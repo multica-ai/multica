@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -95,6 +96,117 @@ func TestRequestDaemonShutdownRejectsMissingCredential(t *testing.T) {
 	}
 }
 
+func TestRequestDaemonDiagnosticsSendsOperatorCredential(t *testing.T) {
+	t.Parallel()
+
+	const credential = "operator-diagnostics-credential"
+	requests := make(chan *http.Request, 1)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"running","pid":1234,"cli_version":"v9.9.9"}`))
+	}))
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	got, err := requestDaemonDiagnostics(context.Background(), port, credential)
+	if err != nil {
+		t.Fatalf("request diagnostics: %v", err)
+	}
+	if got["pid"] != float64(1234) || got["cli_version"] != "v9.9.9" {
+		t.Fatalf("diagnostics = %#v", got)
+	}
+	request := <-requests
+	if request.Method != http.MethodGet || request.URL.Path != "/diagnostics" {
+		t.Fatalf("request = %s %s, want GET /diagnostics", request.Method, request.URL.Path)
+	}
+	if got := request.Header.Get(daemon.ShutdownCredentialHeader); got != credential {
+		t.Fatalf("operator credential header = %q, want %q", got, credential)
+	}
+}
+
+func TestRequestDaemonDiagnosticsRejectsMissingCredentialAndRedirects(t *testing.T) {
+	t.Parallel()
+
+	if _, err := requestDaemonDiagnostics(context.Background(), 1, " \n\t"); err == nil {
+		t.Fatal("diagnostics request without a credential unexpectedly succeeded")
+	}
+
+	const credential = "operator-diagnostics-credential"
+	redirected := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected <- r.Header.Get(daemon.ShutdownCredentialHeader)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	if _, err := requestDaemonDiagnostics(context.Background(), port, credential); err == nil {
+		t.Fatal("redirected diagnostics request unexpectedly succeeded")
+	}
+	select {
+	case got := <-redirected:
+		t.Fatalf("diagnostics redirect reached target with credential %q", got)
+	default:
+	}
+}
+
+func TestRequestDaemonDiagnosticsRejectsInvalidAndOversizedBodies(t *testing.T) {
+	t.Parallel()
+
+	for name, body := range map[string]string{
+		"malformed": `{`,
+		"trailing":  `{"status":"running"} {"extra":true}`,
+		"null":      `null`,
+		"oversized": `{"padding":"` + strings.Repeat("x", (1<<20)+1) + `"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("listen: %v", err)
+			}
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			}))
+			server.Listener = listener
+			server.Start()
+			defer server.Close()
+
+			port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+			if err != nil {
+				t.Fatalf("parse test server port: %v", err)
+			}
+			if _, err := requestDaemonDiagnostics(context.Background(), port, "operator-credential"); err == nil {
+				t.Fatalf("diagnostics body %q unexpectedly succeeded", name)
+			}
+		})
+	}
+}
+
 func TestReadDaemonShutdownCredentialValidatesOperatorFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -133,6 +245,18 @@ func TestReadDaemonShutdownCredentialValidatesOperatorFile(t *testing.T) {
 		}
 		if _, err := readDaemonShutdownCredential(profile); err == nil {
 			t.Fatal("non-operator-only shutdown credential unexpectedly accepted")
+		}
+
+		if err := os.Chmod(path, 0o600); err != nil {
+			t.Fatalf("restore shutdown credential permissions: %v", err)
+		}
+		link := filepath.Join(filepath.Dir(path), "credential-link")
+		if err := os.Symlink(path, link); err != nil {
+			t.Fatalf("create shutdown credential symlink: %v", err)
+		}
+		if file, err := openDaemonCredentialFile(link); err == nil {
+			_ = file.Close()
+			t.Fatal("no-follow credential open unexpectedly accepted a symlink")
 		}
 	}
 }

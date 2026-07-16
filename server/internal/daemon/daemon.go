@@ -253,7 +253,7 @@ type Daemon struct {
 	rootCtx       context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
-	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
+	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via authenticated /diagnostics
 	ready         atomic.Bool        // false until preflight completes; gates /health status (starting -> running)
 	// taskExecutionCapable is set once at startup after the local Linux
 	// bubblewrap FD-bound smoke probe succeeds. It gates registration, polling,

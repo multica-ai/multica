@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -84,9 +85,11 @@ func TestServeHealthOwnsShutdownCredentialLifecycle(t *testing.T) {
 	}()
 
 	credentialPath := filepath.Join(home, ".multica", "profiles", "test-profile", ShutdownCredentialFileName)
+	var credential string
 	deadline := time.Now().Add(time.Second)
 	for {
 		if data, readErr := os.ReadFile(credentialPath); readErr == nil && strings.TrimSpace(string(data)) != "" {
+			credential = strings.TrimSpace(string(data))
 			break
 		}
 		if time.Now().After(deadline) {
@@ -95,6 +98,81 @@ func TestServeHealthOwnsShutdownCredentialLifecycle(t *testing.T) {
 			t.Fatal("serveHealth did not publish a shutdown credential")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+
+	baseURL := "http://" + ln.Addr().String()
+	healthResp, err := http.Get(baseURL + "/health")
+	if err != nil {
+		cancel()
+		<-done
+		t.Fatalf("GET /health: %v", err)
+	}
+	var public map[string]any
+	if err := json.NewDecoder(healthResp.Body).Decode(&public); err != nil {
+		healthResp.Body.Close()
+		cancel()
+		<-done
+		t.Fatalf("decode /health: %v", err)
+	}
+	healthResp.Body.Close()
+	if healthResp.StatusCode != http.StatusOK || len(public) != 2 || public["status"] != "starting" || public["os"] != runtime.GOOS {
+		cancel()
+		<-done
+		t.Fatalf("public /health status=%d body=%#v, want exact starting/status+os", healthResp.StatusCode, public)
+	}
+
+	for name, configure := range map[string]func(*http.Request){
+		"unauthenticated": func(*http.Request) {},
+		"task bearer": func(req *http.Request) {
+			req.Header.Set("Authorization", "Bearer task-token")
+		},
+	} {
+		req, err := http.NewRequest(http.MethodGet, baseURL+"/diagnostics", nil)
+		if err != nil {
+			cancel()
+			<-done
+			t.Fatalf("create %s diagnostics request: %v", name, err)
+		}
+		configure(req)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			cancel()
+			<-done
+			t.Fatalf("%s diagnostics request: %v", name, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			cancel()
+			<-done
+			t.Fatalf("%s /diagnostics status = %d, want 401", name, resp.StatusCode)
+		}
+	}
+
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/diagnostics", nil)
+	if err != nil {
+		cancel()
+		<-done
+		t.Fatalf("create operator diagnostics request: %v", err)
+	}
+	req.Header.Set(ShutdownCredentialHeader, credential)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		cancel()
+		<-done
+		t.Fatalf("operator diagnostics request: %v", err)
+	}
+	var diagnostics map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&diagnostics); err != nil {
+		resp.Body.Close()
+		cancel()
+		<-done
+		t.Fatalf("decode operator /diagnostics: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || diagnostics["pid"] != float64(os.Getpid()) {
+		cancel()
+		<-done
+		t.Fatalf("operator /diagnostics status=%d body=%#v", resp.StatusCode, diagnostics)
 	}
 
 	cancel()
@@ -108,7 +186,7 @@ func TestServeHealthOwnsShutdownCredentialLifecycle(t *testing.T) {
 	}
 }
 
-func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
+func TestHealthHandlerExposesOnlyPublicLivenessMetadata(t *testing.T) {
 	t.Parallel()
 
 	d := &Daemon{
@@ -132,19 +210,12 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 
-	// Decode into a raw map so the test locks in the exact wire-level JSON
-	// keys — the desktop TS client depends on snake_case (cli_version,
-	// active_task_count), so a silent struct-tag rename must fail here.
 	var raw map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode raw response: %v", err)
 	}
-	if got, want := raw["cli_version"], "v9.9.9"; got != want {
-		t.Errorf("cli_version key: got %v, want %q", got, want)
-	}
-	// JSON numbers decode to float64 through map[string]any.
-	if got, want := raw["active_task_count"], float64(3); got != want {
-		t.Errorf("active_task_count key: got %v, want %v", got, want)
+	if len(raw) != 2 {
+		t.Fatalf("public health keys = %v, want exactly status and os", raw)
 	}
 	if got, want := raw["status"], "running"; got != want {
 		t.Errorf("status key: got %v, want %q", got, want)
@@ -155,18 +226,121 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	if got, want := raw["os"], runtime.GOOS; got != want {
 		t.Errorf("os key: got %v, want %q", got, want)
 	}
+	for _, forbidden := range []string{
+		"pid", "uptime", "daemon_id", "device_name", "server_url",
+		"cli_version", "active_task_count", "agents", "workspaces",
+	} {
+		if _, ok := raw[forbidden]; ok {
+			t.Errorf("public health exposed management field %q", forbidden)
+		}
+	}
+}
 
-	// Also round-trip into the typed struct as a separate check that the
-	// field values match, independent of key naming.
-	var resp HealthResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode typed response: %v", err)
+func TestDiagnosticsHandlerRequiresOperatorCredential(t *testing.T) {
+	t.Parallel()
+
+	const credential = "operator-diagnostics-credential"
+	d := &Daemon{
+		cfg: Config{
+			CLIVersion:    "v9.9.9",
+			DaemonID:      "daemon-test",
+			DeviceName:    "dev",
+			ServerBaseURL: "http://localhost:8080",
+			Agents:        map[string]AgentEntry{"codex": {}},
+		},
+		workspaces: map[string]*workspaceState{
+			"workspace-test": {runtimeIDs: []string{"runtime-test"}},
+		},
+		logger: slog.Default(),
 	}
-	if resp.CLIVersion != "v9.9.9" {
-		t.Errorf("CLIVersion: got %q, want %q", resp.CLIVersion, "v9.9.9")
+	d.activeTasks.Store(3)
+	d.ready.Store(true)
+	handler := d.diagnosticsHandler(time.Now(), credential)
+
+	for name, configure := range map[string]func(*http.Request){
+		"missing": func(*http.Request) {},
+		"wrong operator credential": func(req *http.Request) {
+			req.Header.Set(ShutdownCredentialHeader, "wrong")
+		},
+		"task bearer token": func(req *http.Request) {
+			req.Header.Set("Authorization", "Bearer task-token")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest(http.MethodGet, "/diagnostics", nil)
+			configure(req)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
+			}
+		})
 	}
-	if resp.ActiveTaskCount != 3 {
-		t.Errorf("ActiveTaskCount: got %d, want 3", resp.ActiveTaskCount)
+
+	req := httptest.NewRequest(http.MethodGet, "/diagnostics", nil)
+	req.Header.Set(ShutdownCredentialHeader, credential)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode diagnostics: %v", err)
+	}
+	for key, want := range map[string]any{
+		"status":            "running",
+		"os":                runtime.GOOS,
+		"pid":               float64(os.Getpid()),
+		"daemon_id":         "daemon-test",
+		"device_name":       "dev",
+		"server_url":        "http://localhost:8080",
+		"cli_version":       "v9.9.9",
+		"active_task_count": float64(3),
+	} {
+		if got := raw[key]; got != want {
+			t.Errorf("%s = %v, want %v", key, got, want)
+		}
+	}
+	if _, ok := raw["uptime"].(string); !ok {
+		t.Errorf("uptime = %T, want string", raw["uptime"])
+	}
+	if got := raw["agents"]; !reflect.DeepEqual(got, []any{"codex"}) {
+		t.Errorf("agents = %#v, want [codex]", got)
+	}
+	wantWorkspaces := []any{map[string]any{
+		"id":       "workspace-test",
+		"runtimes": []any{"runtime-test"},
+	}}
+	if got := raw["workspaces"]; !reflect.DeepEqual(got, wantWorkspaces) {
+		t.Errorf("workspaces = %#v, want %#v", got, wantWorkspaces)
+	}
+}
+
+func TestDiagnosticsHandlerFailsClosedWithoutServerCredential(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{workspaces: map[string]*workspaceState{}}
+	req := httptest.NewRequest(http.MethodGet, "/diagnostics", nil)
+	req.Header.Set(ShutdownCredentialHeader, "caller-controlled")
+	rec := httptest.NewRecorder()
+	d.diagnosticsHandler(time.Now(), "").ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDiagnosticsHandlerRejectsNonGetMethods(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{workspaces: map[string]*workspaceState{}}
+	req := httptest.NewRequest(http.MethodPost, "/diagnostics", nil)
+	req.Header.Set(ShutdownCredentialHeader, "operator-credential")
+	rec := httptest.NewRecorder()
+	d.diagnosticsHandler(time.Now(), "operator-credential").ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -206,7 +380,7 @@ func TestHealthHandlerReportsStartingUntilReady(t *testing.T) {
 	}
 }
 
-func TestHealthHandlerActiveTaskCountTracksCounter(t *testing.T) {
+func TestDiagnosticsHandlerActiveTaskCountTracksCounter(t *testing.T) {
 	t.Parallel()
 
 	d := &Daemon{
@@ -214,18 +388,18 @@ func TestHealthHandlerActiveTaskCountTracksCounter(t *testing.T) {
 		workspaces: map[string]*workspaceState{},
 		logger:     slog.Default(),
 	}
-	handler := d.healthHandler(time.Now())
+	handler := d.diagnosticsHandler(time.Now(), "operator-credential")
 
 	// Simulate the pollLoop increment/decrement protocol.
 	d.activeTasks.Add(1)
 	d.activeTasks.Add(1)
-	assertActiveTaskCount(t, handler, 2)
+	assertActiveTaskCount(t, handler, "operator-credential", 2)
 
 	d.activeTasks.Add(-1)
-	assertActiveTaskCount(t, handler, 1)
+	assertActiveTaskCount(t, handler, "operator-credential", 1)
 
 	d.activeTasks.Add(-1)
-	assertActiveTaskCount(t, handler, 0)
+	assertActiveTaskCount(t, handler, "operator-credential", 0)
 }
 
 func TestShutdownHandlerPostCancelsDaemonContext(t *testing.T) {
@@ -1067,11 +1241,13 @@ func (c *blockingLookupRepoCache) release() {
 	})
 }
 
-func assertActiveTaskCount(t *testing.T, h http.HandlerFunc, want int64) {
+func assertActiveTaskCount(t *testing.T, h http.HandlerFunc, credential string, want int64) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
-	var resp HealthResponse
+	req := httptest.NewRequest(http.MethodGet, "/diagnostics", nil)
+	req.Header.Set(ShutdownCredentialHeader, credential)
+	h.ServeHTTP(rec, req)
+	var resp DiagnosticsResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}

@@ -21,6 +21,10 @@ import { daemonStatusAlive } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
 import {
+  fetchDaemonDiagnostics,
+  type DiagnosticsPayload,
+} from "./daemon-diagnostics";
+import {
   daemonLifecycleUnreachable,
   isDaemonExternallyManaged,
   normalizeHostOS,
@@ -163,24 +167,15 @@ function sendStatus(status: DaemonStatus): void {
   win?.webContents.send("daemon:status", status);
 }
 
-interface HealthPayload {
+interface PublicHealthPayload {
   status?: string;
-  pid?: number;
   /** Daemon's runtime.GOOS. Absent on daemons older than the #3916 fix. */
   os?: string;
-  uptime?: string;
-  daemon_id?: string;
-  device_name?: string;
-  server_url?: string;
-  cli_version?: string;
-  active_task_count?: number;
-  agents?: string[];
-  workspaces?: unknown[];
 }
 
 async function fetchHealthAtPort(
   port: number,
-): Promise<HealthPayload | null> {
+): Promise<PublicHealthPayload | null> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2_000);
@@ -189,7 +184,8 @@ async function fetchHealthAtPort(
     });
     clearTimeout(timeout);
     if (!res.ok) return null;
-    return (await res.json()) as HealthPayload;
+    const payload = (await res.json()) as PublicHealthPayload;
+    return { status: payload.status, os: payload.os };
   } catch {
     return null;
   }
@@ -364,12 +360,14 @@ async function fetchHealth(): Promise<DaemonStatus> {
     normalizeHostOS(process.platform),
   );
 
+  const diagnostics = await fetchDaemonDiagnostics(active.name, active.port);
+
   // Safety: if we have a target URL and the daemon on our port reports a
   // different server_url, it's not "our" daemon — drop it and re-resolve.
   if (
     targetApiBaseUrl &&
-    data.server_url &&
-    !urlsMatch(data.server_url, targetApiBaseUrl)
+    diagnostics?.server_url &&
+    !urlsMatch(diagnostics.server_url, targetApiBaseUrl)
   ) {
     invalidateActiveProfile();
     return { state: "stopped" };
@@ -377,16 +375,16 @@ async function fetchHealth(): Promise<DaemonStatus> {
 
   return {
     state: "running",
-    pid: data.pid,
-    uptime: data.uptime,
-    daemonId: data.daemon_id,
-    deviceName: data.device_name,
-    agents: data.agents ?? [],
-    workspaceCount: Array.isArray(data.workspaces)
-      ? data.workspaces.length
+    pid: diagnostics?.pid,
+    uptime: diagnostics?.uptime,
+    daemonId: diagnostics?.daemon_id,
+    deviceName: diagnostics?.device_name,
+    agents: diagnostics?.agents ?? [],
+    workspaceCount: Array.isArray(diagnostics?.workspaces)
+      ? diagnostics.workspaces.length
       : 0,
     profile: active.name,
-    serverUrl: data.server_url,
+    serverUrl: diagnostics?.server_url,
     externallyManaged,
   };
 }
@@ -583,8 +581,16 @@ async function ensureRunningDaemonVersionMatches(): Promise<
     return "ok";
   }
 
+  if (running?.status !== "running") {
+    pendingVersionRestart = false;
+    return "not_running";
+  }
+  const diagnostics: DiagnosticsPayload | null = await fetchDaemonDiagnostics(
+    active.name,
+    active.port,
+  );
   const bundled = await getCliBinaryVersion();
-  const action = decideVersionAction(bundled, running);
+  const action = decideVersionAction(bundled, diagnostics);
 
   switch (action) {
     case "not_running":
@@ -595,9 +601,9 @@ async function ensureRunningDaemonVersionMatches(): Promise<
       return "ok";
     case "defer": {
       if (!pendingVersionRestart) {
-        const activeTasks = running?.active_task_count ?? 0;
+        const activeTasks = diagnostics?.active_task_count ?? 0;
         console.log(
-          `[daemon] CLI version mismatch (bundled=${bundled} running=${running?.cli_version}); deferring restart until ${activeTasks} active task(s) finish`,
+          `[daemon] CLI version mismatch (bundled=${bundled} running=${diagnostics?.cli_version}); deferring restart until ${activeTasks} active task(s) finish`,
         );
       }
       pendingVersionRestart = true;
@@ -605,7 +611,7 @@ async function ensureRunningDaemonVersionMatches(): Promise<
     }
     case "restart":
       console.log(
-        `[daemon] CLI version mismatch (bundled=${bundled} running=${running?.cli_version}) — restarting daemon`,
+        `[daemon] CLI version mismatch (bundled=${bundled} running=${diagnostics?.cli_version}) — restarting daemon`,
       );
       pendingVersionRestart = false;
       await restartDaemon();

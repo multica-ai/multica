@@ -263,8 +263,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		if profile != "" {
 			label = fmt.Sprintf("daemon [%s]", profile)
 		}
-		pid, _ := health["pid"].(float64)
-		return fmt.Errorf("%s is already running (pid %v). Use 'daemon restart' to restart it", label, int(pid))
+		return fmt.Errorf("%s is already running. Use 'daemon restart' to restart it", label)
 	}
 
 	// Resolve current executable so the foreground child reuses this binary.
@@ -605,26 +604,28 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPort)
 	if daemonAlive(health) {
-		pid, _ := health["pid"].(float64)
-		if pid > 0 {
+		credential, err := readDaemonShutdownCredential(profile)
+		if err != nil {
+			return fmt.Errorf("load daemon shutdown credential: %w", err)
+		}
+		diagnostics, _ := requestDaemonDiagnostics(ctx, healthPort, credential)
+		if pid, ok := diagnostics["pid"].(float64); ok && pid > 0 {
 			fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
-			credential, err := readDaemonShutdownCredential(profile)
-			if err != nil {
-				return fmt.Errorf("load daemon shutdown credential: %w", err)
-			}
-			if err := requestDaemonShutdown(healthPort, credential); err != nil {
-				return fmt.Errorf("request daemon shutdown: %w", err)
-			}
-			// Wait until the port is fully released (not merely past "running"),
-			// otherwise the fresh start below races the old daemon's listener.
-			for i := 0; i < 10; i++ {
-				time.Sleep(500 * time.Millisecond)
-				sctx, scancel := context.WithTimeout(context.Background(), 1*time.Second)
-				h := checkDaemonHealthOnPort(sctx, healthPort)
-				scancel()
-				if !daemonAlive(h) {
-					break
-				}
+		} else {
+			fmt.Fprintln(os.Stderr, "Stopping daemon...")
+		}
+		if err := requestDaemonShutdown(healthPort, credential); err != nil {
+			return fmt.Errorf("request daemon shutdown: %w", err)
+		}
+		// Wait until the port is fully released (not merely past "running"),
+		// otherwise the fresh start below races the old daemon's listener.
+		for i := 0; i < 10; i++ {
+			time.Sleep(500 * time.Millisecond)
+			sctx, scancel := context.WithTimeout(context.Background(), 1*time.Second)
+			h := checkDaemonHealthOnPort(sctx, healthPort)
+			scancel()
+			if !daemonAlive(h) {
+				break
 			}
 		}
 	}
@@ -652,11 +653,6 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	pid, ok := health["pid"].(float64)
-	if !ok || pid == 0 {
-		return fmt.Errorf("could not determine daemon PID from health endpoint")
-	}
-
 	// Request graceful shutdown via the daemon's HTTP /shutdown endpoint
 	// rather than an OS signal. On Windows the daemon is spawned with
 	// DETACHED_PROCESS so it shares no console with us, which means
@@ -667,11 +663,16 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("load daemon shutdown credential: %w", err)
 	}
+	diagnostics, _ := requestDaemonDiagnostics(ctx, healthPort, credential)
 	if err := requestDaemonShutdown(healthPort, credential); err != nil {
 		return fmt.Errorf("request daemon shutdown: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
+	if pid, ok := diagnostics["pid"].(float64); ok && pid > 0 {
+		fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
+	} else {
+		fmt.Fprintln(os.Stderr, "Stopping daemon...")
+	}
 
 	// Poll health endpoint until daemon is gone.
 	for i := 0; i < 10; i++ {
@@ -720,6 +721,47 @@ func requestDaemonShutdown(healthPort int, credential string) error {
 	return nil
 }
 
+func requestDaemonDiagnostics(ctx context.Context, healthPort int, credential string) (map[string]any, error) {
+	if strings.TrimSpace(credential) == "" {
+		return nil, errors.New("operator credential is required")
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/diagnostics", healthPort)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(daemon.ShutdownCredentialHeader, credential)
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	if err != nil {
+		return nil, fmt.Errorf("read daemon diagnostics: %w", err)
+	}
+	if len(body) > 1<<20 {
+		return nil, errors.New("daemon diagnostics response exceeds 1 MiB")
+	}
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("decode daemon diagnostics: %w", err)
+	}
+	if result == nil {
+		return nil, errors.New("decode daemon diagnostics: expected JSON object")
+	}
+	return result, nil
+}
+
 func readDaemonShutdownCredential(profile string) (string, error) {
 	path := daemonShutdownCredentialPathForProfile(profile)
 	pathInfo, err := os.Lstat(path)
@@ -735,7 +777,7 @@ func readDaemonShutdownCredential(profile string) (string, error) {
 	if pathInfo.Size() <= 0 || pathInfo.Size() > 256 {
 		return "", fmt.Errorf("%s has invalid size", path)
 	}
-	file, err := os.Open(path)
+	file, err := openDaemonCredentialFile(path)
 	if err != nil {
 		return "", fmt.Errorf("open %s: %w", path, err)
 	}
@@ -778,10 +820,21 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
+	diagnostics := health
+	if daemonAlive(health) {
+		credential, err := readDaemonShutdownCredential(profile)
+		if err != nil {
+			return fmt.Errorf("load daemon diagnostics credential: %w", err)
+		}
+		diagnostics, err = requestDaemonDiagnostics(ctx, healthPort, credential)
+		if err != nil {
+			return fmt.Errorf("request daemon diagnostics: %w", err)
+		}
+	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
-		return cli.PrintJSON(os.Stdout, health)
+		return cli.PrintJSON(os.Stdout, diagnostics)
 	}
 
 	label := "Daemon"
@@ -791,9 +844,13 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 
 	switch health["status"] {
 	case "running":
-		printDaemonStatusReport(os.Stdout, label, health)
+		printDaemonStatusReport(os.Stdout, label, diagnostics)
 	case "starting":
-		fmt.Fprintf(os.Stdout, "%s: starting (pid %v)\n", label, health["pid"])
+		if pid, ok := diagnostics["pid"].(float64); ok && pid > 0 {
+			fmt.Fprintf(os.Stdout, "%s: starting (pid %v)\n", label, pid)
+		} else {
+			fmt.Fprintf(os.Stdout, "%s: starting\n", label)
+		}
 	default:
 		fmt.Fprintf(os.Stdout, "%s: stopped\n", label)
 	}

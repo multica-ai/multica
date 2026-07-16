@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,16 +37,25 @@ const (
 	ShutdownCredentialFileName = "daemon.shutdown-token"
 )
 
-// HealthResponse is returned by the daemon's local health endpoint.
+// HealthResponse contains only public liveness/readiness metadata. The health
+// port is reachable from task sandboxes, so management metadata belongs on the
+// operator-authenticated /diagnostics endpoint instead.
 type HealthResponse struct {
 	Status string `json:"status"`
-	PID    int    `json:"pid"`
 	// OS is the daemon's runtime.GOOS. The desktop app compares it against its
 	// own host OS to detect a daemon it cannot manage — e.g. a Windows desktop
 	// reaching a Linux daemon inside WSL2 over localhost forwarding. The
 	// lifecycle CLI (`daemon start/stop`) acts on the host process namespace,
 	// so a foreign-OS daemon can't be started/stopped by the app even though
 	// /health is reachable. See #3916.
+	OS string `json:"os"`
+}
+
+// DiagnosticsResponse is returned only to an operator that presents the
+// daemon's per-process credential.
+type DiagnosticsResponse struct {
+	Status          string            `json:"status"`
+	PID             int               `json:"pid"`
 	OS              string            `json:"os"`
 	Uptime          string            `json:"uptime"`
 	DaemonID        string            `json:"daemon_id"`
@@ -143,34 +153,66 @@ type repoCheckoutRequest struct {
 // so tests can exercise it without spinning up a listener.
 func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		resp := HealthResponse{
+			Status: d.healthStatus(),
+			OS:     runtime.GOOS,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+}
+
+func (d *Daemon) healthStatus() string {
+	if d.ready.Load() {
+		return "running"
+	}
+	return "starting"
+}
+
+func validOperatorCredential(expected, supplied string) bool {
+	supplied = strings.TrimSpace(supplied)
+	if expected == "" || supplied == "" {
+		return false
+	}
+	expectedDigest := sha256.Sum256([]byte(expected))
+	suppliedDigest := sha256.Sum256([]byte(supplied))
+	return subtle.ConstantTimeCompare(expectedDigest[:], suppliedDigest[:]) == 1
+}
+
+func (d *Daemon) diagnosticsHandler(startedAt time.Time, credential string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if credential == "" {
+			http.Error(w, "operator credential unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !validOperatorCredential(credential, r.Header.Get(ShutdownCredentialHeader)) {
+			http.Error(w, "invalid operator credential", http.StatusUnauthorized)
+			return
+		}
+
 		d.mu.Lock()
-		var wsList []healthWorkspace
+		wsList := make([]healthWorkspace, 0, len(d.workspaces))
 		for id, ws := range d.workspaces {
-			wsList = append(wsList, healthWorkspace{
-				ID:       id,
-				Runtimes: ws.runtimeIDs,
-			})
+			runtimes := append([]string(nil), ws.runtimeIDs...)
+			sort.Strings(runtimes)
+			wsList = append(wsList, healthWorkspace{ID: id, Runtimes: runtimes})
 		}
 		d.mu.Unlock()
+		sort.Slice(wsList, func(i, j int) bool { return wsList[i].ID < wsList[j].ID })
 
 		agents := make([]string, 0, len(d.cfg.Agents))
 		for name := range d.cfg.Agents {
 			agents = append(agents, name)
 		}
+		sort.Strings(agents)
 
-		// "starting" until preflight (PAT renew + initial workspace sync +
-		// runtime registration) completes; "running" once the daemon can
-		// actually claim tasks. The health port is bound before preflight for
-		// liveness/diagnostics, so callers must not treat a reachable endpoint
-		// as ready — they gate on this status. Consumers that only know
-		// "running" (older CLI/desktop) safely treat "starting" as not-ready.
-		status := "starting"
-		if d.ready.Load() {
-			status = "running"
-		}
-
-		resp := HealthResponse{
-			Status:          status,
+		resp := DiagnosticsResponse{
+			Status:          d.healthStatus(),
 			PID:             os.Getpid(),
 			OS:              runtime.GOOS,
 			Uptime:          time.Since(startedAt).Truncate(time.Second).String(),
@@ -182,7 +224,6 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			Agents:          agents,
 			Workspaces:      wsList,
 		}
-
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}
@@ -204,10 +245,7 @@ func (d *Daemon) shutdownHandler(credential string) http.HandlerFunc {
 			http.Error(w, "shutdown credential unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		supplied := strings.TrimSpace(r.Header.Get(ShutdownCredentialHeader))
-		expectedDigest := sha256.Sum256([]byte(credential))
-		suppliedDigest := sha256.Sum256([]byte(supplied))
-		if supplied == "" || subtle.ConstantTimeCompare(expectedDigest[:], suppliedDigest[:]) != 1 {
+		if !validOperatorCredential(credential, r.Header.Get(ShutdownCredentialHeader)) {
 			http.Error(w, "invalid shutdown credential", http.StatusUnauthorized)
 			return
 		}
@@ -241,6 +279,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
+	mux.HandleFunc("/diagnostics", d.diagnosticsHandler(startedAt, credential))
 	mux.HandleFunc("/shutdown", d.shutdownHandler(credential))
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 
