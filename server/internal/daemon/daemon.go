@@ -3945,6 +3945,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.PriorWorkDir != "" && localAssignment == nil && !task.IsLeaderTask {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkspacesRoot:        d.cfg.WorkspacesRoot,
+			WorkspaceID:           task.WorkspaceID,
 			Profile:               d.cfg.Profile,
 			WorkDir:               task.PriorWorkDir,
 			Provider:              provider,
@@ -4127,6 +4128,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
+	}
+	// Redirect HOME/XDG/npm_config_cache to the per-task writable home under the
+	// Linux workspace-write sandbox, where the real home is read-only. This lets
+	// tools that write to `~` (npm, Prisma, …) succeed without per-tool env
+	// tweaks. Set before custom_env below so a user override still wins for the
+	// non-blocklisted XDG keys; HOME itself stays blocklisted. Empty TaskHome
+	// (darwin, non-sandboxed providers) leaves the real HOME untouched (MUL-4856).
+	if env.TaskHome != "" {
+		for k, v := range execenv.TaskHomeEnv(env.TaskHome) {
+			agentEnv[k] = v
+		}
 	}
 	// (Hermes HERMES_HOME is applied after custom_env below so the per-task
 	// overlay can win over a user-set HERMES_HOME; see

@@ -186,6 +186,14 @@ type Environment struct {
 	LocalDirectory bool
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
+	// TaskHome is the per-task writable HOME directory (set only for the codex
+	// provider under the workspace-write sandbox — i.e. Linux). When non-empty
+	// the daemon redirects HOME/XDG/npm_config_cache here so tools that write to
+	// `~` (npm, Prisma, …) land in a sandbox-writable location instead of the
+	// read-only real home. Empty on darwin danger-full-access and for
+	// non-sandboxed providers, where the real HOME stays in place. See
+	// task_home.go and MUL-4856.
+	TaskHome string
 	// OpenclawConfigPath is the path to the per-task synthesized OpenClaw
 	// config (set only for openclaw provider). The daemon exports this as
 	// OPENCLAW_CONFIG_PATH on the openclaw subprocess so its native skill
@@ -300,7 +308,15 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID)}, logger); err != nil {
+		// Under the Linux workspace-write sandbox the real HOME and repo cache
+		// are read-only; give the task a writable HOME and grant write access to
+		// it plus this workspace's repo cache in the Codex config (MUL-4856).
+		taskHome, writableRoots, err := prepareCodexSandboxHome(envRoot, params.WorkspacesRoot, params.WorkspaceID, params.CodexVersion, logger)
+		if err != nil {
+			return nil, fmt.Errorf("execenv: prepare task home: %w", err)
+		}
+		env.TaskHome = taskHome
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), WritableRoots: writableRoots}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
@@ -372,9 +388,14 @@ type ReuseParams struct {
 	// too — a marker removed while the daemon runs is restored before a reused
 	// task spawns, not only on the fresh-Prepare path.
 	WorkspacesRoot string
-	WorkDir        string
-	Provider       string
-	CodexVersion   string // only used when Provider == "codex"
+	// WorkspaceID scopes the repo cache writable root added to the Codex
+	// sandbox config on reuse (`{WorkspacesRoot}/.repos/{WorkspaceID}`). Only
+	// used when Provider == "codex" under the workspace-write policy; empty
+	// simply omits the repo cache from writable_roots. See task_home.go.
+	WorkspaceID  string
+	WorkDir      string
+	Provider     string
+	CodexVersion string // only used when Provider == "codex"
 	// ResumeSessionID is the prior Codex thread/session ID this reused task
 	// intends to resume, when any. Only consulted when Provider == "codex" and
 	// only used while migrating a legacy per-task home whose sessions/ still
@@ -504,7 +525,15 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID)}, logger); err != nil {
+		// Refresh the per-task writable HOME (re-seed credential symlinks in
+		// case the user's real home changed) and recompute the sandbox
+		// writable_roots on reuse, mirroring the fresh Prepare path (MUL-4856).
+		taskHome, writableRoots, err := prepareCodexSandboxHome(env.RootDir, params.WorkspacesRoot, params.WorkspaceID, params.CodexVersion, logger)
+		if err != nil {
+			logger.Warn("execenv: refresh task home failed", "error", err)
+		}
+		env.TaskHome = taskHome
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), WritableRoots: writableRoots}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome
