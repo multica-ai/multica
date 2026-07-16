@@ -166,19 +166,25 @@ func (TaskCompletedPayload) eventType() string    { return TypeTaskCompleted }
 func (TaskCompletedPayload) subjectType() string  { return SubjectTask }
 func (TaskCompletedPayload) schemaVersion() int32 { return 1 }
 
-// TaskFailedPayload — subject is the task. Retryable reports whether this failure
-// is eligible for an automatic retry (an infra-shaped reason still within the
-// attempt budget). The single FailTask path creates the retry child in the SAME
-// transaction, so there it is exact; the bulk sweeper paths create it immediately
-// after commit, so there it means "a retry is expected" — both derive it from the
-// shared retryEligible predicate so the event never contradicts the actual retry
-// decision. A consumer should read retryable=true as "not yet terminal, a fresh
-// attempt is coming" rather than reacting to the failure.
+// TaskFailedPayload — subject is the task. RetryEligible is an atomically-decidable
+// fact: at the instant this failure committed, the task satisfied the auto-retry
+// eligibility predicate (an infra-shaped reason, still within the attempt budget,
+// not an autopilot run, and reporting to an issue or chat). Every path derives it
+// from the shared retryEligible predicate in the SAME transaction as the fail + its
+// event, so the flag can never contradict the eligibility decision.
+//
+// It deliberately does NOT promise that a retry child was — or ever will be —
+// created. The single FailTask path does create the child in this same transaction,
+// but the bulk sweeper / orphan-recovery paths create it best-effort AFTER commit,
+// where CreateRetryTask can return an error or the process can crash between the two
+// steps. So a consumer must treat task.failed as terminal for the subject task and
+// read retry_eligible only as "this failure was retry-eligible", never as "a fresh
+// attempt is guaranteed to arrive".
 type TaskFailedPayload struct {
-	IssueID   string `json:"issue_id,omitempty"`
-	AgentID   string `json:"agent_id,omitempty"`
-	Retryable bool   `json:"retryable"`
-	ErrorCode string `json:"error_code,omitempty"`
+	IssueID       string `json:"issue_id,omitempty"`
+	AgentID       string `json:"agent_id,omitempty"`
+	RetryEligible bool   `json:"retry_eligible"`
+	ErrorCode     string `json:"error_code,omitempty"`
 }
 
 func (TaskFailedPayload) eventType() string    { return TypeTaskFailed }

@@ -710,9 +710,25 @@ WHERE id = $1 AND status IN ('dispatched', 'running');
 -- FailAgentTasksByIDs and emits its task.failed event in the SAME transaction.
 -- FOR UPDATE SKIP LOCKED avoids contending with the freshly-restarted daemon's
 -- own claim path; the LIMIT bounds the lock hold.
+--
+-- Keyset cursor (MUL-4332 review round 3, point 1): the registration path upserts
+-- the runtime back to `online`, so the every-tick offline sweep will NOT reap an
+-- orphan the daemon leaves past this page — the recovery must therefore drain
+-- itself. Callers page by (created_at, id) via @after_created_at / @after_id (NULL
+-- on the first page) and repeat until a short page. Because the cursor advances
+-- over EVERY returned candidate — including a poison (unresolvable-workspace) row
+-- the caller skips rather than fails — a page full of poison at the front can no
+-- longer pin the drain in place: the next page steps past it to the healthy rows
+-- behind it. (A plain re-select of the oldest rows would loop on the poison
+-- forever.) Ordering matches the keyset so pages are stable and non-overlapping.
 SELECT * FROM agent_task_queue
 WHERE runtime_id = @runtime_id AND status IN ('dispatched', 'running', 'waiting_local_directory')
-ORDER BY created_at ASC
+  AND (
+    sqlc.narg('after_created_at')::timestamptz IS NULL
+    OR created_at > sqlc.narg('after_created_at')::timestamptz
+    OR (created_at = sqlc.narg('after_created_at')::timestamptz AND id > sqlc.narg('after_id')::uuid)
+  )
+ORDER BY created_at ASC, id ASC
 LIMIT @max_per_tick::int
 FOR UPDATE SKIP LOCKED;
 

@@ -2975,19 +2975,21 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		}
 
 		// Transactional outbox (MUL-4332): emit task.failed atomically with the
-		// fail (and any retry child). retryable reflects whether this failure
-		// spawned an auto-retry; the status CAS makes it exactly-once. Fail-closed
-		// on workspace resolution (review point 4).
+		// fail (and any retry child). retry_eligible is the atomically-decidable
+		// eligibility predicate — NOT a promise a child was created — computed from
+		// the just-failed row so it matches the bulk paths exactly; here a child is
+		// in fact created in this same tx when eligible. The status CAS makes it
+		// exactly-once. Fail-closed on workspace resolution (review point 4).
 		wsID := s.resolveTaskWorkspaceForEvent(ctx, qtx, t)
 		if !wsID.Valid {
 			return fmt.Errorf("task.failed event: unresolvable workspace for task %s", util.UUIDToString(t.ID))
 		}
 		evt := domainevent.TaskFailed(wsID, t.ID, domainevent.AgentActor(t.AgentID),
 			domainevent.TaskFailedPayload{
-				IssueID:   util.UUIDToString(t.IssueID),
-				AgentID:   util.UUIDToString(t.AgentID),
-				Retryable: wantRetry,
-				ErrorCode: failureReason,
+				IssueID:       util.UUIDToString(t.IssueID),
+				AgentID:       util.UUIDToString(t.AgentID),
+				RetryEligible: retryEligible(failureReason, t),
+				ErrorCode:     failureReason,
 			})
 		if _, err := domainevent.Write(ctx, qtx, evt); err != nil {
 			return fmt.Errorf("write task.failed event: %w", err)
@@ -3620,10 +3622,11 @@ func (s *TaskService) resolveTaskWorkspaceForEvent(ctx context.Context, qtx *db.
 //
 // The actor is the platform (SystemActor): these are sweeper / orphan-recovery
 // paths, not an agent action — the agent is already carried in the payload
-// (review point 3). retryable is computed with the SAME retryEligible predicate
-// HandleFailedTasks uses to decide the post-commit auto-retry, so the event and
-// the retry decision agree instead of the event hard-coding false while a retry
-// child appears anyway.
+// (review point 3). retry_eligible is the same atomically-decidable predicate
+// HandleFailedTasks uses to gate the post-commit auto-retry, committed in this
+// transaction. It reports eligibility only: on these paths the retry child is
+// created best-effort AFTER commit, so the event never promises a fresh attempt
+// will actually arrive (review point 3, third round).
 //
 // A transient event/commit failure rolls back only the CURRENT batch (no fact is
 // ever committed without its event), so the next sweep tick simply re-selects and
@@ -3692,10 +3695,10 @@ func (s *TaskService) FailBulkTasksWithEvents(
 		}
 		evt := domainevent.TaskFailed(wsID, t.ID, domainevent.SystemActor(),
 			domainevent.TaskFailedPayload{
-				IssueID:   util.UUIDToString(t.IssueID),
-				AgentID:   util.UUIDToString(t.AgentID),
-				Retryable: retryEligible(reason, t),
-				ErrorCode: reason,
+				IssueID:       util.UUIDToString(t.IssueID),
+				AgentID:       util.UUIDToString(t.AgentID),
+				RetryEligible: retryEligible(reason, t),
+				ErrorCode:     reason,
 			})
 		if _, err := domainevent.Write(ctx, qtx, evt); err != nil {
 			return nil, err

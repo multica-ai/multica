@@ -4561,14 +4561,21 @@ func (q *Queries) SelectExpiredQueuedTasks(ctx context.Context, arg SelectExpire
 const selectOrphanedTasksForRuntime = `-- name: SelectOrphanedTasksForRuntime :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id FROM agent_task_queue
 WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
-ORDER BY created_at ASC
-LIMIT $2::int
+  AND (
+    $2::timestamptz IS NULL
+    OR created_at > $2::timestamptz
+    OR (created_at = $2::timestamptz AND id > $3::uuid)
+  )
+ORDER BY created_at ASC, id ASC
+LIMIT $4::int
 FOR UPDATE SKIP LOCKED
 `
 
 type SelectOrphanedTasksForRuntimeParams struct {
-	RuntimeID  pgtype.UUID `json:"runtime_id"`
-	MaxPerTick int32       `json:"max_per_tick"`
+	RuntimeID      pgtype.UUID        `json:"runtime_id"`
+	AfterCreatedAt pgtype.Timestamptz `json:"after_created_at"`
+	AfterID        pgtype.UUID        `json:"after_id"`
+	MaxPerTick     int32              `json:"max_per_tick"`
 }
 
 // Called by the daemon at startup. Selects (and row-locks) up to @max_per_tick
@@ -4582,8 +4589,24 @@ type SelectOrphanedTasksForRuntimeParams struct {
 // FailAgentTasksByIDs and emits its task.failed event in the SAME transaction.
 // FOR UPDATE SKIP LOCKED avoids contending with the freshly-restarted daemon's
 // own claim path; the LIMIT bounds the lock hold.
+//
+// Keyset cursor (MUL-4332 review round 3, point 1): the registration path upserts
+// the runtime back to `online`, so the every-tick offline sweep will NOT reap an
+// orphan the daemon leaves past this page — the recovery must therefore drain
+// itself. Callers page by (created_at, id) via @after_created_at / @after_id (NULL
+// on the first page) and repeat until a short page. Because the cursor advances
+// over EVERY returned candidate — including a poison (unresolvable-workspace) row
+// the caller skips rather than fails — a page full of poison at the front can no
+// longer pin the drain in place: the next page steps past it to the healthy rows
+// behind it. (A plain re-select of the oldest rows would loop on the poison
+// forever.) Ordering matches the keyset so pages are stable and non-overlapping.
 func (q *Queries) SelectOrphanedTasksForRuntime(ctx context.Context, arg SelectOrphanedTasksForRuntimeParams) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, selectOrphanedTasksForRuntime, arg.RuntimeID, arg.MaxPerTick)
+	rows, err := q.db.Query(ctx, selectOrphanedTasksForRuntime,
+		arg.RuntimeID,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.MaxPerTick,
+	)
 	if err != nil {
 		return nil, err
 	}

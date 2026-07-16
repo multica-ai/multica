@@ -33,7 +33,7 @@ func TestConstructorsProduceValidEnvelopes(t *testing.T) {
 		{"issue.assigned", IssueAssigned(ws, subj, actor, IssueAssignedPayload{ToAssigneeType: "agent"}), TypeIssueAssigned, SubjectIssue},
 		{"comment.created", CommentCreated(ws, subj, actor, CommentCreatedPayload{IssueID: uuid.NewString(), AuthorType: "member"}), TypeCommentCreated, SubjectComment},
 		{"task.completed", TaskCompleted(ws, subj, SystemActor(), TaskCompletedPayload{IssueID: uuid.NewString()}), TypeTaskCompleted, SubjectTask},
-		{"task.failed", TaskFailed(ws, subj, SystemActor(), TaskFailedPayload{Retryable: true}), TypeTaskFailed, SubjectTask},
+		{"task.failed", TaskFailed(ws, subj, SystemActor(), TaskFailedPayload{RetryEligible: true}), TypeTaskFailed, SubjectTask},
 	}
 
 	for _, tc := range cases {
