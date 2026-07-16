@@ -7,6 +7,7 @@ import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import { docsHrefForLocale, useLocale } from "../i18n";
+import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import { formatStarCount, useGithubStars } from "../utils/use-github-stars";
 import { GitHubMark, githubUrl, headerButtonClassName } from "./shared";
 
@@ -26,7 +27,7 @@ export function LandingHeader({
     { href: docsHref, label: t.header.docs },
     { href: "/changelog", label: t.header.changelog },
   ];
-  const ctaHref = user ? "/" : "/login";
+  const ctaHref = useDashboardCtaHref();
   const ctaLabel = user ? t.header.dashboard : t.header.cta;
 
   return (

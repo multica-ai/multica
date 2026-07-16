@@ -2444,3 +2444,28 @@ func TestStripHermesProfileArgs(t *testing.T) {
 		t.Error("hermesBlockedArgs must not unconditionally strip --profile")
 	}
 }
+
+// TestACPRawText covers the rawOutput/output shape tolerance added for the
+// GPT-5.6 Sol path (#5509): a string is returned verbatim, an object/array is
+// preserved as raw JSON text, and empty input yields "".
+func TestACPRawText(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty", ``, ""},
+		{"json null", `null`, ""},
+		{"plain string", `"created comment"`, "created comment"},
+		{"object (gpt-5.6-sol shape)", `{"items":[{"Json":{"stdout":"ok\n"}}]}`, `{"items":[{"Json":{"stdout":"ok\n"}}]}`},
+		{"array", `["a","b"]`, `["a","b"]`},
+	}
+	for _, tt := range tests {
+		got := acpRawText(json.RawMessage(tt.raw))
+		if got != tt.want {
+			t.Errorf("%s: acpRawText(%q) = %q, want %q", tt.name, tt.raw, got, tt.want)
+		}
+	}
+}

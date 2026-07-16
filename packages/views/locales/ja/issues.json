@@ -154,6 +154,7 @@
     "add_issue_tooltip": "イシューを追加",
     "empty_column": "イシューなし",
     "empty_grouping": "一致するイシューがありません",
+    "no_value": "値なし",
     "ordered_by": "{{field}} 順に並べたボード"
   },
   "detail": {
@@ -453,6 +454,17 @@
     "delete_issue": "イシューを削除"
   },
   "pickers": {
+    "custom_property": {
+      "empty": "空",
+      "clear_action": "クリア",
+      "true_label": "はい",
+      "false_label": "いいえ",
+      "value_placeholder": "値を入力…",
+      "url_placeholder": "https://…",
+      "number_placeholder": "0",
+      "open_link": "リンクを開く",
+      "archived_hint": "アーカイブ済みプロパティ — 値は読み取り専用です"
+    },
     "filter_options_aria": "フィルターオプション",
     "no_results": "結果なし",
     "assignee": {

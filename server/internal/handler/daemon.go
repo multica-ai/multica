@@ -1101,8 +1101,9 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
 
 	ack := &protocol.DaemonHeartbeatAckPayload{
-		RuntimeID: runtimeID,
-		Status:    "ok",
+		RuntimeID:          runtimeID,
+		Status:             "ok",
+		ServerCapabilities: []string{protocol.DaemonCapabilityRPCV1},
 	}
 
 	probeUpdateCtx, cancelProbeUpdate := context.WithTimeout(ctx, heartbeatHasPendingTimeout)

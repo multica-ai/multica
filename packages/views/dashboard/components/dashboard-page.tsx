@@ -528,9 +528,14 @@ function ProjectFilter({
   const selected = projects.find((p) => p.id === value);
   const selectedTitle =
     value === ALL_PROJECTS ? allLabel : selected?.title ?? allLabel;
+  const projectItems = [
+    { value: ALL_PROJECTS, label: allLabel },
+    ...projects.map((project) => ({ value: project.id, label: project.title })),
+  ];
 
   return (
     <Select
+      items={projectItems}
       value={value}
       onValueChange={(v) => onChange(v ?? ALL_PROJECTS)}
     >

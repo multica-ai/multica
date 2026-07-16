@@ -268,6 +268,21 @@ function TraeLogo({ className }: { className: string }) {
   return <img src={TRAE_ICON} alt="Trae" className={className} />;
 }
 
+// Grok (xAI) — simple monochrome wordmark tile (G on dark square). Matches the
+// compact logo style used for Pi / OpenCode so the runtime list stays dense.
+function GrokLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
+      <rect width="24" height="24" rx="5" fill="#0A0A0A" />
+      <path
+        d="M7.2 7.2h4.1c2.7 0 4.5 1.7 4.5 4.2 0 2.5-1.8 4.2-4.5 4.2H9.4v1.2H7.2V7.2zm2.2 2v4.2h1.8c1.5 0 2.4-.9 2.4-2.1 0-1.2-.9-2.1-2.4-2.1H9.4z"
+        fill="#FFFFFF"
+      />
+      <path d="M16.8 16.8 14.2 14.1" stroke="#FFFFFF" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -306,6 +321,8 @@ export function ProviderLogo({
       return <AntigravityLogo className={className} />;
     case "traecli":
       return <TraeLogo className={className} />;
+    case "grok":
+      return <GrokLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

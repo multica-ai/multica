@@ -27,6 +27,30 @@ if (process.platform === "win32" && process.arch === "arm64") {
   autoUpdater.channel = "latest-arm64";
 }
 
+interface ChannelConfigurableUpdater {
+  channel: string | null;
+  allowDowngrade: boolean;
+}
+
+export function configureMacX64UpdateChannel(
+  updater: ChannelConfigurableUpdater,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): void {
+  if (platform !== "darwin" || arch !== "x64") return;
+
+  // AppUpdater.channel enables allowDowngrade as a side effect. This channel
+  // isolates a CPU architecture, not a release train, so preserve normal
+  // monotonic version behavior after selecting the architecture feed.
+  updater.channel = "latest-x64";
+  updater.allowDowngrade = false;
+}
+
+// electron-builder does not architecture-suffix macOS update metadata.
+// package.mjs publishes macOS x64 as `latest-x64-mac.yml`; the established
+// arm64 feed and runtime path remain unchanged.
+configureMacX64UpdateChannel(autoUpdater);
+
 const STARTUP_CHECK_DELAY_MS = 5_000;
 const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 

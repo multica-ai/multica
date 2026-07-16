@@ -154,6 +154,7 @@
     "add_issue_tooltip": "이슈 추가",
     "empty_column": "이슈 없음",
     "empty_grouping": "일치하는 이슈가 없습니다",
+    "no_value": "값 없음",
     "ordered_by": "{{field}} 기준으로 정렬된 보드"
   },
   "detail": {
@@ -453,6 +454,17 @@
     "delete_issue": "이슈 삭제"
   },
   "pickers": {
+    "custom_property": {
+      "empty": "비어 있음",
+      "clear_action": "지우기",
+      "true_label": "예",
+      "false_label": "아니요",
+      "value_placeholder": "값 입력…",
+      "url_placeholder": "https://…",
+      "number_placeholder": "0",
+      "open_link": "링크 열기",
+      "archived_hint": "보관된 속성 — 값은 읽기 전용입니다"
+    },
     "filter_options_aria": "필터 옵션",
     "no_results": "결과 없음",
     "assignee": {

@@ -86,6 +86,12 @@ import type {
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
   Label,
+  IssueProperty,
+  IssuePropertyValue,
+  CreatePropertyRequest,
+  UpdatePropertyRequest,
+  ListPropertiesResponse,
+  IssuePropertiesResponse,
   CreateLabelRequest,
   UpdateLabelRequest,
   ListLabelsResponse,
@@ -196,6 +202,7 @@ import {
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
   ListIssuesResponseSchema,
+  CreateIssueResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -232,8 +239,18 @@ import {
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   InboxUnreadSummarySchema,
   EMPTY_INBOX_UNREAD_SUMMARY,
+  InboxItemListSchema,
+  EMPTY_INBOX_ITEMS,
+  NotificationPreferenceResponseSchema,
+  EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
   LabelSchema,
   ListLabelsResponseSchema,
+  IssuePropertySchema,
+  ListPropertiesResponseSchema,
+  IssuePropertiesResponseSchema,
+  EMPTY_ISSUE_PROPERTY,
+  EMPTY_LIST_PROPERTIES_RESPONSE,
+  EMPTY_ISSUE_PROPERTIES_RESPONSE,
   ResourceLabelsResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
@@ -552,6 +569,9 @@ export class ApiClient {
     if (params?.metadata && Object.keys(params.metadata).length > 0) {
       search.set("metadata", JSON.stringify(params.metadata));
     }
+    if (params?.properties && Object.keys(params.properties).length > 0) {
+      search.set("properties", JSON.stringify(params.properties));
+    }
     if (params?.open_only) search.set("open_only", "true");
     if (params?.scheduled) search.set("scheduled", "true");
     if (params?.date_field) search.set("date_field", params.date_field);
@@ -581,6 +601,9 @@ export class ApiClient {
     if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params.metadata && Object.keys(params.metadata).length > 0) {
       search.set("metadata", JSON.stringify(params.metadata));
+    }
+    if (params.properties && Object.keys(params.properties).length > 0) {
+      search.set("properties", JSON.stringify(params.properties));
     }
     if (params.assignee_filters?.length) {
       search.set("assignee_filters", params.assignee_filters.map((f) => `${f.type}:${f.id}`).join(","));
@@ -638,10 +661,26 @@ export class ApiClient {
   }
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
-    return this.fetch("/api/issues", {
+    // Parse through a schema (not a raw cast): the create modal keys its
+    // label-attach compatibility fallback off `labels` being absent vs a
+    // validated Label[], so an unvalidated wrong shape must not slip through.
+    // Unlike list endpoints, a create that returns an unusable body is a
+    // FAILED mutation, not a safe-empty read: fall back to null and reject so
+    // the modal keeps the draft and shows a failure toast instead of a blank
+    // "created" card pointing at an empty issue id. parseWithFallback already
+    // logged the schema issues + raw payload; the empty message lets the modal
+    // render its localized "failed to create" toast.
+    const raw = await this.fetch<unknown>("/api/issues", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    const issue = parseWithFallback<Issue | null>(raw, CreateIssueResponseSchema, null, {
+      endpoint: "POST /api/issues",
+    });
+    if (!issue) {
+      throw new Error();
+    }
+    return issue;
   }
 
   async quickCreateIssue(data: {
@@ -1559,6 +1598,20 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/archive`, { method: "POST" });
   }
 
+  // Archived notifications, backing the inbox's "Archived" sub-view. Capped
+  // server-side (no pagination in v1). Schema-guarded so a contract drift
+  // renders an empty archive instead of taking the inbox down with it.
+  async listArchivedInbox(): Promise<InboxItem[]> {
+    const raw = await this.fetch<unknown>("/api/inbox/archived");
+    return parseWithFallback(raw, InboxItemListSchema, EMPTY_INBOX_ITEMS, {
+      endpoint: "GET /api/inbox/archived",
+    });
+  }
+
+  async unarchiveInbox(id: string): Promise<InboxItem> {
+    return this.fetch(`/api/inbox/${id}/unarchive`, { method: "POST" });
+  }
+
   async getUnreadInboxCount(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/unread-count");
   }
@@ -1597,17 +1650,35 @@ export class ApiClient {
   // preferences — e.g. honoring the mute setting of the workspace an inbox
   // notification came from while the user is viewing a different one (#3766).
   async getNotificationPreferences(workspaceSlug?: string): Promise<NotificationPreferenceResponse> {
-    return this.fetch(
+    const raw = await this.fetch<unknown>(
       "/api/notification-preferences",
       workspaceSlug ? { headers: { "X-Workspace-Slug": workspaceSlug } } : undefined,
     );
+    return parseWithFallback(
+      raw,
+      NotificationPreferenceResponseSchema,
+      EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
+      { endpoint: "GET /api/notification-preferences" },
+    );
   }
 
-  async updateNotificationPreferences(preferences: NotificationPreferences): Promise<NotificationPreferenceResponse> {
-    return this.fetch("/api/notification-preferences", {
-      method: "PUT",
+  async updateNotificationPreferences(
+    preferences: NotificationPreferences,
+    workspaceSlug?: string,
+  ): Promise<NotificationPreferenceResponse> {
+    const raw = await this.fetch<unknown>("/api/notification-preferences", {
+      method: "PATCH",
+      headers: workspaceSlug
+        ? { "X-Workspace-Slug": workspaceSlug }
+        : undefined,
       body: JSON.stringify({ preferences }),
     });
+    return parseWithFallback(
+      raw,
+      NotificationPreferenceResponseSchema,
+      EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
+      { endpoint: "PATCH /api/notification-preferences" },
+    );
   }
 
   // App Config
@@ -2148,6 +2219,67 @@ export class ApiClient {
 
   async deleteLabel(id: string): Promise<void> {
     await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
+  }
+
+  // Custom issue properties
+  async listProperties(includeArchived = false): Promise<ListPropertiesResponse> {
+    const suffix = includeArchived ? "?include_archived=true" : "";
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>(`/api/properties${suffix}`);
+    } catch (error) {
+      // A backend predating custom properties 404s here (e.g. after a
+      // server-only rollback). Treat it as an empty catalog: the property
+      // UI sections disappear and the active-catalog reconciliation strips
+      // persisted property sorts/filters, so no property params ever reach
+      // the old server. Other errors keep normal query-error semantics.
+      if (error instanceof Error && "status" in error && (error as { status?: number }).status === 404) {
+        return EMPTY_LIST_PROPERTIES_RESPONSE;
+      }
+      throw error;
+    }
+    return parseWithFallback(raw, ListPropertiesResponseSchema, EMPTY_LIST_PROPERTIES_RESPONSE, {
+      endpoint: "GET /api/properties",
+    });
+  }
+
+  async createProperty(data: CreatePropertyRequest): Promise<IssueProperty> {
+    const raw = await this.fetch<unknown>(`/api/properties`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssuePropertySchema, EMPTY_ISSUE_PROPERTY, {
+      endpoint: "POST /api/properties",
+    });
+  }
+
+  async updateProperty(id: string, data: UpdatePropertyRequest): Promise<IssueProperty> {
+    const raw = await this.fetch<unknown>(`/api/properties/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssuePropertySchema, EMPTY_ISSUE_PROPERTY, {
+      endpoint: "PATCH /api/properties/{id}",
+    });
+  }
+
+  async setIssueProperty(issueId: string, propertyId: string, value: IssuePropertyValue): Promise<IssuePropertiesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/properties/${propertyId}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
+    return parseWithFallback(raw, IssuePropertiesResponseSchema, EMPTY_ISSUE_PROPERTIES_RESPONSE, {
+      endpoint: "PUT /api/issues/{id}/properties/{propertyId}",
+    });
+  }
+
+  async unsetIssueProperty(issueId: string, propertyId: string): Promise<IssuePropertiesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/properties/${propertyId}`, {
+      method: "DELETE",
+    });
+    return parseWithFallback(raw, IssuePropertiesResponseSchema, EMPTY_ISSUE_PROPERTIES_RESPONSE, {
+      endpoint: "DELETE /api/issues/{id}/properties/{propertyId}",
+    });
   }
 
   async listLabelsForIssue(issueId: string): Promise<IssueLabelsResponse> {

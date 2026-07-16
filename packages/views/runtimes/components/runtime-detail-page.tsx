@@ -9,7 +9,6 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import { runtimeKeys, runtimeListOptions } from "@multica/core/runtimes/queries";
-import { useUpdatableRuntimeIds } from "@multica/core/runtimes/hooks";
 import { useWSEvent } from "@multica/core/realtime";
 import {
   agentListOptions,
@@ -26,6 +25,7 @@ import {
 import { RenameMachineDialog } from "./rename-machine-dialog";
 import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import { pendingRuntimesForProfiles } from "./pending-runtime";
+import { MachineCliSection } from "./machine-cli-section";
 import { HealthIcon, useHealthLabel } from "./shared";
 import { useT, useTimeAgo } from "../../i18n";
 
@@ -100,7 +100,6 @@ export function RuntimeDetailPage({
   const { data: runtimeProfiles = [] } = useQuery(
     runtimeProfileListOptions(wsId),
   );
-  const updatableIds = useUpdatableRuntimeIds(wsId);
   const now = useNowTick();
   const machineLocator = decodeRouteParam(runtimeId);
   const [renameOpen, setRenameOpen] = useState(false);
@@ -259,9 +258,11 @@ export function RuntimeDetailPage({
                         })
                       : t(($) => $.machine.metrics.workload_idle)}
                   </span>
-                  {machine.cliVersion && (
-                    <span className="font-mono">CLI {machine.cliVersion}</span>
-                  )}
+                  <MachineCliSection
+                    machine={machine}
+                    currentUserId={currentUserId}
+                    canManageAnyRuntime={isAdmin}
+                  />
                   {machine.lastSeenAt && (
                     <span>{timeAgo(machine.lastSeenAt)}</span>
                   )}
@@ -313,7 +314,6 @@ export function RuntimeDetailPage({
             <div className="overflow-hidden rounded-lg border bg-card">
               <RuntimeList
                 runtimes={machineRuntimes}
-                updatableIds={updatableIds}
                 now={now}
                 runtimeHref={(childRuntimeId) =>
                   paths.runtimeSettings(machine.id, childRuntimeId)

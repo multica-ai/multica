@@ -159,6 +159,17 @@ wakes the parent assignee. Promoting the next stage's `backlog` sub-issues to
 `--value` is JSON-parsed by default (bool/number sniff); `--type` forces
 `string`/`number`/`bool`.
 
+## Custom properties CLI
+
+| Behavior | File:line |
+|---|---|
+| `multica property list/get/create/update/archive/unarchive` | `server/cmd/multica/cmd_property.go` |
+| `multica issue property list/set/unset` (name→id translation) | `server/cmd/multica/cmd_property.go` (`encodeIssuePropertyValue`) |
+| Definition CRUD, admin gate, agent-actor rejection | `server/internal/handler/property.go` (`requirePropertyAdmin`) |
+| Optional catalog icon field and allowlist validation | `server/internal/handler/property.go` (`PropertyResponse`, `validatePropertyIcon`) |
+| Per-type value validation (self-correcting errors) | `server/internal/handler/property.go` (`validatePropertyValue`) |
+| API routes (`/api/properties`, PUT/DELETE `/api/issues/{id}/properties/{propertyId}`) | `server/cmd/server/router.go` |
+
 ## Verification command
 
 Re-derive any line above before depending on it:

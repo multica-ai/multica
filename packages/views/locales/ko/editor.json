@@ -72,6 +72,10 @@
   "file_card": {
     "uploading": "{{filename}} 업로드 중"
   },
+  "upload": {
+    "failed": "{{filename}}을(를) 업로드하지 못했어요: {{reason}}",
+    "in_progress": "업로드 중…"
+  },
   "title_editor": {
     "title_aria_label": "제목"
   },

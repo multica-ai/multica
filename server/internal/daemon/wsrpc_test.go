@@ -36,7 +36,6 @@ func TestWSRPCClient_CallRoundTrip(t *testing.T) {
 		})
 		return &wsOutbound{data: frame}, nil
 	})
-
 	var resp struct {
 		Tasks []struct {
 			ID string `json:"id"`
@@ -57,6 +56,40 @@ func TestWSRPCClient_Unavailable(t *testing.T) {
 	c := newWSRPCClient(time.Second)
 	if _, err := c.Call(context.Background(), "tasks.claim", 0, nil, nil); !errors.Is(err, errWSRPCUnavailable) {
 		t.Fatalf("err = %v, want errWSRPCUnavailable", err)
+	}
+}
+
+// TestWSRPCClient_ReattachRequiresFreshNegotiation pins capability state to a
+// specific connection. A replacement sender must remain unavailable until a
+// heartbeat ack from that connection explicitly advertises rpc-v1.
+func TestWSRPCClient_ReattachRequiresFreshNegotiation(t *testing.T) {
+	c := newWSRPCClient(time.Second)
+	firstGeneration := c.attach(func(frame []byte) (*wsOutbound, error) {
+		return &wsOutbound{data: frame}, nil
+	})
+	c.markRPCV1Supported(firstGeneration)
+	if !c.supportsRPCV1() {
+		t.Fatal("first connection should support rpc-v1 after negotiation")
+	}
+
+	newConnectionCalls := 0
+	secondGeneration := c.attach(func(frame []byte) (*wsOutbound, error) {
+		newConnectionCalls++
+		return &wsOutbound{data: frame}, nil
+	})
+	c.markRPCV1Supported(firstGeneration) // delayed ack from the replaced connection
+	if c.supportsRPCV1() {
+		t.Fatal("replacement connection inherited rpc-v1 support from a stale ack")
+	}
+	if _, err := c.CallIfRPCV1Supported(context.Background(), "tasks.claim", 0, nil, nil); !errors.Is(err, errWSRPCUnavailable) {
+		t.Fatalf("CallIfRPCV1Supported error = %v, want errWSRPCUnavailable before fresh negotiation", err)
+	}
+	if newConnectionCalls != 0 {
+		t.Fatalf("replacement connection received %d RPC calls before negotiation, want 0", newConnectionCalls)
+	}
+	c.markRPCV1Supported(secondGeneration)
+	if !c.supportsRPCV1() {
+		t.Fatal("replacement connection did not accept its own rpc-v1 acknowledgement")
 	}
 }
 

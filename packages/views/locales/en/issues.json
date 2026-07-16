@@ -156,6 +156,7 @@
     "add_issue_tooltip": "Add issue",
     "empty_column": "No issues",
     "empty_grouping": "No matching issues",
+    "no_value": "No value",
     "ordered_by": "Board ordered by {{field}}"
   },
   "detail": {
@@ -475,6 +476,17 @@
     "delete_issue": "Delete issue"
   },
   "pickers": {
+    "custom_property": {
+      "empty": "Empty",
+      "clear_action": "Clear",
+      "true_label": "Yes",
+      "false_label": "No",
+      "value_placeholder": "Enter value…",
+      "url_placeholder": "https://…",
+      "number_placeholder": "0",
+      "open_link": "Open link",
+      "archived_hint": "Archived property — value is read-only"
+    },
     "filter_options_aria": "Filter options",
     "no_results": "No results",
     "assignee": {

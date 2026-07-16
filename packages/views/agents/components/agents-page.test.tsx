@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
       runtimes: [] as string[],
       owners: [] as string[],
       models: [] as string[],
+      access: [] as string[],
     },
     setScope: vi.fn(),
     toggleSort: vi.fn(),
@@ -93,6 +94,12 @@ vi.mock("@multica/core/agents", () => ({
   useWorkspaceActivityMap: () => mocks.activity,
   useWorkspacePresenceMap: () => mocks.presence,
   VISIBILITY_TOOLTIP: { private: "Private", workspace: "Workspace" },
+  effectiveAccessScope: (pm: unknown, it: unknown) => {
+    if (pm !== "public_to") return "owner-only";
+    if ((Array.isArray(it) ? it : []).some((t) => (t as {target_type?: string})?.target_type === "workspace")) return "workspace";
+    return "specific-people";
+  },
+  ALL_ACCESS_SCOPES: ["workspace", "specific-people", "owner-only"],
 }));
 
 vi.mock("@multica/core/agents/stores", () => ({
@@ -241,6 +248,7 @@ beforeEach(() => {
     runtimes: [],
     owners: [],
     models: [],
+    access: [],
   };
 });
 

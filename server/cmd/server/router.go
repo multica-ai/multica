@@ -1068,12 +1068,24 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/metadata", h.ListIssueMetadata)
 					r.Put("/metadata/{key}", h.SetIssueMetadataKey)
 					r.Delete("/metadata/{key}", h.DeleteIssueMetadataKey)
+					r.Put("/properties/{propertyId}", h.SetIssueProperty)
+					r.Delete("/properties/{propertyId}", h.DeleteIssueProperty)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
 				})
 			})
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+
+			// Custom issue properties (definitions; values live under /api/issues/{id}/properties)
+			r.Route("/api/properties", func(r chi.Router) {
+				r.Get("/", h.ListProperties)
+				r.Post("/", h.CreateProperty)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetProperty)
+					r.Patch("/", h.UpdateProperty)
+				})
+			})
 
 			// Labels
 			r.Route("/api/labels", func(r chi.Router) {
@@ -1344,6 +1356,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
+				// Archived notifications, for the inbox's "Archived" sub-view.
+				// Separate from "/" so the main list keeps its contract and
+				// never carries the unbounded archive.
+				r.Get("/archived", h.ListArchivedInbox)
 				r.Get("/unread-count", h.CountUnreadInbox)
 				// Cross-workspace unread summary: account-level, keyed on the
 				// user. Backs the workspace-switcher dot for OTHER workspaces.
@@ -1354,11 +1370,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
 				r.Post("/{id}/read", h.MarkInboxRead)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
+				r.Post("/{id}/unarchive", h.UnarchiveInboxItem)
 			})
 
 			// Notification preferences
 			r.Route("/api/notification-preferences", func(r chi.Router) {
 				r.Get("/", h.GetNotificationPreferences)
+				r.Patch("/", h.PatchNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
 			})
 		})

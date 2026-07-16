@@ -97,6 +97,84 @@ func TestListRuntimeLocalSkills_Claude(t *testing.T) {
 	}
 }
 
+// TestListRuntimeLocalSkills_Codebuddy is the regression guard for a bug
+// where CodeBuddy was treated as a drop-in alias for Claude and local
+// (user-level) skills were discovered from ~/.claude/skills. CodeBuddy Code
+// is a Claude Code fork but ships its own native config directory and does
+// NOT read ~/.claude/skills by default — see
+// https://www.codebuddy.ai/docs/cli/skills ("User-level Skills:
+// ~/.codebuddy/skills/"). Discovery must use ~/.codebuddy/skills instead.
+func TestListRuntimeLocalSkills_Codebuddy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".codebuddy", "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: CodeBuddy Review\ndescription: Review code with CodeBuddy\n---\n# CodeBuddy Review\n",
+	})
+	// ~/.claude/skills is not a CodeBuddy discovery root, so this must not
+	// appear for the codebuddy provider.
+	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Claude Review\ndescription: Should not appear for codebuddy\n---\n# Claude Review\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("codebuddy")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("codebuddy should be supported")
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d: %+v", len(skills), skills)
+	}
+
+	skill := skills[0]
+	if skill.Key != "review-helper" {
+		t.Fatalf("key = %q, want review-helper", skill.Key)
+	}
+	if skill.Name != "CodeBuddy Review" {
+		t.Fatalf("name = %q, want CodeBuddy Review", skill.Name)
+	}
+	if skill.SourcePath != "~/.codebuddy/skills/review-helper" {
+		t.Fatalf("source_path = %q, want ~/.codebuddy/skills/review-helper", skill.SourcePath)
+	}
+}
+
+func TestRuntimeLocalSkills_CodebuddyExcludesClaudePluginSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".codebuddy", "skills"), "codebuddy-only", map[string]string{
+		"SKILL.md": "---\nname: CodeBuddy Only\n---\n",
+	})
+	installPath := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", true)
+	writeTestLocalSkill(t, filepath.Join(installPath, "skills"), "design-to-code", map[string]string{
+		"SKILL.md": "---\nname: Claude Plugin Skill\n---\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("codebuddy")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("codebuddy should be supported")
+	}
+	if len(skills) != 1 || skills[0].Key != "codebuddy-only" {
+		t.Fatalf("CodeBuddy must not list Claude plugin skills, got %#v", skills)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("codebuddy", "paper-desktop:design-to-code")
+	if !supported {
+		t.Fatal("codebuddy should be supported for import")
+	}
+	if err == nil || err.Error() != "local skill not found" {
+		t.Fatalf("load Claude plugin skill for CodeBuddy err = %v, want local skill not found", err)
+	}
+	if bundle != nil {
+		t.Fatalf("load Claude plugin skill for CodeBuddy bundle = %#v, want nil", bundle)
+	}
+}
+
 func TestListRuntimeLocalSkills_ClaudeEnabledPlugin(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -200,12 +278,21 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			wantPath: "~/.qoder/skills/review-helper",
 			wantName: "Qoder Review",
 		},
+		{
+			provider: "grok",
+			root:     filepath.Join(".grok", "skills"),
+			wantPath: "~/.grok/skills/review-helper",
+			wantName: "Grok Review",
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.provider, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
+			if tc.provider == "grok" {
+				t.Setenv("GROK_HOME", "")
+			}
 
 			writeTestLocalSkill(t, filepath.Join(home, tc.root), "review-helper", map[string]string{
 				"SKILL.md": "---\nname: " + tc.wantName + "\ndescription: Review code\n---\n# Review\n",
@@ -252,6 +339,41 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 				t.Fatalf("expected 1 supporting file, got %d", len(bundle.Files))
 			}
 		})
+	}
+}
+
+func TestListRuntimeLocalSkills_GrokUsesGROKHOME(t *testing.T) {
+	home := t.TempDir()
+	grokHome := filepath.Join(t.TempDir(), "custom-grok-home")
+	t.Setenv("HOME", home)
+	t.Setenv("GROK_HOME", grokHome)
+	writeTestLocalSkill(t, filepath.Join(grokHome, "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Grok Home Review\ndescription: Review code\n---\n# Review\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".grok", "skills"), "wrong-home", map[string]string{
+		"SKILL.md": "---\nname: Wrong Home\n---\n# Wrong\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("grok")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("grok should be supported")
+	}
+	if len(skills) != 1 || skills[0].Key != "review-helper" {
+		t.Fatalf("expected only GROK_HOME skill, got %+v", skills)
+	}
+	if skills[0].SourcePath != filepath.ToSlash(filepath.Join(grokHome, "skills", "review-helper")) {
+		t.Fatalf("source_path = %q, want custom GROK_HOME path", skills[0].SourcePath)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("grok", "review-helper")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported || bundle == nil || bundle.Name != "Grok Home Review" {
+		t.Fatalf("unexpected bundle: supported=%v bundle=%+v", supported, bundle)
 	}
 }
 

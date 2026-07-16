@@ -146,6 +146,32 @@ multica issue metadata delete <issue-id> --key <stale-key>
 `--value` is JSON-parsed by default (bool/number are sniffed); pass `--type
 string|number|bool` to force a type.
 
+## Custom properties: typed workflow state
+
+Workspaces may define custom issue properties (Severity, Environment, QA
+Status, ...). Properties are the typed, user-visible sibling of metadata:
+values are validated against the definition (select options, date format,
+http(s) URL), visible in the issue sidebar, and addressed by name.
+
+- Read what exists before writing: `multica property list` shows the catalog;
+  `multica issue property list <issue-id>` shows values set on the issue.
+- Set values by property name and option name — the CLI translates to ids:
+
+```bash
+multica issue property set <issue-id> --name Environment --value staging
+multica issue property set <issue-id> --name Platforms --value "iOS,Android"
+multica issue property unset <issue-id> --name Environment
+```
+
+- A validation error lists the legal options — fix the value and retry.
+- Definitions may include an optional catalog icon for visual identification;
+  it does not change the property's type or value validation.
+- Agents cannot create or edit property definitions (owner/admin humans only).
+  If a needed property does not exist, propose it in a comment instead.
+- Property vs metadata: if the value is workflow state a human should see and
+  filter by, and a definition exists, prefer the property. Metadata stays the
+  free-form scratchpad for run state (`pr_url`, `waiting_on`, ...).
+
 ## Status changes have server side effects
 
 A status change is not cosmetic — the server enqueues or skips agent work based

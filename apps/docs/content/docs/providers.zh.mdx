@@ -1,11 +1,11 @@
 ---
 title: AI 编程工具对照
-description: Multica 支持 15 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
+description: Multica 支持 16 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica 内置支持 **15 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 Multica 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
+Multica 内置支持 **16 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 Multica 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
 
 创建智能体时挑选工具的指引见 [创建和配置智能体](/agents-create)。
 
@@ -15,7 +15,7 @@ Multica 内置支持 **15 款 AI 编程工具**。它们都实现了同一套接
 |---|---|---|---|---|---|
 | **Antigravity** | Google | ✅（`--conversation <id>`）| ❌ | `.agents/skills/` | 动态发现（`agy models`）|
 | **Claude Code** | Anthropic | ✅ | ✅ | `.claude/skills/` | 静态 + flag |
-| **CodeBuddy** | Tencent | ✅ | ✅ | `.claude/skills/` | 动态发现 |
+| **CodeBuddy** | Tencent | ✅ | ✅ | `.codebuddy/skills/` | 动态发现 |
 | **Codex** | OpenAI | ✅ | ✅ | `$CODEX_HOME/skills/` | 静态 |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静态（账号权益决定）|
 | **Cursor** | Anysphere | ✅ | ✅ | `.cursor/skills/` | 动态发现 |
@@ -28,6 +28,7 @@ Multica 内置支持 **15 款 AI 编程工具**。它们都实现了同一套接
 | **Pi** | Inflection AI | ✅（session 为文件路径）| ❌ | `.pi/skills/` | 动态发现 |
 | **Qoder** | Alibaba | ✅ | ✅ | `.qoder/skills/` | 动态发现 |
 | **Trae CLI** | ByteDance | ✅（ACP `session/load`）| ✅ | `.traecli/skills/` | 动态发现 |
+| **Grok** | xAI | ✅（ACP `session/load`）| ✅ | `.grok/skills/` | 动态发现（ACP `session/new`）|
 
 ## 每款工具的定位
 
@@ -41,7 +42,7 @@ Anthropic 出品。**新用户首选**——功能最完整：会话恢复真用
 
 ### CodeBuddy
 
-Tencent 出品。一款兼容 Claude Code 的 CLI agent——Multica 用和 Claude Code 一样的 stream-json 协议驱动它，所以会话恢复可用（通过 `--resume`），MCP 配置通过 `--mcp-config` 传入，skill 沿用 Claude Code 的 `.claude/skills/` 布局。模型为动态发现。
+Tencent 出品。一款兼容 Claude Code 的 CLI agent——Multica 用和 Claude Code 一样的 stream-json 协议驱动它，所以会话恢复可用（通过 `--resume`），MCP 配置通过 `--mcp-config` 传入。CodeBuddy 使用自己原生的配置目录，而不是复用 Claude 的，所以 skill 放在 `.codebuddy/skills/`，运行时说明写入 `CODEBUDDY.md`。模型为动态发现。
 
 ### Codex
 
@@ -99,15 +100,19 @@ Alibaba 出品。一款 agentic 编程 CLI。使用 ACP 协议（和 Hermes、Ki
 
 ByteDance 官方 TRAE CLI（`traecli`，搭配 Trae IDE，**不是**开源的 `bytedance/trae-agent`）。它是 ACP 原生工具，Multica 通过 `traecli acp serve --yolo` 在 stdio 上驱动它，传输层和 Kiro、Qoder 相同。会话恢复通过 ACP `session/load` 工作，MCP 配置通过 ACP `mcpServers` 传入，模型为动态发现并可通过 `session/set_model` 在任务中切换，skill 复制到 `.traecli/skills/`。
 
+### Grok
+
+xAI 的 Grok Build CLI（`grok`）。Multica 通过 `grok --no-auto-update agent --always-approve stdio` 接入 ACP。`initialize` 返回后，Multica 从 CLI 公布的认证方式中选择 `xai.api_key`（已设置 `XAI_API_KEY` 时优先）或 `cached_token`，等待 `authenticate` 成功后才创建或加载会话；没有可用方式时会明确失败。会话续接走 ACP `session/load`，模型从 `session/new` 动态发现并通过 `session/set_model` 切换。`grok-4.5` 的 reasoning effort 只提供官方支持的 `low`、`medium`、`high`。MCP 配置通过 ACP `mcpServers` 传入。Skill 文件写入 `.grok/skills/`；用户 skill 从 `$GROK_HOME/skills/`（默认 `~/.grok/skills/`）和通用目录 `~/.agents/skills/` 发现。
+
 ## 会话恢复：谁真的支持
 
 会话恢复的机制在 [执行任务](/tasks#任务能接着上次的上下文继续吗) 里讲过。**所有支持的工具都能恢复会话**——传 resume id，任务就会从上次的上下文接着继续。唯一的特例是 Pi：它的 resume id 是磁盘上的会话文件路径，而不是字符串 ID（见上文 [Pi](#pi)）。
 
 ## MCP 配置：按工具不同
 
-**15 款工具里有 11 款实际消费 `mcp_config`：Claude Code、CodeBuddy、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Qoder、Trae CLI**。其他 4 款（Antigravity、Copilot、DevEco Code、Pi）会接收这个字段但**忽略**——不报错、不警告，只是配置不生效。
+**16 款工具里有 12 款实际消费 `mcp_config`：Claude Code、CodeBuddy、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Qoder、Trae CLI、Grok**。其他 4 款（Antigravity、Copilot、DevEco Code、Pi）会接收这个字段但**忽略**——不报错、不警告，只是配置不生效。
 
-各工具的接入方式不同：Claude Code 和 CodeBuddy 通过 `--mcp-config` 加 `--strict-mcp-config` 接收；Codex 会把 daemon 管理的 `mcp_servers` block 写入单次任务的 `$CODEX_HOME/config.toml`；Cursor 会写入 `.cursor/mcp.json`，并把项目 approval 写到单次任务的 `CURSOR_DATA_DIR`；Hermes、Kimi、Kiro CLI、Qoder、Trae CLI 通过 ACP `mcpServers` 接收；OpenCode 通过 `OPENCODE_CONFIG_CONTENT` 环境变量内联接收；OpenClaw 通过 Multica 的单次任务配置 wrapper 接收 `mcp.servers`。OpenCode 这条路径**不会**改写项目里的 `opencode.json`。
+各工具的接入方式不同：Claude Code 和 CodeBuddy 通过 `--mcp-config` 加 `--strict-mcp-config` 接收；Codex 会把 daemon 管理的 `mcp_servers` block 写入单次任务的 `$CODEX_HOME/config.toml`；Cursor 会写入 `.cursor/mcp.json`，并把项目 approval 写到单次任务的 `CURSOR_DATA_DIR`；Hermes、Kimi、Kiro CLI、Qoder、Trae CLI、Grok 通过 ACP `mcpServers` 接收；OpenCode 通过 `OPENCODE_CONFIG_CONTENT` 环境变量内联接收；OpenClaw 通过 Multica 的单次任务配置 wrapper 接收 `mcp.servers`。OpenCode 这条路径**不会**改写项目里的 `opencode.json`。
 
 <Callout type="warning">
 如果你在智能体配置里设置了 `mcp_config`，但选了矩阵 MCP 列没有标 ✅ 的工具，你的 MCP server 对这个智能体**没有效果**。MCP 集成是按工具实现的。
@@ -120,7 +125,7 @@ ByteDance 官方 TRAE CLI（`traecli`，搭配 Trae IDE，**不是**开源的 `b
 | 工具 | 路径 | 是否原生发现 |
 |---|---|---|
 | Claude Code | `.claude/skills/` | ✅ 原生 |
-| CodeBuddy | `.claude/skills/` | ✅ 原生 |
+| CodeBuddy | `.codebuddy/skills/` | ✅ 原生 |
 | Codex | `$CODEX_HOME/skills/` | ✅ 原生 |
 | Copilot | `.github/skills/` | ✅ 原生 |
 | Cursor | `.cursor/skills/` | ✅ 原生 |
@@ -131,6 +136,7 @@ ByteDance 官方 TRAE CLI（`traecli`，搭配 Trae IDE，**不是**开源的 `b
 | Pi | `.pi/skills/` | ✅ 原生 |
 | Qoder | `.qoder/skills/` | ✅ 原生 |
 | Trae CLI | `.traecli/skills/` | ✅ 原生 |
+| Grok | `.grok/skills/` | ✅ 原生 |
 | Antigravity | `.agents/skills/` | ✅ 原生（沿用 Gemini CLI 的 workspace 布局——见 [Antigravity 文档](https://antigravity.google/docs/gcli-migration)）|
 | Hermes | `HERMES_HOME/skills/` （单次任务 home）| ✅ 原生（每个任务从 `~/.hermes/` 播种）|
 | OpenClaw | `.agent_context/skills/` | ⚠️ 通用 fallback |

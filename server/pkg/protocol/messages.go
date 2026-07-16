@@ -249,6 +249,8 @@ type DaemonHeartbeatRequestPayload struct {
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.
 // JSON shape mirrors the HTTP heartbeat response so daemon code can decode either.
+// ServerCapabilities is explicit server-to-daemon protocol negotiation. A
+// daemon must not infer support from its own advertised client capabilities.
 //
 // RuntimeGone is the WebSocket replacement for the HTTP 404 "runtime not found"
 // response. When the server discovers the runtime row was deleted (UI delete,
@@ -260,6 +262,7 @@ type DaemonHeartbeatRequestPayload struct {
 type DaemonHeartbeatAckPayload struct {
 	RuntimeID               string                                  `json:"runtime_id"`
 	Status                  string                                  `json:"status"`
+	ServerCapabilities      []string                                `json:"server_capabilities,omitempty"`
 	RuntimeGone             bool                                    `json:"runtime_gone,omitempty"`
 	PendingUpdate           *DaemonHeartbeatPendingUpdate           `json:"pending_update,omitempty"`
 	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`

@@ -538,6 +538,70 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 	}
 }
 
+// TestWriteContextFilesCodebuddyNativeSkills is the regression guard for a
+// bug where CodeBuddy was treated as a drop-in alias for Claude and skills
+// were written to .claude/skills/. CodeBuddy Code is a Claude Code fork but
+// ships its own native config directory (~/.codebuddy, .codebuddy/) and does
+// NOT read .claude/skills/ by default — see
+// https://www.codebuddy.ai/docs/cli/skills ("Project-level Skills:
+// .codebuddy/skills/"). Skills must land under .codebuddy/skills/ instead.
+func TestWriteContextFilesCodebuddyNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "codebuddy-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Go Conventions",
+				Content: "Follow Go conventions.",
+				Files: []SkillFileContextForEnv{
+					{Path: "templates/example.go", Content: "package main"},
+				},
+			},
+		},
+	}
+
+	if err := writeContextFiles(dir, "codebuddy", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	// Skills should be in .codebuddy/skills/ (native discovery), NOT
+	// .claude/skills/ and NOT .agent_context/skills/.
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".codebuddy", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .codebuddy/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+
+	// Supporting files should also be under .codebuddy/skills/.
+	supportFile, err := os.ReadFile(filepath.Join(dir, ".codebuddy", "skills", "go-conventions", "templates", "example.go"))
+	if err != nil {
+		t.Fatalf("failed to read supporting file: %v", err)
+	}
+	if string(supportFile) != "package main" {
+		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
+	}
+
+	// .claude/skills/ must NOT exist — this is the exact regression this
+	// test guards against.
+	if _, err := os.Stat(filepath.Join(dir, ".claude", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .claude/skills/ to NOT exist for codebuddy provider")
+	}
+
+	// .agent_context/skills/ should NOT exist for CodeBuddy either.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for codebuddy provider")
+	}
+
+	// issue_context.md should still be in .agent_context/.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
+		t.Error("expected .agent_context/issue_context.md to exist")
+	}
+}
+
 // TestReuseRefreshesSkillsWithoutDuplicating is the regression guard for
 // GitHub #3684: re-dispatching the same agent on the same issue goes through
 // the Reuse path, which must refresh skills in place rather than pile up
@@ -681,7 +745,7 @@ func TestReuseReclaimsManagedSkillDirWithStrayAgentFile(t *testing.T) {
 func TestReuseSkillRefreshIsCanonicalAcrossProviders(t *testing.T) {
 	t.Parallel()
 
-	for _, provider := range []string{"claude", "openclaw", "copilot", ""} {
+	for _, provider := range []string{"claude", "codebuddy", "openclaw", "copilot", ""} {
 		provider := provider
 		name := provider
 		if name == "" {

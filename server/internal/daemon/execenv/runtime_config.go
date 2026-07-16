@@ -157,6 +157,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // config file so the agent discovers its environment through its native mechanism.
 //
 // For Claude:   writes {workDir}/CLAUDE.md  (skills discovered natively from .claude/skills/)
+// For CodeBuddy: writes {workDir}/CODEBUDDY.md  (CodeBuddy's native memory filename; skills discovered natively from .codebuddy/skills/)
 // For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
 // For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .opencode/skills/)
@@ -170,6 +171,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For Qoder:       writes {workDir}/AGENTS.md  (skills discovered from .qoder/skills/, user-level ~/.qoder/skills is unaffected)
 // For Antigravity: writes {workDir}/AGENTS.md  (agy CLI reads AGENTS.md natively; skills discovered natively from .agents/skills/ — see https://antigravity.google/docs/gcli-migration)
 // For Traecli:     writes {workDir}/AGENTS.md  (traecli reads .trae/rules/ not AGENTS.md, so the brief is delivered inline via providerNeedsInlineSystemPrompt; the file is written for parity/visibility only)
+// For Grok:        writes {workDir}/AGENTS.md  (Grok Build CLI reads AGENTS.md natively from the workdir)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (string, error) {
 	content := buildMetaSkillContent(provider, ctx)
 	path := runtimeConfigPath(workDir, provider)
@@ -187,9 +189,16 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 // added to one side cannot drift past the other.
 func runtimeConfigPath(workDir, provider string) string {
 	switch provider {
-	case "claude", "codebuddy":
+	case "claude":
 		return filepath.Join(workDir, "CLAUDE.md")
-	case "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli":
+	case "codebuddy":
+		// CodeBuddy Code's native memory file is CODEBUDDY.md, not
+		// CLAUDE.md — see https://www.codebuddy.ai/docs/cli/codebuddy-dir
+		// ("CODEBUDDY.md / .codebuddy/CODEBUDDY.md — Project-level memory
+		// file"). CodeBuddy only reads CLAUDE.md if the user manually
+		// migrates/symlinks it in.
+		return filepath.Join(workDir, "CODEBUDDY.md")
+	case "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli", "grok":
 		return filepath.Join(workDir, "AGENTS.md")
 	default:
 		return ""

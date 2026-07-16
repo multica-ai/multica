@@ -76,6 +76,7 @@ const baseIssue: Issue = {
   start_date: null,
   due_date: null,
   metadata: {},
+  properties: {},
   labels: [labelA],
   created_at: "2025-01-01T00:00:00Z",
   updated_at: "2025-01-01T00:00:00Z",
@@ -260,6 +261,23 @@ describe("project progress invalidation", () => {
     });
 
     expectInvalidated(qc, projectKeys.list(WS_ID));
+  });
+});
+
+describe("onIssueCreated — carries the label snapshot into list cache", () => {
+  it("keeps the created issue's labels so members other than the creator render it already labeled", () => {
+    // The backend now attaches labels in the create transaction and echoes
+    // them on the issue:created event. Guard that the cache insert doesn't
+    // strip them — otherwise online members would see the new issue blank
+    // until a refetch (staleTime: Infinity means no self-heal).
+    const qc = new QueryClient();
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), makeListCache());
+
+    onIssueCreated(qc, WS_ID, { ...baseIssue, labels: [labelA, labelB] });
+
+    const cache = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
+    const cached = cache?.byStatus.todo?.issues.find((i) => i.id === ISSUE_ID);
+    expect(cached?.labels).toEqual([labelA, labelB]);
   });
 });
 

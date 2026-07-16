@@ -15,6 +15,7 @@ import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import { labelKeys } from "../labels/queries";
+import { propertyKeys } from "../properties/queries";
 import {
   agentTaskSnapshotKeys,
   agentActivityKeys,
@@ -29,6 +30,7 @@ import {
   onIssueUpdated,
   onIssueDeleted,
   onIssueLabelsChanged,
+  onIssuePropertiesChanged,
   onIssueMetadataChanged,
 } from "../issues/ws-updaters";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
@@ -57,6 +59,7 @@ import type {
   IssueDeletedPayload,
   IssueLabelsChangedPayload,
   IssueMetadataChangedPayload,
+  IssuePropertiesChangedPayload,
   InboxNewPayload,
   InboxItem,
   NotificationPreferenceResponse,
@@ -494,6 +497,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
   }
   // Cross-workspace, so outside the wsId guard: a reconnect may have missed
   // inbox events from any workspace, so re-pull the switcher-dot summary.
@@ -584,11 +588,12 @@ export function useRealtimeSync(
       inbox: () => {
         const wsId = getCurrentWsId();
         if (wsId) onInboxInvalidate(qc, wsId);
-        // inbox:read / inbox:archived / batch events arrive here. They can
-        // originate from a workspace other than the active one (personal
-        // events fan out to all the user's connections), so always refresh
-        // the cross-workspace summary — its dot must clear when another
-        // workspace's items are read/archived.
+        // inbox:read / inbox:archived / inbox:unarchived / batch events arrive
+        // here. They can originate from a workspace other than the active one
+        // (personal events fan out to all the user's connections), so always
+        // refresh the cross-workspace summary — its dot must clear when another
+        // workspace's items are read/archived, and light again when an unread
+        // item is restored from the archive.
         onInboxSummaryInvalidate(qc);
       },
       agent: () => {
@@ -748,7 +753,7 @@ export function useRealtimeSync(
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
       "workspace:updated",
-      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "issue_metadata:changed", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -830,6 +835,28 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (wsId) onIssueMetadataChanged(qc, wsId, issue_id, metadata ?? {});
     });
+
+    const unsubIssuePropertiesChanged = ws.on("issue_properties:changed", (p) => {
+      const { issue_id, properties } = p as IssuePropertiesChangedPayload;
+      if (!issue_id) return;
+      const wsId = getCurrentWsId();
+      if (wsId) {
+        onIssuePropertiesChanged(qc, wsId, issue_id, properties ?? {});
+        // The catalog embeds per-definition usage counts; every value
+        // set/unset shifts them. The list is tiny, so a refetch beats
+        // trying to patch counts client-side.
+        qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+      }
+    });
+
+    // Definition changes (create / rename / options / archive) — refetch the
+    // catalog; issue caches keep raw value bags so they stay valid.
+    const unsubPropertyChanged = ["property:created", "property:updated"].map((event) =>
+      ws.on(event as "property:created" | "property:updated", () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+      }),
+    );
 
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
       const { item } = p as InboxNewPayload;
@@ -1332,6 +1359,8 @@ export function useRealtimeSync(
       unsubIssueDeleted();
       unsubIssueLabelsChanged();
       unsubIssueMetadataChanged();
+      unsubIssuePropertiesChanged();
+      unsubPropertyChanged.forEach((unsub) => unsub());
       unsubInboxNew();
       unsubCommentCreated();
       unsubCommentUpdated();

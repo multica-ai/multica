@@ -62,6 +62,12 @@ type CodexHomeOptions struct {
 	// task with no issue), in which case sessions/ stays task-local. See
 	// codexSessionStoreDir and prepareCodexSessionsDir (MUL-4424).
 	SessionStoreKey string
+	// WritableRoots are extra absolute paths written into the config.toml
+	// `[sandbox_workspace_write] writable_roots` so the workspace-write sandbox
+	// (Linux) can write outside the task workdir — the per-task writable HOME.
+	// Only meaningful when the policy resolves to workspace-write; ignored on
+	// darwin danger-full-access. See task_home.go and MUL-4856.
+	WritableRoots []string
 }
 
 // prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
@@ -136,6 +142,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// need to fall back to danger-full-access because of openai/codex#10390;
 	// see codex_sandbox.go for the full rationale.
 	policy := codexSandboxPolicyFor(opts.GOOS, opts.CodexVersion)
+	policy.WritableRoots = opts.WritableRoots
 	if err := ensureCodexSandboxConfig(filepath.Join(codexHome, "config.toml"), policy, opts.CodexVersion, logger); err != nil {
 		logger.Warn("execenv: codex-home ensure sandbox config failed", "error", err)
 	}

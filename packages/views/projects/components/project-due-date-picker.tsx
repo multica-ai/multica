@@ -21,7 +21,7 @@ export function ProjectDueDatePicker({
   dueDate: string | null;
   onUpdate: (updates: Partial<UpdateProjectRequest>) => void;
   /** Custom trigger element (e.g. a pill button in the create modal). */
-  triggerRender?: React.ReactElement;
+  triggerRender?: React.ReactElement<Record<string, unknown>>;
   align?: "start" | "center" | "end";
   /** Controlled open state — lets a ⋯ overflow menu reveal + open the pill. */
   open?: boolean;

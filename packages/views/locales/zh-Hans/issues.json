@@ -154,6 +154,7 @@
     "add_issue_tooltip": "新建 issue",
     "empty_column": "无 issue",
     "empty_grouping": "没有匹配的 issue",
+    "no_value": "未设置",
     "ordered_by": "按{{field}}排序"
   },
   "detail": {
@@ -453,6 +454,17 @@
     "delete_issue": "删除 issue"
   },
   "pickers": {
+    "custom_property": {
+      "empty": "空",
+      "clear_action": "清除",
+      "true_label": "是",
+      "false_label": "否",
+      "value_placeholder": "输入值…",
+      "url_placeholder": "https://…",
+      "number_placeholder": "0",
+      "open_link": "打开链接",
+      "archived_hint": "已归档属性——值为只读"
+    },
     "filter_options_aria": "筛选选项",
     "no_results": "无结果",
     "assignee": {

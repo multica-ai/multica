@@ -586,6 +586,10 @@ type hermesClient struct {
 	sessionID    string
 	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
+	// onActivity observes accepted ACP session updates. Grok uses it to
+	// retain a short post-response drain window; other ACP backends leave it
+	// nil and keep their existing lifecycle behavior.
+	onActivity func()
 	// acceptNotification can drop ACP session updates before dispatching to
 	// handlers that mutate client state such as usage or pending tool calls.
 	acceptNotification func(updateType string) bool
@@ -1035,6 +1039,9 @@ func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 	if c.acceptNotification != nil && !c.acceptNotification(updateType) {
 		return
 	}
+	if c.onActivity != nil {
+		c.onActivity()
+	}
 
 	switch updateType {
 	case "agent_message_chunk":
@@ -1196,8 +1203,8 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 		RawInput   map[string]any    `json:"rawInput"`
 		Input      map[string]any    `json:"input"`
 		Parameters map[string]any    `json:"parameters"`
-		RawOutput  string            `json:"rawOutput"`
-		Output     string            `json:"output"`
+		RawOutput  json.RawMessage   `json:"rawOutput"`
+		Output     json.RawMessage   `json:"output"`
 		Content    []json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -1233,9 +1240,9 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 	pending := c.takePendingTool(msg.ToolCallID)
 	c.emitDeferredToolUse(pending, msg.ToolCallID, title, msg.Kind, rawInput)
 
-	output := msg.RawOutput
+	output := acpRawText(msg.RawOutput)
 	if output == "" {
-		output = msg.Output
+		output = acpRawText(msg.Output)
 	}
 	if output == "" {
 		output = extractACPToolCallText(msg.Content)
@@ -1360,6 +1367,27 @@ func parseToolArgsJSON(argsText string) map[string]any {
 //     as a minimal unified-diff header so the UI distinguishes writes
 //     from reads without needing a diff viewer.
 //
+// acpRawText renders an ACP output field (rawOutput / output) that may arrive
+// as either a JSON string or a structured value. Some model adapters — notably
+// Kiro's GPT-5.6 Sol path — send the completed tool_call_update's rawOutput as
+// an object like {"items":[{"Json":{...}}]} rather than a string. Declaring
+// that field as a Go string made json.Unmarshal fail, which made
+// handleToolCallUpdate return early and silently DROP the entire update —
+// including its status:"completed" — so the completion signal was lost and the
+// task was wrongly marked failed (issue #5509 / MUL-4860). Accept both shapes.
+func acpRawText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	// Non-string (object / array / number): keep the raw JSON as text so the
+	// output is preserved rather than discarded.
+	return string(raw)
+}
+
 // Terminal blocks ({type:"terminal", terminalId}) reference a remote
 // terminal the client would normally subscribe to via terminal/output;
 // we don't advertise terminal capability so we never receive those in
@@ -1532,6 +1560,32 @@ func extractACPSessionID(result json.RawMessage) string {
 		return ""
 	}
 	return r.SessionID
+}
+
+// extractACPAuthMethods returns the `authMethods` ids advertised in an ACP
+// `initialize` response, in the order the agent listed them. Agents that
+// require authentication (e.g. xAI's Grok Build) enumerate the accepted
+// methods here; per the ACP flow the client MUST send `authenticate` with one
+// of these ids before `session/new` / `session/load`. Agents that need no
+// explicit auth omit the field, so an empty slice means "skip authenticate".
+// A malformed response degrades to an empty slice (fail open on parsing so we
+// don't wedge agents that never needed the step).
+func extractACPAuthMethods(result json.RawMessage) []string {
+	var r struct {
+		AuthMethods []struct {
+			ID string `json:"id"`
+		} `json:"authMethods"`
+	}
+	if err := json.Unmarshal(result, &r); err != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(r.AuthMethods))
+	for _, m := range r.AuthMethods {
+		if id := strings.TrimSpace(m.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // extractACPCurrentModelID pulls the model selected by the ACP runtime out of

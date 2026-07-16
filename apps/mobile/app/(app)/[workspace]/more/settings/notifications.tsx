@@ -1,6 +1,6 @@
 /**
  * Notification preferences subscreen. 5 inbox groups + system_notifications
- * toggle, each backed by an optimistic PUT /api/notification-preferences.
+ * toggle, each backed by an optimistic PATCH /api/notification-preferences.
  *
  * Copy mirrors packages/views/settings/components/notifications-tab.tsx but
  * hardcoded English (mobile has no i18n infra yet). The group labels MUST
