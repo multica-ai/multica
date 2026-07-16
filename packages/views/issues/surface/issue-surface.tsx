@@ -247,7 +247,6 @@ function IssueSurfaceContent({
                 issues={issues}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
-                createDefaults={controller.createDefaults}
                 fetchNextPage={controller.fetchNextFlatPage}
                 hasNextPage={controller.hasNextFlatPage}
                 isFetchingNextPage={controller.isFetchingNextFlatPage}

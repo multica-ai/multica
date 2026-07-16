@@ -4,6 +4,7 @@ import {
   buildIssueTableCsv,
   buildIssueTableRows,
   calculateIssueTableColumn,
+  getIssueTableSelectionRange,
 } from "./table-view-model";
 
 function makeIssue(id: string, overrides: Partial<Issue> = {}): Issue {
@@ -135,6 +136,29 @@ describe("buildIssueTableRows", () => {
       "status:done",
       "issue-1",
     ]);
+  });
+});
+
+describe("getIssueTableSelectionRange", () => {
+  const issueIds = ["issue-1", "issue-2", "issue-3", "issue-4"];
+
+  it("returns an inclusive range in either direction", () => {
+    expect(
+      getIssueTableSelectionRange(issueIds, "issue-1", "issue-4"),
+    ).toEqual(issueIds);
+    expect(
+      getIssueTableSelectionRange(issueIds, "issue-4", "issue-2"),
+    ).toEqual(["issue-2", "issue-3", "issue-4"]);
+  });
+
+  it("returns null when the anchor or target is not visible", () => {
+    expect(getIssueTableSelectionRange(issueIds, null, "issue-2")).toBeNull();
+    expect(
+      getIssueTableSelectionRange(issueIds, "missing", "issue-2"),
+    ).toBeNull();
+    expect(
+      getIssueTableSelectionRange(issueIds, "issue-1", "missing"),
+    ).toBeNull();
   });
 });
 

@@ -38,11 +38,8 @@ import {
   Download,
   EyeOff,
   GripVertical,
-  ListTree,
   Loader2,
   Plus,
-  Sigma,
-  TableProperties,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable } from "@multica/ui/components/ui/data-table";
@@ -54,8 +51,6 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
@@ -64,18 +59,14 @@ import {
   TableFooter,
   TableRow,
 } from "@multica/ui/components/ui/table";
-import { getCellStyle } from "@multica/ui/lib/data-table";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCreateIssue } from "@multica/core/issues/mutations";
 import {
   TABLE_SYSTEM_COLUMNS,
   propertyIdFromViewKey,
   type SortField,
-  type TableCalculation,
   type TableColumnConfig,
   type TableColumnKey,
-  type TableGrouping,
   type TableSystemColumnKey,
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
@@ -83,7 +74,6 @@ import { propertyListOptions } from "@multica/core/properties";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type {
-  CreateIssueRequest,
   Issue,
   IssueProperty,
   IssuePropertyValue,
@@ -111,11 +101,10 @@ import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
 import {
   buildIssueTableCsv,
   buildIssueTableRows,
-  calculateIssueTableColumn,
+  getIssueTableSelectionRange,
   type IssueTableDisplayRow,
 } from "./table-view-model";
 import type { ChildProgress } from "./list-row";
-import type { IssueCreateDefaults } from "../surface/types";
 
 const SELECT_COLUMN_ID = "__select";
 const ADD_COLUMN_ID = "__add";
@@ -124,7 +113,6 @@ type TableViewProps = {
   issues: Issue[];
   childProgressMap: Map<string, ChildProgress>;
   projectMap: Map<string, Project>;
-  createDefaults: IssueCreateDefaults;
   fetchNextPage: () => Promise<unknown>;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
@@ -193,15 +181,25 @@ function SelectAllCheckbox({
   );
 }
 
-function IssueCheckbox({ issueId, label }: { issueId: string; label: string }) {
-  const selection = useIssueSurfaceSelection();
+function IssueCheckbox({
+  checked,
+  label,
+  onToggle,
+}: {
+  checked: boolean;
+  label: string;
+  onToggle: (shiftKey: boolean) => void;
+}) {
   return (
     <input
       type="checkbox"
       aria-label={label}
-      checked={selection.selectedIds.has(issueId)}
-      onClick={stopRowNavigation}
-      onChange={() => selection.toggle(issueId)}
+      checked={checked}
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggle(event.shiftKey);
+      }}
+      onChange={() => undefined}
       className="size-3.5 cursor-pointer accent-primary"
     />
   );
@@ -521,92 +519,6 @@ function LazyLabelCell({ issue }: { issue: Issue }) {
   );
 }
 
-export function QuickCreateFooter({
-  colSpan,
-  createDefaults,
-  sentinelRef,
-  loadingMore,
-}: {
-  colSpan: number;
-  createDefaults: IssueCreateDefaults;
-  sentinelRef: React.RefObject<HTMLDivElement | null>;
-  loadingMore: boolean;
-}) {
-  const { t } = useT("issues");
-  const [title, setTitle] = useState("");
-  const createIssue = useCreateIssue();
-
-  const submit = () => {
-    const trimmed = title.trim();
-    if (!trimmed || createIssue.isPending) return;
-    const payload: CreateIssueRequest = { title: trimmed };
-    const keys: (keyof IssueCreateDefaults)[] = [
-      "status",
-      "priority",
-      "assignee_type",
-      "assignee_id",
-      "parent_issue_id",
-      "project_id",
-      "stage",
-      "start_date",
-      "due_date",
-    ];
-    for (const key of keys) {
-      const value = createDefaults[key];
-      if (value !== undefined && value !== null) {
-        Object.assign(payload, { [key]: value });
-      }
-    }
-    createIssue.mutate(payload, {
-      onSuccess: () => setTitle(""),
-      onError: (error) =>
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : t(($) => $.table.quick_create_failed),
-        ),
-    });
-  };
-
-  return (
-    <TableRow className="hover:bg-muted/30">
-      <TableCell colSpan={colSpan} className="p-1.5">
-        <form
-          className="sticky left-1.5 flex max-w-2xl items-center gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            submit();
-          }}
-        >
-          <Input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder={t(($) => $.table.quick_create_placeholder)}
-            className="h-7 flex-1 border-0 bg-transparent shadow-none focus-visible:ring-0"
-          />
-          {loadingMore && !createIssue.isPending && (
-            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-          )}
-          <Button
-            type="submit"
-            size="sm"
-            className="h-7"
-            disabled={!title.trim() || createIssue.isPending}
-          >
-            {createIssue.isPending ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Plus className="size-3.5" />
-            )}
-            {t(($) => $.table.quick_create_submit)}
-          </Button>
-          <div ref={sentinelRef} className="h-px w-px" aria-hidden />
-        </form>
-      </TableCell>
-    </TableRow>
-  );
-}
-
 type IssueTableGroupRowProps = {
   group: Extract<IssueTableDisplayRow, { kind: "group" }>;
   colSpan: number;
@@ -666,7 +578,6 @@ export function TableView({
   issues,
   childProgressMap,
   projectMap,
-  createDefaults,
   fetchNextPage,
   hasNextPage,
   isFetchingNextPage,
@@ -678,6 +589,7 @@ export function TableView({
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
   const actions = useIssueSurfaceActionsOptional();
+  const selection = useIssueSurfaceSelection();
   const { getActorName } = useActorName();
   const { data: properties = [] } = useQuery(propertyListOptions(wsId));
   const propertyById = useMemo(
@@ -693,7 +605,6 @@ export function TableView({
   const reorderTableColumn = useViewStore((state) => state.reorderTableColumn);
   const setTableColumnWidth = useViewStore((state) => state.setTableColumnWidth);
   const tableGrouping = useViewStore((state) => state.tableGrouping);
-  const setTableGrouping = useViewStore((state) => state.setTableGrouping);
   const tableCollapsedGroups = useViewStore((state) => state.tableCollapsedGroups);
   const toggleTableGroupCollapsed = useViewStore(
     (state) => state.toggleTableGroupCollapsed,
@@ -703,15 +614,13 @@ export function TableView({
     (state) => state.toggleTableParentCollapsed,
   );
   const tableHierarchy = useViewStore((state) => state.tableHierarchy);
-  const toggleTableHierarchy = useViewStore((state) => state.toggleTableHierarchy);
-  const tableCalculation = useViewStore((state) => state.tableCalculation);
-  const setTableCalculation = useViewStore((state) => state.setTableCalculation);
   const sortBy = useViewStore((state) => state.sortBy);
   const setSortBy = useViewStore((state) => state.setSortBy);
   const sortDirection = useViewStore((state) => state.sortDirection);
   const setSortDirection = useViewStore((state) => state.setSortDirection);
-  const [exporting, setExporting] = useState(false);
+  const [exporting, setExporting] = useState<"all" | "selected" | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const selectionAnchorRef = useRef<string | null>(null);
 
   const groupingPropertyId = propertyIdFromViewKey(tableGrouping);
   const effectiveTableGrouping =
@@ -761,6 +670,35 @@ export function TableView({
         .map((row) => row.issue.id),
     [displayRows],
   );
+  const selectedIssues = useMemo(
+    () => issues.filter((issue) => selection.selectedIds.has(issue.id)),
+    [issues, selection.selectedIds],
+  );
+  const handleIssueSelection = useCallback(
+    (issueId: string, shiftKey: boolean) => {
+      const range = shiftKey
+        ? getIssueTableSelectionRange(
+            visibleIssueIds,
+            selectionAnchorRef.current,
+            issueId,
+          )
+        : null;
+
+      if (range) {
+        if (selection.selectedIds.has(issueId)) selection.deselect(range);
+        else selection.select(range);
+        return;
+      }
+
+      selection.toggle(issueId);
+      selectionAnchorRef.current = issueId;
+    },
+    [selection, visibleIssueIds],
+  );
+
+  useEffect(() => {
+    if (selection.selectedIds.size === 0) selectionAnchorRef.current = null;
+  }, [selection.selectedIds]);
 
   const columnLabel = useCallback(
     (key: TableColumnKey) => {
@@ -963,15 +901,19 @@ export function TableView({
             label={t(($) => $.table.select_all)}
           />
         ),
-        cell: ({ row }) =>
-          row.original.kind === "issue" ? (
+        cell: ({ row }) => {
+          if (row.original.kind !== "issue") return null;
+          const issue = row.original.issue;
+          return (
             <IssueCheckbox
-              issueId={row.original.issue.id}
+              checked={selection.selectedIds.has(issue.id)}
               label={t(($) => $.table.select_issue, {
-                identifier: row.original.issue.identifier,
+                identifier: issue.identifier,
               })}
+              onToggle={(shiftKey) => handleIssueSelection(issue.id, shiftKey)}
             />
-          ) : null,
+          );
+        },
       },
       ...visibleColumnConfigs.map(makeColumn),
       {
@@ -997,7 +939,15 @@ export function TableView({
         cell: () => null,
       },
     ],
-    [makeColumn, properties, t, visibleColumnConfigs, visibleIssueIds],
+    [
+      handleIssueSelection,
+      makeColumn,
+      properties,
+      selection.selectedIds,
+      t,
+      visibleColumnConfigs,
+      visibleIssueIds,
+    ],
   );
 
   const columnSizing = useMemo<ColumnSizingState>(
@@ -1060,18 +1010,10 @@ export function TableView({
     return () => observer.disconnect();
   }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
-  const groupingProperties = useMemo(
-    () =>
-      properties.filter((property) =>
-        ["select", "multi_select", "checkbox"].includes(property.type),
-      ),
-    [properties],
-  );
-
-  const handleExport = async () => {
-    setExporting(true);
+  const handleExport = async (mode: "all" | "selected") => {
+    setExporting(mode);
     try {
-      const rows = await exportIssues();
+      const rows = mode === "all" ? await exportIssues() : selectedIssues;
       const csvColumns = visibleColumnConfigs;
       const headers = csvColumns.map((column) => columnLabel(column.key));
       const csvRows = rows.map((issue) =>
@@ -1121,7 +1063,8 @@ export function TableView({
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `issues-${new Date().toISOString().slice(0, 10)}.csv`;
+      const filenamePrefix = mode === "all" ? "issues" : "issues-selected";
+      anchor.download = `${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.csv`;
       anchor.click();
       URL.revokeObjectURL(url);
       toast.success(t(($) => $.table.export_success, { count: rows.length }));
@@ -1130,51 +1073,20 @@ export function TableView({
         error instanceof Error ? error.message : t(($) => $.table.export_failed),
       );
     } finally {
-      setExporting(false);
+      setExporting(null);
     }
   };
 
   const footer = (
-    <TableFooter className="bg-background">
-      {tableCalculation !== "none" && (
-        <TableRow>
-          {table.getVisibleLeafColumns().map((column) => {
-            const key = column.id;
-            const value =
-              key === SELECT_COLUMN_ID || key === ADD_COLUMN_ID
-                ? null
-                : calculateIssueTableColumn(
-                    issues,
-                    key as TableColumnKey,
-                    tableCalculation,
-                  );
-            return (
-              <TableCell
-                key={column.id}
-                className={cn(
-                  "overflow-hidden px-4 py-1.5 text-xs text-muted-foreground",
-                  column.getIsPinned() && "bg-background",
-                )}
-                style={getCellStyle(column, { withBorder: true, hasExplicitSize: true })}
-              >
-                {key === "title"
-                  ? t(($) => $.table.calculation[tableCalculation])
-                  : typeof value === "number"
-                    ? Number.isInteger(value)
-                      ? value
-                      : value.toFixed(2)
-                    : null}
-              </TableCell>
-            );
-          })}
-        </TableRow>
-      )}
-      <QuickCreateFooter
-        colSpan={table.getVisibleLeafColumns().length}
-        createDefaults={createDefaults}
-        sentinelRef={sentinelRef}
-        loadingMore={isFetchingNextPage}
-      />
+    <TableFooter className="border-0 bg-transparent">
+      <TableRow className="h-px border-0 hover:bg-transparent">
+        <TableCell
+          colSpan={table.getVisibleLeafColumns().length}
+          className="h-px p-0"
+        >
+          <div ref={sentinelRef} className="h-px w-px" aria-hidden />
+        </TableCell>
+      </TableRow>
     </TableFooter>
   );
 
@@ -1184,17 +1096,6 @@ export function TableView({
         <span className="mr-auto text-xs text-muted-foreground">
           {t(($) => $.table.loaded_count, { count: issues.length, total })}
         </span>
-        <Button
-          variant={tableHierarchy ? "secondary" : "ghost"}
-          size="sm"
-          className="h-7"
-          aria-pressed={tableHierarchy}
-          title={t(($) => $.table.hierarchy_description)}
-          onClick={toggleTableHierarchy}
-        >
-          <ListTree className="size-3.5" />
-          {t(($) => $.table.hierarchy)}
-        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -1202,106 +1103,34 @@ export function TableView({
                 variant="ghost"
                 size="sm"
                 className="h-7"
+                disabled={exporting !== null}
               >
-                <TableProperties className="size-3.5" />
-                {t(($) => $.table.group_label)}
+                {exporting ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Download className="size-3.5" />
+                )}
+                {t(($) => $.table.export)}
+                <ChevronDown className="size-3" />
               </Button>
             }
           />
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuRadioGroup
-              value={effectiveTableGrouping}
-              onValueChange={(value) => setTableGrouping(value as TableGrouping)}
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem onClick={() => void handleExport("all")}>
+              <Download className="size-3.5" />
+              {t(($) => $.table.export_all)}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={selectedIssues.length === 0}
+              onClick={() => void handleExport("selected")}
             >
-              <DropdownMenuRadioItem value="none">
-                {t(($) => $.table.group_none)}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="status">
-                {t(($) => $.table.columns.status)}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="assignee">
-                {t(($) => $.table.columns.assignee)}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-            {groupingProperties.length > 0 && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>
-                    {t(($) => $.table.columns.property_section)}
-                  </DropdownMenuLabel>
-                  <DropdownMenuRadioGroup
-                    value={effectiveTableGrouping}
-                    onValueChange={(value) =>
-                      setTableGrouping(value as TableGrouping)
-                    }
-                  >
-                    {groupingProperties.map((property) => (
-                      <DropdownMenuRadioItem
-                        key={property.id}
-                        value={`property:${property.id}`}
-                      >
-                        {property.name}
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuGroup>
-              </>
-            )}
+              <Download className="size-3.5" />
+              {t(($) => $.table.export_selected, {
+                count: selectedIssues.length,
+              })}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7"
-                title={t(($) => $.table.calculation.description)}
-              >
-                <Sigma className="size-3.5" />
-                {t(($) => $.table.calculation.label)}
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="end">
-            <DropdownMenuRadioGroup
-              value={tableCalculation}
-              onValueChange={(value) =>
-                setTableCalculation(value as TableCalculation)
-              }
-            >
-              {(["none", "sum", "average", "count"] as const).map((value) => (
-                <DropdownMenuRadioItem key={value} value={value}>
-                  {t(($) => $.table.calculation[value])}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <TableColumnPicker
-          properties={properties}
-          trigger={
-            <Button variant="ghost" size="sm" className="h-7">
-              <Plus className="size-3.5" />
-              {t(($) => $.table.columns.add)}
-            </Button>
-          }
-        />
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7"
-          disabled={exporting}
-          onClick={() => void handleExport()}
-        >
-          {exporting ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <Download className="size-3.5" />
-          )}
-          {t(($) => $.table.export)}
-        </Button>
       </div>
       <DndContext
         sensors={sensors}

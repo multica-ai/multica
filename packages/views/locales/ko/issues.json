@@ -124,7 +124,9 @@
     "hierarchy_description": "하위 이슈를 상위 이슈 아래에 중첩해 표시",
     "group_label": "그룹",
     "group_none": "그룹화 안 함",
-    "export": "CSV 내보내기",
+    "export": "내보내기",
+    "export_all": "모두 내보내기",
+    "export_selected": "선택 항목 내보내기({{count}})",
     "export_success": "이슈 {{count}}개를 내보냈습니다",
     "export_failed": "이슈를 내보내지 못했습니다",
     "columns": {

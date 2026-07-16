@@ -124,7 +124,9 @@
     "hierarchy_description": "サブイシューを親イシューの下に入れ子で表示",
     "group_label": "グループ",
     "group_none": "グループ化なし",
-    "export": "CSV をエクスポート",
+    "export": "エクスポート",
+    "export_all": "すべてエクスポート",
+    "export_selected": "選択項目をエクスポート（{{count}}）",
     "export_success": "{{count}} 件のイシューをエクスポートしました",
     "export_failed": "イシューをエクスポートできませんでした",
     "columns": {

@@ -126,7 +126,9 @@
     "hierarchy_description": "Nest sub-issues beneath their parents",
     "group_label": "Group",
     "group_none": "No grouping",
-    "export": "Export CSV",
+    "export": "Export",
+    "export_all": "Export all",
+    "export_selected": "Export selected ({{count}})",
     "export_success": "Exported {{count}} issues",
     "export_failed": "Failed to export issues",
     "columns": {

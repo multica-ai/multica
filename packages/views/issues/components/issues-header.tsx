@@ -76,6 +76,7 @@ import {
   type SortField,
   type IssueGrouping,
   type SwimlaneGrouping,
+  type TableGrouping,
   type ViewMode,
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
@@ -898,6 +899,8 @@ export function IssueDisplayControls({
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const cardProperties = useViewStore((s) => s.cardProperties);
   const tableColumns = useViewStore((s) => s.tableColumns);
+  const tableGrouping = useViewStore((s) => s.tableGrouping ?? "none");
+  const tableHierarchy = useViewStore((s) => s.tableHierarchy ?? true);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
   const act = useViewStoreApi().getState();
   const headerWsId = useWorkspaceId();
@@ -921,6 +924,13 @@ export function IssueDisplayControls({
   );
   const groupableProperties = useMemo(
     () => workspaceProperties.filter((p) => p.type === "select"),
+    [workspaceProperties],
+  );
+  const tableGroupableProperties = useMemo(
+    () =>
+      workspaceProperties.filter((p) =>
+        ["select", "multi_select", "checkbox"].includes(p.type),
+      ),
     [workspaceProperties],
   );
   const visibleTableColumns = useMemo(
@@ -993,6 +1003,7 @@ export function IssueDisplayControls({
     : null;
   const sortPropertyId = propertyIdFromViewKey(sortBy);
   const groupingPropertyId = propertyIdFromViewKey(grouping);
+  const tableGroupingPropertyId = propertyIdFromViewKey(tableGrouping);
   // Property-backed sort/grouping label straight from the definition name;
   // a stale persisted id (archived/deleted definition) falls back to the
   // manual/status default label.
@@ -1003,6 +1014,18 @@ export function IssueDisplayControls({
     ? propertyById.get(groupingPropertyId)?.name ?? t(($) => $.display.group_status)
     : t(($) => $.display[GROUPING_LABEL_KEY[grouping as keyof typeof GROUPING_LABEL_KEY]]);
   const swimlaneGroupingLabel = t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[swimlaneGrouping]]);
+  const effectiveTableGrouping =
+    tableGroupingPropertyId && !propertyById.has(tableGroupingPropertyId)
+      ? "none"
+      : tableGrouping;
+  const tableGroupingLabel = tableGroupingPropertyId
+    ? propertyById.get(tableGroupingPropertyId)?.name ??
+      t(($) => $.table.group_none)
+    : effectiveTableGrouping === "status"
+      ? t(($) => $.table.columns.status)
+      : effectiveTableGrouping === "assignee"
+        ? t(($) => $.table.columns.assignee)
+        : t(($) => $.table.group_none);
   const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
 
   return (
@@ -1373,6 +1396,75 @@ export function IssueDisplayControls({
                         {SWIMLANE_GROUPINGS.map((value) => (
                           <DropdownMenuRadioItem key={value} value={value}>
                             {t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[value]])}
+                          </DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            )}
+
+            {viewMode === "table" && (
+              <div className="border-b px-3 py-2.5">
+                <label className="flex cursor-pointer items-center justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block text-sm">
+                      {t(($) => $.table.hierarchy)}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {t(($) => $.table.hierarchy_description)}
+                    </span>
+                  </span>
+                  <Switch
+                    size="sm"
+                    checked={tableHierarchy}
+                    onCheckedChange={() => act.toggleTableHierarchy()}
+                  />
+                </label>
+                <div className="mt-3">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {t(($) => $.table.group_label)}
+                  </span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-1.5 w-full justify-between text-xs"
+                        >
+                          {tableGroupingLabel}
+                          <ChevronDown className="size-3 text-muted-foreground" />
+                        </Button>
+                      }
+                    />
+                    <DropdownMenuContent align="start" className="w-auto min-w-48">
+                      <DropdownMenuRadioGroup
+                        value={effectiveTableGrouping}
+                        onValueChange={(value) =>
+                          act.setTableGrouping(value as TableGrouping)
+                        }
+                      >
+                        <DropdownMenuRadioItem value="none">
+                          {t(($) => $.table.group_none)}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="status">
+                          {t(($) => $.table.columns.status)}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="assignee">
+                          {t(($) => $.table.columns.assignee)}
+                        </DropdownMenuRadioItem>
+                        {tableGroupableProperties.map((property) => (
+                          <DropdownMenuRadioItem
+                            key={property.id}
+                            value={`property:${property.id}`}
+                          >
+                            <PropertyIcon
+                              property={property}
+                              className="size-3.5 text-xs"
+                            />
+                            <span>{property.name}</span>
                           </DropdownMenuRadioItem>
                         ))}
                       </DropdownMenuRadioGroup>

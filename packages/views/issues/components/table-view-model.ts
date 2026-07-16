@@ -42,6 +42,21 @@ export interface BuildIssueTableRowsOptions {
   falseLabel: string;
 }
 
+export function getIssueTableSelectionRange(
+  issueIds: string[],
+  anchorId: string | null,
+  targetId: string,
+): string[] | null {
+  if (!anchorId) return null;
+  const anchorIndex = issueIds.indexOf(anchorId);
+  const targetIndex = issueIds.indexOf(targetId);
+  if (anchorIndex === -1 || targetIndex === -1) return null;
+
+  const start = Math.min(anchorIndex, targetIndex);
+  const end = Math.max(anchorIndex, targetIndex);
+  return issueIds.slice(start, end + 1);
+}
+
 function propertyValueLabel(
   property: IssueProperty | undefined,
   value: IssuePropertyValue | undefined,
