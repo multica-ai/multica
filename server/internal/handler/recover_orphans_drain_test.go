@@ -61,9 +61,12 @@ func TestRecoverOrphansDrainsPastBatchLimit(t *testing.T) {
 	}
 
 	// Drive the real handler in a drain loop, threading the cursor like the daemon.
+	// paginate:true is the current daemon's capability signal — without it the server
+	// treats the caller as a legacy client and drains every page itself in one call
+	// (that legacy path is covered by TestRecoverOrphansLegacyClientDrainsServerSide).
 	const daemonID = "recover-drain-test"
 	path := fmt.Sprintf("/api/daemon/runtimes/%s/recover-orphans", runtimeID)
-	var body any
+	var body any = map[string]any{"paginate": true}
 	totalFailed, pages := 0, 0
 	for {
 		pages++
@@ -87,7 +90,7 @@ func TestRecoverOrphansDrainsPastBatchLimit(t *testing.T) {
 		if resp.NextCursorCreatedAt == "" || resp.NextCursorID == "" {
 			t.Fatalf("page %d: has_more=true but empty cursor", pages)
 		}
-		body = map[string]any{"cursor_created_at": resp.NextCursorCreatedAt, "cursor_id": resp.NextCursorID}
+		body = map[string]any{"paginate": true, "cursor_created_at": resp.NextCursorCreatedAt, "cursor_id": resp.NextCursorID}
 	}
 
 	if pages != 2 {
@@ -107,6 +110,91 @@ func TestRecoverOrphansDrainsPastBatchLimit(t *testing.T) {
 	}
 	if remaining != 0 {
 		t.Errorf("remaining orphans = %d, want 0 (drain must reach the row past the first page)", remaining)
+	}
+	var events int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM domain_event
+		 WHERE type = 'task.failed' AND subject_id IN (SELECT id FROM agent_task_queue WHERE runtime_id = $1)`,
+		runtimeID).Scan(&events); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if events != total {
+		t.Errorf("task.failed events = %d, want %d (fact ⇔ event, one per failed row)", events, total)
+	}
+}
+
+// A LEGACY daemon (one that predates paging) POSTs {} exactly once and ignores the
+// response body, so it can never thread the keyset cursor across pages. With 501+
+// orphans on a re-registered runtime — which registration has already flipped back
+// `online`, so the offline sweep won't reap the tail — the server must therefore
+// drain every page itself in one call (MUL-4332 review round 4, point 2). We seed
+// orphanRecoveryBatchSize + 1 orphans, POST a single {} request with NO paginate
+// capability, and assert all of them end failed with one event each — none leak past
+// the first server page.
+func TestRecoverOrphansLegacyClientDrainsServerSide(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id)
+		VALUES ($1, 'orphan-legacy-runtime', 'cloud', 'codex', 'online', '', '{}'::jsonb, $2)
+		RETURNING id`, testWorkspaceID, testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("seed runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility,
+			max_concurrent_tasks, owner_id, instructions, custom_env, custom_args)
+		VALUES ($1, 'orphan-legacy-agent', 'cloud', '{}'::jsonb, $2, 'workspace', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
+		RETURNING id`, testWorkspaceID, runtimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM domain_event WHERE subject_id IN (SELECT id FROM agent_task_queue WHERE runtime_id = $1)`, runtimeID)
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	// One past a single server page (see TestRecoverOrphansDrainsPastBatchLimit for
+	// why attempt/max with no issue keeps the post-fail pipeline a no-op here).
+	total := orphanRecoveryBatchSize + 1
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+		SELECT $1, $2, 'running', 0 FROM generate_series(1, $3)`, agentID, runtimeID, total); err != nil {
+		t.Fatalf("seed orphaned tasks: %v", err)
+	}
+
+	// Legacy request: {} body, no paginate capability, called exactly once.
+	const daemonID = "recover-legacy-test"
+	path := fmt.Sprintf("/api/daemon/runtimes/%s/recover-orphans", runtimeID)
+	w := httptest.NewRecorder()
+	req := withURLParam(newDaemonTokenRequest(http.MethodPost, path, map[string]any{}, testWorkspaceID, daemonID), "runtimeId", runtimeID)
+	testHandler.RecoverOrphanedTasks(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	var resp RecoverOrphansResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.HasMore {
+		t.Errorf("legacy drain returned has_more=true; the server must fully drain in one call (a legacy client cannot page)")
+	}
+	if resp.Orphaned != total {
+		t.Errorf("orphaned = %d, want %d (single legacy call must drain past the first server page)", resp.Orphaned, total)
+	}
+
+	var remaining int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM agent_task_queue
+		 WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')`,
+		runtimeID).Scan(&remaining); err != nil {
+		t.Fatalf("count remaining: %v", err)
+	}
+	if remaining != 0 {
+		t.Errorf("remaining orphans = %d, want 0 (legacy client can't page, so nothing may be left behind)", remaining)
 	}
 	var events int
 	if err := testPool.QueryRow(ctx,

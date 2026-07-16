@@ -439,7 +439,12 @@ const maxRecoverOrphanPages = 1000
 // server skips, so a page of poison at the front cannot stall the drain.
 func (c *Client) RecoverOrphans(ctx context.Context, runtimeID string) error {
 	path := fmt.Sprintf("/api/daemon/runtimes/%s/recover-orphans", runtimeID)
-	body := map[string]any{}
+	// paginate:true is our capability signal (MUL-4332 review round 4, point 2): it
+	// tells the server this client will drive the drain itself, so the server hands
+	// back one page at a time. A server that predates the flag ignores it and does
+	// its own single-shot recovery (handled via io.EOF below); a legacy daemon that
+	// lacks the flag is drained entirely server-side.
+	body := map[string]any{"paginate": true}
 	for page := 0; page < maxRecoverOrphanPages; page++ {
 		var resp struct {
 			HasMore             bool   `json:"has_more"`
@@ -461,6 +466,7 @@ func (c *Client) RecoverOrphans(ctx context.Context, runtimeID string) error {
 			return nil
 		}
 		body = map[string]any{
+			"paginate":          true,
 			"cursor_created_at": resp.NextCursorCreatedAt,
 			"cursor_id":         resp.NextCursorID,
 		}

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -22,11 +23,27 @@ import (
 // lock hold and event volume per page.
 const orphanRecoveryBatchSize = 500
 
-// RecoverOrphansRequest is the optional body of POST recover-orphans. Empty on the
-// first page; the daemon threads back the keyset cursor from the prior page's
-// response to fetch the next one. Both fields move together — a partial cursor is
-// rejected.
+// maxServerOrphanDrainPages bounds the server-side drain loop used for legacy
+// clients (see RecoverOrphanedTasks). Each page fails up to orphanRecoveryBatchSize
+// (500) rows, so this covers ~500k orphaned rows in one request — far beyond any
+// real restart. It is purely a backstop so a pathological backlog can never hold
+// one HTTP request open forever; any residual is reclaimed on the next
+// registration. It mirrors the daemon client's own maxRecoverOrphanPages backstop.
+const maxServerOrphanDrainPages = 1000
+
+// RecoverOrphansRequest is the optional body of POST recover-orphans.
+//
+// Paginate is the client's capability signal (MUL-4332 review round 4, point 2):
+// a current daemon sets it true and drives the drain itself, threading the keyset
+// cursor across calls. A legacy daemon predates paging — it POSTs `{}` (or an empty
+// body) exactly once and ignores the response — so Paginate is absent/false and the
+// server must instead drain every page itself, or orphans past the first page leak
+// on a re-registered (now `online`) runtime that the offline sweep won't reap.
+//
+// Cursor* is threaded back by a paginating client for each subsequent page. Both
+// fields move together — a partial cursor is rejected.
 type RecoverOrphansRequest struct {
+	Paginate        bool   `json:"paginate,omitempty"`
 	CursorCreatedAt string `json:"cursor_created_at,omitempty"`
 	CursorID        string `json:"cursor_id,omitempty"`
 }
@@ -78,16 +95,74 @@ func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	runtimeUUID := parseUUID(runtimeID)
+
+	// A capability-aware client (req.Paginate) drives the drain itself: fail exactly
+	// one page and hand back the cursor for it to continue. A legacy client — which
+	// POSTs {} once and ignores the body — cannot page, so the server drains every
+	// page itself in bounded per-page transactions; otherwise 501+ orphans on a
+	// re-registered (now `online`) runtime leak permanently (MUL-4332 review round 4,
+	// point 2). Both modes share recoverOrphansPage, so the per-page fact ⇔ event and
+	// poison-isolation semantics are identical.
+	if req.Paginate {
+		resp, _, _, err := h.recoverOrphansPage(r.Context(), runtimeUUID, runtimeID, afterCreatedAt, afterID)
+		if err != nil {
+			slog.Warn("recover-orphans failed", "runtime_id", runtimeID, "error", err)
+			writeError(w, http.StatusInternalServerError, "recover orphans failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	// Legacy single-shot client: drain all pages server-side. A partial cursor is
+	// already rejected above, so a legacy client always starts from the first page
+	// (both cursor components NULL).
+	var agg RecoverOrphansResponse
+	cursorCreatedAt, cursorID := afterCreatedAt, afterID
+	for page := 0; page < maxServerOrphanDrainPages; page++ {
+		resp, nextCreatedAt, nextID, err := h.recoverOrphansPage(r.Context(), runtimeUUID, runtimeID, cursorCreatedAt, cursorID)
+		if err != nil {
+			slog.Warn("recover-orphans failed", "runtime_id", runtimeID, "error", err)
+			writeError(w, http.StatusInternalServerError, "recover orphans failed")
+			return
+		}
+		agg.Orphaned += resp.Orphaned
+		agg.Retried += resp.Retried
+		agg.Skipped += resp.Skipped
+		if !resp.HasMore {
+			break
+		}
+		cursorCreatedAt, cursorID = nextCreatedAt, nextID
+	}
+	// The legacy client ignores the body, but return an accurate, explicitly
+	// non-paged (has_more=false) aggregate for logs and proxies.
+	writeJSON(w, http.StatusOK, agg)
+}
+
+// recoverOrphansPage fails one bounded page of the runtime's orphaned tasks and
+// runs the shared post-failure pipeline. It returns the page result plus the raw
+// keyset cursor of the last candidate (for the server-side legacy drain to thread
+// without re-parsing its own RFC3339 string). The cursor advances over EVERY
+// candidate the page locked — failed OR skipped-poison — so neither a paginating
+// client nor the server-side drain can be pinned by a page of poison at the front.
+func (h *Handler) recoverOrphansPage(
+	ctx context.Context,
+	runtimeUUID pgtype.UUID,
+	runtimeID string,
+	afterCreatedAt pgtype.Timestamptz,
+	afterID pgtype.UUID,
+) (RecoverOrphansResponse, pgtype.Timestamptz, pgtype.UUID, error) {
 	// Select one page of the runtime's orphaned tasks and fail the resolvable ones
 	// with their task.failed events atomically (MUL-4332 review point 2), so
-	// daemon-driven recovery converges onto the outbox like the runtime sweepers and
-	// an unresolvable poison row cannot block the rest. We capture the raw candidate
+	// recovery converges onto the outbox like the runtime sweepers and an
+	// unresolvable poison row cannot block the rest. We capture the raw candidate
 	// page (before poison isolation drops rows) to compute has_more and the cursor.
 	var candidates []db.AgentTaskQueue
-	rows, err := h.TaskService.FailBulkTasksWithEvents(r.Context(),
+	rows, err := h.TaskService.FailBulkTasksWithEvents(ctx,
 		func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
-			c, e := qtx.SelectOrphanedTasksForRuntime(r.Context(), db.SelectOrphanedTasksForRuntimeParams{
-				RuntimeID:      parseUUID(runtimeID),
+			c, e := qtx.SelectOrphanedTasksForRuntime(ctx, db.SelectOrphanedTasksForRuntimeParams{
+				RuntimeID:      runtimeUUID,
 				AfterCreatedAt: afterCreatedAt,
 				AfterID:        afterID,
 				MaxPerTick:     orphanRecoveryBatchSize,
@@ -96,16 +171,14 @@ func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 			return c, e
 		},
 		func(qtx *db.Queries, ids []pgtype.UUID) ([]db.AgentTaskQueue, error) {
-			return qtx.FailAgentTasksByIDs(r.Context(), db.FailAgentTasksByIDsParams{
+			return qtx.FailAgentTasksByIDs(ctx, db.FailAgentTasksByIDsParams{
 				Ids:           ids,
 				Error:         pgtype.Text{String: "daemon restarted while task was in flight", Valid: true},
 				FailureReason: pgtype.Text{String: "runtime_recovery", Valid: true},
 			})
 		})
 	if err != nil {
-		slog.Warn("recover-orphans failed", "runtime_id", runtimeID, "error", err)
-		writeError(w, http.StatusInternalServerError, "recover orphans failed")
-		return
+		return RecoverOrphansResponse{}, pgtype.Timestamptz{}, pgtype.UUID{}, err
 	}
 
 	// Funnel through the shared post-failure pipeline so we get the same
@@ -113,7 +186,7 @@ func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 	// behaviour as the runtime sweeper. This was previously a fast-path
 	// that bypassed those side effects, leaving the UI stale when no retry
 	// was created (max_attempts exhausted, autopilot, non-retryable reason).
-	retried := h.TaskService.HandleFailedTasks(r.Context(), rows)
+	retried := h.TaskService.HandleFailedTasks(ctx, rows)
 
 	// A full candidate page means there may be more behind it. The cursor advances
 	// over the LAST candidate we locked (failed or skipped), so the next page never
@@ -124,8 +197,12 @@ func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 		Skipped:  len(candidates) - len(rows),
 		HasMore:  len(candidates) == orphanRecoveryBatchSize,
 	}
+	var nextCreatedAt pgtype.Timestamptz
+	var nextID pgtype.UUID
 	if resp.HasMore && len(candidates) > 0 {
 		last := candidates[len(candidates)-1]
+		nextCreatedAt = last.CreatedAt
+		nextID = last.ID
 		resp.NextCursorCreatedAt = last.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
 		resp.NextCursorID = uuidToString(last.ID)
 	}
@@ -141,7 +218,7 @@ func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nextCreatedAt, nextID, nil
 }
 
 // parseOrphanCursor turns the optional (cursor_created_at, cursor_id) request pair

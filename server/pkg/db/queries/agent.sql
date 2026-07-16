@@ -708,8 +708,22 @@ WHERE id = $1 AND status IN ('dispatched', 'running');
 -- Candidate half of the MUL-4332 poison-isolated fail path (review point 2): the
 -- caller resolves each task's workspace, fails only the resolvable set via
 -- FailAgentTasksByIDs and emits its task.failed event in the SAME transaction.
--- FOR UPDATE SKIP LOCKED avoids contending with the freshly-restarted daemon's
--- own claim path; the LIMIT bounds the lock hold.
+-- The LIMIT bounds the lock hold.
+--
+-- Plain FOR UPDATE (NOT SKIP LOCKED — review round 4, point 1). Unlike the
+-- sweepers, which re-scan from the start every tick so a skipped row is simply
+-- retried next tick, this query pages forward with a keyset cursor that advances
+-- permanently past whatever a page returned. If SKIP LOCKED silently dropped an
+-- older orphan that happened to be briefly locked (a sweep, a stale-dispatch
+-- reclaim), the cursor — filled by the newer rows behind it — would step past that
+-- older row and NO later page could ever select it again; the runtime is already
+-- back `online`, so the offline sweep won't reap it either, and it leaks forever.
+-- Plain FOR UPDATE instead WAITS for the lock and, once it releases, re-checks the
+-- row against the WHERE (Postgres EvalPlanQual): still dispatched/running →
+-- included on this page; already failed by whoever held the lock → correctly
+-- excluded. The bounded page size keeps that wait short, and recovery only races
+-- short sweeper/reclaim transactions (both SKIP LOCKED, so they never wait — no
+-- deadlock cycle is possible).
 --
 -- Keyset cursor (MUL-4332 review round 3, point 1): the registration path upserts
 -- the runtime back to `online`, so the every-tick offline sweep will NOT reap an
@@ -730,7 +744,7 @@ WHERE runtime_id = @runtime_id AND status IN ('dispatched', 'running', 'waiting_
   )
 ORDER BY created_at ASC, id ASC
 LIMIT @max_per_tick::int
-FOR UPDATE SKIP LOCKED;
+FOR UPDATE;
 
 -- name: SelectStaleTasksToFail :many
 -- Selects (and row-locks) up to @max_per_tick tasks stuck in dispatched/running
