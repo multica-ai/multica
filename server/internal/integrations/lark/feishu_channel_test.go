@@ -32,13 +32,14 @@ func (f *fakeSender) DownloadMessageResource(context.Context, InstallationCreden
 type fakeMediaStorage struct {
 	key, contentType, filename string
 	data                       []byte
+	deleted                    []string
 }
 
 func (s *fakeMediaStorage) Upload(_ context.Context, key string, data []byte, contentType, filename string) (string, error) {
 	s.key, s.data, s.contentType, s.filename = key, data, contentType, filename
 	return "/uploads/" + key, nil
 }
-func (*fakeMediaStorage) Delete(context.Context, string)                           {}
+func (s *fakeMediaStorage) Delete(_ context.Context, key string)                   { s.deleted = append(s.deleted, key) }
 func (*fakeMediaStorage) DeleteKeys(context.Context, []string)                     {}
 func (*fakeMediaStorage) KeyFromURL(raw string) string                             { return raw }
 func (*fakeMediaStorage) CdnDomain() string                                        { return "" }
@@ -128,16 +129,14 @@ func TestFeishuChannel_AttachImagePersistsMediaRef(t *testing.T) {
 		Data: []byte("png"), Filename: "screen.png", ContentType: "image/png",
 	}}
 	store := &fakeMediaStorage{}
-	fc := &feishuChannel{
-		inst:   Installation{AppID: "cli", Region: "feishu"},
-		sender: api, media: api, creds: fakeCreds{secret: "secret"}, storage: store,
-	}
-	msg := channel.InboundMessage{}
-	err := fc.attachImage(context.Background(), InboundMessage{
-		MessageID: "om_image", RawContent: `{"image_key":"img_key"}`,
-	}, &msg)
+	lm := InboundMessage{MessageID: "om_image", RawContent: `{"image_key":"img_key"}`}
+	raw, _ := json.Marshal(lm)
+	resolver := &feishuMediaResolver{media: api, creds: fakeCreds{secret: "secret"}, storage: store}
+	msg, cleanup, err := resolver.Resolve(context.Background(), engine.ResolvedInstallation{
+		Platform: Installation{AppID: "cli", Region: "feishu"},
+	}, channel.InboundMessage{Type: channel.MsgTypeImage, Raw: raw})
 	if err != nil {
-		t.Fatalf("attachImage: %v", err)
+		t.Fatalf("Resolve: %v", err)
 	}
 	if len(msg.MediaRefs) != 1 || msg.MediaRefs[0].URL == "" ||
 		msg.MediaRefs[0].Filename != "screen.png" || msg.MediaRefs[0].MimeType != "image/png" {
@@ -145,6 +144,10 @@ func TestFeishuChannel_AttachImagePersistsMediaRef(t *testing.T) {
 	}
 	if string(store.data) != "png" || store.contentType != "image/png" {
 		t.Fatalf("stored data=%q contentType=%q", store.data, store.contentType)
+	}
+	cleanup(context.Background())
+	if len(store.deleted) != 1 || store.deleted[0] != msg.MediaRefs[0].StorageKey {
+		t.Fatalf("cleanup deleted = %v", store.deleted)
 	}
 }
 

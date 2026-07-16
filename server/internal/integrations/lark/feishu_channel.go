@@ -8,15 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
-	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -38,10 +35,8 @@ type feishuChannel struct {
 	conn    EventConnector
 	handler channel.InboundHandler
 	sender  APIClient
-	media   MessageResourceDownloader
 	creds   CredentialsResolver
 	logger  *slog.Logger
-	storage storage.Storage
 }
 
 var _ channel.Channel = (*feishuChannel)(nil)
@@ -59,59 +54,8 @@ func (c *feishuChannel) Connect(ctx context.Context) error {
 		if c.handler == nil {
 			return DispatchResult{}, errors.New("lark: inbound handler not configured")
 		}
-		msg := channelMessageFromLark(lm)
-		if lm.MessageType == "image" {
-			if err := c.attachImage(emitCtx, lm, &msg); err != nil {
-				return DispatchResult{}, err
-			}
-		}
-		return DispatchResult{}, c.handler(emitCtx, msg)
+		return DispatchResult{}, c.handler(emitCtx, channelMessageFromLark(lm))
 	})
-}
-
-func (c *feishuChannel) attachImage(ctx context.Context, lm InboundMessage, msg *channel.InboundMessage) error {
-	if c.storage == nil {
-		return errors.New("lark: attachment storage not configured")
-	}
-	var body struct {
-		ImageKey string `json:"image_key"`
-	}
-	if err := json.Unmarshal([]byte(lm.RawContent), &body); err != nil || body.ImageKey == "" {
-		return errors.New("lark: image message missing image_key")
-	}
-	creds, err := c.installationCredentials()
-	if err != nil {
-		return err
-	}
-	if c.media == nil {
-		return errors.New("lark: message resource downloader not configured")
-	}
-	resource, err := c.media.DownloadMessageResource(ctx, creds, lm.MessageID, body.ImageKey, "image")
-	if err != nil {
-		return fmt.Errorf("download image resource: %w", err)
-	}
-	id, err := uuid.NewV7()
-	if err != nil {
-		return fmt.Errorf("generate image attachment id: %w", err)
-	}
-	ext := filepath.Ext(resource.Filename)
-	if ext == "" {
-		ext = ".png"
-	}
-	filename := resource.Filename
-	if filename == "" {
-		filename = "feishu-image" + ext
-	}
-	key := "channel-inbound/" + id.String() + ext
-	link, err := c.storage.Upload(ctx, key, resource.Data, resource.ContentType, filename)
-	if err != nil {
-		return fmt.Errorf("persist image resource: %w", err)
-	}
-	msg.MediaRefs = []channel.MediaRef{{
-		Type: channel.MsgTypeImage, StorageKey: key, URL: link, Filename: filename,
-		MimeType: resource.ContentType, SizeBytes: int64(len(resource.Data)),
-	}}
-	return nil
 }
 
 // Disconnect is a no-op: the connector's receive loop is torn down by ctx
@@ -240,8 +184,6 @@ type FeishuChannelDeps struct {
 	APIClient   APIClient
 	Credentials CredentialsResolver
 	Logger      *slog.Logger
-	Storage     storage.Storage
-	Media       MessageResourceDownloader
 }
 
 // RegisterFeishu registers the Feishu Factory on reg under channel.TypeFeishu
@@ -271,19 +213,13 @@ func newFeishuFactory(deps FeishuChannelDeps) channel.Factory {
 		if err != nil {
 			return nil, fmt.Errorf("decode feishu installation config: %w", err)
 		}
-		media := deps.Media
-		if media == nil {
-			media, _ = deps.APIClient.(MessageResourceDownloader)
-		}
 		return &feishuChannel{
 			inst:    inst,
 			conn:    deps.Connector,
 			handler: cfg.Handler,
 			sender:  deps.APIClient,
-			media:   media,
 			creds:   deps.Credentials,
 			logger:  logger,
-			storage: deps.Storage,
 		}, nil
 	}
 }

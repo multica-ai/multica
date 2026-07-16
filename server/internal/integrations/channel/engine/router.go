@@ -242,7 +242,27 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		}
 	}
 
-	// 5. Resolve the chat_session. Group sessions are created by the INSTALLER
+	// 5. Resolve platform media only after dedup, group filtering, and sender
+	//    authorization have accepted the event. If any later pre-commit step
+	//    fails, remove objects created here so no unlinked media remains.
+	cleanupMedia := func(context.Context) {}
+	if set.Media != nil {
+		msg, cleanupMedia, err = set.Media.Resolve(ctx, inst, msg)
+		if err != nil {
+			return Result{}, finalizeRelease, fmt.Errorf("resolve media: %w", err)
+		}
+		if cleanupMedia == nil {
+			cleanupMedia = func(context.Context) {}
+		}
+	}
+	mediaCommitted := false
+	defer func() {
+		if !mediaCommitted {
+			cleanupMedia(context.WithoutCancel(ctx))
+		}
+	}()
+
+	// 6. Resolve the chat_session. Group sessions are created by the INSTALLER
 	//    (stable workspace identity that won't churn with group membership);
 	//    p2p sessions by the sole human sender.
 	sessionCreator := identity.UserID
@@ -259,7 +279,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		return Result{}, finalizeRelease, fmt.Errorf("ensure chat session: %w", err)
 	}
 
-	// 6. Append message + in-tx dedup Mark — the durable transition point.
+	// 7. Append message + in-tx dedup Mark — the durable transition point.
 	appendRes, err := set.Session.AppendMessage(ctx, AppendParams{
 		SessionID:      sessionID,
 		Sender:         identity.UserID,
@@ -274,6 +294,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		}
 		return Result{}, finalizeRelease, fmt.Errorf("append user message: %w", err)
 	}
+	mediaCommitted = true
 
 	// Post-append paths must NOT Release (chat_message + Mark already
 	// committed). Mark-again is a no-op, so finalizeNone — unless the binder
@@ -290,7 +311,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		Sender:         msg.Source.SenderID,
 	}
 
-	// 7. /issue command, if present. chat_message is already durable; all
+	// 8. /issue command, if present. chat_message is already durable; all
 	//    error returns from here signal finalizeNone (or the defensive Mark).
 	if appendRes.IssueCommand != nil {
 		issueRes, err := r.createIssue(ctx, inst, set.OriginType, identity.UserID, sessionID, *appendRes.IssueCommand)
@@ -307,7 +328,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		}
 	}
 
-	// 8. Debounce the run trigger. The synchronous outcome is OutcomeIngested
+	// 9. Debounce the run trigger. The synchronous outcome is OutcomeIngested
 	//    with no TaskID — the task row is created at flush. identity.UserID is
 	//    THIS message's sender (the task initiator), deliberately not the
 	//    session creator (group sessions are creator=installer). Latest sender

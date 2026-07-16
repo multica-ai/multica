@@ -147,6 +147,14 @@ type IdentityResolver interface {
 	ResolveSender(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage) (ResolvedIdentity, error)
 }
 
+// MediaResolver persists platform media after the Router's drop gates have
+// accepted the message. Cleanup removes any objects created by Resolve and is
+// called when a later pre-commit step fails. A nil resolver means the platform
+// has no inbound media work.
+type MediaResolver interface {
+	Resolve(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage) (resolved channel.InboundMessage, cleanup func(context.Context), err error)
+}
+
 // Deduper is the two-phase idempotency seam. Claim mints an owner-fence token
 // (ErrDuplicate when already processed / in flight); Mark/Release are fenced on
 // the token (a no-op on token mismatch is not an error).
@@ -200,6 +208,7 @@ type ResolverSet struct {
 	Installation InstallationResolver
 	Identity     IdentityResolver
 	Dedup        Deduper
+	Media        MediaResolver
 	Session      SessionBinder
 	Audit        Auditor
 	Replier      OutboundReplier

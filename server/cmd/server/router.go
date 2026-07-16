@@ -348,15 +348,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// (inbound pipeline seams) is all it takes to add the platform
 				// to the engine — no engine edit.
 				connector, connectorLabel := buildLarkConnector(installSvc, larkClient)
+				mediaDownloader, _ := larkClient.(lark.MessageResourceDownloader)
 				lark.RegisterFeishu(channelRegistry, lark.FeishuChannelDeps{
 					Connector:   connector,
 					APIClient:   larkClient,
 					Credentials: installSvc,
 					Logger:      slog.Default(),
-					Storage:     store,
 				})
 				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
 					cs, feishuSession, auditLogger, resolverReplier, typingIndicator,
+					mediaDownloader, installSvc, store,
 				))
 				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
 
