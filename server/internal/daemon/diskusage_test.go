@@ -412,6 +412,42 @@ func TestScanDiskUsageAccountsSharedSkillCache(t *testing.T) {
 	}
 }
 
+func TestScanDiskUsageAccountsTaskSkillCache(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	wsID := "11111111-1111-1111-1111-111111111111"
+	taskDir := filepath.Join(root, wsID, "task-skill-cache")
+	writeFile(t, filepath.Join(taskDir, "workdir", "main.go"), 100)
+	writeFile(t, filepath.Join(taskDir, "codex-home", "skills", "writing", "SKILL.md"), 200)
+	writeFile(t, filepath.Join(taskDir, "codex-home", "skills", "writing", "docs", "guide.md"), 300)
+	mustWriteMeta(t, taskDir, execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     "issue-1",
+		WorkspaceID: wsID,
+		CompletedAt: time.Now().Add(-13 * time.Hour),
+	})
+
+	report, err := ScanDiskUsage(root, []string{"skills"})
+	if err != nil {
+		t.Fatalf("ScanDiskUsage: %v", err)
+	}
+	if len(report.Tasks) != 1 {
+		t.Fatalf("Tasks len = %d, want 1", len(report.Tasks))
+	}
+
+	task := report.Tasks[0]
+	if task.ArtifactSizeBytes != 500 {
+		t.Fatalf("ArtifactSizeBytes = %d, want 500 from codex-home/skills", task.ArtifactSizeBytes)
+	}
+	if report.TotalArtifactSizeBytes != 500 {
+		t.Fatalf("TotalArtifactSizeBytes = %d, want 500", report.TotalArtifactSizeBytes)
+	}
+	if task.Kind != string(execenv.GCKindIssue) {
+		t.Fatalf("Kind = %q, want %q", task.Kind, execenv.GCKindIssue)
+	}
+}
+
 func mustWriteMeta(t *testing.T, taskDir string, meta execenv.GCMeta) {
 	t.Helper()
 	data, err := json.Marshal(meta)

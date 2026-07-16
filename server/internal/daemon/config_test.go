@@ -16,7 +16,7 @@ import (
 
 func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	t.Setenv("MULTICA_GC_ARTIFACT_PATTERNS", "")
-	defaults := []string{"node_modules", ".next", ".turbo"}
+	defaults := []string{"node_modules", ".next", ".turbo", "skills"}
 	got := patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", defaults)
 	if !reflect.DeepEqual(got, defaults) {
 		t.Fatalf("expected defaults %v, got %v", defaults, got)

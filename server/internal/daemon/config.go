@@ -50,27 +50,27 @@ const (
 	// matching tool_result would otherwise run forever. This is the backstop for
 	// that stuck-tool case (MUL-3064). Set MULTICA_AGENT_TOOL_WATCHDOG=0 to
 	// disable, in which case an in-flight tool never force-stops the run.
-	DefaultAgentToolWatchdog       = 2 * time.Hour
-	DefaultRuntimeName             = "Local Agent"
-	DefaultWorkspaceSyncInterval   = 30 * time.Second
-	DefaultHealthPort              = 19514
-	DefaultMaxConcurrentTasks      = 20
-	DefaultGCInterval              = 1 * time.Hour
-	DefaultGCTTL                   = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
-	DefaultGCOrphanTTL             = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
-	DefaultGCArtifactTTL           = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
+	DefaultAgentToolWatchdog         = 2 * time.Hour
+	DefaultRuntimeName               = "Local Agent"
+	DefaultWorkspaceSyncInterval     = 30 * time.Second
+	DefaultHealthPort                = 19514
+	DefaultMaxConcurrentTasks        = 20
+	DefaultGCInterval                = 1 * time.Hour
+	DefaultGCTTL                     = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
+	DefaultGCOrphanTTL               = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
+	DefaultGCArtifactTTL             = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
 	DefaultDiskPressureCheckInterval = 5 * time.Minute
 	DefaultDiskPressureMinFreeBytes  = int64(5 << 30)
-	DefaultAutoUpdateCheckInterval = 6 * time.Hour  // how often the daemon polls GitHub for a newer CLI release
+	DefaultAutoUpdateCheckInterval   = 6 * time.Hour // how often the daemon polls GitHub for a newer CLI release
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
 // regenerable build artifacts. Kept conservative: only directories that are
-// always cheap to recreate (`pnpm install`, `next build`, `turbo build`). Things
-// like `dist/`, `build/`, `.cache/` or `.venv/` may legitimately hold source or
-// release output in some repos and are NOT included by default — set
-// MULTICA_GC_ARTIFACT_PATTERNS to extend the list per deployment.
-var DefaultGCArtifactPatterns = []string{"node_modules", ".next", ".turbo"}
+// always cheap to recreate (`pnpm install`, `next build`, `turbo build`, task-
+// local skill trees). Things like `dist/`, `build/`, `.cache/` or `.venv/` may
+// legitimately hold source or release output in some repos and are NOT included
+// by default — set MULTICA_GC_ARTIFACT_PATTERNS to extend the list per deployment.
+var DefaultGCArtifactPatterns = []string{"node_modules", ".next", ".turbo", "skills"}
 
 // Config holds all daemon configuration.
 type Config struct {

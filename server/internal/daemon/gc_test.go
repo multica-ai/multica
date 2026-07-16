@@ -32,7 +32,7 @@ func newGCTestDaemon(t *testing.T, handler http.Handler) *Daemon {
 		GCTTL:              5 * 24 * time.Hour,
 		GCOrphanTTL:        30 * 24 * time.Hour,
 		GCArtifactTTL:      12 * time.Hour,
-		GCArtifactPatterns: []string{"node_modules", ".next", ".turbo"},
+		GCArtifactPatterns: []string{"node_modules", ".next", ".turbo", "skills"},
 	}
 	d := New(cfg, slog.Default())
 	d.client = NewClient(srv.URL)
@@ -552,6 +552,69 @@ func TestCleanTaskArtifacts_RemovesOnlyMatchedDirs(t *testing.T) {
 		"workdir/repo/node_modules",
 		"workdir/repo/.next",
 		"workdir/repo/.turbo",
+	} {
+		if _, err := os.Stat(filepath.Join(taskDir, rel)); !os.IsNotExist(err) {
+			t.Errorf("expected %s to be removed, stat err=%v", rel, err)
+		}
+	}
+}
+
+func TestCleanTaskArtifacts_RemovesSkillTrees(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := t.TempDir()
+
+	mustMkdir := func(rel string) string {
+		p := filepath.Join(taskDir, rel)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	mustWrite := func(rel string, content string) {
+		p := filepath.Join(taskDir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mustMkdir("workdir/src")
+	mustWrite("workdir/src/main.go", "package main")
+	mustMkdir("codex-home/skills/writing/docs")
+	mustWrite("codex-home/skills/writing/SKILL.md", "body")
+	mustWrite("codex-home/skills/writing/docs/guide.md", "guide")
+	mustWrite("codex-home/config.toml", "model = \"codex\"")
+	mustMkdir("output")
+	mustWrite("output/result.txt", "done")
+
+	removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, []string{"skills"})
+	if removed != 1 {
+		t.Fatalf("expected 1 skill tree removed, got %d", removed)
+	}
+	if bytes <= 0 {
+		t.Fatalf("expected non-zero bytes reclaimed, got %d", bytes)
+	}
+	if perPattern["skills"] != 1 {
+		t.Fatalf("expected skills pattern count 1, got %+v", perPattern)
+	}
+
+	for _, rel := range []string{
+		"workdir/src/main.go",
+		"codex-home/config.toml",
+		"output/result.txt",
+	} {
+		if _, err := os.Stat(filepath.Join(taskDir, rel)); err != nil {
+			t.Errorf("expected %s to be preserved, got %v", rel, err)
+		}
+	}
+	for _, rel := range []string{
+		"codex-home/skills",
+		"codex-home/skills/writing",
+		"codex-home/skills/writing/SKILL.md",
 	} {
 		if _, err := os.Stat(filepath.Join(taskDir, rel)); !os.IsNotExist(err) {
 			t.Errorf("expected %s to be removed, stat err=%v", rel, err)
