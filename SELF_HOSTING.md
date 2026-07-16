@@ -427,7 +427,7 @@ docker compose -f docker-compose.selfhost.yml up -d
 ```
 
 Pin `MULTICA_IMAGE_TAG` in `.env` to an exact version like `v0.2.4` if you want to stay on a specific release. Migrations run automatically on backend startup.
-If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` or `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
+If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` (resolves the official release baseline on the host and threads it into both backend and web Docker builds) or, if you prefer raw compose, see [Manual Docker Compose Setup → Source build from checkout](#source-build-from-checkout) for the required `VERSION` / `NEXT_PUBLIC_APP_VERSION` overrides.
 
 > **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** That's migration `103`'s fail-closed guard: it requires `task_usage_hourly` to be seeded before the legacy daily rollups are dropped. As of MUL-2957 `migrate up` runs that backfill automatically right before applying `103`, so the upgrade completes in a single invocation. If you are still on a pre-MUL-2957 binary or the auto-hook fails, run `backfill_task_usage_hourly` manually first, then re-run the upgrade. Full instructions in [Advanced Configuration → Usage Dashboard Rollup](SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
 
@@ -455,6 +455,48 @@ Then start everything:
 docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
 ```
+
+### Source build from checkout
+
+To build the backend and web images from your current checkout (instead of pulling official ones), use `make selfhost-build`. It resolves the official release baseline on the host via `scripts/resolve-official-baseline.sh` and threads it into both Docker builds in one step.
+
+If you prefer raw `docker compose`, you **must** pass the baseline explicitly — the build override now requires both `VERSION` (backend) and `NEXT_PUBLIC_APP_VERSION` (web) and rejects a `dev` default, so a bare invocation fails instead of silently stamping an unstamped build:
+
+```bash
+VERSION=vX.Y.Z \
+NEXT_PUBLIC_APP_VERSION=vX.Y.Z \
+docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
+```
+
+Replace `vX.Y.Z` with the real upstream release tag you intend to ship. The sidebar Help menu shows both values after a hard refresh — if either reads `unavailable`, the rebuild did not take effect.
+
+### Direct production build (no Docker)
+
+For self-hosted production deployments that don't run the Docker Compose stack, `make build-prod` resolves the same official baseline and produces a server binary plus web bundle stamped with it:
+
+```bash
+make build-prod    # writes server/bin/server and apps/web/.next/...
+```
+
+`make build-prod` fails fast if the baseline cannot be resolved (shallow clone without tags, source archive, offline build, or a fork whose `v*` tags are not on the upstream remote) — see [Recovery when baseline can't be resolved](#recovery-when-baseline-cant-be-resolved).
+
+### Recovery when baseline can't be resolved
+
+`scripts/resolve-official-baseline.sh` derives the nearest reachable upstream tag via `git describe --tags --abbrev=0 --match 'v[0-9]*'` and verifies it against the canonical upstream release tags. The following contexts can't be auto-derived and require an explicit trusted override:
+
+- **Shallow clone** without tags (only the latest commit fetched).
+- **Source archive** (tarball / zip without a `.git` history).
+- **Fork** whose own `v*` tags are not present on the canonical upstream (`https://github.com/multica-ai/multica`).
+- **Offline / air-gapped** build that cannot reach the upstream remote.
+
+In any of these contexts, set `MULTICA_TRUSTED_BASELINE` to the upstream release tag the build is based on (e.g. `vX.Y.Z`) before invoking `make selfhost-build` or `make build-prod`:
+
+```bash
+export MULTICA_TRUSTED_BASELINE=vX.Y.Z
+make selfhost-build
+```
+
+The displayed value in the Help sidebar is the upstream-verified baseline — it does not prove the source is clean or that the artifact is an unmodified official image, only that the running build is associated with the upstream release you supplied.
 
 ## Manual CLI Configuration
 

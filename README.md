@@ -103,7 +103,7 @@ multica setup          # Connect to Multica Cloud, log in, start daemon
 > ```
 >
 > This pulls the official Multica images from GHCR (latest stable by default). Requires Docker. See the [Self-Hosting Guide](SELF_HOSTING.md) for details.
-> If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` from a checkout.
+> If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` from a checkout. The build override requires both `VERSION` (backend) and `NEXT_PUBLIC_APP_VERSION` (web) — `make selfhost-build` resolves them via the official upstream release tags; raw `docker compose` needs them passed explicitly. See `SELF_HOSTING.md → Manual Docker Compose Setup → Source build from checkout`.
 
 ---
 

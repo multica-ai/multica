@@ -264,6 +264,7 @@ pull_official_selfhost_images() {
   echo "This can happen before the first GHCR release is available."
   echo "From $INSTALL_DIR, build from source instead:"
   echo "  docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build"
+    echo "  (requires VERSION and NEXT_PUBLIC_APP_VERSION — 'make selfhost-build' resolves them for you)"
   exit 1
 }
 
