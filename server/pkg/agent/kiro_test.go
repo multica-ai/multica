@@ -449,13 +449,52 @@ func TestKiroIssueCommentAddToolIgnoresToolTitle(t *testing.T) {
 	}
 }
 
-// fakeKiroACPRunningToolCloseErrorScript reproduces the GPT-5.6 Sol failure
-// mode from #5509: the finishing tool is invoked (ToolCall notification) but
-// the adapter never emits a completed/failed ToolCallUpdate — the tool stays
-// parked at "running", so no ToolResult is ever produced. Kiro then raises the
-// -32603 "failed to generate a response" close handshake. `toolName` lets the
-// caller pick a title that does NOT normalize to "terminal", and `command`
-// selects goal_complete vs comment-add.
+// runKiroCloseErrorScript executes a fake-kiro script that ends in the -32603
+// close handshake and returns the final Result.
+func runKiroCloseErrorScript(t *testing.T, script string) Result {
+	t.Helper()
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		return result
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+		return Result{}
+	}
+}
+
+// closeErrorFrame is the -32603 "failed to generate a response" close
+// handshake Kiro raises after the task has already finished its work.
+const closeErrorFrame = `printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"Kiro failed to generate a response"}}\n' "$id"`
+
+// fakeKiroACPRunningToolCloseErrorScript reproduces the GPT-5.6 Sol shape from
+// #5509: the finishing tool is invoked (ToolCall notification) but the adapter
+// never emits a completed/failed ToolCallUpdate — the tool stays parked at
+// "running", so no ToolResult is ever produced. Kiro then raises the -32603
+// close handshake. `toolName` picks a title that does NOT normalize to
+// "terminal"; `command` selects goal_complete (empty) vs comment-add.
 func fakeKiroACPRunningToolCloseErrorScript(toolName, command string) string {
 	params := `{}`
 	if command != "" {
@@ -469,11 +508,11 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
       ;;
     *'"method":"session/new"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_running_done"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_running"}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
-      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_running_done","update":{"type":"ToolCall","toolCallId":"tc-running","name":"` + toolName + `","status":"pending","parameters":` + params + `}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"Kiro failed to generate a response"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_running","update":{"type":"ToolCall","toolCallId":"tc-running","name":"` + toolName + `","status":"pending","parameters":` + params + `}}}\n'
+      ` + closeErrorFrame + `
       exit 0
       ;;
   esac
@@ -481,97 +520,45 @@ done
 `
 }
 
-// TestKiroBackendTreatsRunningCommentAddCloseErrorAsCompleted is the primary
-// #5509 regression: a `multica issue comment add` shell tool titled with a
-// non-terminal name, left at "running" (no completed ToolResult), followed by
-// the -32603 close handshake, must be preserved as completed.
-func TestKiroBackendTreatsRunningCommentAddCloseErrorAsCompleted(t *testing.T) {
+// TestKiroBackendDoesNotCompleteRunningCommentAddWithoutResult is the core
+// safety property from the #5511 review (Must-fix #1): a finishing tool that
+// was only ever seen invoked — no terminal ToolResult — is NOT proof the work
+// succeeded (a mid-command crash produces the same shape). It must stay failed.
+func TestKiroBackendDoesNotCompleteRunningCommentAddWithoutResult(t *testing.T) {
 	t.Parallel()
 
-	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
-	writeTestExecutable(t, fakePath, []byte(fakeKiroACPRunningToolCloseErrorScript(
+	result := runKiroCloseErrorScript(t, fakeKiroACPRunningToolCloseErrorScript(
 		"execute_bash",
 		"multica issue comment add issue-1 --content-file ./reply.md",
-	)))
-
-	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new kiro backend: %v", err)
+	))
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed for a result-less running comment-add, got %q (error=%q)", result.Status, result.Error)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
-	if err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	go func() {
-		for range session.Messages {
-		}
-	}()
-
-	select {
-	case result, ok := <-session.Result:
-		if !ok {
-			t.Fatal("result channel closed without a value")
-		}
-		if result.Status != "completed" {
-			t.Fatalf("expected status=completed for a running comment-add + close error, got %q (error=%q)", result.Status, result.Error)
-		}
-		if result.Error != "" {
-			t.Fatalf("expected close-handshake error to be suppressed, got %q", result.Error)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("timeout waiting for result")
+	if !strings.Contains(result.Error, "Kiro failed to generate a response") {
+		t.Fatalf("expected original prompt error to be preserved, got %q", result.Error)
 	}
 }
 
-// TestKiroBackendTreatsRunningGoalCompleteCloseErrorAsCompleted covers the
-// goal_complete sibling of the running-tool path.
-func TestKiroBackendTreatsRunningGoalCompleteCloseErrorAsCompleted(t *testing.T) {
+// TestKiroBackendDoesNotCompleteRunningGoalCompleteWithoutResult is the
+// goal_complete sibling of the result-less safety property.
+func TestKiroBackendDoesNotCompleteRunningGoalCompleteWithoutResult(t *testing.T) {
 	t.Parallel()
 
-	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
-	writeTestExecutable(t, fakePath, []byte(fakeKiroACPRunningToolCloseErrorScript("goal_complete", "")))
-
-	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new kiro backend: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
-	if err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	go func() {
-		for range session.Messages {
-		}
-	}()
-
-	select {
-	case result, ok := <-session.Result:
-		if !ok {
-			t.Fatal("result channel closed without a value")
-		}
-		if result.Status != "completed" {
-			t.Fatalf("expected status=completed for a running goal_complete + close error, got %q (error=%q)", result.Status, result.Error)
-		}
-		if result.Error != "" {
-			t.Fatalf("expected close-handshake error to be suppressed, got %q", result.Error)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("timeout waiting for result")
+	result := runKiroCloseErrorScript(t, fakeKiroACPRunningToolCloseErrorScript("goal_complete", ""))
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed for a result-less running goal_complete, got %q (error=%q)", result.Status, result.Error)
 	}
 }
 
-// fakeKiroACPFailedRunningToolCloseErrorScript is the safety counterpart: the
-// finishing tool DID emit a failed ToolResult before the close error. That is
-// a genuine failure and must stay failed even though we saw the tool use.
-func fakeKiroACPFailedRunningToolCloseErrorScript() string {
+// fakeKiroACPCompletedToolCloseErrorScript is the positive-proof path: the
+// finishing tool emits a completed ToolCallUpdate (the real completion signal)
+// before the -32603 close handshake. `toolName` deliberately uses a title that
+// does NOT normalize to "terminal" to prove recognition is title-independent.
+func fakeKiroACPCompletedToolCloseErrorScript(toolName, command string) string {
+	params := `{}`
+	if command != "" {
+		params = `{"command":"` + command + `"}`
+	}
 	return `#!/bin/sh
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
@@ -580,12 +567,12 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
       ;;
     *'"method":"session/new"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_failed_done"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_completed"}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
-      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_failed_done","update":{"type":"ToolCall","toolCallId":"tc-fail","name":"execute_bash","status":"pending","parameters":{"command":"multica issue comment add issue-1 --content-file ./reply.md"}}}}\n'
-      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_failed_done","update":{"type":"ToolCallUpdate","toolCallId":"tc-fail","status":"failed","name":"execute_bash","output":"exit status 1"}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"Kiro failed to generate a response"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_completed","update":{"type":"ToolCall","toolCallId":"tc-done","name":"` + toolName + `","status":"pending","parameters":` + params + `}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_completed","update":{"type":"ToolCallUpdate","toolCallId":"tc-done","status":"completed","name":"` + toolName + `","output":"ok"}}}\n'
+      ` + closeErrorFrame + `
       exit 0
       ;;
   esac
@@ -593,44 +580,119 @@ done
 `
 }
 
-// TestKiroBackendDoesNotCompleteAfterFailedCommentAddResult guards the
-// tradeoff: a failed ToolResult must not be rescued by the running-tool path.
+// TestKiroBackendTreatsCompletedCommentAddWithNonTerminalTitleAsCompleted is
+// the #5509 fix proper: a comment-add whose shell tool is titled with a
+// non-terminal name but DID complete (positive proof) must be preserved as
+// completed through the -32603 close handshake.
+func TestKiroBackendTreatsCompletedCommentAddWithNonTerminalTitleAsCompleted(t *testing.T) {
+	t.Parallel()
+
+	result := runKiroCloseErrorScript(t, fakeKiroACPCompletedToolCloseErrorScript(
+		"execute_bash",
+		"multica issue comment add issue-1 --content-file ./reply.md",
+	))
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed for a completed comment-add + close error, got %q (error=%q)", result.Status, result.Error)
+	}
+	if result.Error != "" {
+		t.Fatalf("expected close-handshake error to be suppressed, got %q", result.Error)
+	}
+}
+
+// fakeKiroACPTwoCommentCloseErrorScript emits two comment-add tool calls with
+// distinct CallIDs and configurable terminal statuses (in order), then the
+// -32603 close handshake. This exercises ordering: only the most recent
+// finishing-tool result should decide completion.
+func fakeKiroACPTwoCommentCloseErrorScript(firstStatus, secondStatus string) string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_two"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_two","update":{"type":"ToolCall","toolCallId":"tc-1","name":"terminal","status":"pending","parameters":{"command":"multica issue comment add issue-1 --content-file ./progress.md"}}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_two","update":{"type":"ToolCallUpdate","toolCallId":"tc-1","status":"` + firstStatus + `","name":"terminal","output":"first"}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_two","update":{"type":"ToolCall","toolCallId":"tc-2","name":"terminal","status":"pending","parameters":{"command":"multica issue comment add issue-1 --content-file ./final.md"}}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_two","update":{"type":"ToolCallUpdate","toolCallId":"tc-2","status":"` + secondStatus + `","name":"terminal","output":"second"}}}\n'
+      ` + closeErrorFrame + `
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKiroBackendFailedFinalCommentOverridesEarlierSuccess is the #5511 review
+// Must-fix #2: "progress comment completed → final comment failed → -32603"
+// must stay failed. An earlier success must not mask a later failure.
+func TestKiroBackendFailedFinalCommentOverridesEarlierSuccess(t *testing.T) {
+	t.Parallel()
+
+	result := runKiroCloseErrorScript(t, fakeKiroACPTwoCommentCloseErrorScript("completed", "failed"))
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed when the final comment failed after an earlier success, got %q (error=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "Kiro failed to generate a response") {
+		t.Fatalf("expected original prompt error to be preserved, got %q", result.Error)
+	}
+}
+
+// TestKiroBackendCompletedRetryAfterEarlierFailureIsCompleted is the reverse
+// ordering the review flagged: "first attempt failed → retry completed →
+// -32603" is a real completion and must be preserved.
+func TestKiroBackendCompletedRetryAfterEarlierFailureIsCompleted(t *testing.T) {
+	t.Parallel()
+
+	result := runKiroCloseErrorScript(t, fakeKiroACPTwoCommentCloseErrorScript("failed", "completed"))
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed when a retry completed after an earlier failure, got %q (error=%q)", result.Status, result.Error)
+	}
+	if result.Error != "" {
+		t.Fatalf("expected close-handshake error to be suppressed, got %q", result.Error)
+	}
+}
+
+// fakeKiroACPFailedCommentAddCloseErrorScript: the finishing tool emits a
+// failed ToolResult before the close error — a genuine failure that must stay
+// failed.
+func fakeKiroACPFailedCommentAddCloseErrorScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_failed"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_failed","update":{"type":"ToolCall","toolCallId":"tc-fail","name":"execute_bash","status":"pending","parameters":{"command":"multica issue comment add issue-1 --content-file ./reply.md"}}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_failed","update":{"type":"ToolCallUpdate","toolCallId":"tc-fail","status":"failed","name":"execute_bash","output":"exit status 1"}}}\n'
+      ` + closeErrorFrame + `
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKiroBackendDoesNotCompleteAfterFailedCommentAddResult guards the case
+// where the finishing tool explicitly failed: it must stay failed.
 func TestKiroBackendDoesNotCompleteAfterFailedCommentAddResult(t *testing.T) {
 	t.Parallel()
 
-	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
-	writeTestExecutable(t, fakePath, []byte(fakeKiroACPFailedRunningToolCloseErrorScript()))
-
-	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new kiro backend: %v", err)
+	result := runKiroCloseErrorScript(t, fakeKiroACPFailedCommentAddCloseErrorScript())
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed after a failed comment-add result, got %q (error=%q)", result.Status, result.Error)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
-	if err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	go func() {
-		for range session.Messages {
-		}
-	}()
-
-	select {
-	case result, ok := <-session.Result:
-		if !ok {
-			t.Fatal("result channel closed without a value")
-		}
-		if result.Status != "failed" {
-			t.Fatalf("expected status=failed after a failed comment-add result, got %q (error=%q)", result.Status, result.Error)
-		}
-		if !strings.Contains(result.Error, "Kiro failed to generate a response") {
-			t.Fatalf("expected original prompt error to be preserved, got %q", result.Error)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("timeout waiting for result")
+	if !strings.Contains(result.Error, "Kiro failed to generate a response") {
+		t.Fatalf("expected original prompt error to be preserved, got %q", result.Error)
 	}
 }
 
