@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/mcp"
@@ -31,6 +32,10 @@ import (
 // registered (FIR-2388), so "0 connection tools" is never silent: an agent that
 // expected an api-connection tool can call it to learn WHY none loaded.
 const connectionToolsStatusToolName = "multica_connection_tools_status"
+
+// Registry job following can poll for roughly two minutes. Keep the broader
+// CLI client default unchanged while allowing connection tools to finish.
+const connectionToolCallTimeout = 3 * time.Minute
 
 // connectionToolDescriptor mirrors the server's toolDescriptor JSON shape.
 type connectionToolDescriptor struct {
@@ -60,6 +65,12 @@ func registerConnectionTools(srv *mcp.Server, client *cli.APIClient) {
 	listErr := client.GetJSON(context.Background(), "/api/cerebro/connection-tools", &list)
 
 	registered := 0
+	callClient := *client
+	callHTTPClient := *client.HTTPClient
+	if callHTTPClient.Timeout < connectionToolCallTimeout {
+		callHTTPClient.Timeout = connectionToolCallTimeout
+	}
+	callClient.HTTPClient = &callHTTPClient
 	for _, t := range list.Tools {
 		if t.Name == "" {
 			continue
@@ -79,7 +90,7 @@ func registerConnectionTools(srv *mcp.Server, client *cli.APIClient) {
 			}
 			body := map[string]any{"tool": toolName, "arguments": args}
 			var resp connectionToolsCallResponse
-			if err := client.PostJSON(ctx, "/api/cerebro/connection-tools/call", body, &resp); err != nil {
+			if err := callClient.PostJSON(ctx, "/api/cerebro/connection-tools/call", body, &resp); err != nil {
 				return mcp.ErrorResult(err.Error()), nil
 			}
 			return mcp.TextResult(resp.Result), nil

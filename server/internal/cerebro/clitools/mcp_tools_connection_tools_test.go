@@ -10,10 +10,39 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/mcp"
 )
+
+func TestConnectionToolCallOutlivesDefaultAPIClientTimeout(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/cerebro/connection-tools":
+			_, _ = w.Write([]byte(`{"tools":[{"name":"registry__post_execute","description":"d","input_schema":{"type":"object"}}]}`))
+		case "/api/cerebro/connection-tools/call":
+			time.Sleep(50 * time.Millisecond)
+			_, _ = w.Write([]byte(`{"result":"completed"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	client := cli.NewAPIClient(ts.URL, "", "")
+	client.HTTPClient.Timeout = 10 * time.Millisecond
+	srv := mcp.NewServer("test", "0")
+	registerConnectionTools(srv, client)
+
+	result, err := srv.Call(context.Background(), "registry__post_execute", nil)
+	if err != nil {
+		t.Fatalf("connection tool call errored: %v", err)
+	}
+	if len(result.Content) != 1 || result.Content[0].Text != "completed" {
+		t.Fatalf("connection tool result = %#v, want completed", result.Content)
+	}
+}
 
 func hasTool(srv *mcp.Server, name string) bool {
 	for _, t := range srv.Tools() {
