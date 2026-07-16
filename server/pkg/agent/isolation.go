@@ -111,6 +111,9 @@ func validateReadOnlyFiles(files []ReadOnlyFileMount, writableRoots, forbiddenRo
 			if pathWithin(source, writable) {
 				return nil, fmt.Errorf("read-only file source %q is inside writable root %q", source, writable)
 			}
+			if pathsOverlap(target, writable) {
+				return nil, fmt.Errorf("read-only file target %q overlaps writable root %q", target, writable)
+			}
 		}
 		for _, forbidden := range forbiddenRoots {
 			if pathWithin(source, forbidden) {
@@ -284,6 +287,23 @@ func pathWithin(path, root string) bool {
 
 func pathsOverlap(left, right string) bool {
 	return pathWithin(left, right) || pathWithin(right, left)
+}
+
+func validateProtectedTargetsAgainstCommandPaths(files []boundReadOnlyFileMount, executable, cwd pathIdentity) error {
+	for _, file := range files {
+		for _, commandPath := range []struct {
+			kind string
+			path string
+		}{
+			{kind: "cwd", path: cwd.Path},
+			{kind: "executable", path: executable.Path},
+		} {
+			if pathsOverlap(file.Target, commandPath.path) {
+				return fmt.Errorf("read-only file target %q overlaps command %s %q", file.Target, commandPath.kind, commandPath.path)
+			}
+		}
+	}
+	return nil
 }
 
 type unsupportedIsolation struct {

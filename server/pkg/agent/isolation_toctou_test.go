@@ -285,8 +285,62 @@ func TestLinuxBoundArgsMountExactReadOnlyFileAfterWritableRoots(t *testing.T) {
 	}
 	bindIndex := isolationSequenceIndex(args, "--bind-fd", root)
 	readOnlyIndex := isolationSequenceIndex(args, "--ro-bind-fd", "/run/multica/task-authority.json")
-	if bindIndex < 0 || readOnlyIndex < 0 || readOnlyIndex <= bindIndex {
-		t.Fatalf("exact file was not mounted read-only after writable parent: %#v", args)
+	cwdIndex := isolationSequenceIndex(args, "--bind-fd", cwd.Path)
+	executableIndex := isolationSequenceIndex(args, "--ro-bind-fd", executable.Path)
+	if bindIndex < 0 || cwdIndex < 0 || executableIndex < 0 || readOnlyIndex < 0 || readOnlyIndex <= bindIndex || readOnlyIndex <= cwdIndex || readOnlyIndex <= executableIndex {
+		t.Fatalf("exact file was not mounted read-only after every namespace destination: %#v", args)
+	}
+}
+
+func TestCommandLauncherRejectsReadOnlyFileTargetShadowedByCWDOrExecutable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX task namespace paths")
+	}
+
+	root := t.TempDir()
+	readOnlyRoot := filepath.Join(root, "read-only")
+	writableRoot := filepath.Join(root, "writable")
+	privateRoot := filepath.Join(root, "daemon-private")
+	for _, dir := range []string{readOnlyRoot, writableRoot, privateRoot} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	executable := filepath.Join(readOnlyRoot, "tool.sh")
+	writeTestExecutable(t, executable, []byte("#!/bin/sh\nexit 0\n"))
+	authority := filepath.Join(privateRoot, "task-authority.json")
+	if err := os.WriteFile(authority, []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		target string
+	}{
+		{name: "cwd shadows descendant target", target: filepath.Join(readOnlyRoot, "task-authority.json")},
+		{name: "target equals cwd", target: readOnlyRoot},
+		{name: "target equals executable", target: executable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			launcher := newCommandLauncher(&recordingIsolation{})
+			cmd, err := launcher.Command(context.Background(), CommandRequest{
+				Executable: executable,
+				Cwd:        readOnlyRoot,
+				Env:        map[string]string{"PATH": "/usr/bin:/bin"},
+				Isolation: &TaskIsolationPolicy{
+					WritableRoots: []string{writableRoot},
+					ReadOnlyRoots: []string{readOnlyRoot},
+					ReadOnlyFiles: []ReadOnlyFileMount{{Source: authority, Target: tt.target}},
+				},
+			})
+			if cmd != nil {
+				_ = cmd.Close()
+			}
+			if err == nil {
+				t.Fatalf("read-only target %q shadowed by cwd or executable unexpectedly accepted", tt.target)
+			}
+		})
 	}
 }
 

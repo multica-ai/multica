@@ -432,6 +432,16 @@ func TestValidateLocalPath(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects runtime authority root", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("POSIX runtime root")
+		}
+		reason, blocked := isBlacklistedLocalPath("/run")
+		if !blocked || !strings.Contains(reason, "protected system root") {
+			t.Fatalf("isBlacklistedLocalPath(/run) = (%q, %v), want protected root", reason, blocked)
+		}
+	})
+
 }
 
 func TestValidateLocalDirectoryTree(t *testing.T) {

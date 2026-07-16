@@ -379,7 +379,7 @@ func systemRootBlacklist() []string {
 	if runtime.GOOS == "windows" {
 		return []string{`C:\Users`, `C:\ProgramData`, `C:\Program Files`, `C:\Program Files (x86)`, `C:\Windows`}
 	}
-	return []string{"/", "/Users", "/Users/Shared", "/home", "/root", "/var", "/etc", "/tmp", "/usr", "/opt"}
+	return []string{"/", "/Users", "/Users/Shared", "/home", "/root", "/var", "/etc", "/tmp", "/usr", "/opt", "/run"}
 }
 
 // checkDirReadWrite verifies the daemon process can both read directory

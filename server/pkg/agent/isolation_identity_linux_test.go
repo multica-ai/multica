@@ -52,6 +52,59 @@ func TestLinuxIsolationExecutesDescriptorBoundScriptAndCwd(t *testing.T) {
 	}
 }
 
+func TestLinuxIsolationPreservesProtectedFileAfterAllMounts(t *testing.T) {
+	const helper = "/usr/bin/bwrap"
+	if _, err := os.Stat(helper); err != nil {
+		t.Skip("bubblewrap is unavailable")
+	}
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	if err := os.Mkdir(work, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	authority := filepath.Join(t.TempDir(), "task-authority.json")
+	const authorityContent = `{"managed_by":"multica-daemon-task-authority","task_id":"expected"}`
+	if err := os.WriteFile(authority, []byte(authorityContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(root, "tool.sh")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\ncat /run/multica/task-authority.json\nif printf tampered > /run/multica/task-authority.json 2>/dev/null; then exit 91; fi\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	launcher := newCommandLauncher(newLinuxIsolation(helper))
+	cmd, err := launcher.Command(context.Background(), CommandRequest{
+		Executable: executable,
+		Cwd:        work,
+		Env:        map[string]string{"PATH": "/usr/bin:/bin"},
+		Isolation: &TaskIsolationPolicy{
+			WritableRoots: []string{root},
+			SystemRoots:   existingSystemRootsForTest(t),
+			ReadOnlyFiles: []ReadOnlyFileMount{{Source: authority, Target: "/run/multica/task-authority.json"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Command: %v", err)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			t.Fatalf("Output: %v: %s", err, exitErr.Stderr)
+		}
+		t.Fatalf("Output: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != authorityContent {
+		t.Fatalf("protected authority content = %q, want %q", got, authorityContent)
+	}
+	hostContent, err := os.ReadFile(authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(hostContent) != authorityContent {
+		t.Fatalf("host authority content changed to %q", hostContent)
+	}
+}
+
 func TestOpenPathNoSymlinksFallbackRejectsAncestorSymlink(t *testing.T) {
 	root := t.TempDir()
 	real := filepath.Join(root, "real")

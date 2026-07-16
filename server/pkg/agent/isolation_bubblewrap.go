@@ -173,15 +173,6 @@ func renderLinuxBubblewrapArgsBound(policy *boundIsolationPolicy, executable, cw
 		extraFiles = append(extraFiles, m.identity.File)
 		childFD++
 	}
-	for _, file := range policy.ReadOnlyFiles {
-		if file.Identity.File == nil {
-			return nil, nil, fmt.Errorf("linux isolation file %q is missing a descriptor", file.Identity.Path)
-		}
-		args = append(args, "--ro-bind-fd", fmt.Sprintf("%d", childFD), file.Target)
-		extraFiles = append(extraFiles, file.Identity.File)
-		childFD++
-	}
-
 	// Overmount cwd and executable at their original namespace paths from the
 	// retained descriptors. This preserves expected absolute paths while the
 	// final chdir and exec resolve to the validated objects, not host pathnames.
@@ -190,6 +181,18 @@ func renderLinuxBubblewrapArgsBound(policy *boundIsolationPolicy, executable, cw
 	childFD++
 	args = append(args, "--ro-bind-fd", fmt.Sprintf("%d", childFD), executable.Path)
 	extraFiles = append(extraFiles, executable.File)
+	childFD++
+
+	// Protected exact files are mounted last so no namespace destination added
+	// by this renderer can shadow daemon-published task authority.
+	for _, file := range policy.ReadOnlyFiles {
+		if file.Identity.File == nil {
+			return nil, nil, fmt.Errorf("linux isolation file %q is missing a descriptor", file.Identity.Path)
+		}
+		args = append(args, "--ro-bind-fd", fmt.Sprintf("%d", childFD), file.Target)
+		extraFiles = append(extraFiles, file.Identity.File)
+		childFD++
+	}
 	args = append(args, "--chdir", cwd.Path)
 	args = append(args, "--", executable.Path)
 	args = append(args, commandArgs...)

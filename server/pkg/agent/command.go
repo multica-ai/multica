@@ -150,6 +150,9 @@ func (l *CommandLauncher) Command(ctx context.Context, req CommandRequest) (Task
 	if !identityWithinAny(executable.Path, allowedExec) {
 		return nil, fmt.Errorf("executable %q is outside isolated roots", executable.Path)
 	}
+	if err := validateProtectedTargetsAgainstCommandPaths(bound.ReadOnlyFiles, executable, cwd); err != nil {
+		return nil, err
+	}
 
 	if err := recheckBoundIsolation(bound); err != nil {
 		return nil, err

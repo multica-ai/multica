@@ -171,6 +171,42 @@ func TestTaskIsolationPolicyValidatesExactReadOnlyFiles(t *testing.T) {
 	}
 }
 
+func TestTaskIsolationPolicyRejectsReadOnlyFileTargetWritableOverlap(t *testing.T) {
+	root := t.TempDir()
+	writable := filepath.Join(root, "task")
+	private := filepath.Join(root, "daemon-private")
+	if err := os.MkdirAll(writable, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(private, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	authority := filepath.Join(private, "task-authority.json")
+	if err := os.WriteFile(authority, []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		target string
+	}{
+		{name: "target inside writable root", target: filepath.Join(writable, "task-authority.json")},
+		{name: "target equals writable root", target: writable},
+		{name: "target contains writable root", target: root},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := (TaskIsolationPolicy{
+				WritableRoots: []string{writable},
+				ReadOnlyFiles: []ReadOnlyFileMount{{Source: authority, Target: tt.target}},
+			}).Validated()
+			if err == nil {
+				t.Fatalf("read-only target %q overlapping writable root %q unexpectedly accepted", tt.target, writable)
+			}
+		})
+	}
+}
+
 func TestStableSystemPathAliasesArePlatformBoundAndExact(t *testing.T) {
 	t.Parallel()
 
