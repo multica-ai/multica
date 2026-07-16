@@ -25,8 +25,132 @@ import (
 // overridden by user-configured custom_args. `acp` is the protocol
 // subcommand that drives the ACP JSON-RPC transport; overriding it
 // would break the daemon↔Hermes communication contract.
+//
+// `-p`/`--profile` are NOT stripped unconditionally: a skill-less Hermes task
+// has no overlay, so its profile selection must pass through to Hermes
+// unchanged. The daemon strips the selected occurrence via StripHermesProfileArgs
+// only when it actually built the per-task overlay (see the daemon's launch-arg
+// handling), so the flag can't re-point HERMES_HOME past the overlay while
+// leaving no-overlay tasks' behavior untouched.
 var hermesBlockedArgs = map[string]blockedArgMode{
 	"acp": blockedStandalone,
+}
+
+// hermesArgProfileRe mirrors the space-form guard in Hermes'
+// hermes_cli.main._apply_profile_override step 1b: a `-p <value>` whose value
+// doesn't match the profile-id shape is not a profile selection at all (e.g.
+// pytest's `-p no:xdist`), so it is ignored rather than consumed. The inline
+// `--profile=<value>` form is NOT guarded here — Hermes forwards it verbatim to
+// resolve_profile_env, which validates and hard-fails on an invalid value; that
+// validation lives in the daemon-side resolver (execenv.ResolveHermesProfile).
+var hermesArgProfileRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// hermesValueFlags and hermesOptionalValueFlags mirror the value-taking flags
+// Hermes skips while scanning argv for -p/--profile, so a value like the `coder`
+// in `-m coder -p research` is never misread as the profile. Kept in sync with
+// _apply_profile_override.value_flags / optional_value_flags.
+var hermesValueFlags = map[string]struct{}{
+	"-z": {}, "--oneshot": {}, "-m": {}, "--model": {}, "--provider": {},
+	"-t": {}, "--toolsets": {}, "-r": {}, "--resume": {}, "-s": {},
+	"--skills": {}, "--usage-file": {},
+}
+var hermesOptionalValueFlags = map[string]struct{}{"-c": {}, "--continue": {}}
+
+// HermesProfileSelection is the profile selection parsed out of custom_args by
+// ParseHermesProfileArgs. It carries the exact argv occurrence to consume so the
+// daemon-side resolver and the launch-arg stripping act on one authoritative
+// parse instead of each re-approximating Hermes' argv handling.
+type HermesProfileSelection struct {
+	Name    string // the selected value; "" for the empty inline `--profile=` value
+	Found   bool   // a -p/--profile selection with a value was matched
+	Inline  bool   // matched the `--profile=<value>` form (value validated downstream)
+	ArgFrom int    // index of the first token to strip, or -1 when nothing matched
+	ArgLen  int    // tokens to strip: 2 for `-p <value>`, 1 for `--profile=<value>`
+}
+
+// ParseHermesProfileArgs finds the first Hermes profile selection in custom_args,
+// mirroring hermes_cli.main._apply_profile_override step 1/1b: it scans for the
+// first `-p`/`--profile <value>` or `--profile=<value>`, skipping value-taking
+// flags and stopping at a `--` sentinel or an `mcp add --args` command-argv
+// passthrough region. A space-form value that fails the profile-id shape is
+// ignored (matches Hermes discarding it). Args are unquoted with the same helper
+// as filterCustomArgs so quoting is handled consistently.
+func ParseHermesProfileArgs(args []string) HermesProfileSelection {
+	none := HermesProfileSelection{ArgFrom: -1}
+	i := 0
+	for i < len(args) {
+		arg := unshellQuoteArg(args[i])
+		if arg == "--" {
+			break
+		}
+		if arg == "--args" && hermesInsideMcpAdd(args, i) {
+			break
+		}
+		if arg == "-p" || arg == "--profile" {
+			if i+1 < len(args) {
+				val := unshellQuoteArg(args[i+1])
+				if !hermesArgProfileRe.MatchString(val) {
+					return none // step 1b: not a valid profile value, ignore
+				}
+				return HermesProfileSelection{Name: val, Found: true, ArgFrom: i, ArgLen: 2}
+			}
+			return none // trailing flag with no value
+		}
+		if v, ok := strings.CutPrefix(arg, "--profile="); ok {
+			return HermesProfileSelection{Name: v, Found: true, Inline: true, ArgFrom: i, ArgLen: 1}
+		}
+		if _, ok := hermesValueFlags[arg]; ok && i+1 < len(args) {
+			i += 2
+			continue
+		}
+		if _, ok := hermesOptionalValueFlags[arg]; ok && i+1 < len(args) &&
+			!strings.HasPrefix(unshellQuoteArg(args[i+1]), "-") {
+			i += 2
+			continue
+		}
+		i++
+	}
+	return none
+}
+
+// hermesInsideMcpAdd reports whether argv position index sits inside an
+// `mcp add ... --args <child argv>` passthrough region, where flags belong to
+// the child MCP command and must not be read as Hermes' own profile selector.
+func hermesInsideMcpAdd(args []string, index int) bool {
+	mcp := -1
+	for j := 0; j < index; j++ {
+		if unshellQuoteArg(args[j]) == "mcp" {
+			mcp = j
+			break
+		}
+	}
+	if mcp < 0 {
+		return false
+	}
+	for j := mcp + 1; j < index; j++ {
+		if unshellQuoteArg(args[j]) == "add" {
+			return true
+		}
+	}
+	return false
+}
+
+// StripHermesProfileArgs removes exactly the argv occurrence ParseHermesProfileArgs
+// selected. The daemon calls this only when it built the per-task overlay, so
+// Hermes uses the overlay's HERMES_HOME instead of re-resolving the profile —
+// while a skill-less task keeps its flags untouched.
+func StripHermesProfileArgs(args []string, sel HermesProfileSelection) []string {
+	if !sel.Found || sel.ArgFrom < 0 || sel.ArgLen <= 0 {
+		return args
+	}
+	end := sel.ArgFrom + sel.ArgLen
+	if end > len(args) {
+		end = len(args)
+	}
+	out := make([]string, 0, len(args)-(end-sel.ArgFrom))
+	out = append(out, args[:sel.ArgFrom]...)
+	out = append(out, args[end:]...)
+	return out
 }
 
 // hermesBackend implements Backend by spawning `hermes acp` and communicating
@@ -462,6 +586,10 @@ type hermesClient struct {
 	sessionID    string
 	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
+	// onActivity observes accepted ACP session updates. Grok uses it to
+	// retain a short post-response drain window; other ACP backends leave it
+	// nil and keep their existing lifecycle behavior.
+	onActivity func()
 	// acceptNotification can drop ACP session updates before dispatching to
 	// handlers that mutate client state such as usage or pending tool calls.
 	acceptNotification func(updateType string) bool
@@ -911,6 +1039,9 @@ func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 	if c.acceptNotification != nil && !c.acceptNotification(updateType) {
 		return
 	}
+	if c.onActivity != nil {
+		c.onActivity()
+	}
 
 	switch updateType {
 	case "agent_message_chunk":
@@ -1072,8 +1203,8 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 		RawInput   map[string]any    `json:"rawInput"`
 		Input      map[string]any    `json:"input"`
 		Parameters map[string]any    `json:"parameters"`
-		RawOutput  string            `json:"rawOutput"`
-		Output     string            `json:"output"`
+		RawOutput  json.RawMessage   `json:"rawOutput"`
+		Output     json.RawMessage   `json:"output"`
 		Content    []json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -1109,9 +1240,9 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 	pending := c.takePendingTool(msg.ToolCallID)
 	c.emitDeferredToolUse(pending, msg.ToolCallID, title, msg.Kind, rawInput)
 
-	output := msg.RawOutput
+	output := acpRawText(msg.RawOutput)
 	if output == "" {
-		output = msg.Output
+		output = acpRawText(msg.Output)
 	}
 	if output == "" {
 		output = extractACPToolCallText(msg.Content)
@@ -1236,6 +1367,27 @@ func parseToolArgsJSON(argsText string) map[string]any {
 //     as a minimal unified-diff header so the UI distinguishes writes
 //     from reads without needing a diff viewer.
 //
+// acpRawText renders an ACP output field (rawOutput / output) that may arrive
+// as either a JSON string or a structured value. Some model adapters — notably
+// Kiro's GPT-5.6 Sol path — send the completed tool_call_update's rawOutput as
+// an object like {"items":[{"Json":{...}}]} rather than a string. Declaring
+// that field as a Go string made json.Unmarshal fail, which made
+// handleToolCallUpdate return early and silently DROP the entire update —
+// including its status:"completed" — so the completion signal was lost and the
+// task was wrongly marked failed (issue #5509 / MUL-4860). Accept both shapes.
+func acpRawText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	// Non-string (object / array / number): keep the raw JSON as text so the
+	// output is preserved rather than discarded.
+	return string(raw)
+}
+
 // Terminal blocks ({type:"terminal", terminalId}) reference a remote
 // terminal the client would normally subscribe to via terminal/output;
 // we don't advertise terminal capability so we never receive those in
@@ -1408,6 +1560,32 @@ func extractACPSessionID(result json.RawMessage) string {
 		return ""
 	}
 	return r.SessionID
+}
+
+// extractACPAuthMethods returns the `authMethods` ids advertised in an ACP
+// `initialize` response, in the order the agent listed them. Agents that
+// require authentication (e.g. xAI's Grok Build) enumerate the accepted
+// methods here; per the ACP flow the client MUST send `authenticate` with one
+// of these ids before `session/new` / `session/load`. Agents that need no
+// explicit auth omit the field, so an empty slice means "skip authenticate".
+// A malformed response degrades to an empty slice (fail open on parsing so we
+// don't wedge agents that never needed the step).
+func extractACPAuthMethods(result json.RawMessage) []string {
+	var r struct {
+		AuthMethods []struct {
+			ID string `json:"id"`
+		} `json:"authMethods"`
+	}
+	if err := json.Unmarshal(result, &r); err != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(r.AuthMethods))
+	for _, m := range r.AuthMethods {
+		if id := strings.TrimSpace(m.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // extractACPCurrentModelID pulls the model selected by the ACP runtime out of

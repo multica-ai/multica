@@ -6,7 +6,22 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@multica/ui/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+type SelectProps<
+  Value,
+  Multiple extends boolean | undefined = false,
+> = SelectPrimitive.Root.Props<Value, Multiple> & {
+  items: NonNullable<SelectPrimitive.Root.Props<Value, Multiple>["items"]>
+}
+
+/**
+ * Base UI renders the raw value unless Root receives an items label map.
+ * Keep items required so every select has a single source for value labels.
+ */
+function Select<Value, Multiple extends boolean | undefined = false>(
+  props: SelectProps<Value, Multiple>
+) {
+  return <SelectPrimitive.Root {...props} />
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (

@@ -169,6 +169,8 @@ const mockViewState = {
   projectFilters: [] as string[],
   includeNoProject: false,
   labelFilters: [] as string[],
+  propertyFilters: {} as Record<string, string[]>,
+  cardPropertyIds: [] as string[],
   sortBy: "position" as const,
   sortDirection: "asc" as const,
   cardProperties: { priority: true, description: true, assignee: true, dueDate: true, project: true, childProgress: true, labels: true },
@@ -183,6 +185,8 @@ const mockViewState = {
   toggleProjectFilter: vi.fn(),
   toggleNoProject: vi.fn(),
   toggleLabelFilter: vi.fn(),
+  togglePropertyFilter: vi.fn(),
+  toggleCardPropertyId: vi.fn(),
   hideStatus: vi.fn(),
   showStatus: vi.fn(),
   clearFilters: vi.fn(),
@@ -194,6 +198,9 @@ const mockViewState = {
 
 vi.mock("@multica/core/issues/stores/view-store", () => ({
   useClearFiltersOnWorkspaceChange: () => {},
+  PROPERTY_VIEW_PREFIX: "property:",
+  propertyIdFromViewKey: (key: string) =>
+    key.startsWith("property:") ? key.slice("property:".length) : null,
   viewStorePersistOptions: () => ({ name: "test", storage: undefined, partialize: (s: any) => s }),
   mergeViewStatePersisted: (_p: unknown, c: any) => c,
   viewStoreSlice: vi.fn(),
@@ -286,16 +293,23 @@ vi.mock("sonner", () => ({
 }));
 
 // Mock dnd-kit
-vi.mock("@dnd-kit/core", () => ({
-  DndContext: ({ children }: any) => children,
-  DragOverlay: () => null,
-  PointerSensor: class {},
-  useSensor: () => ({}),
-  useSensors: () => [],
-  useDroppable: () => ({ setNodeRef: vi.fn(), isOver: false }),
-  pointerWithin: vi.fn(),
-  closestCenter: vi.fn(),
-}));
+vi.mock("@dnd-kit/core", () => {
+  // Real dnd-kit useDroppable returns a referentially stable setNodeRef
+  // (memoized internally). BoardColumn merges it with a state-setting
+  // callback ref for Virtuoso's customScrollParent, so a fresh function each
+  // render would loop the ref detach/reattach. Model the stable identity.
+  const stableSetNodeRef = () => {};
+  return {
+    DndContext: ({ children }: any) => children,
+    DragOverlay: () => null,
+    PointerSensor: class {},
+    useSensor: () => ({}),
+    useSensors: () => [],
+    useDroppable: () => ({ setNodeRef: stableSetNodeRef, isOver: false }),
+    pointerWithin: vi.fn(),
+    closestCenter: vi.fn(),
+  };
+});
 
 vi.mock("@dnd-kit/sortable", () => ({
   SortableContext: ({ children }: any) => children,
@@ -329,6 +343,21 @@ vi.mock("@base-ui/react/accordion", () => ({
   ),
 }));
 
+// Mock react-virtuoso: jsdom has no layout, so the real Virtuoso computes a
+// 0-height viewport and renders nothing (and throws on its resize plumbing).
+// Render every item inline so the virtualized board columns expose their
+// cards to the DOM, matching the non-virtualized behavior these tests assert.
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: ({ data, itemContent, components }: any) => (
+    <div data-testid="virtuoso-mock">
+      {(data ?? []).map((item: any, i: number) => (
+        <div key={i}>{itemContent(i, item)}</div>
+      ))}
+      {components?.Footer ? <components.Footer /> : null}
+    </div>
+  ),
+}));
+
 // ---------------------------------------------------------------------------
 // Test data
 // ---------------------------------------------------------------------------
@@ -339,6 +368,7 @@ const issueDefaults = {
   position: 0,
   stage: null,
   metadata: {},
+  properties: {},
 };
 
 const mockIssues: Issue[] = [

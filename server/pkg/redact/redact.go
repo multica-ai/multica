@@ -51,8 +51,9 @@ var patterns = []secretPattern{
 	{regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}\b`), "[REDACTED GITLAB TOKEN]"},
 
 	// Google API keys always start with the AIza prefix and are 39 chars total
-	// (AIza + 35). Not covered by any rule above, so they would otherwise leak.
-	{regexp.MustCompile(`\bAIza[0-9A-Za-z_\-]{35}\b`), "[REDACTED GOOGLE API KEY]"},
+	// (AIza + 35). Capture and restore the trailing delimiter so keys ending in
+	// a non-word character such as '-' are still redacted.
+	{regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}([^0-9A-Za-z_-]|$)`), "[REDACTED GOOGLE API KEY]$1"},
 
 	// Stripe secret / restricted live keys (sk_live_ / rk_live_). The sk-
 	// rule above only matches the hyphen form used by OpenAI/Anthropic; Stripe

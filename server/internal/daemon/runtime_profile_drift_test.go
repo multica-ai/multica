@@ -218,7 +218,7 @@ func TestSyncWorkspacesSkipsRuntimeProfileRefreshOnExistingWorkspace(t *testing.
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/workspaces":
+		case "/api/daemon/workspaces":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]WorkspaceInfo{{ID: workspaceID, Name: "ws"}})
 		case "/api/daemon/workspaces/" + workspaceID + "/runtime-profiles":
@@ -258,7 +258,7 @@ func TestSyncWorkspacesRefreshesRuntimeProfilesOnReconcile(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/workspaces":
+		case "/api/daemon/workspaces":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]WorkspaceInfo{{ID: workspaceID, Name: "ws"}})
 		case "/api/daemon/workspaces/" + workspaceID + "/runtime-profiles":

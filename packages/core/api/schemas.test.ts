@@ -2,18 +2,26 @@ import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
   AgentTaskListSchema,
+  AutopilotRunSchema,
+  FALLBACK_AUTOPILOT_RUN,
+  CommentTriggerPreviewSchema,
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  ChatDraftRestoresResponseSchema,
   CreateFeedbackResponseSchema,
   DuplicateIssueErrorBodySchema,
+  EMPTY_CHAT_DRAFT_RESTORES,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
+  EMPTY_INBOX_ITEMS,
   EMPTY_INBOX_UNREAD_SUMMARY,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_USER,
+  InboxItemListSchema,
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
+  ListPropertiesResponseSchema,
   SearchProjectsResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -95,6 +103,98 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     const payload = { issues: [issueWithoutStage], total: 1 };
     const parsed = ListIssuesResponseSchema.parse(payload);
     expect(parsed.issues[0]?.stage).toBeNull();
+  });
+
+  it("accepts custom property values including multi_select arrays", () => {
+    const payload = {
+      issues: [
+        {
+          ...baseIssue,
+          properties: { "def-1": "opt-a", "def-2": ["opt-x", "opt-y"], "def-3": 3.5, "def-4": true },
+        },
+      ],
+      total: 1,
+    };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.properties).toEqual({
+      "def-1": "opt-a",
+      "def-2": ["opt-x", "opt-y"],
+      "def-3": 3.5,
+      "def-4": true,
+    });
+  });
+
+  it("defaults properties to {} when the server omits it (older backend)", () => {
+    const parsed = ListIssuesResponseSchema.parse({ issues: [baseIssue], total: 1 });
+    expect(parsed.issues[0]?.properties).toEqual({});
+  });
+
+  it("drops unknown-shaped property values instead of failing the issue parse", () => {
+    // Forward compat: a future server type (actor/relation) may ship object
+    // values. That one entry must disappear; the issue and its other
+    // properties must survive — a full parse failure would blank the whole
+    // list through parseWithFallback on installed desktop builds.
+    const payload = {
+      issues: [
+        {
+          ...baseIssue,
+          properties: { "def-1": { nested: 1 }, "def-2": "opt-a" },
+        },
+      ],
+      total: 1,
+    };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.properties).toEqual({ "def-2": "opt-a" });
+  });
+});
+
+describe("IssuePropertySchema (via ListPropertiesResponseSchema)", () => {
+  const baseProperty = {
+    id: "22222222-2222-2222-2222-222222222222",
+    workspace_id: "ws-1",
+    name: "Severity",
+    type: "select",
+    description: "",
+    icon: "flag",
+    config: { options: [{ id: "opt-1", name: "Critical", color: "#ef4444" }] },
+    position: 1,
+    archived: false,
+    archived_at: null,
+    usage_count: 2,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("parses a full definition", () => {
+    const parsed = ListPropertiesResponseSchema.parse({ properties: [baseProperty], total: 1 });
+    expect(parsed.properties[0]?.config.options?.[0]?.name).toBe("Critical");
+    expect(parsed.properties[0]?.icon).toBe("flag");
+  });
+
+  it("survives a malformed response by defaulting the list", () => {
+    const parsed = ListPropertiesResponseSchema.parse({});
+    expect(parsed.properties).toEqual([]);
+    expect(parsed.total).toBe(0);
+  });
+
+  it("keeps unknown property types as strings (forward compat)", () => {
+    const parsed = ListPropertiesResponseSchema.parse({
+      properties: [{ ...baseProperty, type: "relation", config: {} }],
+      total: 1,
+    });
+    expect(parsed.properties[0]?.type).toBe("relation");
+  });
+
+  it("defaults config when the server sends none", () => {
+    const { config: _omit, ...withoutConfig } = baseProperty;
+    const parsed = ListPropertiesResponseSchema.parse({ properties: [withoutConfig], total: 1 });
+    expect(parsed.properties[0]?.config).toEqual({});
+  });
+
+  it("defaults icon for an older server response", () => {
+    const { icon: _omit, ...withoutIcon } = baseProperty;
+    const parsed = ListPropertiesResponseSchema.parse({ properties: [withoutIcon], total: 1 });
+    expect(parsed.properties[0]?.icon).toBe("");
   });
 });
 
@@ -256,6 +356,53 @@ describe("AgentTaskListSchema", () => {
       "comment-2",
       "comment-3",
     ]);
+  });
+});
+
+describe("ChatDraftRestoresResponseSchema", () => {
+  it("parses a well-formed response with attachments", () => {
+    const parsed = parseWithFallback(
+      {
+        restores: [
+          {
+            id: "msg-1",
+            chat_session_id: "s-1",
+            task_id: "t-1",
+            content: "run the thing",
+            attachments: [{ id: "att-1", filename: "notes.txt" }],
+            created_at: "2026-07-01T00:00:00Z",
+          },
+        ],
+      },
+      ChatDraftRestoresResponseSchema,
+      EMPTY_CHAT_DRAFT_RESTORES,
+      { endpoint: "test" },
+    );
+    expect(parsed.restores).toHaveLength(1);
+    expect(parsed.restores[0]?.content).toBe("run the thing");
+    expect(parsed.restores[0]?.attachments?.[0]?.id).toBe("att-1");
+  });
+
+  it("defaults a missing restores array instead of crashing the composer", () => {
+    const parsed = parseWithFallback(
+      {},
+      ChatDraftRestoresResponseSchema,
+      EMPTY_CHAT_DRAFT_RESTORES,
+      { endpoint: "test" },
+    );
+    expect(parsed.restores).toEqual([]);
+  });
+
+  it("falls back to the empty response on a malformed row", () => {
+    // A row without the consume key (id) is unusable — the whole response
+    // falls back and the durable rows simply stay pending server-side.
+    const parsed = parseWithFallback(
+      { restores: [{ chat_session_id: "s-1", content: 42 }] },
+      ChatDraftRestoresResponseSchema,
+      EMPTY_CHAT_DRAFT_RESTORES,
+      { endpoint: "test" },
+    );
+    expect(parsed).toEqual(EMPTY_CHAT_DRAFT_RESTORES);
   });
 });
 
@@ -539,6 +686,11 @@ describe("AppConfigSchema cdn_signed drift", () => {
     const parsed = AppConfigSchema.parse({ feature_flags: ["not", "an", "object"] });
     expect(parsed.feature_flags).toEqual({});
   });
+
+  it("parses server_version and leaves it undefined when the server omits it", () => {
+    expect(AppConfigSchema.parse({ server_version: "1.2.3" }).server_version).toBe("1.2.3");
+    expect(AppConfigSchema.parse({}).server_version).toBeUndefined();
+  });
 });
 
 describe("InboxUnreadSummarySchema", () => {
@@ -578,6 +730,86 @@ describe("InboxUnreadSummarySchema", () => {
         ENDPOINT,
       ),
     ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
+  });
+});
+
+describe("InboxItemListSchema", () => {
+  const ENDPOINT = { endpoint: "GET /api/inbox/archived" };
+
+  const row = (overrides: Record<string, unknown> = {}) => ({
+    id: "inbox-1",
+    workspace_id: "ws-1",
+    recipient_type: "member",
+    recipient_id: "member-1",
+    type: "new_comment",
+    severity: "info",
+    issue_id: "issue-1",
+    title: "Issue title",
+    body: null,
+    read: false,
+    archived: true,
+    created_at: "2026-06-15T08:00:00Z",
+    ...overrides,
+  });
+
+  it("parses a well-formed archived list and tolerates extra fields", () => {
+    const parsed = parseWithFallback(
+      [row({ issue_status: "in_progress", details: { comment_id: "c-1" }, future_field: 1 })],
+      InboxItemListSchema,
+      EMPTY_INBOX_ITEMS,
+      ENDPOINT,
+    );
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({ id: "inbox-1", archived: true });
+  });
+
+  it("keeps a notification type this client doesn't know yet", () => {
+    // Enums stay lenient on purpose: a backend that ships a new inbox type
+    // must not blank the whole archived list on older clients.
+    const parsed = parseWithFallback(
+      [row({ type: "some_future_type", severity: "future_severity" })],
+      InboxItemListSchema,
+      EMPTY_INBOX_ITEMS,
+      ENDPOINT,
+    );
+    expect(parsed).toHaveLength(1);
+  });
+
+  it("accepts rows that omit the nullable optional fields", () => {
+    const { body, issue_id, ...withoutOptionals } = row();
+    void body;
+    void issue_id;
+    expect(
+      parseWithFallback([withoutOptionals], InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
+    ).toHaveLength(1);
+  });
+
+  it("returns the empty fallback for a non-array body", () => {
+    expect(
+      parseWithFallback({ items: [] }, InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
+    ).toBe(EMPTY_INBOX_ITEMS);
+    expect(
+      parseWithFallback(null, InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
+    ).toBe(EMPTY_INBOX_ITEMS);
+  });
+
+  it("returns the empty fallback when a row is missing a required field", () => {
+    const { id, ...withoutId } = row();
+    void id;
+    expect(
+      parseWithFallback([withoutId], InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
+    ).toBe(EMPTY_INBOX_ITEMS);
+  });
+
+  it("returns the empty fallback when `archived` is wrong-typed", () => {
+    expect(
+      parseWithFallback(
+        [row({ archived: "yes" })],
+        InboxItemListSchema,
+        EMPTY_INBOX_ITEMS,
+        ENDPOINT,
+      ),
+    ).toBe(EMPTY_INBOX_ITEMS);
   });
 });
 
@@ -627,5 +859,92 @@ describe("SearchProjectsResponseSchema date drift", () => {
     expect(parsed.projects).toHaveLength(1);
     expect(parsed.projects[0]?.start_date).toBeNull();
     expect(parsed.projects[0]?.due_date).toBeNull();
+  });
+});
+
+// The "run now" flow branches on run.status/reason_code to avoid a false-success
+// toast (MUL-4525), so the trigger response must survive backend drift.
+describe("AutopilotRunSchema", () => {
+  const ENDPOINT = { endpoint: "POST /api/autopilots/:id/trigger" };
+  const baseRun = {
+    id: "run-1",
+    autopilot_id: "ap-1",
+    trigger_id: null,
+    source: "manual",
+    status: "issue_created",
+    issue_id: "issue-1",
+    task_id: null,
+    triggered_at: "2026-07-14T00:00:00Z",
+    completed_at: null,
+    failure_reason: null,
+    trigger_payload: null,
+    result: null,
+    created_at: "2026-07-14T00:00:00Z",
+  };
+
+  it("preserves a blocked run's status and reason_code", () => {
+    const parsed = parseWithFallback(
+      { ...baseRun, status: "skipped", failure_reason: "you are not allowed to trigger this autopilot's assignee agent", reason_code: "invocation_not_allowed" },
+      AutopilotRunSchema,
+      FALLBACK_AUTOPILOT_RUN,
+      ENDPOINT,
+    );
+    expect(parsed.status).toBe("skipped");
+    expect(parsed.reason_code).toBe("invocation_not_allowed");
+  });
+
+  it("tolerates an older server omitting reason_code", () => {
+    const parsed = parseWithFallback(baseRun, AutopilotRunSchema, FALLBACK_AUTOPILOT_RUN, ENDPOINT);
+    expect(parsed.status).toBe("issue_created");
+    expect(parsed.reason_code).toBeUndefined();
+  });
+
+  it("degrades a malformed response to a non-success fallback (never a false success)", () => {
+    const parsed = parseWithFallback("not-an-object", AutopilotRunSchema, FALLBACK_AUTOPILOT_RUN, ENDPOINT);
+    expect(parsed).toBe(FALLBACK_AUTOPILOT_RUN);
+    expect(parsed.status).toBe("failed");
+  });
+});
+
+// The comment composer branches on preview.blocked to warn before sending
+// (MUL-4525 §2), so the additive field must parse and degrade gracefully.
+describe("CommentTriggerPreviewSchema.blocked", () => {
+  it("parses blocked mention outcomes alongside agents", () => {
+    const parsed = CommentTriggerPreviewSchema.parse({
+      agents: [{ id: "a1", source: "mention_agent", reason: "" }],
+      blocked: [
+        { target_type: "squad", target_id: "s1", status: "blocked", reason_code: "invocation_not_allowed" },
+      ],
+    });
+    expect(parsed.agents).toHaveLength(1);
+    expect(parsed.blocked).toEqual([
+      { target_type: "squad", target_id: "s1", status: "blocked", reason_code: "invocation_not_allowed" },
+    ]);
+  });
+
+  it("defaults blocked to [] when an older server omits it", () => {
+    const parsed = CommentTriggerPreviewSchema.parse({ agents: [] });
+    expect(parsed.blocked).toEqual([]);
+  });
+
+  it("degrades a malformed blocked field to [] without dropping agents", () => {
+    const parsed = CommentTriggerPreviewSchema.parse({
+      agents: [{ id: "a1", source: "mention_agent", reason: "" }],
+      blocked: "nope",
+    });
+    expect(parsed.agents).toHaveLength(1);
+    expect(parsed.blocked).toEqual([]);
+  });
+
+  it("drops a single malformed blocked entry without discarding the valid ones", () => {
+    const parsed = CommentTriggerPreviewSchema.parse({
+      agents: [],
+      blocked: [
+        { target_type: "squad", target_id: "s1", status: "blocked", reason_code: "invocation_not_allowed" },
+        { status: "blocked" }, // missing target_id → dropped individually
+        { target_type: "agent", target_id: "a1", status: "blocked", reason_code: "runtime_offline" },
+      ],
+    });
+    expect(parsed.blocked.map((b) => b.target_id)).toEqual(["s1", "a1"]);
   });
 });

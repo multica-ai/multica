@@ -54,7 +54,9 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
+import { useAppForeground } from "../../common/use-app-foreground";
 import { ChatInput } from "../../chat/components/chat-input";
+import { useChatDraftRestore } from "../../chat/components/use-chat-draft-restore";
 import {
   ChatMessageList,
   ChatMessageSkeleton,
@@ -154,6 +156,28 @@ export function AgentCreationStudio() {
   const duplicateAppliedRef = useRef(false);
   const appliedAssistantMessageRef = useRef<string | null>(null);
   const builderSessionIdRef = useRef("");
+
+  // The builder chat is a real chat_session, so cancelling a started-but-empty
+  // run defers the empty/non-empty judgment exactly as it does in the main chat
+  // (#5219): stopBuilder's response carries no restore_to_input, and the prompt
+  // arrives later as a durable chat_draft_restore row. Without this hook the
+  // studio composer would simply never see it. The two sources are exclusive —
+  // the synchronous cancel answers immediately, the durable one lands after the
+  // daemon acks — so whichever exists is handed to the composer.
+  //
+  // Gated on app foreground: this studio is a dedicated route, so being mounted
+  // means the surface is on screen, but a backgrounded tab must not fetch/apply/
+  // consume a restore the user is waiting on elsewhere. It recovers on its next
+  // fetch once the tab is refocused.
+  const appForeground = useAppForeground();
+  const {
+    restoreDraftRequest: durableRestoreRequest,
+    handleRestoreDraftApplied: handleDurableRestoreApplied,
+  } = useChatDraftRestore(builderSessionId || null, appForeground);
+  const builderRestoreRequest = useMemo(
+    () => pickBuilderRestore(builderRestoreDraft, durableRestoreRequest),
+    [builderRestoreDraft, durableRestoreRequest],
+  );
 
   useEffect(() => {
     builderSessionIdRef.current = builderSessionId;
@@ -734,8 +758,14 @@ export function AgentCreationStudio() {
             runtimeOnline={selectedRuntime?.status === "online"}
             onSend={sendBuilderMessage}
             onStop={() => void stopBuilder()}
-            restoreDraftRequest={builderRestoreDraft}
-            onRestoreDraftConsumed={() => setBuilderRestoreDraft(null)}
+            restoreDraftRequest={builderRestoreRequest}
+            onRestoreDraftApplied={() => {
+              if (builderRestoreDraft) {
+                setBuilderRestoreDraft(null);
+                return;
+              }
+              handleDurableRestoreApplied();
+            }}
             error={builderError}
           />
           <div className="min-h-0 overflow-y-auto border-l bg-muted/10">
@@ -1230,7 +1260,7 @@ function BuilderConversation({
   onSend,
   onStop,
   restoreDraftRequest,
-  onRestoreDraftConsumed,
+  onRestoreDraftApplied,
   error,
 }: {
   sessionId: string;
@@ -1241,7 +1271,7 @@ function BuilderConversation({
   onSend: (content: string) => Promise<boolean>;
   onStop: () => void;
   restoreDraftRequest: { id: string; content: string } | null;
-  onRestoreDraftConsumed: () => void;
+  onRestoreDraftApplied: () => void;
   error: string | null;
 }) {
   const { t } = useT("agents");
@@ -1331,7 +1361,7 @@ function BuilderConversation({
         draftKeyOverride={draftKey}
         editorKeyOverride={draftKey}
         restoreDraftRequest={restoreDraftRequest}
-        onRestoreDraftConsumed={onRestoreDraftConsumed}
+        onRestoreDraftApplied={onRestoreDraftApplied}
       />
     </section>
   );
@@ -1529,6 +1559,35 @@ export function decodeBuilderInput(content: string): string {
   } catch {
     return content;
   }
+}
+
+export interface BuilderRestore {
+  id: string;
+  content: string;
+}
+
+/**
+ * Chooses which cancelled prompt the builder composer should adopt (#5219).
+ *
+ * Two sources, never both: cancelling a task the daemon never started answers
+ * synchronously (`cancelled_chat_message.restore_to_input`), while cancelling a
+ * started-but-empty one defers the judgment and delivers the prompt later as a
+ * durable chat_draft_restore row. The durable copy is the raw chat_message
+ * content, i.e. still in the builder's encoded wire form, so it is decoded here
+ * exactly as the synchronous path decodes its own.
+ *
+ * The session id is deliberately not carried over: the builder composer keys its
+ * draft by `agent-builder:<id>`, so ChatInput's session guard would never match
+ * a raw session id — and it does not need to, since this composer only ever
+ * shows the builder session.
+ */
+export function pickBuilderRestore(
+  synchronous: BuilderRestore | null,
+  durable: { id: string; content: string } | null,
+): BuilderRestore | null {
+  if (synchronous) return synchronous;
+  if (!durable) return null;
+  return { id: durable.id, content: decodeBuilderInput(durable.content) };
 }
 
 export function mergeBuilderDraft(

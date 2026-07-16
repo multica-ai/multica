@@ -241,6 +241,8 @@
     "version_unknown": "알 수 없음",
     "managed_by_desktop": "데스크톱에서 관리",
     "managed_by_desktop_title": "CLI 바이너리는 Multica Desktop에서 관리합니다. CLI를 업그레이드하려면 Desktop을 업데이트하세요.",
+    "read_only": "읽기 전용",
+    "read_only_title": "런타임 소유자와 워크스페이스 관리자만 CLI를 업데이트할 수 있습니다.",
     "latest": "최신",
     "available": "사용 가능",
     "action": "업데이트",

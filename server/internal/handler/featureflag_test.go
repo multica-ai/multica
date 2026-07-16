@@ -19,10 +19,6 @@ func withResourceLabelsFlag(t *testing.T, h *Handler, enabled bool) {
 	withFeatureFlag(t, h, featureflags.ResourceLabels, enabled)
 }
 
-func withAgentSkillTogglesFlag(t *testing.T, h *Handler, enabled bool) {
-	withFeatureFlag(t, h, featureflags.AgentSkillToggles, enabled)
-}
-
 func withFeatureFlag(t *testing.T, h *Handler, key string, enabled bool) {
 	t.Helper()
 	provider := featureflag.NewStaticProvider()

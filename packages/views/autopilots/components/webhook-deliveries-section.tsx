@@ -294,6 +294,16 @@ function DeliveryDetailDialog({
               value={String(full.attempt_count)}
             />
             <MetaRow
+              label={t(($) => $.deliveries.detail.dispatch_attempts)}
+              value={String(full.dispatch_attempts)}
+            />
+            {full.status === "queued" && (
+              <MetaRow
+                label={t(($) => $.deliveries.detail.available_at)}
+                value={formatDate(full.available_at)}
+              />
+            )}
+            <MetaRow
               label={t(($) => $.deliveries.detail.response_status)}
               value={full.response_status != null ? String(full.response_status) : "—"}
             />

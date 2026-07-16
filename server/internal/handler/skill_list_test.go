@@ -114,7 +114,6 @@ func TestListAgentSkills_OmitsContent(t *testing.T) {
 }
 
 func TestSetAgentSkillEnabledControlsExecutionWithoutRemovingAssignment(t *testing.T) {
-	withAgentSkillTogglesFlag(t, testHandler, true)
 	agentID := createHandlerTestAgent(t, "Handler Skill Toggle Test", nil)
 	skillID := insertHandlerTestSkill(t, "agent-skill-toggle", "# Toggle me")
 	if _, err := testPool.Exec(context.Background(),
@@ -159,27 +158,6 @@ func TestSetAgentSkillEnabledControlsExecutionWithoutRemovingAssignment(t *testi
 	active, err = testHandler.Queries.ListAgentSkills(context.Background(), parseUUID(agentID))
 	if err != nil || len(active) != 1 || active[0].Name == "" {
 		t.Fatalf("re-enabled skill missing from execution: skills=%+v err=%v", active, err)
-	}
-}
-
-func TestSetAgentSkillEnabledRequiresReleaseFlag(t *testing.T) {
-	withAgentSkillTogglesFlag(t, testHandler, false)
-	agentID := createHandlerTestAgent(t, "Blocked Skill Toggle", nil)
-	skillID := insertHandlerTestSkill(t, "blocked-agent-skill-toggle", "# Toggle me")
-	if _, err := testPool.Exec(context.Background(),
-		`INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`,
-		agentID, skillID,
-	); err != nil {
-		t.Fatalf("attach skill to agent: %v", err)
-	}
-	w := httptest.NewRecorder()
-	req := newRequest("PUT", "/api/agents/"+agentID+"/skills/"+skillID+"/enabled", map[string]any{"enabled": false})
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", agentID)
-	rctx.URLParams.Add("skillId", skillID)
-	testHandler.SetAgentSkillEnabled(w, req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
-	if w.Code != 404 {
-		t.Fatalf("SetAgentSkillEnabled without flag: expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

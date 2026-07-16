@@ -5,7 +5,49 @@ import "encoding/json"
 const (
 	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
 	DaemonCapabilityCoalescedCommentsV1 = "coalesced-comments-v1"
+	// DaemonCapabilityRPCV1 advertises that the daemon can carry
+	// request/response RPCs over the WebSocket control connection (MUL-4257).
+	// Gated so only daemons+servers that both support it route claim over WS;
+	// everyone else keeps using the HTTP claim endpoint.
+	DaemonCapabilityRPCV1 = "rpc-v1"
+
+	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
+	// app clients that understand the durable draft-restore recovery path:
+	// chat:cancel_finalized as an invalidation hint plus the draft-restores
+	// endpoint. Cancelling a started-but-empty chat task defers the
+	// empty/non-empty judgment (#5219), so its cancel response carries no
+	// synchronous restore — a client without this capability would silently
+	// drop the user's prompt, and keeps the legacy synchronous restore instead.
+	AppCapabilityChatDraftRestoreV1 = "chat-draft-restore-v1"
 )
+
+// RPCRequestPayload is the generic daemon→server request envelope carried in a
+// protocol.Message of type EventDaemonRPCRequest. RequestID correlates the
+// response; Method selects the server-side handler (e.g. "tasks.claim"); Body
+// is the method-specific request JSON.
+type RPCRequestPayload struct {
+	RequestID string          `json:"request_id"`
+	Method    string          `json:"method"`
+	Body      json.RawMessage `json:"body,omitempty"`
+	// TimeoutMs is the server-side execution budget in milliseconds. The server
+	// bounds the handler's context by it so a slow RPC is cancelled (its work
+	// rolled back) rather than committing after the daemon has already timed
+	// out waiting and fallen back to HTTP (MUL-4257). 0 means no server-side
+	// bound (connection-lifetime only).
+	TimeoutMs int64 `json:"timeout_ms,omitempty"`
+}
+
+// RPCResponsePayload is the server→daemon reply, carried in a
+// protocol.Message of type EventDaemonRPCResponse. RequestID echoes the
+// request. Status mirrors an HTTP status so the daemon can treat WS and HTTP
+// outcomes uniformly. Exactly one of Body / Error is meaningful: Body on
+// success (2xx), Error on failure.
+type RPCResponsePayload struct {
+	RequestID string          `json:"request_id"`
+	Status    int             `json:"status"`
+	Body      json.RawMessage `json:"body,omitempty"`
+	Error     string          `json:"error,omitempty"`
+}
 
 // Message is the envelope for all WebSocket messages.
 type Message struct {
@@ -36,6 +78,11 @@ type RuntimeProfilesChangedPayload struct {
 	WorkspaceID      string `json:"workspace_id"`
 	RuntimeProfileID string `json:"runtime_profile_id,omitempty"`
 }
+
+// WorkspacesChangedPayload is an account-scoped hint that asks a daemon to
+// reconcile its workspace membership set. The server remains authoritative;
+// no workspace data is embedded in the event.
+type WorkspacesChangedPayload struct{}
 
 // TaskProgressPayload is sent from daemon to server during task execution.
 type TaskProgressPayload struct {
@@ -123,6 +170,45 @@ type ChatDonePayload struct {
 	MessageKind   string `json:"message_kind,omitempty"`
 }
 
+// Outcome values carried by ChatCancelFinalizedPayload.
+const (
+	// ChatCancelOutcomeStopped: the transcript turned out non-empty, so a
+	// "Stopped." assistant message was persisted.
+	ChatCancelOutcomeStopped = "stopped"
+	// ChatCancelOutcomeRestored: the transcript stayed empty, so the
+	// triggering user message was deleted and its content should be
+	// restored into the composer as a draft.
+	ChatCancelOutcomeRestored = "restored"
+)
+
+// ChatCancelFinalizedPayload is broadcast when a cancelled chat task's
+// deferred finalization settles (#5219). The cancel HTTP response cannot
+// carry this outcome — it is only known after the daemon's transcript flush —
+// so clients react to this event instead: outcome "stopped" inserts the
+// assistant message (MessageID/Content/... describe the new row, shaped like
+// ChatDonePayload), outcome "restored" removes the deleted user message from
+// caches and prompts the initiator's client to fetch the durable draft
+// restore from the creator-authorized endpoint. The restored prompt's content
+// and attachments deliberately never ride this workspace-wide broadcast.
+type ChatCancelFinalizedPayload struct {
+	Outcome       string `json:"outcome"`
+	ChatSessionID string `json:"chat_session_id"`
+	TaskID        string `json:"task_id"`
+	// InitiatorUserID is the human who triggered the cancelled task. Only
+	// this user's client needs to fetch the draft restore (the endpoint is
+	// creator-authorized regardless); clients treat a missing value as
+	// "not me".
+	InitiatorUserID string `json:"initiator_user_id,omitempty"`
+	MessageID       string `json:"message_id,omitempty"`
+	// Content/MessageKind/CreatedAt/ElapsedMs describe the persisted
+	// "Stopped." assistant row and are set only for outcome "stopped" —
+	// the same exposure surface as chat:done.
+	Content     string `json:"content,omitempty"`
+	MessageKind string `json:"message_kind,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	ElapsedMs   int64  `json:"elapsed_ms,omitempty"`
+}
+
 // ChatSessionReadPayload is broadcast when the creator marks a session as read.
 // Fires to other devices so their unread counts stay in sync.
 type ChatSessionReadPayload struct {
@@ -163,6 +249,8 @@ type DaemonHeartbeatRequestPayload struct {
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.
 // JSON shape mirrors the HTTP heartbeat response so daemon code can decode either.
+// ServerCapabilities is explicit server-to-daemon protocol negotiation. A
+// daemon must not infer support from its own advertised client capabilities.
 //
 // RuntimeGone is the WebSocket replacement for the HTTP 404 "runtime not found"
 // response. When the server discovers the runtime row was deleted (UI delete,
@@ -174,6 +262,7 @@ type DaemonHeartbeatRequestPayload struct {
 type DaemonHeartbeatAckPayload struct {
 	RuntimeID               string                                  `json:"runtime_id"`
 	Status                  string                                  `json:"status"`
+	ServerCapabilities      []string                                `json:"server_capabilities,omitempty"`
 	RuntimeGone             bool                                    `json:"runtime_gone,omitempty"`
 	PendingUpdate           *DaemonHeartbeatPendingUpdate           `json:"pending_update,omitempty"`
 	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`

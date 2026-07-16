@@ -241,6 +241,8 @@
     "version_unknown": "不明",
     "managed_by_desktop": "デスクトップで管理",
     "managed_by_desktop_title": "CLI バイナリは Multica Desktop で管理されています。CLI をアップグレードするには Desktop を更新してください。",
+    "read_only": "読み取り専用",
+    "read_only_title": "CLI を更新できるのは、ランタイムの所有者とワークスペース管理者のみです。",
     "latest": "最新",
     "available": "利用可能",
     "action": "更新",

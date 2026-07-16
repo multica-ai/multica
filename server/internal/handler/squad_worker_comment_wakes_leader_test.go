@@ -50,8 +50,8 @@ func TestCreateComment_WorkerAgentCommentWakesSquadLeader_MUL4015(t *testing.T) 
 	}
 	var workerTaskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, originator_user_id)
-		VALUES ($1, $2, $3, 'running', FALSE, $4)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, originator_user_id, accountable_user_id)
+		VALUES ($1, $2, $3, 'running', FALSE, $4, $4)
 		RETURNING id
 	`, fx.OtherID, workerRuntimeID, issueID, testUserID).Scan(&workerTaskID); err != nil {
 		t.Fatalf("seed worker task: %v", err)
@@ -65,8 +65,8 @@ func TestCreateComment_WorkerAgentCommentWakesSquadLeader_MUL4015(t *testing.T) 
 		t.Fatalf("load leader runtime: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, originator_user_id)
-		VALUES ($1, $2, $3, 'completed', TRUE, $4)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, originator_user_id, accountable_user_id)
+		VALUES ($1, $2, $3, 'completed', TRUE, $4, $4)
 	`, fx.LeaderID, leaderRuntimeID, issueID, testUserID); err != nil {
 		t.Fatalf("seed leader task: %v", err)
 	}
@@ -125,8 +125,8 @@ func TestCreateComment_WorkerAgentCommentDoesNotWakeLeader_WhenLeaderTaskPending
 	}
 	var workerTaskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, originator_user_id)
-		VALUES ($1, $2, $3, 'running', FALSE, $4)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, originator_user_id, accountable_user_id)
+		VALUES ($1, $2, $3, 'running', FALSE, $4, $4)
 		RETURNING id
 	`, fx.OtherID, workerRuntimeID, issueID, testUserID).Scan(&workerTaskID); err != nil {
 		t.Fatalf("seed worker task: %v", err)
@@ -140,8 +140,8 @@ func TestCreateComment_WorkerAgentCommentDoesNotWakeLeader_WhenLeaderTaskPending
 		t.Fatalf("load leader runtime: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, originator_user_id)
-		VALUES ($1, $2, $3, 'queued', TRUE, $4)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, originator_user_id, accountable_user_id)
+		VALUES ($1, $2, $3, 'queued', TRUE, $4, $4)
 	`, fx.LeaderID, leaderRuntimeID, issueID, testUserID); err != nil {
 		t.Fatalf("seed queued leader task: %v", err)
 	}
@@ -270,8 +270,8 @@ func TestCreateComment_WorkerAgentCommentWakesPrivateSquadLeader_MUL4015(t *test
 	}
 	var leaderTaskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, originator_user_id, squad_id)
-		VALUES ($1, $2, $3, 'running', TRUE, $4, $5)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, originator_user_id, accountable_user_id, squad_id)
+		VALUES ($1, $2, $3, 'running', TRUE, $4, $4, $5)
 		RETURNING id
 	`, leaderID, leaderRuntimeID, issueID, testUserID, squadID).Scan(&leaderTaskID); err != nil {
 		t.Fatalf("seed leader task: %v", err)

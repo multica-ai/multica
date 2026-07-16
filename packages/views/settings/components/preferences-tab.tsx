@@ -18,7 +18,10 @@ import {
 } from "@multica/core/i18n";
 import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
-import { useCommentComposerStore } from "@multica/core/issues/stores";
+import {
+  useCommentComposerStore,
+  useIssueLinkStore,
+} from "@multica/core/issues/stores";
 import { api } from "@multica/core/api";
 import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
 import { useT } from "../../i18n";
@@ -101,6 +104,7 @@ export function PreferencesTab() {
             size="select"
           >
             <Select
+              items={themeOptions}
               value={theme}
               onValueChange={(next) => {
                 if (!next || next === theme) return;
@@ -134,6 +138,7 @@ export function PreferencesTab() {
             size="select"
           >
             <Select
+              items={languageOptions}
               value={currentLocale}
               onValueChange={(next) => {
                 if (next) void handleLanguageChange(next as SupportedLocale);
@@ -161,6 +166,8 @@ export function PreferencesTab() {
           <TimezoneRow />
 
           <StickyCommentBarRow />
+
+          <IssueLinkNewTabRow />
         </SettingsCard>
       </SettingsSection>
     </SettingsTab>
@@ -186,6 +193,30 @@ function StickyCommentBarRow() {
           });
         }}
         aria-label={t(($) => $.preferences.sticky_comment_bar.title)}
+      />
+    </SettingsRow>
+  );
+}
+
+function IssueLinkNewTabRow() {
+  const { t } = useT("settings");
+  const openInNewTab = useIssueLinkStore((s) => s.openInNewTab);
+  const setOpenInNewTab = useIssueLinkStore((s) => s.setOpenInNewTab);
+
+  return (
+    <SettingsRow
+      label={t(($) => $.preferences.issue_link_new_tab.title)}
+      description={t(($) => $.preferences.issue_link_new_tab.hint)}
+    >
+      <Switch
+        checked={openInNewTab}
+        onCheckedChange={(checked) => {
+          setOpenInNewTab(checked === true);
+          toast.success(t(($) => $.auto_save.toast_saved), {
+            id: "settings-auto-save",
+          });
+        }}
+        aria-label={t(($) => $.preferences.issue_link_new_tab.title)}
       />
     </SettingsRow>
   );
@@ -243,6 +274,13 @@ function TimezoneRow() {
       size="select-wide"
     >
       <Select
+        items={[
+          { value: BROWSER_TZ_VALUE, label: formatTZLabel(BROWSER_TZ_VALUE) },
+          ...options.map((timezone) => ({
+            value: timezone,
+            label: formatTZLabel(timezone),
+          })),
+        ]}
         value={value}
         onValueChange={(next) => {
           if (next) void handleChange(next);

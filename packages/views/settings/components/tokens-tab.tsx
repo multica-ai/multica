@@ -44,6 +44,10 @@ const EXPIRY_KEYS = ["30", "90", "365", "never"] as const;
 
 export function TokensTab() {
   const { t } = useT("settings");
+  const expiryItems = EXPIRY_KEYS.map((value) => ({
+    value,
+    label: t(($) => $.tokens.expiry[value]),
+  }));
   const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);
   const [tokenName, setTokenName] = useState("");
   const [tokenExpiry, setTokenExpiry] = useState("90");
@@ -147,14 +151,18 @@ export function TokensTab() {
                 onChange={(e) => setTokenName(e.target.value)}
                 placeholder={t(($) => $.tokens.name_placeholder)}
               />
-              <Select value={tokenExpiry} onValueChange={(v) => { if (v) setTokenExpiry(v); }}>
+              <Select
+                items={expiryItems}
+                value={tokenExpiry}
+                onValueChange={(v) => { if (v) setTokenExpiry(v); }}
+              >
                 <SelectTrigger
                   size="sm"
                   aria-label={t(($) => $.tokens.title)}
                 ><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {EXPIRY_KEYS.map((key) => (
-                    <SelectItem key={key} value={key}>{t(($) => $.tokens.expiry[key])}</SelectItem>
+                  {expiryItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

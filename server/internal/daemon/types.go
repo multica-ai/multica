@@ -8,8 +8,16 @@ import (
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
-	Path  string // path to CLI binary
-	Model string // model override (optional)
+	Path string // path to CLI binary (pinned at startup; symlink-resolved to a concrete, possibly versioned, path)
+	// Command is the bare command name or MULTICA_*_PATH value that Path was
+	// resolved from at startup. It is kept so the daemon can re-resolve Path
+	// if the pinned executable later vanishes — e.g. a version manager
+	// (Homebrew Cask, nvm/fnm) does an in-place upgrade that deletes the old
+	// versioned directory Path points into. Empty for synthesized entries
+	// (custom runtime profiles) that carry an absolute path directly. See
+	// Daemon.resolveAgentEntry and MUL-4486.
+	Command string
+	Model   string // model override (optional)
 }
 
 // Runtime represents a registered daemon runtime.

@@ -70,6 +70,18 @@ func TestRedactGitHubFineGrainedToken(t *testing.T) {
 	}
 }
 
+func TestRedactGoogleAPIKeyEndingWithDash(t *testing.T) {
+	t.Parallel()
+	input := `the config file still had "` + asm("AIza", "SyB1cD3fGhIjKlMnOpQrStUvWxYz012345-") + `" in it`
+	got := Text(input)
+	if strings.Contains(got, asm("AIza", "SyB1cD3f")) {
+		t.Fatalf("Google API key ending with dash not redacted: %s", got)
+	}
+	if !strings.Contains(got, `"[REDACTED GOOGLE API KEY]" in it`) {
+		t.Fatalf("expected delimiter to be preserved, got: %s", got)
+	}
+}
+
 func TestRedactOpenAIKey(t *testing.T) {
 	t.Parallel()
 	input := "OPENAI_API_KEY=sk-proj-abc123def456ghi789jkl012mno345"

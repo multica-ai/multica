@@ -70,7 +70,8 @@
     "last_active": "최근 활동",
     "model": "모델",
     "created": "생성일",
-    "owner": "소유자"
+    "owner": "소유자",
+    "access": "액세스"
   },
   "row": {
     "you": "나",
@@ -94,6 +95,12 @@
     "duplicate": "복제",
     "restore": "복원",
     "archive": "보관",
+    "set_access": "접근 범위 설정",
+    "set_access_dialog_title": "접근 범위 설정",
+    "set_access_applies_to": "{{count}}개 agent에 적용됩니다.",
+    "set_access_skipped": "{{count}}개 건너뜀(본인 소유 아님).",
+    "set_access_dialog_confirm": "적용",
+    "set_access_bulk_partial": "{{succeeded}}개 적용, {{failed}}개 실패(현재 상태 유지).",
     "agent_archived_toast": "에이전트를 보관했습니다",
     "archive_failed_toast": "에이전트를 보관하지 못했습니다",
     "agent_restored_toast": "에이전트를 복원했습니다",
@@ -591,6 +598,11 @@
     "tooltip": "접근 권한 · 누가 이 에이전트를 실행할 수 있는지",
     "trigger_private": "나만",
     "trigger_workspace": "워크스페이스",
+    "scope_labels": {
+      "workspace": "워크스페이스",
+      "specific_people": "특정 사용자",
+      "owner_only": "소유자만"
+    },
     "trigger_members_count": "{{count}}명",
     "trigger_members_empty": "특정 사용자",
     "trigger_team": "팀",
@@ -643,6 +655,7 @@
     "copy_filtered": "필터 결과 복사",
     "copied": "복사했습니다",
     "waiting_events": "이벤트를 기다리는 중...",
+    "antigravity_live_unavailable": "Antigravity는 현재 실시간 실행 이벤트를 제공하지 않습니다. 작업이 완료되면 실행 기록을 확인할 수 있습니다.",
     "no_data": "기록된 실행 데이터가 없습니다.",
     "sort_label": "정렬",
     "sort_chronological": "오래된 순",
@@ -670,6 +683,7 @@
     "filter_active_count_other": "필터 {{count}}개",
     "clear_filters": "필터 지우기",
     "section_availability": "가용성",
+    "section_access": "액세스",
     "section_runtime": "런타임",
     "display": "표시",
     "sort_by": "정렬",

@@ -42,7 +42,7 @@ Multica 支持两种邮件发送通道——[Resend](https://resend.com/) 适合
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `RESEND_API_KEY` | 空 | Resend API key |
-| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | 发件地址（必须是 Resend 账号已验证的域名；走 SMTP 时同时作为 `From:` 头）|
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Resend 发件地址（必须是 Resend 账号已验证的域名；`SMTP_FROM_EMAIL` 未设置时，SMTP 也会使用它）|
 
 ### SMTP relay
 
@@ -52,6 +52,7 @@ Multica 支持两种邮件发送通道——[Resend](https://resend.com/) 适合
 | `SMTP_PORT` | `25` | SMTP 端口。STARTTLS 提交端口用 `587`；SMTPS（隐式 TLS，自动启用）用 `465` |
 | `SMTP_USERNAME` | 空 | SMTP 用户名。留空表示未认证 relay |
 | `SMTP_PASSWORD` | 空 | SMTP 密码 |
+| `SMTP_FROM_EMAIL` | 空 | SMTP 的 `MAIL FROM` 和 `From:` 发件地址。未设置时回退到 `RESEND_FROM_EMAIL` |
 | `SMTP_TLS` | `starttls` | TLS 模式。`implicit`（别名 `smtps`、`ssl`）在连接时立即进行 TLS 握手（SMTPS）；`465` 端口会自动启用。未设置 / `starttls` 则在连接后通过 STARTTLS 升级 |
 | `SMTP_TLS_INSECURE` | `false` | 设为 `true` 跳过 TLS 证书校验（仅限私有 CA / 自签证书）|
 | `SMTP_EHLO_NAME` | 机器主机名 | 向 relay 通告的 EHLO/HELO 名称。当严格的 relay（例如 Google Workspace `smtp-relay.gmail.com`）拒绝来自公网 IP 的默认问候时，填一个真实的 FQDN——否则 relay 会直接断开连接，并在后续某条命令上表现为一个不知所云的 `EOF` |
@@ -183,7 +184,8 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | 任务轮询频率 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 并发任务上限 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 单次任务的绝对墙钟上限；`0` = 不设上限，任务只受看门狗约束（活跃任务不会因为跑得久被杀）。想要硬性成本/资源天花板时再设一个正值 |
-| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 空闲看门狗：backend 持续静默（无消息、消息队列为空、且没有工具在途）这么久就 force-stop。`0` = 关闭整套看门狗 |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 空闲看门狗：backend 持续静默（无消息、消息队列为空、且没有工具在途）这么久就 force-stop。`0` = 关闭整套看门狗，包括 provider 专用阈值 |
+| `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 首 token 未到或流式回复中断时的专用无消息阈值；`0` = 回退到 `MULTICA_AGENT_IDLE_WATCHDOG`，更大的值不能放宽全局阈值 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 工具在途时的静默上限：某个工具调用发出后长时间无任何输出（疑似卡死的子进程）这么久就 force-stop。`0` = 关闭该兜底（在途工具永不被停）|
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex 专用的静默看门狗窗口 |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex `app-server` 启动 RPC 超时 |

@@ -43,6 +43,7 @@ function makeIssue(
     start_date: null,
     due_date: null,
     metadata: {},
+    properties: {},
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,

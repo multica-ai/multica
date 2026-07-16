@@ -100,6 +100,81 @@ func TestClient_VersionOmittedWhenUnset(t *testing.T) {
 	}
 }
 
+func TestClient_ListWorkspacesUsesDaemonEndpointAndETag(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/workspaces" {
+			t.Errorf("path = %q, want /api/daemon/workspaces", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		call := calls.Add(1)
+		if call == 1 {
+			if got := r.Header.Get("If-None-Match"); got != "" {
+				t.Errorf("first If-None-Match = %q, want empty", got)
+			}
+			w.Header().Set("ETag", `W/"workspace-v1"`)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"id":"ws-1","name":"One"}]`))
+			return
+		}
+		if got := r.Header.Get("If-None-Match"); got != `W/"workspace-v1"` {
+			t.Errorf("If-None-Match = %q, want cached ETag", got)
+		}
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	first, err := c.ListWorkspaces(context.Background())
+	if err != nil {
+		t.Fatalf("first ListWorkspaces: %v", err)
+	}
+	second, err := c.ListWorkspaces(context.Background())
+	if err != nil {
+		t.Fatalf("second ListWorkspaces: %v", err)
+	}
+	if len(first) != 1 || len(second) != 1 || second[0] != first[0] {
+		t.Fatalf("cached workspaces mismatch: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestClient_ListWorkspacesFallsBackToLegacyEndpointOnce(t *testing.T) {
+	var daemonCalls atomic.Int32
+	var legacyCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/daemon/workspaces":
+			daemonCalls.Add(1)
+			http.NotFound(w, r)
+		case "/api/workspaces":
+			legacyCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"id":"ws-legacy","name":"Legacy"}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	for i := 0; i < 2; i++ {
+		workspaces, err := c.ListWorkspaces(context.Background())
+		if err != nil {
+			t.Fatalf("ListWorkspaces call %d: %v", i+1, err)
+		}
+		if len(workspaces) != 1 || workspaces[0].ID != "ws-legacy" {
+			t.Fatalf("workspaces = %+v, want legacy response", workspaces)
+		}
+	}
+	if got := daemonCalls.Load(); got != 1 {
+		t.Fatalf("daemon endpoint calls = %d, want 1", got)
+	}
+	if got := legacyCalls.Load(); got != 2 {
+		t.Fatalf("legacy endpoint calls = %d, want 2", got)
+	}
+}
+
 // noSleepRetry replaces retrySleep with an immediate no-op so tests don't
 // actually wait the 4s/8s/16s/... backoffs. Returns a restore func.
 func noSleepRetry(t *testing.T) func() {
