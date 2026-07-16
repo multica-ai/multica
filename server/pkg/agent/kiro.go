@@ -107,8 +107,27 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	var outputMu sync.Mutex
 	var output strings.Builder
 	var streamingCurrentTurn atomic.Bool
+	// Completion-preservation state for the -32603 close-handshake guard.
+	// We track each finish-signalling tool (goal_complete, `multica issue
+	// comment add`) along three axes so the guard can tell three cases
+	// apart:
+	//   - saw*Use:       we observed the tool being invoked this turn.
+	//   - saw*Result:    we observed a terminal ToolResult for it (any status).
+	//   - sawCompleted*: that terminal ToolResult was status=="completed".
+	// The Claude/Kiro path always emits a completed ToolResult, so
+	// sawCompleted* is enough there. The GPT-5.6 Sol adapter, however, can
+	// leave the terminal tool parked at "running" and never emit a
+	// completed/failed ToolCallUpdate — so no ToolResult is ever produced
+	// (hermes.handleToolCallUpdate only dispatches on completed/failed).
+	// For that path we fall back to "saw the use but never saw a result"
+	// (see the guard below), which stays safe because a genuinely failed
+	// tool still emits a failed ToolResult and trips saw*Result.
 	var sawCompletedGoalComplete atomic.Bool
 	var sawCompletedIssueComment atomic.Bool
+	var sawGoalCompleteUse atomic.Bool
+	var sawGoalCompleteResult atomic.Bool
+	var sawIssueCommentUse atomic.Bool
+	var sawIssueCommentResult atomic.Bool
 	var goalCompleteCallIDs sync.Map
 	var issueCommentCallIDs sync.Map
 
@@ -130,17 +149,33 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				msg.Tool = kiroToolNameFromTitle(msg.Tool)
 				if msg.Tool == "goal_complete" && msg.CallID != "" {
 					goalCompleteCallIDs.Store(msg.CallID, struct{}{})
+					sawGoalCompleteUse.Store(true)
 				}
-				if msg.CallID != "" && isKiroIssueCommentAddTool(msg) {
-					issueCommentCallIDs.Store(msg.CallID, struct{}{})
+				// Recognize `multica issue comment add` by its command
+				// payload regardless of how the adapter titled the tool.
+				// GPT-5.6 Sol may label the shell tool something other than
+				// the aliases kiroToolNameFromTitle folds into "terminal"
+				// (e.g. "execute"/"run"), so gating on msg.Tool=="terminal"
+				// here would miss it entirely.
+				if isKiroIssueCommentAddTool(msg) {
+					sawIssueCommentUse.Store(true)
+					if msg.CallID != "" {
+						issueCommentCallIDs.Store(msg.CallID, struct{}{})
+					}
 				}
 			}
 			if msg.Type == MessageToolResult {
 				if _, ok := goalCompleteCallIDs.LoadAndDelete(msg.CallID); ok {
-					sawCompletedGoalComplete.Store(msg.Status == "completed")
+					sawGoalCompleteResult.Store(true)
+					if msg.Status == "completed" {
+						sawCompletedGoalComplete.Store(true)
+					}
 				}
 				if _, ok := issueCommentCallIDs.LoadAndDelete(msg.CallID); ok {
-					sawCompletedIssueComment.Store(msg.Status == "completed")
+					sawIssueCommentResult.Store(true)
+					if msg.Status == "completed" {
+						sawCompletedIssueComment.Store(true)
+					}
 				}
 			}
 			if msg.Type == MessageText {
@@ -333,7 +368,22 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kiro session/prompt failed: %v", err)
-				if (sawCompletedGoalComplete.Load() || sawCompletedIssueComment.Load()) && isKiroGoalCompleteCloseError(err) {
+				// Completion-preservation guard for the -32603 close
+				// handshake Kiro raises after a task has finished its work.
+				//
+				//   completedResult  — we saw a completed ToolResult for
+				//                      goal_complete / comment-add (Claude path).
+				//   useWithoutResult — we saw the finishing tool invoked but
+				//                      never saw ANY terminal ToolResult for it
+				//                      (GPT-5.6 Sol path: the tool stays parked
+				//                      at "running"). We deliberately exclude
+				//                      the case where a failed ToolResult DID
+				//                      arrive — that is a real failure and must
+				//                      stay failed.
+				completedResult := sawCompletedGoalComplete.Load() || sawCompletedIssueComment.Load()
+				useWithoutResult := (sawGoalCompleteUse.Load() && !sawGoalCompleteResult.Load()) ||
+					(sawIssueCommentUse.Load() && !sawIssueCommentResult.Load())
+				if (completedResult || useWithoutResult) && isKiroGoalCompleteCloseError(err) {
 					b.cfg.Logger.Warn("kiro session/prompt failed after completed task result; preserving completed task status", "error", err)
 					finalStatus = "completed"
 					finalError = ""
@@ -431,10 +481,14 @@ func isKiroGoalCompleteCloseError(err error) bool {
 	return strings.Contains(strings.ToLower(rpcErr.Data), "failed to generate a response")
 }
 
+// isKiroIssueCommentAddTool reports whether a tool-use message is a
+// `multica issue comment add` invocation. It keys purely off the command
+// payload, not the normalized tool name: GPT-5.6 Sol adapters may title the
+// shell tool with a name that doesn't fold into "terminal" (the earlier
+// msg.Tool=="terminal" gate silently dropped those and left completed tasks
+// marked failed — see #5509). isKiroIssueCommentAddCommand is strict enough
+// that no non-shell tool's input will accidentally match.
 func isKiroIssueCommentAddTool(msg Message) bool {
-	if msg.Tool != "terminal" {
-		return false
-	}
 	command, _ := msg.Input["command"].(string)
 	return isKiroIssueCommentAddCommand(command)
 }
