@@ -289,6 +289,121 @@ func TestPruneOrphan_PreservesLiveWorktree(t *testing.T) {
 	git(t, wt.WorkDir, "commit", "-qm", "still works")
 }
 
+// Prepare-level wiring: Isolate=true must produce a WorkDir that is a per-task
+// worktree of the source repo (not the source itself), with sidecars inside the
+// isolated tree, LocalDirectory=false, and a Cleanup that reclaims the worktree
+// registry entry.
+func TestPrepare_IsolateCutsWorktree(t *testing.T) {
+	src := newSourceRepo(t)
+	workspacesRoot := t.TempDir()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-iso-001",
+		TaskID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "Iso Agent",
+		LocalWorkDir:   src,
+		Isolate:        true,
+		Task: TaskContextForEnv{
+			IssueID:     "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+			AgentSkills: []SkillContextForEnv{{Name: "Code Review", Content: "Be concise."}},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	if env.WorkDir == src {
+		t.Fatal("isolated Prepare left WorkDir pointing at the source checkout")
+	}
+	if env.WorkDir != filepath.Join(env.RootDir, "workdir") {
+		t.Fatalf("isolated WorkDir = %q, want %q", env.WorkDir, filepath.Join(env.RootDir, "workdir"))
+	}
+	if env.LocalDirectory {
+		t.Fatal("isolated task must have LocalDirectory=false (WorkDir is daemon-owned scratch)")
+	}
+	if env.IsolatedWorktree == nil {
+		t.Fatal("IsolatedWorktree handle not set")
+	}
+	// It is a real worktree of the source repository (shared common gitdir),
+	// with its own index. Compare symlink-resolved forms — temp dirs may be
+	// reported via different prefixes (macOS /var vs /private/var).
+	common := git(t, env.WorkDir, "rev-parse", "--git-common-dir")
+	commonReal, err := filepath.EvalSymlinks(common)
+	if err != nil {
+		t.Fatalf("resolve common dir: %v", err)
+	}
+	srcGitReal, err := filepath.EvalSymlinks(filepath.Join(src, ".git"))
+	if err != nil {
+		t.Fatalf("resolve source gitdir: %v", err)
+	}
+	if commonReal != srcGitReal {
+		t.Fatalf("worktree common dir = %q, want %q", commonReal, srcGitReal)
+	}
+	srcIdx := git(t, src, "rev-parse", "--git-path", "index")
+	wtIdx := git(t, env.WorkDir, "rev-parse", "--git-path", "index")
+	if srcIdx == wtIdx {
+		t.Fatal("isolated worktree shares the source's git index")
+	}
+	// Sidecars landed inside the isolated worktree, not the source.
+	if _, err := os.Stat(filepath.Join(env.WorkDir, ".agent_context")); err != nil {
+		t.Fatalf("context files missing from isolated worktree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(src, ".agent_context")); !os.IsNotExist(err) {
+		t.Fatal("context files leaked into the source checkout")
+	}
+
+	// Cleanup reclaims the registry entry and the envRoot.
+	if err := env.Cleanup(true); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if list := worktreeList(t, src); strings.Contains(list, env.WorkDir) {
+		t.Fatalf("cleanup left a dangling worktree entry:\n%s", list)
+	}
+	if _, err := os.Stat(env.RootDir); !os.IsNotExist(err) {
+		t.Fatal("cleanup left the envRoot behind")
+	}
+}
+
+func TestPrepare_IsolateRequiresGitRepo(t *testing.T) {
+	nonRepo := t.TempDir()
+	_, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-iso-002",
+		TaskID:         "b1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		LocalWorkDir:   nonRepo,
+		Isolate:        true,
+		Task:           TaskContextForEnv{IssueID: "b1b2c3d4-e5f6-7890-abcd-ef1234567890"},
+	}, testLogger())
+	if err == nil {
+		t.Fatal("expected Prepare to fail closed when Isolate is set on a non-git directory")
+	}
+}
+
+// The default (isolate absent) in-place contract is byte-for-byte unchanged:
+// WorkDir IS the user's path and LocalDirectory guards it from cleanup.
+func TestPrepare_InPlaceDefaultUnchanged(t *testing.T) {
+	src := newSourceRepo(t)
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-iso-003",
+		TaskID:         "c1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		LocalWorkDir:   src,
+		Task:           TaskContextForEnv{IssueID: "c1b2c3d4-e5f6-7890-abcd-ef1234567890"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	if env.WorkDir != src {
+		t.Fatalf("in-place WorkDir = %q, want the user's path %q", env.WorkDir, src)
+	}
+	if !env.LocalDirectory {
+		t.Fatal("in-place task must keep LocalDirectory=true")
+	}
+	if env.IsolatedWorktree != nil {
+		t.Fatal("in-place task must not get an IsolatedWorktree handle")
+	}
+}
+
 func TestIsolated_RebaseConflictSurfaces(t *testing.T) {
 	src := newSourceRepo(t)
 	// A shared file both tasks will edit differently.
