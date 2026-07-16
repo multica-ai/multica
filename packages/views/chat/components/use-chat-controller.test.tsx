@@ -53,6 +53,9 @@ const h = vi.hoisted(() => {
     store,
     archivedMutate: vi.fn(),
     markReadMutate: vi.fn(),
+    // Stable across renders so tests can assert on it; lazy-creates the session
+    // a new chat's first send needs.
+    createSessionMutate: vi.fn(async () => ({ id: "new-session" })),
     // Foreground gate for the auto mark-read effect; tests flip it.
     appForeground: { value: true },
     consumeRestoreMutate: vi.fn(),
@@ -78,6 +81,9 @@ vi.mock("@multica/core/workspace/queries", () => ({
 vi.mock("@multica/views/issues/components", () => ({ canAssignAgent: () => true }));
 vi.mock("@multica/core/api", () => ({
   api: { sendChatMessage: vi.fn(), cancelTaskById: vi.fn() },
+  // Names the 403 that a revoked invoke permission raises (MUL-4525); plain
+  // failures have no reason code.
+  dispatchReasonCode: () => undefined,
 }));
 vi.mock("@multica/core/agents", () => ({
   useAgentPresenceDetail: () => ({ availability: "online" }),
@@ -87,7 +93,7 @@ vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: vi.fn() }),
 }));
 vi.mock("@multica/core/chat/mutations", () => ({
-  useCreateChatSession: () => ({ mutateAsync: vi.fn() }),
+  useCreateChatSession: () => ({ mutateAsync: h.createSessionMutate }),
   useMarkChatSessionRead: () => ({ mutate: h.markReadMutate }),
   useSetChatSessionArchived: () => ({ mutate: h.archivedMutate }),
   useConsumeChatDraftRestore: () => ({ mutate: h.consumeRestoreMutate }),
@@ -140,6 +146,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 });
 
 import { useChatController } from "./use-chat-controller";
+import { api } from "@multica/core/api";
 
 // --- Fixtures ---------------------------------------------------------------
 function makeSession(
@@ -464,5 +471,107 @@ describe("useChatController durable draft restores (#5219)", () => {
     });
 
     expect(result.current.restoreDraftRequest?.serverRestoreId).toBe("msg-1");
+  });
+});
+
+// After a send, the composer is scrubbed only if the user is still on the
+// session they sent from — otherwise the shared editor is showing a different
+// draft and clearing it would wipe visible input. MUL-4864 changes what
+// "still here" means: with ONE new-chat draft, the composer no longer belongs
+// to an agent, so only `activeSessionId` can answer it.
+describe("useChatController.handleSend — compose target tracking", () => {
+  beforeEach(() => {
+    h.store.setActiveSession.mockClear();
+    h.createSessionMutate.mockClear();
+    h.createSessionMutate.mockResolvedValue({ id: "new-session" });
+    vi.mocked(api.sendChatMessage).mockResolvedValue({
+      message_id: "msg-1",
+      task_id: "task-1",
+      created_at: new Date(0).toISOString(),
+    } as unknown as Awaited<ReturnType<typeof api.sendChatMessage>>);
+  });
+
+  function sendFrom(activeSessionId: string | null, whileSending?: () => void) {
+    h.store.activeSessionId = activeSessionId;
+    h.store.selectedAgentId = "agent-a";
+    h.sessions = [sA];
+    h.agents = [agentA];
+    const { result } = renderHook(() => useChatController());
+    h.store.setActiveSession.mockClear();
+    const commitInput = vi.fn();
+    return {
+      commitInput,
+      send: () =>
+        act(async () => {
+          const pending = result.current.handleSend("hello", undefined, commitInput);
+          // Runs between ensureSession and the commit — the window the user
+          // actually races with when they touch the picker after hitting send.
+          whileSending?.();
+          await pending;
+        }),
+    };
+  }
+
+  it("scrubs the composer after a new chat's first send", async () => {
+    const { commitInput, send } = sendFrom(null);
+    await send();
+
+    expect(commitInput).toHaveBeenCalledWith(
+      expect.objectContaining({ clearEditor: true, extraDraftKeys: ["new-session"] }),
+    );
+    expect(h.store.setActiveSession).toHaveBeenCalledWith("new-session");
+  });
+
+  it("scrubs the composer even if the agent picker moved mid-send", async () => {
+    // The sent text is still sitting in the one shared composer. Leaving it
+    // there would arm a second, unintended send to the agent just picked.
+    const { commitInput, send } = sendFrom(null, () => {
+      h.store.selectedAgentId = "agent-b";
+    });
+    await send();
+
+    expect(commitInput).toHaveBeenCalledWith(
+      expect.objectContaining({ clearEditor: true, extraDraftKeys: ["new-session"] }),
+    );
+    // The message goes to the agent selected when Send was pressed — a later
+    // flick of the picker does not re-route work already on its way.
+    expect(h.createSessionMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ agent_id: "agent-a" }),
+    );
+    // …and that session is what opens, so the user sees the reply they asked for.
+    expect(h.store.setActiveSession).toHaveBeenCalledWith("new-session");
+  });
+
+  it("keeps the input when session create fails, and opens nothing", async () => {
+    h.createSessionMutate.mockRejectedValue(new Error("create failed"));
+    const { commitInput, send } = sendFrom(null);
+    await send();
+
+    // No commit = the draft is never cleared, so the user's words survive.
+    expect(commitInput).not.toHaveBeenCalled();
+    expect(h.store.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("leaves the composer alone when the user navigated to another session mid-send", async () => {
+    // Genuine navigation: the editor now shows sB's draft, which this send has
+    // no business clearing. Fire-and-forget — the reply surfaces as unread.
+    const { commitInput, send } = sendFrom(null, () => {
+      h.store.activeSessionId = "sB";
+    });
+    await send();
+
+    expect(commitInput).toHaveBeenCalledWith(
+      expect.objectContaining({ clearEditor: false, extraDraftKeys: ["new-session"] }),
+    );
+    expect(h.store.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("still clears the sent draft when sending from an existing session", async () => {
+    const { commitInput, send } = sendFrom("sA");
+    await send();
+
+    expect(commitInput).toHaveBeenCalledWith(
+      expect.objectContaining({ clearEditor: true, extraDraftKeys: ["sA"] }),
+    );
   });
 });

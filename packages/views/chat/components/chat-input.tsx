@@ -12,7 +12,7 @@ import {
 } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
-import { useChatStore, newSessionDraftKey } from "@multica/core/chat";
+import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
@@ -22,6 +22,8 @@ import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
 const EMPTY_ATTACHMENTS: Attachment[] = [];
+/** Editor identity for the chat composer — see the editorKey note below. */
+const CHAT_COMPOSER_EDITOR_KEY = "chat-composer";
 
 function attachmentReferenceUrls(attachment: Attachment): string[] {
   const withUploadFields = attachment as Attachment & {
@@ -129,36 +131,35 @@ export function ChatInput({
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
-  const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   // Two keys with deliberately different concerns:
   //
-  // `draftKey` — zustand storage key. Scopes the in-progress draft per
-  // session so different sessions don't bleed text into each other; for
-  // brand-new chats it falls back to a per-agent slot so switching agents
-  // mid-compose gives each agent its own draft. This is a STORAGE key, not
-  // a React identity.
+  // `draftKey` — zustand storage key. Scopes the in-progress draft per session
+  // so different sessions don't bleed text into each other. An uncreated chat
+  // uses ONE slot per workspace, deliberately NOT keyed by agent: the composer
+  // is "the chat I have not created yet", and `selectedAgentId` only decides
+  // where the first send goes (MUL-4864). This is a STORAGE key, not a React
+  // identity.
   //
-  // `editorKey` — React `key` on the ContentEditor. Forces a fresh editor
-  // instance when the user explicitly switches agent. Placeholder text itself
-  // no longer depends on this: ContentEditor's placeholder-sync effect
-  // refreshes it live (e.g. across archived ↔ active sessions of the SAME
-  // agent, where this key does not change). A cancelled-run draft restore
-  // does NOT bump this key either: it just writes
-  // the restored text into `inputDraft`, and the editor's own
-  // defaultValue-sync effect (content-editor.tsx) pushes it into the live
-  // instance. There is no second copy of the draft to drift or resurface.
-  // Crucially this does NOT include `activeSessionId`: when the user
-  // uploads a file in a brand-new chat, `handleUploadFile` first awaits
-  // `ensureSession` which lazily creates the session and flips
-  // `activeSessionId` from null → uuid mid-upload. If the editor key
-  // depended on session id, that flip would unmount the editor right as
-  // the blob preview was inserted, dropping the in-progress upload's
-  // image node before file-upload.ts could swap it for the CDN URL — the
-  // user would see the image flash on then disappear. Keeping editor
-  // identity stable across the lazy-create event is what makes
-  // first-upload-creates-session work the same as second-upload.
-  const draftKey =
-    draftKeyOverride ?? activeSessionId ?? newSessionDraftKey(selectedAgentId);
+  // `editorKey` — React `key` on the ContentEditor, i.e. editor identity. It is
+  // constant for the chat composer, because nothing about switching what you
+  // are composing to should throw away the instance you are typing in:
+  //   - Agent switch: same draft slot now, so a remount would only serve to
+  //     drop the last <100ms of typing the draft debounce has not persisted.
+  //   - Placeholder: ContentEditor's placeholder-sync effect refreshes it live,
+  //     so it never needed a remount.
+  //   - Draft restore (a cancelled run, a failed send): writes into
+  //     `inputDraft`, and the editor's defaultValue-sync effect pushes it into
+  //     the live instance. There is no second copy to drift or resurface.
+  //   - Session switch / lazy create: when the user uploads a file in a
+  //     brand-new chat, `handleUploadFile` awaits `ensureSession`, which flips
+  //     `activeSessionId` from null → uuid mid-upload. A session-keyed editor
+  //     would unmount right as the blob preview landed, dropping the image node
+  //     before file-upload.ts could swap in the CDN URL — the user would watch
+  //     the image flash on and vanish. Stable identity is what makes
+  //     first-upload-creates-session behave like every later upload.
+  // Embedded surfaces (Agent Builder) still pass `editorKeyOverride` to isolate
+  // their own composer.
+  const draftKey = draftKeyOverride ?? activeSessionId ?? DRAFT_NEW_SESSION;
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const draftAttachments = useChatStore(
@@ -181,7 +182,7 @@ export function ChatInput({
   // reads the live editor and bails when it is empty.
   const hasNothingToSend = isEmpty && !inputDraft.trim();
   const appliedRestoreIdRef = useRef<string | null>(null);
-  const editorKey = editorKeyOverride ?? selectedAgentId ?? "no-agent";
+  const editorKey = editorKeyOverride ?? CHAT_COMPOSER_EDITOR_KEY;
   // Submit gate. `uploading` disables the SubmitButton the instant an upload
   // starts; `isBlocked()` is re-read inside handleSend for the paths that skip
   // the button entirely (Mod+Enter mid-paste, drag-drop racing the keyboard).
@@ -409,8 +410,8 @@ export function ChatInput({
       >
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
           <ContentEditor
-            // See the editorKey / draftKey split note above — editorKey
-            // intentionally does not depend on activeSessionId.
+            // See the editorKey / draftKey split note above — editor identity
+            // intentionally tracks neither the session nor the agent.
             key={editorKey}
             ref={editorRef}
             defaultValue={inputDraft}

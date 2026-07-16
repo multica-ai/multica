@@ -64,6 +64,28 @@ export function deriveChatTitle(content: string): string {
   return cleaned.slice(0, CHAT_TITLE_MAX - 1).trimEnd() + "…";
 }
 
+/**
+ * After a send resolves: is the user still composing to the target they sent
+ * from? Decides whether to scrub the composer and open the sent session, or
+ * treat the send as fire-and-forget (the reply surfaces as unread instead).
+ *
+ * The active session answers this on its own, deliberately. The new-chat
+ * composer is ONE box per workspace (see DRAFT_NEW_SESSION), so moving the
+ * agent picker re-points where the next send goes without moving the view or
+ * the draft slot — that is not "navigating away" (MUL-4864). Counting it as
+ * such would leave a completed send's text sitting in the composer, primed to
+ * be sent a second time to the agent just picked.
+ *
+ * Shared by both send chains — the chat tab's controller and the floating
+ * ChatWindow — so the rule cannot drift between the two surfaces.
+ */
+export function isStillOnComposeTarget(
+  liveActiveSessionId: string | null,
+  sentFromSessionId: string | null,
+): boolean {
+  return liveActiveSessionId === sentFromSessionId;
+}
+
 // True when a session has an in-flight optimistic write — an `optimistic-`
 // message or a pending task in the cache. That is the signal of a just-created
 // (or actively-sending) session still awaiting server confirmation, before the
@@ -497,10 +519,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
         status: "queued",
         created_at: sentAt,
       });
+      // Cache primed → safe to publish the new active session, but only if the
+      // user hasn't navigated away mid-send. See isStillOnComposeTarget.
       const live = useChatStore.getState();
-      const stillOnSourceSession =
-        live.activeSessionId === activeSessionId &&
-        (activeSessionId !== null || live.selectedAgentId === selectedAgentId);
+      const stillOnSourceSession = isStillOnComposeTarget(live.activeSessionId, activeSessionId);
       if (stillOnSourceSession) {
         setActiveSession(sessionId);
       }
@@ -569,7 +591,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
     },
     [
       activeSessionId,
-      selectedAgentId,
       activeAgent,
       isAgentArchived,
       ensureSession,
