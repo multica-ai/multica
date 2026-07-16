@@ -110,45 +110,57 @@ func (q *Queries) CountWorkspaceIssueStatuses(ctx context.Context, workspaceID p
 }
 
 const createCustomIssueStatus = `-- name: CreateCustomIssueStatus :one
+WITH ws AS (
+    SELECT id FROM workspace WHERE id = $7::uuid FOR KEY SHARE
+)
 INSERT INTO issue_status (
     workspace_id, name, description, icon, color, category, system_key, is_default, position
 )
-SELECT $1::uuid,
+SELECT ws.id,
+       $1::text,
        $2::text,
        $3::text,
        $4::text,
        $5::text,
-       $6::text,
-       NULL,
-       $7::bool,
+       NULL::text,
+       $6::bool,
        COALESCE((SELECT MAX(position) FROM issue_status
-                 WHERE workspace_id = $1::uuid
-                   AND category = $6::text), 0) + 1
+                 WHERE workspace_id = ws.id
+                   AND category = $5::text), 0) + 1
+FROM ws
 RETURNING id, workspace_id, name, description, icon, color, category, system_key, is_default, position, archived_at, created_at, updated_at
 `
 
 type CreateCustomIssueStatusParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
 	Icon        string      `json:"icon"`
 	Color       string      `json:"color"`
 	Category    string      `json:"category"`
 	IsDefault   bool        `json:"is_default"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
 // Custom statuses always have system_key = NULL and append to the end of their
 // Category: position = max(position within category) + 1, so they sort after
 // the built-ins of the same Category.
+//
+// The `WITH ws ... FOR KEY SHARE` clause is the no-FK workspace existence gate
+// (mirrors EnsureWorkspaceSystemIssueStatuses). It takes the same lock the
+// workspace delete/create protocol uses (LockWorkspaceForChatSessionCreate), so
+// a concurrent DeleteWorkspace (FOR UPDATE) cannot interleave: if the workspace
+// row is already gone, ws is empty and zero rows are inserted, so a create that
+// lost the race to a workspace delete can never leave an orphan status behind.
+// Zero rows makes this :one return pgx.ErrNoRows, which the handler maps to 404.
 func (q *Queries) CreateCustomIssueStatus(ctx context.Context, arg CreateCustomIssueStatusParams) (IssueStatus, error) {
 	row := q.db.QueryRow(ctx, createCustomIssueStatus,
-		arg.WorkspaceID,
 		arg.Name,
 		arg.Description,
 		arg.Icon,
 		arg.Color,
 		arg.Category,
 		arg.IsDefault,
+		arg.WorkspaceID,
 	)
 	var i IssueStatus
 	err := row.Scan(

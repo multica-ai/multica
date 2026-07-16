@@ -80,20 +80,32 @@ WHERE workspace_id = $1 AND system_key IS NULL AND archived_at IS NULL;
 -- Custom statuses always have system_key = NULL and append to the end of their
 -- Category: position = max(position within category) + 1, so they sort after
 -- the built-ins of the same Category.
+--
+-- The `WITH ws ... FOR KEY SHARE` clause is the no-FK workspace existence gate
+-- (mirrors EnsureWorkspaceSystemIssueStatuses). It takes the same lock the
+-- workspace delete/create protocol uses (LockWorkspaceForChatSessionCreate), so
+-- a concurrent DeleteWorkspace (FOR UPDATE) cannot interleave: if the workspace
+-- row is already gone, ws is empty and zero rows are inserted, so a create that
+-- lost the race to a workspace delete can never leave an orphan status behind.
+-- Zero rows makes this :one return pgx.ErrNoRows, which the handler maps to 404.
+WITH ws AS (
+    SELECT id FROM workspace WHERE id = sqlc.arg('workspace_id')::uuid FOR KEY SHARE
+)
 INSERT INTO issue_status (
     workspace_id, name, description, icon, color, category, system_key, is_default, position
 )
-SELECT sqlc.arg('workspace_id')::uuid,
+SELECT ws.id,
        sqlc.arg('name')::text,
        sqlc.arg('description')::text,
        sqlc.arg('icon')::text,
        sqlc.arg('color')::text,
        sqlc.arg('category')::text,
-       NULL,
+       NULL::text,
        sqlc.arg('is_default')::bool,
        COALESCE((SELECT MAX(position) FROM issue_status
-                 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+                 WHERE workspace_id = ws.id
                    AND category = sqlc.arg('category')::text), 0) + 1
+FROM ws
 RETURNING *;
 
 -- name: UpdateIssueStatusFields :one

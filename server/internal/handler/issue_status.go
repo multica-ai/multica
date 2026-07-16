@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -113,6 +114,11 @@ type CreateIssueStatusRequest struct {
 	IsDefault   bool   `json:"is_default"`
 }
 
+// UpdateIssueStatusRequest carries only the mutable fields. The immutable fields
+// (category / system_key / workspace_id) are intentionally absent here: their
+// presence in the request body is detected separately on the raw JSON so an
+// explicit `null` is still rejected (plan §5.3), which a pointer decode cannot
+// distinguish from an omitted key.
 type UpdateIssueStatusRequest struct {
 	Name        *string  `json:"name"`
 	Description *string  `json:"description"`
@@ -120,12 +126,11 @@ type UpdateIssueStatusRequest struct {
 	Color       *string  `json:"color"`
 	Position    *float64 `json:"position"`
 	IsDefault   *bool    `json:"is_default"`
-	// Immutable fields. They are decoded only to reject the request loudly if a
-	// caller sends them (plan §5.3), never applied.
-	Category    *string `json:"category"`
-	SystemKey   *string `json:"system_key"`
-	WorkspaceID *string `json:"workspace_id"`
 }
+
+// immutableIssueStatusFields are rejected whenever their key appears in a PATCH
+// body, even as an explicit JSON null (plan §5.3).
+var immutableIssueStatusFields = []string{"category", "system_key", "workspace_id"}
 
 func issueStatusToResponse(s db.IssueStatus) IssueStatusResponse {
 	resp := IssueStatusResponse{
@@ -158,11 +163,17 @@ func issueStatusToResponse(s db.IssueStatus) IssueStatusResponse {
 // Validation
 // ---------------------------------------------------------------------------
 
-// validateIssueStatusName trims and validates a display name. Beyond length and
-// control-char rules it rejects the 7 reserved alias tokens: the alias resolver
-// claims those first, so a status named "todo" or "in_review" could never be
-// targeted by its own name (plan §3.1).
-func validateIssueStatusName(raw string) (string, error) {
+// validateIssueStatusName trims and validates a display name.
+//
+// allowReserved controls the reserved-alias rule (plan §3.1): custom statuses
+// (allowReserved=false) may not take one of the 7 reserved alias tokens, because
+// the alias resolver claims those first, so a custom status named "todo" or
+// "in_review" could never be targeted by its own name. Built-in statuses
+// (allowReserved=true) are seeded with names like "Todo"/"Done"/"Blocked" that
+// normalize onto those tokens, so renaming one and renaming it back to its
+// original name must stay allowed — the reserved rule would otherwise brick the
+// built-ins' own default names. Length and control-char rules always apply.
+func validateIssueStatusName(raw string, allowReserved bool) (string, error) {
 	for _, r := range raw {
 		if unicode.IsControl(r) {
 			return "", errors.New("name cannot contain tabs, newlines, or control characters")
@@ -175,7 +186,7 @@ func validateIssueStatusName(raw string) (string, error) {
 	if utf8.RuneCountInString(name) > maxIssueStatusNameLen {
 		return "", fmt.Errorf("name must be %d characters or fewer", maxIssueStatusNameLen)
 	}
-	if issuestatus.IsReservedStatusToken(name) {
+	if !allowReserved && issuestatus.IsReservedStatusToken(name) {
 		return "", fmt.Errorf("%q is a reserved status alias and cannot be a status name", name)
 	}
 	return name, nil
@@ -239,17 +250,21 @@ func (h *Handler) requireIssueStatusAdmin(w http.ResponseWriter, r *http.Request
 	return workspaceID, userID, true
 }
 
-// withIssueStatusLock runs fn inside a transaction holding a workspace-scoped
+// withIssueStatusLock runs fn inside a transaction holding the workspace-scoped
 // advisory lock, serializing catalog writes for the workspace: the active-count
 // cap, name-uniqueness, and the clear-then-set default swap are all
-// read-then-write and must not interleave. The lock is transaction-scoped.
-func (h *Handler) withIssueStatusLock(r *http.Request, workspaceID string, fn func(q *db.Queries) error) error {
+// read-then-write and must not interleave. The lock key is derived from the
+// canonical workspace UUID (issuestatus.WorkspaceLockKey), the single protocol
+// every status write shares, so a differently-formatted UUID cannot take a
+// distinct lock and bypass mutual exclusion. The lock is transaction-scoped and
+// releases on commit or rollback.
+func (h *Handler) withIssueStatusLock(r *http.Request, wsUUID pgtype.UUID, fn func(q *db.Queries) error) error {
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(r.Context())
-	if _, err := tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", "issuestatus:"+workspaceID); err != nil {
+	if err := issuestatus.LockWorkspaceForStatusWrite(r.Context(), tx, wsUUID); err != nil {
 		return err
 	}
 	if err := fn(h.Queries.WithTx(tx)); err != nil {
@@ -263,8 +278,11 @@ func (h *Handler) withIssueStatusLock(r *http.Request, workspaceID string, fn fu
 // ---------------------------------------------------------------------------
 
 // ListIssueStatuses (GET /api/issue-statuses) returns the workspace catalog plus
-// the alias resolution table. Readable by any workspace member and by agents —
-// the alias table is exactly what an agent reads before calling `issue status`.
+// the alias resolution table. The active catalog is readable by any workspace
+// member and by agents — the alias table is exactly what an agent reads before
+// calling `issue status`. include_archived=true is an admin-only management view
+// (plan §5.1): it exposes soft-deleted statuses, so it is gated behind the same
+// owner/admin check as catalog writes (and rejects agents).
 func (h *Handler) ListIssueStatuses(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
@@ -272,6 +290,11 @@ func (h *Handler) ListIssueStatuses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	includeArchived := r.URL.Query().Get("include_archived") == "true"
+	if includeArchived {
+		if _, _, adminOK := h.requireIssueStatusAdmin(w, r); !adminOK {
+			return
+		}
+	}
 	statuses, err := h.Queries.ListWorkspaceIssueStatuses(r.Context(), db.ListWorkspaceIssueStatusesParams{
 		WorkspaceID:     wsUUID,
 		IncludeArchived: includeArchived,
@@ -324,7 +347,8 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	name, err := validateIssueStatusName(req.Name)
+	// Custom statuses may never take a reserved alias token (allowReserved=false).
+	name, err := validateIssueStatusName(req.Name, false)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -357,7 +381,7 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		httpStatus, httpMsg = status, msg
 		return errClientRejected
 	}
-	err = h.withIssueStatusLock(r, workspaceID, func(q *db.Queries) error {
+	err = h.withIssueStatusLock(r, wsUUID, func(q *db.Queries) error {
 		active, err := q.CountActiveCustomIssueStatuses(r.Context(), wsUUID)
 		if err != nil {
 			return err
@@ -381,6 +405,13 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 			Category:    category,
 			IsDefault:   req.IsDefault,
 		})
+		// Zero rows means the FOR KEY SHARE existence gate found no workspace: a
+		// concurrent DeleteWorkspace won the race. Surface it as 404 instead of a
+		// 500, and roll back (the ClearCategoryDefault above touched nothing since
+		// the workspace is gone).
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fail(http.StatusNotFound, "workspace not found")
+		}
 		return err
 	})
 	if err != nil {
@@ -414,14 +445,30 @@ func (h *Handler) UpdateIssueStatus(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req UpdateIssueStatusRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// Read the body once: presence of an immutable field is detected on the raw
+	// JSON (so an explicit `null` still counts as present), then the same bytes
+	// are decoded into the mutable-field struct.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	// Immutable fields are rejected loudly, not silently ignored (plan §5.3).
-	if req.Category != nil || req.SystemKey != nil || req.WorkspaceID != nil {
-		writeError(w, http.StatusBadRequest, "immutable_field: category, system_key, and workspace_id cannot be changed; create a new status and migrate issues instead")
+	var rawFields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &rawFields); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	// Immutable fields are rejected loudly whenever the key is present — even as an
+	// explicit null — never silently ignored (plan §5.3).
+	for _, field := range immutableIssueStatusFields {
+		if _, present := rawFields[field]; present {
+			writeError(w, http.StatusBadRequest, "immutable_field: category, system_key, and workspace_id cannot be changed; create a new status and migrate issues instead")
+			return
+		}
+	}
+	var req UpdateIssueStatusRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -432,7 +479,7 @@ func (h *Handler) UpdateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		httpStatus, httpMsg = status, msg
 		return errClientRejected
 	}
-	err := h.withIssueStatusLock(r, workspaceID, func(q *db.Queries) error {
+	err = h.withIssueStatusLock(r, wsUUID, func(q *db.Queries) error {
 		existing, err := q.GetWorkspaceIssueStatus(r.Context(), db.GetWorkspaceIssueStatusParams{ID: idUUID, WorkspaceID: wsUUID})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -443,7 +490,10 @@ func (h *Handler) UpdateIssueStatus(w http.ResponseWriter, r *http.Request) {
 
 		params := db.UpdateIssueStatusFieldsParams{ID: idUUID, WorkspaceID: wsUUID}
 		if req.Name != nil {
-			name, err := validateIssueStatusName(*req.Name)
+			// Built-in statuses may bear their reserved default names ("Todo",
+			// "Done", ...), so renaming one and back stays allowed; custom statuses
+			// may not take a reserved alias token.
+			name, err := validateIssueStatusName(*req.Name, existing.SystemKey.Valid)
 			if err != nil {
 				return fail(http.StatusBadRequest, err.Error())
 			}
@@ -555,7 +605,7 @@ func (h *Handler) DeleteIssueStatus(w http.ResponseWriter, r *http.Request) {
 		httpStatus, httpMsg = status, msg
 		return errClientRejected
 	}
-	err := h.withIssueStatusLock(r, workspaceID, func(q *db.Queries) error {
+	err := h.withIssueStatusLock(r, wsUUID, func(q *db.Queries) error {
 		existing, err := q.GetWorkspaceIssueStatus(r.Context(), db.GetWorkspaceIssueStatusParams{ID: idUUID, WorkspaceID: wsUUID})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
