@@ -98,10 +98,20 @@ type WSConnectorConfig struct {
 	Enricher Enricher
 
 	// EnrichTimeout caps a single message's enrichment (at most two
-	// GetMessage calls). It MUST stay well under Lark's ~3s long-conn
-	// ACK window, since enrichment runs before the frame is ACKed.
-	// Zero defaults to 2 seconds.
+	// GetMessage calls). It is also bounded by the shared AckTimeout.
+	// Zero defaults to 500 milliseconds.
 	EnrichTimeout time.Duration
+
+	// AckTimeout is the shared budget for enrichment, dispatch (including
+	// media resolution and DB writes), and the ACK write. It MUST stay below
+	// Lark's ~3s long-conn ACK deadline. Zero defaults to 2.5 seconds.
+	AckTimeout time.Duration
+
+	// AckWriteReserve is held back from AckTimeout for serializing and
+	// writing the ACK. Enrichment and dispatch receive a context whose
+	// deadline is AckTimeout-AckWriteReserve after frame handling starts.
+	// Zero defaults to 250 milliseconds.
+	AckWriteReserve time.Duration
 
 	// CredentialsProvider returns the InstallationCredentials the
 	// EndpointFetcher needs. Typically wraps
@@ -154,7 +164,13 @@ func (c WSConnectorConfig) withDefaults() WSConnectorConfig {
 		c.ChunkTTL = 5 * time.Second
 	}
 	if c.EnrichTimeout == 0 {
-		c.EnrichTimeout = 2 * time.Second
+		c.EnrichTimeout = 500 * time.Millisecond
+	}
+	if c.AckTimeout == 0 {
+		c.AckTimeout = 2500 * time.Millisecond
+	}
+	if c.AckWriteReserve == 0 {
+		c.AckWriteReserve = 250 * time.Millisecond
 	}
 	if c.Now == nil {
 		c.Now = time.Now
@@ -180,7 +196,11 @@ func NewWSLongConnConnector(cfg WSConnectorConfig) (*WSLongConnConnector, error)
 	if cfg.CredentialsProvider == nil {
 		return nil, errors.New("lark ws connector: CredentialsProvider is required")
 	}
-	return &WSLongConnConnector{cfg: cfg.withDefaults()}, nil
+	cfg = cfg.withDefaults()
+	if cfg.AckWriteReserve >= cfg.AckTimeout {
+		return nil, errors.New("lark ws connector: AckWriteReserve must be less than AckTimeout")
+	}
+	return &WSLongConnConnector{cfg: cfg}, nil
 }
 
 // Run satisfies EventConnector. Opens one WebSocket session, reads
@@ -381,6 +401,14 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 			continue
 		}
 
+		// Enrichment and dispatch share one pre-ACK budget. Holding back a
+		// fixed write reserve prevents independently bounded network work
+		// (enrichment, then media resolution) from consuming Lark's entire
+		// ~3s ACK window before the DB path and ACK write run.
+		ackDeadline := c.cfg.Now().Add(c.cfg.AckTimeout)
+		processDeadline := ackDeadline.Add(-c.cfg.AckWriteReserve)
+		processCtx, cancelProcess := context.WithDeadline(ctx, processDeadline)
+
 		// Enrich the decoded body with explicitly-attached context
 		// (quoted reply / forwarded bundle) before emitting. This runs
 		// before the frame ACK, so it is bounded by EnrichTimeout and
@@ -388,17 +416,18 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 		// pipeline. Most messages need no enrichment and return
 		// immediately without any network call.
 		if c.cfg.Enricher != nil {
-			enrichCtx, cancelEnrich := context.WithTimeout(ctx, c.cfg.EnrichTimeout)
+			enrichCtx, cancelEnrich := context.WithTimeout(processCtx, c.cfg.EnrichTimeout)
 			msg = c.cfg.Enricher.Enrich(enrichCtx, msg, creds)
 			cancelEnrich()
 		}
 
-		_, emitErr := emit(ctx, msg)
+		_, emitErr := emit(processCtx, msg)
+		cancelProcess()
 		if emitErr != nil {
 			// Infra failure from Dispatcher (DB down, etc.). NACK so
 			// Lark retries this event on a healthy replica; then
 			// return so the Hub backs off and reconnects.
-			if werr := c.writeFrame(&writeMu, conn, NewAckFrame(frame, false)); werr != nil {
+			if werr := c.writeFrameBefore(&writeMu, conn, NewAckFrame(frame, false), ackDeadline); werr != nil {
 				log.Warn("lark ws connector: nack write failed", "err", werr.Error())
 			}
 			log.Error("lark ws connector: emit infra error",
@@ -407,7 +436,7 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 			)
 			return fmt.Errorf("dispatch: %w", emitErr)
 		}
-		if werr := c.writeFrame(&writeMu, conn, NewAckFrame(frame, true)); werr != nil {
+		if werr := c.writeFrameBefore(&writeMu, conn, NewAckFrame(frame, true), ackDeadline); werr != nil {
 			log.Warn("lark ws connector: ack write failed", "err", werr.Error())
 			return fmt.Errorf("write ack: %w", werr)
 		}
@@ -418,10 +447,17 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 // message under the connector's write mutex. Caller MUST NOT hold
 // writeMu when calling.
 func (c *WSLongConnConnector) writeFrame(mu *sync.Mutex, conn WSConn, f *Frame) error {
+	return c.writeFrameBefore(mu, conn, f, time.Time{})
+}
+
+func (c *WSLongConnConnector) writeFrameBefore(mu *sync.Mutex, conn WSConn, f *Frame, before time.Time) error {
 	payload := f.Marshal()
 	mu.Lock()
 	defer mu.Unlock()
 	deadline := c.cfg.Now().Add(c.cfg.WriteTimeout)
+	if !before.IsZero() && before.Before(deadline) {
+		deadline = before
+	}
 	if err := conn.SetWriteDeadline(deadline); err != nil {
 		return err
 	}
