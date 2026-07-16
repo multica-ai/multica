@@ -1826,8 +1826,8 @@ func TestCreateWorktreeRejectsNewWorktreeReplacement(t *testing.T) {
 				}
 				if replacementKind == "worktree" {
 					entries, readErr := os.ReadDir(worktreePath + "-moved")
-					if readErr != nil || len(entries) != 0 {
-						t.Fatalf("displaced provisional checkout was not emptied: entries=%v err=%v create error=%v", entries, readErr, err)
+					if readErr != nil || len(entries) == 0 {
+						t.Fatalf("displaced provisional checkout was modified: entries=%v err=%v create error=%v", entries, readErr, err)
 					}
 				}
 			})
@@ -1974,70 +1974,6 @@ func TestCreateWorktreePublishesFinalBacklinksWithoutStagingIdentity(t *testing.
 	}
 	if len(entries) != 0 {
 		t.Fatalf("published staging root is not empty: %v", entries)
-	}
-}
-
-func TestRemoveDirectoryContentsAtFDRejectsEntryReplacement(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("descriptor-relative cleanup is unsupported on windows")
-	}
-
-	for _, kind := range []string{"file", "directory"} {
-		t.Run(kind, func(t *testing.T) {
-			root := t.TempDir()
-			entryPath := filepath.Join(root, "owned")
-			movedPath := filepath.Join(root, "owned-moved")
-			replacementSentinel := filepath.Join(entryPath, "keep.txt")
-			if kind == "directory" {
-				if err := os.Mkdir(entryPath, 0o755); err != nil {
-					t.Fatalf("create owned directory: %v", err)
-				}
-			} else if err := os.WriteFile(entryPath, []byte("owned\n"), 0o644); err != nil {
-				t.Fatalf("create owned file: %v", err)
-			}
-			rootHandle, err := openDirectoryHandle(root)
-			if err != nil {
-				t.Fatalf("open cleanup root: %v", err)
-			}
-			defer rootHandle.file.Close()
-			replaced := false
-			err = removeDirectoryContentsAtFDWithHook(int(rootHandle.file.Fd()), func(_ int, name string) {
-				if replaced || name != "owned" {
-					return
-				}
-				replaced = true
-				if err := os.Rename(entryPath, movedPath); err != nil {
-					t.Fatalf("move owned cleanup entry: %v", err)
-				}
-				if kind == "directory" {
-					if err := os.Mkdir(entryPath, 0o755); err != nil {
-						t.Fatalf("create replacement directory: %v", err)
-					}
-					if err := os.WriteFile(replacementSentinel, []byte("keep\n"), 0o644); err != nil {
-						t.Fatalf("write replacement sentinel: %v", err)
-					}
-					return
-				}
-				if err := os.WriteFile(entryPath, []byte("keep\n"), 0o644); err != nil {
-					t.Fatalf("create replacement file: %v", err)
-				}
-			})
-			if err == nil || !strings.Contains(err.Error(), "entry changed before removal") {
-				t.Fatalf("cleanup did not reject entry replacement: %v", err)
-			}
-			if !replaced {
-				t.Fatal("replacement hook did not run")
-			}
-			if kind == "directory" {
-				if got, readErr := os.ReadFile(replacementSentinel); readErr != nil || string(got) != "keep\n" {
-					t.Fatalf("replacement directory was modified: contents=%q err=%v", got, readErr)
-				}
-				return
-			}
-			if got, readErr := os.ReadFile(entryPath); readErr != nil || string(got) != "keep\n" {
-				t.Fatalf("replacement file was modified: contents=%q err=%v", got, readErr)
-			}
-		})
 	}
 }
 

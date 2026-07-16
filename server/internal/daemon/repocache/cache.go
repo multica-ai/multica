@@ -1292,7 +1292,10 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		}
 		cleanupCtx := context.WithoutCancel(ctx)
 		rollbackErr := publication.Rollback(publicationHandle)
-		cleanupErr := c.cleanupUnpublishedWorktreeHandle(cleanupCtx, bareHandle, publicationHandle, publication.StagingPath(), actualBranch)
+		var cleanupErr error
+		if publication.CleanupAllowed() {
+			cleanupErr = c.cleanupUnpublishedWorktreeHandle(cleanupCtx, bareHandle, publication.StagingPath(), actualBranch)
+		}
 		var closeErr error
 		if publicationHandle != nil {
 			closeErr = publicationHandle.Close()
@@ -1538,30 +1541,16 @@ func (c *Cache) runWorktreeAddHandle(ctx context.Context, handle *bareCacheHandl
 	return nil
 }
 
-func (c *Cache) cleanupUnpublishedWorktreeHandle(ctx context.Context, handle *bareCacheHandle, worktree *worktreeHandle, worktreePath, branchName string) error {
+func (c *Cache) cleanupUnpublishedWorktreeHandle(ctx context.Context, handle *bareCacheHandle, worktreePath, branchName string) error {
 	out, err := c.git.combinedOutputInBareCache(ctx, 0, handle, "worktree", "remove", "--force", worktreePath)
-	var cleanupErr error
 	if err != nil {
-		if fallbackErr := cleanupOwnedWorktreeHandle(worktree); fallbackErr != nil {
-			cleanupErr = errors.Join(
-				fmt.Errorf("remove unpublished worktree: %s: %w", strings.TrimSpace(string(out)), err),
-				fallbackErr,
-			)
-		}
+		return fmt.Errorf("remove unpublished worktree: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	out, err = c.git.combinedOutputInBareCache(ctx, 0, handle, "branch", "-D", branchName)
 	if err != nil {
-		branchRef := "refs/heads/" + branchName
-		fallbackOut, fallbackErr := c.git.combinedOutputInBareCache(ctx, 0, handle, "update-ref", "-d", branchRef)
-		if fallbackErr != nil {
-			cleanupErr = errors.Join(
-				cleanupErr,
-				fmt.Errorf("delete unpublished worktree branch: %s: %w", strings.TrimSpace(string(out)), err),
-				fmt.Errorf("delete unpublished worktree ref: %s: %w", strings.TrimSpace(string(fallbackOut)), fallbackErr),
-			)
-		}
+		return fmt.Errorf("delete unpublished worktree branch: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	return cleanupErr
+	return nil
 }
 
 // isBranchCollisionError returns true if err is specifically about a branch

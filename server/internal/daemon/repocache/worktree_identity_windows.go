@@ -25,10 +25,7 @@ func (p *worktreePublication) Publish(*worktreeHandle) error  { return nil }
 func (p *worktreePublication) Commit()                        {}
 func (p *worktreePublication) Rollback(*worktreeHandle) error { return nil }
 func (p *worktreePublication) Close() error                   { return nil }
-func cleanupOwnedWorktreeHandle(*worktreeHandle) error        { return nil }
-func removeDirectoryContentsAtFDWithHook(int, func(int, string)) error {
-	return fmt.Errorf("descriptor-relative cleanup is unsupported on windows")
-}
+func (p *worktreePublication) CleanupAllowed() bool           { return true }
 
 func identityBoundWorktreeAccessSupported() bool {
 	return false
