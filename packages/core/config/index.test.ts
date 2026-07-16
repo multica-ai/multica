@@ -38,7 +38,7 @@ describe("configStore build-provenance state", () => {
       frontendBaseline: "",
       backendBaseline: "",
       backendBaselineStatus: "loading",
-      serverVersion: "",
+      // serverVersion removed in U4 (replaced by frontendBaseline/backendBaseline)
     });
   });
 
