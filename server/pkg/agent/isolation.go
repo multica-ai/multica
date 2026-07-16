@@ -113,14 +113,28 @@ func validateRoots(kind string, roots []string) ([]string, error) {
 }
 
 func isStableSystemPathAlias(path, resolved string) bool {
-	if runtime.GOOS != "darwin" {
+	return isStableSystemPathAliasForOS(runtime.GOOS, path, resolved)
+}
+
+func isStableSystemPathAliasForOS(goos, path, resolved string) bool {
+	var aliases map[string]string
+	switch goos {
+	case "darwin":
+		aliases = map[string]string{
+			"/etc": "/private/etc",
+			"/tmp": "/private/tmp",
+			"/var": "/private/var",
+		}
+	case "linux":
+		aliases = map[string]string{
+			"/bin":   "/usr/bin",
+			"/lib":   "/usr/lib",
+			"/lib64": "/usr/lib64",
+		}
+	default:
 		return false
 	}
-	for alias, canonical := range map[string]string{
-		"/etc": "/private/etc",
-		"/tmp": "/private/tmp",
-		"/var": "/private/var",
-	} {
+	for alias, canonical := range aliases {
 		if path == alias && resolved == canonical {
 			return true
 		}

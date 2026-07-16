@@ -78,6 +78,43 @@ func TestTaskIsolationPolicyRejectsRelativeDotDotAndMissingRoots(t *testing.T) {
 	}
 }
 
+func TestStableSystemPathAliasesArePlatformBoundAndExact(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		goos     string
+		path     string
+		resolved string
+		want     bool
+	}{
+		{name: "linux bin", goos: "linux", path: "/bin", resolved: "/usr/bin", want: true},
+		{name: "linux bin child", goos: "linux", path: "/bin/sh", resolved: "/usr/bin/sh", want: true},
+		{name: "linux lib", goos: "linux", path: "/lib", resolved: "/usr/lib", want: true},
+		{name: "linux lib64", goos: "linux", path: "/lib64", resolved: "/usr/lib64", want: true},
+		{name: "linux unexpected target", goos: "linux", path: "/lib", resolved: "/opt/lib"},
+		{name: "linux reverse alias", goos: "linux", path: "/usr/bin", resolved: "/bin"},
+		{name: "linux extended target", goos: "linux", path: "/bin", resolved: "/usr/bin/extra"},
+		{name: "linux alias prefix confusion", goos: "linux", path: "/library", resolved: "/usr/library"},
+		{name: "linux bin boundary confusion", goos: "linux", path: "/binx", resolved: "/usr/binx"},
+		{name: "linux lib64 boundary confusion", goos: "linux", path: "/lib64evil", resolved: "/usr/lib64evil"},
+		{name: "linux canonical child mismatch", goos: "linux", path: "/bin/sh", resolved: "/usr/bin/bash"},
+		{name: "linux unlisted alias", goos: "linux", path: "/sbin", resolved: "/usr/sbin"},
+		{name: "darwin var", goos: "darwin", path: "/var", resolved: "/private/var", want: true},
+		{name: "darwin var child", goos: "darwin", path: "/var/db", resolved: "/private/var/db", want: true},
+		{name: "darwin alias on linux", goos: "linux", path: "/var", resolved: "/private/var"},
+		{name: "linux alias on darwin", goos: "darwin", path: "/bin", resolved: "/usr/bin"},
+		{name: "unsupported platform", goos: "windows", path: "/bin", resolved: "/usr/bin"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isStableSystemPathAliasForOS(tt.goos, tt.path, tt.resolved); got != tt.want {
+				t.Fatalf("isStableSystemPathAliasForOS(%q, %q, %q) = %v, want %v", tt.goos, tt.path, tt.resolved, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDarwinProfileRenderingIsDeterministicAndQuotesPaths(t *testing.T) {
 	t.Parallel()
 
