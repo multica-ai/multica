@@ -108,6 +108,38 @@ describe("daemon diagnostics", () => {
     }
   });
 
+  it("rejects oversized diagnostics responses", async () => {
+    await writeCredential("test-profile");
+    for (const response of [
+      new Response("{}", {
+        status: 200,
+        headers: { "Content-Length": String((1 << 20) + 1) },
+      }),
+      new Response(`{"status":"running","padding":"${"x".repeat(1 << 20)}"}`, {
+        status: 200,
+      }),
+    ]) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+      expect(await fetchDaemonDiagnostics("test-profile", 19514)).toBeNull();
+    }
+  });
+
+  it("rejects duplicate keys, trailing content, and unknown fields", async () => {
+    await writeCredential("test-profile");
+    for (const source of [
+      '{"status":"running","status":"starting"}',
+      '{"status":"running","workspaces":[{"id":1,"id":2}]}',
+      '{"status":"running"} true',
+      '{"status":"running","unexpected":true}',
+    ]) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(new Response(source, { status: 200 })),
+      );
+      expect(await fetchDaemonDiagnostics("test-profile", 19514)).toBeNull();
+    }
+  });
+
   it("fails closed for malformed diagnostics fields", async () => {
     await writeCredential("test-profile");
     for (const payload of [
