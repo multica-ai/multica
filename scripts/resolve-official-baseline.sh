@@ -37,6 +37,7 @@ fail() {
 # commit-distance/hash suffix (-<n>-g<hash>).
 is_official_tag() {
 	local tag="$1"
+	tag="${tag#"${tag%%[![:space:]]*}"}"; tag="${tag%"${tag##*[![:space:]]}"}"
 	[[ "$tag" =~ ^v[0-9] ]] || return 1
 	# Defensive: abbrev=0 already prevents describe suffixes.
 	[[ "$tag" =~ -[0-9]+-g[0-9a-f]{4,}$ ]] && return 1
