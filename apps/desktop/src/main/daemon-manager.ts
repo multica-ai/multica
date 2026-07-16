@@ -24,6 +24,7 @@ import {
   fetchDaemonDiagnostics,
   type DiagnosticsPayload,
 } from "./daemon-diagnostics";
+import { fetchDaemonHealth } from "./daemon-health";
 import {
   daemonLifecycleUnreachable,
   isDaemonExternallyManaged,
@@ -167,29 +168,7 @@ function sendStatus(status: DaemonStatus): void {
   win?.webContents.send("daemon:status", status);
 }
 
-interface PublicHealthPayload {
-  status?: string;
-  /** Daemon's runtime.GOOS. Absent on daemons older than the #3916 fix. */
-  os?: string;
-}
-
-async function fetchHealthAtPort(
-  port: number,
-): Promise<PublicHealthPayload | null> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2_000);
-    const res = await fetch(`http://127.0.0.1:${port}/health`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!res.ok) return null;
-    const payload = (await res.json()) as PublicHealthPayload;
-    return { status: payload.status, os: payload.os };
-  } catch {
-    return null;
-  }
-}
+const fetchHealthAtPort = fetchDaemonHealth;
 
 /**
  * Validates the daemon profile's token against the backend to find out whether

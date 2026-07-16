@@ -2,10 +2,10 @@ import { constants } from "fs";
 import { open, lstat } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
+import { readBoundedDaemonJSON } from "./daemon-json";
 
 const OPERATOR_CREDENTIAL_HEADER = "X-Multica-Shutdown-Credential";
 const MAX_CREDENTIAL_BYTES = 256;
-const MAX_DIAGNOSTICS_BYTES = 1 << 20;
 const DIAGNOSTICS_FIELDS = new Set([
   "status",
   "os",
@@ -31,7 +31,21 @@ export interface DiagnosticsPayload {
   cli_version?: string;
   active_task_count?: number;
   agents?: string[];
-  workspaces?: unknown[];
+  workspaces?: Array<{ id: string; runtimes: string[] }>;
+}
+
+function isWorkspace(value: unknown): value is { id: string; runtimes: string[] } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const workspace = value as Record<string, unknown>;
+  const keys = Object.keys(workspace);
+  return (
+    keys.length === 2 &&
+    keys.includes("id") &&
+    keys.includes("runtimes") &&
+    typeof workspace.id === "string" &&
+    Array.isArray(workspace.runtimes) &&
+    workspace.runtimes.every((runtime) => typeof runtime === "string")
+  );
 }
 
 function isDiagnosticsPayload(value: unknown): value is DiagnosticsPayload {
@@ -41,7 +55,10 @@ function isDiagnosticsPayload(value: unknown): value is DiagnosticsPayload {
     Object.keys(payload).every((key) => DIAGNOSTICS_FIELDS.has(key)) &&
     (payload.status === "running" || payload.status === "starting") &&
     (payload.os === undefined || typeof payload.os === "string") &&
-    (payload.pid === undefined || typeof payload.pid === "number") &&
+    (payload.pid === undefined ||
+      (typeof payload.pid === "number" &&
+        Number.isSafeInteger(payload.pid) &&
+        payload.pid > 0)) &&
     (payload.uptime === undefined || typeof payload.uptime === "string") &&
     (payload.daemon_id === undefined || typeof payload.daemon_id === "string") &&
     (payload.device_name === undefined || typeof payload.device_name === "string") &&
@@ -54,135 +71,9 @@ function isDiagnosticsPayload(value: unknown): value is DiagnosticsPayload {
     (payload.agents === undefined ||
       (Array.isArray(payload.agents) &&
         payload.agents.every((agent) => typeof agent === "string"))) &&
-    (payload.workspaces === undefined || Array.isArray(payload.workspaces))
+    (payload.workspaces === undefined ||
+      (Array.isArray(payload.workspaces) && payload.workspaces.every(isWorkspace)))
   );
-}
-
-function rejectDuplicateJSONKeys(source: string): void {
-  let offset = 0;
-
-  function skipWhitespace(): void {
-    while (/\s/.test(source[offset] ?? "")) offset += 1;
-  }
-
-  function parseString(): string {
-    const start = offset;
-    if (source[offset++] !== '"') throw new SyntaxError("expected string");
-    while (offset < source.length) {
-      const char = source[offset++];
-      if (char === '"') return JSON.parse(source.slice(start, offset)) as string;
-      if (char === "\\") {
-        offset += 1;
-      } else if (char < " ") {
-        throw new SyntaxError("invalid control character");
-      }
-    }
-    throw new SyntaxError("unterminated string");
-  }
-
-  function parseValue(): void {
-    skipWhitespace();
-    const char = source[offset];
-    if (char === "{") {
-      parseObject();
-      return;
-    }
-    if (char === "[") {
-      parseArray();
-      return;
-    }
-    if (char === '"') {
-      parseString();
-      return;
-    }
-    const match = source
-      .slice(offset)
-      .match(/^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/);
-    if (!match) throw new SyntaxError("invalid JSON value");
-    offset += match[0].length;
-  }
-
-  function parseObject(): void {
-    offset += 1;
-    const keys = new Set<string>();
-    skipWhitespace();
-    if (source[offset] === "}") {
-      offset += 1;
-      return;
-    }
-    while (true) {
-      skipWhitespace();
-      const key = parseString();
-      if (keys.has(key)) throw new SyntaxError("duplicate JSON key");
-      keys.add(key);
-      skipWhitespace();
-      if (source[offset++] !== ":") throw new SyntaxError("expected colon");
-      parseValue();
-      skipWhitespace();
-      const separator = source[offset++];
-      if (separator === "}") return;
-      if (separator !== ",") throw new SyntaxError("expected object separator");
-    }
-  }
-
-  function parseArray(): void {
-    offset += 1;
-    skipWhitespace();
-    if (source[offset] === "]") {
-      offset += 1;
-      return;
-    }
-    while (true) {
-      parseValue();
-      skipWhitespace();
-      const separator = source[offset++];
-      if (separator === "]") return;
-      if (separator !== ",") throw new SyntaxError("expected array separator");
-    }
-  }
-
-  parseValue();
-  skipWhitespace();
-  if (offset !== source.length) throw new SyntaxError("trailing JSON content");
-}
-
-async function readBoundedJSON(response: Response): Promise<unknown> {
-  const declaredLength = response.headers.get("content-length");
-  if (declaredLength !== null) {
-    const parsedLength = Number(declaredLength);
-    if (!Number.isSafeInteger(parsedLength) || parsedLength < 0 || parsedLength > MAX_DIAGNOSTICS_BYTES) {
-      throw new Error("invalid diagnostics content length");
-    }
-  }
-  if (!response.body) throw new Error("missing diagnostics response body");
-
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_DIAGNOSTICS_BYTES) {
-        await reader.cancel();
-        throw new Error("diagnostics response exceeds 1 MiB");
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const bytes = new Uint8Array(total);
-  let position = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, position);
-    position += chunk.byteLength;
-  }
-  const source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  rejectDuplicateJSONKeys(source);
-  return JSON.parse(source) as unknown;
 }
 
 export function profileOperatorCredentialPath(profile: string): string {
@@ -248,7 +139,7 @@ export async function fetchDaemonDiagnostics(
       signal: controller.signal,
     });
     if (!res.ok) return null;
-    const payload = await readBoundedJSON(res);
+    const payload = await readBoundedDaemonJSON(res, controller.signal);
     return isDiagnosticsPayload(payload) ? payload : null;
   } catch {
     return null;

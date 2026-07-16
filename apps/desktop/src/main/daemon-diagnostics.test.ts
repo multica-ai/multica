@@ -131,6 +131,7 @@ describe("daemon diagnostics", () => {
       '{"status":"running","workspaces":[{"id":1,"id":2}]}',
       '{"status":"running"} true',
       '{"status":"running","unexpected":true}',
+      '{"status":"running","pid":1e400}',
     ]) {
       vi.stubGlobal(
         "fetch",
@@ -147,8 +148,13 @@ describe("daemon diagnostics", () => {
       { status: "stopped" },
       { status: "running", active_task_count: -1 },
       { status: "running", active_task_count: 0.5 },
+      { status: "running", pid: -1 },
+      { status: "running", pid: 0.5 },
       { status: "running", agents: ["codex", 7] },
       { status: "running", workspaces: "workspace-id" },
+      { status: "running", workspaces: [{ id: 7, runtimes: [] }] },
+      { status: "running", workspaces: [{ id: "id", runtimes: [7] }] },
+      { status: "running", workspaces: [{ id: "id", runtimes: [], extra: true }] },
     ]) {
       vi.stubGlobal(
         "fetch",
