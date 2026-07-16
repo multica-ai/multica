@@ -7,7 +7,7 @@ import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { AddToRoundAction } from "@multica/cerebro-rounds";
+import { IssueRoundsSection } from "@multica/cerebro-rounds";
 
 export function IssueDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -23,7 +23,7 @@ export function IssueDetailPage() {
     <ErrorBoundary resetKeys={[id]}>
       <IssueDetail
         issueId={id}
-        extensions={<>{roundsEnabled && <AddToRoundAction issueId={id} />}{referencesEnabled && <IssueReferenceList issueId={id} />}</>}
+        extensions={<>{roundsEnabled && <IssueRoundsSection issueId={id} />}{referencesEnabled && <IssueReferenceList issueId={id} />}</>}
       />
     </ErrorBoundary>
   );

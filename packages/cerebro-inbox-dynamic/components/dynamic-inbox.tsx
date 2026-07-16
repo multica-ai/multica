@@ -107,7 +107,7 @@ import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 import { NotesInboxBox, NoteInboxBox, NoteInboxDetail } from "@multica/cerebro-notes/views";
 import { SkillChangeInboxDetail } from "@multica/cerebro-skill-ownership/views";
 import { opensInDynamicInboxPane } from "../notification-routing";
-import { AddToRoundAction, ConnectedRoundManager, RoundsBlock, roundExcludedIssueIds, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
+import { IssueRoundsSection, ConnectedRoundManager, RoundsBlock, roundExcludedIssueIds, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -853,7 +853,7 @@ export function DynamicInbox() {
             // TECH-3598 #1 — scroll to + highlight the comment that triggered
             // the notification instead of landing at the top, classic parity.
             highlightCommentId={selected.item.details?.comment_id ?? undefined}
-            extensions={roundsEnabled ? <AddToRoundAction issueId={selected.item.issue_id} /> : undefined}
+            extensions={roundsEnabled ? <IssueRoundsSection issueId={selected.item.issue_id} /> : undefined}
             linkSelfInBreadcrumb
             onDelete={clearSelection}
             // TECH-3549 — reuse the classic inbox's mark-done/archive toolbar

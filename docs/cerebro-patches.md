@@ -1622,3 +1622,9 @@ Approved by Jesper Hvejsel on FIR-3272: “byg det hele uden stop og deploy”, 
 | `pi-gateway-fallback` | `server/pkg/agent/pi.go` | Keep the original one-attempt Pi execution behind the Cerebro-owned fallback wrapper. It retries through Firtal AI Gateway only before text or tool activity, preventing duplicate side effects and ensuring only the successful fallback session is pinned. |
 
 The runtime-image, entrypoint, fallback-provider helpers, canary, and cloud runbook are deployment-owned surfaces outside the upstream server zone. ChatGPT Pro is the primary provider for both Pi and Hermes; the Infisical-backed Firtal AI Gateway is the managed backup.
+
+## FIR-3386 — Subscribers and sidebar
+
+- `issue-sidebar-subscribers-component` in `packages/views/package.json` and `packages/views/issues/components/issue-detail.tsx` mounts the fork-owned Subscribers section from `packages/cerebro-issue-sidebar`.
+- `issue-sidebar-subscribers-single` in `packages/views/issues/components/issue-detail.tsx` removes the former Activity-header subscriber popover so regular issues have one subscriber surface.
+- Approved by Jesper Hvejsel on FIR-3386, 2026-07-16.

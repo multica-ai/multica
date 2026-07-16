@@ -131,6 +131,8 @@ import { WorkflowPicker } from "@multica/cerebro-workflows/views/workflow-picker
 import { IssueTimePicker } from "@multica/cerebro-issue-datetime/views";
 // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 recurring-issue sidebar panel, gated on cerebro_recurring_issues.
 import { RecurrencePanel } from "@multica/cerebro-recurring-issues/views";
+// CEREBRO-PATCH(issue-sidebar-subscribers-component): FIR-3386 — fork-owned subscriber badges, unsubscribe rows, and collapse UI.
+import { SubscribersSection } from "@multica/cerebro-issue-sidebar";
 // CEREBRO-PATCH(issue-detail-add-property-cerebro-rows): FIR-2827 — Sprint/Workflow/Recurring rows
 // hide behind "+ Add property" until they carry a value; these queries answer "is it set?".
 import { issueSprintAssignmentOptions } from "@multica/cerebro-sprints/core/queries";
@@ -1172,7 +1174,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   } = useIssueReactions(id, user?.id);
 
   const {
-    subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
+    subscribers, toggleSubscriber,
   } = useIssueSubscribers(id, user?.id);
 
   // Token usage
@@ -1848,30 +1850,15 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           Every row here is a wake-trigger candidate, so seeing them per type
           answers "who can this issue dispatch to?" at a glance. */}
       {!isChat && sidebarSubscribersEnabled && (
-        <div>
-          <div className="flex items-center justify-between px-2 py-1 mb-2">
-            <span className="text-xs font-medium">Subscribers</span>
-            {participantPopover}
-          </div>
-          {subscribers.length > 0 && (
-            <div className="space-y-3 pl-2">
-              <ParticipantGroup
-                heading="Members"
-                subscribers={subscribers.filter((s) => s.user_type === "member")}
-                getActorName={getActorName}
-                ownerType={issue.assignee_type}
-                ownerId={issue.assignee_id}
-              />
-              <ParticipantGroup
-                heading="Agents"
-                subscribers={subscribers.filter((s) => s.user_type === "agent")}
-                getActorName={getActorName}
-                ownerType={issue.assignee_type}
-                ownerId={issue.assignee_id}
-              />
-            </div>
-          )}
-        </div>
+        <SubscribersSection
+          subscribers={subscribers}
+          getActorName={getActorName}
+          renderAvatar={(subscriber) => <ActorAvatar actorType={subscriber.user_type} actorId={subscriber.user_id} size={20} />}
+          ownerType={issue.assignee_type}
+          ownerId={issue.assignee_id}
+          actions={participantPopover}
+          onUnsubscribe={(subscriber) => toggleSubscriber(subscriber.user_id, subscriber.user_type, true)}
+        />
       )}
 
       {/* Parent issue */}
@@ -2685,20 +2672,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               <div className="flex items-center gap-3">
                 <h2 className="text-base font-semibold">{isChat ? "Messages" : t(($) => $.detail.activity_section)}</h2>
               </div>
-              {!isChat && (
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleToggleSubscribe}
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {isSubscribed ? t(($) => $.detail.unsubscribe) : t(($) => $.detail.subscribe)}
-                  </button>
-                  {/* CEREBRO-PATCH(issue-sidebar-subscribers): FIR-2827 — the avatar
-                      popover moved to the sidebar Subscribers section; keep it here
-                      only while that flag is off. */}
-                  {!sidebarSubscribersEnabled && participantPopover}
-                </div>
-              )}
+              {/* CEREBRO-PATCH(issue-sidebar-subscribers-single): FIR-3386 — subscriber controls live only in the sidebar. */}
             </div>
 
             {/* Upstream MUL-2618: local-directory hint relocated out of the

@@ -23,7 +23,7 @@ import { useT } from "@multica/views/i18n";
 import { useNavigation } from "@multica/views/navigation";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { AddToRoundAction } from "@multica/cerebro-rounds";
+import { IssueRoundsSection } from "@multica/cerebro-rounds";
 
 export function CerebroIssueDetailRoute({ id }: { id: string }) {
   const wsId = useWorkspaceId();
@@ -84,7 +84,7 @@ export function CerebroIssueDetailRoute({ id }: { id: string }) {
   return (
     <IssueDetail
       issueId={id}
-      extensions={<>{roundsEnabled && <AddToRoundAction issueId={id} />}{referencesEnabled && <IssueReferenceList issueId={id} />}</>}
+      extensions={<>{roundsEnabled && <IssueRoundsSection issueId={id} />}{referencesEnabled && <IssueReferenceList issueId={id} />}</>}
     />
   );
 }

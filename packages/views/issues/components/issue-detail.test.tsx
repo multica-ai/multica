@@ -1266,6 +1266,10 @@ describe("IssueDetail (channel/DM)", () => {
     mockApiObj.listAgents.mockResolvedValue([]);
   });
 
+  afterEach(() => {
+    useCerebroFeatureFlagsStore.getState().setFlag("cerebro_issue_sidebar_subscribers", undefined);
+  });
+
   it.each([
     [mockChannelIssue, "channel"],
     [mockDMIssue, "dm"],
@@ -1393,6 +1397,27 @@ describe("IssueDetail (channel/DM)", () => {
 
     // Activity (not Messages) is the section heading for issues.
     expect(screen.getAllByText("Activity").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders one subscriber surface for a regular issue", async () => {
+    useCerebroFeatureFlagsStore.getState().setFlag("cerebro_issue_sidebar_subscribers", true);
+    mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    mockApiObj.listIssueSubscribers.mockResolvedValue([
+      { issue_id: "issue-1", user_type: "member", user_id: "user-1", reason: "creator", created_at: "" },
+    ]);
+    mockApiObj.unsubscribeFromIssue.mockImplementation(async () => {
+      mockApiObj.listIssueSubscribers.mockResolvedValue([]);
+    });
+    renderIssueDetail("issue-1");
+
+    const unsubscribe = await screen.findByRole("button", { name: "Unsubscribe Test User" });
+    expect(screen.queryByRole("button", { name: "Unsubscribe" })).not.toBeInTheDocument();
+
+    fireEvent.click(unsubscribe);
+    await waitFor(() => {
+      expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalledWith("issue-1", "user-1", "member");
+      expect(screen.queryByRole("button", { name: "Unsubscribe Test User" })).not.toBeInTheDocument();
+    });
   });
 
   // CEREBRO-PATCH(channel-issue-redirect): FIR-2452 — when a DM or channel

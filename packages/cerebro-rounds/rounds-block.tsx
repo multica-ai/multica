@@ -236,7 +236,24 @@ export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDele
   </ResponsiveRoundPanel>;
 }
 
-export function AddToRoundAction({ issueId }: { issueId: string }) {
+export function IssueRoundsSectionView({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(true);
+  return <section aria-label="Rounds">
+    <button
+      type="button"
+      className={`mb-2 flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors hover:bg-accent/70 ${open ? "" : "text-muted-foreground hover:text-foreground"}`}
+      onClick={() => setOpen((value) => !value)}
+      aria-expanded={open}
+      aria-label={`${open ? "Collapse" : "Expand"} Rounds`}
+    >
+      <span>Rounds</span>
+      <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
+    </button>
+    {open && <div className="pl-2">{children}</div>}
+  </section>;
+}
+
+export function IssueRoundsSection({ issueId }: { issueId: string }) {
   const wsId = useWorkspaceId();
   const { data: statuses = [] } = useRoundStatuses(wsId);
   const add = useAddIssueToRound(wsId);
@@ -244,7 +261,6 @@ export function AddToRoundAction({ issueId }: { issueId: string }) {
   const current = statuses.find((s) => s.members.some((m) => m.issue_id === issueId));
   const available = statuses.filter((s) => s.round.id !== current?.round.id);
   const membership = roundMembershipLabel(statuses, issueId);
-  if (available.length === 0 && !current) return null;
   // A member issue can move to another round or leave rounds entirely
   // (FIR-3114 review, point 5). Membership is unique per issue, so a move
   // must remove before it adds.
@@ -252,10 +268,15 @@ export function AddToRoundAction({ issueId }: { issueId: string }) {
     if (current) await remove.mutateAsync({ roundId: current.round.id, issueId });
     add.mutate({ roundId, issueId });
   };
-  return <div className="flex flex-wrap items-center gap-2">{membership && <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground" aria-label="Round status">{membership}</span>}<DropdownMenu><DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>{current ? "Move to round" : "Add to round"}</DropdownMenuTrigger><DropdownMenuContent align="start">
-    {available.map((s) => <DropdownMenuItem key={s.round.id} onClick={() => void moveTo(s.round.id)}>{s.round.name}</DropdownMenuItem>)}
-    {current && <DropdownMenuItem onClick={() => remove.mutate({ roundId: current.round.id, issueId })}>Remove from {current.round.name}</DropdownMenuItem>}
-  </DropdownMenuContent></DropdownMenu></div>;
+  return <IssueRoundsSectionView>
+    <div className="flex flex-wrap items-center gap-2">
+      {membership && <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground" aria-label="Round status">{membership}</span>}
+      {(available.length > 0 || current) ? <DropdownMenu><DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>{current ? "Move to round" : "Add to round"}</DropdownMenuTrigger><DropdownMenuContent align="start">
+        {available.map((s) => <DropdownMenuItem key={s.round.id} onClick={() => void moveTo(s.round.id)}>{s.round.name}</DropdownMenuItem>)}
+        {current && <DropdownMenuItem onClick={() => remove.mutate({ roundId: current.round.id, issueId })}>Remove from {current.round.name}</DropdownMenuItem>}
+      </DropdownMenuContent></DropdownMenu> : <span className="text-xs text-muted-foreground">No rounds available.</span>}
+    </div>
+  </IssueRoundsSectionView>;
 }
 
 export function RoundPickerDialog({ issueId, open, onOpenChange }: { issueId: string; open: boolean; onOpenChange: (open: boolean) => void }) {

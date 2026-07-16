@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RoundsBlock } from "./rounds-block";
+import { IssueRoundsSectionView, RoundsBlock } from "./rounds-block";
 import type { RoundStatus } from "./schemas";
 
 afterEach(cleanup);
@@ -71,5 +71,24 @@ describe("RoundsBlock", () => {
     expect(screen.queryByTestId("row-ready")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Play Daily" }));
     expect(onStart).toHaveBeenCalledWith("round-1");
+  });
+});
+
+describe("IssueRoundsSectionView", () => {
+  it("renders a collapsible Rounds section", () => {
+    render(
+      <IssueRoundsSectionView>
+        <button type="button">Add to round</button>
+      </IssueRoundsSectionView>,
+    );
+
+    expect(screen.getByText("Rounds")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add to round" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Rounds" }));
+    expect(screen.queryByRole("button", { name: "Add to round" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Rounds" }));
+    expect(screen.getByRole("button", { name: "Add to round" })).toBeInTheDocument();
   });
 });
