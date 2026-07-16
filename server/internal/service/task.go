@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -116,34 +117,30 @@ func truncateForSummary(s string, maxRunes int) string {
 	return string(rs[:maxRunes]) + "…"
 }
 
-// maxSynthesizedFallbackCommentRunes caps the completion-fallback comment that
+// maxSynthesizedFallbackCommentRunes bounds the completion-fallback comment that
 // CompleteTask synthesizes from a task's final output when the agent left no
 // comment of its own during the run. A real final assistant message is at most
 // a few thousand words; anything larger is a runaway raw-stream dump — every
 // streamed text delta concatenated together plus a literal `tool call` line per
 // tool_use event — which some runtimes/providers emit as the task's Output on
 // long, tool-heavy runs. Such a dump (observed at 190–264 KB) must never be
-// posted verbatim to the issue thread (GH #5455). When the output exceeds this,
-// truncateFallbackCommentBody keeps the head — which carries the actual message
-// — and appends a marker instead of the multi-hundred-KB tail.
+// posted, even partially, to the issue thread (GH #5455).
 const maxSynthesizedFallbackCommentRunes = 8000
+
+const oversizedFallbackCommentNotice = "This task completed, but its output was too large to post safely. The raw output was not posted. Review the task in this issue's Execution log."
 
 // truncateFallbackCommentBody bounds a synthesized completion-fallback comment
 // body. Unlike truncateForSummary (which flattens newlines for a one-line row
-// snapshot) it preserves the head verbatim so a genuine final message reads
-// normally, and only when body exceeds maxRunes does it clip to the head and
-// append a marker naming the omitted length. Callers pass the already-redacted
-// body so the stored comment is guaranteed to be at most maxRunes plus marker.
+// snapshot), it preserves genuine final messages below the cap verbatim. Output
+// above the cap is untrusted: the reported failure mode puts process narration
+// and tool traces at the head, so retaining any excerpt can expose execution
+// details and still discard the final answer. Replace the entire body with a
+// fixed notice instead. Callers pass the already-redacted body.
 func truncateFallbackCommentBody(body string, maxRunes int) string {
-	rs := []rune(body)
-	if len(rs) <= maxRunes {
+	if utf8.RuneCountInString(body) <= maxRunes {
 		return body
 	}
-	omitted := len(rs) - maxRunes
-	return string(rs[:maxRunes]) + fmt.Sprintf(
-		"\n\n… [output truncated: %d more characters omitted. This run did not produce a concise final message; see the task run for the full output.]",
-		omitted,
-	)
+	return oversizedFallbackCommentNotice
 }
 
 const (
@@ -2702,10 +2699,10 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 							"agent_id", util.UUIDToString(task.AgentID),
 						)
 					} else {
-						// Redact first, then cap: a runaway raw-stream Output (GH #5455)
-						// must never reach the issue thread as a 200KB+ verbatim dump.
+						// Redact first, then bound: a runaway raw-stream Output (GH #5455)
+						// must never reach the issue thread, even as a clipped excerpt.
 						content := truncateFallbackCommentBody(redact.Text(body), maxSynthesizedFallbackCommentRunes)
-						s.createAgentComment(ctx, task.IssueID, task.AgentID, content, "comment", task.TriggerCommentID, pgtype.UUID{})
+						s.createAgentComment(ctx, task.IssueID, task.AgentID, content, "comment", task.TriggerCommentID, task.ID)
 					}
 				}
 			}
