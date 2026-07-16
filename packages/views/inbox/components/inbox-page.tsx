@@ -9,12 +9,15 @@ import { useModalStore } from "@multica/core/modals";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
   inboxListOptions,
+  archivedInboxListOptions,
   deduplicateInboxItems,
+  deduplicateArchivedInboxItems,
   useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
 import {
   useMarkInboxRead,
   useArchiveInbox,
+  useUnarchiveInbox,
   useMarkAllInboxRead,
   useArchiveAllInbox,
   useArchiveAllReadInbox,
@@ -30,7 +33,9 @@ import {
   Inbox,
   CheckCheck,
   Archive,
+  ArchiveRestore,
   BookCheck,
+  ChevronLeft,
   ListChecks,
   ArrowLeft,
 } from "lucide-react";
@@ -54,6 +59,7 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
+import { ARCHIVED_VIEW_PARAM, type InboxView } from "./inbox-view";
 import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useT } from "../../i18n";
@@ -62,20 +68,43 @@ export function InboxPage() {
   const { t } = useT("inbox");
   const { searchParams, replace } = useNavigation();
   const urlIssue = searchParams.get("issue") ?? "";
+  const urlView: InboxView =
+    searchParams.get("view") === ARCHIVED_VIEW_PARAM ? "archived" : "inbox";
   const wsPaths = useWorkspacePaths();
 
   const [selectedKey, setSelectedKeyState] = useState(() => urlIssue);
+  const [view, setViewState] = useState<InboxView>(() => urlView);
 
   // Sync from URL when searchParams change (e.g. navigation)
   useEffect(() => {
     setSelectedKeyState(urlIssue);
   }, [urlIssue]);
+  useEffect(() => {
+    setViewState(urlView);
+  }, [urlView]);
 
   const wsId = useWorkspaceId();
   const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
 
-  const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+  // Fetched in both views, not just the archived one: the main list's entry
+  // into the archive is labelled with this count, so it has to be known before
+  // the user goes there.
+  const {
+    data: rawArchivedItems = [],
+    isLoading: archivedLoading,
+    isError: archivedError,
+  } = useQuery(archivedInboxListOptions(wsId));
+  const archivedItems = useMemo(
+    () => deduplicateArchivedInboxItems(rawArchivedItems),
+    [rawArchivedItems],
+  );
+
+  const isArchivedView = view === "archived";
+  const visibleItems = isArchivedView ? archivedItems : items;
+
+  const selected =
+    visibleItems.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
 
   // Track the last key we actually resolved against the inbox list. Lets the
   // fallback effect distinguish "shared-link to a notification not in our
@@ -86,12 +115,43 @@ export function InboxPage() {
     if (selected) lastResolvedKeyRef.current = selectedKey;
   }, [selected, selectedKey]);
 
+  // Both the view and the selection live in the URL, so every write has to
+  // carry the other one — a bare `?issue=` would silently drop the user out of
+  // the archived view on the next selection.
+  const buildInboxUrl = useCallback(
+    (nextView: InboxView, key: string) => {
+      const params = new URLSearchParams();
+      if (nextView === "archived") params.set("view", ARCHIVED_VIEW_PARAM);
+      if (key) params.set("issue", key);
+      const query = params.toString();
+      const inboxPath = wsPaths.inbox();
+      return query ? `${inboxPath}?${query}` : inboxPath;
+    },
+    [wsPaths],
+  );
+
   const setSelectedKey = useCallback((key: string) => {
     setSelectedKeyState(key);
-    const inboxPath = wsPaths.inbox();
-    const url = key ? `${inboxPath}?issue=${key}` : inboxPath;
-    replace(url);
-  }, [replace, wsPaths]);
+    replace(buildInboxUrl(view, key));
+  }, [replace, buildInboxUrl, view]);
+
+  // Switching views always clears the selection: the two lists are mutually
+  // exclusive, so a key carried across would never resolve, and the fallback
+  // effect below would bounce the user to the issue page.
+  const setView = useCallback((nextView: InboxView) => {
+    setViewState(nextView);
+    setSelectedKeyState("");
+    replace(buildInboxUrl(nextView, ""));
+  }, [replace, buildInboxUrl]);
+
+  // Stable identity: InboxList memoizes the archive entry on this callback, so
+  // an inline arrow here would rebuild (and remount) the entry every render.
+  const openArchived = useCallback(() => setView("archived"), [setView]);
+
+  // Whether the list currently on screen has finished its first load. The
+  // fallback and drain effects below both key on this, and getting it wrong in
+  // the archived view means acting on an empty list that simply hasn't arrived.
+  const viewLoading = isArchivedView ? archivedLoading : loading;
 
   // Shared inbox links (?issue=<id>) may point to notifications not in this
   // user's inbox (archived, or never received). Fall back to the issue page
@@ -100,7 +160,7 @@ export function InboxPage() {
   // and `onInboxIssueDeleted` pruned the cache), the issue detail would 404
   // too — clear the selection and stay on /inbox instead.
   useEffect(() => {
-    if (loading) return;
+    if (viewLoading) return;
     if (!selectedKey) return;
     if (selected) return;
     if (lastResolvedKeyRef.current === selectedKey) {
@@ -108,7 +168,33 @@ export function InboxPage() {
       return;
     }
     replace(wsPaths.issueDetail(selectedKey));
-  }, [loading, selectedKey, selected, replace, wsPaths, setSelectedKey]);
+  }, [viewLoading, selectedKey, selected, replace, wsPaths, setSelectedKey]);
+
+  // Never strand the user on an empty archive: when the last archived issue is
+  // restored (or a new notification revives it into the main inbox), fall back
+  // to the main list. Same fallback chat's archived view has. Gated on the load
+  // so a cold `?view=archived` open doesn't bounce before the data lands.
+  useEffect(() => {
+    if (!isArchivedView) return;
+    if (archivedLoading) return;
+    // A failed fetch is also "no items" — bouncing here would swap the error
+    // message for the main list and leave the user with no idea it failed.
+    if (archivedError) return;
+    // Let the fallback effect above settle an unresolved selection first. On a
+    // deep link like `?view=archived&issue=X` into an empty archive both would
+    // otherwise fire in the same commit, and this one's replace() would land
+    // last and swallow the redirect to X.
+    if (selectedKey) return;
+    if (archivedItems.length > 0) return;
+    setView("inbox");
+  }, [
+    isArchivedView,
+    archivedLoading,
+    archivedError,
+    archivedItems.length,
+    selectedKey,
+    setView,
+  ]);
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_inbox_layout",
@@ -119,6 +205,7 @@ export function InboxPage() {
 
   const markReadMutation = useMarkInboxRead();
   const archiveMutation = useArchiveInbox();
+  const unarchiveMutation = useUnarchiveInbox();
   const markAllReadMutation = useMarkAllInboxRead();
   const archiveAllMutation = useArchiveAllInbox();
   const archiveAllReadMutation = useArchiveAllReadInbox();
@@ -151,24 +238,42 @@ export function InboxPage() {
     setSelectedKey(item.issue_id ?? item.id);
   };
 
+  // Both archive and unarchive remove the row from the list it was actioned
+  // from, so both have to move the selection off it first. `list` is whichever
+  // list the row came from — the main one for archive, the archived one for
+  // unarchive.
+  const advanceSelectionPast = (id: string, list: InboxItem[]) => {
+    const idx = list.findIndex((i) => i.id === id);
+    const target = idx >= 0 ? list[idx] : null;
+    const wasSelected = !!target && (target.issue_id ?? target.id) === selectedKey;
+    if (!wasSelected) return;
+    // List is sorted newest-first; prefer the next (older) item, fall back
+    // to the previous (newer) one when actioning at the bottom, and only
+    // clear the selection when nothing else is left.
+    const next = list[idx + 1] ?? list[idx - 1] ?? null;
+    setSelectedKey(next ? (next.issue_id ?? next.id) : "");
+  };
+
   const handleArchive = (id: string) => {
-    const idx = items.findIndex((i) => i.id === id);
-    const archived = idx >= 0 ? items[idx] : null;
-    const wasSelected =
-      !!archived && (archived.issue_id ?? archived.id) === selectedKey;
-    if (wasSelected) {
-      // List is sorted newest-first; prefer the next (older) item, fall back
-      // to the previous (newer) one when archiving at the bottom, and only
-      // clear the selection when nothing else is left.
-      const next = items[idx + 1] ?? items[idx - 1] ?? null;
-      setSelectedKey(next ? (next.issue_id ?? next.id) : "");
-    }
+    advanceSelectionPast(id, items);
     archiveMutation.mutate(id, {
       onError: (err) =>
         toast.error(
           err instanceof Error && err.message
             ? err.message
             : t(($) => $.errors.archive_failed),
+        ),
+    });
+  };
+
+  const handleUnarchive = (id: string) => {
+    advanceSelectionPast(id, archivedItems);
+    unarchiveMutation.mutate(id, {
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.unarchive_failed),
         ),
     });
   };
@@ -238,6 +343,10 @@ export function InboxPage() {
           />
         )}
       </div>
+      {/* Batch actions are main-view only. Every entry archives from the MAIN
+          inbox, so offering them while the archived list is on screen reads as
+          "archive all of these" and does the opposite of what it looks like. */}
+      {!isArchivedView && (
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
@@ -270,16 +379,52 @@ export function InboxPage() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      )}
     </PageHeader>
   );
 
-  const list = (
+  // Back out of the archive. Sits inside the list panel rather than replacing
+  // the PageHeader: the user is still in the Inbox, so the page title stays put
+  // and this reads as a sub-view — the same shape chat's archived view uses.
+  const archivedBackRow = (
+    <button
+      type="button"
+      onClick={() => setView("inbox")}
+      className="flex w-full shrink-0 items-center gap-1.5 border-b px-3 py-2 text-left text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+    >
+      <ChevronLeft className="size-4 shrink-0" />
+      <span className="truncate">{t(($) => $.list.archived_title)}</span>
+      <span className="ml-auto shrink-0 tabular-nums text-muted-foreground/70">
+        {archivedItems.length}
+      </span>
+    </button>
+  );
+
+  const list = archivedError && isArchivedView ? (
+    <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+        <Archive className="mb-3 h-8 w-8 text-muted-foreground/50" />
+        <p className="text-sm">{t(($) => $.errors.archived_load_failed)}</p>
+      </div>
+    </div>
+  ) : (
     <InboxList
-      items={items}
+      items={visibleItems}
+      view={view}
       selectedKey={selectedKey}
+      archivedCount={archivedItems.length}
       onSelect={handleSelect}
-      onArchive={handleArchive}
+      onAction={isArchivedView ? handleUnarchive : handleArchive}
+      onOpenArchived={openArchived}
     />
+  );
+
+  const listPanel = (
+    <>
+      {listHeader}
+      {isArchivedView && archivedBackRow}
+      {list}
+    </>
   );
 
   const detailContent = selected?.issue_id ? (
@@ -348,14 +493,27 @@ export function InboxPage() {
             {t(($) => $.detail.edit_advanced)}
           </Button>
         )}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => handleArchive(selected.id)}
-        >
-          <Archive className="mr-1.5 h-3.5 w-3.5" />
-          {t(($) => $.detail.archive)}
-        </Button>
+        {/* Mirrors the row action: the button always reverses the view the
+            item is being read in. */}
+        {isArchivedView ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleUnarchive(selected.id)}
+          >
+            <ArchiveRestore className="mr-1.5 h-3.5 w-3.5" />
+            {t(($) => $.detail.unarchive)}
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleArchive(selected.id)}
+          >
+            <Archive className="mr-1.5 h-3.5 w-3.5" />
+            {t(($) => $.detail.archive)}
+          </Button>
+        )}
       </div>
     </div>
   ) : null;
@@ -363,7 +521,7 @@ export function InboxPage() {
   // -- Mobile layout: list / detail toggle -----------------------------------
 
   if (isMobile) {
-    if (loading) {
+    if (viewLoading) {
       return (
         <div className="flex flex-1 flex-col min-h-0">
           <div className="flex h-12 shrink-0 items-center border-b px-4">
@@ -396,7 +554,11 @@ export function InboxPage() {
               className="gap-1.5 text-muted-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
-              {t(($) => $.page.back)}
+              {/* Back goes to the list the user came FROM, so the label has to
+                  name it — "Inbox" here would be a lie about the destination. */}
+              {isArchivedView
+                ? t(($) => $.list.archived_title)
+                : t(($) => $.page.back)}
             </Button>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto">
@@ -407,17 +569,12 @@ export function InboxPage() {
     }
 
     // Mobile: full-screen list
-    return (
-      <div className="flex flex-1 flex-col min-h-0">
-        {listHeader}
-        {list}
-      </div>
-    );
+    return <div className="flex flex-1 flex-col min-h-0">{listPanel}</div>;
   }
 
   // -- Desktop layout: resizable two-panel -----------------------------------
 
-  if (loading) {
+  if (viewLoading) {
     return (
       <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
         <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
@@ -453,8 +610,7 @@ export function InboxPage() {
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
       <div className="flex flex-col border-r h-full">
-        {listHeader}
-        {list}
+        {listPanel}
       </div>
       </ResizablePanel>
       <ResizableHandle />
@@ -464,7 +620,7 @@ export function InboxPage() {
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
             <p className="text-sm">
-              {items.length === 0
+              {visibleItems.length === 0
                 ? t(($) => $.detail.empty)
                 : t(($) => $.detail.select_prompt)}
             </p>

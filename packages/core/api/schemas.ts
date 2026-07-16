@@ -18,6 +18,7 @@ import type {
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
+  InboxItem,
   InboxWorkspaceUnread,
   Label,
   IssueProperty,
@@ -1312,6 +1313,38 @@ export const InboxUnreadSummarySchema = z.array(
 );
 
 export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
+
+// ---------------------------------------------------------------------------
+// Archived inbox items (`/api/inbox/archived` GET).
+// Lenient per the usual rules: `severity` / `type` / `recipient_type` stay
+// `z.string()` so a notification kind this client doesn't know yet still
+// parses and renders (the UI's type-label lookup already tolerates unknown
+// kinds). Nullable optional fields are declared optional as well, since older
+// rows can omit them entirely. On malformed JSON parseWithFallback returns the
+// empty list — the archived view then reads as empty rather than white-
+// screening the inbox.
+// ---------------------------------------------------------------------------
+
+export const InboxItemListSchema = z.array(
+  z
+    .object({
+      id: z.string(),
+      workspace_id: z.string(),
+      recipient_type: z.string(),
+      recipient_id: z.string(),
+      type: z.string(),
+      severity: z.string(),
+      issue_id: z.string().nullish(),
+      title: z.string(),
+      body: z.string().nullish(),
+      read: z.boolean(),
+      archived: z.boolean(),
+      created_at: z.string(),
+    })
+    .loose(),
+);
+
+export const EMPTY_INBOX_ITEMS: InboxItem[] = [];
 
 // ---------------------------------------------------------------------------
 // Billing schemas (cloud-billing proxy surface)
