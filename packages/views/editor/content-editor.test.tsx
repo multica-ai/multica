@@ -297,6 +297,89 @@ describe("ContentEditor", () => {
     expect(mockSetContent).not.toHaveBeenCalled();
   });
 
+  // flushPendingUpdate exists for hosts that re-point ONE editor instance at a
+  // different destination mid-debounce (chat swapping draftKey between
+  // sessions). Without it the armed debounce fires after the switch and, since
+  // onUpdate always resolves to the latest render's closure, files the old
+  // document under the new destination (MUL-4864).
+  describe("flushPendingUpdate", () => {
+    it("hands back the pending markdown and cancels the debounce so it cannot fire later", () => {
+      vi.useFakeTimers();
+      const onUpdate = vi.fn();
+      const ref = createRef<ContentEditorRef>();
+      editorState.markdown = "old content";
+      render(
+        <ContentEditor ref={ref} defaultValue="old content" onUpdate={onUpdate} debounceMs={100} />,
+      );
+
+      editorState.markdown = "typed but not yet flushed";
+      act(() => {
+        latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      });
+
+      // Taken back, not emitted — the host routes it to the source draft.
+      expect(ref.current?.flushPendingUpdate()).toBe("typed but not yet flushed");
+      expect(onUpdate).not.toHaveBeenCalled();
+
+      // The armed timer must be dead: firing now would write these bytes into
+      // whatever destination the host has since switched to.
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(onUpdate).not.toHaveBeenCalled();
+    });
+
+    it("returns null when nothing is pending", () => {
+      const ref = createRef<ContentEditorRef>();
+      editorState.markdown = "settled";
+      render(<ContentEditor ref={ref} defaultValue="settled" onUpdate={vi.fn()} />);
+
+      expect(ref.current?.flushPendingUpdate()).toBeNull();
+    });
+
+    it("leaves the editor clean so the next defaultValue sync is no longer blocked by the dirty guard", () => {
+      vi.useFakeTimers();
+      const ref = createRef<ContentEditorRef>();
+      editorState.markdown = "draft A text";
+      const { rerender } = render(
+        <ContentEditor ref={ref} defaultValue="draft A text" onUpdate={vi.fn()} debounceMs={100} />,
+      );
+
+      // Unflushed local edits — this is what makes the editor dirty.
+      editorState.markdown = "draft A text, still typing";
+      act(() => {
+        latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      });
+      act(() => {
+        ref.current?.flushPendingUpdate();
+      });
+
+      // Host has taken the bytes, so switching destination must now load the
+      // incoming draft rather than leaving the old document on screen.
+      rerender(
+        <ContentEditor ref={ref} defaultValue="draft B text" onUpdate={vi.fn()} debounceMs={100} />,
+      );
+      expect(mockSetContent).toHaveBeenCalled();
+    });
+
+    it("still blocks the sync when the pending update was NOT flushed (guard intact)", () => {
+      vi.useFakeTimers();
+      editorState.markdown = "draft A text";
+      const { rerender } = render(
+        <ContentEditor defaultValue="draft A text" onUpdate={vi.fn()} debounceMs={100} />,
+      );
+
+      editorState.markdown = "draft A text, still typing";
+      act(() => {
+        latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      });
+
+      // No flush → dirty → the guard must still protect the unsaved bytes.
+      rerender(<ContentEditor defaultValue="draft B text" onUpdate={vi.fn()} debounceMs={100} />);
+      expect(mockSetContent).not.toHaveBeenCalled();
+    });
+  });
+
   it("does not sync when defaultValue normalizes to the current editor markdown", () => {
     editorState.markdown = "same content";
     const { rerender } = render(<ContentEditor defaultValue="same content" />);

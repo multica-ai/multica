@@ -220,6 +220,22 @@ interface ContentEditorRef {
   uploadFile: (file: File) => void;
   /** True when file uploads are still in progress. */
   hasActiveUploads: () => boolean;
+  /**
+   * Cancel the pending debounced `onUpdate` and hand its markdown back to the
+   * caller instead of firing it. Returns null when nothing is pending.
+   *
+   * For hosts that re-point ONE editor instance at a different destination
+   * (chat swaps `draftKey` between sessions). A debounce armed under the old
+   * destination would otherwise fire after the switch and, because `onUpdate`
+   * always resolves to the latest render's closure, write the old document
+   * into the NEW destination. Taking the markdown back lets the host commit it
+   * where it was actually typed. Flushing also marks the editor clean, so the
+   * dirty guard stops suppressing the incoming `defaultValue` sync.
+   *
+   * Distinct from `flushPendingOnUnmount`: this is for a LIVE editor changing
+   * targets, so it reads the current document rather than a cached copy.
+   */
+  flushPendingUpdate: () => string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -700,6 +716,24 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         uploadAndInsertFile(editor, file, onUploadFileRef.current, endPos);
       },
       hasActiveUploads: () => (editor ? hasUploadingNode(editor) : false),
+      flushPendingUpdate: () => {
+        // No armed timer = nothing typed since the last emit. The editor is
+        // already clean, so the host has nothing to re-route.
+        if (!debounceRef.current) return null;
+        clearTimeout(debounceRef.current);
+        debounceRef.current = undefined;
+        pendingFlushRef.current = null;
+        if (!editor || editor.isDestroyed) return null;
+        // Read the live document: unlike the unmount flush, the instance is
+        // still alive here, so this is the freshest possible copy.
+        const md = normalizeEditorMarkdown(editor);
+        if (md === lastEmittedRef.current) return null;
+        // Advance the emit watermark so the editor reads as clean — the host
+        // is taking responsibility for these bytes, and the dirty guard must
+        // now let the incoming defaultValue through.
+        lastEmittedRef.current = md;
+        return md;
+      },
     }));
 
     // Link hover card — disabled when BubbleMenu is active (has selection)

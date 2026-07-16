@@ -114,6 +114,11 @@ vi.mock("../../editor", async () => ({
         }
       },
       hasActiveUploads: () => uploadingRef.current > 0,
+      // This mock emits onUpdate synchronously, so a pending debounced update
+      // never exists and there is nothing to hand back. The real debounce (and
+      // the draft-switch flush that depends on it) is covered against the real
+      // ContentEditor in chat-input-draft-isolation.test.tsx.
+      flushPendingUpdate: () => null,
     }));
     return (
       <textarea

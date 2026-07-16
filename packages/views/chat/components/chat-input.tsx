@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ContentEditor,
@@ -183,6 +183,60 @@ export function ChatInput({
   const hasNothingToSend = isEmpty && !inputDraft.trim();
   const appliedRestoreIdRef = useRef<string | null>(null);
   const editorKey = editorKeyOverride ?? CHAT_COMPOSER_EDITOR_KEY;
+
+  // Write a document into a draft slot: text, plus a prune of the attachments
+  // its body no longer references (deleting an image's markdown drops the
+  // staged upload with it). Shared by the live `onUpdate` and the draft-switch
+  // flush below, so a document can never be filed under one rule by one path
+  // and a different rule by the other.
+  const commitDraft = useCallback(
+    (key: string, markdown: string, attachments: Attachment[]) => {
+      setInputDraft(key, markdown);
+      if (attachments.length === 0) return;
+      const referenced = attachments.filter((attachment) =>
+        isAttachmentReferenced(markdown, attachment),
+      );
+      if (referenced.length !== attachments.length) {
+        setInputDraftAttachments(key, referenced);
+      }
+    },
+    [setInputDraft, setInputDraftAttachments],
+  );
+
+  // Re-point the composer at a different draft slot WITHOUT letting the
+  // outgoing slot's unflushed keystrokes follow it.
+  //
+  // One editor instance serves every chat draft (see the editorKey note), and
+  // its `onUpdate` is debounced. A debounce armed while the user was on draft A
+  // fires up to `debounceMs` later, by which time `onUpdate` resolves to the
+  // latest render's closure — so it would write A's document into B's slot,
+  // breaking draft isolation and handing A's context to B's agent on send.
+  // Meanwhile ContentEditor's dirty guard suppresses B's incoming sync while
+  // those unflushed bytes are live, so B's own draft never even loads.
+  //
+  // Flushing takes the pending document back and files it under the key it was
+  // typed in, and leaves the editor clean so B's draft can sync in.
+  //
+  // useLayoutEffect, not useEffect, for two ordering reasons: passive effects
+  // run child-first, so a passive flush here would land AFTER ContentEditor's
+  // sync effect had already skipped on a dirty editor; and a layout effect is
+  // part of the commit, so no pending timer can fire ahead of it.
+  const draftKeyRef = useRef(draftKey);
+  useLayoutEffect(() => {
+    const previousKey = draftKeyRef.current;
+    if (previousKey === draftKey) return;
+    draftKeyRef.current = draftKey;
+    const pending = editorRef.current?.flushPendingUpdate() ?? null;
+    if (pending === null) return;
+    logger.debug("input.draft flush on key change", { from: previousKey, to: draftKey });
+    // Read the source slot's attachments live: this render's `draftAttachments`
+    // already belongs to the INCOMING key.
+    commitDraft(
+      previousKey,
+      pending,
+      useChatStore.getState().inputDraftAttachments[previousKey] ?? EMPTY_ATTACHMENTS,
+    );
+  }, [draftKey, commitDraft]);
   // Submit gate. `uploading` disables the SubmitButton the instant an upload
   // starts; `isBlocked()` is re-read inside handleSend for the paths that skip
   // the button entirely (Mod+Enter mid-paste, drag-drop racing the keyboard).
@@ -418,15 +472,7 @@ export function ChatInput({
             placeholder={placeholder}
             onUpdate={(md) => {
               setIsEmpty(!md.trim());
-              setInputDraft(draftKey, md);
-              if (draftAttachments.length > 0) {
-                const referenced = draftAttachments.filter((attachment) =>
-                  isAttachmentReferenced(md, attachment),
-                );
-                if (referenced.length !== draftAttachments.length) {
-                  setInputDraftAttachments(draftKey, referenced);
-                }
-              }
+              commitDraft(draftKey, md, draftAttachments);
             }}
             onSubmit={handleSend}
             onUploadFile={uploadEnabled ? handleUpload : undefined}
