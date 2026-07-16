@@ -137,13 +137,14 @@ type HookMatch struct {
 }
 
 type HookResult struct {
-	RunID         string             `json:"run_id,omitempty"`
-	Decision      HookDecision       `json:"decision"`
-	WouldDecision HookDecision       `json:"would_decision,omitempty"`
-	Requirements  []string           `json:"requirements,omitempty"`
-	Modifications map[string]any     `json:"modifications,omitempty"`
-	Matches       []HookMatch        `json:"matches,omitempty"`
-	TimedOut      bool               `json:"timed_out,omitempty"`
-	Warning       string             `json:"warning,omitempty"`
-	ActionResults []HookActionResult `json:"action_results,omitempty"`
+	RunID             string             `json:"run_id,omitempty"`
+	Decision          HookDecision       `json:"decision"`
+	WouldDecision     HookDecision       `json:"would_decision,omitempty"`
+	Requirements      []string           `json:"requirements,omitempty"`
+	Modifications     map[string]any     `json:"modifications,omitempty"`
+	Matches           []HookMatch        `json:"matches,omitempty"`
+	MatchedConditions []Condition        `json:"matched_conditions,omitempty"`
+	TimedOut          bool               `json:"timed_out,omitempty"`
+	Warning           string             `json:"warning,omitempty"`
+	ActionResults     []HookActionResult `json:"action_results,omitempty"`
 }

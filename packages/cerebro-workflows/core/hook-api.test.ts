@@ -77,9 +77,9 @@ describe("workflow hook API compatibility", () => {
     const [run] = parseHookRunsResponse({ runs: [{
       id: "run-1", created_at: "2026-07-15T08:00:00Z", policy_id: "policy-1", policy_version: 2,
       event: { event_id: "event-1", event_type: "before.task.complete" },
-      source_scope: { kind: "model", id: "claude-opus-4-6" }, latency_ms: 12,
-      result: { decision: "allow", would_decision: "block", matches: [{ policy_id: "policy-1", version: 2, handler_id: "primary", source_scope: { kind: "model", id: "claude-opus-4-6" }, decision: "block", dry_run: true }], action_results: [{ type: "audit.record", status: "would_run" }] },
+      source_scope: { kind: "model", id: "claude-opus-4-6" }, fail_mode: "warn", latency_ms: 12,
+      result: { decision: "allow", would_decision: "block", matched_conditions: [{ field: "issue.status", op: "eq", value: "in_review" }], requirements: ["Add delivery evidence"], matches: [{ policy_id: "policy-1", version: 2, handler_id: "primary", source_scope: { kind: "model", id: "claude-opus-4-6" }, decision: "block", dry_run: true }], action_results: [{ type: "audit.record", status: "would_run" }] },
     }] });
-    expect(run).toEqual(expect.objectContaining({ source: "before.task.complete · model claude-opus-4-6", matched_steps: ["Trigger", "Scope", "Filter", "Decision", "Action"], decision: "block", side_effects: false, latency_ms: 12 }));
+    expect(run).toEqual(expect.objectContaining({ policy_id: "policy-1", policy_version: 2, source_scope: { kind: "model", id: "claude-opus-4-6" }, matched_conditions: ["issue.status eq in_review"], fail_mode: "warn", remediation: ["Add delivery evidence"], source: "before.task.complete · model claude-opus-4-6", matched_steps: ["Trigger", "Scope", "Filter", "Decision", "Action"], decision: "block", side_effects: false, latency_ms: 12 }));
   });
 });

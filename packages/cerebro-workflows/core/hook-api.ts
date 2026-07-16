@@ -90,6 +90,8 @@ export function parseHookRunsResponse(raw: unknown): HookRun[] {
     const sourceScope = asObject(record.source_scope);
     const matches = Array.isArray(result.matches) ? result.matches : [];
     const actions = Array.isArray(result.action_results) ? result.action_results : [];
+    const conditions = Array.isArray(result.matched_conditions) ? result.matched_conditions : [];
+    const remediation = Array.isArray(result.requirements) ? result.requirements.map(String) : [];
     const decision = String(result.would_decision || result.decision || "allow") as WorkflowHook["decision"];
     const eventType = String(event.event_type || "Unknown event");
     const scopeKind = String(sourceScope.kind || "workspace");
@@ -97,10 +99,21 @@ export function parseHookRunsResponse(raw: unknown): HookRun[] {
     return [{
       id: String(record.id || event.event_id || ""),
       created_at: String(record.created_at || ""),
+      policy_id: String(record.policy_id || ""),
+      policy_version: Number(record.policy_version || 0),
+      source_scope: { kind: scopeKind, id: scopeID },
+      matched_conditions: conditions.map((condition) => {
+        const item = asObject(condition);
+        const value = item.values ?? item.value;
+        const rendered = Array.isArray(value) ? value.join(", ") : String(value ?? "");
+        return [item.field, item.op, rendered].filter(Boolean).join(" ");
+      }),
       source: `${eventType} · ${scopeKind}${scopeID ? ` ${scopeID}` : ""}`,
       matched_steps: matches.length > 0 ? ["Trigger", "Scope", "Filter", "Decision", ...(actions.length > 0 ? ["Action"] : [])] : [],
       decision,
       would_action: actions.length > 0 ? actions.map((action) => String(asObject(action).type || "action")).join(", ") : String((Array.isArray(result.requirements) ? result.requirements[0] : "No action") || "No action"),
+      fail_mode: (["open", "closed", "warn"].includes(String(record.fail_mode)) ? String(record.fail_mode) : "open") as WorkflowHook["fail_mode"],
+      remediation,
       side_effects: false as const,
       latency_ms: Number(record.latency_ms || 0),
     }];

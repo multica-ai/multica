@@ -64,9 +64,15 @@ export interface HookRun {
   id: string;
   created_at: string;
   source: string;
+  policy_id: string;
+  policy_version: number;
+  source_scope: { kind: string; id: string };
+  matched_conditions: string[];
   matched_steps: string[];
   decision: HookDecision;
   would_action: string;
+  fail_mode: HookFailMode;
+  remediation: string[];
   side_effects: false;
   latency_ms: number;
 }

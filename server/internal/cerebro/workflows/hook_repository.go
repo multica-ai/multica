@@ -17,14 +17,15 @@ var (
 )
 
 type HookRunRecord struct {
-	ID            string      `json:"id"`
-	PolicyID      string      `json:"policy_id"`
-	PolicyVersion int         `json:"policy_version"`
-	Event         HookEvent   `json:"event"`
-	Result        HookResult  `json:"result"`
-	SourceScope   HookBinding `json:"source_scope"`
-	LatencyMS     int         `json:"latency_ms"`
-	CreatedAt     time.Time   `json:"created_at"`
+	ID            string       `json:"id"`
+	PolicyID      string       `json:"policy_id"`
+	PolicyVersion int          `json:"policy_version"`
+	Event         HookEvent    `json:"event"`
+	Result        HookResult   `json:"result"`
+	SourceScope   HookBinding  `json:"source_scope"`
+	FailMode      HookFailMode `json:"fail_mode"`
+	LatencyMS     int          `json:"latency_ms"`
+	CreatedAt     time.Time    `json:"created_at"`
 }
 
 type HookRepository interface {

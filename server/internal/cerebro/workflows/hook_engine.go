@@ -85,6 +85,7 @@ func (e *HookEngine) Evaluate(ctx context.Context, event HookEvent) (HookResult,
 		if !ok {
 			continue
 		}
+		result.MatchedConditions = append(result.MatchedConditions, policy.Conditions...)
 		for _, handler := range policy.Handlers {
 			match := HookMatch{
 				PolicyID: policy.ID, Version: policy.Version, HandlerID: handler.ID,

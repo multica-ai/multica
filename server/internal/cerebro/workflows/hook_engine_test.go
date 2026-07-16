@@ -80,6 +80,9 @@ func TestHookEngineBlockWinsAndRequirementsAreCombined(t *testing.T) {
 	}
 	policies[0].Handlers[0].Requirement = "Create a wakeup"
 	policies[1].Handlers[0].Requirement = "Record a continuation"
+	policies[0].Conditions = []Condition{{Field: "workspace.id", Op: "eq", Value: "ws-1"}}
+	policies[1].Conditions = []Condition{{Field: "agent.id", Op: "eq", Value: "agent-1"}}
+	policies[2].Conditions = []Condition{{Field: "issue.id", Op: "eq", Value: "issue-1"}}
 
 	engine := NewHookEngine(true, NewMemoryHookStore(policies))
 	result, err := engine.Evaluate(context.Background(), HookEvent{
@@ -94,6 +97,13 @@ func TestHookEngineBlockWinsAndRequirementsAreCombined(t *testing.T) {
 	}
 	if !reflect.DeepEqual(result.Requirements, []string{"Create a wakeup", "Record a continuation"}) {
 		t.Fatalf("requirements = %#v", result.Requirements)
+	}
+	if !reflect.DeepEqual(result.MatchedConditions, []Condition{
+		{Field: "workspace.id", Op: "eq", Value: "ws-1"},
+		{Field: "agent.id", Op: "eq", Value: "agent-1"},
+		{Field: "issue.id", Op: "eq", Value: "issue-1"},
+	}) {
+		t.Fatalf("matched conditions = %#v", result.MatchedConditions)
 	}
 }
 
