@@ -3091,6 +3091,8 @@ type claimRuntimeGuardTask struct {
 	ChatMessage              string   `json:"chat_message"`
 	ThreadName               string   `json:"thread_name"`
 	QuickCreateAttachmentIDs []string `json:"quick_create_attachment_ids"`
+	QuickCreatePriority      string   `json:"quick_create_priority"`
+	QuickCreateDueDate       string   `json:"quick_create_due_date"`
 	ProjectID                string   `json:"project_id"`
 	ProjectDescription       string   `json:"project_description"`
 }
@@ -3746,6 +3748,8 @@ func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
 		"prompt":         quickPrompt,
 		"requester_id":   testUserID,
 		"workspace_id":   testWorkspaceID,
+		"priority":       "high",
+		"due_date":       "2026-08-01",
 		"attachment_ids": []string{attachmentID},
 	})
 
@@ -3762,6 +3766,9 @@ func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
 	}
 	if len(task.QuickCreateAttachmentIDs) != 1 || task.QuickCreateAttachmentIDs[0] != attachmentID {
 		t.Fatalf("quick-create attachment ids = %#v, want [%q]", task.QuickCreateAttachmentIDs, attachmentID)
+	}
+	if task.QuickCreatePriority != "high" || task.QuickCreateDueDate != "2026-08-01" {
+		t.Fatalf("quick-create fields = {%q, %q}, want {high, 2026-08-01}", task.QuickCreatePriority, task.QuickCreateDueDate)
 	}
 }
 

@@ -154,6 +154,26 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 	}
 }
 
+func TestBuildQuickCreatePromptExplicitPriorityAndDueDate(t *testing.T) {
+	out := buildQuickCreatePrompt(Task{
+		QuickCreatePrompt:   "fix the login button color",
+		QuickCreatePriority: "urgent",
+		QuickCreateDueDate:  "2026-08-01",
+	})
+	for _, want := range []string{
+		"--priority urgent",
+		"--due-date 2026-08-01",
+		"quick-create selection is authoritative",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("buildQuickCreatePrompt with explicit fields missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Map P0/P1") {
+		t.Errorf("explicit priority must replace inference rules, got:\n%s", out)
+	}
+}
+
 // TestBuildQuickCreatePromptParentPinning verifies that when the user
 // opened quick-create from "Add sub issue" on an existing issue, the prompt
 // instructs the agent to pass `--parent <uuid>` so the new issue is filed

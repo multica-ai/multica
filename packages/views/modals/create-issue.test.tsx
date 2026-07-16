@@ -24,6 +24,8 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockAttachLabel = vi.hoisted(() => vi.fn());
+const mockListProperties = vi.hoisted(() => vi.fn());
+const mockSetIssueProperty = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
@@ -44,6 +46,7 @@ const mockDraftStore = {
     startDate: null,
     dueDate: null,
     labelIds: [] as string[],
+    propertyValues: {} as Record<string, string | number | boolean | string[]>,
     attachments: [] as Array<{
       id: string;
       workspace_id: string;
@@ -145,6 +148,20 @@ vi.mock("@multica/core/labels", () => ({
   useAttachLabelToIssue: () => ({ mutateAsync: mockAttachLabel }),
 }));
 
+vi.mock("@multica/core/properties", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/properties")>();
+  return {
+    ...actual,
+    useSetIssueProperty: () => ({
+      mutateAsync: ({ issueId, propertyId, value }: {
+        issueId: string;
+        propertyId: string;
+        value: string | number | boolean | string[];
+      }) => mockSetIssueProperty(issueId, propertyId, value),
+    }),
+  };
+});
+
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: mockUploadWithToast }),
 }));
@@ -182,7 +199,10 @@ vi.mock("@multica/core/api", async () => {
     typeof import("@multica/core/api/schemas")
   >("@multica/core/api/schemas");
   return {
-    api: {},
+    api: {
+      listProperties: mockListProperties,
+      setIssueProperty: mockSetIssueProperty,
+    },
     ApiError,
     parseWithFallback,
     DuplicateIssueErrorBodySchema,
@@ -293,6 +313,19 @@ vi.mock("../issues/components", () => ({
   LabelPicker: () => <div data-testid="label-picker" />,
 }));
 
+vi.mock("../issues/components/pickers/custom-property-picker", () => ({
+  CustomPropertyValueInput: ({ property, onChange }: any) => (
+    <button
+      type="button"
+      aria-label={`Edit ${property.name}`}
+      onClick={() => onChange("option-enterprise")}
+    >
+      {property.name}
+    </button>
+  ),
+  CustomPropertyValueDisplay: ({ value }: any) => <span>{String(value)}</span>,
+}));
+
 vi.mock("../projects/components/project-picker", () => ({
   ProjectPicker: () => <div data-testid="project-picker" />,
 }));
@@ -315,6 +348,9 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
     <button type="button" onClick={onClick}>{children}</button>
   ),
   DropdownMenuSeparator: () => null,
+  DropdownMenuSub: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuSubTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuSubContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 vi.mock("./issue-picker-modal", () => ({
@@ -418,6 +454,7 @@ describe("CreateIssueModal", () => {
     mockDraftStore.draft.startDate = null;
     mockDraftStore.draft.dueDate = null;
     mockDraftStore.draft.labelIds = [];
+    mockDraftStore.draft.propertyValues = {};
     mockDraftStore.draft.attachments = [];
     mockSetDraft.mockImplementation((patch: Partial<typeof mockDraftStore.draft>) => {
       mockDraftStore.draft = { ...mockDraftStore.draft, ...patch };
@@ -433,6 +470,7 @@ describe("CreateIssueModal", () => {
         startDate: null,
         dueDate: null,
         labelIds: [],
+        propertyValues: {},
         attachments: [],
       };
     });
@@ -466,6 +504,29 @@ describe("CreateIssueModal", () => {
       labels: [],
     });
     mockAttachLabel.mockResolvedValue({ labels: [] });
+    mockListProperties.mockResolvedValue({
+      properties: [
+        {
+          id: "property-tier",
+          workspace_id: "ws-test",
+          name: "Customer tier",
+          type: "select",
+          config: {
+            options: [
+              { id: "option-enterprise", name: "Enterprise", color: "#3b82f6" },
+            ],
+          },
+          position: 0,
+          archived: false,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+    mockSetIssueProperty.mockResolvedValue({
+      properties: { "property-tier": "option-enterprise" },
+    });
   });
 
   it("shows success feedback with a direct path to the new issue", async () => {
@@ -620,8 +681,30 @@ describe("CreateIssueModal", () => {
       startDate: null,
       dueDate: null,
       labelIds: [],
+      propertyValues: {},
       attachments: [],
     });
+  });
+
+  it("sets configured custom property values after the issue is created", async () => {
+    const user = userEvent.setup();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await screen.findByText("Customer tier");
+    await user.click(screen.getByText("Customer tier"));
+    await user.click(screen.getByRole("button", { name: "Edit Customer tier" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Enterprise follow-up");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockSetIssueProperty).toHaveBeenCalledWith(
+        "issue-123",
+        "property-tier",
+        "option-enterprise",
+      );
+    });
+    expect(mockClearDraft).toHaveBeenCalled();
   });
 
   it("persists manual-mode uploads in the issue draft", async () => {
@@ -1035,16 +1118,12 @@ describe("CreateIssueModal", () => {
       );
     });
 
-    it("blocks Enter on the title while an upload is in flight", async () => {
+    it("never submits manual create from Enter in the title", async () => {
       const user = userEvent.setup();
       renderManual();
       const title = screen.getByPlaceholderText("Issue title");
       await user.type(title, "Has a screenshot");
 
-      startPendingUpload();
-
-      // Title Enter routes to the same handler as the Create button but never
-      // consults its disabled state — the handler's own check is the gate.
       fireEvent.keyDown(title, { key: "Enter" });
       await Promise.resolve();
       expect(mockCreateIssue).not.toHaveBeenCalled();

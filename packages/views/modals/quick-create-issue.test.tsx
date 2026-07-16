@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetLastActor = vi.hoisted(() => vi.fn());
 const mockSetLastProjectId = vi.hoisted(() => vi.fn());
+const mockSetVisibleFields = vi.hoisted(() => vi.fn());
 const mockSetPrompt = vi.hoisted(() => vi.fn());
 const mockClearPrompt = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
@@ -19,6 +20,8 @@ const mockQuickCreateStore = {
   setLastActor: mockSetLastActor,
   lastProjectId: null as string | null,
   setLastProjectId: mockSetLastProjectId,
+  visibleFields: ["project"] as Array<"project" | "priority" | "due_date">,
+  setVisibleFields: mockSetVisibleFields,
   prompt: "Persisted draft prompt",
   setPrompt: mockSetPrompt,
   clearPrompt: mockClearPrompt,
@@ -112,6 +115,7 @@ vi.mock("@multica/core/auth", () => ({
 vi.mock("@multica/core/runtimes", () => ({
   runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
   checkQuickCreateCliVersion: () => ({ state: "ok", min: "1.0.0" }),
+  checkQuickCreateFieldsCliVersion: () => ({ state: "ok", min: "1.0.0" }),
   readRuntimeCliVersion: () => "1.2.3",
   MIN_QUICK_CREATE_CLI_VERSION: "1.0.0",
 }));
@@ -129,16 +133,43 @@ vi.mock("../common/actor-avatar", () => ({
 }));
 
 vi.mock("../issues/components", () => ({
-  PriorityPicker: () => <div data-testid="priority-picker" />,
-  DueDatePicker: () => <div data-testid="due-date-picker" />,
+  PriorityIcon: ({ priority }: { priority: string }) => <span>{priority}</span>,
+  PriorityPicker: ({ onUpdate }: any) => (
+    <button type="button" data-testid="priority-picker" onClick={() => onUpdate({ priority: "high" })}>
+      Priority
+    </button>
+  ),
+  DueDatePicker: ({ onUpdate }: any) => (
+    <button type="button" data-testid="due-date-picker" onClick={() => onUpdate({ due_date: "2026-08-01" })}>
+      Due date
+    </button>
+  ),
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
-  ProjectPicker: () => <div data-testid="project-picker" />,
+  ProjectPicker: ({ onUpdate }: any) => (
+    <button type="button" data-testid="project-picker" onClick={() => onUpdate({ project_id: "proj-1" })}>
+      Project
+    </button>
+  ),
 }));
 
 vi.mock("../common/pill-button", () => ({
-  PillButton: () => <div data-testid="pill-button" />,
+  PillButton: ({ children, ...props }: any) => <button type="button" {...props}>{children}</button>,
+}));
+
+vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
+  DropdownMenuTrigger: ({ render }: { render: ReactNode }) => <>{render}</>,
+  DropdownMenuContent: ({ children }: { children: ReactNode }) => <>{children}</>,
+  DropdownMenuItem: ({ children, onClick }: any) => (
+    <button type="button" onClick={onClick}>{children}</button>
+  ),
+  DropdownMenuSeparator: () => null,
+}));
+
+vi.mock("@multica/ui/lib/utils", () => ({
+  cn: (...values: Array<string | false | null | undefined>) => values.filter(Boolean).join(" "),
 }));
 
 vi.mock("../editor", async () => {
@@ -277,7 +308,6 @@ vi.mock("@multica/ui/components/ui/button", () => ({
 vi.mock("@multica/ui/components/ui/switch", () => ({
   Switch: ({ checked, onCheckedChange }: { checked: boolean; onCheckedChange: (v: boolean) => void }) => (
     <input
-      aria-label="Create another"
       type="checkbox"
       checked={checked}
       onChange={(e) => onCheckedChange(e.target.checked)}
@@ -320,6 +350,7 @@ describe("AgentCreatePanel", () => {
     mockQuickCreateStore.lastActorType = null;
     mockQuickCreateStore.lastActorId = null;
     mockQuickCreateStore.lastProjectId = null;
+    mockQuickCreateStore.visibleFields = ["project"];
     mockQuickCreateStore.prompt = "Persisted draft prompt";
     mockQuickCreateStore.keepOpen = false;
     mockProjectsQuery.data = [];
@@ -346,6 +377,11 @@ describe("AgentCreatePanel", () => {
     mockSetKeepOpen.mockImplementation((value: boolean) => {
       mockQuickCreateStore.keepOpen = value;
     });
+    mockSetVisibleFields.mockImplementation(
+      (fields: Array<"project" | "priority" | "due_date">) => {
+        mockQuickCreateStore.visibleFields = fields;
+      },
+    );
   });
 
   it("loads the persisted prompt draft when no transient prompt is provided", () => {
@@ -389,6 +425,60 @@ describe("AgentCreatePanel", () => {
     expect(mockClearPrompt).toHaveBeenCalled();
     expect(mockSetLastMode).toHaveBeenCalledWith("agent");
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("reveals optional fields from the overflow and submits their values", async () => {
+    const user = userEvent.setup();
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.queryByTestId("priority-picker")).not.toBeInTheDocument();
+    await user.click(screen.getByText("Set priority..."));
+    await user.click(screen.getByTestId("priority-picker"));
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agent_id: "agent-1",
+          priority: "high",
+        }),
+      );
+    });
+  });
+
+  it("lets users choose which quick-create fields stay exposed", async () => {
+    const user = userEvent.setup();
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    await user.click(screen.getByRole("button", { name: "Customize fields..." }));
+    expect(screen.getByText("Quick create fields")).toBeInTheDocument();
+    await user.click(screen.getAllByRole("checkbox")[1]!);
+
+    expect(mockSetVisibleFields).toHaveBeenCalledWith(["project", "priority"]);
+  });
+
+  it("submits seeded priority and due date as authoritative quick-create fields", async () => {
+    const user = userEvent.setup();
+
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: { priority: "urgent", due_date: "2026-08-01" },
+    });
+
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          priority: "urgent",
+          due_date: "2026-08-01",
+        }),
+      );
+    });
   });
 
   it("passes referenced upload attachment ids to quick-create", async () => {

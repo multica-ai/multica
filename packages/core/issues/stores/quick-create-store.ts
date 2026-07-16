@@ -6,6 +6,9 @@ import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "..
 import { defaultStorage } from "../../platform/storage";
 
 export type QuickCreateActorType = "agent" | "squad";
+export type QuickCreateField = "project" | "priority" | "due_date";
+
+export const DEFAULT_QUICK_CREATE_FIELDS: QuickCreateField[] = ["project"];
 
 // Per-workspace memory of the last actor (agent or squad) and project the
 // user picked in the Quick Create modal. Defaulted to those values on next
@@ -27,6 +30,8 @@ interface QuickCreateState {
   setLastActor: (type: QuickCreateActorType | null, id: string | null) => void;
   lastProjectId: string | null;
   setLastProjectId: (id: string | null) => void;
+  visibleFields: QuickCreateField[];
+  setVisibleFields: (fields: QuickCreateField[]) => void;
   prompt: string;
   setPrompt: (prompt: string) => void;
   clearPrompt: () => void;
@@ -42,6 +47,8 @@ export const useQuickCreateStore = create<QuickCreateState>()(
       setLastActor: (type, id) => set({ lastActorType: type, lastActorId: id }),
       lastProjectId: null,
       setLastProjectId: (id) => set({ lastProjectId: id }),
+      visibleFields: DEFAULT_QUICK_CREATE_FIELDS,
+      setVisibleFields: (visibleFields) => set({ visibleFields }),
       prompt: "",
       setPrompt: (prompt) => set({ prompt }),
       clearPrompt: () => set({ prompt: "" }),
@@ -51,6 +58,14 @@ export const useQuickCreateStore = create<QuickCreateState>()(
     {
       name: "multica_quick_create",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState ?? {}) as Partial<QuickCreateState>;
+        return {
+          ...currentState,
+          ...persisted,
+          visibleFields: persisted.visibleFields ?? DEFAULT_QUICK_CREATE_FIELDS,
+        };
+      },
     },
   ),
 );

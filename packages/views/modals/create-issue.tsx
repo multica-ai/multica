@@ -15,11 +15,19 @@ import {
   Maximize2,
   Minimize2,
   MoreHorizontal,
+  Shapes,
   X as XIcon,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, Attachment } from "@multica/core/types";
+import type {
+  Issue,
+  IssueStatus,
+  IssuePriority,
+  IssueAssigneeType,
+  IssuePropertyValue,
+  Attachment,
+} from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import {
   DialogContent,
@@ -30,6 +38,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
@@ -50,6 +61,10 @@ import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/que
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useAttachLabelToIssue } from "@multica/core/labels";
 import {
+  propertyListOptions,
+  useSetIssueProperty,
+} from "@multica/core/properties";
+import {
   ApiError,
   DuplicateIssueErrorBodySchema,
   type DuplicateIssueErrorBody,
@@ -58,6 +73,11 @@ import {
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { PillButton } from "../common/pill-button";
 import { ActorAvatar } from "../common/actor-avatar";
+import { PropertyIcon } from "../common/property-icon";
+import {
+  CustomPropertyValueDisplay,
+  CustomPropertyValueInput,
+} from "../issues/components/pickers/custom-property-picker";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 
@@ -208,7 +228,9 @@ export function ManualCreatePanel({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
   const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
-  const [priority, setPriority] = useState<IssuePriority>(draft.priority);
+  const [priority, setPriority] = useState<IssuePriority>(
+    (data?.priority as IssuePriority | undefined) ?? draft.priority,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(() => {
     if (data && "assignee_type" in data) {
@@ -223,8 +245,12 @@ export function ManualCreatePanel({
     return draft.assigneeId;
   });
   const [startDate, setStartDate] = useState<string | null>(draft.startDate);
-  const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
+  const [dueDate, setDueDate] = useState<string | null>(
+    (data?.due_date as string | undefined) ?? draft.dueDate,
+  );
   const [labelIds, setLabelIds] = useState<string[]>(draft.labelIds);
+  const [propertyValues, setPropertyValues] = useState(draft.propertyValues ?? {});
+  const [customPropertyPickerId, setCustomPropertyPickerId] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | undefined>(
     (data?.project_id as string) || undefined,
   );
@@ -253,6 +279,7 @@ export function ManualCreatePanel({
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
@@ -283,8 +310,8 @@ export function ManualCreatePanel({
   }, []);
 
   const { uploadWithToast } = useEditorUpload();
-  // Gate every action that fixes this draft: Create, Enter on the title, and
-  // the switch to agent mode (which re-serializes the description into a
+  // Gate every action that fixes this draft: Create and the switch to agent
+  // mode (which re-serializes the description into a
   // prompt and would carry a stripped body across).
   const uploadGate = useUploadGate(descEditorRef);
   const handleUpload = async (file: File) => {
@@ -311,10 +338,18 @@ export function ManualCreatePanel({
   const updateStartDate = (v: string | null) => { setStartDate(v); setDraft({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
   const updateLabelIds = (ids: string[]) => { setLabelIds(ids); setDraft({ labelIds: ids }); };
+  const updatePropertyValue = (propertyId: string, value: IssuePropertyValue | undefined) => {
+    const next = { ...propertyValues };
+    if (value === undefined) delete next[propertyId];
+    else next[propertyId] = value;
+    setPropertyValues(next);
+    setDraft({ propertyValues: next });
+  };
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
   const attachLabelMutation = useAttachLabelToIssue();
+  const setIssuePropertyMutation = useSetIssueProperty();
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
@@ -322,6 +357,8 @@ export function ManualCreatePanel({
     setStartDate(null);
     setDueDate(null);
     setLabelIds([]);
+    setPropertyValues({});
+    setCustomPropertyPickerId(null);
     setProjectId(undefined);
     setParentIssueId(undefined);
     setStage(null);
@@ -336,6 +373,7 @@ export function ManualCreatePanel({
       startDate: null,
       dueDate: null,
       labelIds: [],
+      propertyValues: {},
       attachments: [],
     });
     descEditorRef.current?.clearContent();
@@ -344,7 +382,6 @@ export function ManualCreatePanel({
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
-    // Covers both the Create button and TitleEditor's Enter, which route here.
     if (uploadGate.isBlocked()) return;
     setSubmitting(true);
     try {
@@ -373,6 +410,34 @@ export function ManualCreatePanel({
         stage: parentIssueId && stage != null ? stage : undefined,
         project_id: projectId,
       });
+
+      // Custom-property values can only be addressed once the issue has an
+      // id. Keep the modal in its submitting state until every value settles
+      // so closing or "Create another" cannot race the fan-out.
+      const propertyEntries = Object.entries(propertyValues);
+      if (propertyEntries.length > 0) {
+        const results = await Promise.allSettled(
+          propertyEntries.map(([propertyId, value]) =>
+            setIssuePropertyMutation.mutateAsync({
+              issueId: issue.id,
+              propertyId,
+              value,
+            }),
+          ),
+        );
+        let failed = 0;
+        for (const result of results) {
+          if (result.status === "rejected") {
+            failed += 1;
+            console.error("[create-issue] custom property set failed", result.reason);
+          }
+        }
+        if (failed > 0) {
+          toast.error(
+            t(($) => $.create_issue.toast_set_properties_failed, { count: failed }),
+          );
+        }
+      }
 
       // Link queued children to the new parent. Deferred to after create
       // because the new issue's ID doesn't exist yet. Partial failures don't
@@ -570,6 +635,8 @@ export function ManualCreatePanel({
           ? { squad_id: assigneeId }
           : {}),
       ...(projectId ? { project_id: projectId } : {}),
+      ...(priority !== "none" ? { priority } : {}),
+      ...(dueDate ? { due_date: dueDate } : {}),
       ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
       ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
     });
@@ -631,7 +698,6 @@ export function ManualCreatePanel({
                 placeholder={t(($) => $.create_issue.title_placeholder)}
                 className="text-lg font-semibold"
                 onChange={(v) => updateTitle(v)}
-                onSubmit={handleSubmit}
               />
             </div>
 
@@ -745,6 +811,42 @@ export function ManualCreatePanel({
                 />
               )}
 
+              {/* Workspace-defined fields use the same typed editors as issue
+                  detail, but write into the persisted draft until creation. */}
+              {workspaceProperties
+                .filter(
+                  (property) =>
+                    Object.prototype.hasOwnProperty.call(propertyValues, property.id) ||
+                    customPropertyPickerId === property.id,
+                )
+                .map((property) => {
+                  const value = propertyValues[property.id];
+                  return (
+                    <CustomPropertyValueInput
+                      key={property.id}
+                      property={property}
+                      value={value}
+                      onChange={(next) => updatePropertyValue(property.id, next)}
+                      open={customPropertyPickerId === property.id}
+                      onOpenChange={(open) =>
+                        setCustomPropertyPickerId(open ? property.id : null)
+                      }
+                      triggerRender={<PillButton />}
+                      trigger={
+                        <>
+                          <PropertyIcon property={property} className="size-3.5 text-xs" />
+                          <span className="max-w-32 truncate">{property.name}</span>
+                          {value !== undefined && (
+                            <span className="max-w-40 truncate text-muted-foreground">
+                              <CustomPropertyValueDisplay property={property} value={value} />
+                            </span>
+                          )}
+                        </>
+                      }
+                    />
+                  );
+                })}
+
               {/* Parent chip — appears when parent is set.
                   Placed before the ⋯ so it wraps to a new line with ⋯ if
                   space is tight, but ⋯ always stays last in DOM order. */}
@@ -833,6 +935,33 @@ export function ManualCreatePanel({
                     <ArrowDown className="h-3.5 w-3.5" />
                     {t(($) => $.create_issue.add_subissue)}
                   </DropdownMenuItem>
+                  {workspaceProperties.length > 0 && (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <Shapes className="h-3.5 w-3.5" />
+                        {t(($) => $.create_issue.custom_properties)}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-56">
+                        {workspaceProperties.map((property) => (
+                          <DropdownMenuItem
+                            key={property.id}
+                            disabled={Object.prototype.hasOwnProperty.call(
+                              propertyValues,
+                              property.id,
+                            )}
+                            onClick={() => setCustomPropertyPickerId(property.id)}
+                          >
+                            <PropertyIcon property={property} className="size-3.5 text-xs" />
+                            <span className="truncate">{property.name}</span>
+                            {Object.prototype.hasOwnProperty.call(
+                              propertyValues,
+                              property.id,
+                            ) && <Check className="ml-auto size-3.5" />}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  )}
                   {parentIssueId && parentIssue && (
                     <>
                       <DropdownMenuSeparator />
