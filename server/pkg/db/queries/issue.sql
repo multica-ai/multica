@@ -187,6 +187,14 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 FROM issue i
 WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
+  AND (sqlc.narg('status_id')::uuid IS NULL OR i.status_id = sqlc.narg('status_id'))
+  -- status_category (MUL-4809): match issues whose status_id resolves to the
+  -- given Category, scoped to the same workspace (no FK). Mirrors the EXISTS
+  -- predicate the dynamic ListIssues/ListGroupedIssues paths build.
+  AND (sqlc.narg('status_category')::text IS NULL OR EXISTS (
+        SELECT 1 FROM issue_status s
+         WHERE s.id = i.status_id AND s.workspace_id = i.workspace_id
+           AND s.category = sqlc.narg('status_category')::text))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))

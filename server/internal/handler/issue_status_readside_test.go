@@ -192,3 +192,89 @@ func TestIssueWithoutStatusIDHasNoStatusDetail(t *testing.T) {
 		t.Errorf("legacy status = %q, want todo", got.Status)
 	}
 }
+
+// TestListOpenIssuesStatusFilters covers P1-1 (MUL-4809 read-side review): the
+// open_only fast path must apply status_id / status_category and validate them
+// (they were silently ignored before, and bad values wrongly returned 200).
+func TestListOpenIssuesStatusFilters(t *testing.T) {
+	seedTestWorkspaceStatuses(t)
+	todoStatusID := getStatusCatalog(t, false).CategoryDefaults["todo"]
+
+	// Both statuses are "open" (not done/cancelled), so status filtering — not the
+	// open predicate — is what must separate them.
+	todoIssue := createIssueForReadside(t, "open todo", "todo")
+	inProgIssue := createIssueForReadside(t, "open in progress", "in_progress")
+
+	issues, code, msg := listIssuesForReadside(t, "open_only=true&status_category=todo")
+	if code != http.StatusOK {
+		t.Fatalf("open_only category filter: %d %s", code, msg)
+	}
+	if !containsIssue(issues, todoIssue.ID) {
+		t.Error("open_only status_category=todo dropped the todo issue")
+	}
+	if containsIssue(issues, inProgIssue.ID) {
+		t.Error("open_only status_category=todo wrongly returned the in_progress issue")
+	}
+
+	issues, code, _ = listIssuesForReadside(t, "open_only=true&status_id="+todoStatusID)
+	if code != http.StatusOK {
+		t.Fatalf("open_only status_id filter: %d", code)
+	}
+	got := findIssue(issues, todoIssue.ID)
+	if got == nil {
+		t.Fatal("open_only status_id filter dropped the matching issue")
+	}
+	if got.StatusDetail == nil || got.StatusDetail.Category != "todo" {
+		t.Errorf("open_only status_detail = %+v, want category todo", got.StatusDetail)
+	}
+	if containsIssue(issues, inProgIssue.ID) {
+		t.Error("open_only status_id filter returned a non-matching issue")
+	}
+
+	// Invalid values are a 400 on the open_only branch too (no longer ignored).
+	if _, code, _ := listIssuesForReadside(t, "open_only=true&status_id=not-a-uuid"); code != http.StatusBadRequest {
+		t.Errorf("open_only invalid status_id: expected 400, got %d", code)
+	}
+	if _, code, _ := listIssuesForReadside(t, "open_only=true&status_category=bogus"); code != http.StatusBadRequest {
+		t.Errorf("open_only invalid status_category: expected 400, got %d", code)
+	}
+}
+
+// TestListChildIssuesAttachesStatusDetail covers P1-4 (MUL-4809): the child-list
+// read endpoint hydrates status_detail like the other Issue read entries.
+func TestListChildIssuesAttachesStatusDetail(t *testing.T) {
+	seedTestWorkspaceStatuses(t)
+	todoStatusID := getStatusCatalog(t, false).CategoryDefaults["todo"]
+	parent := createIssueForReadside(t, "parent for child detail", "todo")
+
+	var childID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (workspace_id, title, status, status_id, priority, creator_type, creator_id, parent_issue_id, number)
+		VALUES ($1, 'child with status', 'todo', $2, 'none', 'member', $3, $4,
+		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1)
+		RETURNING id::text
+	`, testWorkspaceID, todoStatusID, testUserID, parent.ID).Scan(&childID); err != nil {
+		t.Fatalf("insert child: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, childID) })
+
+	w := httptest.NewRecorder()
+	testHandler.ListChildIssues(w, withURLParam(newRequest("GET", "/api/issues/"+parent.ID+"/children", nil), "id", parent.ID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListChildIssues: %d %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		Issues []IssueResponse `json:"issues"`
+	}
+	json.NewDecoder(w.Body).Decode(&out)
+	child := findIssue(out.Issues, childID)
+	if child == nil {
+		t.Fatal("child issue missing from children list")
+	}
+	if child.StatusID == nil || *child.StatusID != todoStatusID {
+		t.Errorf("child status_id = %v, want %s", child.StatusID, todoStatusID)
+	}
+	if child.StatusDetail == nil || child.StatusDetail.Category != "todo" {
+		t.Errorf("child status_detail = %+v, want category todo", child.StatusDetail)
+	}
+}

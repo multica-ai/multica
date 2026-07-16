@@ -244,6 +244,25 @@ func applyStatusDetail(resp *IssueResponse, details map[string]IssueStatusDetail
 	resp.StatusDetail = &detail
 }
 
+// hydrateStatusDetails bulk-loads status_id + status_detail for a slice of issue
+// responses in one round-trip and attaches them (MUL-4809). For read endpoints
+// that don't already build an issue-id slice (search / children). No-op on empty.
+func (h *Handler) hydrateStatusDetails(ctx context.Context, wsUUID pgtype.UUID, resps []IssueResponse) {
+	if len(resps) == 0 {
+		return
+	}
+	ids := make([]pgtype.UUID, 0, len(resps))
+	for i := range resps {
+		if u, err := util.ParseUUID(resps[i].ID); err == nil {
+			ids = append(ids, u)
+		}
+	}
+	details := h.statusDetailsByIssue(ctx, wsUUID, ids)
+	for i := range resps {
+		applyStatusDetail(&resps[i], details)
+	}
+}
+
 // parseStatusCatalogFilters reads the optional status_id / status_category list
 // filters (MUL-4809 read side) and validates them: status_id must be a UUID,
 // status_category one of the 5 Categories. On a malformed value it writes a 400
@@ -854,6 +873,21 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		resp[i] = sir
 	}
 
+	// Attach status_detail (MUL-4809) to each search hit in one round-trip. The
+	// search scan doesn't select status_id, so resolve it by issue id here.
+	if len(resp) > 0 {
+		ids := make([]pgtype.UUID, 0, len(resp))
+		for i := range resp {
+			if u, err := util.ParseUUID(resp[i].ID); err == nil {
+				ids = append(ids, u)
+			}
+		}
+		details := h.statusDetailsByIssue(ctx, wsUUID, ids)
+		for i := range resp {
+			applyStatusDetail(&resp[i].IssueResponse, details)
+		}
+	}
+
 	w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -939,6 +973,13 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Custom-status catalog filters (MUL-4809). Parsed BEFORE the open_only
+	// branch so validation (400 on a bad UUID / unknown Category) and the two
+	// predicates apply to BOTH the open_only fast path and the general list.
+	statusIDFilter, statusCategoryFilter, statusFiltersOK := parseStatusCatalogFilters(w, r)
+	if !statusFiltersOK {
+		return
+	}
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
@@ -955,6 +996,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
 			WorkspaceID:      wsUUID,
+			StatusID:         statusIDFilter,
+			StatusCategory:   pgtype.Text{String: statusCategoryFilter, Valid: statusCategoryFilter != ""},
 			Priority:         priorityFilter,
 			AssigneeID:       assigneeFilter,
 			AssigneeIds:      assigneeIdsFilter,
@@ -1014,10 +1057,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if s := r.URL.Query().Get("status"); s != "" {
 		statusFilter = pgtype.Text{String: s, Valid: true}
 	}
-	statusIDFilter, statusCategoryFilter, statusFiltersOK := parseStatusCatalogFilters(w, r)
-	if !statusFiltersOK {
-		return
-	}
+	// statusIDFilter / statusCategoryFilter were parsed above (shared with the
+	// open_only branch); applied to the dynamic WHERE below.
 
 	// assignee_types narrows the list to issues assigned to the given actor
 	// kinds (member / agent / squad). Mirrors the same param on
@@ -1889,6 +1930,7 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
 	}
+	h.hydrateStatusDetails(r.Context(), issue.WorkspaceID, resp)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
 	})
@@ -1958,6 +2000,7 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
 	}
+	h.hydrateStatusDetails(r.Context(), wsUUID, resp)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
 	})
