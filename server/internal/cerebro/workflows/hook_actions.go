@@ -84,6 +84,46 @@ func validateTypedHookAction(action HookAction) error {
 		return nil
 	}
 	switch action.Type {
+	case "member.notify":
+		for _, key := range []string{"member_id", "title", "message"} {
+			if err := requireString(key); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "wakeup.create":
+		if err := requireString("fire_at"); err != nil {
+			return err
+		}
+		return requireString("prompt")
+	case "wakeup.cancel":
+		return requireString("wakeup_id")
+	case "task.retry", "task.cancel":
+		return requireString("task_id")
+	case "artifact.create_or_update":
+		for _, key := range []string{"title", "kind", "body"} {
+			if err := requireString(key); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "approval.require":
+		for _, key := range []string{"capability", "resource", "reason"} {
+			if err := requireString(key); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "audit.record":
+		return requireString("event")
+	case "metric.increment":
+		if err := requireString("name"); err != nil {
+			return err
+		}
+		if _, ok := action.Config["amount"]; !ok {
+			return fmt.Errorf("%s amount is required", action.Type)
+		}
+		return nil
 	case "skill.run":
 		return requireString("skill_name")
 	case "judge.gate":

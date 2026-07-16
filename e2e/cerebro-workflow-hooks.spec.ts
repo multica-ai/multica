@@ -20,11 +20,12 @@ const basePolicy = {
     { field: "continuation", op: "not_exists" },
     { field: "attempt", op: "lt", value: 3 },
   ],
-  handlers: [{ id: "primary", decision: "block", requirement: "Choose a valid continuation before completing the task", actions: [{ type: "audit.record", config: {} }] }],
+  handlers: [{ id: "primary", decision: "block", requirement: "Choose a valid continuation before completing the task", actions: [{ type: "audit.record", config: { event: "continuation_required" } }] }],
   observed_run_count: 4,
   baseline_at: "2026-07-15T08:00:00Z",
   can_publish: true,
   updated_at: "2026-07-15T08:00:00Z",
+  last_run_at: "2026-07-15T08:00:00Z",
 };
 
 const run = {
@@ -61,7 +62,7 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
     await page.goto(`/${slug}/workflows/hooks`);
     await expect(page.getByRole("heading", { name: "Hooks" })).toBeVisible();
     await expect(page.getByRole("button", { name: "New hook" })).toBeVisible();
-    await expect(page.getByText("Trigger → 3 conditions → Block → 1 action").first()).toBeVisible();
+    await expect(page.getByText(/This hook runs before a task completes/).first()).toBeVisible();
     for (const state of ["Off", "Dry run", "Enforced", "Managed"]) await expect(page.getByText(state, { exact: true })).toBeVisible();
     await capture(page, testInfo, "01-hooks-overview");
 
@@ -72,7 +73,7 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
     await capture(page, testInfo, "02-hook-editor");
 
     await page.getByRole("button", { name: "Configure Filter" }).click();
-    await expect(page.getByLabel("Filter field 1")).toContainText("issue.status");
+    await expect(page.getByLabel("Filter field 1")).toContainText("Issue status");
     const conjunction = page.getByLabel("Filter conjunction 2");
     await expect(conjunction).toContainText("AND");
     await conjunction.click();
@@ -92,6 +93,7 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
 
     await page.getByRole("button", { name: "Test" }).click();
     await expect(page.getByRole("region", { name: "Test and history" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Run test with selected event" })).toBeEnabled();
     await expect(page.getByText("Test run — no side effects")).toBeVisible();
     await expect(page.getByText("Would block: audit.record")).toBeVisible();
     await capture(page, testInfo, "05-test-history");
@@ -102,9 +104,13 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
     });
   });
 
-  test("starts empty and exposes typed target actions", async ({ page }) => {
+  test("starts empty and exposes typed target actions", async ({ page }, testInfo) => {
     const slug = "e2e-workspace";
     await page.goto(`/${slug}/workflows/hooks/new`);
+    await expect(page.getByRole("heading", { name: "Start with a proven recipe" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Require a continuation before completion/ })).toBeVisible();
+    await capture(page, testInfo, "00-template-picker");
+    await page.getByRole("button", { name: /Start from scratch/ }).click();
     await expect(page.getByLabel("Hook name")).toHaveValue("");
     await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Configure Trigger" })).toHaveAttribute("data-state", "incomplete");
@@ -115,6 +121,11 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
     await expect(page.getByRole("option", { name: "Start agent" })).toBeVisible();
     await expect(page.getByRole("option", { name: "Run skill" })).toBeVisible();
     await expect(page.getByRole("option", { name: "Judge gate" })).toBeVisible();
+    await page.getByRole("option", { name: "Notify member" }).click();
+    await expect(page.getByLabel("Member")).toBeVisible();
+    await expect(page.getByLabel("Title")).toBeVisible();
+    await expect(page.getByLabel("Message")).toBeVisible();
+    await capture(page, testInfo, "08-typed-action");
   });
 
   test("saves a named target and keeps it after reload", async ({ page }) => {
@@ -147,6 +158,8 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
 
     await page.goto(`/${slug}/workflows/hooks/${HOOK_ID}`);
     await expect(page.getByRole("list", { name: "Hook chain" })).toBeVisible();
+    await page.getByRole("button", { name: "Configure Filter" }).click();
+    await expect(page.getByRole("region", { name: "filter configuration" })).toBeVisible();
     await expectNoHorizontalScroll(page);
     await capture(page, testInfo, "07-editor-mobile");
   });

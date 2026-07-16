@@ -30,10 +30,13 @@ describe("workflow hook API compatibility", () => {
       handlers: [{ id: "h1", decision: "block", requirement: "Choose one", actions: [{ type: "continuation.require" }] }],
       observed_run_count: 4,
       can_publish: true,
+      updated_at: "2026-07-15T08:00:00Z",
+      last_run_at: "2026-07-16T09:30:00Z",
     });
     expect(parsed.bindings).toEqual([{ kind: "model", value: "claude-opus-4-6" }]);
     expect(parsed.conditions[0]).toEqual(expect.objectContaining({ operator: "lt", value: "3" }));
     expect(parsed.baseline_run_count).toBe(4);
+    expect(parsed.last_run_at).toBe("2026-07-16T09:30:00Z");
   });
 
   it("always writes a dry-run transport policy", () => {

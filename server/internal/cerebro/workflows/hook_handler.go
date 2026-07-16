@@ -33,11 +33,46 @@ func (h *HookAPI) Routes() http.Handler {
 	r.Post("/", h.Create)
 	r.Get("/{id}", h.Get)
 	r.Put("/{id}", h.Update)
+	r.Delete("/{id}", h.Delete)
+	r.Post("/{id}/disable", h.Disable)
 	r.Post("/{id}/test", h.Test)
 	r.Post("/{id}/publish", h.Publish)
 	r.Get("/{id}/effective", h.Effective)
 	r.Get("/{id}/runs", h.Runs)
 	return r
+}
+
+func (h *HookAPI) Disable(w http.ResponseWriter, r *http.Request) {
+	workspaceID, actor, ok := h.authorize(w, r, HookPermissionWrite)
+	if !ok {
+		return
+	}
+	id, ok := hookIDOr400(w, r)
+	if !ok {
+		return
+	}
+	policy, err := h.repository.Disable(r.Context(), workspaceID, actor, id)
+	if err != nil {
+		h.writeRepositoryError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, policy)
+}
+
+func (h *HookAPI) Delete(w http.ResponseWriter, r *http.Request) {
+	workspaceID, actor, ok := h.authorize(w, r, HookPermissionWrite)
+	if !ok {
+		return
+	}
+	id, ok := hookIDOr400(w, r)
+	if !ok {
+		return
+	}
+	if err := h.repository.Delete(r.Context(), workspaceID, actor, id); err != nil {
+		h.writeRepositoryError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *HookAPI) List(w http.ResponseWriter, r *http.Request) {

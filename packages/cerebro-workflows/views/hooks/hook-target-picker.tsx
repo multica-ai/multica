@@ -1,22 +1,32 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronsUpDown, Search } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 
 export interface HookTargetOption { value: string; label: string; description?: string }
-export type HookDirectory = Partial<Record<"agent" | "model" | "issue" | "project" | "workflow" | "session" | "squad" | "skill", HookTargetOption[]>>;
+export type HookDirectory = Partial<Record<"agent" | "member" | "model" | "issue" | "project" | "workflow" | "session" | "squad" | "skill" | "artifact", HookTargetOption[]>> & {
+  searchIssues?: (query: string) => Promise<HookTargetOption[]>;
+};
 
-export function HookTargetPicker({ label, value, options, onChange }: { label: string; value: string; options: HookTargetOption[]; onChange: (value: string) => void }) {
+export function HookTargetPicker({ label, value, options, onChange, onSearch }: { label: string; value: string; options: HookTargetOption[]; onChange: (value: string) => void; onSearch?: (query: string) => Promise<HookTargetOption[]> }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const selected = options.find((option) => option.value === value);
+  const [remoteOptions, setRemoteOptions] = useState<HookTargetOption[]>([]);
+  const allOptions = remoteOptions.length > 0 ? remoteOptions : options;
+  const selected = [...options, ...remoteOptions].find((option) => option.value === value);
+  useEffect(() => {
+    if (!onSearch || !open || search.trim().length < 2) { setRemoteOptions([]); return; }
+    let current = true;
+    const timer = setTimeout(() => { void onSearch(search.trim()).then((next) => { if (current) setRemoteOptions(next); }); }, 250);
+    return () => { current = false; clearTimeout(timer); };
+  }, [onSearch, open, search]);
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return query ? options.filter((option) => `${option.label} ${option.description ?? ""}`.toLowerCase().includes(query)) : options;
-  }, [options, search]);
+    return onSearch ? allOptions : query ? allOptions.filter((option) => `${option.label} ${option.description ?? ""}`.toLowerCase().includes(query)) : allOptions;
+  }, [allOptions, onSearch, search]);
 
   return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setSearch(""); }}>
     <PopoverTrigger render={<Button type="button" variant="outline" className="h-9 w-full justify-between font-normal" aria-label={label} />}>

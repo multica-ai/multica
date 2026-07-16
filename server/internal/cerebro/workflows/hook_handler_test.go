@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -145,6 +146,33 @@ func TestHookAPIMalformedIDAndWorkspaceIsolationFailSafely(t *testing.T) {
 	router.ServeHTTP(missingRecorder, missing)
 	if missingRecorder.Code != http.StatusNotFound {
 		t.Fatalf("cross-workspace status = %d", missingRecorder.Code)
+	}
+}
+
+func TestHookAPIDisablesAndDeletesEditableHooks(t *testing.T) {
+	repo := NewMemoryHookRepository()
+	policy := newTestHookPolicy("22222222-2222-2222-2222-222222222222", HookAllow, HookModeDryRun, HookBinding{Kind: HookScopeWorkspace, ID: hookTestWorkspaceID})
+	repo.Seed(hookTestWorkspaceID, policy)
+	auth := &fakeHookAuthorizer{allow: map[HookPermission]bool{HookPermissionWrite: true}}
+	router := hookTestRouter(NewHookAPI(repo, auth))
+
+	disable := httptest.NewRecorder()
+	router.ServeHTTP(disable, hookRequest(t, http.MethodPost, "/"+policy.ID+"/disable", nil, "member-1", false))
+	if disable.Code != http.StatusOK {
+		t.Fatalf("disable status = %d, body=%s", disable.Code, disable.Body.String())
+	}
+	stored, err := repo.Get(context.Background(), hookTestWorkspaceID, policy.ID)
+	if err != nil || stored.Mode != HookModeOff {
+		t.Fatalf("disabled policy = %#v, err=%v", stored, err)
+	}
+
+	deleted := httptest.NewRecorder()
+	router.ServeHTTP(deleted, hookRequest(t, http.MethodDelete, "/"+policy.ID, nil, "member-1", false))
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, body=%s", deleted.Code, deleted.Body.String())
+	}
+	if _, err := repo.Get(context.Background(), hookTestWorkspaceID, policy.ID); !errors.Is(err, ErrHookPolicyNotFound) {
+		t.Fatalf("deleted policy error = %v, want not found", err)
 	}
 }
 

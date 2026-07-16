@@ -75,26 +75,29 @@ export interface HookRun {
   remediation: string[];
   side_effects: false;
   latency_ms: number;
+  event?: Record<string, unknown>;
 }
 
-export const HOOK_EVENT_OPTIONS: ReadonlyArray<{ value: HookEventType; label: string; advanced?: boolean }> = [
-  { value: "before.task.complete", label: "Before task completes" },
-  { value: "before.wakeup.create", label: "Before wakeup is created" },
-  { value: "before.issue.status_change", label: "Before issue status changes" },
-  { value: "before.message.send", label: "Before message is sent" },
-  { value: "before.tool.call", label: "Before tool call", advanced: true },
-  { value: "after.workflow.step_completed", label: "After workflow step completes" },
-  { value: "before.session.start", label: "Before session starts", advanced: true },
-  { value: "after.session.start", label: "After session starts", advanced: true },
-  { value: "before.session.end", label: "Before session ends", advanced: true },
-  { value: "after.session.end", label: "After session ends", advanced: true },
-  { value: "before.prompt.assemble", label: "Before prompt is assembled", advanced: true },
-  { value: "after.tool.call", label: "After tool call", advanced: true },
-  { value: "on.tool.failure", label: "When a tool fails", advanced: true },
-  { value: "before.agent.stop", label: "Before agent stops", advanced: true },
-  { value: "before.subagent.start", label: "Before subagent starts", advanced: true },
-  { value: "after.subagent.stop", label: "After subagent stops", advanced: true },
-  { value: "on.error", label: "When an error occurs", advanced: true },
+export const HOOK_EVENT_OPTIONS: ReadonlyArray<{ value: HookEventType; label: string; description: string; advanced?: boolean }> = [
+  { value: "before.task.complete", label: "Before task completes", description: "Check work immediately before a task is marked complete." },
+  { value: "on.task.failure", label: "When a task fails", description: "React after a task ends with an error." },
+  { value: "before.wakeup.create", label: "Before wakeup is created", description: "Check a scheduled wakeup before it is saved." },
+  { value: "on.wakeup.fire_failure", label: "When a wakeup fails", description: "React when a scheduled wakeup cannot start its work." },
+  { value: "before.issue.status_change", label: "Before issue status changes", description: "Check an issue before its status is changed." },
+  { value: "before.message.send", label: "Before message is sent", description: "Check an outgoing message before delivery." },
+  { value: "after.workflow.step_completed", label: "After workflow step completes", description: "React after a workflow finishes one step." },
+  { value: "before.tool.call", label: "Before tool call", description: "Check a tool request before it runs.", advanced: true },
+  { value: "before.session.start", label: "Before session starts", description: "Check a session before it starts.", advanced: true },
+  { value: "after.session.start", label: "After session starts", description: "React after a session starts.", advanced: true },
+  { value: "before.session.end", label: "Before session ends", description: "Check a session before it ends.", advanced: true },
+  { value: "after.session.end", label: "After session ends", description: "React after a session ends.", advanced: true },
+  { value: "before.prompt.assemble", label: "Before prompt is assembled", description: "Check context before the final prompt is assembled.", advanced: true },
+  { value: "after.tool.call", label: "After tool call", description: "React after a tool returns successfully.", advanced: true },
+  { value: "on.tool.failure", label: "When a tool fails", description: "React when a tool returns an error.", advanced: true },
+  { value: "before.agent.stop", label: "Before agent stops", description: "Check an agent immediately before it stops.", advanced: true },
+  { value: "before.subagent.start", label: "Before subagent starts", description: "Check delegated work before it starts.", advanced: true },
+  { value: "after.subagent.stop", label: "After subagent stops", description: "React after delegated work stops.", advanced: true },
+  { value: "on.error", label: "When an error occurs", description: "React to an unhandled workflow error.", advanced: true },
 ];
 
 export function createHookDraft(): WorkflowHook {

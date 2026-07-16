@@ -34,10 +34,19 @@ func TestRunSkillAndJudgeGateDeclareCapabilities(t *testing.T) {
 	}
 }
 
-func TestValidateTypedHookActionsRejectsIncompleteSkillAndJudgeConfiguration(t *testing.T) {
+func TestValidateTypedHookActionsRejectsEveryIncompleteVisibleConfiguration(t *testing.T) {
 	for _, action := range []HookAction{
 		{Type: "skill.run", Config: map[string]any{}},
 		{Type: "judge.gate", Config: map[string]any{"agent_id": "11111111-1111-1111-1111-111111111111"}},
+		{Type: "member.notify", Config: map[string]any{}},
+		{Type: "wakeup.create", Config: map[string]any{}},
+		{Type: "wakeup.cancel", Config: map[string]any{}},
+		{Type: "task.retry", Config: map[string]any{}},
+		{Type: "task.cancel", Config: map[string]any{}},
+		{Type: "artifact.create_or_update", Config: map[string]any{}},
+		{Type: "approval.require", Config: map[string]any{}},
+		{Type: "audit.record", Config: map[string]any{}},
+		{Type: "metric.increment", Config: map[string]any{}},
 	} {
 		if err := validateTypedHookAction(action); err == nil {
 			t.Fatalf("expected %s to be rejected", action.Type)
@@ -48,6 +57,16 @@ func TestValidateTypedHookActionsRejectsIncompleteSkillAndJudgeConfiguration(t *
 	}
 	if err := validateTypedHookAction(HookAction{Type: "judge.gate", Config: map[string]any{"agent_id": "11111111-1111-1111-1111-111111111111", "rubric": "Every acceptance criterion passes"}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStartHandoffAllowsAnOptionalPlanReference(t *testing.T) {
+	config := map[string]any{
+		"target":  "11111111-1111-1111-1111-111111111111",
+		"summary": "Continue the work", "done": "Tests added", "remaining": "Implement the fix", "max_depth": 2,
+	}
+	if _, err := validateHandoffAction(HookEvent{}, config); err != nil {
+		t.Fatalf("optional plan reference rejected: %v", err)
 	}
 }
 
@@ -70,7 +89,7 @@ func TestStartHandoffRequiresTypedBriefTargetAndDepthLimit(t *testing.T) {
 	if _, err := validateHandoffAction(HookEvent{HookDepth: 1}, valid); err != nil {
 		t.Fatal(err)
 	}
-	for _, missing := range []string{"target", "summary", "done", "remaining", "plan_ref"} {
+	for _, missing := range []string{"target", "summary", "done", "remaining"} {
 		config := map[string]any{}
 		for key, value := range valid {
 			config[key] = value

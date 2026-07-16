@@ -33,6 +33,8 @@ type HookRepository interface {
 	Get(context.Context, string, string) (HookPolicy, error)
 	Create(context.Context, string, HookPermissionActor, HookPolicy) (HookPolicy, error)
 	Update(context.Context, string, HookPermissionActor, string, HookPolicy) (HookPolicy, error)
+	Disable(context.Context, string, HookPermissionActor, string) (HookPolicy, error)
+	Delete(context.Context, string, HookPermissionActor, string) error
 	Publish(context.Context, string, string, string) (HookPolicy, error)
 	Runs(context.Context, string, string) ([]HookRunRecord, error)
 	RecordRun(context.Context, string, HookRunRecord) error
@@ -115,6 +117,36 @@ func (r *MemoryHookRepository) Update(_ context.Context, workspaceID string, act
 	return policy, nil
 }
 
+func (r *MemoryHookRepository) Disable(_ context.Context, workspaceID string, actor HookPermissionActor, id string) (HookPolicy, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	row, ok := r.workspaces[workspaceID][id]
+	if !ok {
+		return HookPolicy{}, ErrHookPolicyNotFound
+	}
+	if row.policy.Mode == HookModeManaged && !actor.IsOwner {
+		return HookPolicy{}, ErrManagedHookLocked
+	}
+	row.policy.Mode = HookModeOff
+	row.policy.UpdatedAt = time.Now().UTC()
+	return memoryPolicyResponse(row), nil
+}
+
+func (r *MemoryHookRepository) Delete(_ context.Context, workspaceID string, actor HookPermissionActor, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	row, ok := r.workspaces[workspaceID][id]
+	if !ok {
+		return ErrHookPolicyNotFound
+	}
+	if row.policy.Mode == HookModeManaged && !actor.IsOwner {
+		return ErrManagedHookLocked
+	}
+	delete(r.workspaces[workspaceID], id)
+	delete(r.runs, workspaceID+":"+id)
+	return nil
+}
+
 func (r *MemoryHookRepository) Publish(_ context.Context, workspaceID, id, _ string) (HookPolicy, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -164,6 +196,8 @@ func (r *MemoryHookRepository) RecordRun(_ context.Context, workspaceID string, 
 	key := workspaceID + ":" + run.PolicyID
 	r.runs[key] = append([]HookRunRecord{run}, r.runs[key]...)
 	row.observedRuns++
+	lastRun := run.CreatedAt
+	row.policy.LastRunAt = &lastRun
 	return nil
 }
 

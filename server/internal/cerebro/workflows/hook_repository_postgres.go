@@ -111,6 +111,48 @@ func (r *PostgresHookRepository) Update(ctx context.Context, workspaceID string,
 	return r.insertVersion(ctx, workspaceID, actor, util.UUIDToString(familyID), current.Version+1, policy)
 }
 
+func (r *PostgresHookRepository) Disable(ctx context.Context, workspaceID string, actor HookPermissionActor, id string) (HookPolicy, error) {
+	current, err := r.Get(ctx, workspaceID, id)
+	if err != nil {
+		return HookPolicy{}, err
+	}
+	if current.Mode == HookModeManaged && !actor.IsOwner {
+		return HookPolicy{}, ErrManagedHookLocked
+	}
+	policyID, _ := util.ParseUUID(id)
+	wsID, _ := util.ParseUUID(workspaceID)
+	if _, err := r.db.Exec(ctx, `UPDATE cerebro_workflow_hook_policy SET mode='off', updated_at=now() WHERE id=$1 AND workspace_id=$2`, policyID, wsID); err != nil {
+		return HookPolicy{}, err
+	}
+	current.Mode = HookModeOff
+	current.UpdatedAt = time.Now().UTC()
+	return current, nil
+}
+
+func (r *PostgresHookRepository) Delete(ctx context.Context, workspaceID string, actor HookPermissionActor, id string) error {
+	current, err := r.Get(ctx, workspaceID, id)
+	if err != nil {
+		return err
+	}
+	if current.Mode == HookModeManaged && !actor.IsOwner {
+		return ErrManagedHookLocked
+	}
+	policyID, _ := util.ParseUUID(id)
+	wsID, _ := util.ParseUUID(workspaceID)
+	query := `DELETE FROM cerebro_workflow_hook_policy WHERE workspace_id=$1 AND family_id=(SELECT family_id FROM cerebro_workflow_hook_policy WHERE id=$2 AND workspace_id=$1) AND mode <> 'managed'`
+	if current.Mode == HookModeManaged && actor.IsOwner {
+		query = `DELETE FROM cerebro_workflow_hook_policy WHERE workspace_id=$1 AND family_id=(SELECT family_id FROM cerebro_workflow_hook_policy WHERE id=$2 AND workspace_id=$1)`
+	}
+	result, err := r.db.Exec(ctx, query, wsID, policyID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrHookPolicyNotFound
+	}
+	return nil
+}
+
 func (r *PostgresHookRepository) insertVersion(ctx context.Context, workspaceID string, actor HookPermissionActor, familyID string, version int, policy HookPolicy) (HookPolicy, error) {
 	wsID, err := util.ParseUUID(workspaceID)
 	if err != nil {
@@ -215,10 +257,15 @@ func (r *PostgresHookRepository) loadPolicyMetrics(ctx context.Context, policy *
 		return err
 	}
 	var count int
-	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM cerebro_workflow_hook_run WHERE policy_id=$1`, id).Scan(&count); err != nil {
+	var lastRun pgtype.Timestamptz
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*), MAX(created_at) FROM cerebro_workflow_hook_run WHERE policy_id=$1`, id).Scan(&count, &lastRun); err != nil {
 		return err
 	}
 	policy.ObservedRuns = count
+	if lastRun.Valid {
+		value := lastRun.Time
+		policy.LastRunAt = &value
+	}
 	policy.CanPublish = policy.Mode == HookModeDryRun && count > 0 && policy.BaselineAt != nil
 	return nil
 }

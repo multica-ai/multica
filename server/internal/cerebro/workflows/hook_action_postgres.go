@@ -283,7 +283,7 @@ func validateHandoffAction(event HookEvent, config map[string]any) (handoffActio
 	if value, ok := config["start_new"].(bool); ok {
 		input.StartNew = value
 	}
-	for key, value := range map[string]string{"summary": input.Summary, "done": input.Done, "remaining": input.Remaining, "plan_ref": input.PlanRef} {
+	for key, value := range map[string]string{"summary": input.Summary, "done": input.Done, "remaining": input.Remaining} {
 		if value == "" {
 			return handoffActionInput{}, fmt.Errorf("session.handoff %s is required", key)
 		}

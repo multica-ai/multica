@@ -10,7 +10,7 @@ const hookPolicySchema = z.object({
   id: z.string().optional(), version: z.number().int().positive(), name: z.string(), description: z.string().optional().default(""),
   mode: z.enum(["off", "dry_run", "enforce", "managed"]), fail_mode: z.enum(["open", "closed", "warn"]),
   events: z.array(z.string()), bindings: z.array(hookBindingSchema), conditions: z.array(hookConditionSchema).optional().default([]), handlers: z.array(hookHandlerSchema),
-  observed_run_count: z.number().int().nonnegative().optional().default(0), can_publish: z.boolean().optional().default(false), updated_at: z.string().optional(),
+  observed_run_count: z.number().int().nonnegative().optional().default(0), can_publish: z.boolean().optional().default(false), updated_at: z.string().optional(), last_run_at: z.string().optional(),
 });
 const hookListSchema = z.object({ hooks: z.array(hookPolicySchema) });
 
@@ -35,7 +35,7 @@ function fromTransport(policy: HookPolicyTransport): WorkflowHook {
     actions: handler.actions.map((action) => ({ type: action.type, label: humaniseAction(action.type), config: action.config })),
     baseline_run_count: policy.observed_run_count,
 	can_publish: policy.can_publish,
-    last_run_at: policy.updated_at,
+    last_run_at: policy.last_run_at,
   };
 }
 
@@ -72,6 +72,12 @@ export async function updateWorkflowHook(id: string, hook: WorkflowHook): Promis
 }
 export async function publishWorkflowHook(id: string): Promise<WorkflowHook> {
   return parseHookResponse(await api.cerebroRequest<unknown>(`/api/cerebro/workflow-hooks/${encodeURIComponent(id)}/publish`, { method: "POST" }));
+}
+export async function disableWorkflowHook(id: string): Promise<WorkflowHook> {
+  return parseHookResponse(await api.cerebroRequest<unknown>(`/api/cerebro/workflow-hooks/${encodeURIComponent(id)}/disable`, { method: "POST" }));
+}
+export async function deleteWorkflowHook(id: string): Promise<void> {
+  await api.cerebroRequest(`/api/cerebro/workflow-hooks/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 export async function testWorkflowHook(id: string, event: Record<string, unknown>): Promise<{ side_effects: false; result: unknown }> {
   return api.cerebroRequest(`/api/cerebro/workflow-hooks/${encodeURIComponent(id)}/test`, { method: "POST", body: JSON.stringify(event) });
@@ -116,6 +122,7 @@ export function parseHookRunsResponse(raw: unknown): HookRun[] {
       remediation,
       side_effects: false as const,
       latency_ms: Number(record.latency_ms || 0),
+      event,
     }];
   });
 }

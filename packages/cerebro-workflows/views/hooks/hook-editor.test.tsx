@@ -25,7 +25,7 @@ describe("HookEditor", () => {
   it("edits filters as field, operator, and value rows without raw JSON", () => {
     render(<HookEditor initialHook={{ ...createHookDraft(), events: ["before.task.complete"], conditions: [{ field: "issue.status", operator: "not_in", value: "done, cancelled" }] }} onSave={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Configure Filter" }));
-    expect(screen.getByLabelText("Filter field 1")).toHaveTextContent("issue.status");
+    expect(screen.getByLabelText("Filter field 1")).toHaveTextContent("Issue status");
     expect(screen.getByLabelText("Filter operator 1")).toHaveTextContent("is not one of");
     expect(screen.getByLabelText("Filter value 1")).toHaveValue("done, cancelled");
     expect(screen.queryByText(/\{\s*"field"/)).not.toBeInTheDocument();
@@ -44,7 +44,7 @@ describe("HookEditor", () => {
     }} onSave={onSave} />);
     fireEvent.click(screen.getByRole("button", { name: "Configure Filter" }));
     await user.click(screen.getByLabelText("Filter conjunction 2"));
-    await user.click(screen.getByRole("option", { name: "OR" }));
+    await user.click(await screen.findByRole("option", { name: "OR" }));
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       conditions: expect.arrayContaining([expect.objectContaining({ conjunction: "OR" })]),
@@ -68,7 +68,7 @@ describe("HookEditor", () => {
       bindings: [{ kind: "workspace" as const, value: "" }],
       conditions: [{ field: "issue.status", operator: "eq", value: "todo" }],
       decision: "block" as const, requirement: "Continue the issue",
-      actions: [{ type: "audit.record", label: "Record audit event", config: {} }],
+      actions: [{ type: "audit.record", label: "Record audit event", config: { event: "completion_guarded" } }],
     };
     const { rerender } = render(<HookEditor initialHook={valid} onSave={vi.fn()} canPublish={false} />);
     expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
@@ -111,12 +111,46 @@ describe("HookEditor", () => {
     expect(screen.queryByRole("button", { name: /Remove action/ })).not.toBeInTheDocument();
   });
 
-  it("turns the chain plus controls into quick-add actions", () => {
+  it("does not show insertion controls that cannot change the chain shape", () => {
     render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Quick add filter" }));
-    expect(screen.getByRole("button", { name: "Remove condition 1" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Quick add action" }));
-    expect(screen.getByRole("button", { name: "Remove action 1" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Quick add/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a live plain-language explanation and editable description", () => {
+    render(<HookEditor initialHook={{ ...createHookDraft(), events: ["before.task.complete"] }} onSave={vi.fn()} />);
+    expect(screen.getByLabelText("Hook description")).toBeInTheDocument();
+    expect(screen.getByLabelText("What this hook does")).toHaveTextContent("before a task completes");
+  });
+
+  it("saves current edits before publishing and asks for confirmation", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue({ id: "hook-1" });
+    const onPublish = vi.fn();
+    const valid = {
+      ...createHookDraft(), id: "hook-1", name: "Guard completion", events: ["before.task.complete" as const],
+      bindings: [{ kind: "workspace" as const, value: "" }],
+      conditions: [{ field: "issue.status", operator: "eq", value: "todo" }],
+      decision: "block" as const, requirement: "Continue the issue",
+      actions: [{ type: "audit.record", label: "Record audit event", config: { event: "completion_blocked" } }],
+      baseline_run_count: 4,
+    };
+    render(<HookEditor initialHook={valid} onSave={onSave} onPublish={onPublish} canPublish />);
+    await user.clear(screen.getByLabelText("Hook name"));
+    await user.type(screen.getByLabelText("Hook name"), "Changed name");
+    await user.click(screen.getByRole("button", { name: "Publish" }));
+    expect(screen.getByRole("dialog", { name: "Publish hook" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Confirm publish" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: "Changed name" }));
+    expect(onPublish).toHaveBeenCalled();
+  });
+
+  it("offers lifecycle controls for an existing editable hook", async () => {
+    const user = userEvent.setup();
+    render(<HookEditor initialHook={{ ...createHookDraft(), id: "hook-1" }} onSave={vi.fn()} onDisable={vi.fn()} onDelete={vi.fn()} onDuplicate={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "More hook actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Disable hook" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Duplicate hook" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete hook" })).toBeInTheDocument();
   });
 
   it("shows honest completion state and the new skill and judge actions", () => {

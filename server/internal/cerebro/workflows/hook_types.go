@@ -95,6 +95,7 @@ type HookPolicy struct {
 	CreatedByID   string          `json:"created_by_id,omitempty"`
 	CreatedByType string          `json:"created_by_type,omitempty"`
 	UpdatedAt     time.Time       `json:"updated_at,omitempty"`
+	LastRunAt     *time.Time      `json:"last_run_at,omitempty"`
 	ObservedRuns  int             `json:"observed_run_count"`
 	BaselineAt    *time.Time      `json:"baseline_at,omitempty"`
 	CanPublish    bool            `json:"can_publish"`

@@ -1,4 +1,5 @@
 import type { HookEventType, WorkflowHook } from "./hook-types";
+import { ACTION_CONFIGURATION } from "./hook-ux";
 
 export type HookStepKey = "trigger" | "scope" | "filter" | "decision" | "action" | "failure";
 export interface HookValidationResult { valid: boolean; message?: string }
@@ -62,16 +63,12 @@ export function validateHookStep(hook: WorkflowHook, step: HookStepKey): HookVal
 }
 
 function actionIsConfigured(action: WorkflowHook["actions"][number]): boolean {
-  const value = (key: string) => String(action.config[key] ?? "").trim();
-  switch (action.type) {
-    case "agent.dispatch": return Boolean(value("agent_id"));
-    case "squad.dispatch": return Boolean(value("squad_id") && value("agent_id"));
-    case "session.handoff": return ["target", "summary", "done", "remaining", "plan_ref"].every((key) => value(key));
-    case "workflow.activate": case "workflow.pause": case "workflow.resume": case "workflow.stop": return Boolean(value("workflow_id"));
-    case "skill.run": return Boolean(value("skill_name"));
-    case "judge.gate": return Boolean(value("agent_id") && value("rubric"));
-    default: return true;
-  }
+  const definition = ACTION_CONFIGURATION[action.type];
+  if (!definition) return false;
+  return definition.fields.filter((field) => field.required).every((field) => {
+    const value = action.config[field.key];
+    return typeof value === "boolean" ? true : String(value ?? "").trim().length > 0;
+  });
 }
 
 export function validateHook(hook: WorkflowHook): HookValidationResult {
