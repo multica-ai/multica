@@ -796,4 +796,155 @@ describe("useIssueSurfaceController", () => {
       "todo-1",
     ]);
   });
+
+  it("scopes swimlane to the cards it draws, not its statusless lane source", async () => {
+    // SwimLaneView draws cards from `issues` (status filter applied) and uses
+    // the statusless `swimlaneIssues` only for LANE DISCOVERY. Scoping the
+    // chip to the statusless set counted rows the canvas never draws.
+    mockListByStatus({
+      todo: [makeIssue({ id: "todo-1", status: "todo" })],
+      in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
+    });
+    getAgentTaskSnapshot.mockResolvedValue([
+      makeRunningTask("t-1", "agent-1", "todo-1"),
+      makeRunningTask("t-2", "agent-2", "prog-1"),
+    ]);
+
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => {
+      store.getState().setViewMode("swimlane");
+      store.getState().toggleStatusFilter("todo");
+    });
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["board", "list", "swimlane"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() =>
+      expect(result.current.workingScopeIssues.length).toBe(1),
+    );
+
+    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual([
+      "todo-1",
+    ]);
+    expect(result.current.issues.map((i) => i.id)).toEqual(["todo-1"]);
+    // The statusless lane source still carries both — so a regression back to
+    // it would make the assertion above fail rather than pass by accident.
+    expect(result.current.swimlaneIssues.map((i) => i.id).sort()).toEqual([
+      "prog-1",
+      "todo-1",
+    ]);
+  });
+
+  // --- gantt canvas scope ------------------------------------------------
+  // The gantt canvas draws fewer rows than the shared filters leave: a row
+  // needs a date, and done/cancelled hide unless `ganttShowCompleted` is on.
+  // Those rules live in the surface (`ganttCanvasRows`) so the chip narrows
+  // the same set the canvas draws.
+
+  function mockGanttIssues(issues: Issue[]) {
+    listIssues.mockImplementation((params?: ListIssuesParams) => {
+      if (params?.scheduled === true) {
+        return Promise.resolve({ issues, total: issues.length });
+      }
+      return Promise.resolve({ issues: [], total: 0 });
+    });
+  }
+
+  const ganttFixture = [
+    makeIssue({
+      id: "gantt-open",
+      status: "in_progress",
+      start_date: "2026-01-01",
+      due_date: "2026-01-05",
+    }),
+    makeIssue({
+      id: "gantt-done",
+      status: "done",
+      start_date: "2026-01-01",
+      due_date: "2026-01-05",
+    }),
+    // Scheduled server-side but momentarily dateless (e.g. a WS patch that
+    // just cleared both dates) — the canvas cannot place it.
+    makeIssue({ id: "gantt-undated", status: "in_progress" }),
+  ];
+
+  it("keeps rows the gantt canvas hides out of the working scope", async () => {
+    mockGanttIssues(ganttFixture);
+    // Every one of them has a running agent.
+    getAgentTaskSnapshot.mockResolvedValue([
+      makeRunningTask("t-1", "agent-1", "gantt-open"),
+      makeRunningTask("t-2", "agent-2", "gantt-done"),
+      makeRunningTask("t-3", "agent-3", "gantt-undated"),
+    ]);
+
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => store.getState().setViewMode("gantt"));
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["board", "list", "swimlane", "gantt"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() =>
+      expect(result.current.filteredGanttIssues.length).toBe(1),
+    );
+
+    // ganttShowCompleted defaults to false, so the done row and the undated
+    // row are not drawn — the chip must not count them either.
+    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual([
+      "gantt-open",
+    ]);
+    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual(
+      result.current.filteredGanttIssues.map((i) => i.id),
+    );
+  });
+
+  it("widens the gantt working scope when show-completed is turned on", async () => {
+    mockGanttIssues(ganttFixture);
+    getAgentTaskSnapshot.mockResolvedValue([
+      makeRunningTask("t-1", "agent-1", "gantt-open"),
+      makeRunningTask("t-2", "agent-2", "gantt-done"),
+      makeRunningTask("t-3", "agent-3", "gantt-undated"),
+    ]);
+
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => {
+      store.getState().setViewMode("gantt");
+      store.getState().toggleGanttShowCompleted();
+    });
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["board", "list", "swimlane", "gantt"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() =>
+      expect(result.current.filteredGanttIssues.length).toBe(2),
+    );
+
+    // The done row is drawn now, so it counts. The undated one still cannot
+    // be placed, so it still does not.
+    expect(result.current.workingScopeIssues.map((i) => i.id).sort()).toEqual([
+      "gantt-done",
+      "gantt-open",
+    ]);
+    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual(
+      result.current.filteredGanttIssues.map((i) => i.id),
+    );
+  });
 });

@@ -34,6 +34,28 @@ const EMPTY_ISSUES: Issue[] = [];
 const EMPTY_CHILD_PROGRESS = new Map<string, ChildProgress>();
 const EMPTY_PROJECTS: Project[] = [];
 
+/**
+ * The rows the gantt canvas actually draws, on top of the shared filters.
+ *
+ * The canvas adds two rules of its own: a row needs a date to be placed, and
+ * completed work is hidden unless the user asks for it. The data source only
+ * delivers scheduled issues (server-side `scheduled=true`), but a row can
+ * still arrive without a date — e.g. a WS-driven optimistic patch that just
+ * cleared start_date / due_date and is waiting for the cache to refetch — so
+ * the date check stays defensive.
+ *
+ * These rules live HERE rather than privately inside GanttView so the header
+ * chip can narrow the same set the canvas draws. A view that filters its own
+ * rows in secret is exactly how the chip's count drifted from the list in the
+ * first place (MUL-4884); duplicating the rules in both places would just
+ * reintroduce the drift with extra steps.
+ */
+function ganttCanvasRows(issues: Issue[], showCompleted: boolean): Issue[] {
+  const dated = issues.filter((i) => i.start_date || i.due_date);
+  if (showCompleted) return dated;
+  return dated.filter((i) => i.status !== "done" && i.status !== "cancelled");
+}
+
 export interface IssueSurfaceData {
   surfaceIssues: Issue[];
   projectIssues: Issue[];
@@ -72,7 +94,7 @@ export function useIssueSurfaceData({
   projectId,
   usesAssigneeBoard,
   usesGantt,
-  usesSwimlane,
+  ganttShowCompleted,
   sort,
   statusFilters,
   priorityFilters,
@@ -92,7 +114,9 @@ export function useIssueSurfaceData({
   projectId?: string;
   usesAssigneeBoard: boolean;
   usesGantt: boolean;
-  usesSwimlane: boolean;
+  /** Gantt's "show completed" display toggle. The canvas hides done/cancelled
+   *  rows without it, so the working scope has to honour it too. */
+  ganttShowCompleted: boolean;
   sort: IssueSortParam;
   statusFilters: IssueStatus[];
   priorityFilters: IssueFilterState["priorityFilters"];
@@ -220,8 +244,12 @@ export function useIssueSurfaceData({
   );
 
   const filteredGanttIssues = useMemo(
-    () => applyIssueFilters(ganttIssues, baseFilterState, filterContext),
-    [baseFilterState, filterContext, ganttIssues],
+    () =>
+      ganttCanvasRows(
+        applyIssueFilters(ganttIssues, baseFilterState, filterContext),
+        ganttShowCompleted,
+      ),
+    [baseFilterState, filterContext, ganttIssues, ganttShowCompleted],
   );
 
   // The assignee-grouped board renders straight from `groups`, bypassing the
@@ -259,15 +287,27 @@ export function useIssueSurfaceData({
   //
   // Turning the filter on only adds `workingOnly` to this same pipeline, so
   // the preview is the post-click list whether the filter is currently on or
-  // off. Mode branches mirror the render branches: gantt renders its own
-  // scheduled-only projection, the assignee board renders from `groups`, and
-  // swimlane drops the status filter.
+  // off.
+  //
+  // Each branch below must take the SAME source the matching branch of
+  // IssueSurface renders:
+  //   - gantt          → the canvas set (scheduled + dated + showCompleted)
+  //   - assignee board → the grouped response, not the flat list
+  //   - board / list / swimlane → the flat filtered list
+  //
+  // Swimlane deliberately has no branch: SwimLaneView draws its cards from
+  // `issues` (status filter applied) and only uses the statusless
+  // `swimlaneIssues` for LANE DISCOVERY, so scoping the chip to the
+  // statusless set would count rows the canvas never draws.
   const workingScopeIssues = useMemo(() => {
     if (usesGantt) {
-      return applyIssueFilters(
-        ganttIssues,
-        { ...baseFilterState, workingOnly: true },
-        filterContext,
+      return ganttCanvasRows(
+        applyIssueFilters(
+          ganttIssues,
+          { ...baseFilterState, workingOnly: true },
+          filterContext,
+        ),
+        ganttShowCompleted,
       );
     }
     if (usesAssigneeBoard) {
@@ -282,10 +322,7 @@ export function useIssueSurfaceData({
     }
     return applyIssueFilters(
       surfaceIssues,
-      {
-        ...(usesSwimlane ? statuslessFilterState : baseFilterState),
-        workingOnly: true,
-      },
+      { ...baseFilterState, workingOnly: true },
       filterContext,
     );
   }, [
@@ -294,13 +331,12 @@ export function useIssueSurfaceData({
     baseFilterState,
     filterContext,
     ganttIssues,
+    ganttShowCompleted,
     propertyFilters,
     showSubIssues,
-    statuslessFilterState,
     surfaceIssues,
     usesAssigneeBoard,
     usesGantt,
-    usesSwimlane,
   ]);
 
   const { data: childProgressMap = EMPTY_CHILD_PROGRESS } = useQuery(

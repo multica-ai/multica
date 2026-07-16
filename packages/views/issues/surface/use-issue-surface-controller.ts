@@ -138,6 +138,7 @@ export function useIssueSurfaceController({
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
+  const ganttShowCompleted = useViewStore((s) => s.ganttShowCompleted);
   const cardProperties = useViewStore((s) => s.cardProperties);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
 
@@ -219,7 +220,6 @@ export function useIssueSurfaceController({
   const usesAssigneeBoard =
     effectiveViewMode === "board" && grouping === "assignee";
   const usesGantt = effectiveViewMode === "gantt" && !!projectId;
-  const usesSwimlane = effectiveViewMode === "swimlane";
 
   const projectFilterState = useMemo(
     () => ({
@@ -237,7 +237,7 @@ export function useIssueSurfaceController({
     projectId,
     usesAssigneeBoard,
     usesGantt,
-    usesSwimlane,
+    ganttShowCompleted,
     sort,
     statusFilters,
     priorityFilters,
