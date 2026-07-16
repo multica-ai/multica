@@ -54,15 +54,22 @@ func TestQuickCreateIssueParentTrustBoundary(t *testing.T) {
 	).Scan(&runtimeID); err != nil {
 		t.Fatalf("fetch agent runtime: %v", err)
 	}
+	var originalMetadata []byte
+	if err := testPool.QueryRow(ctx,
+		`SELECT metadata FROM agent_runtime WHERE id = $1`,
+		runtimeID,
+	).Scan(&originalMetadata); err != nil {
+		t.Fatalf("fetch agent runtime metadata: %v", err)
+	}
 	if _, err := testPool.Exec(ctx,
-		`UPDATE agent_runtime SET metadata = jsonb_build_object('cli_version', $1::text) WHERE id = $2`,
+		`UPDATE agent_runtime SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('cli_version', $1::text) WHERE id = $2`,
 		agent.MinQuickCreateCLIVersion, runtimeID,
 	); err != nil {
 		t.Fatalf("bump runtime cli_version: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`UPDATE agent_runtime SET metadata = '{}'::jsonb WHERE id = $1`, runtimeID)
+			`UPDATE agent_runtime SET metadata = $1 WHERE id = $2`, originalMetadata, runtimeID)
 	})
 
 	// Same-workspace parent — must be accepted and threaded through.

@@ -97,27 +97,10 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	args = append(args, filterCustomArgs(opts.CustomArgs, opencodeBlockedArgs, b.cfg.Logger)...)
 	args = append(args, prompt)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
-	hideAgentWindow(cmd)
-	// Run opencode in its own process group so cancellation can reach the
-	// whole tree (opencode plus any tool subprocess it spawns), not just the
-	// direct child — otherwise a cancelled or restarted run can orphan a
-	// descendant that keeps spinning (#4533).
-	configureProcessGroup(cmd)
-	// Take over context cancellation. The default CommandContext behaviour
-	// SIGKILLs only the leader the instant runCtx is done; we instead drive a
-	// graceful, group-wide SIGTERM→SIGKILL from the cancellation goroutine
-	// below and close the stdout read end only after the tree has been
-	// signalled. Returning nil here keeps os/exec from racing us with its own
-	// kill; WaitDelay remains the hard backstop.
-	cmd.Cancel = func() error { return nil }
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
-	cmd.WaitDelay = 10 * time.Second
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	env := make(map[string]string, len(b.cfg.Env)+2)
+	for key, value := range b.cfg.Env {
+		env[key] = value
 	}
-
-	env := buildEnv(b.cfg.Env)
 	// Keep daemon-mode runs non-interactive without relying on
 	// OPENCODE_PERMISSION. OpenCode deep-merges that env override into user
 	// config while preserving existing key order, so a pre-existing
@@ -131,7 +114,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// when computing the directory it walks for AGENTS.md / .opencode/skills.
 	// See packages/opencode/src/cli/cmd/run.ts in the upstream source.
 	if opts.Cwd != "" {
-		env = append(env, "PWD="+opts.Cwd)
+		env["PWD"] = opts.Cwd
 	}
 	// Project agent.mcp_config into OpenCode via OPENCODE_CONFIG_CONTENT —
 	// OpenCode's general inline-config injection mechanism that merges at
@@ -153,23 +136,42 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		if _, dup := b.cfg.Env["OPENCODE_CONFIG_CONTENT"]; dup {
 			b.cfg.Logger.Warn("agent.custom_env sets OPENCODE_CONFIG_CONTENT but agent.mcp_config takes precedence and overrides it")
 		}
-		env = append(env, "OPENCODE_CONFIG_CONTENT="+mcpContent)
+		env["OPENCODE_CONFIG_CONTENT"] = mcpContent
 	}
-	cmd.Env = env
+	commandCfg := b.cfg
+	commandCfg.Env = env
+	cmd, err := commandCfg.command(runCtx, execPath, args, opts.Cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("prepare opencode command: %w", err)
+	}
+	// cfg.command runs opencode in its own process group so cancellation can
+	// reach the whole tree (opencode plus any tool subprocess it spawns), not
+	// just the direct child — otherwise a cancelled or restarted run can orphan
+	// a descendant that keeps spinning (#4533).
+	//
+	// Take over context cancellation. The default CommandContext behaviour
+	// SIGKILLs only the leader the instant runCtx is done; we instead drive a
+	// graceful, group-wide SIGTERM→SIGKILL from the cancellation goroutine
+	// below and close the stdout read end only after the tree has been
+	// signalled. Returning nil here keeps os/exec from racing us with its own
+	// kill; WaitDelay remains the hard backstop.
+	_ = cmd.SetCancel(func() error { return nil })
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("opencode stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[opencode:stderr] ")
+	_ = cmd.SetStderr(newLogWriter(b.cfg.Logger, "[opencode:stderr] "))
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start opencode: %w", err)
 	}
 
-	b.cfg.Logger.Info("opencode started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("opencode started", "pid", cmd.Process().Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -194,12 +196,12 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			return // finished on its own; nothing to terminate
 		case <-runCtx.Done():
 		}
-		if cmd.Process != nil {
-			signalProcessGroup(cmd.Process, syscall.SIGTERM)
+		if cmd.Process() != nil {
+			signalProcessGroup(cmd.Process(), syscall.SIGTERM)
 			select {
 			case <-procDone: // exited within the grace window
 			case <-time.After(opencodeTerminateGrace()):
-				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				signalProcessGroup(cmd.Process(), syscall.SIGKILL)
 			}
 		}
 		_ = stdout.Close()
@@ -234,7 +236,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			scanResult.errMsg = fmt.Sprintf("%s; opencode exited with error: %v", scanResult.errMsg, exitErr)
 		}
 
-		b.cfg.Logger.Info("opencode finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("opencode finished", "pid", cmd.Process().Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
 
 		// Build usage map. OpenCode doesn't report model per-step, so we
 		// attribute all usage to the configured model (or "unknown").

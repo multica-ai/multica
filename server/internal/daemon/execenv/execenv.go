@@ -45,7 +45,7 @@ type PrepareParams struct {
 	Profile      string
 	Provider     string // agent provider (determines runtime config and skill injection paths)
 	CodexVersion string // detected Codex CLI version (only used when Provider == "codex")
-	OpenclawBin  string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	OpenclawBin  string // runtime OpenClaw path; never executed during task preparation
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
 	// via a per-task config file. Cursor and OpenClaw consume it here; other
@@ -175,6 +175,12 @@ type SkillFileContextForEnv struct {
 type Environment struct {
 	// RootDir is the top-level env directory ({workspacesRoot}/{task_id_short}/).
 	RootDir string
+	// HomeDir is the task-private user home exposed to the agent process. It
+	// deliberately starts without the daemon owner's ~/.multica credentials so
+	// clearing MULTICA_* cannot fall back to a human PAT/JWT.
+	HomeDir string
+	// ConfigDir is the task-private XDG configuration root under HomeDir.
+	ConfigDir string
 	// WorkDir is the directory to pass as Cwd to the agent. Normally
 	// ({RootDir}/workdir/); when the task is bound to a local_directory
 	// project_resource, it is the user's path instead. See LocalDirectory.
@@ -199,28 +205,17 @@ type Environment struct {
 	// OPENCLAW_CONFIG_PATH on the openclaw subprocess so its native skill
 	// scanner pins workspaceDir to WorkDir.
 	OpenclawConfigPath string
-	// OpenclawIncludeRoot is the directory of the user's active OpenClaw
-	// config (set only for openclaw provider with an on-disk user config).
-	// The daemon must prepend it to OPENCLAW_INCLUDE_ROOTS so OpenClaw is
-	// allowed to follow the wrapper's `$include` link out of envRoot into
-	// the user's config — by default OpenClaw confines `$include` to the
-	// directory holding the wrapper file. Empty when no $include is
-	// emitted (fresh install).
-	OpenclawIncludeRoot string
 	// CursorDataDir is the per-task Cursor data directory (set only for
 	// cursor provider when the agent has managed mcp_config). The daemon
 	// exports this as CURSOR_DATA_DIR so project-level MCP approvals are
 	// isolated from the user's persistent ~/.cursor/projects state.
 	CursorDataDir string
-	// HermesHome is the path to the per-task HERMES_HOME overlay (set only for
+	// HermesHome is the path to the per-task HERMES_HOME projection (set only for
 	// the hermes provider, and only when the agent has skills bound — empty
-	// otherwise, leaving the user's real home in place). It mirrors ~/.hermes/
-	// via symlink, derives a config.yaml that references the user's real skills
-	// as an external root, and holds the bound skills in its skills/ subdir. The
-	// daemon exports it as HERMES_HOME so the hermes CLI discovers those skills
-	// natively — Hermes has no workspace-relative discovery, so the previous
-	// .agent_context/skills/ fallback was never read (issue #5242). See
-	// hermes_home.go.
+	// otherwise). It contains bounded private snapshots of allowlisted runtime
+	// state, a minimal derived config with no owner paths, and only the bound
+	// skills. The daemon exports it as HERMES_HOME because Hermes has no
+	// workspace-relative skill discovery (issue #5242). See hermes_home.go.
 	HermesHome string
 
 	logger *slog.Logger // for cleanup logging
@@ -285,9 +280,15 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: create directory %s: %w", dir, err)
 		}
 	}
+	homeDir, configDir, err := preparePrivateTaskHome(envRoot)
+	if err != nil {
+		return nil, fmt.Errorf("execenv: prepare private task home: %w", err)
+	}
 
 	env := &Environment{
 		RootDir:        envRoot,
+		HomeDir:        homeDir,
+		ConfigDir:      configDir,
 		WorkDir:        workDir,
 		LocalDirectory: params.LocalWorkDir != "",
 		logger:         logger,
@@ -325,13 +326,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.CodexHome = codexHome
 	}
 
-	// For Hermes, redirect HERMES_HOME to a per-task compatibility overlay ONLY
-	// when the agent has skills bound. A skill-less Hermes task keeps the user's
-	// real home and its original behavior untouched. The overlay makes the bound
-	// skills visible — Hermes discovers skills only from its home, so the old
-	// .agent_context/skills/ fallback was never read (issue #5242). See
-	// hermes_home.go.
-	if params.Provider == "hermes" && len(params.Task.AgentSkills) > 0 {
+	// Hermes always runs from a task-private HERMES_HOME. This prevents an Issue
+	// task without bound skills from inheriting owner credentials, plugins,
+	// memories, profiles, or future owner-home state.
+	if params.Provider == "hermes" {
 		hermesHome := filepath.Join(envRoot, "hermes-home")
 		if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
@@ -359,9 +357,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For OpenClaw, synthesize a per-task config that pins workspace to
 	// workDir. The skill scanner then reads {workDir}/skills/ (written by
 	// writeContextFiles above). Fail closed on errors: a malformed user
-	// config that the openclaw CLI can't read is a real problem and
-	// silently degrading to a minimal config would mask it by booting
-	// OpenClaw without the agents / providers / API keys it expects.
+	// config that cannot be projected safely is a real problem. Preparation
+	// never executes the task-selected OpenClaw binary.
 	if params.Provider == "openclaw" {
 		result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
 			OpenclawBin: params.OpenclawBin,
@@ -372,7 +369,6 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: prepare openclaw config: %w", err)
 		}
 		env.OpenclawConfigPath = result.ConfigPath
-		env.OpenclawIncludeRoot = result.IncludeRoot
 	}
 
 	logger.Info("execenv: prepared env", "root", envRoot, "repos_available", len(params.Task.Repos))
@@ -388,9 +384,12 @@ type ReuseParams struct {
 	// too — a marker removed while the daemon runs is restored before a reused
 	// task spawns, not only on the fresh-Prepare path.
 	WorkspacesRoot string
-	WorkDir        string
-	Provider       string
-	CodexVersion   string // only used when Provider == "codex"
+	// RootDir is the daemon-derived, task-specific environment root. Reuse never
+	// derives authority from the persisted WorkDir path.
+	RootDir      string
+	WorkDir      string
+	Provider     string
+	CodexVersion string // only used when Provider == "codex"
 	// ResumeSessionID is the prior Codex thread/session ID this reused task
 	// intends to resume, when any. Only consulted when Provider == "codex" and
 	// only used while migrating a legacy per-task home whose sessions/ still
@@ -398,7 +397,7 @@ type ReuseParams struct {
 	// exposed into the new task-local sessions dir so thread/resume still finds
 	// it. Empty means a fresh thread. See prepareCodexSessionsDir (MUL-4424).
 	ResumeSessionID string
-	OpenclawBin     string // only used when Provider == "openclaw"; empty = PATH lookup
+	OpenclawBin     string // runtime OpenClaw path; ignored by task preparation
 	// McpConfig is the agent's saved `mcp_config` JSON. Reused on reuse so a
 	// freshly-saved managed set re-materialises into the wrapper before the
 	// task starts — without this a stale wrapper from a prior run would keep
@@ -420,8 +419,7 @@ type ReuseParams struct {
 	// reuse paths.
 	LocalDirectory bool
 	// HermesSourceHome and HermesEnv mirror PrepareParams on reuse so the Hermes
-	// overlay re-derives against the agent's current source home / profile and
-	// external_dirs vars.
+	// projection re-derives against the agent's current source home/profile.
 	HermesSourceHome      string
 	HermesSourceMustExist bool
 	HermesEnv             map[string]string
@@ -431,7 +429,11 @@ type ReuseParams struct {
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
 // Returns nil if the workdir does not exist (caller should fall back to Prepare).
 func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
-	if _, err := os.Stat(params.WorkDir); err != nil {
+	rootDir, workDir, err := validateReusePaths(params.RootDir, params.WorkDir)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("execenv: reject unsafe reused environment", "error", err)
+		}
 		return nil
 	}
 
@@ -446,7 +448,6 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		}
 	}
 
-	rootDir := filepath.Dir(params.WorkDir)
 	if params.LocalDirectory {
 		// For local_directory tasks the user's WorkDir is unrelated to
 		// envRoot (envRoot still lives under workspacesRoot/{wsID}/...),
@@ -461,10 +462,17 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	}
 	env := &Environment{
 		RootDir:        rootDir,
-		WorkDir:        params.WorkDir,
+		WorkDir:        workDir,
 		LocalDirectory: params.LocalDirectory,
 		logger:         logger,
 	}
+	homeDir, configDir, err := preparePrivateTaskHome(env.RootDir)
+	if err != nil {
+		logger.Warn("execenv: reset private task home failed", "error", err)
+		return nil
+	}
+	env.HomeDir = homeDir
+	env.ConfigDir = configDir
 
 	// Roll back the previous dispatch's sidecar writes before refreshing.
 	// On reuse the workdir still holds the prior run's issue_context.md and
@@ -538,30 +546,15 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		}
 	}
 
-	// Refresh (or tear down) the per-task HERMES_HOME on reuse. With skills
-	// bound, rebuild the overlay so an added/removed/edited skill and the
-	// mirrored home/config track the user's current ~/.hermes/ before the next
-	// hermes process starts. With no skills bound, drop the redirect entirely so
-	// the task reverts to the user's real home — matching a fresh Prepare for a
-	// skill-less agent.
+	// Refresh the per-task HERMES_HOME on reuse so runtime snapshots and bound
+	// skills track current task authority.
 	if params.Provider == "hermes" && env.RootDir != "" {
 		hermesHome := filepath.Join(env.RootDir, "hermes-home")
-		if len(params.Task.AgentSkills) > 0 {
-			if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
-				// Fail closed: a half-built overlay must not run. Returning nil
-				// makes the daemon fall back to a fresh Prepare, whose error
-				// then blocks dispatch rather than silently dropping the bound
-				// skill.
-				logger.Warn("execenv: refresh hermes-home failed; forcing fresh prepare", "error", err)
-				return nil
-			}
-			env.HermesHome = hermesHome
-		} else {
-			env.HermesHome = ""
-			if err := os.RemoveAll(hermesHome); err != nil {
-				logger.Warn("execenv: remove stale hermes-home failed", "error", err)
-			}
+		if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
+			logger.Warn("execenv: refresh hermes-home failed; forcing fresh prepare", "error", err)
+			return nil
 		}
+		env.HermesHome = hermesHome
 	}
 
 	// Refresh Cursor's managed MCP sidecars on reuse. A newly saved agent
@@ -583,11 +576,8 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	}
 
 	// Refresh the per-task OpenClaw config on reuse — the user may have
-	// added/removed agents or rotated providers since the prior task ran,
+	// changed allowlisted model/provider settings since the prior task ran,
 	// and the workspace override always re-targets the current workDir.
-	// Fail closed: a user config that can no longer be parsed should block
-	// reuse rather than degrade to a minimal config that boots OpenClaw
-	// without the registered agents.
 	if params.Provider == "openclaw" {
 		result, err := prepareOpenclawConfig(env.RootDir, params.WorkDir, OpenclawConfigPrep{
 			OpenclawBin: params.OpenclawBin,
@@ -599,11 +589,82 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			return nil
 		}
 		env.OpenclawConfigPath = result.ConfigPath
-		env.OpenclawIncludeRoot = result.IncludeRoot
 	}
 
 	logger.Info("execenv: reusing env", "workdir", params.WorkDir)
 	return env
+}
+
+func validateReusePaths(rootDir, workDir string) (string, string, error) {
+	if rootDir == "" || workDir == "" || !filepath.IsAbs(rootDir) || !filepath.IsAbs(workDir) ||
+		filepath.Clean(rootDir) != rootDir || filepath.Clean(workDir) != workDir {
+		return "", "", fmt.Errorf("reuse root and workdir must be absolute canonical paths")
+	}
+	if workDir != filepath.Join(rootDir, "workdir") {
+		return "", "", fmt.Errorf("reuse workdir %q is not the expected child of root %q", workDir, rootDir)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(rootDir)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve reuse root: %w", err)
+	}
+	resolvedWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve reuse workdir: %w", err)
+	}
+	if resolvedWorkDir != filepath.Join(resolvedRoot, "workdir") {
+		return "", "", fmt.Errorf("resolved reuse workdir is not the expected child of the resolved root")
+	}
+	rootInfo, err := os.Lstat(rootDir)
+	if err != nil || !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
+		return "", "", fmt.Errorf("reuse root is not a real directory")
+	}
+	workInfo, err := os.Lstat(workDir)
+	if err != nil || !workInfo.IsDir() || workInfo.Mode()&os.ModeSymlink != 0 {
+		return "", "", fmt.Errorf("reuse workdir is not a real directory")
+	}
+	// Preserve the daemon-issued lexical identity after validating its resolved
+	// filesystem relationship. On macOS, /var commonly resolves to /private/var;
+	// replacing the issued paths would split active-root and persisted identity.
+	return rootDir, workDir, nil
+}
+
+// preparePrivateTaskHome creates the home/config roots inherited by an agent
+// subprocess and removes any Multica user configuration left by a prior run.
+// The explicit chmod calls are intentional: MkdirAll honors an existing
+// directory's mode, so reuse must tighten directories an earlier process made
+// more permissive.
+func preparePrivateTaskHome(rootDir string) (string, string, error) {
+	if rootDir == "" {
+		return "", "", fmt.Errorf("environment root is required")
+	}
+
+	homeDir := filepath.Join(rootDir, "home")
+	configDir := filepath.Join(homeDir, ".config")
+	for _, dir := range []string{homeDir, configDir} {
+		info, err := os.Lstat(dir)
+		switch {
+		case err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0):
+			if err := os.RemoveAll(dir); err != nil {
+				return "", "", fmt.Errorf("replace non-directory %s: %w", dir, err)
+			}
+		case err != nil && !os.IsNotExist(err):
+			return "", "", fmt.Errorf("inspect directory %s: %w", dir, err)
+		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return "", "", fmt.Errorf("create directory %s: %w", dir, err)
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return "", "", fmt.Errorf("secure directory %s: %w", dir, err)
+		}
+	}
+
+	// A task may invoke the Multica CLI and write a config into its private
+	// home. Never carry that credential into a later dispatch/reuse.
+	if err := os.RemoveAll(filepath.Join(homeDir, ".multica")); err != nil {
+		return "", "", fmt.Errorf("clear private Multica config: %w", err)
+	}
+
+	return homeDir, configDir, nil
 }
 
 // hydrateCodexSkills populates the per-task CODEX_HOME/skills directory with

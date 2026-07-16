@@ -56,6 +56,8 @@ var repoCheckoutCmd = &cobra.Command{
 
 var repoCheckoutRef string
 
+const repoCheckoutCapabilityHeader = "X-Multica-Repo-Checkout-Capability"
+
 func init() {
 	repoListCmd.Flags().String("output", "table", "Output format: table or json")
 
@@ -338,24 +340,14 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	if daemonPort == "" {
 		return fmt.Errorf("MULTICA_DAEMON_PORT not set (this command is intended to be run by an agent inside a daemon task)")
 	}
-
-	workspaceID := os.Getenv("MULTICA_WORKSPACE_ID")
-	agentName := os.Getenv("MULTICA_AGENT_NAME")
-	taskID := os.Getenv("MULTICA_TASK_ID")
-
-	// Use current working directory as the checkout target.
-	workDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+	capability := strings.TrimSpace(os.Getenv("MULTICA_REPO_CHECKOUT_TOKEN"))
+	if capability == "" {
+		return fmt.Errorf("MULTICA_REPO_CHECKOUT_TOKEN not set (checkout is limited to repos assigned to this daemon task)")
 	}
 
 	reqBody := map[string]string{
-		"url":          repoURL,
-		"workspace_id": workspaceID,
-		"workdir":      workDir,
-		"ref":          repoCheckoutRef,
-		"agent_name":   agentName,
-		"task_id":      taskID,
+		"url": repoURL,
+		"ref": repoCheckoutRef,
 	}
 
 	data, err := json.Marshal(reqBody)
@@ -364,11 +356,13 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	}
 
 	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Post(
-		fmt.Sprintf("http://127.0.0.1:%s/repo/checkout", daemonPort),
-		"application/json",
-		bytes.NewReader(data),
-	)
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%s/repo/checkout", daemonPort), bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("create checkout request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(repoCheckoutCapabilityHeader, capability)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
 	}

@@ -2,6 +2,7 @@ package execenv
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -637,6 +638,7 @@ func TestReuseRefreshesSkillsWithoutDuplicating(t *testing.T) {
 	// Re-dispatch twice on the same persistent workdir.
 	for i := 0; i < 2; i++ {
 		if reused := Reuse(ReuseParams{
+			RootDir:  env.RootDir,
 			WorkDir:  env.WorkDir,
 			Provider: "claude",
 			Task:     task,
@@ -707,6 +709,7 @@ func TestReuseReclaimsManagedSkillDirWithStrayAgentFile(t *testing.T) {
 	}
 
 	if reused := Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "claude",
 		Task:     task,
@@ -734,6 +737,122 @@ func TestReuseReclaimsManagedSkillDirWithStrayAgentFile(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(skillsDir, "issue-review", "SKILL.md")); err != nil {
 		t.Errorf("expected a refreshed SKILL.md at the canonical slug: %v", err)
 	}
+}
+
+func TestReuseRejectsUntrustedPathsBeforeWriting(t *testing.T) {
+	t.Parallel()
+
+	makeRoot := func(t *testing.T) (string, string) {
+		t.Helper()
+		root := filepath.Join(t.TempDir(), "task-root")
+		workdir := filepath.Join(root, "workdir")
+		if err := os.MkdirAll(workdir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return root, workdir
+	}
+	assertUntouched := func(t *testing.T, root, sentinel string) {
+		t.Helper()
+		data, err := os.ReadFile(sentinel)
+		if err != nil || string(data) != "owner-data" {
+			t.Fatalf("sentinel changed: data=%q err=%v", data, err)
+		}
+		for _, name := range []string{"home", "codex-home", "hermes-home", ".agent_context"} {
+			if _, err := os.Lstat(filepath.Join(root, name)); !os.IsNotExist(err) {
+				t.Fatalf("rejected reuse wrote %s: %v", name, err)
+			}
+		}
+	}
+
+	tests := []struct {
+		name   string
+		params func(*testing.T) (ReuseParams, string, string)
+	}{
+		{
+			name: "missing trusted root",
+			params: func(t *testing.T) (ReuseParams, string, string) {
+				root, workdir := makeRoot(t)
+				return ReuseParams{WorkDir: workdir, Provider: "claude"}, root, workdir
+			},
+		},
+		{
+			name: "foreign workdir",
+			params: func(t *testing.T) (ReuseParams, string, string) {
+				trustedRoot, _ := makeRoot(t)
+				foreignRoot, foreignWorkdir := makeRoot(t)
+				return ReuseParams{RootDir: trustedRoot, WorkDir: foreignWorkdir, Provider: "claude"}, foreignRoot, foreignWorkdir
+			},
+		},
+		{
+			name: "wrong child name",
+			params: func(t *testing.T) (ReuseParams, string, string) {
+				root, _ := makeRoot(t)
+				foreign := filepath.Join(root, "foreign")
+				if err := os.Mkdir(foreign, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				return ReuseParams{RootDir: root, WorkDir: foreign, Provider: "claude"}, root, foreign
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			params, observedRoot, sentinelDir := tt.params(t)
+			sentinel := filepath.Join(sentinelDir, "sentinel")
+			if err := os.WriteFile(sentinel, []byte("owner-data"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if reused := Reuse(params, testLogger()); reused != nil {
+				t.Fatal("Reuse accepted an untrusted path")
+			}
+			assertUntouched(t, observedRoot, sentinel)
+		})
+	}
+
+	t.Run("symlinked root", func(t *testing.T) {
+		realRoot, realWorkdir := makeRoot(t)
+		linkRoot := filepath.Join(t.TempDir(), "task-root-link")
+		if err := os.Symlink(realRoot, linkRoot); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		sentinel := filepath.Join(realWorkdir, "sentinel")
+		if err := os.WriteFile(sentinel, []byte("owner-data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if reused := Reuse(ReuseParams{RootDir: linkRoot, WorkDir: filepath.Join(linkRoot, "workdir"), Provider: "claude"}, testLogger()); reused != nil {
+			t.Fatal("Reuse accepted a symlinked root")
+		}
+		assertUntouched(t, realRoot, sentinel)
+	})
+
+	t.Run("symlinked workdir", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "task-root")
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		foreignRoot, foreignWorkdir := makeRoot(t)
+		if err := os.Symlink(foreignWorkdir, filepath.Join(root, "workdir")); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		sentinel := filepath.Join(foreignWorkdir, "sentinel")
+		if err := os.WriteFile(sentinel, []byte("owner-data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if reused := Reuse(ReuseParams{RootDir: root, WorkDir: filepath.Join(root, "workdir"), Provider: "claude"}, testLogger()); reused != nil {
+			t.Fatal("Reuse accepted a symlinked workdir")
+		}
+		assertUntouched(t, foreignRoot, sentinel)
+	})
+
+	t.Run("valid expected paths", func(t *testing.T) {
+		root, workdir := makeRoot(t)
+		reused := Reuse(ReuseParams{RootDir: root, WorkDir: workdir, Provider: "claude"}, testLogger())
+		if reused == nil || reused.RootDir != root || reused.WorkDir != workdir {
+			t.Fatalf("Reuse valid identity = %#v", reused)
+		}
+	})
 }
 
 // TestReuseSkillRefreshIsCanonicalAcrossProviders exercises the reuse skill
@@ -2011,39 +2130,46 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	}
 
 	// sessions should be a real, task-local directory — NOT a symlink into the
-	// shared home (MUL-4424). A fresh home gets an empty local dir.
+	// shared home (MUL-4424). A fresh home gets an empty private local dir.
 	sessionsPath := filepath.Join(codexHome, "sessions")
 	fi, err := os.Lstat(sessionsPath)
 	if err != nil {
 		t.Fatalf("sessions not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		t.Error("sessions should be a task-local directory, not a symlink into the shared home")
+	if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+		t.Fatalf("sessions mode = %v, want task-private directory", fi.Mode())
 	}
-	if !fi.IsDir() {
-		t.Error("sessions should be a directory")
+	if fi.Mode().Perm() != 0o700 {
+		t.Errorf("sessions mode = %#o, want 0700", fi.Mode().Perm())
 	}
 
-	// auth.json should be a symlink.
+	// auth.json must be a private, permission-restricted snapshot.
 	authPath := filepath.Join(codexHome, "auth.json")
 	fi, err = os.Lstat(authPath)
 	if err != nil {
 		t.Fatalf("auth.json not found: %v", err)
 	}
-	authIsLink := fi.Mode()&os.ModeSymlink != 0
-	if !authIsLink && runtime.GOOS != "windows" {
-		t.Error("auth.json should be a symlink")
+	if fi.Mode()&os.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+		t.Fatalf("auth.json mode = %v, want task-private regular file", fi.Mode())
 	}
-	if authIsLink {
-		target, _ := os.Readlink(authPath)
-		if target != filepath.Join(sharedHome, "auth.json") {
-			t.Errorf("auth.json symlink target = %q, want %q", target, filepath.Join(sharedHome, "auth.json"))
-		}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("auth.json mode = %#o, want 0600", fi.Mode().Perm())
 	}
-	// Verify content is accessible through symlink.
+	// Verify content was captured, then prove later owner mutation cannot alter
+	// the credentials visible to the running task.
 	data, _ := os.ReadFile(authPath)
 	if string(data) != `{"token":"secret"}` {
 		t.Errorf("auth.json content = %q", data)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "auth.json"), []byte(`{"token":"rotated"}`), 0o600); err != nil {
+		t.Fatalf("rotate shared auth: %v", err)
+	}
+	data, err = os.ReadFile(authPath)
+	if err != nil {
+		t.Fatalf("read auth snapshot after owner mutation: %v", err)
+	}
+	if string(data) != `{"token":"secret"}` {
+		t.Errorf("auth snapshot changed with owner file: %q", data)
 	}
 
 	// config.json should be a copy (not symlink).
@@ -2106,6 +2232,166 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	marketplacePath := filepath.Join(codexHome, ".tmp", "marketplaces")
 	if _, err := os.Lstat(marketplacePath); !os.IsNotExist(err) {
 		t.Fatalf("shared marketplace cache exposed in task home: %v", err)
+	}
+}
+
+func TestPrepareCodexHomeIsolatesPluginCacheFromSharedHome(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	sharedPluginFile := filepath.Join(sharedHome, "plugins", "cache", "superpowers", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(sharedPluginFile), 0o755); err != nil {
+		t.Fatalf("create shared plugin cache: %v", err)
+	}
+	if err := os.WriteFile(sharedPluginFile, []byte("owner-v1"), 0o644); err != nil {
+		t.Fatalf("write shared plugin cache: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if runtime.GOOS != "windows" {
+		legacyTaskPluginCache := filepath.Join(codexHome, "plugins", "cache")
+		if err := os.MkdirAll(filepath.Dir(legacyTaskPluginCache), 0o755); err != nil {
+			t.Fatalf("create legacy task plugin directory: %v", err)
+		}
+		if err := os.Symlink(filepath.Join(sharedHome, "plugins", "cache"), legacyTaskPluginCache); err != nil {
+			t.Fatalf("create legacy shared plugin cache link: %v", err)
+		}
+	}
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	taskPluginCache := filepath.Join(codexHome, "plugins", "cache")
+	info, err := os.Lstat(taskPluginCache)
+	if err != nil {
+		t.Fatalf("inspect task plugin cache: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("task plugin cache is a symlink to mutable owner state")
+	}
+
+	taskPluginFile := filepath.Join(taskPluginCache, "superpowers", "SKILL.md")
+	if err := os.WriteFile(taskPluginFile, []byte("task-write"), 0o644); err != nil {
+		t.Fatalf("write task plugin cache: %v", err)
+	}
+	ownerData, err := os.ReadFile(sharedPluginFile)
+	if err != nil {
+		t.Fatalf("read shared plugin cache after task write: %v", err)
+	}
+	if string(ownerData) != "owner-v1" {
+		t.Errorf("task plugin cache write mutated owner cache: got %q, want %q", ownerData, "owner-v1")
+	}
+
+	if err := os.WriteFile(sharedPluginFile, []byte("owner-v2"), 0o644); err != nil {
+		t.Fatalf("update shared plugin cache: %v", err)
+	}
+	taskData, err := os.ReadFile(taskPluginFile)
+	if err != nil {
+		t.Fatalf("read task plugin cache after owner update: %v", err)
+	}
+	if string(taskData) != "task-write" {
+		t.Errorf("owner plugin cache mutation changed task cache: got %q, want %q", taskData, "task-write")
+	}
+}
+
+func TestSnapshotSharedCodexPluginCacheRejectsHardlinkedSourceFile(t *testing.T) {
+	sharedHome := t.TempDir()
+	sharedPluginFile := filepath.Join(sharedHome, "plugins", "cache", "plugin", "manifest.json")
+	if err := os.MkdirAll(filepath.Dir(sharedPluginFile), 0o755); err != nil {
+		t.Fatalf("create shared plugin cache: %v", err)
+	}
+	if err := os.WriteFile(sharedPluginFile, []byte("owner-plugin"), 0o644); err != nil {
+		t.Fatalf("write shared plugin file: %v", err)
+	}
+	ownerAlias := filepath.Join(sharedHome, "owner-alias.json")
+	if err := os.Link(sharedPluginFile, ownerAlias); err != nil {
+		t.Skipf("hard links unavailable: %v", err)
+	}
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	taskMarker := filepath.Join(codexHome, "plugins", "cache", "existing.txt")
+	if err := os.MkdirAll(filepath.Dir(taskMarker), 0o700); err != nil {
+		t.Fatalf("create existing task plugin cache: %v", err)
+	}
+	if err := os.WriteFile(taskMarker, []byte("existing-snapshot"), 0o600); err != nil {
+		t.Fatalf("write existing task plugin cache: %v", err)
+	}
+
+	err := snapshotSharedCodexPluginCache(codexHome, sharedHome)
+	if err == nil {
+		t.Fatal("expected hardlinked plugin cache source to be rejected")
+	}
+	if !errors.Is(err, errUnsafeTaskCodexPluginCacheEntry) || !strings.Contains(err.Error(), "hard link") {
+		t.Fatalf("snapshot error = %v, want unsafe hard-link rejection", err)
+	}
+	data, readErr := os.ReadFile(taskMarker)
+	if readErr != nil {
+		t.Fatalf("existing task plugin cache was not preserved: %v", readErr)
+	}
+	if string(data) != "existing-snapshot" {
+		t.Fatalf("existing task plugin cache changed: %q", data)
+	}
+}
+
+func TestSnapshotSharedCodexPluginCacheRejectsSymlinkSwapDuringCopy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink fixture requires elevated privileges on some Windows hosts")
+	}
+
+	sharedHome := t.TempDir()
+	sharedPluginFile := filepath.Join(sharedHome, "plugins", "cache", "plugin", "manifest.json")
+	if err := os.MkdirAll(filepath.Dir(sharedPluginFile), 0o755); err != nil {
+		t.Fatalf("create shared plugin cache: %v", err)
+	}
+	if err := os.WriteFile(sharedPluginFile, []byte("owner-plugin"), 0o644); err != nil {
+		t.Fatalf("write shared plugin file: %v", err)
+	}
+	outsideFile := filepath.Join(t.TempDir(), "outside.json")
+	if err := os.WriteFile(outsideFile, []byte("outside-owner-state"), 0o600); err != nil {
+		t.Fatalf("write outside owner file: %v", err)
+	}
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	taskMarker := filepath.Join(codexHome, "plugins", "cache", "existing.txt")
+	if err := os.MkdirAll(filepath.Dir(taskMarker), 0o700); err != nil {
+		t.Fatalf("create existing task plugin cache: %v", err)
+	}
+	if err := os.WriteFile(taskMarker, []byte("existing-snapshot"), 0o600); err != nil {
+		t.Fatalf("write existing task plugin cache: %v", err)
+	}
+
+	swapped := false
+	err := snapshotSharedCodexPluginCacheWithAfterOpen(codexHome, sharedHome, func(path string) {
+		if swapped || path != sharedPluginFile {
+			return
+		}
+		swapped = true
+		if removeErr := os.Remove(path); removeErr != nil {
+			t.Fatalf("remove plugin file during swap: %v", removeErr)
+		}
+		if symlinkErr := os.Symlink(outsideFile, path); symlinkErr != nil {
+			t.Fatalf("replace plugin file with symlink: %v", symlinkErr)
+		}
+	})
+	if !swapped {
+		t.Fatal("test hook did not swap the plugin cache source")
+	}
+	if err == nil {
+		t.Fatal("expected plugin cache source identity change to be rejected")
+	}
+	if !errors.Is(err, errUnsafeTaskCodexPluginCacheEntry) || !strings.Contains(err.Error(), "identity changed") {
+		t.Fatalf("snapshot error = %v, want unsafe identity-change rejection", err)
+	}
+	data, readErr := os.ReadFile(taskMarker)
+	if readErr != nil {
+		t.Fatalf("existing task plugin cache was not preserved: %v", readErr)
+	}
+	if string(data) != "existing-snapshot" {
+		t.Fatalf("existing task plugin cache changed: %q", data)
+	}
+	if _, statErr := os.Stat(filepath.Join(codexHome, "plugins", "cache", "plugin", "manifest.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("unsafe staging snapshot was published: stat error = %v", statErr)
 	}
 }
 
@@ -2219,8 +2505,8 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 		t.Fatalf("prepareCodexHome failed: %v", err)
 	}
 
-	// Directory should contain task-local sessions, the model-cache config
-	// binding, and auto-generated config.toml.
+	// Directory should contain private task-local sessions, the model-cache
+	// config binding, and auto-generated config.toml.
 	entries, err := os.ReadDir(codexHome)
 	if err != nil {
 		t.Fatalf("failed to read codex-home: %v", err)
@@ -2230,7 +2516,7 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 		entryNames[e.Name()] = true
 	}
 	if !entryNames["sessions"] {
-		t.Error("expected sessions directory")
+		t.Error("expected private sessions directory")
 	}
 	if !entryNames["config.toml"] {
 		t.Error("expected config.toml (auto-generated for network access)")
@@ -2247,20 +2533,40 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 		}
 	}
 	// sessions should be a real, task-local directory — not a symlink into the
-	// shared home (MUL-4424).
+	// shared home, even when the shared home is empty (MUL-4424).
 	sessionsPath := filepath.Join(codexHome, "sessions")
 	fi, err := os.Lstat(sessionsPath)
 	if err != nil {
 		t.Fatalf("sessions not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		t.Error("sessions should be a task-local directory, not a symlink")
+	if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+		t.Fatalf("sessions mode = %v, want private directory", fi.Mode())
 	}
-	if !fi.IsDir() {
-		t.Error("sessions should be a directory")
+	if fi.Mode().Perm() != 0o700 {
+		t.Errorf("sessions mode = %#o, want 0700", fi.Mode().Perm())
 	}
 	if _, err := os.Stat(filepath.Join(codexHome, "plugins", "cache")); err != nil {
 		t.Fatalf("missing shared plugin cache exposure should still be tolerated and created: %v", err)
+	}
+}
+
+func TestPrepareCodexHomeRejectsUnsafeAuthSource(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink fixture requires elevated privileges on some Windows hosts")
+	}
+	sharedHome := t.TempDir()
+	ownerAuth := filepath.Join(t.TempDir(), "owner-auth.json")
+	if err := os.WriteFile(ownerAuth, []byte(`{"token":"owner"}`), 0o600); err != nil {
+		t.Fatalf("write owner auth: %v", err)
+	}
+	if err := os.Symlink(ownerAuth, filepath.Join(sharedHome, "auth.json")); err != nil {
+		t.Fatalf("symlink shared auth: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	err := prepareCodexHome(filepath.Join(t.TempDir(), "codex-home"), testLogger())
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("prepareCodexHome error = %v, want fail-closed symlink rejection", err)
 	}
 }
 
@@ -2828,7 +3134,7 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	}
 
 	// Reuse should restore CodexHome.
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-test"}}, testLogger())
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-test"}}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse returned nil")
 	}
@@ -2878,7 +3184,7 @@ func TestReuseRestoresCodexPluginCache(t *testing.T) {
 		t.Fatalf("remove codex plugins dir: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-plugin-test"}}, testLogger())
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-plugin-test"}}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse returned nil")
 	}
@@ -2917,6 +3223,7 @@ func TestReusePreservesTaskLocalModelsCacheWhenSharedMissing(t *testing.T) {
 	}
 
 	reused := Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-missing"},
@@ -2962,6 +3269,7 @@ func TestReusePreservesTaskLocalModelsCacheOverStaleSharedSnapshot(t *testing.T)
 	}
 
 	reused := Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-stale"},
@@ -3020,6 +3328,7 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenProviderConfigChanges(t *testin
 	}
 
 	reused := Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
@@ -3044,6 +3353,7 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenProviderConfigChanges(t *testin
 		t.Fatalf("write provider B task cache: %v", err)
 	}
 	if Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
@@ -3097,6 +3407,7 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenModelCatalogChanges(t *testing.
 	}
 
 	reused := Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-catalog-change"},
@@ -3147,6 +3458,7 @@ func TestReuseInvalidatesUnboundLegacyModelsCache(t *testing.T) {
 	}
 
 	if Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
@@ -3166,6 +3478,7 @@ func TestReuseInvalidatesUnboundLegacyModelsCache(t *testing.T) {
 		t.Fatalf("write shared cache: %v", err)
 	}
 	if Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
@@ -3201,7 +3514,7 @@ func TestReuseWritesMissingCodexWorkspaceSkills(t *testing.T) {
 		t.Fatalf("remove codex skills dir: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "reuse-skill-test",
 		AgentSkills: []SkillContextForEnv{
 			{
@@ -3260,7 +3573,7 @@ func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
 	}
 	defer env.Cleanup(true)
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "reuse-skill-update-test",
 		AgentSkills: []SkillContextForEnv{
 			{
@@ -3527,7 +3840,7 @@ func TestReuseSeedsUserSkillUpdates(t *testing.T) {
 		t.Fatalf("update user SKILL.md: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "user-skill-reuse-test",
 	}}, testLogger())
 	if reused == nil {
@@ -3582,7 +3895,7 @@ func TestReuseClearsUserSkillResidueOnWorkspaceConflict(t *testing.T) {
 		t.Fatalf("user support file should be seeded in round 1: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "reuse-conflict-test",
 		AgentSkills: []SkillContextForEnv{
 			{Name: "Writing", Content: "workspace writing"},
@@ -3644,7 +3957,7 @@ func TestReuseClearsRemovedUserSkill(t *testing.T) {
 		t.Fatalf("remove user skill: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "reuse-remove-test",
 	}}, testLogger())
 	if reused == nil {

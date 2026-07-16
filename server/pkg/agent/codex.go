@@ -649,9 +649,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	if execPath == "" {
 		execPath = "codex"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolved, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("codex executable not found at %q: %w", execPath, err)
 	}
+	execPath = resolved
 
 	timeout := opts.Timeout
 	semanticInactivityTimeout := opts.SemanticInactivityTimeout
@@ -694,37 +696,33 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	}
 
 	codexArgs := buildCodexArgs(opts, b.cfg.Logger)
-	cmd := exec.CommandContext(runCtx, execPath, codexArgs...)
-	hideAgentWindow(cmd)
-	// Run codex in its own process group so a cancel-on-stuck cleanup
-	// reaches the whole tree — the codex Node wrapper plus the native
-	// Rust app-server it spawns — not just the direct child. Without
-	// this, killing the leader leaves grandchildren as orphans that
-	// keep consuming memory until the OS reaps them; see #4520, where a
-	// scanner overflow during thread/resume otherwise leaked Codex
-	// processes indefinitely. configureProcessGroup is a no-op on
-	// Windows.
-	configureProcessGroup(cmd)
+	cmd, err := b.cfg.command(runCtx, execPath, codexArgs, opts.Cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("prepare codex command: %w", err)
+	}
+	// cfg.command runs codex in its own process group so a cancel-on-stuck
+	// cleanup reaches the whole tree — the codex Node wrapper plus the native
+	// Rust app-server it spawns — not just the direct child. Without this,
+	// killing the leader leaves grandchildren as orphans that keep consuming
+	// memory until the OS reaps them; see #4520, where a scanner overflow during
+	// thread/resume otherwise leaked Codex processes indefinitely.
 	// Override the default exec.CommandContext cancel behaviour. The
 	// default sends SIGKILL only to cmd.Process (the leader); we instead
 	// signal the whole process group so descendants die too. Returning
-	// nil keeps exec from logging a spurious error; cmd.WaitDelay below
-	// still backstops cmd.Wait() if the kill leaves an open pipe.
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			signalProcessGroup(cmd.Process, syscall.SIGKILL)
+	// nil keeps exec from logging a spurious error; the WaitDelay supplied
+	// through cfg.command still backstops cmd.Wait() if the kill leaves an
+	// open pipe.
+	if err := cmd.SetCancel(func() error {
+		if cmd.Process() != nil {
+			signalProcessGroup(cmd.Process(), syscall.SIGKILL)
 		}
 		return nil
+	}); err != nil {
+		cancel()
+		return nil, fmt.Errorf("configure codex cancellation: %w", err)
 	}
-	// Bound the wait after the context is cancelled so a stuck child (or an
-	// open pipe held by a grandchild) can't hang cmd.Wait() forever. Matches
-	// the other long-lived backends (claude, copilot, cursor, …).
-	cmd.WaitDelay = 10 * time.Second
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", codexArgs)
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
-	}
-	cmd.Env = buildEnv(b.cfg.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -739,12 +737,21 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// Codex stderr can contain auth/provider diagnostics. Capture a bounded
 	// tail and emit it only through the sanitizer in the cleanup event.
 	stderrBuf := newStderrTail(io.Discard, codexStderrTailBytes)
-	cmd.Stderr = stderrBuf
+	if err := cmd.SetStderr(stderrBuf); err != nil {
+		cancel()
+		return nil, fmt.Errorf("configure codex stderr: %w", err)
+	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start codex: %w", err)
 	}
+	process := cmd.Process()
+	if process == nil {
+		cancel()
+		return nil, fmt.Errorf("start codex: process identity is unavailable")
+	}
+	pid := process.Pid
 	activeLaunches := activeCodexLaunches.Add(1)
 	for {
 		maxSeen := maxActiveCodexLaunchesObserved.Load()
@@ -758,7 +765,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		codexVersion = "unknown"
 	}
 
-	b.cfg.Logger.Info("codex lifecycle", "phase", "spawn", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process.Pid, "process_group", cmd.Process.Pid, "cwd", opts.Cwd, "attempt", attempt, "active_launches", activeLaunches, "codex_version", codexVersion, "daemon_version", b.cfg.DaemonVersion)
+	b.cfg.Logger.Info("codex lifecycle", "phase", "spawn", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", pid, "process_group", pid, "cwd", opts.Cwd, "attempt", attempt, "active_launches", activeLaunches, "codex_version", codexVersion, "daemon_version", b.cfg.DaemonVersion)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -889,7 +896,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				// group-kills the tree, the reader unblocks when stdout
 				// EOFs, and we proceed to phase 2.
 				b.cfg.Logger.Warn("codex did not close stdout after stdin EOF; forcing shutdown",
-					"pid", cmd.Process.Pid,
+					"pid", pid,
 					"grace", grace.String(),
 				)
 				cancel()
@@ -910,7 +917,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				// reaped cleanly.
 			case <-time.After(grace):
 				b.cfg.Logger.Warn("codex process still alive after reader exited; forcing shutdown",
-					"pid", cmd.Process.Pid,
+					"pid", pid,
 					"grace", grace.String(),
 				)
 				cancel()
@@ -924,7 +931,8 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			// Wait returning with a ProcessState is the os/exec reap boundary.
 			// On Unix, ProcessState.Exited reports false for a process terminated
 			// by SIGKILL even though Wait successfully reaped it.
-			cleanupConfirmed = waitReturned && cmd.ProcessState != nil
+			processState := cmd.ProcessState()
+			cleanupConfirmed = waitReturned && processState != nil
 			if codexCleanupConfirmationOverride.Load() < 0 {
 				cleanupConfirmed = false
 			}
@@ -932,12 +940,12 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				"phase", "cleanup",
 				"task_id", b.cfg.TaskID,
 				"runtime_id", b.cfg.RuntimeID,
-				"pid", cmd.Process.Pid,
-				"process_group", cmd.Process.Pid,
+				"pid", pid,
+				"process_group", pid,
 				"attempt", attempt,
 				"latency", time.Since(launchStarted).Round(time.Millisecond).String(),
 				"reaped", cleanupConfirmed,
-				"exit_status", codexProcessExitStatus(cmd.ProcessState),
+				"exit_status", codexProcessExitStatus(processState),
 				"wait_error", cleanupWaitErr,
 				"stderr_bytes", stderrBuf.TotalBytes(),
 				"stderr_truncated", stderrBuf.TotalBytes() > codexStderrTailBytes,
@@ -963,7 +971,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 
 		// 1. Initialize handshake
 		initializeStarted := time.Now()
-		b.cfg.Logger.Info("codex lifecycle", "phase", "initialize_sent", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process.Pid, "attempt", attempt, "active_launches", activeLaunches)
+		b.cfg.Logger.Info("codex lifecycle", "phase", "initialize_sent", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", pid, "attempt", attempt, "active_launches", activeLaunches)
 		_, err := c.request(runCtx, "initialize", map[string]any{
 			"clientInfo": map[string]any{
 				"name":    "multica-agent-sdk",
@@ -986,11 +994,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			} else if errors.As(err, &handshakeErr) && handshakeErr.Method == "initialize" && cleanupConfirmed && !codexInitializeRetrySupported() {
 				finalError += "; retry suppressed: process-tree cleanup cannot be confirmed on this platform"
 			}
-			b.cfg.Logger.Warn("codex lifecycle", "phase", "initialize_failure", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process.Pid, "attempt", attempt, "latency", initializeLatency.Round(time.Millisecond).String(), "semantic_activity", semanticObserved.Load(), "cleanup_confirmed", cleanupConfirmed, "retry_safe", retrySafe)
+			b.cfg.Logger.Warn("codex lifecycle", "phase", "initialize_failure", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", pid, "attempt", attempt, "latency", initializeLatency.Round(time.Millisecond).String(), "semantic_activity", semanticObserved.Load(), "cleanup_confirmed", cleanupConfirmed, "retry_safe", retrySafe)
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), codexInitializeRetrySafe: retrySafe}
 			return
 		}
-		b.cfg.Logger.Info("codex lifecycle", "phase", "initialize_response", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process.Pid, "attempt", attempt, "latency", time.Since(initializeStarted).Round(time.Millisecond).String())
+		b.cfg.Logger.Info("codex lifecycle", "phase", "initialize_response", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", pid, "attempt", attempt, "latency", time.Since(initializeStarted).Round(time.Millisecond).String())
 		c.notify("initialized")
 
 		// 2. Start a new thread, or resume the prior one for this issue. When
@@ -1119,7 +1127,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					Model:        opts.Model,
 				}
 				b.cfg.Logger.Warn(CodexFirstTurnNoProgressMarker,
-					"pid", cmd.Process.Pid,
+					"pid", pid,
 					"thread_id", threadID,
 					"turn_id", c.turnID,
 					"timeout", firstTurnNoProgressTimeout.String(),
@@ -1137,7 +1145,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					Model:        opts.Model,
 				}
 				b.cfg.Logger.Warn(CodexSemanticInactivityMarker,
-					"pid", cmd.Process.Pid,
+					"pid", pid,
 					"thread_id", threadID,
 					"turn_id", c.turnID,
 					"timeout", semanticInactivityTimeout.String(),
@@ -1167,7 +1175,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		}
 
 		duration := time.Since(startTime)
-		b.cfg.Logger.Info("codex finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("codex finished", "pid", pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		// Run cleanup. drainAndWait handles the graceful-then-cancel pattern
 		// in two bounded phases (see its declaration): wait for the reader,
@@ -1180,7 +1188,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			finalError = withAgentStderr(processExitErr.Error(), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
 		}
 		if timeoutDiagnostic.Kind != codexTimeoutNone {
-			timeoutDiagnostic.CodexVersion = detectCodexVersionForDiagnostics(context.Background(), execPath, cmd.Env, b.cfg.Logger)
+			timeoutDiagnostic.CodexVersion = detectCodexVersionForDiagnostics(context.Background(), b.cfg, execPath, opts.Cwd, b.cfg.Logger)
 			finalError = buildCodexTimeoutDiagnosticError(timeoutDiagnostic, sanitizeCodexDiagnostic(stderrBuf.Tail()))
 		}
 
@@ -1461,12 +1469,25 @@ func appendCodexKnownStderrHint(msg, stderrTail string) string {
 	return msg
 }
 
-func detectCodexVersionForDiagnostics(ctx context.Context, execPath string, env []string, logger *slog.Logger) string {
+func detectCodexVersionForDiagnostics(ctx context.Context, cfg Config, execPath, cwd string, logger *slog.Logger) string {
 	versionCtx, cancel := context.WithTimeout(ctx, codexVersionDiagnosticTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(versionCtx, execPath, "--version")
-	cmd.Env = env
+	cmd, err := cfg.command(versionCtx, execPath, []string{"--version"}, cwd, 2*time.Second)
+	if err != nil {
+		if logger != nil {
+			logger.Debug("codex version diagnostic command failed", "error", err)
+		}
+		return "unknown"
+	}
+	if err := cmd.SetCancel(func() error {
+		if cmd.Process() != nil {
+			signalProcessGroup(cmd.Process(), syscall.SIGKILL)
+		}
+		return nil
+	}); err != nil {
+		return "unknown"
+	}
 	data, err := cmd.Output()
 	if err != nil {
 		if logger != nil {

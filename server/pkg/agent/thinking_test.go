@@ -2,13 +2,226 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"testing"
 )
+
+type recordingTaskDiscoveryLauncher struct {
+	requests  []CommandRequest
+	responses func(CommandRequest) (string, int)
+}
+
+func newTaskDiscoveryExecution(t *testing.T, provider string, responses func(CommandRequest) (string, int)) (string, TaskModelDiscovery) {
+	t.Helper()
+	root := t.TempDir()
+	launcher := &recordingTaskDiscoveryLauncher{responses: responses}
+	return filepath.Join(root, provider), TaskModelDiscovery{
+		Execution: &ModelDiscoveryExecution{
+			Launcher: launcher,
+			Cwd:      root,
+			Env: map[string]string{
+				"PATH":                    "/usr/bin:/bin",
+				"TASK_DISCOVERY_SENTINEL": provider,
+			},
+			Isolation: &TaskIsolationPolicy{WritableRoots: []string{root}},
+		},
+	}
+}
+
+func (l *recordingTaskDiscoveryLauncher) Command(ctx context.Context, req CommandRequest) (TaskCommand, error) {
+	recorded := req
+	recorded.Args = append([]string(nil), req.Args...)
+	recorded.Env = cloneModelDiscoveryEnv(req.Env)
+	l.requests = append(l.requests, recorded)
+
+	output, exitCode := l.responses(req)
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestTaskDiscoveryLauncherHelperProcess", "--")
+	cmd.Env = append(os.Environ(),
+		"GO_WANT_TASK_DISCOVERY_HELPER=1",
+		"TASK_DISCOVERY_OUTPUT="+base64.StdEncoding.EncodeToString([]byte(output)),
+		"TASK_DISCOVERY_EXIT_CODE="+strconv.Itoa(exitCode),
+	)
+	return newPreparedCommand(cmd), nil
+}
+
+func TestTaskDiscoveryLauncherHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_TASK_DISCOVERY_HELPER") != "1" {
+		return
+	}
+	output, err := base64.StdEncoding.DecodeString(os.Getenv("TASK_DISCOVERY_OUTPUT"))
+	if err != nil {
+		os.Exit(97)
+	}
+	_, _ = os.Stdout.Write(output)
+	exitCode, err := strconv.Atoi(os.Getenv("TASK_DISCOVERY_EXIT_CODE"))
+	if err != nil {
+		os.Exit(98)
+	}
+	os.Exit(exitCode)
+}
+
+func TestValidateThinkingLevelForTaskUsesExplicitLauncherForDynamicDiscovery(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("malicious runtime fixture is a POSIX shell script")
+	}
+
+	tests := []struct {
+		name      string
+		provider  string
+		model     string
+		level     string
+		responses func(CommandRequest) (string, int)
+	}{
+		{
+			name:     "claude",
+			provider: "claude",
+			model:    "claude-opus-4-7",
+			level:    "xhigh",
+			responses: func(req CommandRequest) (string, int) {
+				if reflect.DeepEqual(req.Args, []string{"--help"}) {
+					return "--effort <level> Effort level for the current session (low, medium, high, xhigh, max)\n", 0
+				}
+				return "", 96
+			},
+		},
+		{
+			name:     "codex",
+			provider: "codex",
+			model:    "task-codex-model",
+			level:    "high",
+			responses: func(req CommandRequest) (string, int) {
+				switch {
+				case reflect.DeepEqual(req.Args, []string{"--version"}):
+					return "codex-cli 0.144.1\n", 0
+				case reflect.DeepEqual(req.Args, codexDebugModelsArgs):
+					return `{"models":[{"slug":"task-codex-model","display_name":"Task Codex","visibility":"list","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"high"}]}]}`, 0
+				default:
+					return "", 96
+				}
+			},
+		},
+		{
+			name:     "codebuddy",
+			provider: "codebuddy",
+			model:    "claude-sonnet-4-6",
+			level:    "high",
+			responses: func(req CommandRequest) (string, int) {
+				if reflect.DeepEqual(req.Args, []string{"--help"}) {
+					return "--model <model> Currently supported: (claude-sonnet-4-6)\n--effort <level> Effort level (low, medium, high, xhigh)\n", 0
+				}
+				return "", 96
+			},
+		},
+		{
+			name:     "opencode",
+			provider: "opencode",
+			model:    "openai/task-model",
+			level:    "max",
+			responses: func(req CommandRequest) (string, int) {
+				if reflect.DeepEqual(req.Args, []string{"models", "--verbose"}) {
+					return "openai/task-model\n{\"variants\":{\"high\":{},\"max\":{}}}\n", 0
+				}
+				return "", 96
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			marker := filepath.Join(root, "direct-exec-marker")
+			executable := filepath.Join(root, tt.provider)
+			writeTestExecutable(t, executable, []byte("#!/bin/sh\ntouch '"+marker+"'\nexit 95\n"))
+
+			launcher := &recordingTaskDiscoveryLauncher{responses: tt.responses}
+			policy := &TaskIsolationPolicy{WritableRoots: []string{root}}
+			env := map[string]string{"PATH": "/usr/bin:/bin", "TASK_DISCOVERY_SENTINEL": tt.provider}
+			discovery := TaskModelDiscovery{
+				Execution: &ModelDiscoveryExecution{
+					Launcher:  launcher,
+					Cwd:       root,
+					Env:       env,
+					Isolation: policy,
+				},
+			}
+
+			ok, err := ValidateThinkingLevelForTask(t.Context(), tt.provider, executable, tt.model, tt.level, discovery)
+			if err != nil {
+				t.Fatalf("ValidateThinkingLevelForTask: %v", err)
+			}
+			if !ok {
+				t.Fatal("expected launcher-provided catalog to validate the thinking level")
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatalf("task-selected runtime executed outside launcher: stat error = %v", err)
+			}
+			if len(launcher.requests) == 0 {
+				t.Fatal("task discovery did not use the explicit launcher")
+			}
+			for _, req := range launcher.requests {
+				if req.Executable != executable {
+					t.Errorf("launcher executable = %q, want %q", req.Executable, executable)
+				}
+				if req.Cwd != root {
+					t.Errorf("launcher cwd = %q, want %q", req.Cwd, root)
+				}
+				if !reflect.DeepEqual(req.Env, env) {
+					t.Errorf("launcher env = %#v, want %#v", req.Env, env)
+				}
+				if req.Isolation != policy {
+					t.Errorf("launcher isolation = %p, want %p", req.Isolation, policy)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateThinkingLevelForTaskAcceptsOnlyBoundTrustedSnapshot(t *testing.T) {
+	models := []Model{{
+		ID:       "snapshot-model",
+		Thinking: &ModelThinking{SupportedLevels: []ThinkingLevel{{Value: "high"}}},
+	}}
+	snapshot := &ModelCatalogSnapshot{
+		ProviderType:   "codex",
+		ExecutablePath: "/trusted/codex",
+		Models:         models,
+	}
+
+	ok, err := ValidateThinkingLevelForTask(t.Context(), "codex", "/trusted/codex", "snapshot-model", "high", TaskModelDiscovery{Snapshot: snapshot})
+	if err != nil || !ok {
+		t.Fatalf("bound snapshot validation = (%v, %v), want (true, nil)", ok, err)
+	}
+
+	ok, err = ValidateThinkingLevelForTask(t.Context(), "codex", "/different/codex", "snapshot-model", "high", TaskModelDiscovery{Snapshot: snapshot})
+	if err == nil || ok {
+		t.Fatalf("mismatched snapshot validation = (%v, %v), want fail closed", ok, err)
+	}
+}
+
+func TestValidateThinkingLevelLegacyEntryPointFailsClosedWithoutDiscoveryAuthority(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("malicious runtime fixture is a POSIX shell script")
+	}
+	root := t.TempDir()
+	marker := filepath.Join(root, "direct-exec-marker")
+	executable := filepath.Join(root, "claude")
+	writeTestExecutable(t, executable, []byte("#!/bin/sh\ntouch '"+marker+"'\necho '--effort <level> (low, medium, high)'\n"))
+
+	ok, err := ValidateThinkingLevel(t.Context(), "claude", executable, "claude-sonnet-4-6", "high")
+	if err != nil || ok {
+		t.Fatalf("legacy validation = (%v, %v), want (false, nil)", ok, err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("legacy task validation directly executed runtime: stat error = %v", err)
+	}
+}
 
 // ── Claude help parsing ──────────────────────────────────────────────
 
@@ -326,8 +539,14 @@ echo '{"models":[{"slug":"runtime-model","display_name":"Runtime Model","visibil
 	})
 }
 
-func TestValidateThinkingLevelCodexPerModelFallbackCatalog(t *testing.T) {
+func TestValidateThinkingLevelForTaskCodexPerModelFallbackCatalog(t *testing.T) {
 	t.Parallel()
+	executable := "/trusted/codex"
+	discovery := TaskModelDiscovery{Snapshot: &ModelCatalogSnapshot{
+		ProviderType:   "codex",
+		ExecutablePath: executable,
+		Models:         codexStaticModels(),
+	}}
 	for _, tc := range []struct {
 		model string
 		level string
@@ -340,12 +559,12 @@ func TestValidateThinkingLevelCodexPerModelFallbackCatalog(t *testing.T) {
 		{model: "gpt-5.3-codex", level: "xhigh", want: true},
 		{model: "gpt-5.3-codex", level: "max", want: false},
 	} {
-		got, err := ValidateThinkingLevel(context.Background(), "codex", "/nonexistent/codex", tc.model, tc.level)
+		got, err := ValidateThinkingLevelForTask(context.Background(), "codex", executable, tc.model, tc.level, discovery)
 		if err != nil {
-			t.Fatalf("ValidateThinkingLevel(%q, %q): %v", tc.model, tc.level, err)
+			t.Fatalf("ValidateThinkingLevelForTask(%q, %q): %v", tc.model, tc.level, err)
 		}
 		if got != tc.want {
-			t.Errorf("ValidateThinkingLevel(%q, %q) = %v, want %v", tc.model, tc.level, got, tc.want)
+			t.Errorf("ValidateThinkingLevelForTask(%q, %q) = %v, want %v", tc.model, tc.level, got, tc.want)
 		}
 	}
 }
@@ -483,7 +702,7 @@ func TestCodexAdvertisedLevelsArePersistable(t *testing.T) {
 	}
 }
 
-// ── ValidateThinkingLevel default-model handling ─────────────────────
+// ── ValidateThinkingLevelForTask default-model handling ──────────────
 //
 // Elon's PR1 review called out that an empty model on a default-model
 // task must not be misjudged as "unknown model → reject". The fix is to
@@ -492,20 +711,18 @@ func TestCodexAdvertisedLevelsArePersistable(t *testing.T) {
 // layer call this; if it gets default-model wrong, any agent without an
 // explicit model set would have its thinking_level dropped silently.
 
-func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fake binary requires a POSIX shell")
-	}
+func TestValidateThinkingLevelForTask_EmptyModelResolvesToDefault(t *testing.T) {
 	t.Parallel()
 
-	// We need a `claude` whose --help advertises the full superset
+	// We need task-scoped `claude --help` output advertising the full superset
 	// (low/medium/high/xhigh/max) so per-model projection actually has
-	// something to filter. A non-existent path falls back to a conservative
-	// [low,medium,high] which would hide the per-model behaviour we're
-	// trying to verify.
-	fakeClaude := writeFakeClaudeHelpBinary(t)
-	resetThinkingCacheForTests()
-	defer resetThinkingCacheForTests()
+	// something to filter.
+	executable, discovery := newTaskDiscoveryExecution(t, "claude", func(req CommandRequest) (string, int) {
+		if reflect.DeepEqual(req.Args, []string{"--help"}) {
+			return "--effort <level> Effort level for the current session (low, medium, high, xhigh, max)\n", 0
+		}
+		return "", 96
+	})
 
 	ctx := context.Background()
 
@@ -513,7 +730,7 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 		// Claude's catalog flags Sonnet 4.6 as Default. Sonnet supports
 		// low/medium/high/max (no xhigh) per claudeModelEffortAllow, so
 		// "high" must round-trip when model is left empty.
-		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "", "high")
+		ok, err := ValidateThinkingLevelForTask(ctx, "claude", executable, "", "high", discovery)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -525,7 +742,7 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 	t.Run("invalid level on default model fails", func(t *testing.T) {
 		// "xhigh" is opus-only; resolving "" to default (sonnet 4.6)
 		// should reject it, not silently accept.
-		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "", "xhigh")
+		ok, err := ValidateThinkingLevelForTask(ctx, "claude", executable, "", "xhigh", discovery)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -537,7 +754,7 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 	t.Run("empty value always valid", func(t *testing.T) {
 		// Empty value means "use runtime default" — should pass
 		// regardless of model resolution.
-		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "", "")
+		ok, err := ValidateThinkingLevelForTask(ctx, "claude", executable, "", "", discovery)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -547,19 +764,19 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 	})
 }
 
-func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fake binary requires a POSIX shell")
-	}
+func TestValidateThinkingLevelForTask_ExplicitModel(t *testing.T) {
 	t.Parallel()
-	fakeClaude := writeFakeClaudeHelpBinary(t)
-	resetThinkingCacheForTests()
-	defer resetThinkingCacheForTests()
+	executable, discovery := newTaskDiscoveryExecution(t, "claude", func(req CommandRequest) (string, int) {
+		if reflect.DeepEqual(req.Args, []string{"--help"}) {
+			return "--effort <level> Effort level for the current session (low, medium, high, xhigh, max)\n", 0
+		}
+		return "", 96
+	})
 
 	ctx := context.Background()
 
 	// xhigh IS valid on Opus 4.7.
-	ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-opus-4-7", "xhigh")
+	ok, err := ValidateThinkingLevelForTask(ctx, "claude", executable, "claude-opus-4-7", "xhigh", discovery)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -568,7 +785,7 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	}
 
 	// xhigh is NOT valid on Sonnet — should fail.
-	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-sonnet-4-6", "xhigh")
+	ok, err = ValidateThinkingLevelForTask(ctx, "claude", executable, "claude-sonnet-4-6", "xhigh", discovery)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -577,7 +794,7 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	}
 
 	// An unknown model with a valid token still fails closed (no guess).
-	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-nonexistent", "high")
+	ok, err = ValidateThinkingLevelForTask(ctx, "claude", executable, "claude-nonexistent", "high", discovery)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -586,7 +803,7 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	}
 }
 
-// TestValidateThinkingLevel_CodexEmptyModelFailsClosed pins the MUL-4347
+// TestValidateThinkingLevelForTask_CodexEmptyModelFailsClosed pins the MUL-4347
 // fix: an explicit codex model is validated against its own per-model
 // catalog, but an EMPTY model (follow config.toml, which can resolve to any
 // installed model) must NOT borrow the flagged Default entry's catalog. The
@@ -594,22 +811,31 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 // inherit it would green-light a level Luna / gpt-5.5 don't support and Codex
 // won't reject. So an empty codex model fails closed for every level and the
 // daemon drops it — users must pick an explicit model to pin an effort.
-func TestValidateThinkingLevel_CodexEmptyModelFailsClosed(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fake binary requires a POSIX shell")
-	}
-
-	fakeCodex := writeFakeCodexModelsBinary(t)
+func TestValidateThinkingLevelForTask_CodexEmptyModelFailsClosed(t *testing.T) {
+	executable, discovery := newTaskDiscoveryExecution(t, "codex", func(req CommandRequest) (string, int) {
+		switch {
+		case reflect.DeepEqual(req.Args, []string{"--version"}):
+			return "codex-cli 0.144.1\n", 0
+		case reflect.DeepEqual(req.Args, codexDebugModelsArgs):
+			return `{"models":[` +
+				`{"slug":"gpt-5.6-sol","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},` +
+				`{"slug":"gpt-5.6-terra","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},` +
+				`{"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}` +
+				`]}`, 0
+		default:
+			return "", 96
+		}
+	})
 	ctx := context.Background()
 
 	check := func(model, value string, want bool) {
 		t.Helper()
-		ok, err := ValidateThinkingLevel(ctx, "codex", fakeCodex, model, value)
+		ok, err := ValidateThinkingLevelForTask(ctx, "codex", executable, model, value, discovery)
 		if err != nil {
-			t.Fatalf("ValidateThinkingLevel(codex, %q, %q): unexpected err: %v", model, value, err)
+			t.Fatalf("ValidateThinkingLevelForTask(codex, %q, %q): unexpected err: %v", model, value, err)
 		}
 		if ok != want {
-			t.Errorf("ValidateThinkingLevel(codex, %q, %q) = %v, want %v", model, value, ok, want)
+			t.Errorf("ValidateThinkingLevelForTask(codex, %q, %q) = %v, want %v", model, value, ok, want)
 		}
 	}
 
@@ -633,24 +859,24 @@ func TestValidateThinkingLevel_CodexEmptyModelFailsClosed(t *testing.T) {
 	check("gpt-5.6-luna", "", true)
 }
 
-func TestValidateThinkingLevel_PreEffortCLIRejectsAllLevels(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fake binary requires a POSIX shell")
-	}
+func TestValidateThinkingLevelForTask_PreEffortCLIRejectsAllLevels(t *testing.T) {
 	t.Parallel()
 
 	// End-to-end guard for the daemon's pre-execution check against a CLI
 	// that predates --effort: the catalog must offer no levels, so any
 	// persisted thinking_level is dropped (with a warning) instead of being
 	// injected as a flag the binary rejects with "unknown option".
-	fakeClaude := writeFakeClaudePreEffortHelpBinary(t)
-	resetThinkingCacheForTests()
-	defer resetThinkingCacheForTests()
+	executable, discovery := newTaskDiscoveryExecution(t, "claude", func(req CommandRequest) (string, int) {
+		if reflect.DeepEqual(req.Args, []string{"--help"}) {
+			return "Usage: claude [options]\n\nOptions:\n  --model <model> Model to use\n  --verbose\n", 0
+		}
+		return "", 96
+	})
 
 	ctx := context.Background()
 
 	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
-		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-fable-5", level)
+		ok, err := ValidateThinkingLevelForTask(ctx, "claude", executable, "claude-fable-5", level, discovery)
 		if err != nil {
 			t.Fatalf("unexpected err for %q: %v", level, err)
 		}
@@ -660,7 +886,7 @@ func TestValidateThinkingLevel_PreEffortCLIRejectsAllLevels(t *testing.T) {
 	}
 
 	// Empty value still means "use runtime default" and must stay valid.
-	ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-fable-5", "")
+	ok, err := ValidateThinkingLevelForTask(ctx, "claude", executable, "claude-fable-5", "", discovery)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -669,25 +895,10 @@ func TestValidateThinkingLevel_PreEffortCLIRejectsAllLevels(t *testing.T) {
 	}
 }
 
-func TestValidateThinkingLevel_OpenCodeEmptyModelUsesAdvertisedVariants(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fake binary requires a POSIX shell")
-	}
-
-	modelCacheMu.Lock()
-	delete(modelCache, "opencode")
-	modelCacheMu.Unlock()
-	defer func() {
-		modelCacheMu.Lock()
-		delete(modelCache, "opencode")
-		modelCacheMu.Unlock()
-	}()
-
-	dir := t.TempDir()
-	fake := filepath.Join(dir, "opencode")
-	script := `#!/bin/sh
-if [ "$1" = "models" ]; then
-  cat <<'EOF'
+func TestValidateThinkingLevelForTask_OpenCodeEmptyModelUsesAdvertisedVariants(t *testing.T) {
+	executable, discovery := newTaskDiscoveryExecution(t, "opencode", func(req CommandRequest) (string, int) {
+		if reflect.DeepEqual(req.Args, []string{"models", "--verbose"}) {
+			return `
 opencode/deepseek-v4
 {
   "id": "deepseek-v4",
@@ -697,15 +908,13 @@ opencode/deepseek-v4
     "max": {}
   }
 }
-EOF
-  exit 0
-fi
-echo "opencode 9.9.9"
-`
-	writeTestExecutable(t, fake, []byte(script))
+`, 0
+		}
+		return "", 96
+	})
 
 	ctx := context.Background()
-	ok, err := ValidateThinkingLevel(ctx, "opencode", fake, "", "max")
+	ok, err := ValidateThinkingLevelForTask(ctx, "opencode", executable, "", "max", discovery)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -713,79 +922,13 @@ echo "opencode 9.9.9"
 		t.Fatalf("expected empty-model opencode max to pass when any advertised model supports it")
 	}
 
-	ok, err = ValidateThinkingLevel(ctx, "opencode", fake, "", "xhigh")
+	ok, err = ValidateThinkingLevelForTask(ctx, "opencode", executable, "", "xhigh", discovery)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if ok {
 		t.Fatalf("xhigh should fail when no advertised OpenCode model exposes it")
 	}
-}
-
-// writeFakeClaudeHelpBinary writes a small shell script that mimics
-// `claude --help`, emitting the full effort superset line so per-model
-// projection has something to filter. Returns the path to the executable.
-func writeFakeClaudeHelpBinary(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "claude")
-	script := "#!/bin/sh\n" +
-		"cat <<'EOF'\n" +
-		"Usage: claude [options]\n" +
-		"\n" +
-		"Options:\n" +
-		"  --model <model>     Model to use\n" +
-		"  --effort <level>    Effort level for the current session (low, medium, high, xhigh, max)\n" +
-		"EOF\n"
-	// Same ForkLock rationale as TestRunCodexDebugModels_ArgvSeenByBinary —
-	// the parser tests that consume this helper exec the script in parallel,
-	// so a sibling fork can otherwise inherit our write fd and trip ETXTBSY.
-	writeTestExecutable(t, path, []byte(script))
-	return path
-}
-
-// writeFakeClaudePreEffortHelpBinary mimics a Claude Code release from
-// before the --effort flag existed (e.g. 2.1.2): --help succeeds but has
-// no --effort line at all.
-func writeFakeClaudePreEffortHelpBinary(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "claude")
-	script := "#!/bin/sh\n" +
-		"cat <<'EOF'\n" +
-		"Usage: claude [options]\n" +
-		"\n" +
-		"Options:\n" +
-		"  --model <model>     Model to use\n" +
-		"  --verbose\n" +
-		"EOF\n"
-	writeTestExecutable(t, path, []byte(script))
-	return path
-}
-
-// writeFakeCodexModelsBinary writes a stand-in `codex` that answers
-// `debug models --bundled` with a Codex 0.144.1-shaped gpt-5.6 catalog
-// (sol/terra advertise max+ultra, luna tops out at max) and prints a version
-// string for any other invocation (DetectVersion's probe). Used to exercise
-// ValidateThinkingLevel against a real per-model catalog without a codex install.
-func writeFakeCodexModelsBinary(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "codex")
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"debug\" ]; then\n" +
-		"cat <<'EOF'\n" +
-		`{"models":[` +
-		`{"slug":"gpt-5.6-sol","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},` +
-		`{"slug":"gpt-5.6-terra","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},` +
-		`{"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}` +
-		`]}` + "\n" +
-		"EOF\n" +
-		"exit 0\n" +
-		"fi\n" +
-		"echo 'codex-cli 0.144.1'\n"
-	writeTestExecutable(t, path, []byte(script))
-	return path
 }
 
 // ── Cache key invalidation ───────────────────────────────────────────

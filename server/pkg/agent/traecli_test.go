@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"log/slog"
 )
 
 func TestNewReturnsTraecliBackend(t *testing.T) {
@@ -81,7 +79,7 @@ func TestTraecliBackendStreamsAndCompletes(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "traecli")
 	writeTestExecutable(t, fakePath, []byte(fakeTraecliACPScript()))
 
-	backend, err := New("traecli", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("traecli", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new traecli backend: %v", err)
 	}
@@ -138,11 +136,7 @@ func TestTraecliBlockedArgsFiltering(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "traecli")
 	writeTestExecutable(t, fakePath, []byte(fakeTraecliACPScript()))
 
-	backend, err := New("traecli", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env:            map[string]string{"TRAECLI_ARGS_FILE": argsFile},
-	})
+	backend, err := New("traecli", acpProviderTestConfig(t, fakePath, map[string]string{"TRAECLI_ARGS_FILE": argsFile}))
 	if err != nil {
 		t.Fatalf("new traecli backend: %v", err)
 	}
@@ -213,7 +207,7 @@ func TestTraecliSetModelFailureFailsTask(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "traecli")
 	writeTestExecutable(t, fakePath, []byte(fakeTraecliACPScript()))
 
-	backend, err := New("traecli", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("traecli", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new traecli backend: %v", err)
 	}
@@ -247,11 +241,7 @@ func TestTraecliUsesSessionLoadForResume(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "traecli")
 	writeTestExecutable(t, fakePath, []byte(fakeTraecliACPScript()))
 
-	backend, err := New("traecli", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env:            map[string]string{"TRAECLI_REQUESTS_FILE": requestsFile},
-	})
+	backend, err := New("traecli", acpProviderTestConfig(t, fakePath, map[string]string{"TRAECLI_REQUESTS_FILE": requestsFile}))
 	if err != nil {
 		t.Fatalf("new traecli backend: %v", err)
 	}
@@ -305,8 +295,13 @@ func TestTraecliRealACPSmoke(t *testing.T) {
 	if err != nil {
 		t.Skip("traecli not on PATH; skipping real-binary smoke test")
 	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		t.Fatalf("resolve traecli path: %v", err)
+	}
+	cwd := t.TempDir()
 
-	backend, err := New("traecli", Config{ExecutablePath: path, Logger: slog.Default()})
+	backend, err := New("traecli", acpProviderTestConfigForCwd(t, path, cwd, inheritedEnvironmentForTest()))
 	if err != nil {
 		t.Fatalf("new traecli backend: %v", err)
 	}
@@ -314,7 +309,7 @@ func TestTraecliRealACPSmoke(t *testing.T) {
 	defer cancel()
 
 	session, err := backend.Execute(ctx, "Reply with exactly one word: pong. Do not use any tools.", ExecOptions{
-		Cwd:     t.TempDir(),
+		Cwd:     cwd,
 		Timeout: 80 * time.Second,
 	})
 	if err != nil {

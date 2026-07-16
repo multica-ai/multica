@@ -809,7 +809,7 @@ func TestPruneWorktree_SerializesWithCreateWorktree(t *testing.T) {
 
 	createDone := make(chan error, 1)
 	go func() {
-		_, err := blockingCache.CreateWorktree(repocache.WorktreeParams{
+		_, err := blockingCache.CreateWorktreeContext(context.Background(), repocache.WorktreeParams{
 			WorkspaceID: "ws1",
 			RepoURL:     sourceRepo,
 			WorkDir:     t.TempDir(),
@@ -849,12 +849,16 @@ type blockingRepoCache struct {
 	release chan struct{}
 }
 
-func (c *blockingRepoCache) Lookup(workspaceID, url string) string {
-	return c.inner.Lookup(workspaceID, url)
+func (c *blockingRepoCache) LookupContext(ctx context.Context, workspaceID, url string) string {
+	return c.inner.LookupContext(ctx, workspaceID, url)
 }
 
-func (c *blockingRepoCache) Sync(workspaceID string, repos []repocache.RepoInfo) error {
-	return c.inner.Sync(workspaceID, repos)
+func (c *blockingRepoCache) ResolveContext(ctx context.Context, workspaceID, url string) (repocache.ResolvedRepo, error) {
+	return c.inner.ResolveContext(ctx, workspaceID, url)
+}
+
+func (c *blockingRepoCache) SyncContext(ctx context.Context, workspaceID string, repos []repocache.RepoInfo) error {
+	return c.inner.SyncContext(ctx, workspaceID, repos)
 }
 
 func (c *blockingRepoCache) WithRepoLock(barePath string, fn func() error) error {
@@ -865,8 +869,8 @@ func (c *blockingRepoCache) WithRepoLock(barePath string, fn func() error) error
 	})
 }
 
-func (c *blockingRepoCache) CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
-	return c.inner.CreateWorktree(params)
+func (c *blockingRepoCache) CreateWorktreeContext(ctx context.Context, params repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return c.inner.CreateWorktreeContext(ctx, params)
 }
 
 // TestShouldCleanTaskDir_KindDispatch covers the four GCMeta kinds across

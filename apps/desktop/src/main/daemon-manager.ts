@@ -21,6 +21,16 @@ import { daemonStatusAlive } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
 import {
+  fetchDaemonDiagnostics,
+  type DiagnosticsPayload,
+} from "./daemon-diagnostics";
+import { fetchDaemonHealth } from "./daemon-health";
+import { decideAutomaticRestart } from "./restart-decision";
+import {
+  DaemonLifecycleCoordinator,
+  daemonStopArgs,
+} from "./daemon-lifecycle-coordinator";
+import {
   daemonLifecycleUnreachable,
   isDaemonExternallyManaged,
   normalizeHostOS,
@@ -60,7 +70,7 @@ let statusPollTimer: ReturnType<typeof setInterval> | null = null;
 let logTailWatcher: { path: string; listener: StatsListener } | null = null;
 let currentState: DaemonStatus["state"] = "installing_cli";
 let getMainWindow: () => BrowserWindow | null = () => null;
-let operationInProgress = false;
+const lifecycleCoordinator = new DaemonLifecycleCoordinator();
 let cachedCliBinary: string | null | undefined = undefined;
 let cliResolvePromise: Promise<string | null> | null = null;
 let cachedCliBinaryVersion: string | null | undefined = undefined;
@@ -68,6 +78,8 @@ let cachedCliBinaryVersion: string | null | undefined = undefined;
 // busy executing tasks. The poll loop retries the check on each tick and
 // fires the restart once active_task_count drops to 0.
 let pendingVersionRestart = false;
+let pendingCredentialRestart = false;
+let automaticRestartInProgress = false;
 let targetApiBaseUrl: string | null = null;
 let activeProfile: ActiveProfile | null = null;
 
@@ -163,37 +175,7 @@ function sendStatus(status: DaemonStatus): void {
   win?.webContents.send("daemon:status", status);
 }
 
-interface HealthPayload {
-  status?: string;
-  pid?: number;
-  /** Daemon's runtime.GOOS. Absent on daemons older than the #3916 fix. */
-  os?: string;
-  uptime?: string;
-  daemon_id?: string;
-  device_name?: string;
-  server_url?: string;
-  cli_version?: string;
-  active_task_count?: number;
-  agents?: string[];
-  workspaces?: unknown[];
-}
-
-async function fetchHealthAtPort(
-  port: number,
-): Promise<HealthPayload | null> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2_000);
-    const res = await fetch(`http://127.0.0.1:${port}/health`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!res.ok) return null;
-    return (await res.json()) as HealthPayload;
-  } catch {
-    return null;
-  }
-}
+const fetchHealthAtPort = fetchDaemonHealth;
 
 /**
  * Validates the daemon profile's token against the backend to find out whether
@@ -364,12 +346,14 @@ async function fetchHealth(): Promise<DaemonStatus> {
     normalizeHostOS(process.platform),
   );
 
+  const diagnostics = await fetchDaemonDiagnostics(active.name, active.port);
+
   // Safety: if we have a target URL and the daemon on our port reports a
   // different server_url, it's not "our" daemon — drop it and re-resolve.
   if (
     targetApiBaseUrl &&
-    data.server_url &&
-    !urlsMatch(data.server_url, targetApiBaseUrl)
+    diagnostics?.server_url &&
+    !urlsMatch(diagnostics.server_url, targetApiBaseUrl)
   ) {
     invalidateActiveProfile();
     return { state: "stopped" };
@@ -377,16 +361,16 @@ async function fetchHealth(): Promise<DaemonStatus> {
 
   return {
     state: "running",
-    pid: data.pid,
-    uptime: data.uptime,
-    daemonId: data.daemon_id,
-    deviceName: data.device_name,
-    agents: data.agents ?? [],
-    workspaceCount: Array.isArray(data.workspaces)
-      ? data.workspaces.length
+    pid: diagnostics?.pid,
+    uptime: diagnostics?.uptime,
+    daemonId: diagnostics?.daemon_id,
+    deviceName: diagnostics?.device_name,
+    agents: diagnostics?.agents ?? [],
+    workspaceCount: Array.isArray(diagnostics?.workspaces)
+      ? diagnostics.workspaces.length
       : 0,
     profile: active.name,
-    serverUrl: data.server_url,
+    serverUrl: diagnostics?.server_url,
     externallyManaged,
   };
 }
@@ -583,8 +567,16 @@ async function ensureRunningDaemonVersionMatches(): Promise<
     return "ok";
   }
 
+  if (running?.status !== "running") {
+    pendingVersionRestart = false;
+    return "not_running";
+  }
+  const diagnostics: DiagnosticsPayload | null = await fetchDaemonDiagnostics(
+    active.name,
+    active.port,
+  );
   const bundled = await getCliBinaryVersion();
-  const action = decideVersionAction(bundled, running);
+  const action = decideVersionAction(bundled, diagnostics);
 
   switch (action) {
     case "not_running":
@@ -595,21 +587,26 @@ async function ensureRunningDaemonVersionMatches(): Promise<
       return "ok";
     case "defer": {
       if (!pendingVersionRestart) {
-        const activeTasks = running?.active_task_count ?? 0;
+        const activeTasks = diagnostics?.active_task_count ?? 0;
         console.log(
-          `[daemon] CLI version mismatch (bundled=${bundled} running=${running?.cli_version}); deferring restart until ${activeTasks} active task(s) finish`,
+          `[daemon] CLI version mismatch (bundled=${bundled} running=${diagnostics?.cli_version}); deferring restart until ${activeTasks} active task(s) finish`,
         );
       }
       pendingVersionRestart = true;
       return "deferred";
     }
-    case "restart":
+    case "restart": {
       console.log(
-        `[daemon] CLI version mismatch (bundled=${bundled} running=${running?.cli_version}) — restarting daemon`,
+        `[daemon] CLI version mismatch (bundled=${bundled} running=${diagnostics?.cli_version}) — restarting daemon`,
       );
       pendingVersionRestart = false;
-      await restartDaemon();
+      const restart = await restartDaemon({ requireIdle: true });
+      if (!restart.success) {
+        pendingVersionRestart = true;
+        return "deferred";
+      }
       return "restarted";
+    }
   }
 }
 
@@ -712,7 +709,13 @@ async function syncToken(
         console.log(
           "[daemon] user switched — restarting daemon with new credentials",
         );
-        void restartDaemon();
+        pendingCredentialRestart = true;
+        void restartDaemon({ requireIdle: true }).then((result) => {
+          pendingCredentialRestart = !result.success;
+          if (!result.success) {
+            console.log(`[daemon] credential restart deferred: ${result.error}`);
+          }
+        });
       }
     } catch (err) {
       console.warn("[daemon] restart-on-user-switch failed:", err);
@@ -783,8 +786,9 @@ async function reauthenticate(
     if (isAuthStatusError(err)) return { ok: false, reason: "session_invalid" };
     return { ok: false, reason: "transient", message: errorMessage(err) };
   }
-  const restart = await restartDaemon();
+  const restart = await restartDaemon({ requireIdle: true });
   if (!restart.success) {
+    pendingCredentialRestart = true;
     return {
       ok: false,
       reason: "transient",
@@ -792,18 +796,6 @@ async function reauthenticate(
     };
   }
   return { ok: true };
-}
-
-async function withGuard<T>(fn: () => Promise<T>): Promise<T | { success: false; error: string }> {
-  if (operationInProgress) {
-    return { success: false, error: "Another daemon operation is in progress" };
-  }
-  operationInProgress = true;
-  try {
-    return await fn();
-  } finally {
-    operationInProgress = false;
-  }
 }
 
 function profileArgs(active: ActiveProfile): string[] {
@@ -819,7 +811,7 @@ function desktopSpawnEnv(): NodeJS.ProcessEnv {
   return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
 }
 
-async function startDaemon(): Promise<{ success: boolean; error?: string }> {
+async function startDaemonUnlocked(): Promise<{ success: boolean; error?: string }> {
   const bin = await resolveCliBinary();
   if (!bin) return { success: false, error: "multica CLI is not installed" };
 
@@ -880,7 +872,9 @@ async function lifecycleBlockedByForeignDaemon(): Promise<boolean> {
   );
 }
 
-async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
+async function stopDaemonUnlocked(
+  options: { requireIdle?: boolean } = {},
+): Promise<{ success: boolean; error?: string }> {
   // Central lifecycle guard: a daemon running in an environment we can't drive
   // (e.g. Linux in WSL2 behind a Windows desktop) can't be stopped by the
   // native CLI — it would act on the host process namespace and no-op, while
@@ -894,36 +888,88 @@ async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
   if (!bin) return { success: false, error: "multica CLI is not installed" };
 
   const active = await ensureActiveProfile();
+  const previousState = currentState;
   currentState = "stopping";
   // An explicit stop is a clean reset — drop any pending auth-failure verdict.
   authExpired = false;
   startingSince = null;
   sendStatus({ state: "stopping" });
 
-  const args = ["daemon", "stop", ...profileArgs(active)];
+  const args = daemonStopArgs(active.name, options.requireIdle === true);
 
   return new Promise((resolve) => {
     execFile(bin, args, { timeout: 15_000 }, (err) => {
       if (err) {
+        currentState = previousState;
+        sendStatus({ state: previousState });
         resolve({ success: false, error: err.message });
       } else {
+        currentState = "stopped";
+        sendStatus({ state: "stopped" });
         resolve({ success: true });
       }
-      currentState = "stopped";
-      sendStatus({ state: "stopped" });
     });
   });
 }
 
-async function restartDaemon(): Promise<{ success: boolean; error?: string }> {
+async function restartDaemonUnlocked(
+  options: { requireIdle?: boolean } = {},
+): Promise<{ success: boolean; error?: string }> {
   // Same central, live-preflighted guard as stopDaemon: we can neither stop nor
   // start a daemon we don't manage, so don't try (user-switch, reauth,
   // first-workspace, and any future restart caller all route through here).
   // #3916.
   if (await lifecycleBlockedByForeignDaemon()) return { success: true };
-  const stopResult = await stopDaemon();
+  if (options.requireIdle) {
+    const active = await ensureActiveProfile();
+    const health = await fetchHealthAtPort(active.port);
+    const diagnostics = health
+      ? await fetchDaemonDiagnostics(active.name, active.port)
+      : null;
+    if (decideAutomaticRestart(health, diagnostics) === "defer") {
+      return {
+        success: false,
+        error: "daemon restart deferred until authenticated diagnostics report zero active tasks",
+      };
+    }
+  }
+  const stopResult = await stopDaemonUnlocked(options);
   if (!stopResult.success) return stopResult;
-  return startDaemon();
+  return startDaemonUnlocked();
+}
+
+function startDaemon(): Promise<{ success: boolean; error?: string }> {
+  return lifecycleCoordinator.run(startDaemonUnlocked);
+}
+
+function stopDaemon(
+  options: { requireIdle?: boolean } = {},
+): Promise<{ success: boolean; error?: string }> {
+  return lifecycleCoordinator.run(() => stopDaemonUnlocked(options));
+}
+
+function restartDaemon(
+  options: { requireIdle?: boolean } = {},
+): Promise<{ success: boolean; error?: string }> {
+  return lifecycleCoordinator.run(() => restartDaemonUnlocked(options));
+}
+
+async function retryPendingAutomaticRestarts(): Promise<void> {
+  if (automaticRestartInProgress) return;
+  automaticRestartInProgress = true;
+  try {
+    if (pendingCredentialRestart) {
+      const result = await restartDaemon({ requireIdle: true });
+      pendingCredentialRestart = !result.success;
+      if (result.success) pendingVersionRestart = false;
+      return;
+    }
+    if (pendingVersionRestart) {
+      await ensureRunningDaemonVersionMatches();
+    }
+  } finally {
+    automaticRestartInProgress = false;
+  }
 }
 
 async function pollOnce(): Promise<void> {
@@ -931,8 +977,11 @@ async function pollOnce(): Promise<void> {
   currentState = status.state;
   sendStatus(status);
   // Retry a deferred version-mismatch restart once the daemon drains.
-  if (pendingVersionRestart && status.state === "running") {
-    void ensureRunningDaemonVersionMatches();
+  if (
+    status.state === "running" &&
+    (pendingCredentialRestart || pendingVersionRestart)
+  ) {
+    void retryPendingAutomaticRestarts();
   }
 }
 
@@ -1074,9 +1123,9 @@ export function setupDaemonManager(
       await pollOnce();
     }
   });
-  ipcMain.handle("daemon:start", () => withGuard(() => startDaemon()));
-  ipcMain.handle("daemon:stop", () => withGuard(() => stopDaemon()));
-  ipcMain.handle("daemon:restart", () => withGuard(() => restartDaemon()));
+  ipcMain.handle("daemon:start", () => startDaemon());
+  ipcMain.handle("daemon:stop", () => stopDaemon());
+  ipcMain.handle("daemon:restart", () => restartDaemon());
   ipcMain.handle("daemon:get-status", () => fetchHealth());
   // The host's OS name, available regardless of daemon state. The Runtimes
   // page uses it as a fallback identity for "this machine" when no

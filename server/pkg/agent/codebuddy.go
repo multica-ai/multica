@@ -71,7 +71,8 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	if execPath == "" {
 		execPath = "codebuddy"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolvedExecPath, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("codebuddy executable not found at %q: %w", execPath, err)
 	}
 
@@ -85,7 +86,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	var mcpConfigPath string
 	var mcpFileCleanup func()
 	if len(opts.McpConfig) > 0 {
-		path, err := writeMcpConfigToTemp(opts.McpConfig)
+		path, err := writeMcpConfigToTemp(b.cfg.TaskTempDir, opts.McpConfig)
 		if err != nil {
 			cancel()
 			return nil, err
@@ -101,14 +102,12 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		}
 	}()
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
-	cmd.WaitDelay = 10 * time.Second
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cmd, err := b.cfg.command(runCtx, resolvedExecPath, args, opts.Cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("build codebuddy command: %w", err)
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -124,7 +123,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[codebuddy:stderr] "), agentStderrTailBytes)
-	cmd.Stderr = stderrBuf
+	_ = cmd.SetStderr(stderrBuf)
 
 	if err := cmd.Start(); err != nil {
 		closeStdin()
@@ -132,7 +131,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		return nil, fmt.Errorf("start codebuddy: %w", err)
 	}
 
-	b.cfg.Logger.Info("codebuddy started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("codebuddy started", "pid", cmd.Process().Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	// cmd.Start() succeeded — transfer temp file ownership to the goroutine.
 	mcpFileCleanup = nil
@@ -291,7 +290,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
 		})
 
-		b.cfg.Logger.Info("codebuddy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("codebuddy finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed")
 		if reportedSessionID != sessionID {

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // stubLookPath swaps the package-level lookPath indirection used by
@@ -207,6 +209,88 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	// The response runtime carries the profile_id back.
 	if len(resp.Runtimes) != 1 || resp.Runtimes[0].ProfileID != "prof-1" {
 		t.Fatalf("response runtimes wrong: %+v", resp.Runtimes)
+	}
+}
+
+func assertTaskExecutionCapability(t *testing.T, runtime map[string]any, want bool) {
+	t.Helper()
+	capabilities, ok := runtime["capabilities"]
+	if !want {
+		if ok {
+			t.Fatalf("capabilities = %#v, want field omitted", capabilities)
+		}
+		return
+	}
+	if !ok {
+		t.Fatal("capabilities field omitted, want task execution capability")
+	}
+	values, ok := capabilities.([]any)
+	if !ok || len(values) != 1 || values[0] != protocol.RuntimeCapabilityTaskExecution {
+		t.Fatalf("capabilities = %#v, want [%q]", capabilities, protocol.RuntimeCapabilityTaskExecution)
+	}
+}
+
+func TestRegisterRuntimes_BuiltInCapabilityMatchesProbe(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		capable bool
+	}{
+		{name: "capable", capable: true},
+		{name: "incapable", capable: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(stubAgentVersion(t))
+			stubLookPath(t, map[string]string{})
+
+			fx := newProfileRegisterFixture(t, nil, http.StatusNotFound)
+			d := fx.daemon
+			d.cfg.Agents = map[string]AgentEntry{"codex": {Path: "/usr/bin/true"}}
+			d.taskExecutionCapable = tc.capable
+
+			if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+				t.Fatalf("registerRuntimesForWorkspace: %v", err)
+			}
+			if len(fx.sentRuntimes) != 1 {
+				t.Fatalf("sent runtimes = %d, want 1: %+v", len(fx.sentRuntimes), fx.sentRuntimes)
+			}
+			assertTaskExecutionCapability(t, fx.sentRuntimes[0], tc.capable)
+		})
+	}
+}
+
+func TestRegisterRuntimes_CustomProfileCapabilityMatchesProbe(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		capable bool
+	}{
+		{name: "capable", capable: true},
+		{name: "incapable", capable: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(stubAgentVersion(t))
+			stubLookPath(t, map[string]string{"company-codex": "/opt/bin/company-codex"})
+
+			profiles := []RuntimeProfile{{
+				ID:             "prof-1",
+				WorkspaceID:    "ws-1",
+				DisplayName:    "Company Codex",
+				ProtocolFamily: "codex",
+				CommandName:    "company-codex",
+				Enabled:        true,
+			}}
+			fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+			d := fx.daemon
+			d.cfg.Agents = map[string]AgentEntry{}
+			d.taskExecutionCapable = tc.capable
+
+			if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+				t.Fatalf("registerRuntimesForWorkspace: %v", err)
+			}
+			if len(fx.sentRuntimes) != 1 {
+				t.Fatalf("sent runtimes = %d, want 1: %+v", len(fx.sentRuntimes), fx.sentRuntimes)
+			}
+			assertTaskExecutionCapability(t, fx.sentRuntimes[0], tc.capable)
+		})
 	}
 }
 

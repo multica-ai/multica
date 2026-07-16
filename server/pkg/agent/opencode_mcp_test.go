@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -407,13 +406,9 @@ func TestOpencodeBackendInjectsMCPConfigViaEnv(t *testing.T) {
 	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScriptCapturingEnv()))
 
 	workDir := t.TempDir()
-	backend, err := New("opencode", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env: map[string]string{
-			"OPENCODE_CAPTURE_FILE": captureFile,
-		},
-	})
+	backend, err := New("opencode", opencodeTestConfig(t, fakePath, workDir, map[string]string{
+		"OPENCODE_CAPTURE_FILE": captureFile,
+	}))
 	if err != nil {
 		t.Fatalf("new backend: %v", err)
 	}
@@ -468,14 +463,10 @@ func TestOpencodeBackendOmitsMCPEnvWhenEmpty(t *testing.T) {
 
 	const userContent = `{"mcp":{"user_only":{"type":"remote","url":"https://user.example/mcp"}}}`
 	workDir := t.TempDir()
-	backend, err := New("opencode", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env: map[string]string{
-			"OPENCODE_CAPTURE_FILE":   captureFile,
-			"OPENCODE_CONFIG_CONTENT": userContent,
-		},
-	})
+	backend, err := New("opencode", opencodeTestConfig(t, fakePath, workDir, map[string]string{
+		"OPENCODE_CAPTURE_FILE":   captureFile,
+		"OPENCODE_CONFIG_CONTENT": userContent,
+	}))
 	if err != nil {
 		t.Fatalf("new backend: %v", err)
 	}
@@ -518,14 +509,10 @@ func TestOpencodeBackendOverridesUserOpenCodeConfigContent(t *testing.T) {
 
 	const userBogus = `{"this-should-not-survive":true}`
 	workDir := t.TempDir()
-	backend, err := New("opencode", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env: map[string]string{
-			"OPENCODE_CAPTURE_FILE":   captureFile,
-			"OPENCODE_CONFIG_CONTENT": userBogus,
-		},
-	})
+	backend, err := New("opencode", opencodeTestConfig(t, fakePath, workDir, map[string]string{
+		"OPENCODE_CAPTURE_FILE":   captureFile,
+		"OPENCODE_CONFIG_CONTENT": userBogus,
+	}))
 	if err != nil {
 		t.Fatalf("new backend: %v", err)
 	}

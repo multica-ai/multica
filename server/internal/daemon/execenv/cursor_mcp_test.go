@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -148,6 +149,53 @@ func TestPrepareCursorMcpConfigSeedsExplicitAuthSource(t *testing.T) {
 	}
 	if string(data) != `{"tokens":{"fetch":"secret"}}` {
 		t.Fatalf("seeded auth = %s", data)
+	}
+	info, err := os.Lstat(targetAuth)
+	if err != nil {
+		t.Fatalf("lstat seeded auth: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		t.Fatalf("seeded auth mode = %v, want task-private regular file", info.Mode())
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("seeded auth mode = %#o, want 0600", info.Mode().Perm())
+	}
+	if err := os.WriteFile(sourceAuth, []byte(`{"tokens":{"fetch":"rotated"}}`), 0o600); err != nil {
+		t.Fatalf("rotate source auth: %v", err)
+	}
+	data, err = os.ReadFile(targetAuth)
+	if err != nil {
+		t.Fatalf("read seeded auth after source mutation: %v", err)
+	}
+	if string(data) != `{"tokens":{"fetch":"secret"}}` {
+		t.Fatalf("seeded auth changed with source: %s", data)
+	}
+}
+
+func TestPrepareCursorMcpConfigRejectsSymlinkAuthSource(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink fixture requires elevated privileges on some Windows hosts")
+	}
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workDir: %v", err)
+	}
+	realAuth := filepath.Join(envRoot, "owner-auth.json")
+	if err := os.WriteFile(realAuth, []byte(`{"token":"owner"}`), 0o600); err != nil {
+		t.Fatalf("write real auth: %v", err)
+	}
+	sourceDir := filepath.Join(envRoot, "source-project")
+	if err := os.MkdirAll(sourceDir, 0o700); err != nil {
+		t.Fatalf("mkdir source project: %v", err)
+	}
+	if err := os.Symlink(realAuth, filepath.Join(sourceDir, cursorMcpAuthFile)); err != nil {
+		t.Fatalf("symlink auth: %v", err)
+	}
+
+	_, err := prepareCursorMcpConfig(envRoot, workDir, json.RawMessage(`{"mcpServers":{}}`), sourceDir, &sidecarManifest{})
+	if err == nil {
+		t.Fatal("expected symlink mcp-auth source to fail closed")
 	}
 }
 

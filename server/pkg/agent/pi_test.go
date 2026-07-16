@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -90,14 +92,19 @@ func TestPiExecuteAttachesStdinPipe(t *testing.T) {
 		"exit 1\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	cfg, cwd := providerCommandTestConfig(t, fakePath, slog.Default())
+	backend, err := New("pi", cfg)
 	if err != nil {
 		t.Fatalf("new pi backend: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:             cwd,
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "0123456789abcdef0123456789abcdef",
+	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -132,12 +139,238 @@ func piEventStreamScript(events []string) string {
 	return b.String()
 }
 
+func newPiSessionSecurityBackend(t *testing.T) (Backend, Config, string) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("secure Pi session descriptor handoff is currently Linux-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	writeTestExecutable(t, fakePath, []byte(piEventStreamScript([]string{
+		`{"type":"agent_start"}`,
+		`{"type":"turn_end","message":{"role":"assistant","model":"test","usage":{"input":1,"output":1}}}`,
+	})))
+	cfg, cwd := providerCommandTestConfig(t, fakePath, slog.Default())
+	backend, err := New("pi", cfg)
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+	return backend, cfg, cwd
+}
+
+func TestPiExecuteStoresNewSessionUnderTaskTempDir(t *testing.T) {
+	backend, cfg, cwd := newPiSessionSecurityBackend(t)
+	ownerHome := t.TempDir()
+	t.Setenv("HOME", ownerHome)
+
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Cwd: cwd, Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	if filepath.IsAbs(result.SessionID) || strings.ContainsAny(result.SessionID, `/\\`) {
+		t.Fatalf("SessionID = %q, want opaque path-free identifier", result.SessionID)
+	}
+	wantPath := filepath.Join(cfg.TaskStateDir, "pi-sessions", result.SessionID+".jsonl")
+	info, err := os.Lstat(wantPath)
+	if err != nil {
+		t.Fatalf("task-private session file %q: %v", wantPath, err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("task-private session mode = %v, want regular file", info.Mode())
+	}
+	if _, err := os.Stat(filepath.Join(ownerHome, ".multica", "pi-sessions")); !os.IsNotExist(err) {
+		t.Fatalf("daemon-owner Pi session directory must not be created, stat err=%v", err)
+	}
+}
+
+func TestPiExecuteRejectsCallerSelectedSessionPathsBeforeCreation(t *testing.T) {
+	tests := map[string]func(root, taskTemp string) string{
+		"absolute outside task root": func(root, _ string) string {
+			return filepath.Join(root, "owner-session.jsonl")
+		},
+		"parent traversal": func(root, taskState string) string {
+			return filepath.Join(taskState, "..", filepath.Base(root), "traversal-session.jsonl")
+		},
+	}
+	for name, sessionID := range tests {
+		t.Run(name, func(t *testing.T) {
+			backend, cfg, cwd := newPiSessionSecurityBackend(t)
+			outside := t.TempDir()
+			requestedPath := sessionID(outside, cfg.TaskStateDir)
+			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+				Cwd:             cwd,
+				Timeout:         5 * time.Second,
+				ResumeSessionID: requestedPath,
+			})
+			if err == nil {
+				if session != nil {
+					go func() {
+						for range session.Messages {
+						}
+						<-session.Result
+					}()
+				}
+				t.Fatalf("Execute accepted caller-selected session path %q", requestedPath)
+			}
+			if _, statErr := os.Lstat(requestedPath); !os.IsNotExist(statErr) {
+				t.Fatalf("caller-selected path %q was touched, stat err=%v", requestedPath, statErr)
+			}
+		})
+	}
+}
+
+func TestPiExecuteRejectsSymlinkSessionBeforeProcessStart(t *testing.T) {
+	backend, cfg, cwd := newPiSessionSecurityBackend(t)
+	sessionDir := filepath.Join(cfg.TaskStateDir, "pi-sessions")
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+	target := filepath.Join(t.TempDir(), "owner-secret")
+	if err := os.WriteFile(target, []byte("unchanged"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	link := filepath.Join(sessionDir, "0123456789abcdef0123456789abcdef.jsonl")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+		Cwd:             cwd,
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "0123456789abcdef0123456789abcdef",
+	})
+	if err == nil {
+		if session != nil {
+			go func() {
+				for range session.Messages {
+				}
+				<-session.Result
+			}()
+		}
+		t.Fatal("Execute accepted symlink session file")
+	}
+	got, readErr := os.ReadFile(target)
+	if readErr != nil || string(got) != "unchanged" {
+		t.Fatalf("symlink target changed: bytes=%q err=%v", got, readErr)
+	}
+}
+
+func TestPiExecuteRequiresTaskStateDirBeforeProcessStart(t *testing.T) {
+	backend, cfg, cwd := newPiSessionSecurityBackend(t)
+	outsidePath := filepath.Join(t.TempDir(), "owner-session.jsonl")
+	pi := backend.(*piBackend)
+	pi.cfg.TaskStateDir = ""
+
+	session, err := pi.Execute(context.Background(), "prompt", ExecOptions{
+		Cwd:             cwd,
+		Timeout:         5 * time.Second,
+		ResumeSessionID: outsidePath,
+	})
+	if err == nil {
+		if session != nil {
+			go func() {
+				for range session.Messages {
+				}
+				<-session.Result
+			}()
+		}
+		t.Fatal("Execute succeeded without TaskStateDir")
+	}
+	if _, statErr := os.Lstat(outsidePath); !os.IsNotExist(statErr) {
+		t.Fatalf("path was touched without TaskStateDir, stat err=%v (original state root=%q)", statErr, cfg.TaskStateDir)
+	}
+}
+
+func TestPiSessionRejectsHardLinkedFile(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("secure Pi session descriptor handoff is currently Linux-only")
+	}
+	root := t.TempDir()
+	sessionDir := filepath.Join(root, "pi-sessions")
+	if err := os.Mkdir(sessionDir, 0o700); err != nil {
+		t.Fatalf("create session directory: %v", err)
+	}
+	sessionID := "0123456789abcdef0123456789abcdef"
+	path := filepath.Join(sessionDir, sessionID+".jsonl")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	if err := os.Link(path, filepath.Join(t.TempDir(), "foreign-link")); err != nil {
+		t.Fatalf("create hard link: %v", err)
+	}
+
+	if _, _, err := preparePiSession(root, sessionID); err == nil || !strings.Contains(err.Error(), "link count") {
+		t.Fatalf("preparePiSession hard-linked file error = %v, want link-count rejection", err)
+	}
+}
+
+func TestPiSessionInheritedFDResistsPathReplacement(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("secure Pi session descriptor handoff is currently Linux-only")
+	}
+	root := t.TempDir()
+	sessionID := "0123456789abcdef0123456789abcdef"
+	_, sessionFile, err := preparePiSession(root, sessionID)
+	if err != nil {
+		t.Fatalf("preparePiSession: %v", err)
+	}
+	defer sessionFile.Close()
+
+	path := filepath.Join(root, "pi-sessions", sessionID+".jsonl")
+	originalPath := filepath.Join(root, "pi-sessions", "original-unlinked.jsonl")
+	if err := os.Rename(path, originalPath); err != nil {
+		t.Fatalf("rename verified session: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("replacement\n"), 0o600); err != nil {
+		t.Fatalf("write replacement session: %v", err)
+	}
+
+	cmd := exec.Command("/bin/sh", "-c", `printf 'child-append\n' >> "$1"`, "sh", sessionFile.childPath())
+	cmd.ExtraFiles = []*os.File{sessionFile.file}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("append through inherited descriptor: %v, output=%s", err, output)
+	}
+
+	original, err := os.ReadFile(originalPath)
+	if err != nil {
+		t.Fatalf("read original inode: %v", err)
+	}
+	replacement, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read replacement path: %v", err)
+	}
+	if string(original) != "child-append\n" {
+		t.Fatalf("original inode bytes = %q, want inherited-FD append", original)
+	}
+	if string(replacement) != "replacement\n" {
+		t.Fatalf("replacement path was modified: %q", replacement)
+	}
+}
+
+func TestPiExecutionFailsClosedWithoutSecureDescriptorHandoff(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		t.Skip("Linux supports secure Pi session descriptor handoff")
+	}
+	_, _, err := preparePiSession(t.TempDir(), "0123456789abcdef0123456789abcdef")
+	if err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("preparePiSession error = %v, want platform fail-closed error", err)
+	}
+}
+
 // TestPiExecuteRetainsOnlyLastTurnOutput verifies turn_start resets the
 // output buffer so Result.Output keeps only the final turn's text.
 func TestPiExecuteRetainsOnlyLastTurnOutput(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
+	if runtime.GOOS != "linux" {
+		t.Skip("secure Pi session descriptor handoff is currently Linux-only")
 	}
 
 	events := []string{
@@ -156,14 +389,19 @@ func TestPiExecuteRetainsOnlyLastTurnOutput(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "pi")
 	writeTestExecutable(t, fakePath, []byte(piEventStreamScript(events)))
 
-	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	cfg, cwd := providerCommandTestConfig(t, fakePath, slog.Default())
+	backend, err := New("pi", cfg)
 	if err != nil {
 		t.Fatalf("new pi backend: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:             cwd,
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "0123456789abcdef0123456789abcdef",
+	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

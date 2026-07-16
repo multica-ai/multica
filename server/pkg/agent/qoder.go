@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -72,8 +74,13 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	if execPath == "" {
 		execPath = "qodercli"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolvedExecPath, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("qoder executable not found at %q: %w", execPath, err)
+	}
+	resolvedExecPath, err = filepath.Abs(resolvedExecPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve qoder executable %q: %w", resolvedExecPath, err)
 	}
 
 	// Translate the agent's mcp_config (Claude-style object of objects) into
@@ -94,13 +101,20 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		[]string{"--yolo", "--acp"},
 		filterCustomArgs(opts.CustomArgs, qoderBlockedArgs, b.cfg.Logger)...,
 	)
-	cmd := exec.CommandContext(runCtx, execPath, qoderArgs...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", qoderArgs)
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cwd := opts.Cwd
+	if cwd == "" {
+		cwd, err = os.Getwd()
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("resolve qoder working directory: %w", err)
+		}
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	cmd, err := b.cfg.command(runCtx, resolvedExecPath, qoderArgs, cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("build qoder command: %w", err)
+	}
+	b.cfg.Logger.Info("agent command", "exec", resolvedExecPath, "args", qoderArgs)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -136,7 +150,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		_, _ = io.Copy(stderrSink, stderr)
 	}()
 
-	b.cfg.Logger.Info("qoder acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
+	b.cfg.Logger.Info("qoder acp started", "pid", cmd.Process().Pid, "cwd", opts.Cwd)
 
 	msgStream := newQoderMessageStream(256)
 	resCh := make(chan Result, 1)
@@ -369,7 +383,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		}
 
 		duration := time.Since(startTime)
-		b.cfg.Logger.Info("qoder finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("qoder finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		stdin.Close()
 		cancel()

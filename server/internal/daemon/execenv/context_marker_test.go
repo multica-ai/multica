@@ -159,6 +159,7 @@ func TestReuse_SelfHealsWorkspacesRootMarker(t *testing.T) {
 
 	reused := Reuse(ReuseParams{
 		WorkspacesRoot: root,
+		RootDir:        env.RootDir,
 		WorkDir:        env.WorkDir,
 		Task:           TaskContextForEnv{IssueID: "b2c3d4e5-f6a7-8901-bcde-f23456789012"},
 	}, testLogger())

@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -35,8 +37,13 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	if execPath == "" {
 		execPath = "kimi"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolvedExecPath, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("kimi executable not found at %q: %w", execPath, err)
+	}
+	resolvedExecPath, err = filepath.Abs(resolvedExecPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve kimi executable %q: %w", resolvedExecPath, err)
 	}
 
 	// Translate the agent's mcp_config (Claude-style object of objects)
@@ -57,13 +64,20 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	// a safe granting option the agent offered (see
 	// selectACPApprovalOptionID) for each session/request_permission request.
 	kimiArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, kimiBlockedArgs, b.cfg.Logger)...)
-	cmd := exec.CommandContext(runCtx, execPath, kimiArgs...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", kimiArgs)
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cwd := opts.Cwd
+	if cwd == "" {
+		cwd, err = os.Getwd()
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("resolve kimi working directory: %w", err)
+		}
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	cmd, err := b.cfg.command(runCtx, resolvedExecPath, kimiArgs, cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("build kimi command: %w", err)
+	}
+	b.cfg.Logger.Info("agent command", "exec", resolvedExecPath, "args", kimiArgs)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -106,7 +120,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		_, _ = io.Copy(stderrSink, stderr)
 	}()
 
-	b.cfg.Logger.Info("kimi acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
+	b.cfg.Logger.Info("kimi acp started", "pid", cmd.Process().Pid, "cwd", opts.Cwd)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -349,7 +363,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		duration := time.Since(startTime)
-		b.cfg.Logger.Info("kimi finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("kimi finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		stdin.Close()
 		cancel()

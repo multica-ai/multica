@@ -229,6 +229,92 @@ func TestTaskHomeEnv(t *testing.T) {
 	}
 }
 
+func TestPrepareCreatesPrivateTaskHome(t *testing.T) {
+	t.Parallel()
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-private-home",
+		TaskID:         "task-private-home",
+		Provider:       "claude",
+		Task:           TaskContextForEnv{IssueID: "issue-private-home"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare(): %v", err)
+	}
+	t.Cleanup(func() { _ = env.Cleanup(true) })
+
+	wantHome := filepath.Join(env.RootDir, "home")
+	wantConfig := filepath.Join(wantHome, ".config")
+	if env.HomeDir != wantHome {
+		t.Fatalf("HomeDir = %q, want %q", env.HomeDir, wantHome)
+	}
+	if env.ConfigDir != wantConfig {
+		t.Fatalf("ConfigDir = %q, want %q", env.ConfigDir, wantConfig)
+	}
+	for _, path := range []string{env.HomeDir, env.ConfigDir} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %q: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != 0o700 {
+			t.Fatalf("mode(%q) = %#o, want 0700", path, got)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(env.HomeDir, ".multica", "config.json")); !os.IsNotExist(err) {
+		t.Fatalf("private home must not contain a Multica user config, stat err = %v", err)
+	}
+}
+
+func TestReuseResetsPrivateTaskHome(t *testing.T) {
+	t.Parallel()
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-private-home-reuse",
+		TaskID:         "task-private-home-reuse",
+		Provider:       "claude",
+		Task:           TaskContextForEnv{IssueID: "issue-private-home-reuse"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare(): %v", err)
+	}
+	t.Cleanup(func() { _ = env.Cleanup(true) })
+
+	staleConfig := filepath.Join(env.HomeDir, ".multica", "config.json")
+	if err := os.MkdirAll(filepath.Dir(staleConfig), 0o700); err != nil {
+		t.Fatalf("mkdir stale config dir: %v", err)
+	}
+	if err := os.WriteFile(staleConfig, []byte(`{"token":"stale"}`), 0o600); err != nil {
+		t.Fatalf("write stale config: %v", err)
+	}
+
+	reused := Reuse(ReuseParams{
+		RootDir:  env.RootDir,
+		WorkDir:  env.WorkDir,
+		Provider: "claude",
+		Task:     TaskContextForEnv{IssueID: "issue-private-home-reuse"},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse() returned nil")
+	}
+	if reused.HomeDir != env.HomeDir || reused.ConfigDir != env.ConfigDir {
+		t.Fatalf("Reuse private paths = (%q, %q), want (%q, %q)", reused.HomeDir, reused.ConfigDir, env.HomeDir, env.ConfigDir)
+	}
+	if _, err := os.Stat(staleConfig); !os.IsNotExist(err) {
+		t.Fatalf("Reuse must reset stale private Multica config, stat err = %v", err)
+	}
+	for _, path := range []string{reused.HomeDir, reused.ConfigDir} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %q: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != 0o700 {
+			t.Fatalf("mode(%q) = %#o, want 0700", path, got)
+		}
+	}
+}
+
 // --- helpers ---
 
 func assertSymlinkTo(t *testing.T, link, wantTarget string) {

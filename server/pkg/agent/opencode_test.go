@@ -13,6 +13,35 @@ import (
 	"time"
 )
 
+type opencodeTestIsolation struct{}
+
+func (*opencodeTestIsolation) WrapBound(_ *boundIsolationPolicy, executable, cwd pathIdentity, args []string, leadingExtraFiles int) (string, []string, []*os.File, error) {
+	_ = cwd
+	_ = leadingExtraFiles
+	return executable.Path, args, nil, nil
+}
+
+func opencodeTestConfig(t *testing.T, executable, cwd string, env map[string]string) Config {
+	t.Helper()
+	taskEnv := make(map[string]string, len(env)+1)
+	for key, value := range env {
+		taskEnv[key] = value
+	}
+	if taskEnv["PATH"] == "" {
+		taskEnv["PATH"] = os.Getenv("PATH")
+	}
+	return Config{
+		ExecutablePath: executable,
+		Logger:         slog.Default(),
+		Env:            taskEnv,
+		Launcher:       newCommandLauncher(&opencodeTestIsolation{}),
+		Isolation: &TaskIsolationPolicy{
+			WritableRoots: []string{filepath.Dir(executable), cwd},
+			Network:       NetworkAccessPublicAndLoopback,
+		},
+	}
+}
+
 func TestNewReturnsOpencodeBackend(t *testing.T) {
 	t.Parallel()
 	b, err := New("opencode", Config{ExecutablePath: "/nonexistent/opencode"})
@@ -1159,14 +1188,10 @@ func TestOpencodeBackendAnchorsDirAndPWD(t *testing.T) {
 
 	workDir := t.TempDir()
 
-	backend, err := New("opencode", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env: map[string]string{
-			"OPENCODE_ARGS_FILE": argsFile,
-			"OPENCODE_PWD_FILE":  pwdFile,
-		},
-	})
+	backend, err := New("opencode", opencodeTestConfig(t, fakePath, workDir, map[string]string{
+		"OPENCODE_ARGS_FILE": argsFile,
+		"OPENCODE_PWD_FILE":  pwdFile,
+	}))
 	if err != nil {
 		t.Fatalf("new opencode backend: %v", err)
 	}
@@ -1230,14 +1255,11 @@ func TestOpencodeBackendInjectsThinkingVariant(t *testing.T) {
 	argsFile := filepath.Join(tempDir, "argv.txt")
 	fakePath := filepath.Join(tempDir, "opencode")
 	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+	workDir := t.TempDir()
 
-	backend, err := New("opencode", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env: map[string]string{
-			"OPENCODE_ARGS_FILE": argsFile,
-		},
-	})
+	backend, err := New("opencode", opencodeTestConfig(t, fakePath, workDir, map[string]string{
+		"OPENCODE_ARGS_FILE": argsFile,
+	}))
 	if err != nil {
 		t.Fatalf("new opencode backend: %v", err)
 	}
@@ -1246,6 +1268,7 @@ func TestOpencodeBackendInjectsThinkingVariant(t *testing.T) {
 	defer cancel()
 
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:           workDir,
 		Model:         "opencode/deepseek-v4",
 		ThinkingLevel: "max",
 		CustomArgs:    []string{"--variant", "low", "--keep-me"},
@@ -1298,14 +1321,11 @@ func TestOpencodeBackendDoesNotUsePermissionEnvOverride(t *testing.T) {
 	permissionFile := filepath.Join(tempDir, "permission.json")
 	fakePath := filepath.Join(tempDir, "opencode")
 	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+	workDir := t.TempDir()
 
-	backend, err := New("opencode", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env: map[string]string{
-			"OPENCODE_PERMISSION_FILE": permissionFile,
-		},
-	})
+	backend, err := New("opencode", opencodeTestConfig(t, fakePath, workDir, map[string]string{
+		"OPENCODE_PERMISSION_FILE": permissionFile,
+	}))
 	if err != nil {
 		t.Fatalf("new opencode backend: %v", err)
 	}
@@ -1314,6 +1334,7 @@ func TestOpencodeBackendDoesNotUsePermissionEnvOverride(t *testing.T) {
 	defer cancel()
 
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:     workDir,
 		Timeout: 5 * time.Second,
 	})
 	if err != nil {
@@ -1351,13 +1372,9 @@ func TestOpencodeBackendQuestionDenySurvivesUserConfig(t *testing.T) {
 		t.Fatalf("write opencode config: %v", err)
 	}
 
-	backend, err := New("opencode", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env: map[string]string{
-			"OPENCODE_ARGS_FILE": argsFile,
-		},
-	})
+	backend, err := New("opencode", opencodeTestConfig(t, fakePath, workDir, map[string]string{
+		"OPENCODE_ARGS_FILE": argsFile,
+	}))
 	if err != nil {
 		t.Fatalf("new opencode backend: %v", err)
 	}
@@ -1405,13 +1422,9 @@ func TestOpencodeBackendBlocksDirOverride(t *testing.T) {
 	workDir := t.TempDir()
 	bogusDir := t.TempDir()
 
-	backend, err := New("opencode", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env: map[string]string{
-			"OPENCODE_ARGS_FILE": argsFile,
-		},
-	})
+	backend, err := New("opencode", opencodeTestConfig(t, fakePath, workDir, map[string]string{
+		"OPENCODE_ARGS_FILE": argsFile,
+	}))
 	if err != nil {
 		t.Fatalf("new opencode backend: %v", err)
 	}
@@ -1475,10 +1488,7 @@ func TestOpencodeBackendFailsOnStreamEndingMidTool(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "opencode")
 	writeTestExecutable(t, fakePath, []byte(fakeOpencodeMidToolScript()))
 
-	backend, err := New("opencode", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-	})
+	backend, err := New("opencode", opencodeTestConfig(t, fakePath, tempDir, nil))
 	if err != nil {
 		t.Fatalf("new opencode backend: %v", err)
 	}
@@ -1487,6 +1497,7 @@ func TestOpencodeBackendFailsOnStreamEndingMidTool(t *testing.T) {
 	defer cancel()
 
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:     tempDir,
 		Timeout: 5 * time.Second,
 	})
 	if err != nil {
@@ -1528,10 +1539,7 @@ func TestOpencodeBackendAppendsExitDetailOnMidStepCrash(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "opencode")
 	writeTestExecutable(t, fakePath, []byte(fakeOpencodeStepThenExit1Script()))
 
-	backend, err := New("opencode", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-	})
+	backend, err := New("opencode", opencodeTestConfig(t, fakePath, tempDir, nil))
 	if err != nil {
 		t.Fatalf("new opencode backend: %v", err)
 	}
@@ -1540,6 +1548,7 @@ func TestOpencodeBackendAppendsExitDetailOnMidStepCrash(t *testing.T) {
 	defer cancel()
 
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:     tempDir,
 		Timeout: 5 * time.Second,
 	})
 	if err != nil {

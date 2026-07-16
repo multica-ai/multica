@@ -120,47 +120,44 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	args = append(args, filterCustomArgs(opts.CustomArgs, devecoBlockedArgs, b.cfg.Logger)...)
 	args = append(args, prompt)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
-	hideAgentWindow(cmd)
-	// Run deveco in its own process group so cancellation can reach the whole
-	// tree (deveco plus any tool subprocess it spawns), not just the direct
-	// child — otherwise a cancelled or restarted run can orphan a descendant.
-	configureProcessGroup(cmd)
+	env := make(map[string]string, len(b.cfg.Env)+1)
+	for key, value := range b.cfg.Env {
+		env[key] = value
+	}
+	// Override PWD so the child DevEco process resolves its discovery root to
+	// the task workdir. The launcher also sets cmd.Dir, but DevEco reads PWD
+	// before falling back to process.cwd() when locating AGENTS.md and skills.
+	if opts.Cwd != "" {
+		env["PWD"] = opts.Cwd
+	}
+	commandCfg := b.cfg
+	commandCfg.Env = env
+	cmd, err := commandCfg.command(runCtx, execPath, args, opts.Cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("prepare deveco command: %w", err)
+	}
 	// Take over context cancellation: drive a graceful, group-wide
 	// SIGTERM→SIGKILL from the cancellation goroutine below and close the
 	// stdout read end only after the tree has been signalled. Returning nil
 	// here keeps os/exec from racing us with its own kill; WaitDelay is the
 	// hard backstop.
-	cmd.Cancel = func() error { return nil }
+	_ = cmd.SetCancel(func() error { return nil })
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
-	cmd.WaitDelay = 10 * time.Second
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
-	}
-
-	env := buildEnv(b.cfg.Env)
-	// Override PWD so the child DevEco process resolves its discovery root to
-	// the task workdir. cmd.Dir alone is not enough: DevEco reads PWD
-	// (inherited from the parent daemon) before falling back to process.cwd()
-	// when computing the directory it walks for AGENTS.md / .deveco/skills.
-	if opts.Cwd != "" {
-		env = append(env, "PWD="+opts.Cwd)
-	}
-	cmd.Env = env
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("deveco stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[deveco:stderr] ")
+	_ = cmd.SetStderr(newLogWriter(b.cfg.Logger, "[deveco:stderr] "))
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start deveco: %w", err)
 	}
 
-	b.cfg.Logger.Info("deveco started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("deveco started", "pid", cmd.Process().Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -182,12 +179,12 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			return // finished on its own; nothing to terminate
 		case <-runCtx.Done():
 		}
-		if cmd.Process != nil {
-			signalProcessGroup(cmd.Process, syscall.SIGTERM)
+		if cmd.Process() != nil {
+			signalProcessGroup(cmd.Process(), syscall.SIGTERM)
 			select {
 			case <-procDone: // exited within the grace window
 			case <-time.After(devecoTerminateGrace()):
-				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				signalProcessGroup(cmd.Process(), syscall.SIGKILL)
 			}
 		}
 		_ = stdout.Close()
@@ -216,7 +213,7 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			scanResult.errMsg = fmt.Sprintf("deveco exited with error: %v", exitErr)
 		}
 
-		b.cfg.Logger.Info("deveco finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("deveco finished", "pid", cmd.Process().Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
 
 		// Build usage map. DevEco doesn't report model per-step, so attribute
 		// all usage to the configured model (or "unknown").

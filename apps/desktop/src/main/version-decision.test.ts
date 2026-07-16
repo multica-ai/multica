@@ -51,13 +51,13 @@ describe("decideVersionAction", () => {
     ).toBe("restart");
   });
 
-  it("treats missing active_task_count as 0 (old daemon that still reports cli_version)", () => {
+  it("does not restart when authenticated active_task_count is unavailable", () => {
     expect(
       decideVersionAction("v1.2.3", {
         status: "running",
         cli_version: "v1.2.2",
       }),
-    ).toBe("restart");
+    ).toBe("ok");
   });
 
   it("returns defer when versions differ but daemon is busy", () => {

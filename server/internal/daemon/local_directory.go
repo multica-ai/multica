@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -212,6 +213,70 @@ func validateLocalPath(absPath string) error {
 	return nil
 }
 
+// validateLocalDirectoryTree prevents a writable local_directory from
+// exposing another daemon-owner path through a pre-existing hard link. The
+// sandbox grants write access to the complete tree, so every regular file
+// beneath the selected root must have exactly one directory entry.
+func validateLocalDirectoryTree(root string) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return fmt.Errorf("local_directory: inspect tree entry %q: %w", path, walkErr)
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("local_directory: inspect tree entry %q: %w", path, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		links, ok := localPathLinkCount(info)
+		if !ok {
+			return fmt.Errorf("local_directory: regular file link count is unavailable: %q", path)
+		}
+		if links != 1 {
+			return fmt.Errorf("local_directory: regular file must have exactly one hard link: %q", path)
+		}
+		return nil
+	})
+}
+
+// localPathLinkCount reads the platform stat object's Nlink field without
+// importing an OS-specific syscall package. Unknown platforms fail closed.
+func localPathLinkCount(info os.FileInfo) (uint64, bool) {
+	v := reflect.ValueOf(info.Sys())
+	if !v.IsValid() {
+		return 0, false
+	}
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return 0, false
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return 0, false
+	}
+	field := v.FieldByName("Nlink")
+	if !field.IsValid() {
+		return 0, false
+	}
+	switch field.Kind() {
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return field.Uint(), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		value := field.Int()
+		if value < 0 {
+			return 0, false
+		}
+		return uint64(value), true
+	default:
+		return 0, false
+	}
+}
+
 // isBlacklistedLocalPath rejects paths that map to the whole machine or an
 // entire user profile. The intent is to keep the daemon from accidentally
 // stamping context files (.agent_context/, .claude/skills/, .multica/) at
@@ -314,7 +379,7 @@ func systemRootBlacklist() []string {
 	if runtime.GOOS == "windows" {
 		return []string{`C:\Users`, `C:\ProgramData`, `C:\Program Files`, `C:\Program Files (x86)`, `C:\Windows`}
 	}
-	return []string{"/", "/Users", "/Users/Shared", "/home", "/root", "/var", "/etc", "/tmp", "/usr", "/opt"}
+	return []string{"/", "/Users", "/Users/Shared", "/home", "/root", "/var", "/etc", "/tmp", "/usr", "/opt", "/run"}
 }
 
 // checkDirReadWrite verifies the daemon process can both read directory

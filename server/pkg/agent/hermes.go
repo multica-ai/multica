@@ -166,8 +166,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if execPath == "" {
 		execPath = "hermes"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolvedExecPath, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("hermes executable not found at %q: %w", execPath, err)
+	}
+	resolvedExecPath, err = filepath.Abs(resolvedExecPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve hermes executable %q: %w", resolvedExecPath, err)
 	}
 
 	// Translate the agent's mcp_config (Claude-style object of objects)
@@ -183,12 +188,29 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	runCtx, cancel := runContext(ctx, timeout)
 
 	hermesArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, hermesBlockedArgs, b.cfg.Logger)...)
-	cmd := exec.CommandContext(runCtx, execPath, hermesArgs...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", hermesArgs)
+	cwd := opts.Cwd
+	if cwd == "" {
+		cwd, err = os.Getwd()
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("resolve hermes working directory: %w", err)
+		}
+	}
+
+	commandCfg := b.cfg
+	commandCfg.Env = make(map[string]string, len(b.cfg.Env)+1)
+	for key, value := range b.cfg.Env {
+		commandCfg.Env[key] = value
+	}
+	commandCfg.Env["HERMES_YOLO_MODE"] = "1"
+	cmd, err := commandCfg.command(runCtx, resolvedExecPath, hermesArgs, cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("build hermes command: %w", err)
+	}
+	b.cfg.Logger.Info("agent command", "exec", resolvedExecPath, "args", hermesArgs)
 	agentsMDPresent := false
 	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
 		if _, err := os.Stat(filepath.Join(opts.Cwd, "AGENTS.md")); err == nil {
 			agentsMDPresent = true
 		}
@@ -197,11 +219,6 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if opts.SystemPrompt != "" {
 		b.cfg.Logger.Debug("hermes ignoring ExecOptions.SystemPrompt; using cwd-scoped context files", "cwd", opts.Cwd)
 	}
-
-	env := buildEnv(b.cfg.Env)
-	// Enable yolo mode so Hermes auto-approves all tool executions.
-	env = append(env, "HERMES_YOLO_MODE=1")
-	cmd.Env = env
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -249,7 +266,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		_, _ = io.Copy(stderrSink, stderr)
 	}()
 
-	b.cfg.Logger.Info("hermes acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
+	b.cfg.Logger.Info("hermes acp started", "pid", cmd.Process().Pid, "cwd", opts.Cwd)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -512,7 +529,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		duration := time.Since(startTime)
-		b.cfg.Logger.Info("hermes finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("hermes finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		// Close stdin and cancel context to signal hermes acp to exit.
 		stdin.Close()

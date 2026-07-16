@@ -31,7 +31,8 @@ export function decideVersionAction(
   if (!bundled || !runningVersion) return "ok";
   if (runningVersion === bundled) return "ok";
 
-  const activeTasks = running.active_task_count ?? 0;
+  if (typeof running.active_task_count !== "number") return "ok";
+  const activeTasks = running.active_task_count;
   if (activeTasks > 0) return "defer";
   return "restart";
 }

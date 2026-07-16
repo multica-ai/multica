@@ -1504,14 +1504,15 @@ func TestOpenclawExecuteRejectsOldVersion(t *testing.T) {
 		"exit 99\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("openclaw", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	cfg, cwd := providerCommandTestConfig(t, fakePath, slog.Default())
+	backend, err := New("openclaw", cfg)
 	if err != nil {
 		t.Fatalf("new openclaw backend: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err = backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	_, err = backend.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: cwd, Timeout: 5 * time.Second})
 	if err == nil {
 		t.Fatal("expected Execute to return a version error, got nil")
 	}
@@ -1543,14 +1544,15 @@ func TestOpenclawExecuteAllowsCurrentVersion(t *testing.T) {
 		"exit 0\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("openclaw", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	cfg, cwd := providerCommandTestConfig(t, fakePath, slog.Default())
+	backend, err := New("openclaw", cfg)
 	if err != nil {
 		t.Fatalf("new openclaw backend: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: cwd, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("Execute returned synchronous error past the version gate: %v", err)
 	}

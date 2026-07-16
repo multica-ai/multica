@@ -7,10 +7,37 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
 )
+
+type claudeDeadlockTestLauncher struct{}
+
+func (claudeDeadlockTestLauncher) Command(ctx context.Context, req CommandRequest) (TaskCommand, error) {
+	cmd := exec.CommandContext(ctx, req.Executable, req.Args...)
+	cmd.Dir = req.Cwd
+	var err error
+	cmd.Env, err = explicitEnvironment(req.Env)
+	if err != nil {
+		return nil, err
+	}
+	cmd.WaitDelay = req.WaitDelay
+	if len(req.LeadingExtraFiles) > 0 {
+		cmd.ExtraFiles = append([]*os.File(nil), req.LeadingExtraFiles...)
+	}
+	return newPreparedCommand(cmd), nil
+}
+
+func claudeDeadlockConfig(executable, mode string) Config {
+	return Config{
+		ExecutablePath: executable,
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": mode, "IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+		Launcher:       claudeDeadlockTestLauncher{},
+	}
+}
 
 // TestMain intercepts when the test binary is re-executed as a fake
 // child process by the agent backend. The fake's behavior is selected via
@@ -165,11 +192,7 @@ func TestClaudeExecuteDoesNotDeadlockOnStartupStdoutBurst(t *testing.T) {
 		t.Fatalf("os.Executable: %v", err)
 	}
 
-	backend, err := New("claude", Config{
-		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "startup_stdout_burst", "IS_SANDBOX": "1"},
-		Logger:         slog.Default(),
-	})
+	backend, err := New("claude", claudeDeadlockConfig(self, "startup_stdout_burst"))
 	if err != nil {
 		t.Fatalf("new claude backend: %v", err)
 	}
@@ -212,11 +235,7 @@ func TestClaudeExecuteRespondsToControlRequest(t *testing.T) {
 		t.Fatalf("os.Executable: %v", err)
 	}
 
-	backend, err := New("claude", Config{
-		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "control_request", "IS_SANDBOX": "1"},
-		Logger:         slog.Default(),
-	})
+	backend, err := New("claude", claudeDeadlockConfig(self, "control_request"))
 	if err != nil {
 		t.Fatalf("new claude backend: %v", err)
 	}
@@ -260,11 +279,7 @@ func TestClaudeExecuteForcesBackgroundControlRequestForeground(t *testing.T) {
 		t.Fatalf("os.Executable: %v", err)
 	}
 
-	backend, err := New("claude", Config{
-		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "background_control_request", "IS_SANDBOX": "1"},
-		Logger:         slog.Default(),
-	})
+	backend, err := New("claude", claudeDeadlockConfig(self, "background_control_request"))
 	if err != nil {
 		t.Fatalf("new claude backend: %v", err)
 	}
@@ -308,11 +323,7 @@ func TestClaudeExecuteFailsLoudlyOnAsyncLaunchedToolResult(t *testing.T) {
 		t.Fatalf("os.Executable: %v", err)
 	}
 
-	backend, err := New("claude", Config{
-		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "async_launched_tool_result", "IS_SANDBOX": "1"},
-		Logger:         slog.Default(),
-	})
+	backend, err := New("claude", claudeDeadlockConfig(self, "async_launched_tool_result"))
 	if err != nil {
 		t.Fatalf("new claude backend: %v", err)
 	}

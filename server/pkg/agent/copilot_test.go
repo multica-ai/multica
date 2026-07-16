@@ -667,14 +667,15 @@ func TestCopilotExecuteSurfacesStderrOnNonZeroResult(t *testing.T) {
 		"exit 1\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("copilot", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	cfg, cwd := providerCommandTestConfig(t, fakePath, slog.Default())
+	backend, err := New("copilot", cfg)
 	if err != nil {
 		t.Fatalf("new copilot backend: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: cwd, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

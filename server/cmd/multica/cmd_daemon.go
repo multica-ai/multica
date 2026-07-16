@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,10 +13,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
@@ -97,6 +101,7 @@ func init() {
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
 
 	daemonStatusCmd.Flags().String("output", "table", "Output format: table or json")
+	daemonStopCmd.Flags().Bool("require-idle", false, "Stop only if no task or claim is in flight")
 
 	// restart shares all the same flags as start
 	rf := daemonRestartCmd.Flags()
@@ -141,6 +146,10 @@ func daemonDirForProfile(profile string) string {
 
 func daemonPIDPathForProfile(profile string) string {
 	return filepath.Join(daemonDirForProfile(profile), "daemon.pid")
+}
+
+func daemonShutdownCredentialPathForProfile(profile string) string {
+	return filepath.Join(daemonDirForProfile(profile), daemon.ShutdownCredentialFileName)
 }
 
 func daemonLogPathForProfile(profile string) string {
@@ -257,8 +266,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		if profile != "" {
 			label = fmt.Sprintf("daemon [%s]", profile)
 		}
-		pid, _ := health["pid"].(float64)
-		return fmt.Errorf("%s is already running (pid %v). Use 'daemon restart' to restart it", label, int(pid))
+		return fmt.Errorf("%s is already running. Use 'daemon restart' to restart it", label)
 	}
 
 	// Resolve current executable so the foreground child reuses this binary.
@@ -599,24 +607,28 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPort)
 	if daemonAlive(health) {
-		pid, _ := health["pid"].(float64)
-		if pid > 0 {
+		credential, err := readDaemonShutdownCredential(profile)
+		if err != nil {
+			return fmt.Errorf("load daemon shutdown credential: %w", err)
+		}
+		diagnostics, _ := requestDaemonDiagnostics(ctx, healthPort, credential)
+		if pid, ok := diagnostics["pid"].(float64); ok && pid > 0 {
 			fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
-			if err := requestDaemonShutdown(healthPort); err != nil {
-				if p, perr := os.FindProcess(int(pid)); perr == nil {
-					_ = p.Kill()
-				}
-			}
-			// Wait until the port is fully released (not merely past "running"),
-			// otherwise the fresh start below races the old daemon's listener.
-			for i := 0; i < 10; i++ {
-				time.Sleep(500 * time.Millisecond)
-				sctx, scancel := context.WithTimeout(context.Background(), 1*time.Second)
-				h := checkDaemonHealthOnPort(sctx, healthPort)
-				scancel()
-				if !daemonAlive(h) {
-					break
-				}
+		} else {
+			fmt.Fprintln(os.Stderr, "Stopping daemon...")
+		}
+		if err := requestDaemonShutdown(healthPort, credential, false); err != nil {
+			return fmt.Errorf("request daemon shutdown: %w", err)
+		}
+		// Wait until the port is fully released (not merely past "running"),
+		// otherwise the fresh start below races the old daemon's listener.
+		for i := 0; i < 10; i++ {
+			time.Sleep(500 * time.Millisecond)
+			sctx, scancel := context.WithTimeout(context.Background(), 1*time.Second)
+			h := checkDaemonHealthOnPort(sctx, healthPort)
+			scancel()
+			if !daemonAlive(h) {
+				break
 			}
 		}
 	}
@@ -644,30 +656,30 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	pid, ok := health["pid"].(float64)
-	if !ok || pid == 0 {
-		return fmt.Errorf("could not determine daemon PID from health endpoint")
-	}
-
-	process, err := os.FindProcess(int(pid))
-	if err != nil {
-		return fmt.Errorf("find process %d: %w", int(pid), err)
-	}
-
 	// Request graceful shutdown via the daemon's HTTP /shutdown endpoint
 	// rather than an OS signal. On Windows the daemon is spawned with
 	// DETACHED_PROCESS so it shares no console with us, which means
 	// GenerateConsoleCtrlEvent can't reach it; HTTP works on both
 	// platforms and triggers the same context-cancel path the daemon
 	// already uses for self-restart.
-	if err := requestDaemonShutdown(healthPort); err != nil {
-		fmt.Fprintf(os.Stderr, "Graceful shutdown request failed: %v — falling back to forced kill.\n", err)
-		if kerr := process.Kill(); kerr != nil {
-			return fmt.Errorf("kill daemon (pid %d): %w", int(pid), kerr)
-		}
+	credential, err := readDaemonShutdownCredential(profile)
+	if err != nil {
+		return fmt.Errorf("load daemon shutdown credential: %w", err)
+	}
+	diagnostics, _ := requestDaemonDiagnostics(ctx, healthPort, credential)
+	requireIdle, err := cmd.Flags().GetBool("require-idle")
+	if err != nil {
+		return fmt.Errorf("read require-idle flag: %w", err)
+	}
+	if err := requestDaemonShutdown(healthPort, credential, requireIdle); err != nil {
+		return fmt.Errorf("request daemon shutdown: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
+	if pid, ok := diagnostics["pid"].(float64); ok && pid > 0 {
+		fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
+	} else {
+		fmt.Fprintln(os.Stderr, "Stopping daemon...")
+	}
 
 	// Poll health endpoint until daemon is gone.
 	for i := 0; i < 10; i++ {
@@ -689,13 +701,25 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 // requestDaemonShutdown POSTs to the daemon's /shutdown endpoint to ask it
 // to exit gracefully. Returns an error if the request could not be delivered
 // (network error, non-2xx status, or the endpoint predates this change).
-func requestDaemonShutdown(healthPort int) error {
+func requestDaemonShutdown(healthPort int, credential string, requireIdle bool) error {
+	if strings.TrimSpace(credential) == "" {
+		return errors.New("shutdown credential is required")
+	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/shutdown", healthPort)
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 2 * time.Second}
+	req.Header.Set(daemon.ShutdownCredentialHeader, credential)
+	if requireIdle {
+		req.Header.Set(daemon.ShutdownRequireIdleHeader, "true")
+	}
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -705,6 +729,274 @@ func requestDaemonShutdown(healthPort int) error {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func requestDaemonDiagnostics(ctx context.Context, healthPort int, credential string) (map[string]any, error) {
+	if strings.TrimSpace(credential) == "" {
+		return nil, errors.New("operator credential is required")
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/diagnostics", healthPort)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(daemon.ShutdownCredentialHeader, credential)
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	var payload daemonDiagnosticsPayload
+	if err := decodeStrictDaemonJSON(resp.Body, &payload); err != nil {
+		return nil, fmt.Errorf("decode daemon diagnostics: %w", err)
+	}
+	if err := payload.validate(); err != nil {
+		return nil, fmt.Errorf("decode daemon diagnostics: %w", err)
+	}
+	return payload.asMap(), nil
+}
+
+const (
+	maxDaemonResponseBytes = 1 << 20
+	maxDaemonJSONDepth     = 64
+	maxJSONSafeInteger     = int64(1<<53 - 1)
+)
+
+type daemonHealthPayload struct {
+	Status *string `json:"status"`
+	OS     *string `json:"os"`
+}
+
+type daemonDiagnosticsWorkspace struct {
+	ID       *string   `json:"id"`
+	Runtimes *[]string `json:"runtimes"`
+}
+
+type daemonDiagnosticsPayload struct {
+	Status          *string                       `json:"status"`
+	PID             *int64                        `json:"pid"`
+	OS              *string                       `json:"os"`
+	Uptime          *string                       `json:"uptime"`
+	DaemonID        *string                       `json:"daemon_id"`
+	DeviceName      *string                       `json:"device_name"`
+	ServerURL       *string                       `json:"server_url"`
+	CLIVersion      *string                       `json:"cli_version"`
+	ActiveTaskCount *int64                        `json:"active_task_count"`
+	Agents          *[]string                     `json:"agents"`
+	Workspaces      *[]daemonDiagnosticsWorkspace `json:"workspaces"`
+}
+
+func decodeStrictDaemonJSON(body io.Reader, target any) error {
+	data, err := io.ReadAll(io.LimitReader(body, maxDaemonResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
+	if len(data) > maxDaemonResponseBytes {
+		return errors.New("response exceeds 1 MiB")
+	}
+	if !utf8.Valid(data) {
+		return errors.New("response is not valid UTF-8")
+	}
+	if err := validateDaemonJSONStructure(data); err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateDaemonJSONStructure(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := validateDaemonJSONValue(decoder, 0); err != nil {
+		return err
+	}
+	return requireJSONEOF(decoder)
+}
+
+func validateDaemonJSONValue(decoder *json.Decoder, depth int) error {
+	if depth > maxDaemonJSONDepth {
+		return errors.New("JSON nesting limit exceeded")
+	}
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delim {
+	case '{':
+		keys := make(map[string]struct{})
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return errors.New("expected object key")
+			}
+			if _, exists := keys[key]; exists {
+				return fmt.Errorf("duplicate JSON key %q", key)
+			}
+			keys[key] = struct{}{}
+			if err := validateDaemonJSONValue(decoder, depth+1); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim('}') {
+			return errors.New("expected object terminator")
+		}
+	case '[':
+		for decoder.More() {
+			if err := validateDaemonJSONValue(decoder, depth+1); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim(']') {
+			return errors.New("expected array terminator")
+		}
+	default:
+		return fmt.Errorf("unexpected JSON delimiter %q", delim)
+	}
+	return nil
+}
+
+func requireJSONEOF(decoder *json.Decoder) error {
+	if _, err := decoder.Token(); err != io.EOF {
+		if err == nil {
+			return errors.New("trailing JSON content")
+		}
+		return err
+	}
+	return nil
+}
+
+func (payload daemonHealthPayload) validate() error {
+	if payload.Status == nil || payload.OS == nil {
+		return errors.New("health response is missing required fields")
+	}
+	if *payload.Status != "running" && *payload.Status != "starting" {
+		return errors.New("health response has invalid status")
+	}
+	return nil
+}
+
+func (payload daemonDiagnosticsPayload) validate() error {
+	if payload.Status == nil || payload.PID == nil || payload.OS == nil ||
+		payload.Uptime == nil || payload.DaemonID == nil || payload.DeviceName == nil ||
+		payload.ServerURL == nil || payload.CLIVersion == nil ||
+		payload.ActiveTaskCount == nil || payload.Agents == nil || payload.Workspaces == nil {
+		return errors.New("diagnostics response is missing required fields")
+	}
+	if *payload.Status != "running" && *payload.Status != "starting" {
+		return errors.New("diagnostics response has invalid status")
+	}
+	if *payload.PID <= 0 || *payload.PID > maxJSONSafeInteger ||
+		*payload.ActiveTaskCount < 0 || *payload.ActiveTaskCount > maxJSONSafeInteger {
+		return errors.New("diagnostics response has invalid numeric fields")
+	}
+	for _, workspace := range *payload.Workspaces {
+		if workspace.ID == nil || workspace.Runtimes == nil {
+			return errors.New("diagnostics workspace is missing required fields")
+		}
+	}
+	return nil
+}
+
+func (payload daemonDiagnosticsPayload) asMap() map[string]any {
+	agents := make([]any, len(*payload.Agents))
+	for i, agent := range *payload.Agents {
+		agents[i] = agent
+	}
+	workspaces := make([]any, len(*payload.Workspaces))
+	for i, workspace := range *payload.Workspaces {
+		runtimes := make([]any, len(*workspace.Runtimes))
+		for j, runtimeName := range *workspace.Runtimes {
+			runtimes[j] = runtimeName
+		}
+		workspaces[i] = map[string]any{"id": *workspace.ID, "runtimes": runtimes}
+	}
+	return map[string]any{
+		"status": *payload.Status, "pid": float64(*payload.PID), "os": *payload.OS,
+		"uptime": *payload.Uptime, "daemon_id": *payload.DaemonID,
+		"device_name": *payload.DeviceName, "server_url": *payload.ServerURL,
+		"cli_version": *payload.CLIVersion, "active_task_count": float64(*payload.ActiveTaskCount),
+		"agents": agents, "workspaces": workspaces,
+	}
+}
+
+func readDaemonShutdownCredential(profile string) (string, error) {
+	path := daemonShutdownCredentialPathForProfile(profile)
+	pathInfo, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("inspect %s: %w", path, err)
+	}
+	if !pathInfo.Mode().IsRegular() || pathInfo.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("%s is not a regular credential file", path)
+	}
+	if runtime.GOOS != "windows" && pathInfo.Mode().Perm()&0o077 != 0 {
+		return "", fmt.Errorf("%s permissions are not operator-only", path)
+	}
+	if pathInfo.Size() <= 0 || pathInfo.Size() > 256 {
+		return "", fmt.Errorf("%s has invalid size", path)
+	}
+	file, err := openDaemonCredentialFile(path)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", path, err)
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("inspect opened %s: %w", path, err)
+	}
+	if !openedInfo.Mode().IsRegular() || !os.SameFile(pathInfo, openedInfo) {
+		return "", fmt.Errorf("%s identity changed while opening", path)
+	}
+	if runtime.GOOS != "windows" && openedInfo.Mode().Perm()&0o077 != 0 {
+		return "", fmt.Errorf("%s permissions are not operator-only", path)
+	}
+	if openedInfo.Size() <= 0 || openedInfo.Size() > 256 {
+		return "", fmt.Errorf("%s has invalid size", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, 257))
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	if len(data) > 256 {
+		return "", fmt.Errorf("%s has invalid size", path)
+	}
+	credential := strings.TrimSpace(string(data))
+	raw, err := base64.RawURLEncoding.DecodeString(credential)
+	if err != nil || len(raw) != 32 {
+		return "", fmt.Errorf("%s contains an invalid credential", path)
+	}
+	return credential, nil
 }
 
 // --- daemon status ---
@@ -717,10 +1009,21 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
+	diagnostics := health
+	if daemonAlive(health) {
+		credential, err := readDaemonShutdownCredential(profile)
+		if err != nil {
+			return fmt.Errorf("load daemon diagnostics credential: %w", err)
+		}
+		diagnostics, err = requestDaemonDiagnostics(ctx, healthPort, credential)
+		if err != nil {
+			return fmt.Errorf("request daemon diagnostics: %w", err)
+		}
+	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
-		return cli.PrintJSON(os.Stdout, health)
+		return cli.PrintJSON(os.Stdout, diagnostics)
 	}
 
 	label := "Daemon"
@@ -730,9 +1033,13 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 
 	switch health["status"] {
 	case "running":
-		printDaemonStatusReport(os.Stdout, label, health)
+		printDaemonStatusReport(os.Stdout, label, diagnostics)
 	case "starting":
-		fmt.Fprintf(os.Stdout, "%s: starting (pid %v)\n", label, health["pid"])
+		if pid, ok := diagnostics["pid"].(float64); ok && pid > 0 {
+			fmt.Fprintf(os.Stdout, "%s: starting (pid %v)\n", label, pid)
+		} else {
+			fmt.Fprintf(os.Stdout, "%s: starting\n", label)
+		}
 	default:
 		fmt.Fprintf(os.Stdout, "%s: stopped\n", label)
 	}
@@ -809,18 +1116,29 @@ func checkDaemonHealthOnPort(ctx context.Context, port int) map[string]any {
 		return map[string]any{"status": "stopped"}
 	}
 
-	httpClient := &http.Client{Timeout: 2 * time.Second}
+	httpClient := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return map[string]any{"status": "stopped"}
 	}
 	defer resp.Body.Close()
-
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return map[string]any{"status": "stopped"}
 	}
-	return result
+
+	var payload daemonHealthPayload
+	if err := decodeStrictDaemonJSON(resp.Body, &payload); err != nil {
+		return map[string]any{"status": "stopped"}
+	}
+	if err := payload.validate(); err != nil {
+		return map[string]any{"status": "stopped"}
+	}
+	return map[string]any{"status": *payload.Status, "os": *payload.OS}
 }
 
 // flagString returns a string flag value or empty string.

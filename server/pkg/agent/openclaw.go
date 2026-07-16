@@ -57,11 +57,12 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if execPath == "" {
 		execPath = "openclaw"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	lookedUp, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("openclaw executable not found at %q: %w", execPath, err)
 	}
 
-	if err := checkOpenclawVersion(ctx, execPath); err != nil {
+	if err := checkOpenclawVersion(ctx, b.cfg, lookedUp, opts.Cwd); err != nil {
 		return nil, err
 	}
 
@@ -74,14 +75,12 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	args := buildOpenclawArgs(prompt, sessionID, opts, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
-	cmd.WaitDelay = 10 * time.Second
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cmd, err := b.cfg.command(runCtx, lookedUp, args, opts.Cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("create openclaw command: %w", err)
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	b.cfg.Logger.Info("agent command", "exec", lookedUp, "args", args)
 
 	// openclaw writes its --json output to stdout. Stderr carries log
 	// overflow (security warnings, tool errors, etc.) — capture it via a
@@ -92,14 +91,14 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		cancel()
 		return nil, fmt.Errorf("openclaw stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[openclaw:stderr] ")
+	_ = cmd.SetStderr(newLogWriter(b.cfg.Logger, "[openclaw:stderr] "))
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start openclaw: %w", err)
 	}
 
-	b.cfg.Logger.Info("openclaw started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("openclaw started", "pid", cmd.Process().Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -133,7 +132,7 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			scanResult.errMsg = fmt.Sprintf("openclaw exited with error: %v", exitErr)
 		}
 
-		b.cfg.Logger.Info("openclaw finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("openclaw finished", "pid", cmd.Process().Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
 
 		// Build usage map. Prefer the model openclaw reported in
 		// `meta.agentMeta.model` (the actual LLM, e.g. `deepseek-chat`).
@@ -231,9 +230,11 @@ func customArgsContains(args []string, flag string) bool {
 // minOpenclawVersion. The returned error becomes the task's failure
 // comment, so the message intentionally names the detected version
 // and the upgrade command.
-func checkOpenclawVersion(ctx context.Context, execPath string) error {
-	cmd := exec.CommandContext(ctx, execPath, "--version")
-	hideAgentWindow(cmd)
+func checkOpenclawVersion(ctx context.Context, cfg Config, execPath, cwd string) error {
+	cmd, err := cfg.command(ctx, execPath, []string{"--version"}, cwd, 0)
+	if err != nil {
+		return fmt.Errorf("create openclaw --version command: %w", err)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("openclaw --version failed: %w", err)

@@ -34,30 +34,28 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildCursorArgs(prompt, opts, b.cfg.Logger)
-	argv0, cmdArgs := chooseCursorInvocation(execName, lookedUp, args, b.cfg.Logger)
+	argv0, cmdArgs := chooseCursorInvocation(lookedUp, lookedUp, args, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
-	cmd.WaitDelay = 500 * time.Millisecond
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cmd, err := b.cfg.command(runCtx, argv0, cmdArgs, opts.Cwd, 500*time.Millisecond)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("create cursor-agent command: %w", err)
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("cursor stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[cursor:stderr] ")
+	_ = cmd.SetStderr(newLogWriter(b.cfg.Logger, "[cursor:stderr] "))
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start cursor-agent: %w", err)
 	}
 
-	b.cfg.Logger.Info("cursor-agent started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("cursor-agent started", "pid", cmd.Process().Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -211,7 +209,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			finalError = fmt.Sprintf("cursor-agent exited with error: %v", exitErr)
 		}
 
-		b.cfg.Logger.Info("cursor-agent finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("cursor-agent finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		resCh <- Result{
 			Status:     finalStatus,

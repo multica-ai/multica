@@ -163,6 +163,7 @@ func TestRunBatchPollerClaimsAcrossRuntimes(t *testing.T) {
 		PollInterval:       20 * time.Millisecond,
 		MaxConcurrentTasks: 4,
 	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.taskExecutionCapable = true
 	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1", runtimeIDs: []string{"rt-1", "rt-2"}}
 	d.cancelPollInterval = time.Hour // no server-side cancellation polling in this test
 
@@ -197,6 +198,34 @@ func TestRunBatchPollerClaimsAcrossRuntimes(t *testing.T) {
 	}
 	cancel()
 	taskWG.Wait()
+}
+
+func TestRunBatchPollerDoesNotClaimWithoutTaskExecutionCapability(t *testing.T) {
+	t.Parallel()
+
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tasks":[]}`))
+	}))
+	defer srv.Close()
+
+	d := New(Config{
+		ServerBaseURL:      srv.URL,
+		HeartbeatInterval:  time.Hour,
+		PollInterval:       10 * time.Millisecond,
+		MaxConcurrentTasks: 1,
+	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1", runtimeIDs: []string{"rt-1"}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Millisecond)
+	defer cancel()
+	var taskWG sync.WaitGroup
+	d.runBatchPoller(ctx, ctx, newTaskSlotSemaphore(1), make(chan struct{}, 1), &taskWG)
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("incapable daemon emitted %d claim requests, want 0", got)
+	}
 }
 
 // TestRunBatchPollerWakesAfterTaskExit guards the gap where a queued task is
@@ -257,6 +286,7 @@ func testRunBatchPollerTaskExitWakeup(t *testing.T, maxConcurrent int, releaseDe
 		PollInterval:       time.Hour,
 		MaxConcurrentTasks: maxConcurrent,
 	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.taskExecutionCapable = true
 	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1", runtimeIDs: []string{"rt-1"}}
 	d.runtimeIndex["rt-1"] = Runtime{ID: "rt-1"}
 	d.cancelPollInterval = time.Hour
@@ -356,6 +386,7 @@ func TestRunBatchPollerSkipsClaimWhenAtCapacity(t *testing.T) {
 		PollInterval:       20 * time.Millisecond,
 		MaxConcurrentTasks: 1,
 	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.taskExecutionCapable = true
 	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1", runtimeIDs: []string{"rt-1"}}
 
 	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
@@ -395,6 +426,7 @@ func TestPollLoopBatchShutdown(t *testing.T) {
 		PollInterval:       20 * time.Millisecond,
 		MaxConcurrentTasks: 1,
 	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.taskExecutionCapable = true
 	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1", runtimeIDs: []string{"rt-1"}}
 	d.cancelPollInterval = time.Hour
 	d.runner = taskRunnerFunc(func(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error) {

@@ -17,6 +17,35 @@ import (
 	"time"
 )
 
+type codexTestIsolation struct{}
+
+func (*codexTestIsolation) WrapBound(_ *boundIsolationPolicy, executable, cwd pathIdentity, args []string, leadingExtraFiles int) (string, []string, []*os.File, error) {
+	_ = cwd
+	_ = leadingExtraFiles
+	return executable.Path, args, nil, nil
+}
+
+func codexTestConfig(t *testing.T, executable, cwd string, env map[string]string) Config {
+	t.Helper()
+	taskEnv := make(map[string]string, len(env)+1)
+	for key, value := range env {
+		taskEnv[key] = value
+	}
+	if taskEnv["PATH"] == "" {
+		taskEnv["PATH"] = os.Getenv("PATH")
+	}
+	return Config{
+		ExecutablePath: executable,
+		Logger:         slog.Default(),
+		Env:            taskEnv,
+		Launcher:       newCommandLauncher(&codexTestIsolation{}),
+		Isolation: &TaskIsolationPolicy{
+			WritableRoots: []string{filepath.Dir(executable), cwd},
+			Network:       NetworkAccessPublicAndLoopback,
+		},
+	}
+}
+
 func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
 	t.Helper()
 	fs := &fakeStdin{}
@@ -1559,14 +1588,15 @@ func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 		"exit 2\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	workDir := t.TempDir()
+	backend, err := New("codex", codexTestConfig(t, fakePath, workDir, nil))
 	if err != nil {
 		t.Fatalf("new codex backend: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: workDir, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1798,8 +1828,8 @@ func TestCodexExecuteDoesNotSerializeConcurrentLaunches(t *testing.T) {
 	results := make(chan Result, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			backend, _ := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
-			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+			backend, _ := New("codex", codexTestConfig(t, fakePath, filepath.Dir(fakePath), nil))
+			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Cwd: filepath.Dir(fakePath), Timeout: 5 * time.Second})
 			if err != nil {
 				results <- Result{Status: "failed", Error: err.Error()}
 				return
@@ -1848,11 +1878,13 @@ func TestCodexExecuteRedactsStderrFromResultAndLogs(t *testing.T) {
 		`exit 2`+"\n")
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
-	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: logger})
+	cfg := codexTestConfig(t, fakePath, filepath.Dir(fakePath), nil)
+	cfg.Logger = logger
+	backend, err := New("codex", cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Cwd: filepath.Dir(fakePath), Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1889,12 +1921,14 @@ func TestCodexExecuteDoesNotProbeVersionBeforeInitialize(t *testing.T) {
 	data = bytes.Replace(data, []byte(`echo "codex-cli 0.0.0-test"; exit 0`), []byte(`sleep 2; echo "codex-cli 0.0.0-test"; exit 0`), 1)
 	writeTestExecutable(t, fakePath, data)
 
-	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default(), CodexVersion: "cached-test-version"})
+	cfg := codexTestConfig(t, fakePath, filepath.Dir(fakePath), nil)
+	cfg.CodexVersion = "cached-test-version"
+	backend, err := New("codex", cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Cwd: filepath.Dir(fakePath), Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2392,7 +2426,10 @@ func writeFakeCodexAppServer(t *testing.T, body string) string {
 
 func executeFakeCodex(t *testing.T, fakePath string, opts ExecOptions) Result {
 	t.Helper()
-	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if opts.Cwd == "" {
+		opts.Cwd = t.TempDir()
+	}
+	backend, err := New("codex", codexTestConfig(t, fakePath, opts.Cwd, nil))
 	if err != nil {
 		t.Fatalf("new codex backend: %v", err)
 	}

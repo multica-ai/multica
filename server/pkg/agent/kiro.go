@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,8 +43,13 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	if execPath == "" {
 		execPath = "kiro-cli"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolvedExecPath, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("kiro executable not found at %q: %w", execPath, err)
+	}
+	resolvedExecPath, err = filepath.Abs(resolvedExecPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve kiro executable %q: %w", resolvedExecPath, err)
 	}
 
 	// Translate the agent's mcp_config (Claude-style object of objects)
@@ -58,13 +65,20 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	runCtx, cancel := runContext(ctx, timeout)
 
 	kiroArgs := append([]string{"acp", "--trust-all-tools"}, filterCustomArgs(opts.CustomArgs, kiroBlockedArgs, b.cfg.Logger)...)
-	cmd := exec.CommandContext(runCtx, execPath, kiroArgs...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", kiroArgs)
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cwd := opts.Cwd
+	if cwd == "" {
+		cwd, err = os.Getwd()
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("resolve kiro working directory: %w", err)
+		}
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	cmd, err := b.cfg.command(runCtx, resolvedExecPath, kiroArgs, cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("build kiro command: %w", err)
+	}
+	b.cfg.Logger.Info("agent command", "exec", resolvedExecPath, "args", kiroArgs)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -99,7 +113,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		_, _ = io.Copy(stderrSink, stderr)
 	}()
 
-	b.cfg.Logger.Info("kiro acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
+	b.cfg.Logger.Info("kiro acp started", "pid", cmd.Process().Pid, "cwd", opts.Cwd)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -410,7 +424,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		duration := time.Since(startTime)
-		b.cfg.Logger.Info("kiro finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("kiro finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		stdin.Close()
 		cancel()

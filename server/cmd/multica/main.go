@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/taskauth"
 )
 
 var (
@@ -22,11 +26,102 @@ var (
 var debugFlag bool
 
 var rootCmd = &cobra.Command{
-	Use:           "multica",
-	Short:         "Multica CLI — local agent runtime and management tool",
-	Long:          "Work seamlessly with Multica from the command line.",
-	SilenceUsage:  true,
-	SilenceErrors: true,
+	Use:               "multica",
+	Short:             "Multica CLI — local agent runtime and management tool",
+	Long:              "Work seamlessly with Multica from the command line.",
+	SilenceUsage:      true,
+	SilenceErrors:     true,
+	PersistentPreRunE: enforceTaskScopedCLI,
+}
+
+var taskScopedCLICommands = map[string]struct{}{
+	"multica issue get":          {},
+	"multica issue comment list": {},
+	"multica issue comment add":  {},
+	"multica issue status":       {},
+	"multica issue run-messages": {},
+	"multica repo checkout":      {},
+}
+
+func enforceTaskScopedCLI(cmd *cobra.Command, _ []string) error {
+	authority, present := taskAuthorityFromContext(cmd)
+	if !present {
+		loaded, err := taskauth.Load(taskauth.FixedPath)
+		if err != nil {
+			if managedTaskSignalPresent() || !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("managed task authority unavailable: %w", err)
+			}
+			return nil
+		}
+		authority = loaded
+		cmd.SetContext(context.WithValue(cmd.Context(), taskAuthorityContextKey{}, authority))
+	}
+	if err := validateTaskAuthorityCompatibility(authority); err != nil {
+		return err
+	}
+
+	if !inTaskScopedCLIContext(cmd) {
+		return nil
+	}
+
+	for _, flagName := range []string{"profile", "server-url", "workspace-id"} {
+		flag := cmd.Root().PersistentFlags().Lookup(flagName)
+		if flag != nil && flag.Changed {
+			return fmt.Errorf("task-scoped CLI context prohibits --%s overrides", flagName)
+		}
+	}
+
+	if _, allowed := taskScopedCLICommands[cmd.CommandPath()]; !allowed {
+		return fmt.Errorf("task-scoped CLI context permits only bounded issue commands; %q is prohibited", cmd.CommandPath())
+	}
+	return nil
+}
+
+type taskAuthorityContextKey struct{}
+
+func taskAuthorityFromContext(cmd *cobra.Command) (taskauth.Authority, bool) {
+	if cmd == nil || cmd.Context() == nil {
+		return taskauth.Authority{}, false
+	}
+	authority, ok := cmd.Context().Value(taskAuthorityContextKey{}).(taskauth.Authority)
+	return authority, ok
+}
+
+func withTaskAuthority(cmd *cobra.Command, authority taskauth.Authority) {
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	cmd.SetContext(context.WithValue(parent, taskAuthorityContextKey{}, authority))
+}
+
+func inTaskScopedCLIContext(cmd *cobra.Command) bool {
+	_, ok := taskAuthorityFromContext(cmd)
+	return ok
+}
+
+func managedTaskSignalPresent() bool {
+	return strings.HasPrefix(strings.TrimSpace(os.Getenv("MULTICA_TOKEN")), "mat_") || inDaemonManagedExecutionContext()
+}
+
+func validateTaskAuthorityCompatibility(authority taskauth.Authority) error {
+	values := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{name: "MULTICA_SERVER_URL", got: strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_SERVER_URL")), "/"), want: authority.ServerURL},
+		{name: "MULTICA_WORKSPACE_ID", got: strings.TrimSpace(os.Getenv("MULTICA_WORKSPACE_ID")), want: authority.WorkspaceID},
+		{name: "MULTICA_TOKEN", got: strings.TrimSpace(os.Getenv("MULTICA_TOKEN")), want: authority.Token},
+		{name: "MULTICA_TASK_ID", got: strings.TrimSpace(os.Getenv("MULTICA_TASK_ID")), want: authority.TaskID},
+		{name: "MULTICA_AGENT_ID", got: strings.TrimSpace(os.Getenv("MULTICA_AGENT_ID")), want: authority.AgentID},
+	}
+	for _, value := range values {
+		if value.got != "" && value.got != value.want {
+			return fmt.Errorf("managed task authority mismatch for %s", value.name)
+		}
+	}
+	return nil
 }
 
 func init() {

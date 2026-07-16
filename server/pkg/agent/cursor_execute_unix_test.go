@@ -40,11 +40,12 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"f
 	fakePath := filepath.Join(t.TempDir(), "cursor-agent")
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("cursor", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	cfg, cwd := providerCommandTestConfig(t, fakePath, slog.Default())
+	backend, err := New("cursor", cfg)
 	if err != nil {
 		t.Fatalf("New(cursor): %v", err)
 	}
-	session, err := backend.Execute(t.Context(), "hello", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(t.Context(), "hello", ExecOptions{Cwd: cwd, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -105,11 +106,12 @@ func executeFakeCursor(t *testing.T, script string) Result {
 	fakePath := filepath.Join(t.TempDir(), "cursor-agent")
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("cursor", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	cfg, cwd := providerCommandTestConfig(t, fakePath, slog.Default())
+	backend, err := New("cursor", cfg)
 	if err != nil {
 		t.Fatalf("New(cursor): %v", err)
 	}
-	session, err := backend.Execute(t.Context(), "hello", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(t.Context(), "hello", ExecOptions{Cwd: cwd, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

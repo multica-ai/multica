@@ -2,8 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +17,371 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon"
 	"github.com/spf13/cobra"
 )
+
+func TestRequestDaemonShutdownSendsOperatorCredential(t *testing.T) {
+	t.Parallel()
+
+	const credential = "operator-shutdown-credential"
+	requests := make(chan *http.Request, 1)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	if err := requestDaemonShutdown(port, credential, false); err != nil {
+		t.Fatalf("request shutdown: %v", err)
+	}
+
+	request := <-requests
+	if request.Method != http.MethodPost {
+		t.Fatalf("method = %q, want POST", request.Method)
+	}
+	if got := request.Header.Get(daemon.ShutdownCredentialHeader); got != credential {
+		t.Fatalf("shutdown credential header = %q, want %q", got, credential)
+	}
+}
+
+func TestRequestDaemonShutdownDoesNotForwardCredentialAcrossRedirect(t *testing.T) {
+	t.Parallel()
+
+	const credential = "operator-shutdown-credential"
+	redirected := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected <- r.Header.Get(daemon.ShutdownCredentialHeader)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	if err := requestDaemonShutdown(port, credential, false); err == nil {
+		t.Fatal("redirected shutdown request unexpectedly succeeded")
+	}
+	select {
+	case got := <-redirected:
+		t.Fatalf("shutdown redirect reached target with credential %q", got)
+	default:
+	}
+}
+
+func TestRequestDaemonShutdownRejectsMissingCredential(t *testing.T) {
+	t.Parallel()
+
+	if err := requestDaemonShutdown(1, " \n\t", false); err == nil {
+		t.Fatal("shutdown request without a credential unexpectedly succeeded")
+	}
+}
+
+func TestRequestDaemonShutdownCanRequireIdle(t *testing.T) {
+	t.Parallel()
+
+	const credential = "operator-shutdown-credential"
+	requestHeaders := make(chan http.Header, 1)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestHeaders <- r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	if err := requestDaemonShutdown(port, credential, true); err != nil {
+		t.Fatalf("request shutdown: %v", err)
+	}
+	if got := (<-requestHeaders).Get(daemon.ShutdownRequireIdleHeader); got != "true" {
+		t.Fatalf("require-idle header = %q, want true", got)
+	}
+}
+
+func TestRequestDaemonDiagnosticsSendsOperatorCredential(t *testing.T) {
+	t.Parallel()
+
+	const credential = "operator-diagnostics-credential"
+	requests := make(chan *http.Request, 1)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(validDaemonDiagnosticsJSON()))
+	}))
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	got, err := requestDaemonDiagnostics(context.Background(), port, credential)
+	if err != nil {
+		t.Fatalf("request diagnostics: %v", err)
+	}
+	if got["pid"] != float64(1234) || got["cli_version"] != "v9.9.9" {
+		t.Fatalf("diagnostics = %#v", got)
+	}
+	request := <-requests
+	if request.Method != http.MethodGet || request.URL.Path != "/diagnostics" {
+		t.Fatalf("request = %s %s, want GET /diagnostics", request.Method, request.URL.Path)
+	}
+	if got := request.Header.Get(daemon.ShutdownCredentialHeader); got != credential {
+		t.Fatalf("operator credential header = %q, want %q", got, credential)
+	}
+}
+
+func TestRequestDaemonDiagnosticsRejectsMissingCredentialAndRedirects(t *testing.T) {
+	t.Parallel()
+
+	if _, err := requestDaemonDiagnostics(context.Background(), 1, " \n\t"); err == nil {
+		t.Fatal("diagnostics request without a credential unexpectedly succeeded")
+	}
+
+	const credential = "operator-diagnostics-credential"
+	redirected := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected <- r.Header.Get(daemon.ShutdownCredentialHeader)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	if _, err := requestDaemonDiagnostics(context.Background(), port, credential); err == nil {
+		t.Fatal("redirected diagnostics request unexpectedly succeeded")
+	}
+	select {
+	case got := <-redirected:
+		t.Fatalf("diagnostics redirect reached target with credential %q", got)
+	default:
+	}
+}
+
+func TestRequestDaemonDiagnosticsRejectsInvalidAndOversizedBodies(t *testing.T) {
+	t.Parallel()
+
+	for name, body := range map[string]string{
+		"malformed":           `{`,
+		"trailing":            validDaemonDiagnosticsJSON() + ` {"extra":true}`,
+		"null":                `null`,
+		"oversized":           `{"padding":"` + strings.Repeat("x", (1<<20)+1) + `"}`,
+		"duplicate top level": strings.Replace(validDaemonDiagnosticsJSON(), `"status":"running"`, `"status":"running","status":"starting"`, 1),
+		"duplicate nested":    strings.Replace(validDaemonDiagnosticsJSON(), `"id":"ws-1"`, `"id":"ws-1","id":"ws-2"`, 1),
+		"unknown field":       strings.Replace(validDaemonDiagnosticsJSON(), `"status":"running"`, `"status":"running","extra":true`, 1),
+		"missing field":       strings.Replace(validDaemonDiagnosticsJSON(), `"os":"darwin",`, ``, 1),
+		"wrong type":          strings.Replace(validDaemonDiagnosticsJSON(), `"pid":1234`, `"pid":"1234"`, 1),
+		"negative tasks":      strings.Replace(validDaemonDiagnosticsJSON(), `"active_task_count":0`, `"active_task_count":-1`, 1),
+		"extreme pid":         strings.Replace(validDaemonDiagnosticsJSON(), `"pid":1234`, `"pid":9007199254740992`, 1),
+		"deep nesting":        `[` + strings.Repeat(`[`, maxDaemonJSONDepth) + `0` + strings.Repeat(`]`, maxDaemonJSONDepth) + `]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("listen: %v", err)
+			}
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			}))
+			server.Listener = listener
+			server.Start()
+			defer server.Close()
+
+			port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+			if err != nil {
+				t.Fatalf("parse test server port: %v", err)
+			}
+			if _, err := requestDaemonDiagnostics(context.Background(), port, "operator-credential"); err == nil {
+				t.Fatalf("diagnostics body %q unexpectedly succeeded", name)
+			}
+		})
+	}
+}
+
+func TestCheckDaemonHealthOnPortRequiresExactBoundedContract(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		status int
+		body   string
+	}{
+		"valid":          {http.StatusOK, `{"status":"running","os":"darwin"}`},
+		"non-2xx":        {http.StatusInternalServerError, `{"status":"running","os":"darwin"}`},
+		"duplicate":      {http.StatusOK, `{"status":"running","status":"starting","os":"darwin"}`},
+		"unknown":        {http.StatusOK, `{"status":"running","os":"darwin","pid":1}`},
+		"missing":        {http.StatusOK, `{"status":"running"}`},
+		"trailing":       {http.StatusOK, `{"status":"running","os":"darwin"} true`},
+		"invalid status": {http.StatusOK, `{"status":"stopped","os":"darwin"}`},
+		"oversized":      {http.StatusOK, strings.Repeat(" ", maxDaemonResponseBytes+1)},
+	}
+
+	for name, test := range tests {
+		name, test := name, test
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("listen: %v", err)
+			}
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			server.Listener = listener
+			server.Start()
+			defer server.Close()
+			port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+			if err != nil {
+				t.Fatalf("parse test server port: %v", err)
+			}
+			got := checkDaemonHealthOnPort(context.Background(), port)
+			if name == "valid" {
+				if got["status"] != "running" || got["os"] != "darwin" {
+					t.Fatalf("health = %#v, want exact running payload", got)
+				}
+			} else if got["status"] != "stopped" {
+				t.Fatalf("health = %#v, want stopped", got)
+			}
+		})
+	}
+}
+
+func TestCheckDaemonHealthOnPortRejectsRedirect(t *testing.T) {
+	t.Parallel()
+	targetReached := make(chan struct{}, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetReached <- struct{}{}
+		_, _ = w.Write([]byte(`{"status":"running","os":"darwin"}`))
+	}))
+	defer target.Close()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	if got := checkDaemonHealthOnPort(context.Background(), port); got["status"] != "stopped" {
+		t.Fatalf("redirect health = %#v, want stopped", got)
+	}
+	select {
+	case <-targetReached:
+		t.Fatal("health redirect unexpectedly reached target")
+	default:
+	}
+}
+
+func validDaemonDiagnosticsJSON() string {
+	return `{"status":"running","pid":1234,"os":"darwin","uptime":"1m","daemon_id":"daemon-1","device_name":"test","server_url":"https://example.test","cli_version":"v9.9.9","active_task_count":0,"agents":["codex"],"workspaces":[{"id":"ws-1","runtimes":["codex"]}]}`
+}
+
+func TestReadDaemonShutdownCredentialValidatesOperatorFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	const profile = "test-profile"
+	const credential = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"
+	path := daemonShutdownCredentialPathForProfile(profile)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("create profile directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(credential+"\n"), 0o600); err != nil {
+		t.Fatalf("write shutdown credential: %v", err)
+	}
+
+	got, err := readDaemonShutdownCredential(profile)
+	if err != nil {
+		t.Fatalf("read shutdown credential: %v", err)
+	}
+	if got != credential {
+		t.Fatalf("credential = %q, want %q", got, credential)
+	}
+
+	if err := os.WriteFile(path, []byte("not-base64\n"), 0o600); err != nil {
+		t.Fatalf("replace shutdown credential: %v", err)
+	}
+	if _, err := readDaemonShutdownCredential(profile); err == nil {
+		t.Fatal("malformed shutdown credential unexpectedly accepted")
+	}
+
+	if runtime.GOOS != "windows" {
+		if err := os.WriteFile(path, []byte(credential+"\n"), 0o644); err != nil {
+			t.Fatalf("replace shutdown credential with broad permissions: %v", err)
+		}
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatalf("broaden shutdown credential permissions: %v", err)
+		}
+		if _, err := readDaemonShutdownCredential(profile); err == nil {
+			t.Fatal("non-operator-only shutdown credential unexpectedly accepted")
+		}
+
+		if err := os.Chmod(path, 0o600); err != nil {
+			t.Fatalf("restore shutdown credential permissions: %v", err)
+		}
+		link := filepath.Join(filepath.Dir(path), "credential-link")
+		if err := os.Symlink(path, link); err != nil {
+			t.Fatalf("create shutdown credential symlink: %v", err)
+		}
+		if file, err := openDaemonCredentialFile(link); err == nil {
+			_ = file.Close()
+			t.Fatal("no-follow credential open unexpectedly accepted a symlink")
+		}
+	}
+}
 
 // TestDaemonAlive locks in the liveness predicate the lifecycle commands rely
 // on: both a ready ("running") and a still-booting ("starting") daemon count as
