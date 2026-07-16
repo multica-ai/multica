@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiClient } from "./client";
 import { parseWithFallback } from "./schema";
+import { EMPTY_ISSUE } from "./schemas";
 
 // Helper: stub fetch with a single JSON response. Status defaults to 200.
 function stubFetchJson(body: unknown, status = 200) {
@@ -88,6 +89,62 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listIssues();
       expect(res).toEqual({ issues: [], total: 0 });
+    });
+  });
+
+  describe("createIssue", () => {
+    // The create modal decides whether to run its label-attach fallback by
+    // reading `labels` off the parsed response, so these guard the exact three
+    // shapes: absent (older backend) → undefined, valid → Label[], malformed →
+    // undefined (never a wrong shape masquerading as "handled").
+    const validIssue = { ...EMPTY_ISSUE, id: "issue-1", title: "Created" };
+    const label = {
+      id: "label-1",
+      workspace_id: "ws-1",
+      name: "bug",
+      color: "#ef4444",
+      created_at: "2025-01-01T00:00:00Z",
+      updated_at: "2025-01-01T00:00:00Z",
+    };
+
+    it("keeps labels undefined when the backend omits the field (older backend)", async () => {
+      stubFetchJson(validIssue, 201);
+      const client = new ApiClient("https://api.example.test");
+      const issue = await client.createIssue({ title: "Created" });
+      expect(issue.id).toBe("issue-1");
+      expect(issue.labels).toBeUndefined();
+    });
+
+    it("validates a well-formed labels array", async () => {
+      stubFetchJson({ ...validIssue, labels: [label] }, 201);
+      const client = new ApiClient("https://api.example.test");
+      const issue = await client.createIssue({ title: "Created" });
+      expect(issue.labels?.map((l) => l.id)).toEqual(["label-1"]);
+    });
+
+    it("degrades a null labels field to undefined so the client falls back", async () => {
+      stubFetchJson({ ...validIssue, labels: null }, 201);
+      const client = new ApiClient("https://api.example.test");
+      const issue = await client.createIssue({ title: "Created" });
+      // The issue itself still parses; only the malformed labels degrade.
+      expect(issue.id).toBe("issue-1");
+      expect(issue.labels).toBeUndefined();
+    });
+
+    it("degrades a labels array of the wrong element shape to undefined", async () => {
+      stubFetchJson({ ...validIssue, labels: [{ nope: true }] }, 201);
+      const client = new ApiClient("https://api.example.test");
+      const issue = await client.createIssue({ title: "Created" });
+      expect(issue.id).toBe("issue-1");
+      expect(issue.labels).toBeUndefined();
+    });
+
+    it("degrades to the empty issue rather than throwing when the whole body is malformed", async () => {
+      stubFetchJson({ not: "an issue" }, 201);
+      const client = new ApiClient("https://api.example.test");
+      const issue = await client.createIssue({ title: "Created" });
+      expect(issue).toEqual(EMPTY_ISSUE);
+      expect(issue.labels).toBeUndefined();
     });
   });
 

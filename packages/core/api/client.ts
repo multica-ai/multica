@@ -202,6 +202,8 @@ import {
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
   ListIssuesResponseSchema,
+  CreateIssueResponseSchema,
+  EMPTY_ISSUE,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -658,9 +660,15 @@ export class ApiClient {
   }
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
-    return this.fetch("/api/issues", {
+    // Parse through a schema (not a raw cast): the create modal keys its
+    // label-attach compatibility fallback off `labels` being absent vs a
+    // validated Label[], so an unvalidated wrong shape must not slip through.
+    const raw = await this.fetch<unknown>("/api/issues", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, CreateIssueResponseSchema, EMPTY_ISSUE, {
+      endpoint: "POST /api/issues",
     });
   }
 
