@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -50,22 +51,28 @@ func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.
 // to IssueService.Create. The handler owns the parsing step that turns its
 // request payload into this struct; the service stays transport-agnostic.
 type IssueCreateParams struct {
-	WorkspaceID    pgtype.UUID
-	Title          string
-	Description    pgtype.Text
-	Status         string
-	Priority       string
-	AssigneeType   pgtype.Text
-	AssigneeID     pgtype.UUID
-	CreatorType    string // "agent" or "member"
-	CreatorID      pgtype.UUID
-	ParentIssueID  pgtype.UUID
-	ProjectID      pgtype.UUID
-	StartDate      pgtype.Date
-	DueDate        pgtype.Date
-	OriginType     pgtype.Text
-	OriginID       pgtype.UUID
-	AttachmentIDs  []pgtype.UUID
+	WorkspaceID   pgtype.UUID
+	Title         string
+	Description   pgtype.Text
+	Status        string
+	Priority      string
+	AssigneeType  pgtype.Text
+	AssigneeID    pgtype.UUID
+	CreatorType   string // "agent" or "member"
+	CreatorID     pgtype.UUID
+	ParentIssueID pgtype.UUID
+	ProjectID     pgtype.UUID
+	StartDate     pgtype.Date
+	DueDate       pgtype.Date
+	OriginType    pgtype.Text
+	OriginID      pgtype.UUID
+	AttachmentIDs []pgtype.UUID
+	// LabelIDs are the issue-scoped labels to attach to the new issue. They
+	// are validated and written inside the create transaction (see Create),
+	// so the issue is never committed with a partial or wrong label set. An
+	// unknown or non-issue label id fails the whole create with
+	// ErrIssueLabelNotFound rather than being silently dropped.
+	LabelIDs       []pgtype.UUID
 	AllowDuplicate bool
 	// Stage groups this issue into an ordered barrier group under its parent
 	// (NULL = unstaged). See issue_child_done.go for the staged-barrier wake.
@@ -123,6 +130,12 @@ var ErrParentIssueNotFound = errors.New("parent issue not found in this workspac
 // MCP / API key callers) enforces the same workspace boundary without
 // having to remember it. Callers translate this into 400.
 var ErrProjectNotFound = errors.New("project not found in this workspace")
+
+// ErrIssueLabelNotFound signals that one of the supplied LabelIDs does not
+// exist in the issue's workspace or is not an issue-scoped label. The whole
+// create is rejected so a new issue is never born with a partial or wrong
+// label set. Callers translate this into their transport's 400.
+var ErrIssueLabelNotFound = errors.New("issue label not found in this workspace")
 
 // IssueCreateResult is the typed return from IssueService.Create.
 //
@@ -192,6 +205,14 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}); err != nil {
 			return IssueCreateResult{}, ErrProjectNotFound
 		}
+	}
+
+	// Validate labels before we increment the issue counter so a stale or
+	// wrong-scope selection fails the create cheaply. The de-duplicated set
+	// is attached to the issue below, inside this same transaction.
+	labelIDs, err := validateIssueLabels(ctx, qtx, p.WorkspaceID, p.LabelIDs)
+	if err != nil {
+		return IssueCreateResult{}, err
 	}
 
 	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
@@ -268,6 +289,22 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
 	}
 
+	// Attach labels inside the create transaction so the issue and its
+	// labels commit together — the old flow created the issue first and
+	// attached labels in a second, non-atomic round-trip whose partial
+	// failure left the issue mis-categorized. AttachLabelToIssue is
+	// workspace/resource_type-guarded and ON CONFLICT DO NOTHING, and the
+	// ids were already validated above.
+	for _, labelID := range labelIDs {
+		if err := qtx.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+			IssueID:     issue.ID,
+			LabelID:     labelID,
+			WorkspaceID: p.WorkspaceID,
+		}); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("attach issue label: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return IssueCreateResult{}, fmt.Errorf("commit: %w", err)
 	}
@@ -284,6 +321,47 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID)
 
 	return IssueCreateResult{Issue: issue, Attachments: attachments}, nil
+}
+
+// validateIssueLabels checks that every requested label exists in the
+// workspace and is issue-scoped, returning the de-duplicated set to attach.
+// It mirrors the workspace + resource_type='issue' guard already enforced by
+// AttachLabelToIssue so an unknown or wrong-scope id surfaces as
+// ErrIssueLabelNotFound instead of a silent no-op insert. Invalid (zero)
+// UUIDs are skipped. The label count per issue is small, so a GetLabel per
+// distinct id is fine and avoids introducing a new batch query.
+func validateIssueLabels(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, labelIDs []pgtype.UUID) ([]pgtype.UUID, error) {
+	if len(labelIDs) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(labelIDs))
+	deduped := make([]pgtype.UUID, 0, len(labelIDs))
+	for _, labelID := range labelIDs {
+		if !labelID.Valid {
+			continue
+		}
+		key := util.UUIDToString(labelID)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		label, err := qtx.GetLabel(ctx, db.GetLabelParams{
+			ID:          labelID,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrIssueLabelNotFound
+			}
+			return nil, fmt.Errorf("get issue label: %w", err)
+		}
+		if label.ResourceType != "issue" {
+			return nil, ErrIssueLabelNotFound
+		}
+		deduped = append(deduped, labelID)
+	}
+	return deduped, nil
 }
 
 // linkAttachments links the given attachment IDs to the newly created

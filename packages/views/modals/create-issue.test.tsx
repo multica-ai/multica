@@ -505,6 +505,33 @@ describe("CreateIssueModal", () => {
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
   });
 
+  it("forwards selected labels in the create payload so they attach in the same transaction", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.labelIds = [
+      "aaaaaaaa-1111-2222-3333-444444444444",
+      "bbbbbbbb-1111-2222-3333-444444444444",
+    ];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Labeled issue" },
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Labeled issue",
+          label_ids: [
+            "aaaaaaaa-1111-2222-3333-444444444444",
+            "bbbbbbbb-1111-2222-3333-444444444444",
+          ],
+        }),
+      );
+    });
+  });
+
   it("keeps manual mode open and clears content when create another is enabled", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

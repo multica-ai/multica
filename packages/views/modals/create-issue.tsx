@@ -48,7 +48,6 @@ import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-stor
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
-import { useAttachLabelToIssue } from "@multica/core/labels";
 import {
   ApiError,
   DuplicateIssueErrorBodySchema,
@@ -314,7 +313,6 @@ export function ManualCreatePanel({
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
-  const attachLabelMutation = useAttachLabelToIssue();
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
@@ -362,6 +360,10 @@ export function ManualCreatePanel({
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
         attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
+        // Labels are attached in the same transaction as the create on the
+        // server, so a stale selection fails the create instead of leaving a
+        // committed-but-unlabeled issue (the old post-create attach flow).
+        label_ids: labelIds.length > 0 ? labelIds : undefined,
         parent_issue_id: parentIssueId,
         // Stage is only meaningful for a sub-issue (relative to its siblings).
         stage: parentIssueId && stage != null ? stage : undefined,
@@ -399,28 +401,6 @@ export function ManualCreatePanel({
                   total: childIssues.length,
                 }),
           );
-        }
-      }
-
-      // Attach the labels chosen in the dialog. Like the sub-issue links
-      // above, this is deferred to after create because the new issue's ID
-      // doesn't exist yet, and the create endpoint takes no labels. Partial
-      // failures don't roll back the committed issue.
-      if (labelIds.length > 0) {
-        const results = await Promise.allSettled(
-          labelIds.map((labelId) =>
-            attachLabelMutation.mutateAsync({ issueId: issue.id, labelId }),
-          ),
-        );
-        let labelsFailed = 0;
-        for (const result of results) {
-          if (result.status === "rejected") {
-            labelsFailed += 1;
-            console.error("[create-issue] label attach failed", result.reason);
-          }
-        }
-        if (labelsFailed > 0) {
-          toast.error(t(($) => $.create_issue.toast_link_labels_failed));
         }
       }
 

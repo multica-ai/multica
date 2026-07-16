@@ -2185,6 +2185,10 @@ type CreateIssueRequest struct {
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	// LabelIDs are issue-scoped labels to attach to the new issue in the same
+	// transaction as the create. Unknown or non-issue ids are rejected with
+	// 400 (service.ErrIssueLabelNotFound) rather than silently dropped.
+	LabelIDs []string `json:"label_ids,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
 	// platform-internal flows can deterministically locate it later. Only
 	// trusted callers should set these — currently the daemon CLI passes
@@ -2283,6 +2287,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// without duplicating the lookup here.
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
+	if !ok {
+		return
+	}
+
+	labelIDs, ok := parseUUIDSliceOrBadRequest(w, req.LabelIDs, "label_ids")
 	if !ok {
 		return
 	}
@@ -2405,6 +2414,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		OriginID:       originID,
 		Stage:          ptrToInt4(req.Stage),
 		AttachmentIDs:  attachmentIDs,
+		LabelIDs:       labelIDs,
 		AllowDuplicate: req.AllowDuplicate,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
@@ -2433,6 +2443,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, service.ErrProjectNotFound) {
 		writeError(w, http.StatusBadRequest, "project not found in this workspace")
+		return
+	}
+	if errors.Is(err, service.ErrIssueLabelNotFound) {
+		writeError(w, http.StatusBadRequest, "one or more labels not found in this workspace")
 		return
 	}
 	if err != nil {
