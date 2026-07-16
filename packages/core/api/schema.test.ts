@@ -127,7 +127,7 @@ describe("ApiClient schema fallback", () => {
       expect(res.issues[0]?.status).toBe("todo");
     });
 
-    it("passes status_id / status_detail through and tolerates an unknown category", async () => {
+    it("passes a well-formed status_id / status_detail through", async () => {
       stubFetchJson({
         issues: [
           {
@@ -136,7 +136,7 @@ describe("ApiClient schema fallback", () => {
             status_detail: {
               id: "st-1",
               name: "In Review",
-              category: "some_future_category",
+              category: "in_progress",
               icon: "in_review",
               color: "success",
             },
@@ -148,10 +148,53 @@ describe("ApiClient schema fallback", () => {
       const res = await client.listIssues();
       expect(res.issues[0]?.status_id).toBe("st-1");
       expect(res.issues[0]?.status_detail?.name).toBe("In Review");
-      expect(res.issues[0]?.status_detail?.category).toBe("some_future_category");
+      expect(res.issues[0]?.status_detail?.category).toBe("in_progress");
     });
 
-    it("keeps the issue when status_detail is explicitly null", async () => {
+    it("degrades status_detail to null on an unknown category, keeping the issue", async () => {
+      // category is a closed 5-value set. An unknown value must fail only the
+      // status_detail field (-> null), never blank the issue or the whole list.
+      stubFetchJson({
+        issues: [
+          {
+            ...baseIssue,
+            status_id: "st-1",
+            status_detail: {
+              id: "st-1",
+              name: "Weird",
+              category: "some_future_category",
+              icon: "todo",
+              color: "warning",
+            },
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssues();
+      expect(res.issues).toHaveLength(1);
+      expect(res.issues[0]?.status).toBe("todo");
+      expect(res.issues[0]?.status_detail).toBeNull();
+    });
+
+    it("degrades a malformed status_detail to null without blanking the list (§7.3)", async () => {
+      // A wrong-typed subfield used to fail the outer IssueSchema and drop the
+      // whole batch to []. Now it degrades to just status_detail = null.
+      stubFetchJson({
+        issues: [
+          { ...baseIssue, id: "issue-1", status_detail: { id: 123, name: null } },
+          { ...baseIssue, id: "issue-2" },
+        ],
+        total: 2,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssues();
+      expect(res.issues).toHaveLength(2);
+      expect(res.issues[0]?.status_detail).toBeNull();
+      expect(res.issues[0]?.status).toBe("todo");
+    });
+
+    it("keeps null on explicit-null status_id / status_detail", async () => {
       stubFetchJson({
         issues: [{ ...baseIssue, status_id: null, status_detail: null }],
         total: 1,
@@ -159,7 +202,8 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listIssues();
       expect(res.issues).toHaveLength(1);
-      expect(res.issues[0]?.status_detail ?? null).toBeNull();
+      expect(res.issues[0]?.status_id).toBeNull();
+      expect(res.issues[0]?.status_detail).toBeNull();
     });
   });
 

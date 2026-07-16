@@ -1,4 +1,4 @@
-import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
+import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeType, StatusCategory } from "./issue";
 import type { MemberRole } from "./workspace";
 import type { Project } from "./project";
 
@@ -81,6 +81,10 @@ export interface ListIssuesParams {
   offset?: number;
   workspace_id?: string;
   status?: IssueStatus;
+  /** Exact custom-status filter by catalog id (MUL-4809). */
+  status_id?: string;
+  /** Filter by one of the 5 status Categories (MUL-4809). */
+  status_category?: StatusCategory;
   priority?: IssuePriority;
   assignee_id?: string;
   assignee_ids?: string[];
@@ -132,6 +136,10 @@ export interface ListGroupedIssuesParams {
   offset?: number;
   workspace_id?: string;
   statuses?: IssueStatus[];
+  /** Exact custom-status filter by catalog id (MUL-4809). */
+  status_id?: string;
+  /** Filter by one of the 5 status Categories (MUL-4809). */
+  status_category?: StatusCategory;
   priorities?: IssuePriority[];
   assignee_types?: IssueAssigneeType[];
   assignee_id?: string;
