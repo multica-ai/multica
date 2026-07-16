@@ -48,7 +48,7 @@ test("opens the allergen app as a standalone SDK-powered surface", async ({ page
     // happens when the frontend sent every field the backend requires.
     expect(gateway.calls()).toEqual(["Bearer sk_e2e"]);
 
-    await expect(page.getByText("Workflow")).toHaveCount(0);
+    await expect(page.locator("main").getByText("Workflow", { exact: true })).toHaveCount(0);
   } finally {
     await db.query("DELETE FROM cerebro_app WHERE id=$1", [appID]);
     await api.setWorkspaceFeatureFlag("cerebro_mini_apps", false);

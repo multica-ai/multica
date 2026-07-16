@@ -3,10 +3,16 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io/fs"
+	"mime"
 	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -20,6 +26,7 @@ var appCreateCmd = &cobra.Command{Use: "create", Short: "Create an app draft", A
 var appPreviewCmd = &cobra.Command{Use: "preview <app-id>", Short: "Create an app preview", Args: exactArgs(1), RunE: runAppPreview}
 var appPublishCmd = &cobra.Command{Use: "publish <app-id>", Short: "Publish an app version", Args: exactArgs(1), RunE: runAppPublish}
 var appRollbackCmd = &cobra.Command{Use: "rollback <app-id>", Short: "Roll an app back to a published version", Args: exactArgs(1), RunE: runAppRollback}
+var appDisableCmd = &cobra.Command{Use: "disable <app-id>", Short: "Disable a published app", Args: exactArgs(1), RunE: runAppDisable}
 
 func init() {
 	appListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -27,14 +34,14 @@ func init() {
 	appCreateCmd.Flags().String("slug", "", "Stable app slug")
 	appCreateCmd.Flags().String("description", "", "App description")
 	appPreviewCmd.Flags().String("file", "", "App snapshot JSON file")
-	appPublishCmd.Flags().String("file", "", "App snapshot JSON file")
+	appPublishCmd.Flags().String("dir", "", "App bundle directory")
 	appPublishCmd.Flags().String("version", "", "Semantic version to publish")
 	appPublishCmd.Flags().String("release-notes", "", "Required release notes")
 	appRollbackCmd.Flags().String("version", "", "Published version to restore")
-	for _, command := range []*cobra.Command{appCreateCmd, appPreviewCmd, appPublishCmd, appRollbackCmd} {
+	for _, command := range []*cobra.Command{appCreateCmd, appPreviewCmd, appPublishCmd, appRollbackCmd, appDisableCmd} {
 		command.Flags().String("output", "json", "Output format: json")
 	}
-	appCmd.AddCommand(appCreateCmd, appPreviewCmd, appPublishCmd, appRollbackCmd, appListCmd)
+	appCmd.AddCommand(appCreateCmd, appPreviewCmd, appPublishCmd, appRollbackCmd, appDisableCmd, appListCmd)
 	appCmd.AddCommand(appWorkflowCmd)
 }
 
@@ -90,10 +97,15 @@ func runAppPreview(cmd *cobra.Command, args []string) error {
 }
 
 func runAppPublish(cmd *cobra.Command, args []string) error {
-	body, err := appSnapshotBody(cmd)
+	dir, _ := cmd.Flags().GetString("dir")
+	if dir == "" {
+		return fmt.Errorf("--dir is required")
+	}
+	files, err := readAppBundle(dir)
 	if err != nil {
 		return err
 	}
+	body := map[string]any{"files": files}
 	version, _ := cmd.Flags().GetString("version")
 	releaseNotes, _ := cmd.Flags().GetString("release-notes")
 	if version == "" || releaseNotes == "" {
@@ -102,6 +114,69 @@ func runAppPublish(cmd *cobra.Command, args []string) error {
 	body["version"] = version
 	body["release_notes"] = releaseNotes
 	return appPost(cmd, "/api/cerebro/apps/"+url.PathEscape(args[0])+"/publish", body)
+}
+
+func runAppDisable(cmd *cobra.Command, args []string) error {
+	return appPost(cmd, "/api/cerebro/apps/"+url.PathEscape(args[0])+"/disable", map[string]any{})
+}
+
+func readAppBundle(root string) ([]map[string]any, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]map[string]any, 0)
+	total := 0
+	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root || entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("app bundle may contain regular files only")
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if relative != "app.json" && !strings.HasPrefix(relative, "frontend/") && !strings.HasPrefix(relative, "backend/") {
+			return fmt.Errorf("app bundle path %q is outside app.json, frontend, and backend", relative)
+		}
+		if len(files) >= 100 || info.Size() > 512<<10 || total+int(info.Size()) > 5<<20 {
+			return fmt.Errorf("app bundle exceeds its file or size limit")
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		total += len(content)
+		hash := sha256.Sum256(content)
+		mediaType := mime.TypeByExtension(filepath.Ext(relative))
+		if mediaType == "" {
+			mediaType = "application/octet-stream"
+		}
+		files = append(files, map[string]any{
+			"path":           relative,
+			"media_type":     mediaType,
+			"content_base64": base64.StdEncoding.EncodeToString(content),
+			"sha256":         fmt.Sprintf("%x", hash),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("app bundle is empty")
+	}
+	return files, nil
 }
 
 func runAppRollback(cmd *cobra.Command, args []string) error {

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -35,13 +37,37 @@ type connectionCaller interface {
 }
 
 type Handler struct {
-	pool            *pgxpool.Pool
-	tokens          tokenIssuer
-	dispatcher      workflowDispatcher
-	workerIngestKey string
-	dataEventKey    string
-	enabled         bool
-	connections     connectionCaller
+	pool              *pgxpool.Pool
+	tokens            tokenIssuer
+	dispatcher        workflowDispatcher
+	workerIngestKey   string
+	dataEventKey      string
+	enabled           bool
+	connections       connectionCaller
+	runtime           runtimeDeployer
+	runtimeServiceKey string
+}
+
+type runtimeDeployer interface {
+	Deploy(ctx context.Context, deployment RuntimeDeploymentRequest) error
+	Invoke(ctx context.Context, appID, version string, input json.RawMessage) (json.RawMessage, error)
+	Lifecycle(ctx context.Context, action, serviceID string) error
+}
+
+type lifecycleRuntime interface {
+	Lifecycle(ctx context.Context, action, serviceID string) error
+}
+
+func applyRuntimeLifecycle(ctx context.Context, runtime lifecycleRuntime, action string, serviceIDs []string) error {
+	if runtime == nil && len(serviceIDs) > 0 {
+		return errRuntimeUnavailable
+	}
+	for _, serviceID := range serviceIDs {
+		if err := runtime.Lifecycle(ctx, action, serviceID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (h *Handler) WithConnectionCaller(caller connectionCaller) *Handler {
@@ -50,14 +76,165 @@ func (h *Handler) WithConnectionCaller(caller connectionCaller) *Handler {
 }
 
 func NewHandler(pool *pgxpool.Pool) *Handler {
-	return &Handler{
-		pool:            pool,
-		tokens:          tokens.NewBroker(tokens.ConfigFromEnv(), nil),
-		dispatcher:      hatchetWorkflowDispatcher{},
-		workerIngestKey: strings.TrimSpace(os.Getenv("CEREBRO_APP_WORKFLOW_INGEST_KEY")),
-		dataEventKey:    strings.TrimSpace(os.Getenv("CEREBRO_APP_DATA_EVENT_KEY")),
-		enabled:         envFlagEnabled("CEREBRO_MINI_APPS_ENABLED"),
+	handler := &Handler{
+		pool:              pool,
+		tokens:            tokens.NewBroker(tokens.ConfigFromEnv(), nil),
+		dispatcher:        hatchetWorkflowDispatcher{},
+		workerIngestKey:   strings.TrimSpace(os.Getenv("CEREBRO_APP_WORKFLOW_INGEST_KEY")),
+		dataEventKey:      strings.TrimSpace(os.Getenv("CEREBRO_APP_DATA_EVENT_KEY")),
+		enabled:           envFlagEnabled("CEREBRO_MINI_APPS_ENABLED"),
+		runtimeServiceKey: strings.TrimSpace(os.Getenv("CEREBRO_APPS_RUNTIME_SERVICE_KEY")),
 	}
+	runtimeURL := strings.TrimSpace(os.Getenv("CEREBRO_APPS_RUNTIME_URL"))
+	runtimeKey := strings.TrimSpace(os.Getenv("CEREBRO_APPS_RUNTIME_SERVICE_KEY"))
+	if runtimeURL != "" && runtimeKey != "" {
+		handler.runtime = NewRuntimeClient(runtimeURL, runtimeKey)
+	}
+	return handler
+}
+
+func (h *Handler) authenticateRuntimeRequest(r *http.Request, body []byte) bool {
+	if h == nil || h.runtimeServiceKey == "" {
+		return false
+	}
+	return verifyRuntimeSignature(
+		h.runtimeServiceKey,
+		r.Method,
+		r.URL.EscapedPath(),
+		body,
+		r.Header.Get("X-Multica-Timestamp"),
+		r.Header.Get("X-Multica-Signature"),
+		time.Now().UTC(),
+	) == nil
+}
+
+func (h *Handler) BundleDownload(w http.ResponseWriter, r *http.Request) {
+	appID, err := uuid.Parse(chi.URLParam(r, "id"))
+	version := chi.URLParam(r, "version")
+	if err != nil || !semverPattern.MatchString(version) {
+		writeError(w, http.StatusBadRequest, "invalid app version")
+		return
+	}
+	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	signed := h.authenticateRuntimeRequest(r, nil)
+	granted := h != nil && h.runtimeServiceKey != "" && verifyBundleToken(h.runtimeServiceKey, bearer, appID.String(), version, time.Now().UTC()) == nil
+	if !signed && !granted {
+		writeError(w, http.StatusUnauthorized, "runtime authentication failed")
+		return
+	}
+	rows, err := h.pool.Query(r.Context(), `SELECT path,media_type,content,sha256 FROM cerebro_app_version_file WHERE app_id=$1 AND version=$2 ORDER BY path`, appID, version)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load app bundle")
+		return
+	}
+	defer rows.Close()
+	files := make([]BundleFile, 0)
+	for rows.Next() {
+		var file BundleFile
+		if err := rows.Scan(&file.Path, &file.MediaType, &file.Content, &file.SHA256); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load app bundle")
+			return
+		}
+		files = append(files, file)
+	}
+	if rows.Err() != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load app bundle")
+		return
+	}
+	if len(files) == 0 {
+		writeError(w, http.StatusNotFound, "app bundle not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"app_id": appID, "version": version, "files": files})
+}
+
+func (h *Handler) PendingDeployments(w http.ResponseWriter, r *http.Request) {
+	if !h.authenticateRuntimeRequest(r, nil) {
+		writeError(w, http.StatusUnauthorized, "runtime authentication failed")
+		return
+	}
+	rows, err := h.pool.Query(r.Context(), `SELECT app_id,version,bundle_sha256 FROM cerebro_app_deployment WHERE status IN ('pending','provisioning') ORDER BY created_at`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load app deployments")
+		return
+	}
+	defer rows.Close()
+	result := make([]map[string]string, 0)
+	for rows.Next() {
+		var appID uuid.UUID
+		var version, bundleSHA string
+		if err := rows.Scan(&appID, &version, &bundleSHA); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load app deployments")
+			return
+		}
+		result = append(result, map[string]string{"app_id": appID.String(), "version": version, "bundle_sha256": bundleSHA})
+	}
+	if rows.Err() != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load app deployments")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) DeploymentInfo(w http.ResponseWriter, r *http.Request) {
+	if !h.authenticateRuntimeRequest(r, nil) {
+		writeError(w, http.StatusUnauthorized, "runtime authentication failed")
+		return
+	}
+	appID, err := uuid.Parse(chi.URLParam(r, "id"))
+	version := chi.URLParam(r, "version")
+	if err != nil || !semverPattern.MatchString(version) {
+		writeError(w, http.StatusBadRequest, "invalid app version")
+		return
+	}
+	var serviceID, internalDomain string
+	err = h.pool.QueryRow(r.Context(), `SELECT external_service_id,internal_domain FROM cerebro_app_deployment WHERE app_id=$1 AND version=$2 AND status='ready'`, appID, version).Scan(&serviceID, &internalDomain)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "ready app deployment not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load app deployment")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"external_service_id": serviceID, "internal_domain": internalDomain})
+}
+
+func (h *Handler) RuntimeCallback(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
+	if err != nil || !h.authenticateRuntimeRequest(r, body) {
+		writeError(w, http.StatusUnauthorized, "runtime authentication failed")
+		return
+	}
+	appID, err := uuid.Parse(chi.URLParam(r, "id"))
+	version := chi.URLParam(r, "version")
+	if err != nil || !semverPattern.MatchString(version) {
+		writeError(w, http.StatusBadRequest, "invalid app version")
+		return
+	}
+	var callback deploymentCallback
+	if err := json.Unmarshal(body, &callback); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update app deployment")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if err := updateDeploymentState(r.Context(), tx, appID, version, callback); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid deployment update")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update app deployment")
+		return
+	}
+	if callback.Status == "failed" && callback.Error != "" {
+		slog.Error("mini app runtime reported deployment failure", "app_id", appID, "version", version, "detail", callback.Error)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": callback.Status})
 }
 
 func envFlagEnabled(name string) bool {
@@ -90,13 +267,20 @@ type createRequest struct {
 }
 
 type publishRequest struct {
-	Version      string          `json:"version"`
-	ReleaseNotes string          `json:"release_notes"`
-	Snapshot     json.RawMessage `json:"snapshot"`
+	Version      string       `json:"version"`
+	ReleaseNotes string       `json:"release_notes"`
+	Files        []BundleFile `json:"files"`
 }
 
 type rollbackRequest struct {
 	Version string `json:"version"`
+}
+
+type deploymentCallback struct {
+	Status            string `json:"status"`
+	ExternalServiceID string `json:"external_service_id"`
+	InternalDomain    string `json:"internal_domain"`
+	Error             string `json:"error"`
 }
 
 type tokenRequest struct {
@@ -170,7 +354,10 @@ func validatePublishRequest(req publishRequest) error {
 	if strings.TrimSpace(req.ReleaseNotes) == "" {
 		return errors.New("release_notes is required")
 	}
-	return validateSnapshot(req.Snapshot)
+	if len(req.Files) == 0 {
+		return errors.New("files are required")
+	}
+	return nil
 }
 
 func validateViewSubmission(req viewSubmissionRequest) error {
@@ -184,6 +371,37 @@ func validateViewSubmission(req viewSubmissionRequest) error {
 		return errors.New("value must be valid JSON")
 	}
 	return nil
+}
+
+func updateDeploymentState(ctx context.Context, tx bundleExec, appID uuid.UUID, version string, callback deploymentCallback) error {
+	switch callback.Status {
+	case "ready":
+		if strings.TrimSpace(callback.ExternalServiceID) == "" || strings.TrimSpace(callback.InternalDomain) == "" {
+			return errors.New("ready deployment requires service identity")
+		}
+		if _, err := tx.Exec(ctx, `UPDATE cerebro_app_deployment SET status='ready',external_service_id=$3,internal_domain=$4,last_error='',updated_at=now() WHERE app_id=$1 AND version=$2`, appID, version, callback.ExternalServiceID, callback.InternalDomain); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE cerebro_app SET current_version=$2,status='published',updated_at=now()
+			WHERE id=$1 AND (
+				NOT EXISTS (SELECT 1 FROM cerebro_app_grant WHERE app_id=$1 AND version=$2)
+				OR EXISTS (SELECT 1 FROM cerebro_app_grant WHERE app_id=$1 AND version=$2 AND status='approved')
+			)`, appID, version); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO cerebro_app_audit_log (workspace_id,app_id,actor_type,actor_id,action,metadata)
+			SELECT workspace_id,id,'system','apps-runtime','app.version.published',jsonb_build_object('version',$2) FROM cerebro_app WHERE id=$1`, appID, version)
+		return err
+	case "failed":
+		if _, err := tx.Exec(ctx, `UPDATE cerebro_app_deployment SET status='failed',last_error='App runtime failed',updated_at=now() WHERE app_id=$1 AND version=$2`, appID, version); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO cerebro_app_audit_log (workspace_id,app_id,actor_type,actor_id,action,metadata)
+			SELECT workspace_id,id,'system','apps-runtime','app.runtime.failed',jsonb_build_object('version',$2) FROM cerebro_app WHERE id=$1`, appID, version)
+		return err
+	default:
+		return errors.New("unsupported deployment status")
+	}
 }
 
 func approvedConnectionScope(scopes []tokens.Scope, connectionID string) bool {
@@ -418,12 +636,24 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req publishRequest
-	if !decodeJSON(w, r, &req) {
+	if !decodeJSONLimit(w, r, &req, 8<<20) {
 		return
 	}
 	if err := validatePublishRequest(req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	bundle, err := ValidateBundle(app.Name, req.Version, req.Files)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var snapshot json.RawMessage
+	for _, file := range bundle.Files {
+		if file.Path == "app.json" {
+			snapshot = json.RawMessage(file.Content)
+			break
+		}
 	}
 	tx, err := h.pool.Begin(r.Context())
 	if err != nil {
@@ -431,11 +661,20 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	if _, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_version (app_id,version,content_snapshot,release_notes,created_by) VALUES ($1,$2,$3,$4,$5)`, app.ID, req.Version, req.Snapshot, strings.TrimSpace(req.ReleaseNotes), userID); err != nil {
+	if _, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_version (app_id,version,content_snapshot,release_notes,created_by) VALUES ($1,$2,$3,$4,$5)`, app.ID, req.Version, snapshot, strings.TrimSpace(req.ReleaseNotes), userID); err != nil {
 		writeError(w, http.StatusConflict, "version already exists")
 		return
 	}
-	scopes, err := snapshotScopes(req.Snapshot)
+	appID, err := uuid.Parse(app.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to publish app")
+		return
+	}
+	if err = StoreVersionBundle(r.Context(), tx, appID, req.Version, bundle); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to store app bundle")
+		return
+	}
+	scopes, err := snapshotScopes(snapshot)
 	if err != nil {
 		writeError(w, 400, "snapshot manifest scopes are invalid")
 		return
@@ -447,19 +686,39 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, err = tx.Exec(r.Context(), `UPDATE cerebro_app SET current_version=$2,status='published',updated_at=now() WHERE id=$1`, app.ID, req.Version); err != nil {
-		writeError(w, 500, "failed to publish app")
+	provider := strings.TrimSpace(os.Getenv("CEREBRO_APPS_RUNTIME_PROVIDER"))
+	if provider == "" {
+		provider = "docker"
+	}
+	if provider != "docker" && provider != "sliplane" {
+		writeError(w, http.StatusInternalServerError, "app runtime is not configured")
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_deployment (app_id,version,provider,status,bundle_sha256) VALUES ($1,$2,$3,'pending',$4)`, app.ID, req.Version, provider, bundle.SHA256); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create app deployment")
 		return
 	}
 	if err = tx.Commit(r.Context()); err != nil {
 		writeError(w, 500, "failed to publish app")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"app_id": app.ID, "version": req.Version, "release_notes": strings.TrimSpace(req.ReleaseNotes)})
+	deployment := RuntimeDeploymentRequest{AppID: app.ID, Version: req.Version, BundleSHA256: bundle.SHA256}
+	if h.runtime == nil || h.runtime.Deploy(r.Context(), deployment) != nil {
+		_, _ = h.pool.Exec(r.Context(), `UPDATE cerebro_app_deployment SET status='failed',last_error='App runtime is unavailable',updated_at=now() WHERE app_id=$1 AND version=$2`, app.ID, req.Version)
+		slog.Error("mini app runtime deployment failed", "app_id", app.ID, "version", req.Version)
+		writeError(w, http.StatusBadGateway, "app runtime is unavailable")
+		return
+	}
+	_, _ = h.pool.Exec(r.Context(), `UPDATE cerebro_app_deployment SET status='provisioning',updated_at=now() WHERE app_id=$1 AND version=$2`, app.ID, req.Version)
+	writeJSON(w, http.StatusAccepted, map[string]any{"app_id": app.ID, "version": req.Version, "release_notes": strings.TrimSpace(req.ReleaseNotes), "deployment_status": "provisioning"})
 }
 
 func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
 	app, ok := h.loadApp(w, r)
+	if !ok {
+		return
+	}
+	actorID, ok := requestUserID(w, r)
 	if !ok {
 		return
 	}
@@ -471,16 +730,47 @@ func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "version must be semantic versioning")
 		return
 	}
-	result, err := h.pool.Exec(r.Context(), `UPDATE cerebro_app SET current_version=$2,status='published',updated_at=now() WHERE id=$1 AND EXISTS (SELECT 1 FROM cerebro_app_version WHERE app_id=$1 AND version=$2)`, app.ID, req.Version)
+	var bundleSHA string
+	err := h.pool.QueryRow(r.Context(), `SELECT bundle_sha256 FROM cerebro_app_deployment WHERE app_id=$1 AND version=$2 AND status IN ('ready','paused')`, app.ID, req.Version).Scan(&bundleSHA)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusConflict, "app version is not available for rollback")
+		return
+	}
 	if err != nil {
-		writeError(w, 500, "failed to roll back app")
+		writeError(w, http.StatusInternalServerError, "failed to load rollback version")
 		return
 	}
-	if result.RowsAffected() == 0 {
-		writeError(w, 404, "app version not found")
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prepare app rollback")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"app_id": app.ID, "version": req.Version})
+	defer tx.Rollback(r.Context())
+	appID := uuid.MustParse(app.ID)
+	if err := markRollbackProvisioning(r.Context(), tx, appID, actorID, req.Version); err != nil || tx.Commit(r.Context()) != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prepare app rollback")
+		return
+	}
+	if h.runtime == nil || h.runtime.Deploy(r.Context(), RuntimeDeploymentRequest{AppID: app.ID, Version: req.Version, BundleSHA256: bundleSHA}) != nil {
+		_, _ = h.pool.Exec(r.Context(), `UPDATE cerebro_app_deployment SET status='paused',last_error='App runtime is unavailable',updated_at=now() WHERE app_id=$1 AND version=$2`, app.ID, req.Version)
+		writeError(w, http.StatusBadGateway, "app runtime is unavailable")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"app_id": app.ID, "version": req.Version, "deployment_status": "provisioning"})
+}
+
+func markRollbackProvisioning(ctx context.Context, exec bundleExec, appID, actorID uuid.UUID, version string) error {
+	result, err := exec.Exec(ctx, `UPDATE cerebro_app_deployment SET status='provisioning',last_error='',updated_at=now()
+		WHERE app_id=$1 AND version=$2 AND status IN ('ready','paused')`, appID, version)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return errors.New("rollback version is not available")
+	}
+	_, err = exec.Exec(ctx, `INSERT INTO cerebro_app_audit_log (workspace_id,app_id,actor_type,actor_id,action,metadata)
+		SELECT workspace_id,id,'user',$2,$3,jsonb_build_object('version',$4,'status','provisioning') FROM cerebro_app WHERE id=$1`, appID, actorID.String(), "app.version.rollback", version)
+	return err
 }
 
 func (h *Handler) ApproveScopes(w http.ResponseWriter, r *http.Request) {
@@ -505,7 +795,13 @@ func (h *Handler) ApproveScopes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rawScopes, _ := json.Marshal(req.Scopes)
-	result, err := h.pool.Exec(r.Context(), `
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to approve app scopes")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	result, err := tx.Exec(r.Context(), `
 		INSERT INTO cerebro_app_grant (app_id,version,scopes,registry_profile_ref,status,approved_by,approved_at)
 		SELECT $1,$2,$3,$4,'approved',$5,now()
 		WHERE EXISTS (SELECT 1 FROM cerebro_app_version WHERE app_id=$1 AND version=$2)
@@ -520,7 +816,18 @@ func (h *Handler) ApproveScopes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "app version not found")
 		return
 	}
-	_, _ = h.pool.Exec(r.Context(), `INSERT INTO cerebro_app_audit_log (workspace_id,app_id,actor_type,actor_id,action,metadata) VALUES ($1,$2,'user',$3,'app.scopes.approved',jsonb_build_object('version',$4))`, app.WorkspaceID, app.ID, approverID.String(), req.Version)
+	if _, err := tx.Exec(r.Context(), `UPDATE cerebro_app SET current_version=$2,status='published',updated_at=now() WHERE id=$1 AND EXISTS (SELECT 1 FROM cerebro_app_deployment WHERE app_id=$1 AND version=$2 AND status='ready')`, app.ID, req.Version); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to activate app version")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `INSERT INTO cerebro_app_audit_log (workspace_id,app_id,actor_type,actor_id,action,metadata) VALUES ($1,$2,'user',$3,'app.scopes.approved',jsonb_build_object('version',$4))`, app.WorkspaceID, app.ID, approverID.String(), req.Version); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to record scope approval")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to approve app scopes")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"app_id": app.ID, "version": req.Version, "status": "approved", "scopes": req.Scopes})
 }
 
@@ -858,7 +1165,11 @@ func requestUserID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, out any) bool {
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
+	return decodeJSONLimit(w, r, out, 4<<20)
+}
+
+func decodeJSONLimit(w http.ResponseWriter, r *http.Request, out any, limit int64) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
 		writeError(w, 400, "invalid JSON body")

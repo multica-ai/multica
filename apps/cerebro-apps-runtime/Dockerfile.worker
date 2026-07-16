@@ -1,8 +1,11 @@
 FROM node:22-alpine
-RUN apk add --no-cache proxychains-ng
+RUN corepack enable
 WORKDIR /srv
-COPY apps/cerebro-apps-runtime/worker-runner.mjs ./worker-runner.mjs
-COPY apps/cerebro-apps-runtime/proxychains.conf /etc/proxychains/proxychains.conf
-ENV NODE_ENV=production
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/cerebro-apps-runtime/package.json ./apps/cerebro-apps-runtime/package.json
+RUN pnpm install --frozen-lockfile --prod --filter @multica/cerebro-apps-runtime
+WORKDIR /srv/apps/cerebro-apps-runtime
+COPY apps/cerebro-apps-runtime/ ./
+ENV NODE_ENV=production PORT=4311
 USER node
-ENTRYPOINT []
+ENTRYPOINT ["node", "worker-entry.mjs"]

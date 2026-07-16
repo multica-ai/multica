@@ -32,17 +32,14 @@ test("each app version runs in its own container", () => {
   assert.deepEqual(args(APP_A).slice(imageIndex + 1, imageIndex + 5), ["proxychains4", "-q", "node", "/srv/worker-runner.mjs"]);
 });
 
-test("compose builds the worker image and gives the trusted runtime access to isolated Docker", async () => {
-  const compose = await readFile(new URL("./docker-compose.yml", import.meta.url), "utf8");
-  assert.match(compose, /cerebro-app-worker:/);
-  assert.match(compose, /Dockerfile\.worker/);
-  assert.match(compose, /\/var\/run\/docker\.sock:\/var\/run\/docker\.sock/);
-  assert.match(compose, /multica-apps:[\s\S]*internal:\s*true/);
-  assert.match(compose, /cerebro-app-egress:/);
-  assert.match(compose, /ALLOWED_HOSTS:\s*registry\.firtal\.com,firtal-data-registry\.sliplane\.app/);
-  assert.match(compose, /ipv4_address:\s*172\.31\.240\.2/);
-  const proxychains = await readFile(new URL("./proxychains.conf", import.meta.url), "utf8");
-  assert.match(proxychains, /http\s+172\.31\.240\.2\s+3128/);
+test("production runtime has no Docker binary or host socket", async () => {
+	const compose = await readFile(new URL("./docker-compose.yml", import.meta.url), "utf8");
+	const dockerfile = await readFile(new URL("./Dockerfile", import.meta.url), "utf8");
+	assert.match(compose, /cerebro-app-worker:/);
+	assert.match(compose, /Dockerfile\.worker/);
+	assert.doesNotMatch(compose, /\/var\/run\/docker\.sock/);
+	assert.doesNotMatch(dockerfile, /docker-cli/);
+	assert.match(compose, /CEREBRO_APPS_RUNTIME_PROVIDER:\s*sliplane/);
 });
 
 test("an app only mounts its own bundle, read-only", () => {

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { createAppsRuntime } from "./runtime.mjs";
+import { signServiceRequest } from "./auth.mjs";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "multica-app-runtime-"));
@@ -15,7 +16,7 @@ async function fixture() {
   await writeFile(join(version, "frontend", "index.html"), "<h1>Allergen Formatter</h1>");
   await writeFile(
     join(version, "backend", "index.mjs"),
-    `export default async ({ value }) => ({ formatted: String(value).toUpperCase(), leaked: process.env.FIRTAL_REGISTRY_KEY ?? null });`,
+    `export default async (input) => ({ formatted: String(input.value).toUpperCase(), leaked: process.env.FIRTAL_REGISTRY_KEY ?? null, grantLeaked: input.grant_token ?? null });`,
   );
   return root;
 }
@@ -30,6 +31,18 @@ test("serves an immutable app frontend version", async () => {
   assert.match(await response.text(), /Allergen Formatter/);
   assert.equal(response.headers.get("cache-control"), "public, max-age=31536000, immutable");
   assert.match(response.headers.get("content-security-policy"), /frame-ancestors https:\/\/multica\.example/);
+});
+
+test("serves a validated published frontend without a shared filesystem", async () => {
+  const requests = [];
+  const runtime = createAppsRuntime({
+    bundleStore: { get: async (...args) => (requests.push(args), { content: Buffer.from("<h1>Published</h1>"), mediaType: "text/html" }) },
+    workerIsolation: "process",
+  });
+  const response = await runtime.fetch(new Request("http://runtime/apps/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/1.0.0/"));
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "<h1>Published</h1>");
+  assert.deepEqual(requests, [["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "1.0.0", "frontend/index.html"]]);
 });
 
 test("serves the mini-app SDK with a real connection call route", async () => {
@@ -56,7 +69,20 @@ test("isolates backend execution and strips registry system credentials", async 
     }),
   );
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { formatted: "MILK", leaked: null });
+  assert.deepEqual(await response.json(), { formatted: "MILK", leaked: null, grantLeaked: null });
+});
+
+test("unwraps invocation input without exposing the private grant to app code", async () => {
+  const runtime = createAppsRuntime({ bundleRoot: await fixture(), workerIsolation: "process" });
+  const response = await runtime.fetch(
+    new Request("http://runtime/workers/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/1.0.0/invoke", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input: { value: "milk" }, grant_token: "private-invocation-grant" }),
+    }),
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { formatted: "MILK", leaked: null, grantLeaked: null });
 });
 
 test("one failed worker does not affect runtime health", async () => {
@@ -117,4 +143,75 @@ test("allergen fixture loads a CSP-safe client that obtains a personal token bef
   // whatever the token broker handed out, so staging and local can never leak
   // traffic to the production registry.
   assert.doesNotMatch(source, /https?:\/\/[^"']*registry/);
+});
+
+test("accepts only signed deployment requests and dispatches them once", async () => {
+  const deployments = [];
+  const runtime = createAppsRuntime({
+    bundleRoot: await fixture(),
+    workerIsolation: "process",
+    runtimeServiceKey: "service-secret",
+    deploymentManager: { deploy: async (value) => deployments.push(value) },
+  });
+  const body = Buffer.from(JSON.stringify({ app_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", version: "1.0.0", bundle_sha256: "a".repeat(64) }));
+  const unsigned = await runtime.fetch(new Request("http://runtime/deployments", { method: "POST", body }));
+  assert.equal(unsigned.status, 401);
+  const signed = signServiceRequest("service-secret", "POST", "/deployments", body);
+  const accepted = await runtime.fetch(new Request("http://runtime/deployments", {
+    method: "POST",
+    headers: { "x-multica-timestamp": signed.timestamp, "x-multica-signature": signed.signature },
+    body,
+  }));
+  assert.equal(accepted.status, 202);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(deployments, [{ appId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", version: "1.0.0", bundleSha256: "a".repeat(64) }]);
+});
+
+test("accepts only signed pause and delete lifecycle requests", async () => {
+  const calls = [];
+  const runtime = createAppsRuntime({
+    bundleRoot: await fixture(),
+    workerIsolation: "process",
+    runtimeServiceKey: "service-secret",
+    deploymentManager: { lifecycle: async (...args) => calls.push(args) },
+  });
+  const body = Buffer.from('{"service_id":"service-123"}');
+  const unsigned = await runtime.fetch(new Request("http://runtime/lifecycle/pause", { method: "POST", body }));
+  assert.equal(unsigned.status, 401);
+  for (const action of ["pause", "delete"]) {
+    const path = `/lifecycle/${action}`;
+    const signed = signServiceRequest("service-secret", "POST", path, body);
+    const response = await runtime.fetch(new Request(`http://runtime${path}`, {
+      method: "POST",
+      headers: { "x-multica-timestamp": signed.timestamp, "x-multica-signature": signed.signature },
+      body,
+    }));
+    assert.equal(response.status, 204);
+  }
+  assert.deepEqual(calls, [["pause", "service-123"], ["delete", "service-123"]]);
+});
+
+test("proxies a signed invoke to the concrete private worker domain", async () => {
+  const proxied = [];
+  const runtime = createAppsRuntime({
+    bundleRoot: await fixture(),
+    workerIsolation: "process",
+    runtimeServiceKey: "service-secret",
+    backendClient: { deployment: async () => ({ internalDomain: "worker-ab12.internal", invokeKey: "invoke-key" }) },
+    fetch: async (url, init) => {
+      proxied.push({ url: String(url), init });
+      return Response.json({ value: "MILK" });
+    },
+  });
+  const path = "/workers/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/1.0.0/invoke";
+  const body = Buffer.from('{"value":"milk"}');
+  const signed = signServiceRequest("service-secret", "POST", path, body);
+  const response = await runtime.fetch(new Request(`http://runtime${path}`, {
+    method: "POST",
+    headers: { "x-multica-timestamp": signed.timestamp, "x-multica-signature": signed.signature },
+    body,
+  }));
+  assert.equal(response.status, 200);
+  assert.equal(proxied[0].url, "http://worker-ab12.internal:4311/invoke");
+  assert.equal(proxied[0].init.headers["x-multica-invoke-key"], "invoke-key");
 });

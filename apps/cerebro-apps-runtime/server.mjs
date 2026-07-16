@@ -1,8 +1,19 @@
 import { createServer } from "node:http";
+import { BackendClient } from "./backend-client.mjs";
+import { BundleStore } from "./bundle-store.mjs";
+import { DeploymentManager } from "./deployment-manager.mjs";
+import { SliplaneProvider } from "./providers/sliplane-provider.mjs";
 import { createAppsRuntime } from "./runtime.mjs";
 
-const runtime = createAppsRuntime();
+const backend = new BackendClient();
+const bundleStore = new BundleStore({ backend });
+const deploymentManager = process.env.CEREBRO_APPS_RUNTIME_PROVIDER === "sliplane"
+  ? new DeploymentManager({ provider: new SliplaneProvider(), backend })
+  : undefined;
+const runtime = createAppsRuntime({ deploymentManager, backendClient: backend, bundleStore });
 const port = Number(process.env.PORT ?? 4310);
+
+deploymentManager?.resume().catch((error) => console.error("mini-app deployment resume failed", { error }));
 
 createServer(async (req, res) => {
   const chunks = [];

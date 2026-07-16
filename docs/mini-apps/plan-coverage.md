@@ -39,3 +39,6 @@ Playwright Allergen Formatter flow.
 | 9 | FIR-154 Allergen Formatter | `apps/cerebro-apps-runtime/runtime.test.mjs#allergen fixture makes one AI call on the personal key` |
 | 10 | Real nested catalog folders | `server/internal/cerebro/apps/folders_test.go#TestAppFoldersSupportNestedRenameAndMove` |
 | 11 | Plan-to-code gate | `server/internal/cerebro/apps/plan_coverage_test.go#TestMiniAppPlanCoverageReferencesExist` |
+| 12 | Source editor, import/export, preview, and immutable publish | `packages/cerebro-apps/views/app-editor-page.test.tsx` and `packages/cerebro-apps/core/api.test.ts` |
+| 13 | Private readiness, rollback, retryable delete, and lifecycle audit | `apps/cerebro-apps-runtime/providers/sliplane-provider.test.mjs` and `server/internal/cerebro/apps/handler_test.go` |
+| 14 | Relative modules, memory pressure, and debug handle disposal | `apps/cerebro-apps-runtime/sandbox.test.mjs` and `worker-server.test.mjs` |

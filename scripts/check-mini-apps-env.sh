@@ -6,5 +6,9 @@
 # disabled them.
 configure_check_mini_apps_env() {
   : "${CEREBRO_MINI_APPS_ENABLED:=true}"
+  : "${CEREBRO_APPS_RUNTIME_URL:=http://127.0.0.1:4310}"
+  : "${CEREBRO_APPS_RUNTIME_SERVICE_KEY:=local-check-mini-apps-key}"
   export CEREBRO_MINI_APPS_ENABLED
+  export CEREBRO_APPS_RUNTIME_URL
+  export CEREBRO_APPS_RUNTIME_SERVICE_KEY
 }

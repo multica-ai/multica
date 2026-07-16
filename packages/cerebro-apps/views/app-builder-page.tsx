@@ -36,7 +36,7 @@ export function AppBuilderPage() {
         event.preventDefault(); setError(""); setSaving(true);
         try {
           const app = await createApp({ name: name.trim(), slug: slugify(name), description: description.trim(), folder_id: folderId || null }, workspace.slug);
-          navigation.push(`/${workspace.slug}/apps/${app.id}`);
+          navigation.push(`/${workspace.slug}/apps/${app.id}/edit`);
         } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create app"); }
         finally { setSaving(false); }
       }}>

@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getAppDetail = vi.fn();
+const push = vi.fn();
 
 vi.mock("@multica/cerebro-feature-flags", () => ({ useFeatureFlag: () => true }));
 vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "ws-1", slug: "firtal" }) }));
+vi.mock("@multica/views/navigation", () => ({ useNavigation: () => ({ push }) }));
 vi.mock("../core/api", () => ({
   getAppDetail: (id: string) => getAppDetail(id),
   callAppSdk: vi.fn(),
@@ -30,6 +33,7 @@ describe("AppDetailPage", () => {
   beforeEach(() => {
     getAppDetail.mockReset();
     getAppDetail.mockResolvedValue(app);
+    push.mockReset();
   });
 
   it("opens the published app as the full workspace surface without workflow controls", async () => {
@@ -43,5 +47,7 @@ describe("AppDetailPage", () => {
     expect(frame).toHaveClass("h-full");
     expect(screen.queryByText("Workflow")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Test workflow/i })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Edit app" }));
+    expect(push).toHaveBeenCalledWith("/firtal/apps/app-1/edit");
   });
 });

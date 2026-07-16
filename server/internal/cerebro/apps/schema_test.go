@@ -33,3 +33,24 @@ func TestMiniAppsMigrationDefinesVersionedCatalogAndWorkflowTables(t *testing.T)
 		t.Error("workflow runs must persist their identity envelope")
 	}
 }
+
+func TestMiniAppSchemaDefinesImmutableBundlesAndDeployments(t *testing.T) {
+	raw, err := os.ReadFile("../../../migrations/9141_cerebro_app_bundles.up.sql")
+	if err != nil {
+		t.Fatalf("read app bundles migration: %v", err)
+	}
+	sql := string(raw)
+	for _, fragment := range []string{
+		"CREATE TABLE IF NOT EXISTS cerebro_app_version_file",
+		"PRIMARY KEY (app_id, version, path)",
+		"REFERENCES cerebro_app_version(app_id, version) ON DELETE CASCADE",
+		"CREATE TABLE IF NOT EXISTS cerebro_app_deployment",
+		"CREATE INDEX IF NOT EXISTS idx_cerebro_app_deployment_status",
+		"CHECK (provider IN ('docker', 'sliplane'))",
+		"CHECK (status IN ('pending', 'provisioning', 'ready', 'failed', 'paused', 'deleting'))",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("app bundles migration is missing %q", fragment)
+		}
+	}
+}

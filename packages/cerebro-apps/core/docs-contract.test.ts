@@ -26,8 +26,12 @@ describe("mini-app documentation contract", () => {
     expect(combined).toContain("connections.call");
     expect(combined).toContain("view.show_and_wait");
     expect(combined).toContain("frontend/index.html");
+    expect(combined).toContain("POST /api/cerebro/apps/{appId}/invoke");
+    expect(combined).toContain("Import files");
+    expect(combined).toContain("relative backend modules");
+    expect(combined).toContain("private health check");
     expect(docs[4]).toContain("separately deployed app");
-    for (let gate = 1; gate <= 11; gate++) expect(docs[5]).toContain(`G${gate}`);
+    for (let gate = 1; gate <= 15; gate++) expect(docs[5]).toContain(`G${gate}`);
   });
 
   it("keeps the stronger gates tied to proof names that exist", async () => {

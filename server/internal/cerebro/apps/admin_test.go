@@ -34,4 +34,15 @@ func TestAllergenFormatterIsAnInstallablePublishedBuiltin(t *testing.T) {
 	if !strings.Contains(string(allergenFormatterSnapshot), `"Allergen Formatter"`) || !strings.Contains(string(allergenFormatterSnapshot), `"integration"`) {
 		t.Fatal("FIR-154 snapshot is not the real scoped app bundle")
 	}
+	bundle, err := ValidateBundle("Allergen Formatter", "1.0.0", allergenFormatterBundleFiles())
+	if err != nil {
+		t.Fatalf("built-in bundle is not publishable: %v", err)
+	}
+	if len(bundle.Files) != 4 || bundle.SHA256 == "" {
+		t.Fatalf("built-in bundle is incomplete: %+v", bundle)
+	}
+	backend := string(allergenFormatterBundleFiles()[3].Content)
+	if !strings.Contains(backend, `multica.connections.call("ai_gateway", "chat.completions"`) || strings.Contains(backend, `const names=`) {
+		t.Fatal("Allergen Formatter must make one person-bound AI call instead of formatting locally")
+	}
 }

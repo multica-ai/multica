@@ -1,15 +1,40 @@
 package apps
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/multica-ai/multica/server/internal/cerebro/apps/tokens"
 )
+
+type recordingDeploymentExec struct {
+	queries []string
+	args    [][]any
+}
+
+type recordingLifecycleRuntime struct {
+	calls []string
+	err   error
+}
+
+func (r *recordingLifecycleRuntime) Lifecycle(_ context.Context, action, serviceID string) error {
+	r.calls = append(r.calls, action+":"+serviceID)
+	return r.err
+}
+
+func (f *recordingDeploymentExec) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	f.queries = append(f.queries, sql)
+	f.args = append(f.args, args)
+	return pgconn.NewCommandTag("UPDATE 1"), nil
+}
 
 func TestValidateCreateRequestRequiresStableIdentity(t *testing.T) {
 	if err := validateCreateRequest(createRequest{Name: "Allergen Formatter", Slug: "allergen-formatter"}); err != nil {
@@ -43,11 +68,11 @@ func TestMiniAppsServerSurfaceDefaultsOff(t *testing.T) {
 	}
 }
 
-func TestValidatePublishRequestRequiresSemverReleaseNotesAndManifest(t *testing.T) {
+func TestValidatePublishRequestRequiresSemverReleaseNotesAndFiles(t *testing.T) {
 	valid := publishRequest{
 		Version:      "1.0.0",
 		ReleaseNotes: "Initial release",
-		Snapshot:     json.RawMessage(`{"manifest":{"schema_version":"1","name":"Allergen Formatter"},"frontend":{"entry":"index.js"}}`),
+		Files:        validBundleFiles(),
 	}
 	if err := validatePublishRequest(valid); err != nil {
 		t.Fatalf("valid publish rejected: %v", err)
@@ -55,13 +80,79 @@ func TestValidatePublishRequestRequiresSemverReleaseNotesAndManifest(t *testing.
 	for _, mutate := range []func(*publishRequest){
 		func(r *publishRequest) { r.Version = "latest" },
 		func(r *publishRequest) { r.ReleaseNotes = " " },
-		func(r *publishRequest) { r.Snapshot = json.RawMessage(`{}`) },
+		func(r *publishRequest) { r.Files = nil },
 	} {
 		req := valid
 		mutate(&req)
 		if err := validatePublishRequest(req); err == nil {
 			t.Fatalf("invalid publish accepted: %+v", req)
 		}
+	}
+}
+
+func TestRuntimeCallbackOnlyMakesReadyVersionCurrent(t *testing.T) {
+	appID := uuid.MustParse("f1540000-0000-4154-8154-000000000001")
+	ready := &recordingDeploymentExec{}
+	if err := updateDeploymentState(context.Background(), ready, appID, "1.0.0", deploymentCallback{Status: "ready", ExternalServiceID: "service-1", InternalDomain: "app.internal"}); err != nil {
+		t.Fatalf("ready callback: %v", err)
+	}
+	if len(ready.queries) != 3 || !strings.Contains(ready.queries[1], "current_version") || !strings.Contains(ready.queries[1], "status='approved'") || !strings.Contains(ready.queries[2], "app.version.published") {
+		t.Fatalf("ready callback did not switch current version atomically: %#v", ready.queries)
+	}
+
+	failed := &recordingDeploymentExec{}
+	if err := updateDeploymentState(context.Background(), failed, appID, "2.0.0", deploymentCallback{Status: "failed", Error: "/srv/private.js"}); err != nil {
+		t.Fatalf("failed callback: %v", err)
+	}
+	if len(failed.queries) != 2 || strings.Contains(failed.queries[0], "current_version") || !strings.Contains(failed.queries[1], "app.runtime.failed") {
+		t.Fatalf("failed callback changed current version: %#v", failed.queries)
+	}
+	if err := updateDeploymentState(context.Background(), failed, appID, "2.0.0", deploymentCallback{Status: "unknown"}); err == nil {
+		t.Fatal("unknown deployment status was accepted")
+	}
+}
+
+func TestRuntimeLifecycleAppliesEveryServiceAndStopsOnFailure(t *testing.T) {
+	runtime := &recordingLifecycleRuntime{}
+	if err := applyRuntimeLifecycle(context.Background(), runtime, "delete", []string{"service-1", "service-2"}); err != nil {
+		t.Fatalf("delete services: %v", err)
+	}
+	if strings.Join(runtime.calls, ",") != "delete:service-1,delete:service-2" {
+		t.Fatalf("unexpected lifecycle calls: %#v", runtime.calls)
+	}
+	runtime.err = errors.New("provider unavailable")
+	if err := applyRuntimeLifecycle(context.Background(), runtime, "pause", []string{"service-3"}); err == nil {
+		t.Fatal("provider failure was ignored")
+	}
+}
+
+func TestLifecycleStateTransitionsAreDurableAndAudited(t *testing.T) {
+	appID := uuid.MustParse("f1540000-0000-4154-8154-000000000001")
+	actorID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	recorder := &recordingDeploymentExec{}
+	if err := markDeploymentsDeleting(context.Background(), recorder, appID); err != nil {
+		t.Fatalf("mark deleting: %v", err)
+	}
+	if err := recordAppLifecycleAudit(context.Background(), recorder, appID, actorID, "app.deleted"); err != nil {
+		t.Fatalf("record delete: %v", err)
+	}
+	if err := recordAppLifecycleAudit(context.Background(), recorder, appID, actorID, "app.disabled"); err != nil {
+		t.Fatalf("record disable: %v", err)
+	}
+	if len(recorder.queries) != 3 || !strings.Contains(recorder.queries[0], "status='deleting'") || recorder.args[1][2] != "app.deleted" || recorder.args[2][2] != "app.disabled" {
+		t.Fatalf("lifecycle state was not durable and audited: %#v", recorder.queries)
+	}
+}
+
+func TestRollbackWaitsForAHealthyTargetAndRecordsIntent(t *testing.T) {
+	appID := uuid.MustParse("f1540000-0000-4154-8154-000000000001")
+	actorID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	recorder := &recordingDeploymentExec{}
+	if err := markRollbackProvisioning(context.Background(), recorder, appID, actorID, "1.0.0"); err != nil {
+		t.Fatalf("prepare rollback: %v", err)
+	}
+	if len(recorder.queries) != 2 || !strings.Contains(recorder.queries[0], "status='provisioning'") || strings.Contains(recorder.queries[0], "current_version") || recorder.args[1][2] != "app.version.rollback" {
+		t.Fatalf("rollback switched before health or missed audit: queries=%#v args=%#v", recorder.queries, recorder.args)
 	}
 }
 
@@ -170,6 +261,40 @@ func TestConnectionCallRequiresAnApprovedIntegrationScope(t *testing.T) {
 	}
 }
 
+func TestAIGatewayCallUsesThePersonBoundToken(t *testing.T) {
+	var authorization string
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		writeJSON(w, http.StatusOK, map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": `{\"allergens\":[\"MILK\"]}`}}}})
+	}))
+	defer gateway.Close()
+
+	result, err := callAIGateway(context.Background(), gateway.Client(), tokens.Token{Key: "person-key", AIBaseURL: gateway.URL}, map[string]any{"model": "claude-haiku-4-5", "messages": []any{}})
+	if err != nil {
+		t.Fatalf("AI gateway call: %v", err)
+	}
+	if authorization != "Bearer person-key" || !strings.Contains(string(result), `"choices"`) {
+		t.Fatalf("person-bound gateway contract was not preserved: authorization=%q result=%s", authorization, result)
+	}
+}
+
+func TestWorkerRegistryCallRequiresExactApprovedResourceScope(t *testing.T) {
+	scopes := []tokens.Scope{{ResourceType: "data_source", ResourceID: "products", Access: "read"}, {ResourceType: "data_destination", ResourceID: "orders", Access: "write"}}
+	if !approvedRegistryScope(scopes, "read", "products") || !approvedRegistryScope(scopes, "write", "orders") {
+		t.Fatal("approved Registry resource scope was rejected")
+	}
+	if approvedRegistryScope(scopes, "write", "products") || approvedRegistryScope(scopes, "read", "orders") || approvedRegistryScope(scopes, "read", "customers") {
+		t.Fatal("Registry host call escaped its exact resource scope")
+	}
+}
+
+func TestWorkerGrantFailsClosedWithoutRuntimeSecret(t *testing.T) {
+	handler := &Handler{}
+	if _, _, err := handler.workerGrant(httptest.NewRequest(http.MethodPost, "/", nil)); err == nil {
+		t.Fatal("worker grant authentication accepted an empty signing secret")
+	}
+}
+
 func TestMiniAppsRouterExposesScopedConnectionCall(t *testing.T) {
 	raw, err := os.ReadFile("../../../cmd/server/router.go")
 	if err != nil {
@@ -177,5 +302,35 @@ func TestMiniAppsRouterExposesScopedConnectionCall(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `r.Post("/api/cerebro/connections/{id}/call", cerebroAppsHandler.CallConnection)`) {
 		t.Fatal("scoped mini-app connection call route is missing")
+	}
+}
+
+func TestMiniAppsRouterExposesMemberBoundInvoke(t *testing.T) {
+	raw, err := os.ReadFile("../../../cmd/server/router.go")
+	if err != nil {
+		t.Fatalf("read router: %v", err)
+	}
+	if !strings.Contains(string(raw), `r.Post("/{id}/invoke", cerebroAppsHandler.Invoke)`) {
+		t.Fatal("member-bound app invoke route is missing")
+	}
+}
+
+func TestMiniAppsRouterExposesSignedRuntimeBundleAndCallback(t *testing.T) {
+	raw, err := os.ReadFile("../../../cmd/server/router.go")
+	if err != nil {
+		t.Fatalf("read router: %v", err)
+	}
+	router := string(raw)
+	for _, route := range []string{
+		`r.Get("/api/cerebro/apps-internal/deployments", cerebroAppsHandler.PendingDeployments)`,
+		`r.Get("/api/cerebro/apps-internal/deployments/{id}/{version}", cerebroAppsHandler.DeploymentInfo)`,
+		`r.Get("/api/cerebro/apps-internal/{id}/{version}/bundle", cerebroAppsHandler.BundleDownload)`,
+		`r.Post("/api/cerebro/apps-internal/{id}/{version}/callback", cerebroAppsHandler.RuntimeCallback)`,
+		`r.Post("/api/cerebro/apps-internal/host/registry", cerebroAppsHandler.WorkerRegistryCall)`,
+		`r.Post("/api/cerebro/apps-internal/host/connection", cerebroAppsHandler.WorkerConnectionCall)`,
+	} {
+		if !strings.Contains(router, route) {
+			t.Fatalf("signed mini-app runtime route is missing: %s", route)
+		}
 	}
 }

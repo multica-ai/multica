@@ -22,3 +22,4 @@
 
 Versions use semantic versioning and are immutable after publishing. Supported view types are `form`, `lookup`, and `approval`. Supported scope resources are `data_source`, `data_destination`, `app`, `function`, `integration`, and `bigquery_credential`; access is `read`, `write`, or `read_write`. Request the smallest exact set. Publishing a new version requires a new scope review.
 
+The immutable package may contain relative backend modules below `backend/`. Imports must start with `./`, resolve within `backend/`, and name a file included in the published bundle. Node packages, absolute paths, parent traversal, and network globals are unavailable inside the worker sandbox.

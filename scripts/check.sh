@@ -151,7 +151,7 @@ if curl -sf "http://localhost:${PORT}/health" > /dev/null 2>&1; then
   echo "    Backend already running on :$PORT"
 else
   echo "    Starting backend..."
-  (cd server && go run ./cmd/server) > /tmp/multica-check-backend.log 2>&1 &
+  (cd server && CEREBRO_MINI_APPS_ENABLED=true go run ./cmd/server) > /tmp/multica-check-backend.log 2>&1 &
   BACKEND_PID=$!
   STARTED_BACKEND=true
   wait_for_port "$PORT" "Backend" 90 "/health"

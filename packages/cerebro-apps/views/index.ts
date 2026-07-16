@@ -3,3 +3,4 @@ export * from "./apps-nav-item";
 export * from "./apps-page";
 export * from "./app-builder-page";
 export * from "./app-detail-page";
+export * from "./app-editor-page";

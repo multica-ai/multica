@@ -1,10 +1,16 @@
 package apps
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 var allergenFormatterID = uuid.MustParse("f1540000-0000-4154-8154-000000000001")
@@ -54,12 +60,126 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := h.pool.Exec(r.Context(), `DELETE FROM cerebro_app WHERE id=$1`, app.ID)
-	if err != nil || result.RowsAffected() != 1 {
+	actorID, ok := requestUserID(w, r)
+	if !ok {
+		return
+	}
+	appID := uuid.MustParse(app.ID)
+	if err := markDeploymentsDeleting(r.Context(), h.pool, appID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prepare app deletion")
+		return
+	}
+	serviceIDs, err := h.deploymentServiceIDs(r, app.ID, "")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load app deployments")
+		return
+	}
+	if err := applyRuntimeLifecycle(r.Context(), h.runtime, "delete", serviceIDs); err != nil {
+		writeError(w, http.StatusBadGateway, "app runtime is unavailable")
+		return
+	}
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete app")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if err := recordAppLifecycleAudit(r.Context(), tx, appID, actorID, "app.deleted"); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to record app deletion")
+		return
+	}
+	result, err := tx.Exec(r.Context(), `DELETE FROM cerebro_app WHERE id=$1 AND NOT EXISTS (
+		SELECT 1 FROM cerebro_app_deployment WHERE app_id=$1 AND status<>'deleting'
+	)`, app.ID)
+	if err != nil || result.RowsAffected() != 1 || tx.Commit(r.Context()) != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete app")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) Disable(w http.ResponseWriter, r *http.Request) {
+	app, ok := h.loadApp(w, r)
+	if !ok {
+		return
+	}
+	actorID, ok := requestUserID(w, r)
+	if !ok {
+		return
+	}
+	serviceIDs := []string{}
+	if app.CurrentVersion != nil {
+		var serviceID string
+		err := h.pool.QueryRow(r.Context(), `SELECT external_service_id FROM cerebro_app_deployment WHERE app_id=$1 AND version=$2 AND status='ready' AND external_service_id IS NOT NULL`, app.ID, *app.CurrentVersion).Scan(&serviceID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, "failed to load app deployment")
+			return
+		}
+		if err == nil {
+			serviceIDs = append(serviceIDs, serviceID)
+		}
+	}
+	if err := applyRuntimeLifecycle(r.Context(), h.runtime, "pause", serviceIDs); err != nil {
+		writeError(w, http.StatusBadGateway, "app runtime is unavailable")
+		return
+	}
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to disable app")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if _, err := tx.Exec(r.Context(), `UPDATE cerebro_app SET status='disabled',updated_at=now() WHERE id=$1`, app.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to disable app")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `UPDATE cerebro_app_deployment SET status='paused',updated_at=now() WHERE app_id=$1 AND version=$2 AND status='ready'`, app.ID, app.CurrentVersion); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to disable app")
+		return
+	}
+	if err := recordAppLifecycleAudit(r.Context(), tx, uuid.MustParse(app.ID), actorID, "app.disabled"); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to record app disable")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to disable app")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"app_id": app.ID, "status": "disabled"})
+}
+
+func markDeploymentsDeleting(ctx context.Context, exec bundleExec, appID uuid.UUID) error {
+	_, err := exec.Exec(ctx, `UPDATE cerebro_app_deployment SET status='deleting',updated_at=now() WHERE app_id=$1 AND status<>'deleting'`, appID)
+	return err
+}
+
+func recordAppLifecycleAudit(ctx context.Context, exec bundleExec, appID, actorID uuid.UUID, action string) error {
+	_, err := exec.Exec(ctx, `INSERT INTO cerebro_app_audit_log (workspace_id,app_id,actor_type,actor_id,action)
+		SELECT workspace_id,id,'user',$2,$3 FROM cerebro_app WHERE id=$1`, appID, actorID.String(), action)
+	return err
+}
+
+func (h *Handler) deploymentServiceIDs(r *http.Request, appID, version string) ([]string, error) {
+	query := `SELECT external_service_id FROM cerebro_app_deployment WHERE app_id=$1 AND external_service_id IS NOT NULL`
+	args := []any{appID}
+	if version != "" {
+		query += ` AND version=$2`
+		args = append(args, version)
+	}
+	rows, err := h.pool.Query(r.Context(), query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	serviceIDs := []string{}
+	for rows.Next() {
+		var serviceID string
+		if err := rows.Scan(&serviceID); err != nil {
+			return nil, err
+		}
+		serviceIDs = append(serviceIDs, serviceID)
+	}
+	return serviceIDs, rows.Err()
 }
 
 func (h *Handler) InstallAllergenFormatter(w http.ResponseWriter, r *http.Request) {
@@ -77,20 +197,43 @@ func (h *Handler) InstallAllergenFormatter(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer tx.Rollback(r.Context())
-	result, err := tx.Exec(r.Context(), `INSERT INTO cerebro_app(id,workspace_id,slug,name,description,icon,folder,owner_id,current_version,status) VALUES($1,$2,'allergen-formatter','Allergen Formatter','Format ingredients and return regulated allergens','blocks','Operations',$3,'1.0.0','published') ON CONFLICT (id) DO NOTHING`, allergenFormatterID, workspaceID, memberID)
+	bundle, err := ValidateBundle("Allergen Formatter", "1.0.0", allergenFormatterBundleFiles())
+	if err != nil {
+		writeError(w, 500, "built-in app bundle is invalid")
+		return
+	}
+	result, err := tx.Exec(r.Context(), `INSERT INTO cerebro_app(id,workspace_id,slug,name,description,icon,folder,owner_id,status) VALUES($1,$2,'allergen-formatter','Allergen Formatter','Format ingredients and return regulated allergens','blocks','Operations',$3,'draft') ON CONFLICT (id) DO NOTHING`, allergenFormatterID, workspaceID, memberID)
 	if err != nil || result.RowsAffected() != 1 {
 		writeError(w, 409, "Allergen Formatter is already installed")
 		return
 	}
 	_, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_version(app_id,version,content_snapshot,release_notes,created_by) VALUES($1,'1.0.0',$2,'Initial FIR-154 release',$3)`, allergenFormatterID, allergenFormatterSnapshot, memberID)
 	if err == nil {
+		err = StoreVersionBundle(r.Context(), tx, allergenFormatterID, "1.0.0", bundle)
+	}
+	if err == nil {
 		_, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_grant(app_id,version,scopes,status,requested_by,approved_by,approved_at) VALUES($1,'1.0.0',$2::jsonb->'manifest'->'scopes','approved',$3,$3,now())`, allergenFormatterID, allergenFormatterSnapshot, memberID)
+	}
+	provider := strings.TrimSpace(os.Getenv("CEREBRO_APPS_RUNTIME_PROVIDER"))
+	if provider == "" {
+		provider = "docker"
+	}
+	if err == nil {
+		_, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_deployment(app_id,version,provider,status,bundle_sha256) VALUES($1,'1.0.0',$2,'pending',$3)`, allergenFormatterID, provider, bundle.SHA256)
 	}
 	if err != nil || tx.Commit(r.Context()) != nil {
 		writeError(w, 500, "failed to install Allergen Formatter")
 		return
 	}
-	writeJSON(w, 201, map[string]any{"id": allergenFormatterID, "name": "Allergen Formatter", "version": "1.0.0", "status": "published"})
+	deployment := RuntimeDeploymentRequest{AppID: allergenFormatterID.String(), Version: "1.0.0", BundleSHA256: bundle.SHA256}
+	if h.runtime == nil || h.runtime.Deploy(r.Context(), deployment) != nil {
+		_, _ = h.pool.Exec(r.Context(), `UPDATE cerebro_app_deployment SET status='failed',last_error='App runtime is unavailable',updated_at=now() WHERE app_id=$1 AND version='1.0.0'`, allergenFormatterID)
+		slog.Error("built-in mini app runtime deployment failed", "app_id", allergenFormatterID)
+		writeError(w, http.StatusBadGateway, "app runtime is unavailable")
+		return
+	}
+	_, _ = h.pool.Exec(r.Context(), `UPDATE cerebro_app_deployment SET status='provisioning',updated_at=now() WHERE app_id=$1 AND version='1.0.0'`, allergenFormatterID)
+	writeJSON(w, http.StatusAccepted, map[string]any{"id": allergenFormatterID, "name": "Allergen Formatter", "version": "1.0.0", "status": "provisioning"})
 }
 
 func (h *Handler) AdminOverview(w http.ResponseWriter, r *http.Request) {

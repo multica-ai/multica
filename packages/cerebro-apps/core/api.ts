@@ -1,6 +1,7 @@
 import { api, parseWithFallback } from "@multica/core/api";
 import { z } from "zod";
 import type { AppAdminSummary, AppDetail, AppFolder, CatalogApp } from "./types";
+import type { AppSourceFile } from "./app-template";
 
 export type AppSdkRequest = {
   appId: string;
@@ -76,12 +77,40 @@ export async function getAppDetail(id: string, workspaceSlug?: string): Promise<
   return parsed.data as AppDetail;
 }
 
+export async function publishAppVersion(id: string, input: { version: string; release_notes: string; files: AppSourceFile[] }, workspaceSlug?: string): Promise<{ deployment_status: "provisioning" }> {
+  const files = await Promise.all(input.files.map(async (file) => ({
+    path: file.path,
+    media_type: file.media_type,
+    content_base64: encodeBase64(file.content),
+    sha256: await sha256(file.content),
+  })));
+  const raw = await api.cerebroRequest<unknown>(workspacePath(`/api/cerebro/apps/${encodeURIComponent(id)}/publish`, workspaceSlug), {
+    method: "POST",
+    body: JSON.stringify({ version: input.version, release_notes: input.release_notes, files }),
+  });
+  const parsed = z.object({ deployment_status: z.literal("provisioning") }).safeParse(raw);
+  if (!parsed.success) throw new Error("The app publish response was invalid");
+  return parsed.data;
+}
+
+function encodeBase64(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+async function sha256(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function requiredString(value: unknown): string {
   if (typeof value !== "string" || value.trim() === "") throw new Error("Invalid app SDK request");
   return value;
 }
 
-export async function callAppSdk(request: AppSdkRequest, runtimeBaseUrl = "/api/cerebro/apps-runtime"): Promise<unknown> {
+export async function callAppSdk(request: AppSdkRequest, _runtimeBaseUrl = "/api/cerebro/apps-runtime"): Promise<unknown> {
   const appId = encodeURIComponent(requiredString(request.appId));
   const version = requiredString(request.version);
   switch (request.method) {
@@ -99,9 +128,8 @@ export async function callAppSdk(request: AppSdkRequest, runtimeBaseUrl = "/api/
         body: JSON.stringify({ app_id: request.appId, version, tool: requiredString(request.args[1]), arguments: request.args[2] ?? {} }),
       });
     case "workers.invoke":
-      return requestRuntimeJSON(`${runtimeBaseUrl.replace(/\/$/, "")}/workers/${appId}/${encodeURIComponent(version)}/invoke`, {
+      return api.cerebroRequest(`/api/cerebro/apps/${appId}/invoke`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify(request.args[0] ?? {}),
       });
     case "views.submit":
@@ -110,11 +138,4 @@ export async function callAppSdk(request: AppSdkRequest, runtimeBaseUrl = "/api/
         body: JSON.stringify({ value: request.args[1], request_id: requiredString(request.args[2]), version }),
       });
   }
-}
-
-async function requestRuntimeJSON(url: string, init: RequestInit): Promise<unknown> {
-  const response = await globalThis.fetch(url, init);
-  const raw = await response.text();
-  if (!response.ok) throw new Error(`App runtime HTTP ${response.status}: ${raw || response.statusText}`);
-  return raw === "" ? undefined : JSON.parse(raw);
 }

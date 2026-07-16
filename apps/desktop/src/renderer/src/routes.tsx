@@ -52,7 +52,7 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { TasksPage } from "@multica/cerebro-tasks";
 import { RocksPage, StrategyPage } from "@multica/cerebro-operating-system/views";
 import { ApprovalsPage } from "@multica/cerebro-approvals";
-import { AppBuilderPage, AppDetailPage, AppsPage } from "@multica/cerebro-apps";
+import { AppBuilderPage, AppDetailPage, AppEditorPage, AppsPage } from "@multica/cerebro-apps";
 import { api } from "@multica/core/api";
 import { NotesPage } from "@multica/cerebro-notes/views";
 import { NoteCommentsPanel } from "@multica/cerebro-notes/views/note-comments-panel";
@@ -252,6 +252,11 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "App" },
           },
           {
+            path: "apps/:appId/edit",
+            element: <DesktopAppEditorRoute />,
+            handle: { title: "Edit app" },
+          },
+          {
             path: "documents",
             element: <DocumentsRoute />,
             handle: { title: "Documents" },
@@ -426,6 +431,11 @@ function DesktopAppDetailRoute() {
   const params = useParams<{ appId: string }>();
   const baseUrl = api.getBaseUrl().replace(/\/$/, "");
   return <AppDetailPage appId={params.appId ?? ""} runtimeBaseUrl={`${baseUrl}/api/cerebro/apps-runtime`} />;
+}
+
+function DesktopAppEditorRoute() {
+  const params = useParams<{ appId: string }>();
+  return <AppEditorPage appId={params.appId ?? ""} />;
 }
 
 function NotesRoute() {

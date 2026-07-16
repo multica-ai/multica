@@ -1,0 +1,134 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { SliplaneProvider, serviceNameForVersion } from "./sliplane-provider.mjs";
+
+const deployment = {
+  appId: "f1540000-0000-4154-8154-000000000001",
+  version: "1.2.3",
+  bundleUrl: "http://multica-backend-8nnfh2.internal:8080/api/cerebro/apps-internal/f1540000-0000-4154-8154-000000000001/1.2.3/bundle",
+  bundleToken: "signed-bundle-token",
+  invokeKey: "worker-invoke-key",
+};
+
+test("creates a private service on the runtime server and explicitly deploys it", async () => {
+  const requests = [];
+  let healthChecks = 0;
+  const provider = new SliplaneProvider({
+    apiKey: "sliplane-secret",
+    projectId: "project-1",
+    serverId: "server-1",
+    workerBranch: "main",
+    healthPollMs: 1,
+    healthTimeoutMs: 100,
+    fetch: async (url, init = {}) => {
+      requests.push({ url, init, body: init.body ? JSON.parse(init.body) : null });
+      if (String(url).endsWith("/services") && init.method === "POST") {
+        return Response.json({ id: "service-1", network: { internalDomain: "cerebro-app-f1540000-v1-2-3.internal" } }, { status: 201 });
+      }
+      if (String(url).endsWith("/services/service-1/deploy")) return Response.json({ status: "queued" }, { status: 202 });
+      if (String(url) === "http://cerebro-app-f1540000-v1-2-3.internal:4311/healthz") {
+        healthChecks++;
+        return Response.json({ status: healthChecks === 1 ? "starting" : "ok" }, { status: healthChecks === 1 ? 503 : 200 });
+      }
+      throw new Error(`unexpected request ${init.method} ${url}`);
+    },
+  });
+
+  const result = await provider.createOrDeploy(deployment);
+  const create = requests[0];
+  assert.equal(create.init.headers.authorization, "Bearer sliplane-secret");
+  assert.equal(create.body.name, "cerebro-app-f1540000-v1-2-3");
+  assert.equal(create.body.serverId, "server-1");
+  assert.deepEqual(create.body.network, { public: false });
+  assert.equal(create.body.deployment.branch, "main");
+  assert.equal(create.body.deployment.dockerfilePath, "apps/cerebro-apps-runtime/Dockerfile.worker");
+  assert.deepEqual(create.body.env, [
+    { key: "APP_ID", value: deployment.appId, secret: false },
+    { key: "APP_VERSION", value: deployment.version, secret: false },
+    { key: "BUNDLE_URL", value: deployment.bundleUrl, secret: false },
+    { key: "BUNDLE_TOKEN", value: deployment.bundleToken, secret: true },
+    { key: "BUNDLE_SHA256", value: "", secret: false },
+    { key: "BACKEND_URL", value: "", secret: false },
+    { key: "INVOKE_KEY", value: deployment.invokeKey, secret: true },
+    { key: "PORT", value: "4311", secret: false },
+  ]);
+  assert.ok(!JSON.stringify(create.body).includes("sliplane.app"));
+  assert.deepEqual(result, { serviceId: "service-1", internalDomain: "cerebro-app-f1540000-v1-2-3.internal" });
+  assert.match(requests[1].url, /projects\/project-1\/services\/service-1\/deploy$/);
+  assert.equal(healthChecks, 2);
+});
+
+test("reuses a deterministic service after a create conflict", async () => {
+  let creates = 0;
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/services") && init.method === "POST") {
+        creates++;
+        return new Response("already exists", { status: 409 });
+      }
+      if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) {
+        return Response.json([{ id: "existing", name: serviceNameForVersion(deployment.appId, deployment.version), serverId: "server-1", network: { internalDomain: "existing.internal" } }]);
+      }
+      if (String(url).endsWith("/services/existing/deploy")) return Response.json({}, { status: 202 });
+      if (String(url) === "http://existing.internal:4311/healthz") return Response.json({ status: "ok" });
+      throw new Error(`unexpected request ${init.method} ${url}`);
+    },
+  });
+
+  assert.deepEqual(await provider.createOrDeploy(deployment), { serviceId: "existing", internalDomain: "existing.internal" });
+  assert.equal(creates, 1);
+});
+
+test("fails safely when the private worker never becomes healthy", async () => {
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    healthPollMs: 1,
+    healthTimeoutMs: 5,
+    fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/services") && init.method === "POST") {
+        return Response.json({ id: "service-1", network: { internalDomain: "never-ready.internal" } }, { status: 201 });
+      }
+      if (String(url).endsWith("/services/service-1/deploy")) return Response.json({}, { status: 202 });
+      if (String(url) === "http://never-ready.internal:4311/healthz") return Response.json({ status: "starting" }, { status: 503 });
+      throw new Error(`unexpected request ${init.method} ${url}`);
+    },
+  });
+
+  await assert.rejects(provider.createOrDeploy(deployment), /App deployment failed/);
+});
+
+test("masks Sliplane response bodies from callers", async () => {
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    fetch: async () => new Response("secret=/srv/private and api-key", { status: 500 }),
+  });
+  await assert.rejects(provider.createOrDeploy(deployment), (error) => {
+    assert.equal(error.message, "App deployment failed");
+    assert.doesNotMatch(error.message, /secret|private|api-key/);
+    return true;
+  });
+});
+
+test("pauses and deletes only the concrete private service", async () => {
+  const requests = [];
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    fetch: async (url, init = {}) => (requests.push([String(url), init.method]), new Response(null, { status: 204 })),
+  });
+  await provider.pause("service-1");
+  await provider.delete("service-1");
+  assert.deepEqual(requests, [
+    ["https://ctrl.sliplane.io/v0/projects/project-1/services/service-1/pause", "POST"],
+    ["https://ctrl.sliplane.io/v0/projects/project-1/services/service-1", "DELETE"],
+  ]);
+});

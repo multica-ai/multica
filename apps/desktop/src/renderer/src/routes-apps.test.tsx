@@ -16,6 +16,7 @@ describe("desktop Apps routes", () => {
       "/:workspaceSlug/apps",
       "/:workspaceSlug/apps/new",
       "/:workspaceSlug/apps/:appId",
+      "/:workspaceSlug/apps/:appId/edit",
     ]));
   });
 });

@@ -544,6 +544,19 @@ type CerebroAppChangeRequest struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroAppDeployment struct {
+	AppID             pgtype.UUID        `json:"app_id"`
+	Version           string             `json:"version"`
+	Provider          string             `json:"provider"`
+	Status            string             `json:"status"`
+	BundleSha256      string             `json:"bundle_sha256"`
+	ExternalServiceID pgtype.Text        `json:"external_service_id"`
+	InternalDomain    pgtype.Text        `json:"internal_domain"`
+	LastError         string             `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroAppFolder struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -583,6 +596,16 @@ type CerebroAppVersion struct {
 	ReleaseNotes    string             `json:"release_notes"`
 	CreatedBy       pgtype.UUID        `json:"created_by"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroAppVersionFile struct {
+	AppID     pgtype.UUID `json:"app_id"`
+	Version   string      `json:"version"`
+	Path      string      `json:"path"`
+	MediaType string      `json:"media_type"`
+	Content   []byte      `json:"content"`
+	Sha256    string      `json:"sha256"`
+	SizeBytes int32       `json:"size_bytes"`
 }
 
 type CerebroAppViewRequest struct {

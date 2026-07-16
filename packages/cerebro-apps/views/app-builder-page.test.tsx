@@ -29,7 +29,7 @@ describe("AppBuilderPage", () => {
     ]);
   });
 
-  it("creates an app and opens its detail page", async () => {
+  it("creates an app and opens its source editor", async () => {
     render(<AppBuilderPage />);
     await userEvent.type(screen.getByLabelText("Name"), "Returns helper");
     await userEvent.type(screen.getByLabelText("Description"), "Look up and update returns");
@@ -42,6 +42,6 @@ describe("AppBuilderPage", () => {
       description: "Look up and update returns",
       folder_id: "collection-1",
     }));
-    expect(push).toHaveBeenCalledWith("/firtal/apps/app-1");
+    expect(push).toHaveBeenCalledWith("/firtal/apps/app-1/edit");
   });
 });
