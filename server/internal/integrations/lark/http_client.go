@@ -63,15 +63,19 @@ const (
 )
 
 func sanitizeMarkdownForLarkCard(markdown string) string {
+	definitions := parseMarkdownReferenceDefinitions(markdown)
+	redactedDefinitions := map[string]struct{}{}
+
 	var sanitized strings.Builder
 	last := 0
+	changed := false
 	for start := 0; start < len(markdown)-1; {
 		relative := strings.Index(markdown[start:], "![")
 		if relative < 0 {
 			break
 		}
 		start += relative
-		end, label, destination, ok := parseMarkdownImage(markdown, start)
+		end, label, destination, referenceKey, ok := parseMarkdownImage(markdown, start, definitions)
 		if !ok {
 			start += 2
 			continue
@@ -87,49 +91,96 @@ func sanitizeMarkdownForLarkCard(markdown string) string {
 			label = "image"
 		}
 		fmt.Fprintf(&sanitized, "[%s omitted]", label)
+		if referenceKey != "" {
+			redactedDefinitions[referenceKey] = struct{}{}
+		}
 		last = end
 		start = end
+		changed = true
 	}
-	if last == 0 {
+	if !changed {
 		return markdown
 	}
 	sanitized.WriteString(markdown[last:])
-	return sanitized.String()
+	result := sanitized.String()
+	if len(redactedDefinitions) > 0 {
+		result = removeMarkdownReferenceDefinitions(result, redactedDefinitions)
+	}
+	return result
+}
+
+type markdownReferenceDefinition struct {
+	destination string
 }
 
 // parseMarkdownImage returns the full image span and its destination. It uses
 // a small scanner instead of a regular expression because destinations may be
-// angle-bracketed, followed by a title, or contain balanced/escaped
-// parentheses.
-func parseMarkdownImage(markdown string, start int) (end int, label, destination string, ok bool) {
+// angle-bracketed, followed by a title, contain balanced/escaped parentheses,
+// or be supplied through a reference-style definition.
+func parseMarkdownImage(markdown string, start int, definitions map[string]markdownReferenceDefinition) (end int, label, destination, referenceKey string, ok bool) {
 	if start < 0 || start+2 > len(markdown) || markdown[start:start+2] != "![" {
-		return 0, "", "", false
+		return 0, "", "", "", false
 	}
 
-	labelEnd := -1
-	labelDepth := 0
-	for i := start + 2; i < len(markdown); i++ {
+	labelEnd, ok := findMarkdownLabelEnd(markdown, start+1)
+	if !ok {
+		return 0, "", "", "", false
+	}
+	label = markdown[start+2 : labelEnd]
+	if labelEnd+1 < len(markdown) && markdown[labelEnd+1] == '(' {
+		end, destination, ok := parseInlineMarkdownImageDestination(markdown, labelEnd+1)
+		return end, label, destination, "", ok
+	}
+	if labelEnd+1 < len(markdown) && markdown[labelEnd+1] == '[' {
+		referenceEnd, ok := findMarkdownLabelEnd(markdown, labelEnd+1)
+		if !ok {
+			return 0, "", "", "", false
+		}
+		referenceLabel := markdown[labelEnd+2 : referenceEnd]
+		if referenceLabel == "" {
+			referenceLabel = label
+		}
+		key := normalizeMarkdownReferenceLabel(referenceLabel)
+		definition, ok := definitions[key]
+		if !ok {
+			return 0, "", "", "", false
+		}
+		return referenceEnd + 1, label, definition.destination, key, true
+	}
+
+	key := normalizeMarkdownReferenceLabel(label)
+	definition, ok := definitions[key]
+	if !ok {
+		return 0, "", "", "", false
+	}
+	return labelEnd + 1, label, definition.destination, key, true
+}
+
+func findMarkdownLabelEnd(markdown string, open int) (int, bool) {
+	if open < 0 || open >= len(markdown) || markdown[open] != '[' {
+		return 0, false
+	}
+	depth := 0
+	for i := open + 1; i < len(markdown); i++ {
 		if markdown[i] == '\\' {
 			i++
 			continue
 		}
 		switch markdown[i] {
 		case '[':
-			labelDepth++
+			depth++
 		case ']':
-			if labelDepth == 0 {
-				labelEnd = i
-				i = len(markdown)
-				continue
+			if depth == 0 {
+				return i, true
 			}
-			labelDepth--
+			depth--
 		}
 	}
-	if labelEnd < 0 || labelEnd+1 >= len(markdown) || markdown[labelEnd+1] != '(' {
-		return 0, "", "", false
-	}
+	return 0, false
+}
 
-	i := labelEnd + 2
+func parseInlineMarkdownImageDestination(markdown string, openParen int) (end int, destination string, ok bool) {
+	i := openParen + 1
 	for i < len(markdown) && isMarkdownSpace(markdown[i]) {
 		i++
 	}
@@ -198,14 +249,115 @@ func parseMarkdownImage(markdown string, start int) (end int, label, destination
 				if destinationEnd < 0 {
 					destinationEnd = i
 				}
-				return i + 1, markdown[start+2 : labelEnd],
-					strings.TrimSpace(markdown[destinationStart:destinationEnd]), true
+				return i + 1, strings.TrimSpace(markdown[destinationStart:destinationEnd]), true
 			}
 			depth--
 		}
 		i++
 	}
-	return 0, "", "", false
+	return 0, "", false
+}
+
+func parseMarkdownReferenceDefinitions(markdown string) map[string]markdownReferenceDefinition {
+	definitions := map[string]markdownReferenceDefinition{}
+	for lineStart := 0; lineStart < len(markdown); {
+		lineEnd := lineStart
+		for lineEnd < len(markdown) && markdown[lineEnd] != '\n' {
+			lineEnd++
+		}
+		label, destination, ok := parseMarkdownReferenceDefinitionLine(markdown[lineStart:lineEnd])
+		if ok {
+			key := normalizeMarkdownReferenceLabel(label)
+			if _, exists := definitions[key]; !exists {
+				definitions[key] = markdownReferenceDefinition{destination: destination}
+			}
+		}
+		lineStart = lineEnd
+		if lineStart < len(markdown) && markdown[lineStart] == '\n' {
+			lineStart++
+		}
+	}
+	return definitions
+}
+
+func parseMarkdownReferenceDefinitionLine(line string) (label, destination string, ok bool) {
+	line = strings.TrimRight(line, "\r")
+	i := 0
+	indent := 0
+	for i < len(line) && line[i] == ' ' && indent < 4 {
+		i++
+		indent++
+	}
+	if indent > 3 || i >= len(line) || line[i] != '[' {
+		return "", "", false
+	}
+	labelEnd, ok := findMarkdownLabelEnd(line, i)
+	if !ok || labelEnd+1 >= len(line) || line[labelEnd+1] != ':' {
+		return "", "", false
+	}
+	label = line[i+1 : labelEnd]
+	if normalizeMarkdownReferenceLabel(label) == "" {
+		return "", "", false
+	}
+	i = labelEnd + 2
+	for i < len(line) && isMarkdownSpace(line[i]) {
+		i++
+	}
+	if i >= len(line) {
+		return "", "", false
+	}
+	if line[i] == '<' {
+		start := i + 1
+		for i = start; i < len(line); i++ {
+			if line[i] == '\\' {
+				i++
+				continue
+			}
+			if line[i] == '>' {
+				return label, strings.TrimSpace(line[start:i]), true
+			}
+		}
+		return "", "", false
+	}
+
+	start := i
+	for i < len(line) && !isMarkdownSpace(line[i]) {
+		if line[i] == '\\' {
+			i += 2
+			continue
+		}
+		i++
+	}
+	return label, strings.TrimSpace(line[start:i]), true
+}
+
+func removeMarkdownReferenceDefinitions(markdown string, redactedDefinitions map[string]struct{}) string {
+	var sanitized strings.Builder
+	for lineStart := 0; lineStart < len(markdown); {
+		lineEnd := lineStart
+		for lineEnd < len(markdown) && markdown[lineEnd] != '\n' {
+			lineEnd++
+		}
+		nextLineStart := lineEnd
+		if nextLineStart < len(markdown) && markdown[nextLineStart] == '\n' {
+			nextLineStart++
+		}
+
+		line := markdown[lineStart:lineEnd]
+		label, destination, ok := parseMarkdownReferenceDefinitionLine(line)
+		_, redact := redactedDefinitions[normalizeMarkdownReferenceLabel(label)]
+		if ok && redact && isLocalMarkdownImageDestination(destination) {
+			lineStart = nextLineStart
+			continue
+		}
+		sanitized.WriteString(markdown[lineStart:nextLineStart])
+		lineStart = nextLineStart
+	}
+	return sanitized.String()
+}
+
+func normalizeMarkdownReferenceLabel(label string) string {
+	return strings.ToLower(strings.Join(strings.Fields(label), " "))
 }
 
 func isMarkdownSpace(c byte) bool {

@@ -269,7 +269,7 @@ func TestPatcherRoutesMarkdownReplyToCard(t *testing.T) {
 	}
 }
 
-func TestPatcherRedactsBalancedLabelLocalImageBeforeTextRouting(t *testing.T) {
+func TestPatcherRedactsReferenceLocalImageBeforeTextRouting(t *testing.T) {
 	p, q, api := newTestPatcher(t)
 	taskID := uuidFromString(t, "ee454545-ee45-ee45-ee45-eeeeeeeeeeee")
 	localPath := "/var/run/app/session/card-image.png"
@@ -281,7 +281,7 @@ func TestPatcherRedactsBalancedLabelLocalImageBeforeTextRouting(t *testing.T) {
 		Payload: protocol.ChatDonePayload{
 			TaskID:        uuidString(taskID),
 			ChatSessionID: uuidString(q.binding.ChatSessionID),
-			Content:       "Scan this:\n\n![scan [annotated]](" + localPath + ")",
+			Content:       "Scan this:\n\n![scan][local]\n\n[local]: " + localPath,
 		},
 	})
 
@@ -290,7 +290,7 @@ func TestPatcherRedactsBalancedLabelLocalImageBeforeTextRouting(t *testing.T) {
 	if len(api.textSent) != 1 {
 		t.Fatalf("expected one SendTextMessage call; got %d", len(api.textSent))
 	}
-	if got := api.textSent[0].Text; got != "Scan this:\n\n[scan [annotated] omitted]" {
+	if got := api.textSent[0].Text; got != "Scan this:\n\n[scan omitted]\n\n" {
 		t.Errorf("local image must be redacted before routing; got %q", got)
 	}
 	if len(api.mdCardSent) != 0 {
@@ -298,7 +298,7 @@ func TestPatcherRedactsBalancedLabelLocalImageBeforeTextRouting(t *testing.T) {
 	}
 }
 
-func TestPatcherRedactsBalancedLabelLocalImageBeforeCardRouting(t *testing.T) {
+func TestPatcherRedactsReferenceLocalImageBeforeCardRouting(t *testing.T) {
 	p, q, api := newTestPatcher(t)
 	taskID := uuidFromString(t, "ee464646-ee46-ee46-ee46-eeeeeeeeeeee")
 
@@ -309,7 +309,7 @@ func TestPatcherRedactsBalancedLabelLocalImageBeforeCardRouting(t *testing.T) {
 		Payload: protocol.ChatDonePayload{
 			TaskID:        uuidString(taskID),
 			ChatSessionID: uuidString(q.binding.ChatSessionID),
-			Content:       "**Scan:** ![result [annotated]](/tmp/screenshot(1).png \"preview\")",
+			Content:       "**Scan:** ![result][local]\n\n[local]: /tmp/screenshot(1).png \"preview\"",
 		},
 	})
 
@@ -318,7 +318,7 @@ func TestPatcherRedactsBalancedLabelLocalImageBeforeCardRouting(t *testing.T) {
 	if len(api.mdCardSent) != 1 {
 		t.Fatalf("expected one SendMarkdownCard call; got %d", len(api.mdCardSent))
 	}
-	if got := api.mdCardSent[0].Markdown; got != "**Scan:** [result [annotated] omitted]" {
+	if got := api.mdCardSent[0].Markdown; got != "**Scan:** [result omitted]\n\n" {
 		t.Errorf("local image must be redacted before card routing; got %q", got)
 	}
 	if len(api.textSent) != 0 {
