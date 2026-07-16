@@ -1115,6 +1115,8 @@ var catalog = []Capability{
 			"POST /api/cerebro/workflow-hooks/",
 			"PUT /api/cerebro/workflow-hooks/{id}",
 			"POST /api/cerebro/workflow-hooks/{id}/test",
+			"POST /api/cerebro/workflow-hooks/{id}/disable",
+			"DELETE /api/cerebro/workflow-hooks/{id}",
 		},
 	},
 	{

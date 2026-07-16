@@ -16,11 +16,18 @@ describe("HooksPage", () => {
       { ...base, id: "on", name: "Live policy", mode: "enforce" },
       { ...base, id: "managed", name: "Managed policy", mode: "managed" },
     ]} />);
-    expect(screen.getAllByText("Trigger → 3 conditions → Block → 1 action")).toHaveLength(4);
+    expect(screen.getAllByText("This hook runs when the selected event occurs for the selected work, every time, will allow it to continue, and will take no follow-up action.")).toHaveLength(4);
     expect(screen.getByText("Off")).toBeInTheDocument();
     expect(screen.getByText("Dry run")).toBeInTheDocument();
     expect(screen.getByText("Enforced")).toBeInTheDocument();
     expect(screen.getByText("Managed")).toBeInTheDocument();
     expect(screen.getAllByText("Never")).toHaveLength(4);
+  });
+
+  it("uses the shared page header and a responsive list without a wide table", () => {
+    const { container } = render(<HooksPage onOpenHook={vi.fn()} hooks={[]} />);
+    expect(screen.getByRole("heading", { name: "Hooks" })).toBeInTheDocument();
+    expect(container.querySelector("table")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New hook" })).toBeInTheDocument();
   });
 });

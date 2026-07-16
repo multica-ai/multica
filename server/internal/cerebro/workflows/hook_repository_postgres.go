@@ -111,6 +111,48 @@ func (r *PostgresHookRepository) Update(ctx context.Context, workspaceID string,
 	return r.insertVersion(ctx, workspaceID, actor, util.UUIDToString(familyID), current.Version+1, policy)
 }
 
+func (r *PostgresHookRepository) Disable(ctx context.Context, workspaceID string, actor HookPermissionActor, id string) (HookPolicy, error) {
+	current, err := r.Get(ctx, workspaceID, id)
+	if err != nil {
+		return HookPolicy{}, err
+	}
+	if current.Mode == HookModeManaged && !actor.IsOwner {
+		return HookPolicy{}, ErrManagedHookLocked
+	}
+	policyID, _ := util.ParseUUID(id)
+	wsID, _ := util.ParseUUID(workspaceID)
+	if _, err := r.db.Exec(ctx, `UPDATE cerebro_workflow_hook_policy SET mode='off', updated_at=now() WHERE id=$1 AND workspace_id=$2`, policyID, wsID); err != nil {
+		return HookPolicy{}, err
+	}
+	current.Mode = HookModeOff
+	current.UpdatedAt = time.Now().UTC()
+	return current, nil
+}
+
+func (r *PostgresHookRepository) Delete(ctx context.Context, workspaceID string, actor HookPermissionActor, id string) error {
+	current, err := r.Get(ctx, workspaceID, id)
+	if err != nil {
+		return err
+	}
+	if current.Mode == HookModeManaged && !actor.IsOwner {
+		return ErrManagedHookLocked
+	}
+	policyID, _ := util.ParseUUID(id)
+	wsID, _ := util.ParseUUID(workspaceID)
+	query := `DELETE FROM cerebro_workflow_hook_policy WHERE workspace_id=$1 AND family_id=(SELECT family_id FROM cerebro_workflow_hook_policy WHERE id=$2 AND workspace_id=$1) AND mode <> 'managed'`
+	if current.Mode == HookModeManaged && actor.IsOwner {
+		query = `DELETE FROM cerebro_workflow_hook_policy WHERE workspace_id=$1 AND family_id=(SELECT family_id FROM cerebro_workflow_hook_policy WHERE id=$2 AND workspace_id=$1)`
+	}
+	result, err := r.db.Exec(ctx, query, wsID, policyID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrHookPolicyNotFound
+	}
+	return nil
+}
+
 func (r *PostgresHookRepository) insertVersion(ctx context.Context, workspaceID string, actor HookPermissionActor, familyID string, version int, policy HookPolicy) (HookPolicy, error) {
 	wsID, err := util.ParseUUID(workspaceID)
 	if err != nil {
@@ -215,10 +257,15 @@ func (r *PostgresHookRepository) loadPolicyMetrics(ctx context.Context, policy *
 		return err
 	}
 	var count int
-	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM cerebro_workflow_hook_run WHERE policy_id=$1`, id).Scan(&count); err != nil {
+	var lastRun pgtype.Timestamptz
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*), MAX(created_at) FROM cerebro_workflow_hook_run WHERE policy_id=$1`, id).Scan(&count, &lastRun); err != nil {
 		return err
 	}
 	policy.ObservedRuns = count
+	if lastRun.Valid {
+		value := lastRun.Time
+		policy.LastRunAt = &value
+	}
 	policy.CanPublish = policy.Mode == HookModeDryRun && count > 0 && policy.BaselineAt != nil
 	return nil
 }
@@ -264,7 +311,7 @@ func (r *PostgresHookRepository) Runs(ctx context.Context, workspaceID, policyID
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Query(ctx, `SELECT id, policy_version, input_event, source_scope, decision, would_decision, matched_conditions, remediation, latency_ms, timed_out, created_at FROM cerebro_workflow_hook_run WHERE workspace_id=$1 AND policy_id=$2 ORDER BY created_at DESC LIMIT 200`, wsID, id)
+	rows, err := r.db.Query(ctx, `SELECT id, policy_version, input_event, source_scope, decision, would_decision, matched_conditions, fail_mode, remediation, latency_ms, timed_out, created_at FROM cerebro_workflow_hook_run WHERE workspace_id=$1 AND policy_id=$2 ORDER BY created_at DESC LIMIT 200`, wsID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +326,7 @@ func (r *PostgresHookRepository) Runs(ctx context.Context, workspaceID, policyID
 		var timedOut bool
 		var created pgtype.Timestamptz
 		var run HookRunRecord
-		if err := rows.Scan(&runID, &run.PolicyVersion, &eventJSON, &scopeJSON, &decision, &wouldDecision, &matchesJSON, &remediation, &run.LatencyMS, &timedOut, &created); err != nil {
+		if err := rows.Scan(&runID, &run.PolicyVersion, &eventJSON, &scopeJSON, &decision, &wouldDecision, &matchesJSON, &run.FailMode, &remediation, &run.LatencyMS, &timedOut, &created); err != nil {
 			return nil, err
 		}
 		run.ID = util.UUIDToString(runID)
@@ -288,7 +335,7 @@ func (r *PostgresHookRepository) Runs(ctx context.Context, workspaceID, policyID
 		_ = json.Unmarshal(eventJSON, &run.Event)
 		_ = json.Unmarshal(scopeJSON, &run.SourceScope)
 		run.Result = HookResult{Decision: HookDecision(decision), WouldDecision: HookDecision(wouldDecision.String), TimedOut: timedOut}
-		_ = json.Unmarshal(matchesJSON, &run.Result.Matches)
+		_ = json.Unmarshal(matchesJSON, &run.Result.MatchedConditions)
 		if remediation != "" {
 			run.Result.Requirements = strings.Split(remediation, "\n")
 		}
@@ -331,14 +378,14 @@ func (r *PostgresHookRepository) RecordRun(ctx context.Context, workspaceID stri
 	}
 	eventJSON, _ := json.Marshal(run.Event)
 	scopeJSON, _ := json.Marshal(run.SourceScope)
-	matchesJSON, _ := json.Marshal(run.Result.Matches)
+	conditionsJSON, _ := json.Marshal(run.Result.MatchedConditions)
 	would := pgtype.Text{String: string(run.Result.WouldDecision), Valid: run.Result.WouldDecision != ""}
 	key := fmt.Sprintf("%s:%d:test", run.Event.EventID, run.PolicyVersion)
 	var hookRunID pgtype.UUID
 	err = r.db.QueryRow(ctx, `INSERT INTO cerebro_workflow_hook_run
 (workspace_id,policy_id,policy_version,event_id,event_type,source_scope,input_event,matched_conditions,decision,would_decision,fail_mode,remediation,latency_ms,timed_out,idempotency_key)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-ON CONFLICT (workspace_id,idempotency_key) DO UPDATE SET idempotency_key=EXCLUDED.idempotency_key RETURNING id`, wsID, policyID, run.PolicyVersion, run.Event.EventID, run.Event.Type, scopeJSON, eventJSON, matchesJSON, run.Result.Decision, would, policy.FailMode, strings.Join(run.Result.Requirements, "\n"), run.LatencyMS, run.Result.TimedOut, key).Scan(&hookRunID)
+ON CONFLICT (workspace_id,idempotency_key) DO UPDATE SET idempotency_key=EXCLUDED.idempotency_key RETURNING id`, wsID, policyID, run.PolicyVersion, run.Event.EventID, run.Event.Type, scopeJSON, eventJSON, conditionsJSON, run.Result.Decision, would, policy.FailMode, strings.Join(run.Result.Requirements, "\n"), run.LatencyMS, run.Result.TimedOut, key).Scan(&hookRunID)
 	if err != nil {
 		return err
 	}

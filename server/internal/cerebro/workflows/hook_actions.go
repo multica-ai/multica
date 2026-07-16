@@ -3,6 +3,8 @@ package workflows
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -59,13 +61,109 @@ var versionOneHookActionTypes = []string{
 	"session.handoff", "task.retry", "task.cancel", "artifact.create_or_update",
 	"workflow.activate", "workflow.pause", "workflow.resume", "workflow.stop",
 	"approval.require", "audit.record", "metric.increment",
+	"skill.run", "judge.gate",
+}
+
+func validateTypedHookAction(action HookAction) error {
+	known := false
+	for _, actionType := range versionOneHookActionTypes {
+		if action.Type == actionType {
+			known = true
+			break
+		}
+	}
+	if !known {
+		// Preserve forward compatibility for actions registered by another
+		// workflow module. This validator only owns the typed actions above.
+		return nil
+	}
+	requireString := func(key string) error {
+		if strings.TrimSpace(hookConfigString(action.Config, key, "")) == "" {
+			return fmt.Errorf("%s %s is required", action.Type, key)
+		}
+		return nil
+	}
+	switch action.Type {
+	case "member.notify":
+		for _, key := range []string{"member_id", "title", "message"} {
+			if err := requireString(key); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "wakeup.create":
+		if err := requireString("fire_at"); err != nil {
+			return err
+		}
+		return requireString("prompt")
+	case "wakeup.cancel":
+		return requireString("wakeup_id")
+	case "task.retry", "task.cancel":
+		return requireString("task_id")
+	case "artifact.create_or_update":
+		for _, key := range []string{"title", "kind", "body"} {
+			if err := requireString(key); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "approval.require":
+		for _, key := range []string{"capability", "resource", "reason"} {
+			if err := requireString(key); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "audit.record":
+		return requireString("event")
+	case "metric.increment":
+		if err := requireString("name"); err != nil {
+			return err
+		}
+		if _, ok := action.Config["amount"]; !ok {
+			return fmt.Errorf("%s amount is required", action.Type)
+		}
+		return nil
+	case "skill.run":
+		return requireString("skill_name")
+	case "judge.gate":
+		if err := requireString("agent_id"); err != nil {
+			return err
+		}
+		return requireString("rubric")
+	case "agent.dispatch":
+		return requireString("agent_id")
+	case "squad.dispatch":
+		if err := requireString("squad_id"); err != nil {
+			return err
+		}
+		return requireString("agent_id")
+	case "session.handoff":
+		_, err := validateHandoffAction(HookEvent{}, action.Config)
+		return err
+	case "workflow.activate", "workflow.pause", "workflow.resume", "workflow.stop":
+		return requireString("workflow_id")
+	default:
+		return nil
+	}
+}
+
+func validateTypedHookActions(policy HookPolicy) error {
+	for _, handler := range policy.Handlers {
+		for _, action := range handler.Actions {
+			if err := validateTypedHookAction(action); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func hookActionCapability(actionType string) string {
 	switch actionType {
 	case "member.notify":
 		return "add_comment"
-	case "agent.dispatch", "squad.dispatch":
+	case "agent.dispatch", "squad.dispatch", "skill.run", "judge.gate":
 		return "trigger_other_agent"
 	case "wakeup.create", "wakeup.cancel":
 		return "schedule_agent_wakeup"

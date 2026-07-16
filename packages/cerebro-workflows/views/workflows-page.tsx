@@ -1,13 +1,14 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { Menu, Plus } from "lucide-react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { useNavigation } from "@multica/views/navigation";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@multica/ui/components/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -75,7 +76,7 @@ export function WorkflowsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {evalsEnabled && (
+          <div className="hidden items-center gap-2 md:flex">{evalsEnabled && (
             <Button
               size="sm"
               variant="outline"
@@ -93,18 +94,21 @@ export function WorkflowsPage() {
           </Button>}
           <Button
             size="sm"
-            onClick={() => navigation.push(`/${workspace.slug}/workflows/new`)}
-          >
-            <Plus className="size-4" />
-            New workflow
-          </Button>
-          <Button
-            size="sm"
             variant="outline"
             onClick={() => navigation.push(`/${workspace.slug}/workflows/runs`)}
           >
             Workflow log
           </Button>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button className="md:hidden" size="sm" variant="outline" aria-label="Workflow menu" />}><Menu className="size-4" />Menu</DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {evalsEnabled && <DropdownMenuItem onClick={() => navigation.push(`/${workspace.slug}/workflows/evals`)}>Eval catalog</DropdownMenuItem>}
+              {hooksEnabled && <DropdownMenuItem onClick={() => navigation.push(`/${workspace.slug}/workflows/hooks`)}>Hook library</DropdownMenuItem>}
+              <DropdownMenuItem onClick={() => navigation.push(`/${workspace.slug}/workflows/runs`)}>Workflow log</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button size="sm" onClick={() => navigation.push(`/${workspace.slug}/workflows/new`)}><Plus className="size-4" />New workflow</Button>
         </div>
       </PageHeader>
 
@@ -116,7 +120,7 @@ export function WorkflowsPage() {
             </div>
           )}
 
-          <Table>
+          <div className="hidden md:block"><Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[28%]">Name</TableHead>
@@ -185,7 +189,37 @@ export function WorkflowsPage() {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+          </Table></div>
+
+          <div className="grid gap-3 md:hidden" aria-label="Workflows">
+            {workflows.length === 0 && !list.isLoading && (
+              <div className="rounded-lg border p-5 text-center text-sm text-muted-foreground">
+                No workflows yet. Press <strong>New workflow</strong> to create a rule.
+              </div>
+            )}
+            {workflows.map((wf) => (
+              <article key={wf.id} className="grid min-w-0 gap-3 rounded-lg border bg-card p-4 text-card-foreground">
+                <button type="button" className="min-w-0 text-left" onClick={() => navigation.push(`/${workspace.slug}/workflows/${wf.id}`)}>
+                  <div className="truncate font-medium">{wf.name}</div>
+                  <div className="text-[11px] text-muted-foreground">Created {new Date(wf.created_at).toLocaleString()}</div>
+                </button>
+                <div className="grid min-w-0 gap-1 text-xs">
+                  <span>{wf.workflow_type === "issue_loop" ? "Issue workflow" : "Standard"}</span>
+                  <span className="truncate font-mono text-muted-foreground">
+                    {wf.workflow_type === "issue_loop" ? "Plan → Build → Delivery gate" : `${wf.trigger_type} → ${wf.action_type}`}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+                  <label className="mr-auto flex items-center gap-2 text-xs font-medium">
+                    <Switch checked={wf.enabled} onCheckedChange={(value) => toggle.mutate({ id: wf.id, enabled: value === true })} disabled={toggle.isPending} />
+                    Active
+                  </label>
+                  <Button size="sm" variant="ghost" onClick={() => navigation.push(`/${workspace.slug}/workflows/${wf.id}/runs`)}>Runs</Button>
+                  <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { if (confirm(`Delete workflow "${wf.name}"?`)) remove.mutate(wf.id); }}>Delete</Button>
+                </div>
+              </article>
+            ))}
+          </div>
         </div>
       </div>
     </div>

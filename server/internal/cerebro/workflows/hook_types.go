@@ -95,6 +95,7 @@ type HookPolicy struct {
 	CreatedByID   string          `json:"created_by_id,omitempty"`
 	CreatedByType string          `json:"created_by_type,omitempty"`
 	UpdatedAt     time.Time       `json:"updated_at,omitempty"`
+	LastRunAt     *time.Time      `json:"last_run_at,omitempty"`
 	ObservedRuns  int             `json:"observed_run_count"`
 	BaselineAt    *time.Time      `json:"baseline_at,omitempty"`
 	CanPublish    bool            `json:"can_publish"`
@@ -137,13 +138,14 @@ type HookMatch struct {
 }
 
 type HookResult struct {
-	RunID         string             `json:"run_id,omitempty"`
-	Decision      HookDecision       `json:"decision"`
-	WouldDecision HookDecision       `json:"would_decision,omitempty"`
-	Requirements  []string           `json:"requirements,omitempty"`
-	Modifications map[string]any     `json:"modifications,omitempty"`
-	Matches       []HookMatch        `json:"matches,omitempty"`
-	TimedOut      bool               `json:"timed_out,omitempty"`
-	Warning       string             `json:"warning,omitempty"`
-	ActionResults []HookActionResult `json:"action_results,omitempty"`
+	RunID             string             `json:"run_id,omitempty"`
+	Decision          HookDecision       `json:"decision"`
+	WouldDecision     HookDecision       `json:"would_decision,omitempty"`
+	Requirements      []string           `json:"requirements,omitempty"`
+	Modifications     map[string]any     `json:"modifications,omitempty"`
+	Matches           []HookMatch        `json:"matches,omitempty"`
+	MatchedConditions []Condition        `json:"matched_conditions,omitempty"`
+	TimedOut          bool               `json:"timed_out,omitempty"`
+	Warning           string             `json:"warning,omitempty"`
+	ActionResults     []HookActionResult `json:"action_results,omitempty"`
 }

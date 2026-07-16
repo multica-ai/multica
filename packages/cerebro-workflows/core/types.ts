@@ -441,10 +441,10 @@ export const ACTION_OPTIONS: ReadonlyArray<{
 
 export const RUN_STATUS_BADGE: Record<CerebroWorkflowRunStatus, string> = {
   queued: "bg-muted text-muted-foreground",
-  running: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  success: "bg-green-500/10 text-green-600 dark:text-green-400",
-  failed: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  escalated: "bg-red-500/10 text-red-600 dark:text-red-400",
+  running: "bg-info/10 text-info",
+  success: "bg-success/10 text-success",
+  failed: "bg-warning/10 text-warning",
+  escalated: "bg-destructive/10 text-destructive",
 };
 
 // Outbound webhook headers — the server-side guard rejects anything that

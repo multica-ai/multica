@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHookDraft } from "../../core/hook-types";
 import { HookEditor } from "./hook-editor";
@@ -22,26 +23,56 @@ describe("HookEditor", () => {
   });
 
   it("edits filters as field, operator, and value rows without raw JSON", () => {
-    render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
+    render(<HookEditor initialHook={{ ...createHookDraft(), events: ["before.task.complete"], conditions: [{ field: "issue.status", operator: "not_in", value: "done, cancelled" }] }} onSave={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Configure Filter" }));
-    expect(screen.getByLabelText("Filter field 1")).toHaveValue("issue.status");
-    expect(screen.getByLabelText("Filter operator 1")).toHaveValue("not_in");
+    expect(screen.getByLabelText("Filter field 1")).toHaveTextContent("Issue status");
+    expect(screen.getByLabelText("Filter operator 1")).toHaveTextContent("is not one of");
     expect(screen.getByLabelText("Filter value 1")).toHaveValue("done, cancelled");
     expect(screen.queryByText(/\{\s*"field"/)).not.toBeInTheDocument();
+  });
+
+  it("lets each additional filter join with AND or OR", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    render(<HookEditor initialHook={{
+      ...createHookDraft(),
+      events: ["before.task.complete"],
+      conditions: [
+        { field: "issue.status", operator: "eq", value: "todo", conjunction: "AND" },
+        { field: "issue.priority", operator: "eq", value: "urgent", conjunction: "AND" },
+      ],
+    }} onSave={onSave} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure Filter" }));
+    await user.click(screen.getByLabelText("Filter conjunction 2"));
+    await user.click(await screen.findByRole("option", { name: "OR" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      conditions: expect.arrayContaining([expect.objectContaining({ conjunction: "OR" })]),
+    }));
   });
 
   it("uses the same scope step for agent, issue, and session", () => {
     render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Configure Applies to" }));
-    expect(screen.getByRole("option", { name: "Agent or model" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add scope" }));
+    fireEvent.click(screen.getByLabelText("Scope 1"));
+    expect(screen.getByRole("option", { name: "Agent" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Model" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Issue" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Chat or session" })).toBeInTheDocument();
   });
 
   it("keeps Publish disabled until dry-run evidence exists", () => {
-    const { rerender } = render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} canPublish={false} />);
+    const valid = {
+      ...createHookDraft(), name: "Guard completion", events: ["before.task.complete" as const],
+      bindings: [{ kind: "workspace" as const, value: "" }],
+      conditions: [{ field: "issue.status", operator: "eq", value: "todo" }],
+      decision: "block" as const, requirement: "Continue the issue",
+      actions: [{ type: "audit.record", label: "Record audit event", config: { event: "completion_guarded" } }],
+    };
+    const { rerender } = render(<HookEditor initialHook={valid} onSave={vi.fn()} canPublish={false} />);
     expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
-    rerender(<HookEditor initialHook={{ ...createHookDraft(), baseline_run_count: 4 }} onSave={vi.fn()} canPublish />);
+    rerender(<HookEditor initialHook={{ ...valid, baseline_run_count: 4 }} onSave={vi.fn()} canPublish />);
     expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
   });
 
@@ -54,15 +85,86 @@ describe("HookEditor", () => {
   });
 
   it("configures Start Handoff as a typed action without commands", () => {
-    render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
+    render(<HookEditor initialHook={{ ...createHookDraft(), actions: [{ type: "session.handoff", label: "Start Handoff", config: {} }] }} onSave={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Configure Action" }));
-    fireEvent.change(screen.getByLabelText("Action 1 type"), { target: { value: "session.handoff" } });
     expect(screen.getByLabelText("Handoff target")).toBeInTheDocument();
     expect(screen.getByLabelText("Handoff plan reference")).toBeInTheDocument();
-    expect(screen.getByLabelText("Start new session now")).toBeChecked();
+    expect(screen.getByRole("checkbox")).toBeChecked();
     expect(screen.getByLabelText("Handoff summary")).toBeInTheDocument();
     expect(screen.getByLabelText("Handoff done")).toBeInTheDocument();
     expect(screen.getByLabelText("Handoff remaining")).toBeInTheDocument();
     expect(screen.queryByLabelText(/command|shell/i)).not.toBeInTheDocument();
+  });
+
+  it("adds and removes conditions and actions", () => {
+    render(<HookEditor initialHook={{ ...createHookDraft(), events: ["before.task.complete"] }} onSave={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure Filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
+    expect(screen.getAllByRole("button", { name: /Remove condition/ })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Remove condition 1" }));
+    expect(screen.queryByRole("button", { name: /Remove condition/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Configure Action" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add action" }));
+    expect(screen.getByRole("button", { name: "Remove action 1" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove action 1" }));
+    expect(screen.queryByRole("button", { name: /Remove action/ })).not.toBeInTheDocument();
+  });
+
+  it("does not show insertion controls that cannot change the chain shape", () => {
+    render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /Quick add/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a live plain-language explanation and editable description", () => {
+    render(<HookEditor initialHook={{ ...createHookDraft(), events: ["before.task.complete"] }} onSave={vi.fn()} />);
+    expect(screen.getByLabelText("Hook description")).toBeInTheDocument();
+    expect(screen.getByLabelText("What this hook does")).toHaveTextContent("before a task completes");
+  });
+
+  it("saves current edits before publishing and asks for confirmation", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue({ id: "hook-1" });
+    const onPublish = vi.fn();
+    const valid = {
+      ...createHookDraft(), id: "hook-1", name: "Guard completion", events: ["before.task.complete" as const],
+      bindings: [{ kind: "workspace" as const, value: "" }],
+      conditions: [{ field: "issue.status", operator: "eq", value: "todo" }],
+      decision: "block" as const, requirement: "Continue the issue",
+      actions: [{ type: "audit.record", label: "Record audit event", config: { event: "completion_blocked" } }],
+      baseline_run_count: 4,
+    };
+    render(<HookEditor initialHook={valid} onSave={onSave} onPublish={onPublish} canPublish />);
+    await user.clear(screen.getByLabelText("Hook name"));
+    await user.type(screen.getByLabelText("Hook name"), "Changed name");
+    await user.click(screen.getByRole("button", { name: "Publish" }));
+    expect(screen.getByRole("dialog", { name: "Publish hook" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Confirm publish" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: "Changed name" }));
+    expect(onPublish).toHaveBeenCalled();
+  });
+
+  it("offers lifecycle controls for an existing editable hook", async () => {
+    const user = userEvent.setup();
+    render(<HookEditor initialHook={{ ...createHookDraft(), id: "hook-1" }} onSave={vi.fn()} onDisable={vi.fn()} onDelete={vi.fn()} onDuplicate={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "More hook actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Disable hook" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Duplicate hook" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete hook" })).toBeInTheDocument();
+  });
+
+  it("shows honest completion state and the new skill and judge actions", () => {
+    render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Configure Trigger" })).toHaveAttribute("data-state", "incomplete");
+    fireEvent.click(screen.getByRole("button", { name: "Configure Action" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add action" }));
+    fireEvent.click(screen.getByLabelText("Action 1 type"));
+    expect(screen.getByRole("option", { name: "Run skill" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Judge gate" })).toBeInTheDocument();
+  });
+
+  it("uses a stacked layout on mobile-sized screens", () => {
+    const { container } = render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
+    expect(container.querySelector("main")).toHaveClass("grid-cols-1", "md:grid-cols-[minmax(18rem,430px)_minmax(0,1fr)]");
   });
 });

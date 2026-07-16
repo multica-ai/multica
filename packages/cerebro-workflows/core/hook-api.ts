@@ -9,15 +9,15 @@ const hookHandlerSchema = z.object({ id: z.string().optional().default(""), deci
 const hookPolicySchema = z.object({
   id: z.string().optional(), version: z.number().int().positive(), name: z.string(), description: z.string().optional().default(""),
   mode: z.enum(["off", "dry_run", "enforce", "managed"]), fail_mode: z.enum(["open", "closed", "warn"]),
-  events: z.array(z.string()).min(1), bindings: z.array(hookBindingSchema).min(1), conditions: z.array(hookConditionSchema).optional().default([]), handlers: z.array(hookHandlerSchema).min(1),
-  observed_run_count: z.number().int().nonnegative().optional().default(0), can_publish: z.boolean().optional().default(false), updated_at: z.string().optional(),
+  events: z.array(z.string()), bindings: z.array(hookBindingSchema), conditions: z.array(hookConditionSchema).optional().default([]), handlers: z.array(hookHandlerSchema),
+  observed_run_count: z.number().int().nonnegative().optional().default(0), can_publish: z.boolean().optional().default(false), updated_at: z.string().optional(), last_run_at: z.string().optional(),
 });
 const hookListSchema = z.object({ hooks: z.array(hookPolicySchema) });
 
 type HookPolicyTransport = z.infer<typeof hookPolicySchema>;
 export interface HookWriteTransport {
   name: string; description: string; mode: "dry_run"; fail_mode: WorkflowHook["fail_mode"];
-  events: HookEventType[]; bindings: Array<{ kind: WorkflowHook["binding"]["kind"]; id: string }>;
+  events: HookEventType[]; bindings: Array<{ kind: WorkflowHook["bindings"][number]["kind"]; id: string }>;
   conditions: Array<{ field: string; op: string; value?: string }>;
   handlers: Array<{ id: string; decision: WorkflowHook["decision"]; requirement: string; actions: HookActionDraft[] }>;
 }
@@ -25,17 +25,17 @@ export interface HookWriteTransport {
 function fromTransport(policy: HookPolicyTransport): WorkflowHook {
 	const fallback = createHookDraft();
 	const handler = policy.handlers[0] ?? { id: "", decision: fallback.decision, requirement: fallback.requirement, actions: [] };
-	const binding = policy.bindings[0] ?? { kind: fallback.binding.kind, id: fallback.binding.value };
   return {
     id: policy.id, version: policy.version, name: policy.name, description: policy.description,
-		mode: policy.mode, fail_mode: policy.fail_mode, event_type: (policy.events[0] ?? fallback.event_type) as HookEventType,
-    binding: { kind: binding.kind, value: binding.id },
+		mode: policy.mode, fail_mode: policy.fail_mode,
+    events: policy.events.filter((event): event is HookEventType => typeof event === "string") as HookEventType[],
+    bindings: policy.bindings.map((binding) => ({ kind: binding.kind, value: binding.id })),
     conditions: policy.conditions.map((condition, index) => ({ field: condition.field, operator: condition.op, value: condition.values?.map(String).join(", ") ?? (condition.value === undefined ? "" : String(condition.value)), conjunction: index < policy.conditions.length - 1 ? "AND" : undefined })),
     decision: handler.decision, requirement: handler.requirement,
     actions: handler.actions.map((action) => ({ type: action.type, label: humaniseAction(action.type), config: action.config })),
     baseline_run_count: policy.observed_run_count,
 	can_publish: policy.can_publish,
-    last_run_at: policy.updated_at,
+    last_run_at: policy.last_run_at,
   };
 }
 
@@ -52,7 +52,7 @@ export function parseHookListResponse(raw: unknown): WorkflowHook[] {
 export function toHookTransport(hook: WorkflowHook): HookWriteTransport {
   return {
     name: hook.name, description: hook.description, mode: "dry_run", fail_mode: hook.fail_mode,
-    events: [hook.event_type], bindings: [{ kind: hook.binding.kind, id: hook.binding.value }],
+    events: hook.events, bindings: hook.bindings.map((binding) => ({ kind: binding.kind, id: binding.value })),
     conditions: hook.conditions.map((condition) => ({ field: condition.field, op: condition.operator, ...(condition.value === "" ? {} : { value: condition.value }) })),
     handlers: [{ id: "primary", decision: hook.decision, requirement: hook.requirement, actions: hook.actions }],
   };
@@ -73,6 +73,12 @@ export async function updateWorkflowHook(id: string, hook: WorkflowHook): Promis
 export async function publishWorkflowHook(id: string): Promise<WorkflowHook> {
   return parseHookResponse(await api.cerebroRequest<unknown>(`/api/cerebro/workflow-hooks/${encodeURIComponent(id)}/publish`, { method: "POST" }));
 }
+export async function disableWorkflowHook(id: string): Promise<WorkflowHook> {
+  return parseHookResponse(await api.cerebroRequest<unknown>(`/api/cerebro/workflow-hooks/${encodeURIComponent(id)}/disable`, { method: "POST" }));
+}
+export async function deleteWorkflowHook(id: string): Promise<void> {
+  await api.cerebroRequest(`/api/cerebro/workflow-hooks/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
 export async function testWorkflowHook(id: string, event: Record<string, unknown>): Promise<{ side_effects: false; result: unknown }> {
   return api.cerebroRequest(`/api/cerebro/workflow-hooks/${encodeURIComponent(id)}/test`, { method: "POST", body: JSON.stringify(event) });
 }
@@ -90,6 +96,8 @@ export function parseHookRunsResponse(raw: unknown): HookRun[] {
     const sourceScope = asObject(record.source_scope);
     const matches = Array.isArray(result.matches) ? result.matches : [];
     const actions = Array.isArray(result.action_results) ? result.action_results : [];
+    const conditions = Array.isArray(result.matched_conditions) ? result.matched_conditions : [];
+    const remediation = Array.isArray(result.requirements) ? result.requirements.map(String) : [];
     const decision = String(result.would_decision || result.decision || "allow") as WorkflowHook["decision"];
     const eventType = String(event.event_type || "Unknown event");
     const scopeKind = String(sourceScope.kind || "workspace");
@@ -97,12 +105,24 @@ export function parseHookRunsResponse(raw: unknown): HookRun[] {
     return [{
       id: String(record.id || event.event_id || ""),
       created_at: String(record.created_at || ""),
+      policy_id: String(record.policy_id || ""),
+      policy_version: Number(record.policy_version || 0),
+      source_scope: { kind: scopeKind, id: scopeID },
+      matched_conditions: conditions.map((condition) => {
+        const item = asObject(condition);
+        const value = item.values ?? item.value;
+        const rendered = Array.isArray(value) ? value.join(", ") : String(value ?? "");
+        return [item.field, item.op, rendered].filter(Boolean).join(" ");
+      }),
       source: `${eventType} · ${scopeKind}${scopeID ? ` ${scopeID}` : ""}`,
       matched_steps: matches.length > 0 ? ["Trigger", "Scope", "Filter", "Decision", ...(actions.length > 0 ? ["Action"] : [])] : [],
       decision,
       would_action: actions.length > 0 ? actions.map((action) => String(asObject(action).type || "action")).join(", ") : String((Array.isArray(result.requirements) ? result.requirements[0] : "No action") || "No action"),
+      fail_mode: (["open", "closed", "warn"].includes(String(record.fail_mode)) ? String(record.fail_mode) : "open") as WorkflowHook["fail_mode"],
+      remediation,
       side_effects: false as const,
       latency_ms: Number(record.latency_ms || 0),
+      event,
     }];
   });
 }

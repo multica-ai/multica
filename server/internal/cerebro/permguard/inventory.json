@@ -17,6 +17,14 @@
       "gate": "tool_policy:hooks:enforce + human_only"
     },
     {
+      "id": "POST /api/cerebro/workflow-hooks/{id}/disable",
+      "gate": "tool_policy:hooks:write"
+    },
+    {
+      "id": "DELETE /api/cerebro/workflow-hooks/{id}",
+      "gate": "tool_policy:hooks:write"
+    },
+    {
       "id": "POST /api/cerebro/app-folders/",
       "gate": "cerebro_capability:apps.manage"
     },
