@@ -747,9 +747,9 @@ func (c *httpAPIClient) DownloadMessageResource(ctx context.Context, creds Insta
 		return MessageResource{}, err
 	}
 	q := url.Values{}
-	q.Set("file_key", fileKey)
 	q.Set("type", resourceType)
-	path := "/open-apis/im/v1/messages/" + url.PathEscape(messageID) + "/resources?" + q.Encode()
+	path := "/open-apis/im/v1/messages/" + url.PathEscape(messageID) +
+		"/resources/" + url.PathEscape(fileKey) + "?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.resolveBaseURL(creds)+path, nil)
 	if err != nil {
 		return MessageResource{}, fmt.Errorf("lark http client: download resource: %w", err)
