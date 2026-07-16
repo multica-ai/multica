@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -134,12 +135,12 @@ func (h *Handler) CreateHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	author, canInvoke, ok := h.resolveHookWriter(w, r, userID, workspaceID)
+	author, ok := h.resolveHookWriter(w, r, userID, workspaceID)
 	if !ok {
 		return
 	}
 
-	result, err := h.HookService.CreateHook(r.Context(), workspaceUUID, spec, author, canInvoke)
+	result, err := h.HookService.CreateHook(r.Context(), workspaceUUID, spec, author)
 	if err != nil {
 		h.writeHookError(w, err)
 		return
@@ -204,11 +205,11 @@ func (h *Handler) UpdateHook(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	author, canInvoke, ok := h.resolveHookWriter(w, r, userID, workspaceID)
+	author, ok := h.resolveHookWriter(w, r, userID, workspaceID)
 	if !ok {
 		return
 	}
-	result, err := h.HookService.UpdateHook(r.Context(), workspaceUUID, hookUUID, spec, author, canInvoke)
+	result, err := h.HookService.UpdateHook(r.Context(), workspaceUUID, hookUUID, spec, author)
 	if err != nil {
 		h.writeHookError(w, err)
 		return
@@ -250,7 +251,7 @@ func (h *Handler) setHookEnabled(w http.ResponseWriter, r *http.Request, enabled
 		}
 		reason = body.Reason
 	}
-	author, _, ok := h.resolveHookWriter(w, r, userID, workspaceID)
+	author, ok := h.resolveHookWriter(w, r, userID, workspaceID)
 	if !ok {
 		return
 	}
@@ -276,7 +277,7 @@ func (h *Handler) DeleteHook(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	author, _, ok := h.resolveHookWriter(w, r, userID, workspaceID)
+	author, ok := h.resolveHookWriter(w, r, userID, workspaceID)
 	if !ok {
 		return
 	}
@@ -334,6 +335,13 @@ func decodeHookSpec(w http.ResponseWriter, r *http.Request) (automation.HookSpec
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return automation.HookSpec{}, false
 	}
+	// The body must be exactly one JSON value. A second Decode must hit io.EOF;
+	// anything else means trailing data (a smuggled second document) that
+	// DisallowUnknownFields alone does not catch (MUL-4332 review round 3, point 4).
+	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid request body: expected exactly one JSON document")
+		return automation.HookSpec{}, false
+	}
 	return spec, true
 }
 
@@ -344,39 +352,27 @@ func decodeHookSpec(w http.ResponseWriter, r *http.Request) (automation.HookSpec
 // behind its current task. The resolved principal must still be a workspace
 // member (review point 2) — an agent UUID is never a substitute for a human, and
 // a departed principal can no longer author hooks.
-func (h *Handler) resolveHookWriter(w http.ResponseWriter, r *http.Request, userID, workspaceID string) (service.HookAuthor, service.CanInvokeAgent, bool) {
+func (h *Handler) resolveHookWriter(w http.ResponseWriter, r *http.Request, userID, workspaceID string) (service.HookAuthor, bool) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	actorUUID, err := util.ParseUUID(actorID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid actor id")
-		return service.HookAuthor{}, nil, false
+		return service.HookAuthor{}, false
 	}
 	principal := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	if principal == "" {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
-		return service.HookAuthor{}, nil, false
+		return service.HookAuthor{}, false
 	}
 	principalUUID, err := util.ParseUUID(principal)
 	if err != nil {
 		writeError(w, http.StatusForbidden, "no accountable authorization principal")
-		return service.HookAuthor{}, nil, false
+		return service.HookAuthor{}, false
 	}
-	// The accountable principal must still be a member of this workspace.
-	member, err := h.getWorkspaceMember(r.Context(), principal, workspaceID)
-	if err != nil {
-		writeError(w, http.StatusForbidden, "authorization principal is not a member of this workspace")
-		return service.HookAuthor{}, nil, false
-	}
-	author := service.HookAuthor{
-		ActorType:        actorType,
-		ActorID:          actorUUID,
-		PrincipalUserID:  principalUUID,
-		IsWorkspaceAdmin: roleAllowed(member.Role, "owner", "admin"),
-	}
-	canInvoke := func(agent db.Agent) bool {
-		return h.canInvokeAgent(r.Context(), agent, actorType, actorID, principal, workspaceID)
-	}
-	return author, canInvoke, true
+	// Membership, role, and every target admission are (re)checked by the service
+	// inside the write transaction against this principal, so a stale snapshot can
+	// never authorize the write.
+	return service.HookAuthor{ActorType: actorType, ActorID: actorUUID, PrincipalUserID: principalUUID}, true
 }
 
 func (h *Handler) writeHookError(w http.ResponseWriter, err error) {

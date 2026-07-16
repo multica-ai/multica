@@ -409,10 +409,9 @@ func TestHookConcurrentPatchAppendsContiguousRevisions(t *testing.T) {
 	hook := createHookAs(t, testUserID, sampleHookSpec("concurrent", "hi", issueID))
 
 	admin := service.HookAuthor{
-		ActorType:        "member",
-		ActorID:          parseUUID(testUserID),
-		PrincipalUserID:  parseUUID(testUserID),
-		IsWorkspaceAdmin: true,
+		ActorType:       "member",
+		ActorID:         parseUUID(testUserID),
+		PrincipalUserID: parseUUID(testUserID),
 	}
 	hookUUID := parseUUID(hook.ID)
 	wsUUID := parseUUID(testWorkspaceID)
@@ -427,7 +426,7 @@ func TestHookConcurrentPatchAppendsContiguousRevisions(t *testing.T) {
 			defer wg.Done()
 			<-start
 			spec := hookSpecFromMap(sampleHookSpec(fmt.Sprintf("rev-%d", n), "x", issueID))
-			_, err := testHandler.HookService.UpdateHook(ctx, wsUUID, hookUUID, spec, admin, nil)
+			_, err := testHandler.HookService.UpdateHook(ctx, wsUUID, hookUUID, spec, admin)
 			errs <- err
 		}(i)
 	}
@@ -459,6 +458,178 @@ func TestHookConcurrentPatchAppendsContiguousRevisions(t *testing.T) {
 		if r != i+1 {
 			t.Fatalf("revisions not contiguous at index %d: got %d, want %d (revs=%v)", i, r, i+1, revs)
 		}
+	}
+}
+
+// seedPrivateAgent inserts a private agent owned by ownerUserID.
+func seedPrivateAgent(t *testing.T, ownerUserID string) string {
+	t.Helper()
+	var id string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 'private', 1, $4)
+		RETURNING id`,
+		testWorkspaceID, fmt.Sprintf("Private Agent %d", hookSeedCounter.Add(1)), testRuntimeID, ownerUserID).Scan(&id); err != nil {
+		t.Fatalf("seed private agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, id) })
+	return id
+}
+
+// seedAutopilot inserts an autopilot created by creatorUserID.
+func seedAutopilot(t *testing.T, creatorUserID string) string {
+	t.Helper()
+	var id string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO autopilot (workspace_id, title, assignee_type, assignee_id, status, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, $2, 'agent', $3, 'active', 'run_only', 'member', $4)
+		RETURNING id`,
+		testWorkspaceID, "hook autopilot", seededHookAgentID(t), creatorUserID).Scan(&id); err != nil {
+		t.Fatalf("seed autopilot: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, id) })
+	return id
+}
+
+func triggerAgentSpec(name, issueID, agentID string) map[string]any {
+	return map[string]any{
+		"name": name,
+		"when": map[string]any{"event": "issue.status_changed"},
+		"fire": map[string]any{"mode": "per_event"},
+		"do":   []any{map[string]any{"type": "trigger_agent", "issue_id": issueID, "agent_id": agentID}},
+	}
+}
+
+func runAutopilotSpec(name, autopilotID string) map[string]any {
+	return map[string]any{
+		"name": name,
+		"when": map[string]any{"event": "issue.status_changed"},
+		"fire": map[string]any{"mode": "per_event"},
+		"do":   []any{map[string]any{"type": "run_autopilot", "autopilot_id": autopilotID}},
+	}
+}
+
+// Target admission is judged against the hook's STORED principal, not the editor.
+// An admin editing member A's hook cannot smuggle in a trigger_agent that A could
+// not invoke (review round 3, point 1).
+func TestHookAdmissionUsesStoredPrincipal(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	enableHooksFlag(t)
+	issueID := seedHookIssue(t)
+	privateAgent := seedPrivateAgent(t, testUserID) // owned by the fixture owner
+	memberA := seedHookMember(t, "member")
+
+	hook := createHookAs(t, memberA, sampleHookSpec("owned by A", "hi", issueID))
+
+	// Owner (admin) PATCHes A's hook to trigger the owner's private agent. Because
+	// admission is judged for A (the stored principal), who cannot invoke that
+	// private agent, the edit is rejected — the admin cannot expand A's reach.
+	w := httptest.NewRecorder()
+	testHandler.UpdateHook(w, withURLParam(newMemberHookRequest(http.MethodPatch, "/api/hooks/"+hook.ID, triggerAgentSpec("hijack", issueID, privateAgent)), "id", hook.ID))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("admin PATCH adding a private agent A cannot invoke: status %d, want 400: %s", w.Code, w.Body.String())
+	}
+
+	// The owner's OWN hook may reference the owner's private agent (owner invokes it).
+	createHookAs(t, testUserID, triggerAgentSpec("owner hook", issueID, privateAgent))
+}
+
+// run_autopilot targets are gated by the stored principal's write permission on
+// the autopilot, not mere existence (review round 3, point 2).
+func TestHookRunAutopilotChecksWritePermission(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	enableHooksFlag(t)
+	memberA := seedHookMember(t, "member")
+	autopilotID := seedAutopilot(t, testUserID) // created by the owner
+
+	// Member A has no write access to the owner's autopilot → rejected.
+	w := httptest.NewRecorder()
+	testHandler.CreateHook(w, newUserHookRequest(http.MethodPost, "/api/hooks", runAutopilotSpec("by A", autopilotID), memberA))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("member A run_autopilot on autopilot they cannot write: status %d, want 400: %s", w.Code, w.Body.String())
+	}
+
+	// The autopilot's creator (owner) may reference it.
+	createHookAs(t, testUserID, runAutopilotSpec("by owner", autopilotID))
+}
+
+// issue_field operand ids must resolve to workspace resources, not just the
+// subject issue (review round 3, point 2).
+func TestHookIssueFieldOperandValidation(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	enableHooksFlag(t)
+	realIssue := seedHookIssue(t)
+	const ghost = "77777777-7777-7777-7777-777777777777"
+
+	parentCond := func(operand string) map[string]any {
+		return map[string]any{
+			"name": "operand",
+			"when": map[string]any{"event": "issue.status_changed"},
+			"if":   []any{map[string]any{"issue_field": map[string]any{"id": realIssue, "field": "parent_issue_id", "eq": operand}}},
+			"fire": map[string]any{"mode": "per_event"},
+			"do":   []any{map[string]any{"type": "add_comment", "issue_id": realIssue, "message": "hi"}},
+		}
+	}
+	// A ghost parent operand is rejected.
+	w := httptest.NewRecorder()
+	testHandler.CreateHook(w, newMemberHookRequest(http.MethodPost, "/api/hooks", parentCond(ghost)))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("issue_field parent operand ghost: status %d, want 400: %s", w.Code, w.Body.String())
+	}
+	// A real parent operand is accepted.
+	createHookAs(t, testUserID, parentCond(realIssue))
+}
+
+// The write transaction re-checks that the principal is a workspace member; a
+// valid-but-non-member principal cannot persist a hook (review round 3, point 3).
+func TestHookServiceRejectsNonMemberPrincipal(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	ctx := context.Background()
+	issueID := seedHookIssue(t)
+	author := service.HookAuthor{
+		ActorType:       "member",
+		ActorID:         parseUUID("88888888-8888-8888-8888-888888888888"),
+		PrincipalUserID: parseUUID("88888888-8888-8888-8888-888888888888"), // not a member
+	}
+	_, err := testHandler.HookService.CreateHook(ctx, parseUUID(testWorkspaceID), hookSpecFromMap(sampleHookSpec("ghost", "hi", issueID)), author)
+	if err == nil {
+		t.Fatalf("expected rejection for non-member principal, got nil")
+	}
+	var count int
+	testPool.QueryRow(ctx, `SELECT count(*) FROM hook WHERE authorization_principal_user_id = $1`, "88888888-8888-8888-8888-888888888888").Scan(&count)
+	if count != 0 {
+		t.Errorf("a hook was persisted for a non-member principal (count=%d)", count)
+	}
+}
+
+// The body must be exactly one JSON document; a smuggled trailing document is
+// rejected even though DisallowUnknownFields alone would accept it (review round
+// 3, point 4).
+func TestHookRejectsTrailingJSONDocument(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	enableHooksFlag(t)
+	issueID := seedHookIssue(t)
+	first, _ := json.Marshal(sampleHookSpec("first", "hi", issueID))
+	body := append(append([]byte{}, first...), []byte(` {"unexpected":"second document"}`)...)
+	req := httptest.NewRequest(http.MethodPost, "/api/hooks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	w := httptest.NewRecorder()
+	testHandler.CreateHook(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("trailing second JSON document: status %d, want 400: %s", w.Code, w.Body.String())
 	}
 }
 

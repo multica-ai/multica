@@ -9,13 +9,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/admission"
 	"github.com/multica-ai/multica/server/internal/automation"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // Hook CRUD errors surfaced to the handler for status mapping. Validation
-// problems (shape or unresolvable target) flow through as
+// problems (shape or unresolvable/forbidden target) flow through as
 // *automation.ValidationError (→ 400).
 var (
 	ErrHookNotFound      = errors.New("hook not found")
@@ -25,21 +26,15 @@ var (
 )
 
 // HookAuthor carries the resolved identity for a hook write: who is acting
-// (creator, pure audit), the accountable human whose authority the hook runs
-// under (§8), and whether that human is a workspace owner/admin. An agent author
-// must resolve to a real member principal.
+// (creator, pure audit) and the accountable human whose authority the hook runs
+// under (§8). Membership and role are NOT carried here — the service re-derives
+// them inside the write transaction so a stale snapshot can never authorize a
+// write (review round 3, point 3).
 type HookAuthor struct {
-	ActorType        string // member | agent
-	ActorID          pgtype.UUID
-	PrincipalUserID  pgtype.UUID
-	IsWorkspaceAdmin bool
+	ActorType       string // member | agent
+	ActorID         pgtype.UUID
+	PrincipalUserID pgtype.UUID
 }
-
-// CanInvokeAgent is the admission predicate the handler supplies (wrapping
-// Handler.canInvokeAgent) so the service can fail-closed on a trigger_agent
-// target without importing request context. A nil predicate denies every
-// trigger_agent target (fail-closed).
-type CanInvokeAgent func(agent db.Agent) bool
 
 // HookWithRevision pairs a hook row with its active revision so the handler can
 // render one complete view. The service returns db rows; the handler shapes JSON.
@@ -62,11 +57,14 @@ func NewHookService(q *db.Queries, tx TxStarter) *HookService {
 	return &HookService{Queries: q, TxStarter: tx}
 }
 
-// CreateHook validates the spec (shape + workspace-scoped targets), resolves
-// scope + principal, and inserts the hook together with revision #1 in one
-// transaction. The two rows reference each other, so both ids are generated up
-// front.
-func (s *HookService) CreateHook(ctx context.Context, workspaceID pgtype.UUID, spec automation.HookSpec, author HookAuthor, canInvoke CanInvokeAgent) (HookWithRevision, error) {
+// CreateHook validates the spec (shape + workspace-scoped, principal-gated
+// targets) and inserts the hook together with revision #1 in one transaction.
+// The writer's membership and every target admission are (re)checked inside that
+// transaction against the accountable principal, so an illegal configuration
+// never enters the store (§13) and a stale role/membership snapshot cannot
+// authorize the write. The two rows reference each other, so both ids are
+// generated up front.
+func (s *HookService) CreateHook(ctx context.Context, workspaceID pgtype.UUID, spec automation.HookSpec, author HookAuthor) (HookWithRevision, error) {
 	if err := automation.Validate(spec); err != nil {
 		return HookWithRevision{}, err
 	}
@@ -87,7 +85,17 @@ func (s *HookService) CreateHook(ctx context.Context, workspaceID pgtype.UUID, s
 
 	var out HookWithRevision
 	err = s.inTx(ctx, func(qtx *db.Queries) error {
-		if err := validateTargets(ctx, qtx, workspaceID, spec, canInvoke); err != nil {
+		// The creator's principal must be a current member of the workspace.
+		if _, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			UserID: author.PrincipalUserID, WorkspaceID: workspaceID,
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrHookNoPrincipal
+			}
+			return err
+		}
+		// A newly created hook runs under the creator's authority.
+		if err := validateTargets(ctx, qtx, workspaceID, spec, util.UUIDToString(author.PrincipalUserID)); err != nil {
 			return err
 		}
 		hook, err := qtx.CreateHook(ctx, db.CreateHookParams{
@@ -131,11 +139,14 @@ func (s *HookService) CreateHook(ctx context.Context, workspaceID pgtype.UUID, s
 }
 
 // UpdateHook appends a new immutable revision from the spec and repoints the
-// hook's active revision (§5.1). It locks the hook row first so concurrent
-// PATCHes serialize and MAX(revision)+1 can never collide (review point 4), and
-// re-checks archived/origin/authorization inside the lock. Only the hook's
-// principal or a workspace admin may edit (review point 1). Scope is immutable.
-func (s *HookService) UpdateHook(ctx context.Context, workspaceID, hookID pgtype.UUID, spec automation.HookSpec, author HookAuthor, canInvoke CanInvokeAgent) (HookWithRevision, error) {
+// hook's active revision (§5.1), all inside one transaction that first locks the
+// hook row (so concurrent PATCHes serialize and MAX(revision)+1 cannot collide),
+// then re-checks archived/origin, the editor's live membership/role, and the
+// edit-authorization gate. Target admission is judged against the hook's LOCKED
+// stored principal — never the editor — so an admin editing another member's
+// hook can only change configuration, never grant the stored principal reach it
+// lacks (review round 3, point 1). Scope is immutable.
+func (s *HookService) UpdateHook(ctx context.Context, workspaceID, hookID pgtype.UUID, spec automation.HookSpec, author HookAuthor) (HookWithRevision, error) {
 	if err := automation.Validate(spec); err != nil {
 		return HookWithRevision{}, err
 	}
@@ -147,23 +158,13 @@ func (s *HookService) UpdateHook(ctx context.Context, workspaceID, hookID pgtype
 	revisionID := util.NewUUID()
 	var out HookWithRevision
 	err = s.inTx(ctx, func(qtx *db.Queries) error {
-		existing, err := qtx.GetHookForUpdate(ctx, db.GetHookForUpdateParams{ID: hookID, WorkspaceID: workspaceID})
+		existing, err := s.lockEditableHook(ctx, qtx, workspaceID, hookID, author)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrHookNotFound
-			}
 			return err
 		}
-		if existing.ArchivedAt.Valid {
-			return ErrHookNotFound
-		}
-		if existing.Origin == "system" {
-			return ErrHookSystemManaged
-		}
-		if err := authorizeHookEdit(existing, author); err != nil {
-			return err
-		}
-		if err := validateTargets(ctx, qtx, workspaceID, spec, canInvoke); err != nil {
+		// Admission uses the hook's STORED principal, resolved from the locked row.
+		storedPrincipal := util.UUIDToString(existing.AuthorizationPrincipalUserID)
+		if err := validateTargets(ctx, qtx, workspaceID, spec, storedPrincipal); err != nil {
 			return err
 		}
 		maxRev, err := qtx.GetMaxHookRevision(ctx, hookID)
@@ -242,48 +243,49 @@ func (s *HookService) ListHooks(ctx context.Context, workspaceID pgtype.UUID) ([
 }
 
 // SetEnabled enables/disables a hook. Disable only blocks future matches; it
-// does not cancel queued/running executions (§5.1). Only the principal or a
-// workspace admin may toggle it.
+// does not cancel queued/running executions (§5.1). Load, authorization and the
+// mutation all happen inside one transaction against the locked row.
 func (s *HookService) SetEnabled(ctx context.Context, workspaceID, hookID pgtype.UUID, enabled bool, reason string, author HookAuthor) (HookWithRevision, error) {
-	if _, err := s.loadEditableHook(ctx, workspaceID, hookID, author); err != nil {
-		return HookWithRevision{}, err
-	}
 	disabledReason := pgtype.Text{}
 	if !enabled && reason != "" {
 		disabledReason = pgtype.Text{String: reason, Valid: true}
 	}
-	hook, err := s.Queries.SetHookEnabled(ctx, db.SetHookEnabledParams{
-		ID:             hookID,
-		WorkspaceID:    workspaceID,
-		Enabled:        enabled,
-		DisabledReason: disabledReason,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return HookWithRevision{}, ErrHookNotFound
+	var out HookWithRevision
+	err := s.inTx(ctx, func(qtx *db.Queries) error {
+		if _, err := s.lockEditableHook(ctx, qtx, workspaceID, hookID, author); err != nil {
+			return err
 		}
-		return HookWithRevision{}, err
-	}
-	rev, err := s.Queries.GetHookRevision(ctx, hook.ActiveRevisionID)
-	if err != nil {
-		return HookWithRevision{}, err
-	}
-	return HookWithRevision{Hook: hook, Revision: rev}, nil
+		hook, err := qtx.SetHookEnabled(ctx, db.SetHookEnabledParams{
+			ID:             hookID,
+			WorkspaceID:    workspaceID,
+			Enabled:        enabled,
+			DisabledReason: disabledReason,
+		})
+		if err != nil {
+			return err
+		}
+		rev, err := qtx.GetHookRevision(ctx, hook.ActiveRevisionID)
+		if err != nil {
+			return err
+		}
+		out = HookWithRevision{Hook: hook, Revision: rev}
+		return nil
+	})
+	return out, err
 }
 
 // ArchiveHook soft-deletes a hook (§5.1); revisions/executions/effects are kept.
-// Only the principal or a workspace admin may archive it.
+// Load, authorization and the mutation all happen inside one transaction.
 func (s *HookService) ArchiveHook(ctx context.Context, workspaceID, hookID pgtype.UUID, author HookAuthor) error {
-	if _, err := s.loadEditableHook(ctx, workspaceID, hookID, author); err != nil {
-		return err
-	}
-	if _, err := s.Queries.ArchiveHook(ctx, db.ArchiveHookParams{ID: hookID, WorkspaceID: workspaceID}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrHookNotFound
+	return s.inTx(ctx, func(qtx *db.Queries) error {
+		if _, err := s.lockEditableHook(ctx, qtx, workspaceID, hookID, author); err != nil {
+			return err
 		}
-		return err
-	}
-	return nil
+		if _, err := qtx.ArchiveHook(ctx, db.ArchiveHookParams{ID: hookID, WorkspaceID: workspaceID}); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // ListExecutions returns the newest execution-trace rows for a hook (bounded).
@@ -298,10 +300,12 @@ func (s *HookService) ListExecutions(ctx context.Context, workspaceID, hookID pg
 	return s.Queries.ListHookExecutionsByHook(ctx, db.ListHookExecutionsByHookParams{HookID: hookID, Limit: limit})
 }
 
-// loadEditableHook loads a non-archived, non-system hook and enforces the edit
-// authorization gate, for the enable/disable/archive paths.
-func (s *HookService) loadEditableHook(ctx context.Context, workspaceID, hookID pgtype.UUID, author HookAuthor) (db.Hook, error) {
-	existing, err := s.Queries.GetHookInWorkspace(ctx, db.GetHookInWorkspaceParams{ID: hookID, WorkspaceID: workspaceID})
+// lockEditableHook loads and row-locks a non-archived, non-system hook and
+// enforces the edit-authorization gate against the editor's LIVE membership and
+// role read inside the same transaction. Returns the locked row for callers that
+// need its stored principal.
+func (s *HookService) lockEditableHook(ctx context.Context, qtx *db.Queries, workspaceID, hookID pgtype.UUID, author HookAuthor) (db.Hook, error) {
+	existing, err := qtx.GetHookForUpdate(ctx, db.GetHookForUpdateParams{ID: hookID, WorkspaceID: workspaceID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return db.Hook{}, ErrHookNotFound
@@ -314,22 +318,32 @@ func (s *HookService) loadEditableHook(ctx context.Context, workspaceID, hookID 
 	if existing.Origin == "system" {
 		return db.Hook{}, ErrHookSystemManaged
 	}
-	if err := authorizeHookEdit(existing, author); err != nil {
+	editor, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID: author.PrincipalUserID, WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The editor is not (or no longer) a member of this workspace.
+			return db.Hook{}, ErrHookForbidden
+		}
+		return db.Hook{}, err
+	}
+	if err := authorizeHookEdit(existing, editor); err != nil {
 		return db.Hook{}, err
 	}
 	return existing, nil
 }
 
 // authorizeHookEdit implements the edit gate (review point 1): a workspace
-// owner/admin may edit any hook; otherwise only the hook's original
-// authorization principal may. The principal is NOT transferred on edit, so an
-// arbitrary member can never rewrite a rule that keeps running under someone
-// else's authority.
-func authorizeHookEdit(hook db.Hook, author HookAuthor) error {
-	if author.IsWorkspaceAdmin {
+// owner/admin may edit any hook's configuration; otherwise only the hook's
+// original authorization principal may. The principal is NOT transferred on
+// edit, so an arbitrary member can never rewrite a rule that keeps running under
+// someone else's authority.
+func authorizeHookEdit(hook db.Hook, editor db.Member) error {
+	if admission.RoleAllowed(editor.Role, "owner", "admin") {
 		return nil
 	}
-	if principalMatches(hook.AuthorizationPrincipalUserID, author.PrincipalUserID) {
+	if principalMatches(hook.AuthorizationPrincipalUserID, editor.UserID) {
 		return nil
 	}
 	return ErrHookForbidden
@@ -383,63 +397,117 @@ func marshalRevisionConfig(spec automation.HookSpec) (match, conditions, actions
 	return match, conditions, actions, nil
 }
 
-// validateTargets fail-closed checks that every id the spec references exists in
-// the hook's workspace under the current principal (review point 2). §13 requires
-// this at create/update time so an illegal configuration never enters the store
-// and never reaches a worker. Uses the tx-bound queries so the checks share the
-// write transaction.
-func validateTargets(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, spec automation.HookSpec, canInvoke CanInvokeAgent) error {
+// targetChecker fail-closed validates every id a spec references, against the
+// workspace and the hook's stored principal, inside the write transaction
+// (review round 3, points 1 & 2). §13 requires this at create/update time so an
+// illegal configuration never enters the store and never reaches a worker.
+type targetChecker struct {
+	ctx               context.Context
+	qtx               *db.Queries
+	workspaceID       pgtype.UUID
+	principalUserID   string
+	principalMember   db.Member
+	principalIsMember bool
+}
+
+func validateTargets(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, spec automation.HookSpec, principalUserID string) error {
+	tc := &targetChecker{ctx: ctx, qtx: qtx, workspaceID: workspaceID, principalUserID: principalUserID}
+	// Resolve the principal's membership once; agent workspace-target and
+	// autopilot admission both need it, and a departed principal fails closed.
+	if pid, err := util.ParseUUID(principalUserID); err == nil {
+		if m, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: pid, WorkspaceID: workspaceID}); err == nil {
+			tc.principalMember = m
+			tc.principalIsMember = true
+		}
+	}
+	return tc.validate(spec)
+}
+
+func (tc *targetChecker) validate(spec automation.HookSpec) error {
 	if spec.Scope != nil && spec.Scope.Type == automation.ScopeIssue {
-		if err := requireIssue(ctx, qtx, workspaceID, spec.Scope.ID, "scope.id"); err != nil {
+		if err := tc.requireIssue(spec.Scope.ID, "scope.id"); err != nil {
 			return err
 		}
 	}
 	for i, cond := range spec.If {
-		if cond.IssuesStatus != nil {
-			for _, id := range cond.IssuesStatus.IDs {
-				if err := requireIssue(ctx, qtx, workspaceID, id, fmt.Sprintf("if[%d].issues_status.ids", i)); err != nil {
-					return err
-				}
-			}
+		if err := tc.validateConditionTargets(i, cond); err != nil {
+			return err
 		}
-		if cond.IssueField != nil {
-			if err := requireIssue(ctx, qtx, workspaceID, cond.IssueField.ID, fmt.Sprintf("if[%d].issue_field.id", i)); err != nil {
+	}
+	for i, action := range spec.Do {
+		if err := tc.validateActionTargets(i, action); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (tc *targetChecker) validateConditionTargets(i int, c automation.ConditionSpec) error {
+	if c.IssuesStatus != nil {
+		for _, id := range c.IssuesStatus.IDs {
+			if err := tc.requireIssue(id, fmt.Sprintf("if[%d].issues_status.ids", i)); err != nil {
 				return err
 			}
 		}
 	}
-	for i, action := range spec.Do {
-		if err := validateActionTargets(ctx, qtx, workspaceID, i, action, canInvoke); err != nil {
+	if c.IssueField != nil {
+		if err := tc.requireIssue(c.IssueField.ID, fmt.Sprintf("if[%d].issue_field.id", i)); err != nil {
 			return err
+		}
+		// The operand ids must also resolve to workspace resources.
+		operands := collectFieldOperands(*c.IssueField)
+		where := fmt.Sprintf("if[%d].issue_field", i)
+		switch c.IssueField.Field {
+		case automation.IssueFieldParentIssueID:
+			for _, v := range operands {
+				if err := tc.requireIssue(v, where); err != nil {
+					return err
+				}
+			}
+		case automation.IssueFieldAssigneeID:
+			for _, v := range operands {
+				if err := tc.requireAssignee(v, where); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
 }
 
-func validateActionTargets(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, i int, a automation.ActionSpec, canInvoke CanInvokeAgent) error {
+func (tc *targetChecker) validateActionTargets(i int, a automation.ActionSpec) error {
 	where := fmt.Sprintf("do[%d].%s", i, a.Type)
 	switch a.Type {
 	case automation.ActionSetIssueStatus, automation.ActionAddComment:
-		return requireIssue(ctx, qtx, workspaceID, a.IssueID, where+".issue_id")
+		return tc.requireIssue(a.IssueID, where+".issue_id")
 	case automation.ActionTriggerAgent:
-		if err := requireIssue(ctx, qtx, workspaceID, a.IssueID, where+".issue_id"); err != nil {
+		if err := tc.requireIssue(a.IssueID, where+".issue_id"); err != nil {
 			return err
 		}
-		return requireInvokableAgent(ctx, qtx, workspaceID, a.AgentID, where+".agent_id", canInvoke)
+		return tc.requireInvokableAgent(a.AgentID, where+".agent_id")
 	case automation.ActionSendInbox:
-		return requireMember(ctx, qtx, workspaceID, a.MemberID, where+".member_id")
+		return tc.requireMember(a.MemberID, where+".member_id")
 	case automation.ActionRunAutopilot:
-		return requireAutopilot(ctx, qtx, workspaceID, a.AutopilotID, where+".autopilot_id")
+		return tc.requireWritableAutopilot(a.AutopilotID, where+".autopilot_id")
 	}
 	return nil
 }
 
-func requireIssue(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, id, field string) error {
+func collectFieldOperands(c automation.IssueFieldCond) []string {
+	out := make([]string, 0, len(c.In)+1)
+	if c.Eq != "" {
+		out = append(out, c.Eq)
+	}
+	out = append(out, c.In...)
+	return out
+}
+
+func (tc *targetChecker) requireIssue(id, field string) error {
 	uid, err := util.ParseUUID(id)
 	if err != nil {
 		return automation.NewValidationError("%s must be a uuid", field)
 	}
-	if _, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: uid, WorkspaceID: workspaceID}); err != nil {
+	if _, err := tc.qtx.GetIssueInWorkspace(tc.ctx, db.GetIssueInWorkspaceParams{ID: uid, WorkspaceID: tc.workspaceID}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return automation.NewValidationError("%s references issue %s which does not exist in this workspace", field, id)
 		}
@@ -448,12 +516,12 @@ func requireIssue(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID,
 	return nil
 }
 
-func requireMember(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, id, field string) error {
+func (tc *targetChecker) requireMember(id, field string) error {
 	uid, err := util.ParseUUID(id)
 	if err != nil {
 		return automation.NewValidationError("%s must be a uuid", field)
 	}
-	if _, err := qtx.GetMemberInWorkspace(ctx, db.GetMemberInWorkspaceParams{ID: uid, WorkspaceID: workspaceID}); err != nil {
+	if _, err := tc.qtx.GetMemberInWorkspace(tc.ctx, db.GetMemberInWorkspaceParams{ID: uid, WorkspaceID: tc.workspaceID}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return automation.NewValidationError("%s references member %s which is not in this workspace", field, id)
 		}
@@ -462,29 +530,63 @@ func requireMember(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID
 	return nil
 }
 
-func requireAutopilot(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, id, field string) error {
+// requireAssignee accepts either a workspace member (by member row id) or a
+// workspace agent — issue assignees are polymorphic.
+func (tc *targetChecker) requireAssignee(id, field string) error {
 	uid, err := util.ParseUUID(id)
 	if err != nil {
 		return automation.NewValidationError("%s must be a uuid", field)
 	}
-	if _, err := qtx.GetAutopilotInWorkspace(ctx, db.GetAutopilotInWorkspaceParams{ID: uid, WorkspaceID: workspaceID}); err != nil {
+	if _, err := tc.qtx.GetMemberInWorkspace(tc.ctx, db.GetMemberInWorkspaceParams{ID: uid, WorkspaceID: tc.workspaceID}); err == nil {
+		return nil
+	}
+	if _, err := tc.qtx.GetAgentInWorkspace(tc.ctx, db.GetAgentInWorkspaceParams{ID: uid, WorkspaceID: tc.workspaceID}); err == nil {
+		return nil
+	}
+	return automation.NewValidationError("%s references assignee %s which is not a member or agent in this workspace", field, id)
+}
+
+func (tc *targetChecker) requireWritableAutopilot(id, field string) error {
+	uid, err := util.ParseUUID(id)
+	if err != nil {
+		return automation.NewValidationError("%s must be a uuid", field)
+	}
+	ap, err := tc.qtx.GetAutopilotInWorkspace(tc.ctx, db.GetAutopilotInWorkspaceParams{ID: uid, WorkspaceID: tc.workspaceID})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return automation.NewValidationError("%s references autopilot %s which does not exist in this workspace", field, id)
 		}
 		return err
 	}
+	// Write permission is judged for the hook's stored principal: role/authorship
+	// or an explicit collaborator grant — the same rule the interactive autopilot
+	// write path enforces (review round 3, point 2).
+	if !tc.principalIsMember {
+		return automation.NewValidationError("%s references autopilot %s which the hook's principal may not write", field, id)
+	}
+	if admission.AutopilotWriteByOwnership(ap, tc.principalMember) {
+		return nil
+	}
+	granted, err := tc.qtx.IsAutopilotCollaborator(tc.ctx, db.IsAutopilotCollaboratorParams{AutopilotID: ap.ID, UserID: tc.principalMember.UserID})
+	if err != nil {
+		return err
+	}
+	if !granted {
+		return automation.NewValidationError("%s references autopilot %s which the hook's principal may not write", field, id)
+	}
 	return nil
 }
 
 // requireInvokableAgent confirms the agent exists in the workspace, is not
-// archived, has a runtime, and is invokable by the current principal — the same
-// admission the interactive trigger path enforces, applied fail-closed at save.
-func requireInvokableAgent(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, id, field string, canInvoke CanInvokeAgent) error {
+// archived, has a runtime, and is invokable by the hook's STORED principal — the
+// same admission the interactive trigger path enforces, applied fail-closed at
+// save against the principal, never the editor (review round 3, point 1).
+func (tc *targetChecker) requireInvokableAgent(id, field string) error {
 	uid, err := util.ParseUUID(id)
 	if err != nil {
 		return automation.NewValidationError("%s must be a uuid", field)
 	}
-	agent, err := qtx.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: uid, WorkspaceID: workspaceID})
+	agent, err := tc.qtx.GetAgentInWorkspace(tc.ctx, db.GetAgentInWorkspaceParams{ID: uid, WorkspaceID: tc.workspaceID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return automation.NewValidationError("%s references agent %s which does not exist in this workspace", field, id)
@@ -494,7 +596,11 @@ func requireInvokableAgent(ctx context.Context, qtx *db.Queries, workspaceID pgt
 	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
 		return automation.NewValidationError("%s references agent %s which is archived or has no runtime", field, id)
 	}
-	if canInvoke == nil || !canInvoke(agent) {
+	targets, err := tc.qtx.ListAgentInvocationTargets(tc.ctx, agent.ID)
+	if err != nil {
+		return err
+	}
+	if !admission.AgentInvocableByMember(agent, targets, tc.principalUserID, tc.principalIsMember) {
 		return automation.NewValidationError("%s references agent %s which the hook's principal may not invoke", field, id)
 	}
 	return nil

@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/admission"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -536,10 +537,7 @@ func (h *Handler) loadAutopilotInWorkspace(w http.ResponseWriter, r *http.Reques
 // write access. Explicit collaborator grants (memberCanWriteAutopilot) layer
 // on top of this (MUL-3807).
 func autopilotWriteByOwnership(ap db.Autopilot, member db.Member) bool {
-	if roleAllowed(member.Role, "owner", "admin") {
-		return true
-	}
-	return ap.CreatedByType == "member" && uuidToString(ap.CreatedByID) == uuidToString(member.UserID)
+	return admission.AutopilotWriteByOwnership(ap, member)
 }
 
 // memberCanWriteAutopilot reports whether the given member may perform write or
