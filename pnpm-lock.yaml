@@ -1102,6 +1102,9 @@ importers:
       '@multica/cerebro-agent-capabilities':
         specifier: workspace:*
         version: link:../cerebro-agent-capabilities
+      '@multica/cerebro-agent-prompt':
+        specifier: workspace:*
+        version: link:../cerebro-agent-prompt
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags

@@ -18,6 +18,7 @@ import { AgentContextChangeRequestQueue } from "./components/agent-context-chang
 import { AgentContextProposeDialog } from "./components/agent-context-propose-dialog";
 import { AgentContextObservabilityPanel } from "./components/agent-context-observability-panel";
 import { AgentContextRuntimeSupportPanel } from "./components/agent-context-runtime-support-panel";
+import { AgentContextEffectivePromptPanel } from "./components/agent-context-effective-prompt-panel";
 
 export interface AgentDetailTabExtension {
   id: string;
@@ -60,7 +61,12 @@ export function CerebroAgentContextTab({
 
   return (
     <div className="space-y-5 p-4 md:p-6">
-      {runtimeSupportOn && <AgentContextRuntimeSupportPanel agent={agent} />}
+      {runtimeSupportOn && (
+        <div className="grid gap-4 xl:grid-cols-2">
+          <AgentContextRuntimeSupportPanel agent={agent} />
+          <AgentContextEffectivePromptPanel agent={agent} />
+        </div>
+      )}
 
       <AgentContextProposeDialog agent={agent} canReview={canManage} />
 

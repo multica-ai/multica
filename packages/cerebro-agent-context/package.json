@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@multica/cerebro-agent-capabilities": "workspace:*",
+    "@multica/cerebro-agent-prompt": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
