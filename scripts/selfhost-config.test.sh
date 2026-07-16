@@ -84,4 +84,34 @@ require_env "$local_env" 'MULTICA_SERVER_URL=ws://localhost:9100/ws'
 require_env "$local_env" 'LOCAL_UPLOAD_BASE_URL=http://localhost:9100'
 require_env "$local_env" 'PLAYWRIGHT_BASE_URL=http://localhost:3100'
 
+# Build override threads the resolved official baseline into both images and
+# never defaults provenance to `dev`. The no-dev constraint is verified against
+# the file directly so it does not depend on a Docker daemon being present.
+if grep -Fq '${VERSION:-dev}' docker-compose.selfhost.build.yml \
+	|| grep -Fq 'NEXT_PUBLIC_APP_VERSION: dev' docker-compose.selfhost.build.yml; then
+	echo "Build override must not default provenance to dev."
+	exit 1
+fi
+
+# With a baseline supplied, the resolved config carries it for both images.
+build_config_with_tag="$(
+  VERSION=v9.9.9-test \
+  NEXT_PUBLIC_APP_VERSION=v9.9.9-test \
+  docker compose \
+    -f docker-compose.selfhost.yml \
+    -f docker-compose.selfhost.build.yml \
+    config 2>/dev/null
+)"
+require_config "$build_config_with_tag" 'v9.9.9-test'
+
+# A raw invocation without a baseline must fail rather than stamp `dev`.
+if env -u VERSION -u NEXT_PUBLIC_APP_VERSION \
+  docker compose \
+    -f docker-compose.selfhost.yml \
+    -f docker-compose.selfhost.build.yml \
+    config >/dev/null 2>&1; then
+	echo "Build override must require VERSION / NEXT_PUBLIC_APP_VERSION (no dev default)."
+	exit 1
+fi
+
 echo "self-host env derivation ok"

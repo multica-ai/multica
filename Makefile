@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
+.PHONY: help makehelp dev server daemon cli multica build build-prod test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -150,7 +150,20 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 		fi; \
 		echo "==> Generated random JWT_SECRET and POSTGRES_PASSWORD"; \
 	fi
-	@echo "==> Building Multica from the current checkout..."
+	@set -e; \
+	echo "==> Resolving official release baseline..."; \
+	BASELINE=$$(bash scripts/resolve-official-baseline.sh) || { \
+		echo ""; \
+		echo "Could not resolve an official release baseline."; \
+		echo "Build from a checkout with reachable upstream tags, or set:"; \
+		echo "  MULTICA_TRUSTED_BASELINE=vX.Y.Z"; \
+		echo "before running make selfhost-build."; \
+		exit 1; \
+	}; \
+	echo "==> Official release baseline: $$BASELINE"; \
+	export VERSION="$$BASELINE"; \
+	export NEXT_PUBLIC_APP_VERSION="$$BASELINE"; \
+	echo "==> Building Multica from the current checkout..."; \
 	$(COMPOSE) -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
 	@echo "==> Waiting for backend to be ready..."
 	@for i in $$(seq 1 30); do \
@@ -317,6 +330,17 @@ build: ## Build the server, CLI, and migrate binaries into server/bin
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/server ./cmd/server
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica ./cmd/multica
 	cd server && go build -o bin/migrate ./cmd/migrate
+
+build-prod: ## Build a production server binary and web bundle stamped with the resolved official baseline
+	@set -e; \
+	BASELINE=$$(bash scripts/resolve-official-baseline.sh) || { \
+		echo "Could not resolve an official release baseline."; \
+		echo "Build from a checkout with reachable upstream tags, or set MULTICA_TRUSTED_BASELINE=vX.Y.Z."; \
+		exit 1; \
+	}; \
+	echo "==> Official release baseline: $$BASELINE"; \
+	cd server && CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=$$BASELINE" -o bin/server ./cmd/server; \
+	cd .. && NEXT_PUBLIC_APP_VERSION="$$BASELINE" pnpm --filter @multica/web build
 
 test: ## Run Go tests after ensuring the target DB exists and migrations are applied
 	$(REQUIRE_ENV)

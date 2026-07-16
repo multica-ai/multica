@@ -8,7 +8,11 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        VERSION: ${VERSION:-dev}
+        # Required official release baseline, resolved on the host by
+        # `make selfhost-build` (scripts/resolve-official-baseline.sh) or
+        # supplied explicitly. Never defaults to `dev`: a raw `docker compose`
+        # invocation must fail rather than silently stamp a non-release.
+        VERSION: ${VERSION:?VERSION is required; run make selfhost-build or set VERSION / MULTICA_TRUSTED_BASELINE}
         COMMIT: ${COMMIT:-unknown}
         DATE: ${DATE:-unknown}
 
@@ -20,4 +24,6 @@ services:
       args:
         REMOTE_API_URL: http://backend:8080
         NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
-        NEXT_PUBLIC_APP_VERSION: dev
+        # Same official baseline as the backend, threaded into the web bundle
+        # by `make selfhost-build`. Required for the same reason as VERSION.
+        NEXT_PUBLIC_APP_VERSION: ${NEXT_PUBLIC_APP_VERSION:?NEXT_PUBLIC_APP_VERSION is required; run make selfhost-build or set NEXT_PUBLIC_APP_VERSION / MULTICA_TRUSTED_BASELINE}
