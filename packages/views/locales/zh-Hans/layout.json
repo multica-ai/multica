@@ -19,7 +19,11 @@
     "changelog": "更新日志",
     "discord": "Discord",
     "feedback": "反馈",
-    "server_version": "服务器版本 {{version}}"
+    "frontend_label": "前端",
+    "backend_label": "后端",
+    "frontend_unavailable": "前端版本不可用",
+    "backend_unavailable": "后端版本不可用",
+    "backend_loading": "后端版本加载中…"
   },
   "workspace_loader": {
     "loading_workspace": "正在加载工作区...",

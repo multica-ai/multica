@@ -19,7 +19,11 @@
     "changelog": "Change log",
     "discord": "Discord",
     "feedback": "Feedback",
-    "server_version": "Server version {{version}}"
+    "frontend_label": "Frontend",
+    "backend_label": "Backend",
+    "frontend_unavailable": "Frontend unavailable",
+    "backend_unavailable": "Backend unavailable",
+    "backend_loading": "Backend loading…"
   },
   "workspace_loader": {
     "loading_workspace": "Loading workspace…",

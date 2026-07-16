@@ -22,8 +22,8 @@ vi.mock("../i18n", () => ({
 }));
 
 // Follows the app-sidebar.test.tsx convention of flattening the Base UI
-// dropdown primitives to plain children so the menu content is always in
-// the DOM, instead of exercising the real portal/open-state interaction.
+// dropdown primitives to plain children so the menu content is always in the
+// DOM, instead of exercising the real portal/open-state interaction.
 //
 // The mock deliberately preserves ONE real invariant: DropdownMenuLabel wraps
 // Base UI's Menu.GroupLabel, whose useMenuGroupRootContext() throws when it has
@@ -56,28 +56,81 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
 });
 
 afterEach(() => {
-  configStore.getState().setServerVersion("");
+  configStore.getState().setFrontendBaseline("");
+  configStore.getState().setBackendBaseline("");
+  // Force the loading -> settled transition back to loading so each test
+  // sees the initial loading state on the backend row.
+  configStore.setState({ backendBaselineStatus: "loading" });
 });
 
-describe("HelpLauncher", () => {
-  it("does not show a version row when the server omits it", () => {
+describe("HelpLauncher provenance rows", () => {
+  it("renders two rows (frontend + backend) even when both values are unavailable", () => {
     render(<HelpLauncher />);
-    expect(screen.queryByText(/Server version/)).not.toBeInTheDocument();
+    expect(screen.getByText(enLayout.help.frontend_label)).toBeInTheDocument();
+    expect(screen.getByText(enLayout.help.backend_label)).toBeInTheDocument();
+    expect(
+      screen.getAllByText(enLayout.help.frontend_unavailable).length,
+    ).toBeGreaterThan(0);
+    // Backend defaults to "loading" before the non-blocking /api/config resolves.
+    expect(
+      screen.getByText(enLayout.help.backend_loading),
+    ).toBeInTheDocument();
   });
 
-  it("shows the server version once /api/config resolves it", () => {
-    configStore.getState().setServerVersion("1.2.3");
+  it("shows the frontend and backend tags side by side when both are stamped", () => {
+    configStore.getState().setFrontendBaseline("v0.4.2");
+    configStore.getState().setBackendBaseline("v0.4.2");
     render(<HelpLauncher />);
-    expect(screen.getByText("Server version 1.2.3")).toBeInTheDocument();
+    const tags = screen.getAllByText("v0.4.2");
+    expect(tags.length).toBe(2);
   });
 
-  // MUL-4819: the version row's DropdownMenuLabel must sit inside a
-  // DropdownMenuGroup. Rendering it bare made Base UI's Menu.GroupLabel throw
-  // on open, unmounting the whole app (black screen, no error) because no error
-  // boundary sits above the sidebar. Rendering here must not throw.
-  it("renders the version row without a missing-group crash", () => {
-    configStore.getState().setServerVersion("9.9.9");
+  it("shows two different tags when frontend and backend are out of sync", () => {
+    configStore.getState().setFrontendBaseline("v0.4.2");
+    configStore.getState().setBackendBaseline("v0.4.1");
+    render(<HelpLauncher />);
+    expect(screen.getByText("v0.4.2")).toBeInTheDocument();
+    expect(screen.getByText("v0.4.1")).toBeInTheDocument();
+  });
+
+  it("shows the backend tag alongside an unavailable frontend", () => {
+    configStore.getState().setFrontendBaseline("");
+    configStore.getState().setBackendBaseline("v0.4.2");
+    render(<HelpLauncher />);
+    expect(
+      screen.getByText(enLayout.help.frontend_unavailable),
+    ).toBeInTheDocument();
+    expect(screen.getByText("v0.4.2")).toBeInTheDocument();
+  });
+
+  it("shows the frontend tag alongside a loading backend", () => {
+    configStore.getState().setFrontendBaseline("v0.4.2");
+    configStore.setState({ backendBaselineStatus: "loading" });
+    render(<HelpLauncher />);
+    expect(screen.getByText("v0.4.2")).toBeInTheDocument();
+    expect(
+      screen.getByText(enLayout.help.backend_loading),
+    ).toBeInTheDocument();
+  });
+
+  it("shows both rows as unavailable after a config failure settles", () => {
+    configStore.getState().setFrontendBaseline("");
+    configStore.getState().setBackendBaseline(); // settled, unavailable
+    render(<HelpLauncher />);
+    expect(
+      screen.getByText(enLayout.help.frontend_unavailable),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(enLayout.help.backend_unavailable),
+    ).toBeInTheDocument();
+  });
+
+  // MUL-4819 (kept as a guardrail): both DropdownMenuLabels must sit inside a
+  // DropdownMenuGroup. Rendering either outside a group would crash the app on
+  // open. The DropdownMenuLabel mock throws if it has no Group ancestor.
+  it("does not throw when rendering both rows under a DropdownMenuGroup", () => {
+    configStore.getState().setFrontendBaseline("v0.4.2");
+    configStore.getState().setBackendBaseline("v0.4.2");
     expect(() => render(<HelpLauncher />)).not.toThrow();
-    expect(screen.getByText("Server version 9.9.9")).toBeInTheDocument();
   });
 });

@@ -33,10 +33,6 @@ interface ConfigState {
   // the managed-cloud case.
   workspaceCreationDisabled: boolean;
   featureFlags: Record<string, boolean>;
-  // The running API build version, surfaced in the Help popover so
-  // self-hosted operators can confirm what's deployed. Empty for dev builds
-  // or servers older than this feature.
-  serverVersion: string;
   // Official release baseline of the loaded frontend bundle (clean vX.Y.Z tag
   // compiled in at build time), or "" when the bundle was not stamped with a
   // trustworthy tag (dev build). Known synchronously at boot — no loading state.
@@ -58,7 +54,6 @@ interface ConfigState {
     daemonAppUrl?: string;
   }) => void;
   setFeatureFlags: (flags?: Record<string, boolean>) => void;
-  setServerVersion: (version?: string) => void;
   setFrontendBaseline: (baseline?: string) => void;
   setBackendBaseline: (baseline?: string) => void;
 }
@@ -72,7 +67,6 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
   featureFlags: {},
-  serverVersion: "",
   frontendBaseline: "",
   backendBaseline: "",
   backendBaselineStatus: "loading",
@@ -82,7 +76,6 @@ export const configStore = createStore<ConfigState>((set) => ({
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),
-  setServerVersion: (version = "") => set({ serverVersion: version }),
   setFrontendBaseline: (baseline) => set({ frontendBaseline: officialBaseline(baseline) }),
   setBackendBaseline: (baseline) =>
     set({ backendBaseline: officialBaseline(baseline), backendBaselineStatus: "settled" }),

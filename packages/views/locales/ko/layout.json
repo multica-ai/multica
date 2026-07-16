@@ -19,7 +19,11 @@
     "changelog": "변경 로그",
     "discord": "Discord",
     "feedback": "피드백",
-    "server_version": "서버 버전 {{version}}"
+    "frontend_label": "프런트엔드",
+    "backend_label": "백엔드",
+    "frontend_unavailable": "프런트엔드 버전 정보를 사용할 수 없음",
+    "backend_unavailable": "백엔드 버전 정보를 사용할 수 없음",
+    "backend_loading": "백엔드 버전 정보 로드 중…"
   },
   "workspace_loader": {
     "loading_workspace": "워크스페이스 로딩 중...",

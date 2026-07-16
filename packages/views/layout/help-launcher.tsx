@@ -20,7 +20,28 @@ const CHANGELOG_URL = "https://multica.ai/changelog";
 
 export function HelpLauncher() {
   const { t } = useT("layout");
-  const serverVersion = useConfigStore((state) => state.serverVersion);
+  // Read frontend and backend observations independently so a partial
+  // rollout or a missing backend metadata can render each row with its own
+  // state (tag / loading / unavailable) instead of inventing a value.
+  const frontendBaseline = useConfigStore((state) => state.frontendBaseline);
+  const backendBaseline = useConfigStore((state) => state.backendBaseline);
+  const backendBaselineStatus = useConfigStore(
+    (state) => state.backendBaselineStatus,
+  );
+
+  // The provenance rows are intentionally always present in the DOM (even
+  // when unavailable): self-host operators rely on them to confirm what is
+  // deployed. A hidden row would make a stale or rolled-back artifact look
+  // identical to a missing one, defeating the whole feature.
+  const frontendText = frontendBaseline
+    ? frontendBaseline
+    : t(($) => $.help.frontend_unavailable);
+  const backendText =
+    backendBaseline ||
+    (backendBaselineStatus === "loading"
+      ? t(($) => $.help.backend_loading)
+      : t(($) => $.help.backend_unavailable));
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -73,21 +94,23 @@ export function HelpLauncher() {
           <MessageCircle className="h-3.5 w-3.5" />
           {t(($) => $.help.feedback)}
         </DropdownMenuItem>
-        {serverVersion && (
-          <>
-            <DropdownMenuSeparator />
-            {/* DropdownMenuLabel renders Base UI's Menu.GroupLabel, which reads
-                a Menu.Group context and throws if it has no Group ancestor. It
-                must always be wrapped in a DropdownMenuGroup — without it the
-                Help menu crashes the whole app on open (no error boundary sits
-                above the sidebar). */}
-            <DropdownMenuGroup>
-              <DropdownMenuLabel className="font-normal break-words">
-                {t(($) => $.help.server_version, { version: serverVersion })}
-              </DropdownMenuLabel>
-            </DropdownMenuGroup>
-          </>
-        )}
+        <DropdownMenuSeparator />
+        {/* DropdownMenuLabel renders Base UI's Menu.GroupLabel, which reads
+            a Menu.Group context and throws if it has no Group ancestor. It
+            must always be wrapped in a DropdownMenuGroup — without it the
+            Help menu crashes the whole app on open (no error boundary sits
+            above the sidebar). Two rows share one Group so a single
+            dropdown-label context surrounds both. */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="flex items-center gap-2 font-normal text-muted-foreground">
+            <span>{t(($) => $.help.frontend_label)}</span>
+            <span className="text-foreground">{frontendText}</span>
+          </DropdownMenuLabel>
+          <DropdownMenuLabel className="flex items-center gap-2 font-normal text-muted-foreground">
+            <span>{t(($) => $.help.backend_label)}</span>
+            <span className="text-foreground">{backendText}</span>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
