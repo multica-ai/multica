@@ -64,6 +64,20 @@
       "default": false
     },
     {
+      "key": "cerebro_agent_production_prompt",
+      "label": "Agent production prompt tab",
+      "description": "Add a Production prompt tab on the agent page showing the exact prompt each run actually read — recorded from the run itself with layers, sizes, and a SHA-256 fingerprint. Evidence only; nothing is reconstructed after the fact. Off hides the tab; recorded snapshots are kept.",
+      "group": "agents",
+      "default": false
+    },
+    {
+      "key": "cerebro_agent_quality",
+      "label": "Agent quality tab",
+      "description": "Add a Quality tab on the agent page measuring each configuration version on the runs that actually used it: judge verdicts (solution) and human signals like reactions and approvals (satisfaction), always with sample sizes and honest missing states. Off hides the tab; measurements are kept.",
+      "group": "agents",
+      "default": false
+    },
+    {
       "key": "cerebro_model_registry",
       "label": "Model registry",
       "description": "Add a Model registry tab under Settings: view and propose changes to model prices, context windows, and display labels. Changes go through the same propose → review → approve flow as Agent Context, so a bad edit never lands without a second pair of eyes.",

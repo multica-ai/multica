@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -171,6 +172,60 @@ func (h *Handler) ReportTaskPromptSnapshot(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// promptSnapshotResponseBody is the member-facing shape of one snapshot. The
+// JSONB layers column is []byte in the generated row; returned directly Go
+// would base64-encode it, so it is re-typed to json.RawMessage here.
+type promptSnapshotResponseBody struct {
+	TaskID                string          `json:"task_id"`
+	IssueID               *string         `json:"issue_id"`
+	AgentContextVersion   string          `json:"agent_context_version"`
+	AgentContextVersionID *string         `json:"agent_context_version_id"`
+	Provider              string          `json:"provider"`
+	Model                 string          `json:"model"`
+	RuntimeVersion        string          `json:"runtime_version"`
+	SystemPromptMode      string          `json:"system_prompt_mode"`
+	Layers                json.RawMessage `json:"layers"`
+	SHA256Original        string          `json:"sha256_original"`
+	SHA256Redacted        string          `json:"sha256_redacted"`
+	TotalBytes            int32           `json:"total_bytes"`
+	Redacted              bool            `json:"redacted"`
+	CreatedAt             *string         `json:"created_at"`
+}
+
+func promptSnapshotResponse(row cerebrodb.CerebroRunPromptSnapshot) promptSnapshotResponseBody {
+	body := promptSnapshotResponseBody{
+		AgentContextVersion: row.AgentContextVersion,
+		Provider:            row.Provider,
+		Model:               row.Model,
+		RuntimeVersion:      row.RuntimeVersion,
+		SystemPromptMode:    row.SystemPromptMode,
+		Layers:              json.RawMessage(`[]`),
+		SHA256Original:      row.Sha256Original,
+		SHA256Redacted:      row.Sha256Redacted,
+		TotalBytes:          row.TotalBytes,
+		Redacted:            row.Redacted,
+	}
+	if len(row.Layers) > 0 && json.Valid(row.Layers) {
+		body.Layers = json.RawMessage(row.Layers)
+	}
+	if row.TaskID.Valid {
+		body.TaskID = uuidToString(row.TaskID)
+	}
+	if row.IssueID.Valid {
+		id := uuidToString(row.IssueID)
+		body.IssueID = &id
+	}
+	if row.AgentContextVersionID.Valid {
+		id := uuidToString(row.AgentContextVersionID)
+		body.AgentContextVersionID = &id
+	}
+	if row.CreatedAt.Valid {
+		ts := row.CreatedAt.Time.UTC().Format(time.RFC3339)
+		body.CreatedAt = &ts
+	}
+	return body
+}
+
 // GetAgentPromptSnapshot returns one run's full snapshot.
 // GET /api/agents/{id}/prompt-snapshots/{taskId}
 func (h *Handler) GetAgentPromptSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -203,7 +258,7 @@ func (h *Handler) GetAgentPromptSnapshot(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, "prompt snapshot not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, snap)
+	writeJSON(w, http.StatusOK, promptSnapshotResponse(snap))
 }
 
 // ListAgentPromptSnapshots returns recent snapshot refs (no prompt bodies).

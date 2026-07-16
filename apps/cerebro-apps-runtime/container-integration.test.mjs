@@ -73,7 +73,7 @@ function file(path, content) {
 }
 
 async function startBundleServer({ image, network, root, name }) {
-  const source = `const http=require("node:http"),fs=require("node:fs");http.createServer((req,res)=>{const file="/bundles/"+req.url.slice(1);try{res.writeHead(200,{"content-type":"application/json"}).end(fs.readFileSync(file))}catch{res.writeHead(404).end()}}).listen(8080,"0.0.0.0")`;
+  const source = `const http=require("node:http"),fs=require("node:fs");http.createServer((req,res)=>{let body;try{body=fs.readFileSync("/bundles/"+req.url.slice(1))}catch{res.writeHead(404).end();return}res.writeHead(200,{"content-type":"application/json"}).end(body)}).listen(8080,"0.0.0.0")`;
   await exec("docker", ["run", "-d", "--rm", "--name", name, "--network", network, "--network-alias", "bundles", "--read-only", "--volume", `${root}:/bundles:ro`, "--entrypoint", "node", image, "-e", source]);
 }
 
@@ -82,8 +82,11 @@ async function startWorker({ image, network, name, hostname, appID, bundlePath }
 }
 
 async function probe({ image, network, hostname }) {
-  const source = `fetch("http://${hostname}:4311/healthz").then(r=>{console.log(r.status);process.exit(r.ok?0:1)}).catch(()=>process.exit(1))`;
-  const { stdout } = await exec("docker", ["run", "--rm", "--network", network, "--entrypoint", "node", image, "-e", source]);
+  // The abort signal keeps a probe from hanging forever when the target container is gone
+  // (DNS on an internal-only network can stall instead of refusing), and the exec timeout
+  // bounds the docker client itself so one stuck probe cannot eat the whole test budget.
+  const source = `fetch("http://${hostname}:4311/healthz",{signal:AbortSignal.timeout(3000)}).then(r=>{console.log(r.status);process.exit(r.ok?0:1)}).catch(()=>process.exit(1))`;
+  const { stdout } = await exec("docker", ["run", "--rm", "--network", network, "--entrypoint", "node", image, "-e", source], { timeout: 15_000 });
   return stdout.trim();
 }
 

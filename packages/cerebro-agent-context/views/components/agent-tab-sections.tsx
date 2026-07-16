@@ -29,6 +29,7 @@
 
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   Collapsible,
   CollapsibleContent,
@@ -60,7 +61,15 @@ const SECTIONS: {
     id: "setup",
     title: "Context",
     defaultOpen: true,
-    tabIds: ["instructions", "skills", "tools", "capabilities"],
+    // production_prompt + quality (FIR-3212) are flag-gated below.
+    tabIds: [
+      "instructions",
+      "production_prompt",
+      "quality",
+      "skills",
+      "tools",
+      "capabilities",
+    ],
   },
   {
     id: "advanced",
@@ -90,6 +99,18 @@ export function AgentTabSections({
   /** Renders a given tab's content; each card calls this for its own tab. */
   renderContent: (tabId: string) => ReactNode;
 }) {
+  // FIR-3212: the evidence tabs are feature-flagged per screen — when a flag
+  // is off its tab button never renders, so the screens can be turned off per
+  // workspace/user without a redeploy. Filtering here (cerebro zone) keeps
+  // the upstream pane free of flag knowledge.
+  const productionPromptOn = useFeatureFlag("cerebro_agent_production_prompt");
+  const qualityOn = useFeatureFlag("cerebro_agent_quality");
+  const visibleTabs = tabs.filter((tab) => {
+    if (tab.id === "production_prompt") return productionPromptOn;
+    if (tab.id === "quality") return qualityOn;
+    return true;
+  });
+
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(SECTIONS.map((s) => [s.id, s.defaultOpen])),
   );
@@ -121,9 +142,9 @@ export function AgentTabSections({
         // Preserve the section's declared tab order, then append any
         // unclaimed tabs that fell through to this section (Advanced only).
         const declared = section.tabIds
-          .map((id) => tabs.find((tab) => tab.id === id))
+          .map((id) => visibleTabs.find((tab) => tab.id === id))
           .filter((tab): tab is AgentTabSectionItem => Boolean(tab));
-        const fellThrough = tabs.filter(
+        const fellThrough = visibleTabs.filter(
           (tab) =>
             sectionForTab(tab.id) === section.id &&
             !section.tabIds.includes(tab.id),

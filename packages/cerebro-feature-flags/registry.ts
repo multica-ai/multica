@@ -416,6 +416,14 @@ export type CerebroFlagKey =
   // chrome, identity rail, flat tab strip). Default OFF — the live agent page
   // is untouched until this is flipped on per workspace/user.
   | "cerebro_agent_page_redesign"
+  // FIR-3212: Production prompt tab on the agent detail page — the byte-exact
+  // prompt each run actually read, recorded by the daemon at claim time.
+  // Default OFF until QA'd on staging.
+  | "cerebro_agent_production_prompt"
+  // FIR-3212: Quality tab on the agent detail page — solution/satisfaction
+  // aggregated per config version over the runs that actually used it.
+  // Default OFF until QA'd on staging.
+  | "cerebro_agent_quality"
   // FIR-2698: Settings tab for the single-source model registry (prices,
   // context windows, display labels) with propose → review → approve
   // versioning. Default OFF until the tab has been QA'd on staging.
@@ -832,6 +840,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_interface_columns: true,
   // FIR-2670: default OFF — opt-in preview of the redesigned agent page.
   cerebro_agent_page_redesign: false,
+  // FIR-3212: default OFF until QA'd on staging.
+  cerebro_agent_production_prompt: false,
+  cerebro_agent_quality: false,
   // FIR-2698: default OFF until QA'd on staging.
   cerebro_model_registry: false,
   // FIR-3172: default OFF. Enabling is a separate release decision.
@@ -941,6 +952,20 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Preview the redesigned agent detail page: a single framed card with a breadcrumb top bar, a redesigned identity rail (avatar, properties, details, skills), and a flat tab strip for Tasks, Instructions, Skills, Tools, and Capabilities. Off keeps the current agent page. All tabs reuse the existing data and permissions.",
+  },
+  {
+    key: "cerebro_agent_production_prompt",
+    label: "Agent production prompt tab",
+    group: "agents",
+    description:
+      "Add a Production prompt tab on the agent page showing the exact prompt each run actually read — recorded from the run itself with layers, sizes, and a SHA-256 fingerprint. Evidence only; nothing is reconstructed after the fact. Off hides the tab; recorded snapshots are kept.",
+  },
+  {
+    key: "cerebro_agent_quality",
+    label: "Agent quality tab",
+    group: "agents",
+    description:
+      "Add a Quality tab on the agent page measuring each configuration version on the runs that actually used it: judge verdicts (solution) and human signals like reactions and approvals (satisfaction), always with sample sizes and honest missing states. Off hides the tab; measurements are kept.",
   },
   {
     key: "cerebro_model_registry",
