@@ -107,14 +107,22 @@ func parseMarkdownImage(markdown string, start int) (end int, label, destination
 	}
 
 	labelEnd := -1
+	labelDepth := 0
 	for i := start + 2; i < len(markdown); i++ {
 		if markdown[i] == '\\' {
 			i++
 			continue
 		}
-		if markdown[i] == ']' {
-			labelEnd = i
-			break
+		switch markdown[i] {
+		case '[':
+			labelDepth++
+		case ']':
+			if labelDepth == 0 {
+				labelEnd = i
+				i = len(markdown)
+				continue
+			}
+			labelDepth--
 		}
 	}
 	if labelEnd < 0 || labelEnd+1 >= len(markdown) || markdown[labelEnd+1] != '(' {

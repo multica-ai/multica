@@ -625,6 +625,8 @@ func TestSanitizeMarkdownForLarkCard_LocalPathFormats(t *testing.T) {
 		{"windows_unc", `![scan](\\server\share\x.png)`, `[scan omitted]`},
 		{"optional_title", `![scan](/tmp/x.png "preview")`, `[scan omitted]`},
 		{"balanced_parentheses", `![scan](/tmp/screenshot(1).png)`, `[scan omitted]`},
+		{"label_balanced_brackets", `![scan [annotated]](/tmp/x.png)`, `[scan [annotated] omitted]`},
+		{"label_escaped_bracket", `![scan \] annotated](/tmp/x.png)`, `[scan \] annotated omitted]`},
 		{"escaped_parenthesis", `![scan](/tmp/screenshot\(1\).png)`, `[scan omitted]`},
 		{"remote_url", `![logo](https://example.com/image.png)`, `![logo](https://example.com/image.png)`},
 		{"remote_url_with_title", `![logo](https://example.com/image.png "preview")`, `![logo](https://example.com/image.png "preview")`},
