@@ -1867,6 +1867,19 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		return nil, nil
 	}
 
+	// Autopilot delegation authority (MUL-4857): a schedule/webhook autopilot run
+	// is unattributed by design (no human originator, MUL-4302), which makes the
+	// A2A invoke gate below fail closed for the default private agent — silently
+	// dropping a mid-run @mention delegation even though the SAME autopilot's first
+	// dispatch was admitted. Fall back to the autopilot creator (the principal the
+	// first dispatch used) so the gate is keyed consistently. Members are their own
+	// originator, so this only affects agent/system-authored comments; it is scoped
+	// to autopilot-origin issues, so other unattributed chains stay fail-closed.
+	// Authorization only: the enqueued task's attribution stays unattributed.
+	if opts.OriginatorUserID == "" && actorType != "member" {
+		opts.OriginatorUserID = h.invokeAuthorityForAutopilotIssue(ctx, issue)
+	}
+
 	mentions := util.ParseMentions(content)
 	if util.HasMentionAll(mentions) {
 		return nil, nil

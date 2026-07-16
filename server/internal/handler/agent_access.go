@@ -199,6 +199,39 @@ func (h *Handler) invokeOriginatorFromRequest(r *http.Request, actorType, actorI
 	return ""
 }
 
+// invokeAuthorityForAutopilotIssue resolves the effective invoking human for the
+// A2A invoke gate (canInvokeAgent) when an UNATTRIBUTED run authors a trigger
+// comment on an autopilot-created issue (MUL-4857).
+//
+// A schedule/webhook autopilot run carries no top-of-chain human originator by
+// design (MUL-4302). Without one, canInvokeAgent fails closed for the DEFAULT
+// private agent (and member-scoped public_to agents), so a mid-run @mention
+// delegation silently enqueues nothing — even though the SAME autopilot's first
+// dispatch was admitted via the autopilot creator (autopilotAdmitInvoke ->
+// canCreatorInvokeAgent). This restores that first-dispatch authority for the
+// mid-run delegation path: the gate still runs, now keyed on the autopilot
+// creator, so no unrestricted agent-to-agent bypass is reopened.
+//
+// Only a MEMBER-created autopilot yields a user id; an agent-created autopilot
+// has no human to key the gate on, and the existing agent-actor workspace-target
+// exception in canInvokeAgent already covers the one case (public_to workspace)
+// it should. The returned id is used for AUTHORIZATION only — the enqueued task's
+// originator/attribution is computed separately and stays unattributed. Fails
+// closed (empty) on any non-autopilot issue or lookup error.
+func (h *Handler) invokeAuthorityForAutopilotIssue(ctx context.Context, issue db.Issue) string {
+	if !issue.OriginType.Valid || issue.OriginType.String != "autopilot" || !issue.OriginID.Valid {
+		return ""
+	}
+	ap, err := h.Queries.GetAutopilotInWorkspace(ctx, db.GetAutopilotInWorkspaceParams{
+		ID:          issue.OriginID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || ap.CreatedByType != "member" {
+		return ""
+	}
+	return uuidToString(ap.CreatedByID)
+}
+
 // accessibleAgentIDs returns the set of agent IDs in the workspace the actor
 // is allowed to see, for use by workspace-wide aggregation endpoints
 // (run counts, activity histograms, task snapshots) that need to filter out

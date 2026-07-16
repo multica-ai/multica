@@ -127,6 +127,15 @@ These are all silent no-ops — no error, no run:
   `canEnqueueSquadLeader` wrapper is the squad assignment/promote path, not this
   one; the child-done wake is ungated — see the multica-squads skill).
 
+One nuance for automation (MUL-4857): when an UNATTRIBUTED autopilot run (a
+schedule/webhook dispatch has no human originator, so the A2A gate has no human
+to key on) authors a delegation `@mention` on an autopilot-created issue, the
+invoke gate falls back to the **autopilot creator** as the effective invoking
+user — the same principal that admitted the first dispatch. So a mid-run
+`@agent` / `@squad` delegation fires exactly when the autopilot creator could
+invoke that target (owner / `public_to` match), and stays skipped otherwise. It
+is authorization only — the enqueued run's originator/attribution is unchanged.
+
 ## Incorrect → Correct
 
 Incorrect: `@alice please review`
