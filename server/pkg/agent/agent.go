@@ -130,7 +130,7 @@ type TokenUsage struct {
 // Result is the final outcome after an agent session completes.
 type Result struct {
 	Status     string // "completed", "failed", "aborted", "timeout", "cancelled"
-	Output     string // accumulated text output
+	Output     string // final user-facing output selected by the backend
 	Error      string // error message if failed
 	DurationMs int64
 	SessionID  string
@@ -140,6 +140,7 @@ type Result struct {
 // Config configures a Backend instance.
 type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli, traecli, grok)
+	CLIVersion     string            // detected version paired with ExecutablePath; observation only, never used to choose behavior
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
