@@ -64,12 +64,12 @@ export function HookStepPanel({ step, hook, onChange, directory = {} }: { step: 
     </div>}
 
     {step === "filter" && <div className="grid gap-2">
-      {hook.conditions.map((condition, index) => <div key={index} className="grid gap-2"><div className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1fr)_auto] sm:items-end">
+      {hook.conditions.map((condition, index) => <div key={index} className="grid gap-2">{index > 0 && <div className="w-20 justify-self-center"><ChoiceSelect label={`Filter conjunction ${index + 1}`} value={condition.conjunction ?? "AND"} options={[{ value: "AND", label: "AND" }, { value: "OR", label: "OR" }]} onChange={(value) => updateCondition(index, { conjunction: value as HookCondition["conjunction"] })} /></div>}<div className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1fr)_auto] sm:items-end">
         <label className="grid gap-1 text-sm">Field<ChoiceSelect label={`Filter field ${index + 1}`} value={condition.field} placeholder="Select field" options={fields.map((field) => ({ value: field, label: field }))} onChange={(value) => updateCondition(index, { field: value })} /></label>
         <label className="grid gap-1 text-sm">Operator<ChoiceSelect label={`Filter operator ${index + 1}`} value={condition.operator} options={operatorOptions} onChange={(value) => updateCondition(index, { operator: value })} /></label>
         <label className="grid gap-1 text-sm">Value<Input aria-label={`Filter value ${index + 1}`} value={condition.value} disabled={["exists", "not_exists"].includes(condition.operator)} onChange={(event) => updateCondition(index, { value: event.target.value })} /></label>
         <Button type="button" variant="outline" size="icon" aria-label={`Remove condition ${index + 1}`} onClick={() => onChange({ ...hook, conditions: hook.conditions.filter((_, current) => current !== index) })}><Trash2 className="size-4" /></Button>
-      </div>{index < hook.conditions.length - 1 && <span className="justify-self-center rounded-full border bg-muted px-2 py-0.5 text-[10px] font-bold text-muted-foreground">AND</span>}</div>)}
+      </div></div>)}
       <Button type="button" variant="outline" className="mt-2 w-fit" aria-label="Add condition" disabled={hook.events.length === 0} onClick={() => onChange({ ...hook, conditions: [...hook.conditions, { field: fields[0] ?? "", operator: "eq", value: "", conjunction: "AND" }] })}><Plus className="size-4" />Add condition</Button>
     </div>}
 

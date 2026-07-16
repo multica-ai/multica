@@ -73,7 +73,11 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
 
     await page.getByRole("button", { name: "Configure Filter" }).click();
     await expect(page.getByLabel("Filter field 1")).toContainText("issue.status");
-    await expect(page.getByText("AND").first()).toBeVisible();
+    const conjunction = page.getByLabel("Filter conjunction 2");
+    await expect(conjunction).toContainText("AND");
+    await conjunction.click();
+    await page.getByRole("option", { name: "OR" }).click();
+    await expect(conjunction).toContainText("OR");
     await expect(page.getByText(/\{\s*"field"/)).toHaveCount(0);
     await capture(page, testInfo, "03-filter-rows");
 

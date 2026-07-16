@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHookDraft } from "../../core/hook-types";
 import { HookEditor } from "./hook-editor";
@@ -28,6 +29,26 @@ describe("HookEditor", () => {
     expect(screen.getByLabelText("Filter operator 1")).toHaveTextContent("is not one of");
     expect(screen.getByLabelText("Filter value 1")).toHaveValue("done, cancelled");
     expect(screen.queryByText(/\{\s*"field"/)).not.toBeInTheDocument();
+  });
+
+  it("lets each additional filter join with AND or OR", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    render(<HookEditor initialHook={{
+      ...createHookDraft(),
+      events: ["before.task.complete"],
+      conditions: [
+        { field: "issue.status", operator: "eq", value: "todo", conjunction: "AND" },
+        { field: "issue.priority", operator: "eq", value: "urgent", conjunction: "AND" },
+      ],
+    }} onSave={onSave} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure Filter" }));
+    await user.click(screen.getByLabelText("Filter conjunction 2"));
+    await user.click(screen.getByRole("option", { name: "OR" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      conditions: expect.arrayContaining([expect.objectContaining({ conjunction: "OR" })]),
+    }));
   });
 
   it("uses the same scope step for agent, issue, and session", () => {
