@@ -19,6 +19,7 @@ import { AgentContextProposeDialog } from "./components/agent-context-propose-di
 import { AgentContextObservabilityPanel } from "./components/agent-context-observability-panel";
 import { AgentContextRuntimeSupportPanel } from "./components/agent-context-runtime-support-panel";
 import { AgentContextEffectivePromptPanel } from "./components/agent-context-effective-prompt-panel";
+import { AgentContextSwapPanel } from "./components/agent-context-swap-panel";
 
 export interface AgentDetailTabExtension {
   id: string;
@@ -37,8 +38,12 @@ export function createAgentContextTabs(): AgentDetailTabExtension[] {
       id: "context",
       labelKey: "context",
       icon: GitBranch,
-      render: ({ agent, canEdit }) => (
-        <CerebroAgentContextTab agent={agent} canEdit={canEdit} />
+      render: ({ agent, runtimes, canEdit }) => (
+        <CerebroAgentContextTab
+          agent={agent}
+          runtimes={runtimes}
+          canEdit={canEdit}
+        />
       ),
     },
   ];
@@ -46,9 +51,11 @@ export function createAgentContextTabs(): AgentDetailTabExtension[] {
 
 export function CerebroAgentContextTab({
   agent,
+  runtimes = [],
   canEdit = true,
 }: {
   agent: Agent;
+  runtimes?: AgentRuntime[];
   canEdit?: boolean;
 }) {
   const wsId = useWorkspaceId();
@@ -65,6 +72,7 @@ export function CerebroAgentContextTab({
         <div className="grid gap-4 xl:grid-cols-2">
           <AgentContextRuntimeSupportPanel agent={agent} />
           <AgentContextEffectivePromptPanel agent={agent} />
+          <AgentContextSwapPanel agent={agent} runtimes={runtimes} />
         </div>
       )}
 

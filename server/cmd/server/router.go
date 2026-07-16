@@ -1772,6 +1772,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/context/lint", cerebroAgentOfficeHandler.LintAgent)                   // CEREBRO-PATCH(cerebro-agent-office-lint-routes): FIR-1775 Phase 3 — per-agent context lint.
 					r.Get("/context/observability", cerebroAgentOfficeHandler.ObservabilityAgent) // CEREBRO-PATCH(cerebro-agent-office-observability-routes): FIR-1775 Phase 4 — per-agent context observability.
 					// CEREBRO-PATCH(agent-capabilities-card-task-route): FIR-2243 — GET /capabilities is registered in the task-allowlist group above (AllowTaskScopeForAgent) so an agent's own task token can also reach it; chi forbids a duplicate flat+nested registration of the same path.
+					r.Get("/capabilities/swap", h.GetAgentCapabilitySwap) // CEREBRO-PATCH(agent-capabilities-swap-route): FIR-3212 Swap slice — operator-facing preview of what a runtime change costs this agent; human route only, so it stays out of the task-token allowlist above.
 					// CEREBRO-PATCH(agent-tools-routes): cerebro tool grant admin endpoints.
 					// NOTE: GET /tools and POST /tools/{name}/invoke are registered in the
 					// task-allowlist group above so agent task tokens can also reach them.

@@ -8,6 +8,14 @@ export {
   type AgentCapabilitySystemPromptSupport,
 } from "./api";
 export {
+  getAgentCapabilitySwap,
+  AgentCapabilitySwapSchema,
+  type AgentCapabilitySwap,
+  type AgentCapabilitySwapImpact,
+  type AgentCapabilitySwapFieldTransition,
+  type AgentCapabilitySwapSystemPrompt,
+} from "./swap-api";
+export {
   createAgentCapabilitiesTabs,
   CerebroCapabilitiesTab,
   type AgentCapabilitiesTabExtension,

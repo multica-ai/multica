@@ -175,7 +175,7 @@ const AgentCapabilitySystemPromptSupportSchema = z
   })
   .loose();
 
-const AgentCapabilityRuntimeOptionsSchema = z
+export const AgentCapabilityRuntimeOptionsSchema = z
   .object({
     status: z.string().default("unknown"),
     provider: z.string().default(""),
@@ -187,7 +187,7 @@ const AgentCapabilityRuntimeOptionsSchema = z
   })
   .loose();
 
-const EMPTY_RUNTIME_OPTIONS = {
+export const EMPTY_RUNTIME_OPTIONS = {
   status: "unknown",
   provider: "",
   cli_version: "",
