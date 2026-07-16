@@ -415,6 +415,7 @@ func (c *directTaskCommand) StderrPipe() (io.ReadCloser, error)  { return c.cmd.
 func (c *directTaskCommand) SetStderr(w io.Writer) error         { c.cmd.Stderr = w; return nil }
 func (c *directTaskCommand) SetCancel(cancel func() error) error { c.cmd.Cancel = cancel; return nil }
 func (c *directTaskCommand) Process() *os.Process                { return c.cmd.Process }
+func (c *directTaskCommand) ProcessState() *os.ProcessState      { return c.cmd.ProcessState }
 func (c *directTaskCommand) Environment() []string               { return append([]string(nil), c.cmd.Env...) }
 
 func (directTaskCommandLauncher) Command(ctx context.Context, req agent.CommandRequest) (agent.TaskCommand, error) {

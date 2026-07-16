@@ -1828,8 +1828,8 @@ func TestCodexExecuteDoesNotSerializeConcurrentLaunches(t *testing.T) {
 	results := make(chan Result, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			backend, _ := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
-			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+			backend, _ := New("codex", codexTestConfig(t, fakePath, filepath.Dir(fakePath), nil))
+			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Cwd: filepath.Dir(fakePath), Timeout: 5 * time.Second})
 			if err != nil {
 				results <- Result{Status: "failed", Error: err.Error()}
 				return
@@ -1878,11 +1878,13 @@ func TestCodexExecuteRedactsStderrFromResultAndLogs(t *testing.T) {
 		`exit 2`+"\n")
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
-	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: logger})
+	cfg := codexTestConfig(t, fakePath, filepath.Dir(fakePath), nil)
+	cfg.Logger = logger
+	backend, err := New("codex", cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Cwd: filepath.Dir(fakePath), Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1919,12 +1921,14 @@ func TestCodexExecuteDoesNotProbeVersionBeforeInitialize(t *testing.T) {
 	data = bytes.Replace(data, []byte(`echo "codex-cli 0.0.0-test"; exit 0`), []byte(`sleep 2; echo "codex-cli 0.0.0-test"; exit 0`), 1)
 	writeTestExecutable(t, fakePath, data)
 
-	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default(), CodexVersion: "cached-test-version"})
+	cfg := codexTestConfig(t, fakePath, filepath.Dir(fakePath), nil)
+	cfg.CodexVersion = "cached-test-version"
+	backend, err := New("codex", cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Cwd: filepath.Dir(fakePath), Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -48,6 +48,7 @@ type TaskCommand interface {
 	SetStderr(io.Writer) error
 	SetCancel(func() error) error
 	Process() *os.Process
+	ProcessState() *os.ProcessState
 	Environment() []string
 }
 
@@ -384,6 +385,15 @@ func (p *PreparedCommand) Process() *os.Process {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.cmd.Process
+}
+
+func (p *PreparedCommand) ProcessState() *os.ProcessState {
+	if p == nil || p.cmd == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.cmd.ProcessState
 }
 
 func (p *PreparedCommand) Environment() []string {

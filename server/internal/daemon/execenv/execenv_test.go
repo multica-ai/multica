@@ -3223,6 +3223,7 @@ func TestReusePreservesTaskLocalModelsCacheWhenSharedMissing(t *testing.T) {
 	}
 
 	reused := Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-missing"},
@@ -3268,6 +3269,7 @@ func TestReusePreservesTaskLocalModelsCacheOverStaleSharedSnapshot(t *testing.T)
 	}
 
 	reused := Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-stale"},
@@ -3326,6 +3328,7 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenProviderConfigChanges(t *testin
 	}
 
 	reused := Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
@@ -3350,6 +3353,7 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenProviderConfigChanges(t *testin
 		t.Fatalf("write provider B task cache: %v", err)
 	}
 	if Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
@@ -3403,6 +3407,7 @@ func TestReuseInvalidatesTaskLocalModelsCacheWhenModelCatalogChanges(t *testing.
 	}
 
 	reused := Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-catalog-change"},
@@ -3453,6 +3458,7 @@ func TestReuseInvalidatesUnboundLegacyModelsCache(t *testing.T) {
 	}
 
 	if Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
@@ -3472,6 +3478,7 @@ func TestReuseInvalidatesUnboundLegacyModelsCache(t *testing.T) {
 		t.Fatalf("write shared cache: %v", err)
 	}
 	if Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "codex",
 		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
