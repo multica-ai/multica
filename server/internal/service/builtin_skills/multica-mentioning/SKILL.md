@@ -143,9 +143,13 @@ The same authority carries the plain assigned-squad-leader wake (a worker's
 result comment on the autopilot issue can still wake the leader), and it survives
 a busy target: if the mentioned agent is already running, the delegation is
 replayed at that run's completion under the same authority, so it is never lost.
-An edit is treated as a fresh action — it re-stamps the comment's lineage to the
-editing task, so editing an old autopilot comment from an unrelated issue fails
-closed instead of reusing the old authority.
+An edit is treated as a fresh action — it re-derives the comment's lineage from
+the editing action. Only the agent author editing its OWN comment re-stamps the
+lineage to the editing task; any other editor — including a workspace owner/admin
+editing an agent's comment — CLEARS it. So editing an old autopilot comment from
+an unrelated issue, or an admin editing an agent's comment (manage rights, not
+invoke rights), fails closed at the deferred completion-reconcile instead of
+reusing the original run's authority.
 
 ## Incorrect → Correct
 

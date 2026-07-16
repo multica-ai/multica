@@ -604,3 +604,88 @@ func TestCreateComment_AutopilotWorkerResultWakesSquadLeader(t *testing.T) {
 		t.Fatalf("expected the private squad leader to be woken once via autopilot-creator authority, got %d", leaderTasks)
 	}
 }
+
+// TestUpdateComment_AdminEditOfAgentCommentClearsStaleLineage is the MUL-4857
+// must-fix (review round 3): a workspace admin may EDIT another author's comment,
+// but that manage right is NOT an invoke right over the author's private agents
+// (canInvokeAgent is deny-by-default for private agents — no admin bypass). When an
+// admin edits an autopilot Agent's comment to add a private @mention while the
+// target is busy, the immediate save is blocked on the admin's own member identity,
+// AND the persisted source_task_id MUST be cleared. Otherwise the deferred
+// completion-reconcile — which routes the comment under its ORIGINAL agent author on
+// the unattributed autopilot chain — would read the stale lineage and resurrect the
+// autopilot creator's authority once the target frees up.
+func TestUpdateComment_AdminEditOfAgentCommentClearsStaleLineage(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	workerID, ownerID, _ := privateAgentTestFixture(t)
+
+	// The autopilot is created by ownerID, who owns the private worker — so the
+	// ORIGINAL agent lineage genuinely carries invoke authority. That is precisely
+	// the authority an admin edit must not be able to borrow.
+	fx := newAutopilotDelegationFixture(t, workerID, ownerID, "autopilot")
+	issueID := uuidToString(fx.Issue.ID)
+	// Neutralise the fixture's own (valid) mention comment so the ONLY comment whose
+	// reconcile fate is under test is the admin-edited one below.
+	setCommentSourceTask(t, &fx, nil)
+
+	// A plain (no-mention) leader comment stamped with the leader's real task
+	// lineage — the comment the admin edits to inject the mention.
+	commentID := seedLeaderPlainComment(t, issueID, fx.LeaderAgentID, fx.LeaderTaskID)
+
+	// A workspace admin who is NEITHER the worker owner nor the comment author.
+	adminID := createPermissionTestAdmin(t, "mul4857-edit-admin@multica.test")
+
+	countQueued := func() int {
+		var n int
+		if err := testPool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		`, issueID, workerID).Scan(&n); err != nil {
+			t.Fatalf("count queued: %v", err)
+		}
+		return n
+	}
+
+	// The admin edits the leader's comment to add the private @Worker mention.
+	w := httptest.NewRecorder()
+	r := newRequestAs(adminID, http.MethodPut, "/api/comments/"+commentID, map[string]any{
+		"content": "[@Worker](mention://agent/" + workerID + ") please take this",
+	})
+	r = withURLParam(r, "commentId", commentID)
+	testHandler.UpdateComment(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("admin UpdateComment: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Immediate save is judged on the admin's member identity, which holds no invoke
+	// right over the private worker — nothing is enqueued.
+	if got := countQueued(); got != 0 {
+		t.Fatalf("admin edit must be blocked immediately (no invoke right over a private agent); got %d queued", got)
+	}
+
+	// The stale autopilot lineage MUST be cleared so the deferred reconcile fails closed.
+	var sourceTaskValid bool
+	if err := testPool.QueryRow(ctx, `SELECT source_task_id IS NOT NULL FROM comment WHERE id = $1`, commentID).Scan(&sourceTaskValid); err != nil {
+		t.Fatalf("read comment source_task_id: %v", err)
+	}
+	if sourceTaskValid {
+		t.Fatal("an admin edit of an agent comment must clear source_task_id so the deferred reconcile cannot borrow the original autopilot creator authority")
+	}
+
+	// The busy worker now completes: the completion reconcile routes the comment
+	// under its original agent author (unattributed autopilot chain). With the
+	// lineage cleared it must NOT resurrect the creator authority or enqueue a
+	// follow-up. (Without the fix this reconcile would enqueue exactly one.)
+	workerTaskID := seedCompletedTaskOnIssueBefore(t, workerID, issueID, fx.RuntimeID)
+	workerTask, err := testHandler.Queries.GetAgentTask(ctx, util.MustParseUUID(workerTaskID))
+	if err != nil {
+		t.Fatalf("load worker task: %v", err)
+	}
+	testHandler.reconcileCommentsOnCompletion(ctx, &workerTask)
+	if got := countQueued(); got != 0 {
+		t.Fatalf("completion reconcile must not borrow the stale autopilot authority after an admin edit; got %d queued", got)
+	}
+}
