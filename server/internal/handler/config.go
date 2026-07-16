@@ -50,11 +50,13 @@ type AppConfig struct {
 	// raw rules here: /api/config is public and may be called anonymously.
 	FeatureFlags map[string]bool `json:"feature_flags,omitempty"`
 
-	// ServerVersion is the running API build version, so self-hosted
-	// operators can confirm what's deployed and include it in bug reports.
-	// Only emitted on self-hosted deployments — omitted on the managed cloud,
-	// which is continuously deployed so its users can't act on the version —
-	// and empty for dev builds that aren't stamped via -X main.version.
+	// ServerVersion is the running API binary's official release baseline
+	// (the clean vX.Y.Z tag stamped via -X main.version), so self-hosted
+	// operators can confirm what's deployed. Only emitted on self-hosted
+	// deployments; omitted on the managed cloud, which is continuously
+	// deployed so its users can't act on the version, and empty for dev
+	// builds or any value that is not a clean official tag. It carries no
+	// commit id, dirty state, repository path, or image reference.
 	ServerVersion string `json:"server_version,omitempty"`
 }
 

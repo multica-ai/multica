@@ -107,10 +107,11 @@ type Config struct {
 	LLMAPIKey       string
 	LLMBaseURL      string
 	LLMDefaultModel string
-	// ServerVersion is the build version of the running API binary (the same
-	// value main.go stamps via -X main.version and reports on /metrics).
-	// Surfaced through /api/config so self-hosted operators can confirm which
-	// server build is deployed. Empty in dev builds.
+	// ServerVersion is the running API binary's official release baseline:
+	// the clean vX.Y.Z tag main.go stamps via -X main.version (and reports
+	// on /metrics). Surfaced through /api/config so self-hosted operators
+	// can confirm which server build is deployed; empty for dev builds and
+	// any value that is not a clean official tag.
 	ServerVersion string
 }
 

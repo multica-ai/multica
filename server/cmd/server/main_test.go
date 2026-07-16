@@ -79,11 +79,12 @@ func TestNewNamedRedisClient_DisableClientName_InvalidValue(t *testing.T) {
 	}
 }
 
-// TestNormalizeServerVersion covers the router-config wiring path (not just
-// a hand-set handler.Config field): an unstamped "dev" build must not leak
-// into /api/config's server_version, or the Help popover would render
-// "Server version dev" instead of hiding the row.
-func TestNormalizeServerVersion(t *testing.T) {
+// TestOfficialBaseline covers the router-config wiring path (not just a
+// hand-set handler.Config field): only a clean official release tag is
+// reportable as /api/config's server_version. Dev builds, dirty checkouts,
+// commit-distance suffixes, hashes, and non-v values map to "" so the Help
+// popover hides the row instead of presenting a non-release as a baseline.
+func TestOfficialBaseline(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
@@ -92,11 +93,17 @@ func TestNormalizeServerVersion(t *testing.T) {
 		{"unstamped_dev_default_becomes_empty", "dev", ""},
 		{"already_empty_stays_empty", "", ""},
 		{"stamped_release_tag_passes_through", "v0.4.0", "v0.4.0"},
+		{"describe_commit_suffix_is_rejected", "v0.4.0-5-gabc1234", ""},
+		{"dirty_marker_is_rejected", "v0.4.0-dirty", ""},
+		{"bare_hash_is_rejected", "abc1234", ""},
+		{"non_v_value_is_rejected", "garbage", ""},
+		{"prerelease_tag_passes_through", "v0.4.0-rc1", "v0.4.0-rc1"},
+		{"surrounding_whitespace_is_trimmed", " v0.4.0 ", "v0.4.0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeServerVersion(tt.in); got != tt.want {
-				t.Errorf("normalizeServerVersion(%q) = %q, want %q", tt.in, got, tt.want)
+			if got := officialBaseline(tt.in); got != tt.want {
+				t.Errorf("officialBaseline(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}

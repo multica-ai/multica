@@ -314,13 +314,13 @@ func TestGetConfigExposesServerVersion(t *testing.T) {
 		t.Fatalf("server_version: want empty for dev build, got %q", cfg.ServerVersion)
 	}
 
-	testHandler.cfg.ServerVersion = "1.2.3"
+	testHandler.cfg.ServerVersion = "v1.2.3"
 	w = httptest.NewRecorder()
 	testHandler.GetConfig(w, req)
 	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
 		t.Fatalf("decode config: %v", err)
 	}
-	if cfg.ServerVersion != "1.2.3" {
+	if cfg.ServerVersion != "v1.2.3" {
 		t.Fatalf("server_version: want 1.2.3, got %q", cfg.ServerVersion)
 	}
 }
@@ -332,7 +332,7 @@ func TestGetConfigExposesServerVersion(t *testing.T) {
 func TestGetConfigOmitsServerVersionOnOfficialCloud(t *testing.T) {
 	origCfg := testHandler.cfg
 	defer func() { testHandler.cfg = origCfg }()
-	testHandler.cfg.ServerVersion = "1.2.3"
+	testHandler.cfg.ServerVersion = "v1.2.3"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 
@@ -356,8 +356,41 @@ func TestGetConfigOmitsServerVersionOnOfficialCloud(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
 		t.Fatalf("decode config: %v", err)
 	}
-	if cfg.ServerVersion != "1.2.3" {
+	if cfg.ServerVersion != "v1.2.3" {
 		t.Fatalf("server_version: want 1.2.3 on self-hosted, got %q", cfg.ServerVersion)
+	}
+}
+
+// TestGetConfigExposesNoProvenanceMetadata verifies /api/config's public JSON
+// carries only the official baseline tag and never commit ids, dirty state,
+// repository paths, or image references: the baseline is safe to expose
+// anonymously precisely because it is the only build metadata surfaced.
+func TestGetConfigExposesNoProvenanceMetadata(t *testing.T) {
+	origCfg := testHandler.cfg
+	defer func() { testHandler.cfg = origCfg }()
+
+	t.Setenv("MULTICA_APP_URL", "https://multica.self-hosted.example")
+	t.Setenv("FRONTEND_ORIGIN", "")
+	testHandler.cfg.ServerVersion = "v1.2.3"
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if got := string(raw["server_version"]); got != `"v1.2.3"` {
+		t.Fatalf("server_version: want %q, got %s", `"v1.2.3"`, got)
+	}
+	for _, key := range []string{"commit", "commit_id", "dirty", "build_path", "repo_path", "image", "image_digest", "build_time", "git_sha"} {
+		if _, ok := raw[key]; ok {
+			t.Fatalf("public config must not expose provenance metadata %q (body=%s)", key, w.Body.String())
+		}
 	}
 }
 
