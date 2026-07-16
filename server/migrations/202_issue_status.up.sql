@@ -11,7 +11,7 @@
 -- reference; tenant consistency and cleanup are enforced in app code (the
 -- workspace-delete path removes these rows in the same transaction). All
 -- indexes are created CONCURRENTLY in their own single-statement follow-up
--- migrations (201-204) because Postgres forbids CREATE INDEX CONCURRENTLY
+-- migrations (203-206) because Postgres forbids CREATE INDEX CONCURRENTLY
 -- inside this table-create transaction.
 CREATE TABLE issue_status (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
