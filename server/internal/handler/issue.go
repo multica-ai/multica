@@ -1086,6 +1086,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("top_level_only") == "true" {
 		where = append(where, "i.parent_issue_id IS NULL")
 	}
+	where = appendIssueTableSearchFilter(where, addArg, r.URL.Query().Get("q"))
 	if scheduledFilter.Valid {
 		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
 	}
@@ -1299,6 +1300,36 @@ func appendIssueDateFilter(where []string, addArg func(any) string, filter *issu
 		filter.column,
 		endRef,
 	))
+}
+
+// appendIssueTableSearchFilter adds a quick identity search to the ordinary
+// ListIssues window. Unlike the ranked global search endpoint, this predicate
+// preserves the table's active filters, explicit sort, total, and pagination.
+// Every word must appear in the title; a complete identifier (or bare issue
+// number) also matches the immutable numeric issue number.
+func appendIssueTableSearchFilter(where []string, addArg func(any) string, raw string) []string {
+	query := strings.TrimSpace(raw)
+	if query == "" {
+		return where
+	}
+
+	words := splitSearchTerms(strings.ToLower(query))
+	ors := make([]string, 0, 2)
+	if len(words) > 0 {
+		titleMatches := make([]string, 0, len(words))
+		for _, word := range words {
+			pattern := "%" + escapeLike(word) + "%"
+			titleMatches = append(titleMatches, fmt.Sprintf("LOWER(i.title) LIKE %s", addArg(pattern)))
+		}
+		ors = append(ors, "("+strings.Join(titleMatches, " AND ")+")")
+	}
+	if number, ok := parseQueryNumber(query); ok {
+		ors = append(ors, fmt.Sprintf("i.number = %s", addArg(number)))
+	}
+	if len(ors) == 0 {
+		return where
+	}
+	return append(where, "("+strings.Join(ors, " OR ")+")")
 }
 
 func splitCommaParam(raw string) []string {

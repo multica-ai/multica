@@ -250,6 +250,8 @@ function IssueSurfaceContent({
                 hasNextPage={controller.hasNextFlatPage}
                 isFetchingNextPage={controller.isFetchingNextFlatPage}
                 total={controller.flatTotal}
+                search={controller.tableSearch}
+                onSearchChange={controller.setTableSearch}
                 exportIssues={controller.exportTableIssues}
                 resolveExportLookups={controller.resolveTableExportLookups}
               />

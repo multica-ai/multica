@@ -185,6 +185,7 @@ describe("flat issue table queries", () => {
         "project:project-1",
         {
           project_id: PROJECT_ID,
+          q: "release train",
           statuses: ["todo", "in_progress"],
           priorities: ["high"],
           assignee_filters: [{ type: "member", id: "member-1" }],
@@ -206,6 +207,7 @@ describe("flat issue table queries", () => {
     ]);
     expect(listIssues).toHaveBeenCalledWith({
       project_id: PROJECT_ID,
+      q: "release train",
       statuses: ["todo", "in_progress"],
       priorities: ["high"],
       assignee_filters: [{ type: "member", id: "member-1" }],

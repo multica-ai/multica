@@ -77,6 +77,8 @@ export interface ListIssuesParams {
   limit?: number;
   offset?: number;
   workspace_id?: string;
+  /** Flat-table quick search. Matches issue title words or an exact issue number. */
+  q?: string;
   status?: IssueStatus;
   /** Multi-value table facet. OR within the field. */
   statuses?: IssueStatus[];

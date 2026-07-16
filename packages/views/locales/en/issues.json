@@ -121,6 +121,8 @@
     "no_value": "No value",
     "unassigned": "Unassigned",
     "empty": "No issues match this view.",
+    "search_placeholder": "Search title or issue ID…",
+    "search_clear": "Clear search",
     "loaded_count": "Loaded {{count}} of {{total}}",
     "hierarchy": "Hierarchy",
     "hierarchy_description": "Nest sub-issues beneath their parents",

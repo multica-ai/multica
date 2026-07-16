@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryKey } from "@tanstack/react-query";
 import type {
@@ -87,6 +87,8 @@ export interface IssueSurfaceController {
   hasNextFlatPage: boolean;
   isFetchingNextFlatPage: boolean;
   flatTotal: number;
+  tableSearch: string;
+  setTableSearch: (query: string) => void;
   exportTableIssues: () => Promise<Issue[]>;
   isLoading: boolean;
   /** See IssueSurfaceData.isRefreshing — placeholder-backed revalidation. */
@@ -117,6 +119,20 @@ function issueDateFilterToApiParams(filter: IssueDateFilter | null) {
     date_start: start.toISOString(),
     date_end: end.toISOString(),
   };
+}
+
+function useDebouncedTableSearch(value: string, delayMs = 250) {
+  const [debouncedValue, setDebouncedValue] = useState(value.trim());
+
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setDebouncedValue(value.trim()),
+      delayMs,
+    );
+    return () => window.clearTimeout(timer);
+  }, [delayMs, value]);
+
+  return debouncedValue;
 }
 
 export function useIssueSurfaceController({
@@ -153,6 +169,8 @@ export function useIssueSurfaceController({
   const cardProperties = useViewStore((s) => s.cardProperties);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const tableColumns = useViewStore((s) => s.tableColumns);
+  const [tableSearch, setTableSearch] = useState("");
+  const debouncedTableSearch = useDebouncedTableSearch(tableSearch);
 
   const allowedModes = useMemo(() => new Set<IssueSurfaceMode>(modes), [modes]);
   const fallbackMode = modes[0] ?? "list";
@@ -246,6 +264,7 @@ export function useIssueSurfaceController({
 
   const tableFacets = useMemo<IssueFlatFilter>(
     () => ({
+      ...(debouncedTableSearch ? { q: debouncedTableSearch } : {}),
       ...(statusFilters.length > 0 ? { statuses: statusFilters } : {}),
       ...(priorityFilters.length > 0 ? { priorities: priorityFilters } : {}),
       ...(assigneeFilters.length > 0
@@ -265,6 +284,7 @@ export function useIssueSurfaceController({
     [
       assigneeFilters,
       creatorFilters,
+      debouncedTableSearch,
       includeNoAssignee,
       labelFilters,
       priorityFilters,
@@ -321,9 +341,18 @@ export function useIssueSurfaceController({
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
     ...surfaceData,
+    // Keep TableView mounted for an empty search result so its local search
+    // control remains available to refine or clear the query. Include the
+    // debounced value as well to avoid a brief empty-screen flash while a
+    // cleared query is waiting to re-fetch the unsearched window.
+    isEmpty:
+      surfaceData.isEmpty &&
+      !(usesTable && (tableSearch.trim() || debouncedTableSearch)),
     sort,
     actions,
     selection,
+    tableSearch,
+    setTableSearch,
     openCreateIssue,
     moveIssue,
     exportTableIssues,

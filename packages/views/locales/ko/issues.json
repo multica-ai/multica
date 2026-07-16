@@ -119,6 +119,8 @@
     "no_value": "값 없음",
     "unassigned": "담당자 없음",
     "empty": "이 보기에 일치하는 이슈가 없습니다.",
+    "search_placeholder": "제목 또는 이슈 ID 검색…",
+    "search_clear": "검색 지우기",
     "loaded_count": "{{total}}개 중 {{count}}개 불러옴",
     "hierarchy": "계층",
     "hierarchy_description": "하위 이슈를 상위 이슈 아래에 중첩해 표시",

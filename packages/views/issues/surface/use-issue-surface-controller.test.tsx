@@ -466,6 +466,43 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(result.current.isRefreshing).toBe(false));
   });
 
+  it("debounces table search and sends it with the server-side flat window", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("table");
+    listIssues.mockResolvedValue({ issues: [], total: 0 });
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["table"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    listIssues.mockClear();
+
+    act(() => result.current.setTableSearch("  Release train  "));
+
+    expect(result.current.tableSearch).toBe("  Release train  ");
+    expect(listIssues).not.toHaveBeenCalledWith(
+      expect.objectContaining({ q: "Release train" }),
+    );
+
+    await waitFor(() =>
+      expect(listIssues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          project_id: "p1",
+          q: "Release train",
+          limit: 100,
+          offset: 0,
+        }),
+      ),
+    );
+    expect(result.current.isEmpty).toBe(false);
+  });
+
   it("still reports isEmpty for the full-window modes when the list is empty", async () => {
     listIssues.mockResolvedValue({ issues: [], total: 0 });
 

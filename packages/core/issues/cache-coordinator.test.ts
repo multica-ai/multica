@@ -50,6 +50,12 @@ const flatUpdatedWindowKey = issueKeys.flat(
     date_end: "2025-02-01T00:00:00Z",
   },
 );
+const flatSearchKey = issueKeys.flat(
+  WS_ID,
+  "workspace:all",
+  { q: "Issue 1" },
+  sort,
+);
 
 function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
   return {
@@ -191,6 +197,21 @@ describe("applyIssueChange", () => {
     });
     expect(statusResult.staleKeys.map(hashKey)).toContain(hashKey(flatFilteredKey));
     expect(statusResult.staleKeys.map(hashKey)).not.toContain(hashKey(flatKey));
+  });
+
+  it("reconciles a searched flat window when an edited title can change membership", () => {
+    qc.setQueryData<IssueFlatCache>(flatSearchKey, {
+      pages: [{ issues: [issue()], total: 1 }],
+      pageParams: [0],
+    });
+
+    const patch = { title: "No longer matches" };
+    const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
+      changed: issueChangedDims(patch, issue()),
+      baseIssue: issue(),
+    });
+
+    expect(result.staleKeys.map(hashKey)).toContain(hashKey(flatSearchKey));
   });
 
   it("status change: rebuckets loaded cards, patches inbox, adjusts counts for absent-but-member lists", () => {

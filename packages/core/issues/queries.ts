@@ -154,6 +154,7 @@ export type MyIssuesFilter = Pick<
 export type IssueFlatFilter = MyIssuesFilter &
   Pick<
     ListIssuesParams,
+    | "q"
     | "statuses"
     | "priorities"
     | "assignee_filters"

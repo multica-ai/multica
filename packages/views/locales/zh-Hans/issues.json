@@ -119,6 +119,8 @@
     "no_value": "无值",
     "unassigned": "未分配",
     "empty": "当前视图没有匹配的 issue。",
+    "search_placeholder": "搜索标题或 issue 编号…",
+    "search_clear": "清除搜索",
     "loaded_count": "已载入 {{count}} / {{total}}",
     "hierarchy": "层级",
     "hierarchy_description": "将子 issue 嵌套显示在父 issue 下方",

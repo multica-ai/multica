@@ -169,6 +169,7 @@ function flatWindowNeedsReconcile(
   );
 
   if (listFilterDependsOn(scope, filter, changed)) return true;
+  if (filter.q && patchFieldChanged(patch, base, "title")) return true;
   if (changed.status && (filter.statuses?.length ?? 0) > 0) return true;
   if (
     patchFieldChanged(patch, base, "priority") &&
