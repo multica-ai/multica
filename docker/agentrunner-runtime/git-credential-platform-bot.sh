@@ -17,6 +17,8 @@
 #   GITHUB_DEFAULT_ORG  fallback org when git doesn't send a path= line
 #                       (used by the gh wrapper and non-path-aware callers)
 #   GITHUB_API_URL      override for GitHub API base (default: https://api.github.com)
+#   AGENTRUNNER_GITHUB_TOKEN_CACHE_DIR
+#                       token cache dir override (default: ${TMPDIR:-/tmp}/agentrunner-gh-cache)
 #
 # When required env is absent the helper exits 0 emitting nothing, so git falls
 # through to its other helpers and the pod still boots without GitHub auth.
@@ -30,7 +32,7 @@ if [ -z "${GITHUB_APP_ID:-}" ] || [ -z "${GITHUB_APP_PRIVATE_KEY:-}" ]; then
 fi
 
 API="${GITHUB_API_URL:-https://api.github.com}"
-CACHE_DIR="${HOME}/.cache/agentrunner"
+CACHE_DIR="${AGENTRUNNER_GITHUB_TOKEN_CACHE_DIR:-${TMPDIR:-/tmp}/agentrunner-gh-cache}"
 # Re-mint when fewer than this many seconds remain on the cached token.
 REFRESH_SKEW=300
 
@@ -124,8 +126,8 @@ if [ -z "${token}" ]; then
 fi
 
 exp_epoch=$(date -d "${expires_at}" +%s 2>/dev/null || echo "$((now + 3600))")
-mkdir -p "${CACHE_DIR}"
 umask 077
+mkdir -p "${CACHE_DIR}"
 printf '%s\n%s\n' "${exp_epoch}" "${token}" > "${CACHE_FILE}"
 
 emit_token "${token}"

@@ -212,6 +212,11 @@ RUN groupadd -g "${GID}" agent \
 # still resolves it. Placed after useradd so --chown can reference the agent user.
 RUN install -d -o agent -g agent -m 755 /opt/multica/bin
 COPY --chown=agent:agent --from=multica-builder /out/multica /opt/multica/bin/multica
+# Codex task shells prepend their own vendor path and keep /usr/local/bin, but
+# may not preserve the image-level /opt/multica/bin PATH entry. Keep the real
+# self-updatable binary in /opt/multica/bin and expose a stable shim on the
+# common tool path so `multica ...` resolves inside agent terminals.
+RUN ln -sf /opt/multica/bin/multica /usr/local/bin/multica
 ENV PATH="/opt/multica/bin:${PATH}"
 
 # G2 LLM proxy defaults — route Anthropic + OpenAI through llmproxy.g2.com.
