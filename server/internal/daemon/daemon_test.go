@@ -398,7 +398,7 @@ func (f taskHomeRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 
 type directTaskCommandLauncher struct{}
 
-func (directTaskCommandLauncher) Command(ctx context.Context, req agent.CommandRequest) (*exec.Cmd, error) {
+func (directTaskCommandLauncher) Command(ctx context.Context, req agent.CommandRequest) (*agent.PreparedCommand, error) {
 	cmd := exec.CommandContext(ctx, req.Executable, req.Args...)
 	cmd.Dir = req.Cwd
 	keys := make([]string, 0, len(req.Env))
@@ -410,7 +410,10 @@ func (directTaskCommandLauncher) Command(ctx context.Context, req agent.CommandR
 		cmd.Env = append(cmd.Env, key+"="+req.Env[key])
 	}
 	cmd.WaitDelay = req.WaitDelay
-	return cmd, nil
+	if len(req.LeadingExtraFiles) > 0 {
+		cmd.ExtraFiles = append([]*os.File(nil), req.LeadingExtraFiles...)
+	}
+	return &agent.PreparedCommand{Cmd: cmd}, nil
 }
 
 func directTaskLauncherFactory() agent.CommandBuilder {

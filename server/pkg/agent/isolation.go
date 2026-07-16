@@ -28,7 +28,9 @@ type TaskIsolationPolicy struct {
 }
 
 type platformIsolation interface {
-	Wrap(TaskIsolationPolicy, string, []string) (string, []string, error)
+	// leadingExtraFiles is the number of caller-owned ExtraFiles that will
+	// occupy child FDs starting at 3 before isolation-owned descriptors.
+	WrapBound(*boundIsolationPolicy, pathIdentity, pathIdentity, []string, int) (string, []string, []*os.File, error)
 }
 
 func newPlatformIsolation() platformIsolation {
@@ -191,6 +193,17 @@ func newUnsupportedIsolation(goos string) platformIsolation {
 	return &unsupportedIsolation{goos: goos}
 }
 
-func (u *unsupportedIsolation) Wrap(TaskIsolationPolicy, string, []string) (string, []string, error) {
-	return "", nil, fmt.Errorf("task process isolation is unsupported on %s", u.goos)
+func (u *unsupportedIsolation) WrapBound(*boundIsolationPolicy, pathIdentity, pathIdentity, []string, int) (string, []string, []*os.File, error) {
+	return "", nil, nil, fmt.Errorf("task process isolation is unsupported on %s", u.goos)
+}
+
+func isolationLaunchDirectory(platform platformIsolation) string {
+	switch platform.(type) {
+	case *linuxIsolation:
+		return "/"
+	default:
+		// Darwin seatbelt authorizes by path and has no fd-bound chdir primitive.
+		// Callers still re-validate cwd identity immediately before Start.
+		return ""
+	}
 }

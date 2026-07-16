@@ -24,21 +24,36 @@ func newDarwinIsolation(helper string) platformIsolation {
 	return &darwinIsolation{helper: helper}
 }
 
-func (d *darwinIsolation) Wrap(policy TaskIsolationPolicy, executable string, args []string) (string, []string, error) {
+func (d *darwinIsolation) WrapBound(policy *boundIsolationPolicy, executable, cwd pathIdentity, args []string, leadingExtraFiles int) (string, []string, []*os.File, error) {
 	if err := validateIsolationHelper(d.helper); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
-	validated, err := policy.Validated()
+	if policy == nil {
+		return "", nil, nil, fmt.Errorf("bound isolation policy is required")
+	}
+	if leadingExtraFiles < 0 {
+		return "", nil, nil, fmt.Errorf("leading extra files count must not be negative")
+	}
+	// Seatbelt can only authorize by pathname. Retain and recheck descriptor
+	// identities so a replaced root/cwd/executable fails closed before launch.
+	if err := recheckBoundIsolation(policy); err != nil {
+		return "", nil, nil, err
+	}
+	if err := recheckPathIdentity(&executable); err != nil {
+		return "", nil, nil, err
+	}
+	if err := recheckPathIdentity(&cwd); err != nil {
+		return "", nil, nil, err
+	}
+	profile, err := renderDarwinProfile(policy.policy())
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
-	profile, err := renderDarwinProfile(validated)
-	if err != nil {
-		return "", nil, err
-	}
-	wrapped := []string{"-p", profile, executable}
+	wrapped := []string{"-p", profile, executable.Path}
 	wrapped = append(wrapped, args...)
-	return d.helper, wrapped, nil
+	// Darwin has no object-bound chdir. Use the revalidated pathname and rely
+	// on PreparedCommand's launch-time recheck immediately before Start.
+	return d.helper, wrapped, nil, nil
 }
 
 func renderDarwinProfile(policy TaskIsolationPolicy) (string, error) {

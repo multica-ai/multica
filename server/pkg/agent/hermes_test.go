@@ -15,8 +15,10 @@ import (
 
 type acpProviderTestIsolation struct{}
 
-func (*acpProviderTestIsolation) Wrap(_ TaskIsolationPolicy, executable string, args []string) (string, []string, error) {
-	return executable, args, nil
+func (*acpProviderTestIsolation) WrapBound(_ *boundIsolationPolicy, executable, cwd pathIdentity, args []string, leadingExtraFiles int) (string, []string, []*os.File, error) {
+	_ = cwd
+	_ = leadingExtraFiles
+	return executable.Path, args, nil, nil
 }
 
 func acpProviderTestConfig(t *testing.T, executable string, env map[string]string) Config {

@@ -120,12 +120,12 @@ func taskModelDiscoveryRunner(execution *ModelDiscoveryExecution) (modelDiscover
 	return modelDiscoveryRunner{execution: execution}, nil
 }
 
-func (r modelDiscoveryRunner) command(ctx context.Context, executable string, args []string, waitDelay time.Duration) (*exec.Cmd, error) {
+func (r modelDiscoveryRunner) command(ctx context.Context, executable string, args []string, waitDelay time.Duration) (*PreparedCommand, error) {
 	if r.execution == nil {
 		cmd := exec.CommandContext(ctx, executable, args...)
 		hideAgentWindow(cmd)
 		cmd.WaitDelay = waitDelay
-		return cmd, nil
+		return &PreparedCommand{Cmd: cmd}, nil
 	}
 	return r.execution.Launcher.Command(ctx, CommandRequest{
 		Executable: executable,

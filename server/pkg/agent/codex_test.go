@@ -19,8 +19,10 @@ import (
 
 type codexTestIsolation struct{}
 
-func (*codexTestIsolation) Wrap(_ TaskIsolationPolicy, executable string, args []string) (string, []string, error) {
-	return executable, args, nil
+func (*codexTestIsolation) WrapBound(_ *boundIsolationPolicy, executable, cwd pathIdentity, args []string, leadingExtraFiles int) (string, []string, []*os.File, error) {
+	_ = cwd
+	_ = leadingExtraFiles
+	return executable.Path, args, nil, nil
 }
 
 func codexTestConfig(t *testing.T, executable, cwd string, env map[string]string) Config {

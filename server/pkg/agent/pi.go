@@ -201,12 +201,13 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	args := buildPiArgs(prompt, sessionFile.childPath(), opts, b.cfg.Logger)
 	argv0, cmdArgs := choosePiInvocation(lookedUp, lookedUp, args, b.cfg.Logger)
 
-	cmd, err := b.cfg.command(runCtx, argv0, cmdArgs, opts.Cwd, 10*time.Second)
+	// Reserve child FD 3 for the verified session descriptor before isolation
+	// mounts claim subsequent ExtraFiles slots on Linux.
+	cmd, err := b.cfg.commandWithLeadingExtraFiles(runCtx, argv0, cmdArgs, opts.Cwd, 10*time.Second, []*os.File{sessionFile.file})
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("create pi command: %w", err)
 	}
-	cmd.ExtraFiles = append(cmd.ExtraFiles, sessionFile.file)
 	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
 
 	stdout, err := cmd.StdoutPipe()

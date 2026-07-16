@@ -16,10 +16,15 @@ type recordingIsolation struct {
 	err        error
 }
 
-func (r *recordingIsolation) Wrap(_ TaskIsolationPolicy, executable string, args []string) (string, []string, error) {
-	r.executable = executable
+func (r *recordingIsolation) WrapBound(_ *boundIsolationPolicy, executable, cwd pathIdentity, args []string, leadingExtraFiles int) (string, []string, []*os.File, error) {
+	_ = cwd
+	_ = leadingExtraFiles
+	r.executable = executable.Path
 	r.args = append([]string(nil), args...)
-	return executable, args, r.err
+	if r.err != nil {
+		return "", nil, nil, r.err
+	}
+	return executable.Path, args, nil, nil
 }
 
 func TestCommandLauncherRejectsMissingPolicyBeforeExecution(t *testing.T) {

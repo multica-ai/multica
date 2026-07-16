@@ -20,10 +20,10 @@ import (
 
 type recordingDevecoCommandBuilder struct {
 	requests []CommandRequest
-	commands []*exec.Cmd
+	commands []*PreparedCommand
 }
 
-func (b *recordingDevecoCommandBuilder) Command(ctx context.Context, req CommandRequest) (*exec.Cmd, error) {
+func (b *recordingDevecoCommandBuilder) Command(ctx context.Context, req CommandRequest) (*PreparedCommand, error) {
 	b.requests = append(b.requests, req)
 	cmd := exec.CommandContext(ctx, req.Executable, req.Args...)
 	cmd.Dir = req.Cwd
@@ -33,8 +33,12 @@ func (b *recordingDevecoCommandBuilder) Command(ctx context.Context, req Command
 	}
 	cmd.Env = env
 	cmd.WaitDelay = req.WaitDelay
-	b.commands = append(b.commands, cmd)
-	return cmd, nil
+	if len(req.LeadingExtraFiles) > 0 {
+		cmd.ExtraFiles = append([]*os.File(nil), req.LeadingExtraFiles...)
+	}
+	prepared := &PreparedCommand{Cmd: cmd}
+	b.commands = append(b.commands, prepared)
+	return prepared, nil
 }
 
 func TestNewReturnsDevecoBackend(t *testing.T) {

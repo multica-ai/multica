@@ -291,13 +291,14 @@ func TestPlatformIsolationFailsClosedForMissingHelperAndUnsupportedOS(t *testing
 	t.Parallel()
 
 	root := t.TempDir()
-	policy := TaskIsolationPolicy{WritableRoots: []string{root}}
 	for _, platform := range []platformIsolation{
 		newDarwinIsolation(filepath.Join(root, "missing-sandbox-exec")),
 		newLinuxIsolation(filepath.Join(root, "missing-bwrap")),
 		newUnsupportedIsolation("plan9"),
 	} {
-		if _, _, err := platform.Wrap(policy, "/usr/bin/tool", nil); err == nil {
+		executable := pathIdentity{Path: "/usr/bin/tool"}
+		cwd := pathIdentity{Path: root}
+		if _, _, _, err := platform.WrapBound(nil, executable, cwd, nil, 0); err == nil {
 			t.Fatalf("%T unexpectedly accepted unavailable isolation", platform)
 		}
 	}
