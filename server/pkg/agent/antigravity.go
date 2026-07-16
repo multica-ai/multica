@@ -100,7 +100,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		return nil, fmt.Errorf("agy stdout pipe: %w", err)
 	}
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[agy:stderr] "), agentStderrTailBytes)
-	cmd.Stderr = stderrBuf
+	_ = cmd.SetStderr(stderrBuf)
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -108,7 +108,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		return nil, fmt.Errorf("start agy: %w", err)
 	}
 
-	b.cfg.Logger.Info("agy started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("agy started", "pid", cmd.Process().Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -201,7 +201,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			}
 		}
 
-		b.cfg.Logger.Info("agy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("agy finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		resCh <- Result{
 			Status:     finalStatus,

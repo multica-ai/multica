@@ -98,10 +98,11 @@ func validateRoots(kind string, roots []string) ([]string, error) {
 		if !info.IsDir() {
 			return nil, fmt.Errorf("%s root %q is not a directory", kind, resolved)
 		}
-		if resolved != clean && !isStableSystemPathAlias(clean, resolved) {
+		stableAlias := isStableSystemPathAlias(clean, resolved)
+		if resolved != clean && !stableAlias {
 			return nil, fmt.Errorf("%s root %q resolves through symlink to %q", kind, clean, resolved)
 		}
-		if isStableSystemPathAlias(clean, resolved) {
+		if !stableAlias || kind != "system" || runtime.GOOS != "linux" {
 			resolved = clean
 		}
 		if _, ok := seen[resolved]; ok {
@@ -116,6 +117,27 @@ func validateRoots(kind string, roots []string) ([]string, error) {
 
 func isStableSystemPathAlias(path, resolved string) bool {
 	return isStableSystemPathAliasForOS(runtime.GOOS, path, resolved)
+}
+
+func resolveStableSystemPathAlias(kind, path string) (string, error) {
+	clean, err := validateAbsolutePath(kind, path)
+	if err != nil {
+		return "", err
+	}
+	if runtime.GOOS != "linux" {
+		return clean, nil
+	}
+	resolved, err := filepath.EvalSymlinks(clean)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s %q: %w", kind, clean, err)
+	}
+	if resolved == clean {
+		return clean, nil
+	}
+	if !isStableSystemPathAlias(clean, resolved) {
+		return "", fmt.Errorf("%s %q resolves through symlink to %q", kind, clean, resolved)
+	}
+	return resolved, nil
 }
 
 func isStableSystemPathAliasForOS(goos, path, resolved string) bool {

@@ -266,7 +266,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		_, _ = io.Copy(stderrSink, stderr)
 	}()
 
-	b.cfg.Logger.Info("hermes acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
+	b.cfg.Logger.Info("hermes acp started", "pid", cmd.Process().Pid, "cwd", opts.Cwd)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -529,7 +529,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		duration := time.Since(startTime)
-		b.cfg.Logger.Info("hermes finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("hermes finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		// Close stdin and cancel context to signal hermes acp to exit.
 		stdin.Close()

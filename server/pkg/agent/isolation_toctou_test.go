@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -34,14 +35,11 @@ func TestCommandLauncherDetectsRootReplacementBeforeStart(t *testing.T) {
 		Network:       NetworkAccessNone,
 	}
 
-	// Use the real platform isolation when available so recheck runs against
-	// the production WrapBound path; fall back to recording isolation otherwise.
+	// Darwin intentionally fails closed because sandbox-exec cannot preserve
+	// cwd and executable identity through final exec. Exercise the launch-time
+	// replacement check with the deterministic recording isolation instead.
 	var launcher *CommandLauncher
 	switch runtime.GOOS {
-	case "darwin":
-		if _, err := os.Stat("/usr/bin/sandbox-exec"); err == nil {
-			launcher = newCommandLauncher(newDarwinIsolation("/usr/bin/sandbox-exec"))
-		}
 	case "linux":
 		if _, err := os.Stat("/usr/bin/bwrap"); err == nil {
 			launcher = newCommandLauncher(newLinuxIsolation("/usr/bin/bwrap"))
@@ -89,6 +87,28 @@ func TestCommandLauncherDetectsRootReplacementBeforeStart(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "replaced") && !strings.Contains(err.Error(), "changed") && !strings.Contains(err.Error(), "identity") {
 		t.Fatalf("Start failed for unexpected reason: %v", err)
+	}
+}
+
+func TestDarwinCommandLauncherFailsClosedWithoutIdentityBoundExec(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Darwin isolation contract")
+	}
+	root := t.TempDir()
+	executable := filepath.Join(root, "tool.sh")
+	writeTestExecutable(t, executable, []byte("#!/bin/sh\nexit 0\n"))
+	launcher := newCommandLauncher(newDarwinIsolation("/usr/bin/sandbox-exec"))
+	_, err := launcher.Command(context.Background(), CommandRequest{
+		Executable: executable,
+		Cwd:        root,
+		Env:        map[string]string{"PATH": "/usr/bin:/bin"},
+		Isolation: &TaskIsolationPolicy{
+			WritableRoots: []string{root},
+			SystemRoots:   existingSystemRootsForTest(t),
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot bind cwd and executable identity") {
+		t.Fatalf("Command error = %v, want identity-bound exec failure", err)
 	}
 }
 
@@ -176,13 +196,37 @@ func TestLinuxBoundArgsReserveLeadingExtraFiles(t *testing.T) {
 		t.Fatal("expected isolation extra files")
 	}
 	// With one leading ExtraFile, first isolation mount is child FD 4.
-	if !isolationContainsAdjacent(args, "--bind", "/proc/self/fd/4") && !isolationContainsAdjacent(args, "--ro-bind", "/proc/self/fd/4") {
+	if !isolationContainsAdjacent(args, "--bind-fd", "4") && !isolationContainsAdjacent(args, "--ro-bind-fd", "4") {
 		t.Fatalf("expected isolation mounts to start at FD 4 after leading ExtraFile, args=%#v", args)
 	}
-	if isolationContainsAdjacent(args, "--bind", "/proc/self/fd/3") || isolationContainsAdjacent(args, "--ro-bind", "/proc/self/fd/3") {
+	if isolationContainsAdjacent(args, "--bind-fd", "3") || isolationContainsAdjacent(args, "--ro-bind-fd", "3") {
 		t.Fatalf("isolation mounts collided with leading FD 3: %#v", args)
 	}
-	if !isolationContainsAdjacent(args, "--chdir", root) {
-		t.Fatalf("missing --chdir to validated cwd: %#v", args)
+	if len(extraFiles) < 2 || extraFiles[len(extraFiles)-2] != cwd.File || extraFiles[len(extraFiles)-1] != executable.File {
+		t.Fatalf("cwd/executable descriptors are not final inherited files: %#v", extraFiles)
 	}
+	wantCwdFD := fmt.Sprintf("%d", 3+1+len(extraFiles)-2)
+	wantExecutableFD := fmt.Sprintf("%d", 3+1+len(extraFiles)-1)
+	if !isolationContainsSequence(args, "--bind-fd", wantCwdFD, cwd.Path) || !isolationContainsSequence(args, "--ro-bind-fd", wantExecutableFD, executable.Path) {
+		t.Fatalf("cwd/executable FD offsets are incorrect: %#v", args)
+	}
+	if !isolationContainsAdjacent(args, "--chdir", cwd.Path) || !containsString(args, executable.Path) {
+		t.Fatalf("cwd/executable namespace paths are not preserved: %#v", args)
+	}
+}
+
+func isolationContainsSequence(values []string, sequence ...string) bool {
+	for i := 0; i+len(sequence) <= len(values); i++ {
+		match := true
+		for j := range sequence {
+			if values[i+j] != sequence[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }

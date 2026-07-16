@@ -123,7 +123,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[codebuddy:stderr] "), agentStderrTailBytes)
-	cmd.Stderr = stderrBuf
+	_ = cmd.SetStderr(stderrBuf)
 
 	if err := cmd.Start(); err != nil {
 		closeStdin()
@@ -131,7 +131,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		return nil, fmt.Errorf("start codebuddy: %w", err)
 	}
 
-	b.cfg.Logger.Info("codebuddy started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("codebuddy started", "pid", cmd.Process().Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	// cmd.Start() succeeded — transfer temp file ownership to the goroutine.
 	mcpFileCleanup = nil
@@ -290,7 +290,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
 		})
 
-		b.cfg.Logger.Info("codebuddy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("codebuddy finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed")
 		if reportedSessionID != sessionID {

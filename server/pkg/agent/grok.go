@@ -184,7 +184,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		_, _ = io.Copy(stderrSink, stderr)
 	}()
 
-	b.cfg.Logger.Info("grok acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
+	b.cfg.Logger.Info("grok acp started", "pid", cmd.Process().Pid, "cwd", opts.Cwd)
 
 	msgStream := newGrokMessageStream(256)
 	resCh := make(chan Result, 1)
@@ -291,7 +291,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// documented preference is the API key when XAI_API_KEY is set and
 		// offered, otherwise the cached login token.
 		// Ref: https://docs.x.ai/build/cli/headless-scripting
-		methodID, err := selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(cmd.Env, "XAI_API_KEY"))
+		methodID, err := selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(cmd.Environment(), "XAI_API_KEY"))
 		if err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("grok authentication setup failed: %v", err)
@@ -446,7 +446,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		duration := time.Since(startTime)
-		b.cfg.Logger.Info("grok finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("grok finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		stdin.Close()
 		cancel()

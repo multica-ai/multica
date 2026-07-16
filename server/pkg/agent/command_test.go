@@ -3,9 +3,12 @@ package agent
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -14,6 +17,108 @@ type recordingIsolation struct {
 	executable string
 	args       []string
 	err        error
+}
+
+func TestPreparedCommandCloseBeforeStartIsTerminal(t *testing.T) {
+	cmd := newPreparedCommand(exec.Command("/usr/bin/true"))
+	if err := cmd.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := cmd.Start(); err == nil {
+		t.Fatal("Start succeeded after Close")
+	}
+}
+
+func TestPreparedCommandDuplicateStartAndWaitFail(t *testing.T) {
+	cmd := newPreparedCommand(exec.Command("/usr/bin/true"))
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := cmd.Start(); err == nil {
+		t.Fatal("duplicate Start succeeded")
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if err := cmd.Wait(); err == nil {
+		t.Fatal("duplicate Wait succeeded")
+	}
+}
+
+func TestPreparedCommandConcurrentStartClose(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		cmd := newPreparedCommand(exec.Command("/usr/bin/true"))
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			if err := cmd.Start(); err == nil {
+				_ = cmd.Wait()
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_ = cmd.Close()
+		}()
+		close(start)
+		wg.Wait()
+	}
+}
+
+func TestPreparedCommandConcurrentWaitAllowsOneCaller(t *testing.T) {
+	cmd := newPreparedCommand(exec.Command("/usr/bin/true"))
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			errs <- cmd.Wait()
+		}()
+	}
+	close(start)
+	var successes int
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err == nil {
+			successes++
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("successful Wait calls = %d, want 1", successes)
+	}
+}
+
+func TestPreparedCommandRejectsConfigurationAfterStartOrClose(t *testing.T) {
+	t.Run("started", func(t *testing.T) {
+		cmd := newPreparedCommand(exec.Command("/usr/bin/true"))
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		defer cmd.Wait()
+		if err := cmd.SetStderr(os.Stderr); err == nil {
+			t.Fatal("SetStderr succeeded after Start")
+		}
+		if _, err := cmd.StdoutPipe(); err == nil {
+			t.Fatal("StdoutPipe succeeded after Start")
+		}
+	})
+	t.Run("closed", func(t *testing.T) {
+		cmd := newPreparedCommand(exec.Command("/usr/bin/true"))
+		if err := cmd.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if err := cmd.SetCancel(func() error { return nil }); err == nil {
+			t.Fatal("SetCancel succeeded after Close")
+		}
+		if _, err := cmd.CombinedOutput(); err == nil {
+			t.Fatal("CombinedOutput succeeded after Close")
+		}
+	})
 }
 
 func (r *recordingIsolation) WrapBound(_ *boundIsolationPolicy, executable, cwd pathIdentity, args []string, leadingExtraFiles int) (string, []string, []*os.File, error) {
@@ -93,13 +198,14 @@ func TestCommandLauncherOwnsExecutableArgsCwdAndExplicitEnv(t *testing.T) {
 	if isolation.executable != executable || !reflect.DeepEqual(isolation.args, []string{"arg-one"}) {
 		t.Fatalf("isolation received (%q, %#v), want (%q, %#v)", isolation.executable, isolation.args, executable, []string{"arg-one"})
 	}
-	if cmd.Dir != workDir {
-		t.Fatalf("cmd.Dir = %q, want %q", cmd.Dir, workDir)
+	prepared := cmd.(*PreparedCommand)
+	if prepared.cmd.Dir != workDir {
+		t.Fatalf("cmd.Dir = %q, want %q", prepared.cmd.Dir, workDir)
 	}
-	if cmd.WaitDelay != 2*time.Second {
-		t.Fatalf("cmd.WaitDelay = %v, want 2s", cmd.WaitDelay)
+	if prepared.cmd.WaitDelay != 2*time.Second {
+		t.Fatalf("cmd.WaitDelay = %v, want 2s", prepared.cmd.WaitDelay)
 	}
-	for _, entry := range cmd.Env {
+	for _, entry := range prepared.cmd.Env {
 		if strings.HasPrefix(entry, "DAEMON_ONLY_SECRET=") {
 			t.Fatalf("daemon-only environment leaked: %q", entry)
 		}
@@ -141,10 +247,40 @@ func TestCommandLauncherRejectsRelativeAndParentTraversalPaths(t *testing.T) {
 func existingSystemRootsForTest(t *testing.T) []string {
 	t.Helper()
 	var roots []string
-	for _, root := range []string{"/bin", "/usr", "/System", "/Library"} {
+	for _, root := range []string{"/bin", "/usr", "/lib", "/lib64", "/System", "/Library"} {
 		if _, err := os.Stat(root); err == nil {
 			roots = append(roots, root)
 		}
 	}
 	return roots
+}
+
+func TestCommandLauncherCanonicalizesStableSystemExecutableAlias(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux usr-merge aliases")
+	}
+	resolved, err := filepath.EvalSymlinks("/bin/sh")
+	if err != nil || resolved == "/bin/sh" {
+		t.Skip("host does not use /bin as a symlink alias")
+	}
+	root := t.TempDir()
+	launcher := newCommandLauncher(&recordingIsolation{})
+	cmd, err := launcher.Command(context.Background(), CommandRequest{
+		Executable: "/bin/sh",
+		Args:       []string{"-c", "exit 0"},
+		Cwd:        root,
+		Env:        map[string]string{"PATH": "/usr/bin:/bin"},
+		Isolation: &TaskIsolationPolicy{
+			WritableRoots: []string{root},
+			SystemRoots:   []string{"/bin"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Command: %v", err)
+	}
+	defer cmd.Close()
+	prepared := cmd.(*PreparedCommand)
+	if prepared.cmd.Args[len(prepared.cmd.Args)-3] != resolved {
+		t.Fatalf("wrapped executable = %q, want %q", prepared.cmd.Args[len(prepared.cmd.Args)-3], resolved)
+	}
 }

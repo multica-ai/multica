@@ -167,7 +167,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		_, _ = io.Copy(stderrSink, stderr)
 	}()
 
-	b.cfg.Logger.Info("traecli acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
+	b.cfg.Logger.Info("traecli acp started", "pid", cmd.Process().Pid, "cwd", opts.Cwd)
 
 	msgStream := newTraecliMessageStream(256)
 	resCh := make(chan Result, 1)
@@ -391,7 +391,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		}
 
 		duration := time.Since(startTime)
-		b.cfg.Logger.Info("traecli finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("traecli finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		stdin.Close()
 		cancel()

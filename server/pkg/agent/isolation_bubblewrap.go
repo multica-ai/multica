@@ -148,7 +148,7 @@ func renderLinuxBubblewrapArgsBound(policy *boundIsolationPolicy, executable, cw
 	if leadingExtraFiles < 0 {
 		return nil, nil, fmt.Errorf("leading extra files count must not be negative")
 	}
-	extraFiles := make([]*os.File, 0, len(mounts))
+	extraFiles := make([]*os.File, 0, len(mounts)+2)
 	// exec.Cmd.ExtraFiles starts at child FD 3. Callers may reserve leading
 	// descriptors (for example Pi session FD 3) before isolation mounts.
 	childFD := 3 + leadingExtraFiles
@@ -156,16 +156,23 @@ func renderLinuxBubblewrapArgsBound(policy *boundIsolationPolicy, executable, cw
 		if m.identity.File == nil {
 			return nil, nil, fmt.Errorf("linux isolation root %q is missing a descriptor", m.identity.Path)
 		}
-		source := fmt.Sprintf("/proc/self/fd/%d", childFD)
 		if m.writable {
-			args = append(args, "--bind", source, m.identity.Path)
+			args = append(args, "--bind-fd", fmt.Sprintf("%d", childFD), m.identity.Path)
 		} else {
-			args = append(args, "--ro-bind", source, m.identity.Path)
+			args = append(args, "--ro-bind-fd", fmt.Sprintf("%d", childFD), m.identity.Path)
 		}
 		extraFiles = append(extraFiles, m.identity.File)
 		childFD++
 	}
 
+	// Overmount cwd and executable at their original namespace paths from the
+	// retained descriptors. This preserves expected absolute paths while the
+	// final chdir and exec resolve to the validated objects, not host pathnames.
+	args = append(args, "--bind-fd", fmt.Sprintf("%d", childFD), cwd.Path)
+	extraFiles = append(extraFiles, cwd.File)
+	childFD++
+	args = append(args, "--ro-bind-fd", fmt.Sprintf("%d", childFD), executable.Path)
+	extraFiles = append(extraFiles, executable.File)
 	args = append(args, "--chdir", cwd.Path)
 	args = append(args, "--", executable.Path)
 	args = append(args, commandArgs...)

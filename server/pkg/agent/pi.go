@@ -227,7 +227,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		cancel()
 		return nil, fmt.Errorf("pi stdin pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[pi:stderr] ")
+	_ = cmd.SetStderr(newLogWriter(b.cfg.Logger, "[pi:stderr] "))
 
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
@@ -236,7 +236,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	}
 	_ = stdin.Close()
 
-	b.cfg.Logger.Info("pi started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("pi started", "pid", cmd.Process().Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -372,7 +372,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			finalError = fmt.Sprintf("pi exited with error: %v", waitErr)
 		}
 
-		b.cfg.Logger.Info("pi finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("pi finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		resCh <- Result{
 			Status:     finalStatus,

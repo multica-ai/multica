@@ -17,7 +17,7 @@ type recordingGrokCommandBuilder struct {
 	requests []CommandRequest
 }
 
-func (b *recordingGrokCommandBuilder) Command(ctx context.Context, req CommandRequest) (*PreparedCommand, error) {
+func (b *recordingGrokCommandBuilder) Command(ctx context.Context, req CommandRequest) (TaskCommand, error) {
 	b.requests = append(b.requests, req)
 	cmd := exec.CommandContext(ctx, req.Executable, req.Args...)
 	cmd.Dir = req.Cwd
@@ -30,7 +30,7 @@ func (b *recordingGrokCommandBuilder) Command(ctx context.Context, req CommandRe
 	if len(req.LeadingExtraFiles) > 0 {
 		cmd.ExtraFiles = append([]*os.File(nil), req.LeadingExtraFiles...)
 	}
-	return &PreparedCommand{Cmd: cmd}, nil
+	return newPreparedCommand(cmd), nil
 }
 
 func grokTestConfig(t *testing.T, executable string, env map[string]string) Config {

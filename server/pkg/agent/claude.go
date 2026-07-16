@@ -64,7 +64,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("build claude command: %w", err)
 	}
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
-	if err := claudeRootSudoPreflight(args, cmd.Env); err != nil {
+	if err := claudeRootSudoPreflight(args, cmd.Environment()); err != nil {
 		cancel()
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// like "claude exited with error: exit status 3" — which is useless for
 	// root-causing V8 aborts, Bun panics, or any other CLI-side crash.
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
-	cmd.Stderr = stderrBuf
+	_ = cmd.SetStderr(stderrBuf)
 
 	if err := cmd.Start(); err != nil {
 		closeStdin()
@@ -95,7 +95,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
 
-	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("claude started", "pid", cmd.Process().Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	// cmd.Start() succeeded — transfer temp file ownership to the goroutine.
 	mcpFileCleanup = nil
@@ -277,7 +277,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
 		})
 
-		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("claude finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", stderrTail)
 		if reportedSessionID != sessionID {

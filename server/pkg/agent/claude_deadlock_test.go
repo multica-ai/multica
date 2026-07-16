@@ -15,7 +15,7 @@ import (
 
 type claudeDeadlockTestLauncher struct{}
 
-func (claudeDeadlockTestLauncher) Command(ctx context.Context, req CommandRequest) (*PreparedCommand, error) {
+func (claudeDeadlockTestLauncher) Command(ctx context.Context, req CommandRequest) (TaskCommand, error) {
 	cmd := exec.CommandContext(ctx, req.Executable, req.Args...)
 	cmd.Dir = req.Cwd
 	var err error
@@ -27,7 +27,7 @@ func (claudeDeadlockTestLauncher) Command(ctx context.Context, req CommandReques
 	if len(req.LeadingExtraFiles) > 0 {
 		cmd.ExtraFiles = append([]*os.File(nil), req.LeadingExtraFiles...)
 	}
-	return &PreparedCommand{Cmd: cmd}, nil
+	return newPreparedCommand(cmd), nil
 }
 
 func claudeDeadlockConfig(executable, mode string) Config {

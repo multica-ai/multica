@@ -398,7 +398,25 @@ func (f taskHomeRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 
 type directTaskCommandLauncher struct{}
 
-func (directTaskCommandLauncher) Command(ctx context.Context, req agent.CommandRequest) (*agent.PreparedCommand, error) {
+type directTaskCommand struct {
+	cmd *exec.Cmd
+}
+
+func (c *directTaskCommand) Start() error                        { return c.cmd.Start() }
+func (c *directTaskCommand) Wait() error                         { return c.cmd.Wait() }
+func (c *directTaskCommand) Run() error                          { return c.cmd.Run() }
+func (c *directTaskCommand) Output() ([]byte, error)             { return c.cmd.Output() }
+func (c *directTaskCommand) CombinedOutput() ([]byte, error)     { return c.cmd.CombinedOutput() }
+func (c *directTaskCommand) Close() error                        { return nil }
+func (c *directTaskCommand) StdoutPipe() (io.ReadCloser, error)  { return c.cmd.StdoutPipe() }
+func (c *directTaskCommand) StdinPipe() (io.WriteCloser, error)  { return c.cmd.StdinPipe() }
+func (c *directTaskCommand) StderrPipe() (io.ReadCloser, error)  { return c.cmd.StderrPipe() }
+func (c *directTaskCommand) SetStderr(w io.Writer) error         { c.cmd.Stderr = w; return nil }
+func (c *directTaskCommand) SetCancel(cancel func() error) error { c.cmd.Cancel = cancel; return nil }
+func (c *directTaskCommand) Process() *os.Process                { return c.cmd.Process }
+func (c *directTaskCommand) Environment() []string               { return append([]string(nil), c.cmd.Env...) }
+
+func (directTaskCommandLauncher) Command(ctx context.Context, req agent.CommandRequest) (agent.TaskCommand, error) {
 	cmd := exec.CommandContext(ctx, req.Executable, req.Args...)
 	cmd.Dir = req.Cwd
 	keys := make([]string, 0, len(req.Env))
@@ -413,7 +431,7 @@ func (directTaskCommandLauncher) Command(ctx context.Context, req agent.CommandR
 	if len(req.LeadingExtraFiles) > 0 {
 		cmd.ExtraFiles = append([]*os.File(nil), req.LeadingExtraFiles...)
 	}
-	return &agent.PreparedCommand{Cmd: cmd}, nil
+	return &directTaskCommand{cmd: cmd}, nil
 }
 
 func directTaskLauncherFactory() agent.CommandBuilder {

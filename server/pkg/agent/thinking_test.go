@@ -35,7 +35,7 @@ func newTaskDiscoveryExecution(t *testing.T, provider string, responses func(Com
 	}
 }
 
-func (l *recordingTaskDiscoveryLauncher) Command(ctx context.Context, req CommandRequest) (*PreparedCommand, error) {
+func (l *recordingTaskDiscoveryLauncher) Command(ctx context.Context, req CommandRequest) (TaskCommand, error) {
 	recorded := req
 	recorded.Args = append([]string(nil), req.Args...)
 	recorded.Env = cloneModelDiscoveryEnv(req.Env)
@@ -48,7 +48,7 @@ func (l *recordingTaskDiscoveryLauncher) Command(ctx context.Context, req Comman
 		"TASK_DISCOVERY_OUTPUT="+base64.StdEncoding.EncodeToString([]byte(output)),
 		"TASK_DISCOVERY_EXIT_CODE="+strconv.Itoa(exitCode),
 	)
-	return &PreparedCommand{Cmd: cmd}, nil
+	return newPreparedCommand(cmd), nil
 }
 
 func TestTaskDiscoveryLauncherHelperProcess(t *testing.T) {

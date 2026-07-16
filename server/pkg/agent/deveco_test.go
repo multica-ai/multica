@@ -23,7 +23,7 @@ type recordingDevecoCommandBuilder struct {
 	commands []*PreparedCommand
 }
 
-func (b *recordingDevecoCommandBuilder) Command(ctx context.Context, req CommandRequest) (*PreparedCommand, error) {
+func (b *recordingDevecoCommandBuilder) Command(ctx context.Context, req CommandRequest) (TaskCommand, error) {
 	b.requests = append(b.requests, req)
 	cmd := exec.CommandContext(ctx, req.Executable, req.Args...)
 	cmd.Dir = req.Cwd
@@ -36,7 +36,7 @@ func (b *recordingDevecoCommandBuilder) Command(ctx context.Context, req Command
 	if len(req.LeadingExtraFiles) > 0 {
 		cmd.ExtraFiles = append([]*os.File(nil), req.LeadingExtraFiles...)
 	}
-	prepared := &PreparedCommand{Cmd: cmd}
+	prepared := newPreparedCommand(cmd)
 	b.commands = append(b.commands, prepared)
 	return prepared, nil
 }
@@ -216,10 +216,10 @@ func TestDevecoBackendUsesTaskCommandBuilder(t *testing.T) {
 	if req.WaitDelay != 10*time.Second {
 		t.Fatalf("wait delay = %s, want 10s", req.WaitDelay)
 	}
-	if len(launcher.commands) != 1 || launcher.commands[0].Cancel == nil {
+	if len(launcher.commands) != 1 || launcher.commands[0].cmd.Cancel == nil {
 		t.Fatal("deveco-specific cancellation override was not installed")
 	}
-	if err := launcher.commands[0].Cancel(); err != nil {
+	if err := launcher.commands[0].cmd.Cancel(); err != nil {
 		t.Fatalf("deveco cancellation override returned %v, want nil", err)
 	}
 }

@@ -91,14 +91,14 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		cancel()
 		return nil, fmt.Errorf("openclaw stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[openclaw:stderr] ")
+	_ = cmd.SetStderr(newLogWriter(b.cfg.Logger, "[openclaw:stderr] "))
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start openclaw: %w", err)
 	}
 
-	b.cfg.Logger.Info("openclaw started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("openclaw started", "pid", cmd.Process().Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -132,7 +132,7 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			scanResult.errMsg = fmt.Sprintf("openclaw exited with error: %v", exitErr)
 		}
 
-		b.cfg.Logger.Info("openclaw finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("openclaw finished", "pid", cmd.Process().Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
 
 		// Build usage map. Prefer the model openclaw reported in
 		// `meta.agentMeta.model` (the actual LLM, e.g. `deepseek-chat`).

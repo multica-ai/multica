@@ -17,20 +17,38 @@ import (
 // child environment; daemon process environment variables are never inherited.
 // LeadingExtraFiles occupy child FDs starting at 3 before isolation descriptors.
 type CommandRequest struct {
-	Executable          string
-	Args                []string
-	Cwd                 string
-	Env                 map[string]string
-	Isolation           *TaskIsolationPolicy
-	WaitDelay           time.Duration
-	LeadingExtraFiles   []*os.File
+	Executable        string
+	Args              []string
+	Cwd               string
+	Env               map[string]string
+	Isolation         *TaskIsolationPolicy
+	WaitDelay         time.Duration
+	LeadingExtraFiles []*os.File
 }
 
 // CommandBuilder constructs one validated task process. Production callers use
 // CommandLauncher; the interface exists so daemon tests can exercise runTask
 // without nesting the host isolation facility inside another sandbox.
 type CommandBuilder interface {
-	Command(context.Context, CommandRequest) (*PreparedCommand, error)
+	Command(context.Context, CommandRequest) (TaskCommand, error)
+}
+
+// TaskCommand exposes only the lifecycle and I/O surface required by agent
+// backends. The underlying exec.Cmd is intentionally never exposed.
+type TaskCommand interface {
+	Start() error
+	Wait() error
+	Run() error
+	Output() ([]byte, error)
+	CombinedOutput() ([]byte, error)
+	Close() error
+	StdoutPipe() (io.ReadCloser, error)
+	StdinPipe() (io.WriteCloser, error)
+	StderrPipe() (io.ReadCloser, error)
+	SetStderr(io.Writer) error
+	SetCancel(func() error) error
+	Process() *os.Process
+	Environment() []string
 }
 
 // CommandLauncher is the only supported constructor for task-time agent
@@ -49,21 +67,34 @@ func NewCommandLauncher() *CommandLauncher {
 	return newCommandLauncher(newPlatformIsolation())
 }
 
-// PreparedCommand is the only supported handle for a validated task process.
-// It embeds *exec.Cmd so existing backends can configure pipes/env/cancel while
-// still going through Start/Wait/Output/CombinedOutput for launch-time recheck
-// and isolation resource release.
+// PreparedCommand is the only production handle for a validated task process.
 type PreparedCommand struct {
-	*exec.Cmd
+	cmd       *exec.Cmd
 	resources []io.Closer
 	recheck   func() error
-	closeOnce sync.Once
+	mu        sync.Mutex
+	state     preparedCommandState
 	closeErr  error
-	started   bool
+}
+
+type preparedCommandState uint8
+
+const (
+	preparedCommandReady preparedCommandState = iota
+	preparedCommandStarting
+	preparedCommandStarted
+	preparedCommandWaiting
+	preparedCommandWaited
+	preparedCommandClosed
+	preparedCommandFailed
+)
+
+func newPreparedCommand(cmd *exec.Cmd) *PreparedCommand {
+	return &PreparedCommand{cmd: cmd, state: preparedCommandReady}
 }
 
 // Command validates and wraps a task-time command without starting it.
-func (l *CommandLauncher) Command(ctx context.Context, req CommandRequest) (*PreparedCommand, error) {
+func (l *CommandLauncher) Command(ctx context.Context, req CommandRequest) (TaskCommand, error) {
 	if l == nil || l.isolation == nil {
 		return nil, fmt.Errorf("command launcher isolation is unavailable")
 	}
@@ -71,7 +102,7 @@ func (l *CommandLauncher) Command(ctx context.Context, req CommandRequest) (*Pre
 		return nil, fmt.Errorf("command isolation policy is required")
 	}
 
-	executablePath, err := validateAbsolutePath("executable", req.Executable)
+	executablePath, err := resolveStableSystemPathAlias("executable", req.Executable)
 	if err != nil {
 		return nil, err
 	}
@@ -166,44 +197,64 @@ func (l *CommandLauncher) Command(ctx context.Context, req CommandRequest) (*Pre
 	}
 
 	prepared := &PreparedCommand{
-		Cmd:       cmd,
+		cmd:       cmd,
 		resources: joinIdentityResources(bound, &cwd, &executable),
 		recheck:   recheck,
+		state:     preparedCommandReady,
 	}
 	owned = false
 	return prepared, nil
 }
 
 func (p *PreparedCommand) Start() error {
-	if p == nil || p.Cmd == nil {
+	if p == nil || p.cmd == nil {
 		return fmt.Errorf("prepared command is nil")
 	}
-	if p.started {
-		return fmt.Errorf("prepared command already started")
+	p.mu.Lock()
+	if p.state != preparedCommandReady {
+		state := p.state
+		p.mu.Unlock()
+		return fmt.Errorf("prepared command cannot start from state %d", state)
 	}
+	p.state = preparedCommandStarting
 	if p.recheck != nil {
 		if err := p.recheck(); err != nil {
-			_ = p.Close()
+			p.state = preparedCommandFailed
+			p.releaseLocked()
+			p.mu.Unlock()
 			return err
 		}
 	}
-	err := p.Cmd.Start()
+	err := p.cmd.Start()
 	// Isolation descriptors are only required until the helper is launched.
 	// After Start returns, the child either inherited them or failed to start.
-	_ = p.Close()
+	p.releaseLocked()
 	if err != nil {
+		p.state = preparedCommandFailed
+		p.mu.Unlock()
 		return err
 	}
-	p.started = true
+	p.state = preparedCommandStarted
+	p.mu.Unlock()
 	return nil
 }
 
 func (p *PreparedCommand) Wait() error {
-	if p == nil || p.Cmd == nil {
+	if p == nil || p.cmd == nil {
 		return fmt.Errorf("prepared command is nil")
 	}
-	err := p.Cmd.Wait()
-	_ = p.Close()
+	p.mu.Lock()
+	if p.state != preparedCommandStarted {
+		state := p.state
+		p.mu.Unlock()
+		return fmt.Errorf("prepared command cannot wait from state %d", state)
+	}
+	p.state = preparedCommandWaiting
+	p.mu.Unlock()
+	err := p.cmd.Wait()
+	p.mu.Lock()
+	p.state = preparedCommandWaited
+	p.mu.Unlock()
 	return err
 }
 
@@ -215,18 +266,24 @@ func (p *PreparedCommand) Run() error {
 }
 
 func (p *PreparedCommand) Output() ([]byte, error) {
-	if p == nil || p.Cmd == nil {
-		return nil, fmt.Errorf("prepared command is nil")
-	}
-	if p.Stdout != nil {
-		return nil, fmt.Errorf("exec: Stdout already set")
-	}
 	var stdout bytes.Buffer
-	p.Stdout = &stdout
+	var stderr bytes.Buffer
+	captureStderr := false
+	if err := p.configure(func(cmd *exec.Cmd) error {
+		if cmd.Stdout != nil {
+			return fmt.Errorf("exec: Stdout already set")
+		}
+		cmd.Stdout = &stdout
+		if cmd.Stderr == nil {
+			cmd.Stderr = &stderr
+			captureStderr = true
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
-	if p.Stderr == nil {
-		var stderr bytes.Buffer
-		p.Stderr = &stderr
+	if captureStderr {
 		err := p.Run()
 		if err != nil {
 			if ee, ok := err.(*exec.ExitError); ok {
@@ -242,18 +299,20 @@ func (p *PreparedCommand) Output() ([]byte, error) {
 }
 
 func (p *PreparedCommand) CombinedOutput() ([]byte, error) {
-	if p == nil || p.Cmd == nil {
-		return nil, fmt.Errorf("prepared command is nil")
-	}
-	if p.Stdout != nil {
-		return nil, fmt.Errorf("exec: Stdout already set")
-	}
-	if p.Stderr != nil {
-		return nil, fmt.Errorf("exec: Stderr already set")
-	}
 	var b bytes.Buffer
-	p.Stdout = &b
-	p.Stderr = &b
+	if err := p.configure(func(cmd *exec.Cmd) error {
+		if cmd.Stdout != nil {
+			return fmt.Errorf("exec: Stdout already set")
+		}
+		if cmd.Stderr != nil {
+			return fmt.Errorf("exec: Stderr already set")
+		}
+		cmd.Stdout = &b
+		cmd.Stderr = &b
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	err := p.Run()
 	return b.Bytes(), err
 }
@@ -262,19 +321,85 @@ func (p *PreparedCommand) Close() error {
 	if p == nil {
 		return nil
 	}
-	p.closeOnce.Do(func() {
-		p.closeErr = closeAll(p.resources...)
-		p.resources = nil
-		p.recheck = nil
-	})
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.state == preparedCommandReady {
+		p.state = preparedCommandClosed
+	}
+	p.releaseLocked()
 	return p.closeErr
 }
 
-func (c Config) command(ctx context.Context, executable string, args []string, cwd string, waitDelay time.Duration) (*PreparedCommand, error) {
+func (p *PreparedCommand) releaseLocked() {
+	if p.resources == nil {
+		return
+	}
+	p.closeErr = closeAll(p.resources...)
+	p.resources = nil
+	p.recheck = nil
+}
+
+func (p *PreparedCommand) configure(fn func(*exec.Cmd) error) error {
+	if p == nil || p.cmd == nil {
+		return fmt.Errorf("prepared command is nil")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.state != preparedCommandReady {
+		return fmt.Errorf("prepared command cannot be configured after launch")
+	}
+	return fn(p.cmd)
+}
+
+func (p *PreparedCommand) StdoutPipe() (io.ReadCloser, error) {
+	var pipe io.ReadCloser
+	err := p.configure(func(cmd *exec.Cmd) (err error) { pipe, err = cmd.StdoutPipe(); return err })
+	return pipe, err
+}
+
+func (p *PreparedCommand) StdinPipe() (io.WriteCloser, error) {
+	var pipe io.WriteCloser
+	err := p.configure(func(cmd *exec.Cmd) (err error) { pipe, err = cmd.StdinPipe(); return err })
+	return pipe, err
+}
+
+func (p *PreparedCommand) StderrPipe() (io.ReadCloser, error) {
+	var pipe io.ReadCloser
+	err := p.configure(func(cmd *exec.Cmd) (err error) { pipe, err = cmd.StderrPipe(); return err })
+	return pipe, err
+}
+
+func (p *PreparedCommand) SetStderr(stderr io.Writer) error {
+	return p.configure(func(cmd *exec.Cmd) error { cmd.Stderr = stderr; return nil })
+}
+
+func (p *PreparedCommand) SetCancel(cancel func() error) error {
+	return p.configure(func(cmd *exec.Cmd) error { cmd.Cancel = cancel; return nil })
+}
+
+func (p *PreparedCommand) Process() *os.Process {
+	if p == nil || p.cmd == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.cmd.Process
+}
+
+func (p *PreparedCommand) Environment() []string {
+	if p == nil || p.cmd == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.cmd.Env...)
+}
+
+func (c Config) command(ctx context.Context, executable string, args []string, cwd string, waitDelay time.Duration) (TaskCommand, error) {
 	return c.commandWithLeadingExtraFiles(ctx, executable, args, cwd, waitDelay, nil)
 }
 
-func (c Config) commandWithLeadingExtraFiles(ctx context.Context, executable string, args []string, cwd string, waitDelay time.Duration, leading []*os.File) (*PreparedCommand, error) {
+func (c Config) commandWithLeadingExtraFiles(ctx context.Context, executable string, args []string, cwd string, waitDelay time.Duration, leading []*os.File) (TaskCommand, error) {
 	if c.Launcher == nil {
 		return nil, fmt.Errorf("agent command launcher is required")
 	}

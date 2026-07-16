@@ -115,6 +115,35 @@ func TestStableSystemPathAliasesArePlatformBoundAndExact(t *testing.T) {
 	}
 }
 
+func TestValidatedCanonicalizesOnlyStableSystemAliases(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux usr-merge aliases")
+	}
+	resolved, err := filepath.EvalSymlinks("/bin")
+	if err != nil || resolved == "/bin" {
+		t.Skip("host does not use /bin as a symlink alias")
+	}
+	root := t.TempDir()
+	policy, err := (TaskIsolationPolicy{
+		WritableRoots: []string{root},
+		SystemRoots:   []string{"/bin"},
+	}).Validated()
+	if err != nil {
+		t.Fatalf("Validated: %v", err)
+	}
+	if !reflect.DeepEqual(policy.SystemRoots, []string{resolved}) {
+		t.Fatalf("system roots = %#v, want %#v", policy.SystemRoots, []string{resolved})
+	}
+
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(resolved, alias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (TaskIsolationPolicy{WritableRoots: []string{alias}}).Validated(); err == nil {
+		t.Fatal("user-controlled alias unexpectedly accepted")
+	}
+}
+
 func TestDarwinProfileRenderingIsDeterministicAndQuotesPaths(t *testing.T) {
 	t.Parallel()
 

@@ -713,11 +713,14 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// nil keeps exec from logging a spurious error; the WaitDelay supplied
 	// through cfg.command still backstops cmd.Wait() if the kill leaves an
 	// open pipe.
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			signalProcessGroup(cmd.Process, syscall.SIGKILL)
+	if err := cmd.SetCancel(func() error {
+		if cmd.Process() != nil {
+			signalProcessGroup(cmd.Process(), syscall.SIGKILL)
 		}
 		return nil
+	}); err != nil {
+		cancel()
+		return nil, fmt.Errorf("configure codex cancellation: %w", err)
 	}
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", codexArgs)
 
@@ -734,7 +737,10 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// Codex stderr can contain auth/provider diagnostics. Capture a bounded
 	// tail and emit it only through the sanitizer in the cleanup event.
 	stderrBuf := newStderrTail(io.Discard, codexStderrTailBytes)
-	cmd.Stderr = stderrBuf
+	if err := cmd.SetStderr(stderrBuf); err != nil {
+		cancel()
+		return nil, fmt.Errorf("configure codex stderr: %w", err)
+	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -753,7 +759,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		codexVersion = "unknown"
 	}
 
-	b.cfg.Logger.Info("codex lifecycle", "phase", "spawn", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process.Pid, "process_group", cmd.Process.Pid, "cwd", opts.Cwd, "attempt", attempt, "active_launches", activeLaunches, "codex_version", codexVersion, "daemon_version", b.cfg.DaemonVersion)
+	b.cfg.Logger.Info("codex lifecycle", "phase", "spawn", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process().Pid, "process_group", cmd.Process().Pid, "cwd", opts.Cwd, "attempt", attempt, "active_launches", activeLaunches, "codex_version", codexVersion, "daemon_version", b.cfg.DaemonVersion)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -884,7 +890,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				// group-kills the tree, the reader unblocks when stdout
 				// EOFs, and we proceed to phase 2.
 				b.cfg.Logger.Warn("codex did not close stdout after stdin EOF; forcing shutdown",
-					"pid", cmd.Process.Pid,
+					"pid", cmd.Process().Pid,
 					"grace", grace.String(),
 				)
 				cancel()
@@ -905,7 +911,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				// reaped cleanly.
 			case <-time.After(grace):
 				b.cfg.Logger.Warn("codex process still alive after reader exited; forcing shutdown",
-					"pid", cmd.Process.Pid,
+					"pid", cmd.Process().Pid,
 					"grace", grace.String(),
 				)
 				cancel()
@@ -1114,7 +1120,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					Model:        opts.Model,
 				}
 				b.cfg.Logger.Warn(CodexFirstTurnNoProgressMarker,
-					"pid", cmd.Process.Pid,
+					"pid", cmd.Process().Pid,
 					"thread_id", threadID,
 					"turn_id", c.turnID,
 					"timeout", firstTurnNoProgressTimeout.String(),
@@ -1132,7 +1138,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					Model:        opts.Model,
 				}
 				b.cfg.Logger.Warn(CodexSemanticInactivityMarker,
-					"pid", cmd.Process.Pid,
+					"pid", cmd.Process().Pid,
 					"thread_id", threadID,
 					"turn_id", c.turnID,
 					"timeout", semanticInactivityTimeout.String(),
@@ -1162,7 +1168,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		}
 
 		duration := time.Since(startTime)
-		b.cfg.Logger.Info("codex finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("codex finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		// Run cleanup. drainAndWait handles the graceful-then-cancel pattern
 		// in two bounded phases (see its declaration): wait for the reader,
@@ -1467,11 +1473,13 @@ func detectCodexVersionForDiagnostics(ctx context.Context, cfg Config, execPath,
 		}
 		return "unknown"
 	}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			signalProcessGroup(cmd.Process, syscall.SIGKILL)
+	if err := cmd.SetCancel(func() error {
+		if cmd.Process() != nil {
+			signalProcessGroup(cmd.Process(), syscall.SIGKILL)
 		}
 		return nil
+	}); err != nil {
+		return "unknown"
 	}
 	data, err := cmd.Output()
 	if err != nil {

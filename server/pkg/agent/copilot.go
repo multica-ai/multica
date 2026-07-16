@@ -221,14 +221,14 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		return nil, fmt.Errorf("copilot stdout pipe: %w", err)
 	}
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[copilot:stderr] "), agentStderrTailBytes)
-	cmd.Stderr = stderrBuf
+	_ = cmd.SetStderr(stderrBuf)
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start copilot: %w", err)
 	}
 
-	b.cfg.Logger.Info("copilot started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("copilot started", "pid", cmd.Process().Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -290,7 +290,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			st.finalError = withAgentStderr(st.finalError, "copilot", stderrBuf.Tail())
 		}
 
-		b.cfg.Logger.Info("copilot finished", "pid", cmd.Process.Pid, "status", st.finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("copilot finished", "pid", cmd.Process().Pid, "status", st.finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		resCh <- Result{
 			Status:     st.finalStatus,

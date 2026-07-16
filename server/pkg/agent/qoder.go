@@ -150,7 +150,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		_, _ = io.Copy(stderrSink, stderr)
 	}()
 
-	b.cfg.Logger.Info("qoder acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
+	b.cfg.Logger.Info("qoder acp started", "pid", cmd.Process().Pid, "cwd", opts.Cwd)
 
 	msgStream := newQoderMessageStream(256)
 	resCh := make(chan Result, 1)
@@ -383,7 +383,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		}
 
 		duration := time.Since(startTime)
-		b.cfg.Logger.Info("qoder finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("qoder finished", "pid", cmd.Process().Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		stdin.Close()
 		cancel()
