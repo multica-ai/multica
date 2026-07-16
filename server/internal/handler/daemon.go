@@ -1970,22 +1970,31 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// Manual retry: resume precisely from the source task the user
 			// clicked, NOT the most-recent (agent, issue) row — a parallel task
 			// on the same issue must never hijack the resume (MUL-4869). The
-			// workdir is ALWAYS reused when it still exists; only the session is
-			// gated on force_fresh_session, which RerunIssue derives from the
-			// source task's failure classification (a conversation-poisoning
-			// failure starts a fresh session on top of the same workdir). When
-			// the source workdir is gone (GC'd), on another runtime, or was never
-			// recorded (failed too early), execenv.Reuse falls back to a fresh
-			// Prepare and gateResumeToReusedWorkdir drops the now-unusable
+			// workdir is ALWAYS reused when it still exists; the session is
+			// resumed only when the source failure did not poison the
+			// conversation AND the source ran on this runtime.
+			//
+			// Resume-safety is computed HERE from the source task, not read off
+			// task.ForceFreshSession: RerunIssue pins that flag to true so an OLD
+			// claim handler mid rolling-deploy degrades to a clean start instead
+			// of resuming a different execution via the (agent, issue) lookup.
+			// service.ResumeUnsafeFailure mirrors GetLastTaskSession, including
+			// its 400/invalid_request_error text defense for legacy /
+			// mis-classified rows that the exact-source path would otherwise miss.
+			//
+			// When the source workdir is gone (GC'd), absent on this runtime, or
+			// was never recorded (failed too early), execenv.Reuse falls back to a
+			// fresh Prepare and gateResumeToReusedWorkdir drops the now-unusable
 			// session — reuse is best-effort, never a silent swap onto a stale
-			// directory.
+			// directory. PriorWorkDir is offered regardless of runtime (a shared
+			// mount may still resolve it); only the per-cwd session is
+			// runtime-gated.
 			if src, err := h.Queries.GetAgentTask(r.Context(), task.RerunOfTaskID); err == nil {
 				if src.WorkDir.Valid {
 					resp.PriorWorkDir = src.WorkDir.String
 				}
-				// A per-cwd CLI session only resolves on the runtime that wrote
-				// it, so gate the session (not the workdir) on the runtime match.
-				if !task.ForceFreshSession && src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
+				if !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) &&
+					src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = src.SessionID.String
 				}
 			}

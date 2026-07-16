@@ -619,10 +619,15 @@ RETURNING *;
 -- conversation and lose the in-flight context — exactly what MUL-1128's B
 -- branch is meant to fix.
 --
--- Manual rerun (TaskService.RerunIssue) does NOT take this path: it sets
--- force_fresh_session=true on the new task, and the daemon claim handler
--- skips this lookup entirely. The user already judged the prior output bad;
--- resuming the same conversation would replay a poisoned state.
+-- Manual rerun (TaskService.RerunIssue) does NOT take this path. The claim
+-- handler branches on rerun_of_task_id FIRST and resolves the session/workdir
+-- from that exact source task (so a parallel task on the same issue can't be
+-- resumed by mistake), reusing the source workdir and resuming its session only
+-- when the source failure is resume-safe. The rerun row still carries
+-- force_fresh_session=true purely as a rollback-safe signal: an OLD claim
+-- handler that predates the rerun_of_task_id branch falls back to this query,
+-- and force_fresh_session=true makes it start clean instead of resuming the
+-- wrong execution (MUL-4869).
 --
 -- Tasks that ended in a known "poisoned" terminal state are also excluded
 -- here so even auto-retry does not inherit the bad session. The daemon

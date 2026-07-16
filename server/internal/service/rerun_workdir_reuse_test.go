@@ -10,14 +10,17 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// TestRerunIssueForceFreshSessionByFailureClass locks in the MUL-4869 contract on
-// the enqueue side: a manual retry no longer hardcodes force_fresh_session=true.
-// It derives the flag from the source task's failure classification so a
-// transient failure (network / timeout / provider blip) resumes the SESSION,
-// while a conversation-poisoning failure starts a fresh session. Either way the
-// workdir is reused — that half is asserted at the claim layer in
+// TestRerunIssuePinsForceFreshSessionForRollbackSafety locks in the rollback-safe
+// half of the MUL-4869 contract: RerunIssue ALWAYS persists
+// force_fresh_session=true on the rerun row, no matter how the source task
+// failed. The session-reuse decision is made later by the (new) claim handler
+// from the source task, so an OLD claim handler picked up mid rolling-deploy —
+// which gates the whole resume lookup on !force_fresh_session — degrades to a
+// clean start instead of resuming a different execution via the
+// (agent, issue) most-recent query. The claim-layer behaviour (workdir always
+// reused, session gated by source failure class) is asserted in
 // TestClaimTask_ManualRetryReusesWorkdir.
-func TestRerunIssueForceFreshSessionByFailureClass(t *testing.T) {
+func TestRerunIssuePinsForceFreshSessionForRollbackSafety(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
 	q := db.New(pool)
@@ -32,17 +35,17 @@ func TestRerunIssueForceFreshSessionByFailureClass(t *testing.T) {
 		t.Fatalf("read agent runtime: %v", err)
 	}
 
+	// The flag must be true across resume-safe, resume-poisoned, and cancelled
+	// source failures alike — the enqueue row never encodes the classification.
 	cases := []struct {
-		name           string
-		status         string
-		failureReason  any // string, or nil for a NULL failure_reason
-		wantForceFresh bool
+		name          string
+		status        string
+		failureReason any // string, or nil for a NULL failure_reason
 	}{
-		{name: "transient_timeout_resumes", status: "failed", failureReason: "timeout", wantForceFresh: false},
-		{name: "transient_provider_network_resumes", status: "failed", failureReason: "agent_error.provider_network", wantForceFresh: false},
-		{name: "poisoned_context_overflow_fresh", status: "failed", failureReason: "agent_error.context_overflow", wantForceFresh: true},
-		{name: "poisoned_api_invalid_request_fresh", status: "failed", failureReason: "api_invalid_request", wantForceFresh: true},
-		{name: "cancelled_no_reason_resumes", status: "cancelled", failureReason: nil, wantForceFresh: false},
+		{name: "transient_timeout", status: "failed", failureReason: "timeout"},
+		{name: "transient_provider_network", status: "failed", failureReason: "agent_error.provider_network"},
+		{name: "poisoned_context_overflow", status: "failed", failureReason: "agent_error.context_overflow"},
+		{name: "cancelled_no_reason", status: "cancelled", failureReason: nil},
 	}
 
 	for _, tc := range cases {
@@ -70,8 +73,8 @@ func TestRerunIssueForceFreshSessionByFailureClass(t *testing.T) {
 			`, task.ID).Scan(&forceFresh, &rerunOf); err != nil {
 				t.Fatalf("read rerun task: %v", err)
 			}
-			if forceFresh != tc.wantForceFresh {
-				t.Errorf("force_fresh_session = %v, want %v (source failure_reason=%v)", forceFresh, tc.wantForceFresh, tc.failureReason)
+			if !forceFresh {
+				t.Errorf("force_fresh_session = false, want true for rollback safety (source failure_reason=%v)", tc.failureReason)
 			}
 			if !rerunOf.Valid || rerunOf.Bytes != sourceID.Bytes {
 				t.Errorf("rerun_of_task_id = %s, want source %s", util.UUIDToString(rerunOf), util.UUIDToString(sourceID))
