@@ -143,6 +143,12 @@ type InboundMessage struct {
 	// arrays, parent ids) stay in Raw.
 	AddressedToBot bool
 
+	// ForceFresh asks the core to start a fresh agent session for this
+	// message instead of resuming the prior one (the platform's "/fresh"
+	// affordance). The adapter normalizes its platform-specific trigger
+	// into this boolean; the core only reads the flag.
+	ForceFresh bool
+
 	// Raw is the untouched platform payload. Adapters stash platform-
 	// specific fields here (Lark raw msg_type / parent_id / root_id /
 	// mention arrays, …) and read them back only inside the adapter. The

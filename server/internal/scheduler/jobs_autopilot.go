@@ -30,6 +30,13 @@ const ScopeKindAutopilotTrigger = "autopilot_trigger"
 // service.DefaultAutopilotTriggerTimezone.
 const DefaultAutopilotScheduleTimezone = "UTC"
 
+// maxAutopilotScheduleLateness is the acceptance window for dispatching a
+// cron occurrence after its configured plan_time. Normal scheduler jitter is
+// tens of seconds; anything beyond this is a stale catch-up and should wait
+// for the next configured slot instead of firing at an arbitrary activation
+// time.
+const maxAutopilotScheduleLateness = 5 * time.Minute
+
 // AutopilotScheduleDispatcher is the narrow contract this job needs
 // from service.AutopilotService. Defined here so unit tests in this
 // package (and the cmd/server integration tests) can stub it without
@@ -120,6 +127,13 @@ type autopilotTriggerConfig struct {
 	CronExpression string
 	Timezone       string
 	CreatedAt      time.Time
+	// LastFiredAt is autopilot_trigger.last_fired_at; zero if the
+	// trigger has never fired (or under no scheduler so far). Used by
+	// the planner hook to anchor cold-start enumeration so that
+	// occurrences which have already been processed (e.g. by the
+	// legacy goroutine pre-migration, or by a prior incarnation of
+	// this process pre-restart) are not replayed.
+	LastFiredAt time.Time
 }
 
 // autopilotScheduleCache holds the per-tick map of trigger configs.
@@ -185,11 +199,16 @@ func autopilotScopes(
 			if r.CreatedAt.Valid {
 				createdAt = r.CreatedAt.Time.UTC()
 			}
+			lastFiredAt := time.Time{}
+			if r.LastFiredAt.Valid {
+				lastFiredAt = r.LastFiredAt.Time.UTC()
+			}
 			next[id] = autopilotTriggerConfig{
 				TriggerID:      id,
 				CronExpression: cron,
 				Timezone:       tz,
 				CreatedAt:      createdAt,
+				LastFiredAt:    lastFiredAt,
 			}
 			scopes = append(scopes, Scope{Kind: ScopeKindAutopilotTrigger, ID: id})
 		}
@@ -199,10 +218,11 @@ func autopilotScopes(
 }
 
 // autopilotPlansForScope returns the PlansForScope hook that computes
-// every cron occurrence in (lastPlan, dbNow] and keeps only the most
-// recent one. This matches the legacy goroutine's "collapse missed
-// fires" semantics; a future per-trigger catch_up_mode column can flip
-// the policy without touching scheduler internals.
+// every cron occurrence in (lastPlan, dbNow], keeps only the most recent
+// one, and rejects it if it is outside the dispatch-lateness window.
+// The latest-only collapse prevents a long outage from replaying every
+// missed slot; the lateness guard prevents a paused / newly eligible
+// trigger from firing hours after its configured time.
 //
 // Retry-eligible state is handled specially: when the most recent
 // stored plan_time is a FAILED row with attempts remaining and
@@ -238,15 +258,44 @@ func autopilotPlansForScope(cache *autopilotScheduleCache) func(
 			return []time.Time{latest.PlanTime}, nil
 		}
 
-		// Anchor on the most recent stored plan_time so the cron evaluator
-		// only enumerates new occurrences. Before the first run we anchor
-		// on the trigger's created_at — never replay history.
-		after := cfg.CreatedAt
-		if latest.Found && latest.PlanTime.After(after) {
+		// Anchor selection — three cases, in order:
+		//
+		//   1. `latest.Found`: this trigger has at least one
+		//      sys_cron_executions row written by the new scheduler.
+		//      Resume strictly after the most recent plan_time.
+		//
+		//   2. `cfg.LastFiredAt` is set: the trigger has been fired
+		//      before, either by the legacy goroutine pre-migration
+		//      or by a previous incarnation of this process. Resume
+		//      strictly after the last successful fire so we do not
+		//      replay an already-handled occurrence. This is the case
+		//      that produced the post-deploy spurious-fire reported
+		//      on MUL-3551 dev: without it, a trigger that fired at
+		//      Mon 17:10 under the legacy code would be enumerated
+		//      again the moment the new scheduler took over, because
+		//      the (created_at, now] half-open interval still
+		//      contained Mon 17:10.
+		//
+		//   3. Brand-new trigger that has never fired: anchor on
+		//      created_at so only occurrences after the trigger
+		//      existed are enumerated.
+		//
+		// Each case feeds into a final safety cap that prevents
+		// enumerating more than `replayWindow` of history at once.
+		var after time.Time
+		switch {
+		case latest.Found:
 			after = latest.PlanTime
+		case !cfg.LastFiredAt.IsZero():
+			after = cfg.LastFiredAt
+		default:
+			after = cfg.CreatedAt
 		}
 		// Bound replay by CatchUpWindow so a long pause / dormant
 		// trigger does not enumerate millions of historical buckets.
+		// `after` is normally already recent (either latest.PlanTime
+		// or last_fired_at); the cap only matters for the unusual
+		// "trigger created weeks ago but never fired" path.
 		if oldest := now.Add(-replayWindow); after.Before(oldest) {
 			after = oldest
 		}
@@ -259,8 +308,16 @@ func autopilotPlansForScope(cache *autopilotScheduleCache) func(
 			return nil, nil
 		}
 		// CatchUpLatestOnly: collapse missed fires to the most recent.
-		return occs[len(occs)-1:], nil
+		latestDue := occs[len(occs)-1]
+		if isAutopilotSchedulePlanStale(now, latestDue) {
+			return nil, nil
+		}
+		return []time.Time{latestDue}, nil
 	}
+}
+
+func isAutopilotSchedulePlanStale(now, planTime time.Time) bool {
+	return now.Sub(planTime) > maxAutopilotScheduleLateness
 }
 
 // autopilotHandler dispatches one (trigger, planTime) attempt and
@@ -320,10 +377,29 @@ func autopilotHandler(
 			return HandlerResult{}, fmt.Errorf("dispatch for plan: %w", err)
 		}
 
-		// Bump the display-only last_fired_at so the trigger UI shows
-		// the most recent fire time. Errors are not fatal — the
-		// canonical record is autopilot_run.created_at.
-		_ = queries.TouchAutopilotTriggerFiredAt(ctx, trigger.ID)
+		// Advance the display-only next_run_at to the upcoming slot and
+		// bump last_fired_at in the same write, so the trigger UI stops
+		// showing a "next run" that has already fired (MUL-3749). The
+		// value stays on the app local clock — consistent with the trigger
+		// create/update display path — but is floored at the plan_time
+		// that just fired (see advancedNextRun), so a lagging app clock can
+		// never recompute the slot we just dispatched. Errors are not
+		// fatal: the canonical record is autopilot_run.created_at and the
+		// next dispatch refreshes the value regardless; on a cron/timezone
+		// parse failure we fall back to the last_fired_at-only bump so the
+		// fire is still recorded.
+		tz := DefaultAutopilotScheduleTimezone
+		if trigger.Timezone.Valid && trigger.Timezone.String != "" {
+			tz = trigger.Timezone.String
+		}
+		if next, ok := advancedNextRun(trigger.CronExpression.String, tz, in.PlanTime, time.Now()); ok {
+			_ = queries.AdvanceTriggerNextRun(ctx, db.AdvanceTriggerNextRunParams{
+				ID:        trigger.ID,
+				NextRunAt: pgtype.Timestamptz{Time: next, Valid: true},
+			})
+		} else {
+			_ = queries.TouchAutopilotTriggerFiredAt(ctx, trigger.ID)
+		}
 
 		return HandlerResult{
 			RowsAffected: 1,
@@ -333,6 +409,28 @@ func autopilotHandler(
 			},
 		}, nil
 	}
+}
+
+// advancedNextRun computes the display-only next_run_at value to write
+// after a schedule trigger fires at planTime. It evaluates the cron on the
+// app local clock (`now`, normally time.Now()) but anchors at
+// max(now, planTime), so the result is always strictly after the slot that
+// just fired — even when this app instance's clock lags the DB clock that
+// judged the plan due. Without that floor a sub-second-late local clock
+// could recompute the same slot and the next_run_at staleness bug
+// (MUL-3749) would reappear at the top-of-period boundary. Returns
+// ok=false when the cron/timezone fail to parse, signalling the caller to
+// fall back to a last_fired_at-only bump.
+func advancedNextRun(cronExpr, timezone string, planTime, now time.Time) (time.Time, bool) {
+	anchor := now
+	if planTime.After(anchor) {
+		anchor = planTime
+	}
+	next, err := service.NextOccurrenceAfterUTC(cronExpr, timezone, anchor)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return next, true
 }
 
 // parseScopeUUID converts a scope.ID string back into pgtype.UUID.

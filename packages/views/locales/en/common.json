@@ -1,4 +1,32 @@
 {
+  "avatar_upload": {
+    "change": "Change avatar",
+    "remove": "Remove",
+    "select_image": "Please choose an image file.",
+    "updated": "Avatar updated",
+    "failed": "Failed to upload avatar"
+  },
+  "avatar_crop": {
+    "title": "Edit avatar",
+    "zoom": "Zoom",
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "rotate": "Rotate",
+    "reset": "Reset",
+    "cancel": "Cancel",
+    "apply": "Save",
+    "uploading": "Uploading…",
+    "loading": "Loading…",
+    "load_failed": "Couldn't load image"
+  },
+  "color_picker": {
+    "saturation": "Saturation and brightness",
+    "hue": "Hue",
+    "hex": "Hex color",
+    "eyedropper": "Pick a color from the screen",
+    "presets": "Presets",
+    "random": "Random"
+  },
   "save": "Save",
   "cancel": "Cancel",
   "delete": "Delete",
@@ -22,6 +50,21 @@
     "error_missing_token": "The link is missing its binding token. Ask the Bot to send a new one in Lark.",
     "error_expired": "This binding link is invalid or expired (links are valid for 15 minutes). Ask the Bot to send a new one.",
     "error_already_bound": "This Lark account is already bound to a different Multica user. Account transfers must go through an explicit unbind first.",
+    "error_not_member": "You're signed in to a Multica account that isn't a member of this workspace.",
+    "error_unknown": "Something went wrong. Try again, and if the problem persists, contact the workspace admin."
+  },
+  "slack_bind": {
+    "page_title": "Link your Slack account",
+    "redeeming": "Linking your account…",
+    "needs_auth_description": "Sign in to Multica to complete the link. The token in the link binds your Slack account to this Multica user, so you must be logged in first.",
+    "sign_in": "Sign in",
+    "done_title": "You're linked.",
+    "done_description": "Your next message to the bot in Slack will go straight to the agent. You can close this tab.",
+    "error_title": "Couldn't complete the link",
+    "error_admin_hint": "If this keeps happening, message the bot again in Slack to get a fresh link.",
+    "error_missing_token": "The link is missing its token. Message the bot again in Slack to get a new one.",
+    "error_expired": "This link is invalid or expired (links are valid for 15 minutes). Message the bot again to get a new one.",
+    "error_already_bound": "This Slack account is already linked to a different Multica user. Account transfers must go through an explicit unbind first.",
     "error_not_member": "You're signed in to a Multica account that isn't a member of this workspace.",
     "error_unknown": "Something went wrong. Try again, and if the problem persists, contact the workspace admin."
   }

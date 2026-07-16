@@ -12,7 +12,8 @@
     "COMPOSE_PROJECT_NAME",
     "POSTGRES_DB",
     "POSTGRES_PORT",
-    "DESKTOP_RENDERER_PORT"
+    "DESKTOP_RENDERER_PORT",
+    "DESKTOP_APP_SUFFIX"
   ],
   "tasks": {
     "build": {

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useLocation, useNavigate, useRouteError } from "react-router-dom";
+import { useLocation, useRouteError } from "react-router-dom";
 import { AlertTriangle, RotateCw, Send, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { useModalStore } from "@multica/core/modals";
@@ -38,14 +38,13 @@ export function formatRouteErrorReport({
     normalized.stack ?? "<no stack>",
     "```",
     "",
-    "TODO: promote kind/context to structured feedback fields once the feedback API supports them.",
+    "TODO: promote error context to structured feedback fields once the feedback API supports them.",
   ].join("\n");
 }
 
 export function DesktopRouteErrorPage() {
   const error = useRouteError();
   const location = useLocation();
-  const navigate = useNavigate();
   const workspaceSlug = location.pathname.split("/").filter(Boolean)[0];
   const safeRoute = workspaceSlug ? `/${workspaceSlug}/issues` : null;
   const report = useMemo(
@@ -89,7 +88,17 @@ export function DesktopRouteErrorPage() {
           Reload tab
         </Button>
         {safeRoute ? (
-          <Button type="button" variant="outline" onClick={() => navigate(safeRoute, { replace: true })}>
+          <Button
+            type="button"
+            variant="outline"
+            // Session mutation, not a router call: the Coordinator projects
+            // the new session URL into the router (MUL-4741 invariant 1).
+            onClick={() =>
+              useTabStore
+                .getState()
+                .navigateActiveSession(safeRoute, { replace: true })
+            }
+          >
             Go to issues
           </Button>
         ) : null}
@@ -106,6 +115,7 @@ export function DesktopRouteErrorPage() {
           onClick={() =>
             useModalStore.getState().open("feedback", {
               initialMessage: report,
+              kind: "bug",
             })
           }
         >

@@ -2,128 +2,42 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
 import { useEffect } from "react";
 
-// Shared in-memory state that the mocked tab store reads / mutates. The test
-// records every method call so we can assert openInNewTab does NOT activate
-// the new tab (i.e. setActiveTab is never invoked on the same-workspace path).
-type MockRouter = {
-  state: { location: { pathname: string; search: string; hash: string } };
-  navigate: ReturnType<typeof vi.fn>;
-};
+// MUL-4741: the adapter mutates tab sessions in the REAL store (no router,
+// no mocks needed for it anymore) — the Coordinator, not tested here, is
+// what projects sessions into the single router. Overlay and auth stay
+// mocked so we can spy on their entry points.
 
-type MockTab = {
-  id: string;
-  path: string;
-  pinned: boolean;
-  router: MockRouter;
-};
-
-function makeMockRouter(pathname: string, search = "", hash = ""): MockRouter {
-  return {
-    state: { location: { pathname, search, hash } },
-    navigate: vi.fn(),
-  };
-}
-
-const state = vi.hoisted(() => ({
-  activeWorkspaceSlug: "acme" as string | null,
-  byWorkspace: {
-    acme: {
-      activeTabId: "tA",
-      tabs: [
-        {
-          id: "tA",
-          path: "/acme/issues",
-          pinned: false,
-          router: makeMockRouter("/acme/issues"),
-        },
-      ] as MockTab[],
-    },
-  } as Record<string, { activeTabId: string; tabs: MockTab[] }>,
-  openTab: vi.fn<(path: string, title?: string, icon?: string) => string>(),
-  setActiveTab: vi.fn<(tabId: string) => void>(),
-  switchWorkspace: vi.fn<(slug: string, openPath?: string) => void>(),
+const overlay = vi.hoisted(() => ({
+  overlay: null as null | { type: string },
+  open: vi.fn(),
+  close: vi.fn(),
 }));
-
-vi.mock("@/stores/tab-store", () => {
-  const store = {
-    get activeWorkspaceSlug() {
-      return state.activeWorkspaceSlug;
-    },
-    get byWorkspace() {
-      return state.byWorkspace;
-    },
-    openTab: state.openTab,
-    setActiveTab: state.setActiveTab,
-    switchWorkspace: state.switchWorkspace,
-  };
-  const useTabStore = Object.assign(
-    (selector?: (s: typeof store) => unknown) =>
-      selector ? selector(store) : store,
-    { getState: () => store },
-  );
-  const getActiveTab = () => {
-    const slug = state.activeWorkspaceSlug;
-    if (!slug) return null;
-    const group = state.byWorkspace[slug];
-    if (!group) return null;
-    return group.tabs.find((t) => t.id === group.activeTabId) ?? null;
-  };
-  const useActiveTabIdentity = () => ({
-    slug: state.activeWorkspaceSlug,
-    tabId: state.activeWorkspaceSlug
-      ? (state.byWorkspace[state.activeWorkspaceSlug]?.activeTabId ?? null)
-      : null,
-  });
-  const useActiveTabRouter = () => null;
-  const resolveRouteIcon = () => "File";
-  return {
-    useTabStore,
-    getActiveTab,
-    useActiveTabIdentity,
-    useActiveTabRouter,
-    resolveRouteIcon,
-  };
-});
 
 vi.mock("@/stores/window-overlay-store", () => ({
-  useWindowOverlayStore: Object.assign(
-    () => null,
-    { getState: () => ({ overlay: null, open: vi.fn(), close: vi.fn() }) },
-  ),
+  useWindowOverlayStore: Object.assign(() => null, {
+    getState: () => overlay,
+  }),
 }));
+
+const auth = vi.hoisted(() => ({ logout: vi.fn() }));
 
 vi.mock("@multica/core/auth", () => ({
-  useAuthStore: Object.assign(
-    () => null,
-    { getState: () => ({ logout: vi.fn() }) },
-  ),
+  useAuthStore: Object.assign(() => null, {
+    getState: () => auth,
+  }),
 }));
 
-vi.mock("@multica/core/paths", () => ({
-  isReservedSlug: (s: string) =>
-    ["login", "workspaces", "invite", "onboarding", "invitations"].includes(s),
-}));
+import { DesktopNavigationProvider } from "./navigation";
+import { useNavigation } from "@multica/views/navigation";
+import { useTabStore, getActiveTab } from "@/stores/tab-store";
 
-// DesktopNavigationProvider reads window.desktopAPI.runtimeConfig synchronously.
 beforeEach(() => {
-  state.openTab.mockReset();
-  state.setActiveTab.mockReset();
-  state.switchWorkspace.mockReset();
-  state.openTab.mockImplementation(() => "tNew");
-  state.activeWorkspaceSlug = "acme";
-  state.byWorkspace = {
-    acme: {
-      activeTabId: "tA",
-      tabs: [
-        {
-          id: "tA",
-          path: "/acme/issues",
-          pinned: false,
-          router: makeMockRouter("/acme/issues"),
-        },
-      ],
-    },
-  };
+  overlay.open.mockReset();
+  overlay.close.mockReset();
+  overlay.overlay = null;
+  auth.logout.mockReset();
+  useTabStore.getState().reset();
+  useTabStore.getState().switchWorkspace("acme"); // default tab /acme/issues
   Object.defineProperty(window, "desktopAPI", {
     configurable: true,
     value: {
@@ -131,12 +45,6 @@ beforeEach(() => {
     },
   });
 });
-
-import {
-  DesktopNavigationProvider,
-  TabNavigationProvider,
-} from "./navigation";
-import { useNavigation } from "@multica/views/navigation";
 
 function captureAdapter(onAdapter: (adapter: ReturnType<typeof useNavigation>) => void) {
   function Probe() {
@@ -149,273 +57,164 @@ function captureAdapter(onAdapter: (adapter: ReturnType<typeof useNavigation>) =
   return Probe;
 }
 
-describe("DesktopNavigationProvider.openInNewTab", () => {
-  it("opens a background tab (no setActiveTab) for a same-workspace path", () => {
-    let adapter: ReturnType<typeof useNavigation> | null = null;
-    const Probe = captureAdapter((a) => {
-      adapter = a;
-    });
-    render(
-      <DesktopNavigationProvider>
-        <Probe />
-      </DesktopNavigationProvider>,
-    );
-    expect(adapter).not.toBeNull();
-    adapter!.openInNewTab!("/acme/agents", "Agents");
-    expect(state.openTab).toHaveBeenCalledWith("/acme/agents", "Agents", "File");
-    expect(state.setActiveTab).not.toHaveBeenCalled();
-    expect(state.switchWorkspace).not.toHaveBeenCalled();
+function renderProvider() {
+  let adapter: ReturnType<typeof useNavigation> | null = null;
+  const Probe = captureAdapter((a) => {
+    adapter = a;
+  });
+  render(
+    <DesktopNavigationProvider>
+      <Probe />
+    </DesktopNavigationProvider>,
+  );
+  return () => adapter!;
+}
+
+function acmeGroup() {
+  return useTabStore.getState().byWorkspace.acme;
+}
+
+describe("openInNewTab", () => {
+  it("opens a background tab (active tab unchanged) for a same-workspace path", () => {
+    const getAdapter = renderProvider();
+    const activeBefore = acmeGroup().activeTabId;
+
+    getAdapter().openInNewTab!("/acme/agents", "Agents");
+
+    const group = acmeGroup();
+    expect(group.tabs.map((t) => t.url)).toEqual(["/acme/issues", "/acme/agents"]);
+    expect(group.activeTabId).toBe(activeBefore);
   });
 
   it("activates the new tab when opts.activate is true (foreground)", () => {
-    let adapter: ReturnType<typeof useNavigation> | null = null;
-    const Probe = captureAdapter((a) => {
-      adapter = a;
-    });
-    render(
-      <DesktopNavigationProvider>
-        <Probe />
-      </DesktopNavigationProvider>,
-    );
-    adapter!.openInNewTab!("/acme/agents", "Agents", { activate: true });
-    expect(state.openTab).toHaveBeenCalledWith("/acme/agents", "Agents", "File");
-    expect(state.setActiveTab).toHaveBeenCalledWith("tNew");
-    expect(state.switchWorkspace).not.toHaveBeenCalled();
+    const getAdapter = renderProvider();
+
+    getAdapter().openInNewTab!("/acme/agents", "Agents", { activate: true });
+
+    const group = acmeGroup();
+    const agents = group.tabs.find((t) => t.url === "/acme/agents")!;
+    expect(group.activeTabId).toBe(agents.id);
   });
 
   it("delegates to switchWorkspace for a cross-workspace path", () => {
-    let adapter: ReturnType<typeof useNavigation> | null = null;
-    const Probe = captureAdapter((a) => {
-      adapter = a;
-    });
-    render(
-      <DesktopNavigationProvider>
-        <Probe />
-      </DesktopNavigationProvider>,
-    );
-    adapter!.openInNewTab!("/butter/inbox");
-    expect(state.switchWorkspace).toHaveBeenCalledWith("butter", "/butter/inbox");
-    expect(state.openTab).not.toHaveBeenCalled();
-    expect(state.setActiveTab).not.toHaveBeenCalled();
+    const getAdapter = renderProvider();
+
+    getAdapter().openInNewTab!("/butter/inbox");
+
+    const s = useTabStore.getState();
+    expect(s.activeWorkspaceSlug).toBe("butter");
+    expect(getActiveTab(s)?.url).toBe("/butter/inbox");
+    // acme's group is untouched.
+    expect(s.byWorkspace.acme.tabs).toHaveLength(1);
   });
 });
 
-describe("DesktopNavigationProvider.push with pinned active tab", () => {
-  function pinActive(pathname: string) {
-    state.byWorkspace.acme.tabs[0] = {
-      id: "tA",
-      path: pathname,
-      pinned: true,
-      router: makeMockRouter(pathname),
-    };
+describe("push", () => {
+  it("navigates the active session in-tab (url + virtual history)", () => {
+    const getAdapter = renderProvider();
+
+    getAdapter().push("/acme/projects?sort=name");
+
+    const active = getActiveTab(useTabStore.getState())!;
+    expect(active.url).toBe("/acme/projects?sort=name");
+    expect(active.history).toEqual({
+      stack: ["/acme/issues", "/acme/projects?sort=name"],
+      index: 1,
+    });
+  });
+
+  it("is a no-op when the target exactly matches the active session url", () => {
+    const getAdapter = renderProvider();
+    const before = acmeGroup();
+
+    getAdapter().push("/acme/issues");
+
+    expect(acmeGroup()).toBe(before);
+  });
+
+  it("switches workspace for a cross-workspace path", () => {
+    const getAdapter = renderProvider();
+
+    getAdapter().push("/butter/inbox");
+
+    const s = useTabStore.getState();
+    expect(s.activeWorkspaceSlug).toBe("butter");
+    expect(getActiveTab(s)?.url).toBe("/butter/inbox");
+  });
+
+  it("logs out instead of navigating for /login", () => {
+    const getAdapter = renderProvider();
+
+    getAdapter().push("/login");
+
+    expect(auth.logout).toHaveBeenCalledOnce();
+    expect(getActiveTab(useTabStore.getState())?.url).toBe("/acme/issues");
+  });
+
+  it("routes transition paths to the window overlay without touching sessions", () => {
+    const getAdapter = renderProvider();
+    const before = acmeGroup();
+
+    getAdapter().push("/workspaces/new");
+
+    expect(overlay.open).toHaveBeenCalledWith({ type: "new-workspace" });
+    expect(acmeGroup()).toBe(before);
+  });
+});
+
+describe("push with pinned active tab", () => {
+  function pinActive() {
+    const store = useTabStore.getState();
+    store.togglePin(acmeGroup().activeTabId);
   }
 
   it("redirects push to a new foreground tab when pathname differs", () => {
-    pinActive("/acme/issues");
-    let adapter: ReturnType<typeof useNavigation> | null = null;
-    const Probe = captureAdapter((a) => {
-      adapter = a;
-    });
-    render(
-      <DesktopNavigationProvider>
-        <Probe />
-      </DesktopNavigationProvider>,
-    );
-    adapter!.push("/acme/projects");
-    expect(state.openTab).toHaveBeenCalledWith("/acme/projects", "/acme/projects", "File");
-    expect(state.setActiveTab).toHaveBeenCalledWith("tNew");
+    pinActive();
+    const getAdapter = renderProvider();
+    const pinnedId = acmeGroup().activeTabId;
+
+    getAdapter().push("/acme/projects");
+
+    const group = acmeGroup();
+    const pinned = group.tabs.find((t) => t.id === pinnedId)!;
+    const projects = group.tabs.find((t) => t.url === "/acme/projects")!;
+    // The pinned tab stays parked on its url; focus follows the new tab.
+    expect(pinned.url).toBe("/acme/issues");
+    expect(group.activeTabId).toBe(projects.id);
   });
 
-  it("allows in-tab navigation when only search/hash changes", () => {
-    pinActive("/acme/issues");
-    let adapter: ReturnType<typeof useNavigation> | null = null;
-    const Probe = captureAdapter((a) => {
-      adapter = a;
-    });
-    render(
-      <DesktopNavigationProvider>
-        <Probe />
-      </DesktopNavigationProvider>,
-    );
-    adapter!.push("/acme/issues?filter=open");
-    // Pathname unchanged → pinned interception declines and falls through to
-    // the router's own navigate — openTab / setActiveTab must not fire.
-    expect(state.openTab).not.toHaveBeenCalled();
-    expect(state.setActiveTab).not.toHaveBeenCalled();
+  it("allows in-tab navigation when only search/hash changes (RFC §3 D2b)", () => {
+    pinActive();
+    const getAdapter = renderProvider();
+
+    getAdapter().push("/acme/issues?filter=open");
+
+    const group = acmeGroup();
+    expect(group.tabs).toHaveLength(1); // no new tab
+    expect(group.tabs[0].url).toBe("/acme/issues?filter=open");
   });
 
   it("leaves cross-workspace push to the workspace switcher (not pin)", () => {
-    pinActive("/acme/issues");
-    let adapter: ReturnType<typeof useNavigation> | null = null;
-    const Probe = captureAdapter((a) => {
-      adapter = a;
-    });
-    render(
-      <DesktopNavigationProvider>
-        <Probe />
-      </DesktopNavigationProvider>,
-    );
-    adapter!.push("/butter/inbox");
-    // Cross-workspace push runs through tryRouteToOtherWorkspace before
-    // tryRouteToPinnedNewTab, so switchWorkspace wins.
-    expect(state.switchWorkspace).toHaveBeenCalledWith("butter", "/butter/inbox");
-    expect(state.openTab).not.toHaveBeenCalled();
+    pinActive();
+    const getAdapter = renderProvider();
+
+    getAdapter().push("/butter/inbox");
+
+    expect(useTabStore.getState().activeWorkspaceSlug).toBe("butter");
+    // No extra tab was opened in acme by the pin interception.
+    expect(useTabStore.getState().byWorkspace.acme.tabs).toHaveLength(1);
   });
 });
 
-describe("DesktopNavigationProvider.push duplicate path guard", () => {
-  it("does not navigate when the target exactly matches the active tab location", () => {
-    const activeRouter = makeMockRouter("/acme/issues/child");
-    state.byWorkspace.acme.tabs[0] = {
-      id: "tA",
-      path: "/acme/issues/child",
-      pinned: false,
-      router: activeRouter,
-    };
-
-    let adapter: ReturnType<typeof useNavigation> | null = null;
-    const Probe = captureAdapter((a) => {
-      adapter = a;
-    });
-    render(
-      <DesktopNavigationProvider>
-        <Probe />
-      </DesktopNavigationProvider>,
-    );
-
-    adapter!.push("/acme/issues/child");
-
-    expect(activeRouter.navigate).not.toHaveBeenCalled();
-  });
-});
-
-describe("TabNavigationProvider.openInNewTab", () => {
-  function renderTabProvider() {
-    let adapter: ReturnType<typeof useNavigation> | null = null;
-    const Probe = captureAdapter((a) => {
-      adapter = a;
-    });
-    const fakeRouter = {
-      state: { location: { pathname: "/acme/issues", search: "" } },
-      subscribe: () => () => {},
-      navigate: vi.fn(),
-    } as unknown as Parameters<typeof TabNavigationProvider>[0]["router"];
-    render(
-      <TabNavigationProvider router={fakeRouter}>
-        <Probe />
-      </TabNavigationProvider>,
-    );
-    return () => adapter!;
-  }
-
-  it("opens a background tab (no setActiveTab) for a same-workspace path", () => {
-    const getAdapter = renderTabProvider();
-    getAdapter().openInNewTab!("/acme/agents", "Agents");
-    expect(state.openTab).toHaveBeenCalledWith("/acme/agents", "Agents", "File");
-    expect(state.setActiveTab).not.toHaveBeenCalled();
-    expect(state.switchWorkspace).not.toHaveBeenCalled();
-  });
-
-  it("activates the new tab when opts.activate is true (foreground)", () => {
-    const getAdapter = renderTabProvider();
-    getAdapter().openInNewTab!("/acme/agents", "Agents", { activate: true });
-    expect(state.openTab).toHaveBeenCalledWith("/acme/agents", "Agents", "File");
-    expect(state.setActiveTab).toHaveBeenCalledWith("tNew");
-    expect(state.switchWorkspace).not.toHaveBeenCalled();
-  });
-});
-
-describe("TabNavigationProvider.push duplicate path guard", () => {
-  function renderTabProviderAt(
-    pathname: string,
-    search = "",
-    hash = "",
-  ) {
-    let adapter: ReturnType<typeof useNavigation> | null = null;
-    const Probe = captureAdapter((a) => {
-      adapter = a;
-    });
-    const fakeRouter = {
-      state: { location: { pathname, search, hash } },
-      subscribe: () => () => {},
-      navigate: vi.fn(),
-    } as unknown as Parameters<typeof TabNavigationProvider>[0]["router"];
-    render(
-      <TabNavigationProvider router={fakeRouter}>
-        <Probe />
-      </TabNavigationProvider>,
-    );
-    return { getAdapter: () => adapter!, fakeRouter };
-  }
-
-  it("does not navigate when the target exactly matches the current full location", () => {
-    const { getAdapter, fakeRouter } = renderTabProviderAt("/acme/issues/child");
-
-    getAdapter().push("/acme/issues/child");
-
-    expect(fakeRouter.navigate).not.toHaveBeenCalled();
-  });
-
-  it("still navigates when only search or hash differs", () => {
-    const { getAdapter, fakeRouter } = renderTabProviderAt("/acme/issues");
-
-    getAdapter().push("/acme/issues?filter=open#top");
-
-    expect(fakeRouter.navigate).toHaveBeenCalledWith("/acme/issues?filter=open#top");
-  });
-});
-
-describe("TabNavigationProvider.push with pinned active tab", () => {
-  type ProviderRouter = Parameters<typeof TabNavigationProvider>[0]["router"];
-
-  function renderPinnedTabProvider(pathname: string) {
-    // The active tab and the per-tab router must share the same pathname:
-    // tryRouteToPinnedNewTab reads the *active tab's* router for the current
-    // pathname (so query-only pushes routed via React Router still compare
-    // correctly), while the TabNavigationProvider falls back to *its own*
-    // router.navigate when no interception fires. In real desktop usage they
-    // are the same router instance; this helper mirrors that invariant.
-    const fakeRouter = {
-      state: { location: { pathname, search: "", hash: "" } },
-      subscribe: () => () => {},
-      navigate: vi.fn(),
-    } as unknown as ProviderRouter;
-    state.byWorkspace.acme.tabs[0] = {
-      id: "tA",
-      path: pathname,
-      pinned: true,
-      router: fakeRouter as unknown as MockRouter,
-    };
-
-    let adapter: ReturnType<typeof useNavigation> | null = null;
-    const Probe = captureAdapter((a) => {
-      adapter = a;
-    });
-    render(
-      <TabNavigationProvider router={fakeRouter}>
-        <Probe />
-      </TabNavigationProvider>,
-    );
-    return { getAdapter: () => adapter!, fakeRouter };
-  }
-
-  it("redirects push to a new foreground tab when pathname differs", () => {
-    const { getAdapter, fakeRouter } = renderPinnedTabProvider("/acme/issues");
+describe("back", () => {
+  it("moves the session's virtual history backwards", () => {
+    const getAdapter = renderProvider();
     getAdapter().push("/acme/projects");
-    expect(state.openTab).toHaveBeenCalledWith("/acme/projects", "/acme/projects", "File");
-    expect(state.setActiveTab).toHaveBeenCalledWith("tNew");
-    // Pinned interception short-circuits — the per-tab router must NOT
-    // navigate, otherwise the pinned tab itself would move off its path.
-    expect(fakeRouter.navigate).not.toHaveBeenCalled();
-  });
 
-  it("allows in-tab navigation when only search/hash changes", () => {
-    const { getAdapter, fakeRouter } = renderPinnedTabProvider("/acme/issues");
-    getAdapter().push("/acme/issues?filter=open");
-    // Same pathname → pinned interception declines, push falls through to
-    // the tab's own router.navigate, and no new tab is opened.
-    expect(state.openTab).not.toHaveBeenCalled();
-    expect(state.setActiveTab).not.toHaveBeenCalled();
-    expect(fakeRouter.navigate).toHaveBeenCalledWith("/acme/issues?filter=open");
+    getAdapter().back!();
+
+    const active = getActiveTab(useTabStore.getState())!;
+    expect(active.url).toBe("/acme/issues");
+    expect(active.history.index).toBe(0);
   });
 });

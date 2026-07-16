@@ -35,7 +35,8 @@ import { NodeSelection } from "@tiptap/pm/state";
 import { toast } from "sonner";
 import { useCreateIssue } from "@multica/core/issues/mutations";
 import { useT } from "../i18n";
-import { modKey } from "@multica/core/platform";
+import { createShortcutChord, type ShortcutChord } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { Toggle } from "@multica/ui/components/ui/toggle";
 import { Separator } from "@multica/ui/components/ui/separator";
 import {
@@ -116,7 +117,7 @@ function MarkButton({
   mark: InlineMark;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
-  shortcut: string;
+  shortcut: ShortcutChord;
   isActive: boolean;
 }) {
   return (
@@ -135,7 +136,7 @@ function MarkButton({
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={8}>
         {label}
-        <span className="ml-1.5 text-muted-foreground">{shortcut}</span>
+        <ShortcutKeycaps shortcut={shortcut} className="ml-1.5" />
       </TooltipContent>
     </Tooltip>
   );
@@ -604,11 +605,11 @@ function EditorBubbleMenu({
       ) : (
         <TooltipProvider delay={300}>
           <div className="bubble-menu">
-            <MarkButton editor={editor} mark="bold" icon={Bold} label={t(($) => $.bubble_menu.bold)} shortcut={`${modKey}+B`} isActive={fmt.bold} />
-            <MarkButton editor={editor} mark="italic" icon={Italic} label={t(($) => $.bubble_menu.italic)} shortcut={`${modKey}+I`} isActive={fmt.italic} />
-            <MarkButton editor={editor} mark="strike" icon={Strikethrough} label={t(($) => $.bubble_menu.strikethrough)} shortcut={`${modKey}+Shift+S`} isActive={fmt.strike} />
-            <MarkButton editor={editor} mark="code" icon={Code} label={t(($) => $.bubble_menu.code)} shortcut={`${modKey}+E`} isActive={fmt.code} />
-            <MarkButton editor={editor} mark="highlight" icon={Highlighter} label={t(($) => $.bubble_menu.highlight)} shortcut={`${modKey}+Shift+H`} isActive={fmt.highlight} />
+            <MarkButton editor={editor} mark="bold" icon={Bold} label={t(($) => $.bubble_menu.bold)} shortcut={createShortcutChord("B", { primary: true })} isActive={fmt.bold} />
+            <MarkButton editor={editor} mark="italic" icon={Italic} label={t(($) => $.bubble_menu.italic)} shortcut={createShortcutChord("I", { primary: true })} isActive={fmt.italic} />
+            <MarkButton editor={editor} mark="strike" icon={Strikethrough} label={t(($) => $.bubble_menu.strikethrough)} shortcut={createShortcutChord("S", { primary: true, shift: true })} isActive={fmt.strike} />
+            <MarkButton editor={editor} mark="code" icon={Code} label={t(($) => $.bubble_menu.code)} shortcut={createShortcutChord("E", { primary: true })} isActive={fmt.code} />
+            <MarkButton editor={editor} mark="highlight" icon={Highlighter} label={t(($) => $.bubble_menu.highlight)} shortcut={createShortcutChord("H", { primary: true, shift: true })} isActive={fmt.highlight} />
             <Separator orientation="vertical" className="mx-0.5 h-5" />
             <Tooltip>
               <TooltipTrigger render={
@@ -621,6 +622,19 @@ function EditorBubbleMenu({
             <Separator orientation="vertical" className="mx-0.5 h-5" />
             <HeadingDropdown editor={editor} onOpenChange={handleMenuOpenChange} activeLevel={fmt.heading1 ? 1 : fmt.heading2 ? 2 : fmt.heading3 ? 3 : undefined} />
             <ListDropdown editor={editor} onOpenChange={handleMenuOpenChange} isBullet={fmt.bulletList} isOrdered={fmt.orderedList} isTask={fmt.taskList} />
+            {/* Dedicated one-click toggle for checkbox task lists — turns the
+                current line(s) into a `- [ ]` task item or back to a paragraph.
+                The same toggle also lives in the List dropdown, but a direct
+                button keeps the common "make this a checklist" action one tap
+                away instead of two. */}
+            <Tooltip>
+              <TooltipTrigger render={
+                <Toggle size="sm" pressed={fmt.taskList} onPressedChange={() => editor.chain().focus().toggleTaskList().run()} onMouseDown={(e) => e.preventDefault()} />
+              }>
+                <ListTodo className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={8}>{t(($) => $.bubble_menu.task_list)}</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger render={
                 <Toggle size="sm" pressed={fmt.blockquote} onPressedChange={() => editor.chain().focus().toggleBlockquote().run()} onMouseDown={(e) => e.preventDefault()} />

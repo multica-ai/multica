@@ -7,6 +7,7 @@
     "highlight": "Highlight",
     "link": "Link",
     "list": "List",
+    "task_list": "Task list",
     "quote": "Quote",
     "url_aria_label": "URL",
     "heading_dropdown": {
@@ -77,6 +78,10 @@
   },
   "file_card": {
     "uploading": "Uploading {{filename}}"
+  },
+  "upload": {
+    "failed": "Couldn't upload {{filename}}: {{reason}}",
+    "in_progress": "Uploading…"
   },
   "title_editor": {
     "title_aria_label": "Title"

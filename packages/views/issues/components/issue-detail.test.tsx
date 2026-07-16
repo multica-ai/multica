@@ -1,15 +1,20 @@
-import { forwardRef, useRef, useState, useImperativeHandle } from "react";
+import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+
+// Counts MockContentEditor mounts. This pins the description to exactly one
+// eager editor per issue and catches stale editor reuse across issue switches.
+const contentEditorMounts = vi.hoisted(() => ({ count: 0 }));
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => mockViewport.isMobile,
@@ -110,7 +115,21 @@ vi.mock("../../navigation", () => ({
 }));
 
 // Mock editor components (Tiptap requires real DOM)
-vi.mock("../../editor", () => ({
+vi.mock("../../editor", async () => ({
+  // Real lazy-mount controller (pure React, no Tiptap) so readonly-first
+  // shell → activate → ready flows behave exactly as in production.
+  ...(await vi.importActual<typeof import("../../editor/use-lazy-editor")>(
+    "../../editor/use-lazy-editor",
+  )),
+  // Real submit gate (pure React) — see comment-composers.test.tsx.
+  ...(await vi.importActual<typeof import("../../editor/use-upload-gate")>(
+    "../../editor/use-upload-gate",
+  )),
+  useEditorUpload: () => ({
+    uploadWithToast: vi.fn(),
+    upload: vi.fn(),
+    uploading: false,
+  }),
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
   // No-op so comment-card's AttachmentList can render without hitting the
@@ -129,15 +148,21 @@ vi.mock("../../editor", () => ({
     <div data-testid="readonly-content">{content}</div>
   ),
   ContentEditor: forwardRef(function MockContentEditor(
-    { defaultValue, onUpdate, placeholder, flushPendingOnUnmount }: any,
+    { defaultValue, onUpdate, placeholder, flushPendingOnUnmount, onReady }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
+    useEffect(() => {
+      contentEditorMounts.count += 1;
+      onReady?.();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       clearContent: () => { valueRef.current = ""; setValue(""); },
       focus: () => {},
+      focusAtCoords: () => {},
       uploadFile: () => {},
     }));
     return (
@@ -155,14 +180,19 @@ vi.mock("../../editor", () => ({
     );
   }),
   TitleEditor: forwardRef(function MockTitleEditor(
-    { defaultValue, placeholder, onBlur, onChange }: any,
+    { defaultValue, placeholder, onBlur, onChange, onReady }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
+    useEffect(() => {
+      onReady?.();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     useImperativeHandle(ref, () => ({
       getText: () => valueRef.current,
       focus: () => {},
+      focusAtCoords: () => {},
     }));
     return (
       <input
@@ -234,7 +264,6 @@ vi.mock("@multica/core/api", () => ({
 // Mock issue config
 vi.mock("@multica/core/issues/config", () => ({
   ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  BOARD_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked"],
   STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -257,7 +286,13 @@ vi.mock("@multica/core/issues/config", () => ({
 
 // Mock recent issues store
 const mockRecordVisit = vi.fn();
-vi.mock("@multica/core/issues/stores", () => ({
+vi.mock("@multica/core/issues/stores", async () => ({
+  // Real store, not a stub: resolved-thread expand/collapse behavior under
+  // test runs through it. Deep import keeps the persisted sibling stores
+  // (which need localStorage) out of this mock.
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/resolved-expand-store")
+  >("@multica/core/issues/stores/resolved-expand-store")),
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
       const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };
@@ -299,6 +334,15 @@ vi.mock("@multica/core/issues/stores", () => ({
       }),
     },
   ),
+  useCommentComposerStore: Object.assign(
+    (selector?: any) => {
+      const state = { sticky: true, toggleSticky: () => {} };
+      return selector ? selector(state) : state;
+    },
+    {
+      getState: () => ({ sticky: true, toggleSticky: () => {} }),
+    },
+  ),
 }));
 
 // Mock react-virtuoso: jsdom has no real layout, so the real Virtuoso would
@@ -311,8 +355,9 @@ vi.mock("@multica/core/issues/stores", () => ({
 // scrollIntoView (it drives the timeline container's scrollTop directly to
 // avoid scrolling ancestor overflow:hidden boxes — see issue-detail.tsx). We
 // keep a no-op stub on the prototype so any stray scrollIntoView call from
-// other components doesn't throw; deep-link tests assert the highlight ring
-// instead, which is mechanism-independent and observable without layout.
+// other components doesn't throw; deep-link tests assert the highlight
+// background instead, which is mechanism-independent and observable without
+// layout.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("react-virtuoso", () => ({
@@ -346,6 +391,9 @@ beforeEach(() => {
     writable: true,
     value: scrollIntoViewSpy,
   });
+  // The resolved-expand store is module-global (not per-mount like the old
+  // useState); reset so one test's expansions can't leak into the next.
+  useResolvedExpandStore.setState({ expandedByIssue: {} });
 });
 
 // Mock modals
@@ -408,6 +456,7 @@ const mockIssue: Issue = {
   start_date: null,
   due_date: "2026-06-01T00:00:00Z",
   metadata: {},
+  properties: {},
   created_at: "2026-01-15T00:00:00Z",
   updated_at: "2026-01-20T00:00:00Z",
 };
@@ -491,6 +540,21 @@ function renderIssueDetailWithHighlight(
   return { ...result, queryClient };
 }
 
+const highlightedCommentBackgroundClass =
+  "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
+
+function hasHighlightedCommentBackground(root: ParentNode | null): boolean {
+  if (!root) return false;
+
+  const elements = root instanceof Element
+    ? [root, ...Array.from(root.querySelectorAll("[class]"))]
+    : Array.from(root.querySelectorAll("[class]"));
+
+  return elements.some(
+    (el) => typeof el.className === "string" && el.className.includes(highlightedCommentBackgroundClass),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -498,6 +562,7 @@ function renderIssueDetailWithHighlight(
 describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    contentEditorMounts.count = 0;
     mockViewport.isMobile = false;
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
@@ -529,14 +594,27 @@ describe("IssueDetail (shared)", () => {
     ).toBe(true);
   });
 
+  it("renders comment bodies without Base UI collapsible panels", async () => {
+    const { container } = renderIssueDetail();
+
+    await screen.findByText("Started working on this");
+
+    expect(
+      container.querySelector('[data-slot="collapsible-content"]'),
+    ).toBeNull();
+  });
+
   it("renders issue title and description after loading", async () => {
     renderIssueDetail();
 
-    await waitFor(() => {
-      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
-    });
-
-    expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+    // The description is the one eager editor: keeping one renderer avoids the
+    // layout jump caused by swapping a long react-markdown tree for ProseMirror.
+    // Title and comment/reply composers remain readonly-first.
+    expect(await screen.findByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+    expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    expect(screen.queryByTestId("title-editor")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("rich-text-editor")).toHaveLength(1);
+    expect(contentEditorMounts.count).toBe(1);
   });
 
   it("opts the description editor into the unmount flush", async () => {
@@ -550,6 +628,45 @@ describe("IssueDetail (shared)", () => {
 
     const description = await screen.findByDisplayValue("Add JWT auth to the backend");
     expect(description).toHaveAttribute("data-flush-on-unmount", "true");
+  });
+
+  it("remounts the eager description on issue switch without carrying stale content", async () => {
+    // The web route reuses IssueDetail across issues. The keyed description
+    // editor must remount atomically for the new issue while the title remains
+    // on its cheap stand-in.
+    const queryClient = createTestQueryClient();
+    const issue2 = {
+      ...mockIssue,
+      id: "issue-2",
+      title: "Second issue",
+      description: "Second description",
+    };
+    // The cache seed marks the data stale, so the query refetches in the
+    // background — getIssue must answer per-id or the refetch would clobber
+    // issue-2 with issue-1's payload.
+    mockApiObj.getIssue.mockImplementation((issueId: string) =>
+      Promise.resolve(issueId === "issue-2" ? issue2 : mockIssue),
+    );
+    // Pre-seed issue-2 so its first render skips the loading skeleton.
+    queryClient.setQueryData(["issues", "ws-1", "detail", "issue-2"], issue2);
+    const ui = (issueId: string) => (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={queryClient}>
+          <IssueDetail issueId={issueId} />
+        </QueryClientProvider>
+      </I18nProvider>
+    );
+    const { rerender } = render(ui("issue-1"));
+
+    await screen.findByDisplayValue("Add JWT auth to the backend");
+    const mountsBeforeSwitch = contentEditorMounts.count;
+
+    rerender(ui("issue-2"));
+
+    expect(await screen.findByDisplayValue("Second description")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Add JWT auth to the backend")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("title-editor")).not.toBeInTheDocument();
+    expect(contentEditorMounts.count).toBe(mountsBeforeSwitch + 1);
   });
 
   it("renders the issue title leaf as a link to the issue detail page", async () => {
@@ -658,7 +775,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
     });
 
     expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
@@ -1112,12 +1229,54 @@ describe("IssueDetail (shared)", () => {
       // The deep-link effect lands on AND highlights the target comment: it
       // drives the timeline container's scrollTop directly (jsdom has no
       // layout, so the scroll itself isn't observable here) and applies the
-      // brand highlight ring. Assert the user-facing highlight.
+      // brand highlight background. Assert the user-facing highlight.
       await waitFor(() => {
         expect(
-          document.getElementById("comment-comment-2")?.querySelector(".ring-2"),
-        ).not.toBeNull();
+          hasHighlightedCommentBackground(document.getElementById("comment-comment-2")),
+        ).toBe(true);
       });
+    });
+
+    it("highlights only the target root comment, not the whole thread", async () => {
+      mockApiObj.listTimeline.mockResolvedValue([
+        {
+          type: "comment",
+          id: "comment-root",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Root target",
+          parent_id: null,
+          created_at: "2026-01-18T00:00:00Z",
+          updated_at: "2026-01-18T00:00:00Z",
+          comment_type: "comment",
+        } as TimelineEntry,
+        {
+          type: "comment",
+          id: "reply-under-root",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Reply should stay neutral",
+          parent_id: "comment-root",
+          created_at: "2026-01-18T01:00:00Z",
+          updated_at: "2026-01-18T01:00:00Z",
+          comment_type: "comment",
+        } as TimelineEntry,
+      ]);
+
+      renderIssueDetailWithHighlight("comment-root");
+
+      await waitFor(() => {
+        expect(document.getElementById("comment-comment-root")).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(
+          hasHighlightedCommentBackground(document.getElementById("comment-comment-root")),
+        ).toBe(true);
+      });
+
+      const reply = document.getElementById("comment-reply-under-root");
+      expect(reply).not.toBeNull();
+      expect(hasHighlightedCommentBackground(reply)).toBe(false);
     });
 
     it("still scrolls when the timeline is ready before the issue (regression for inbox click)", async () => {
@@ -1138,7 +1297,7 @@ describe("IssueDetail (shared)", () => {
         document.getElementById("comment-comment-2"),
       ).toBeNull();
       // Nothing highlighted while the loading skeleton is up.
-      expect(document.querySelector(".ring-2")).toBeNull();
+      expect(hasHighlightedCommentBackground(document)).toBe(false);
 
       resolveIssue(mockIssue);
 
@@ -1149,8 +1308,8 @@ describe("IssueDetail (shared)", () => {
       });
       await waitFor(() => {
         expect(
-          document.getElementById("comment-comment-2")?.querySelector(".ring-2"),
-        ).not.toBeNull();
+          hasHighlightedCommentBackground(document.getElementById("comment-comment-2")),
+        ).toBe(true);
       });
     });
 
@@ -1217,11 +1376,7 @@ describe("IssueDetail (shared)", () => {
   it("sends empty description when editor is cleared", async () => {
     renderIssueDetail();
 
-    await waitFor(() => {
-      expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
-    });
-
-    const editor = screen.getByPlaceholderText("Add description...");
+    const editor = await screen.findByDisplayValue("Add JWT auth to the backend");
     fireEvent.change(editor, { target: { value: "" } });
 
     await waitFor(() => {

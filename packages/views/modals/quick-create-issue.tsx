@@ -24,8 +24,8 @@ import {
   readRuntimeCliVersion,
   MIN_QUICK_CREATE_CLI_VERSION,
 } from "@multica/core/runtimes";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { contentReferencesAttachment, type Agent, type Attachment, type Squad } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
@@ -44,6 +44,8 @@ import {
   type ContentEditorRef,
   useFileDropZone,
   FileDropOverlay,
+  useUploadGate,
+  useEditorUpload,
 } from "../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useT } from "../i18n";
@@ -82,6 +84,7 @@ export function AgentCreatePanel({
   setIsExpanded: (v: boolean) => void;
 }) {
   const { t } = useT("modals");
+  const sendShortcut = useShortcut("send");
   const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
@@ -262,7 +265,11 @@ export function AgentCreatePanel({
   // Image paste/drop support: route uploads through the same helper Advanced
   // uses, so users can paste screenshots straight into the prompt and the
   // agent receives them as embedded markdown image URLs in the prompt.
-  const { uploadWithToast, uploading } = useFileUpload(api);
+  const { uploadWithToast } = useEditorUpload();
+  // Was two parallel truths — useFileUpload's request counter for the button
+  // and the editor's node scan for the handler. The editor document is the
+  // queue, so one source drives both now.
+  const uploadGate = useUploadGate(editorRef);
   const handleUploadFile = useCallback(async (file: File) => {
     const result = await uploadWithToast(file);
     if (result) {
@@ -286,7 +293,12 @@ export function AgentCreatePanel({
 
   const submit = async () => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
-    if (!md || !actor || submitting || versionBlocked || uploading) return;
+    if (!md || !actor || submitting || versionBlocked) return;
+    // Submit-time re-read of the queue. Blocking here is what guarantees
+    // `getMarkdown()`'s blob-url strip never erases a pasted/dropped image
+    // whose attachment id hasn't reached `pendingAttachments` yet — the
+    // rendered button state is a frame behind and ⌘+Enter skips it anyway.
+    if (uploadGate.isBlocked()) return;
     const activeAttachmentIds = pendingAttachments
       .filter((a) => contentReferencesAttachment(md, a))
       .map((a) => a.id);
@@ -372,6 +384,9 @@ export function AgentCreatePanel({
   // store directly because the manual panel reads its initial values from
   // there. Persist the mode flip so the next `c` lands in manual.
   const switchToManual = () => {
+    // The prompt is serialized into the manual draft here; mid-upload that
+    // body has already lost the pending image (see switchToAgent).
+    if (uploadGate.isBlocked()) return;
     const md = editorRef.current?.getMarkdown() ?? "";
     useIssueDraftStore.getState().setDraft({
       description: md,
@@ -480,6 +495,7 @@ export function AgentCreatePanel({
               setPrompt(md);
             }}
             onUploadFile={handleUploadFile}
+            onUploadingChange={uploadGate.onUploadingChange}
             attachments={pendingAttachments}
             onSubmit={submit}
             debounceMs={150}
@@ -529,9 +545,12 @@ export function AgentCreatePanel({
         {/* Footer */}
         <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-h-7 items-center gap-2">
+            {/* Deliberately NOT disabled while uploading: each file is its
+                own queue entry, so queueing a second one is safe and waiting
+                for the first to land just to attach the next is busywork. */}
             <FileUploadButton
               size="sm"
-              disabled={uploading}
+              multiple
               onSelect={(file) => editorRef.current?.uploadFile(file)}
             />
             {keepOpen && sentCount > 0 && (
@@ -544,8 +563,11 @@ export function AgentCreatePanel({
             <button
               type="button"
               onClick={switchToManual}
+              disabled={uploadGate.uploading}
+              aria-disabled={uploadGate.uploading || undefined}
+              aria-busy={uploadGate.uploading || undefined}
               title={t(($) => $.create_issue.switch_to_manual_tooltip)}
-              className="flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
+              className="flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             >
               <ArrowLeftRight className="size-3.5" />
               {t(($) => $.create_issue.switch_to_manual)}
@@ -561,7 +583,9 @@ export function AgentCreatePanel({
             <Button
               size="sm"
               onClick={submit}
-              disabled={!hasContent || !actor || submitting || versionBlocked || uploading}
+              disabled={!hasContent || !actor || submitting || versionBlocked || uploadGate.uploading}
+              aria-disabled={uploadGate.uploading || undefined}
+              aria-busy={uploadGate.uploading || undefined}
               title={
                 versionBlocked
                   ? t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })
@@ -569,9 +593,21 @@ export function AgentCreatePanel({
               }
               className={justSent ? "min-w-28 !bg-emerald-600 !text-white" : "min-w-28"}
             >
-              {submitting ? t(($) => $.create_issue.agent.sending) : uploading ? t(($) => $.create_issue.agent.uploading) : justSent ? (
+              {submitting ? t(($) => $.create_issue.agent.sending) : uploadGate.uploading ? t(($) => $.create_issue.agent.uploading) : justSent ? (
                 <span className="flex items-center gap-1"><Check className="size-3.5" />{t(($) => $.create_issue.agent.sent_label)}</span>
-              ) : `${t(($) => $.create_issue.agent.submit)} (${formatShortcut(modKey, enterKey)})`}
+              ) : (
+                <>
+                  {t(($) => $.create_issue.agent.submit)}
+                  {sendShortcut ? (
+                    <ShortcutKeycaps
+                      shortcut={sendShortcut}
+                      decorative
+                      className="ml-1"
+                      keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
+                    />
+                  ) : null}
+                </>
+              )}
             </Button>
           </div>
         </div>
@@ -641,7 +677,7 @@ function ActorPicker({
               <ActorAvatar
                 actorType={displayActor.type}
                 actorId={displayActor.id}
-                size={16}
+                size="sm"
               />
               {displayLabel}
             </span>
@@ -672,7 +708,7 @@ function ActorPicker({
                     setOpen(false);
                   }}
                 >
-                  <ActorAvatar actorType="agent" actorId={a.id} size={18} />
+                  <ActorAvatar actorType="agent" actorId={a.id} size="sm" />
                   <span className="truncate">{a.name}</span>
                 </PickerItem>
               ))}
@@ -689,7 +725,7 @@ function ActorPicker({
                     setOpen(false);
                   }}
                 >
-                  <ActorAvatar actorType="squad" actorId={s.id} size={18} />
+                  <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
                   <span className="truncate">{s.name}</span>
                 </PickerItem>
               ))}

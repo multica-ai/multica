@@ -8,7 +8,9 @@ export type ShortcutInput = {
   key: string;
   control: boolean;
   meta: boolean;
+  alt: boolean;
   shift: boolean;
+  isAutoRepeat?: boolean;
 };
 
 // Subset of WebContents the zoom handler needs. Keeps the test mock tiny.
@@ -49,32 +51,40 @@ export function handleAppShortcut(
   platform: NodeJS.Platform = process.platform,
 ): ShortcutResult {
   if (input.type !== "keyDown") return false;
-  const cmdOrCtrl = platform === "darwin" ? input.meta : input.control;
+  const primary = platform === "darwin" ? input.meta : input.control;
+  const secondary = platform === "darwin" ? input.control : input.meta;
+  const noSecondaryModifiers = !secondary && !input.alt;
 
   // Block reload — accidental Cmd+R / Ctrl+R / F5 destroys in-memory state
   // (tabs, drafts, WS connections) with no URL bar to recover from.
-  if ((cmdOrCtrl && input.key.toLowerCase() === "r") || input.key === "F5") {
+  if ((primary && input.key.toLowerCase() === "r") || input.key === "F5") {
     return true;
   }
 
-  if (!cmdOrCtrl) return false;
+  if (!primary || !noSecondaryModifiers) return false;
 
   // Cmd/Ctrl + "=" (unshifted) or "+" (Shift+=) → zoom in.
-  if (input.key === "=" || input.key === "+") {
+  if (
+    (input.key === "=" && !input.shift) ||
+    (input.key === "+" && input.shift)
+  ) {
     const next = Math.min(webContents.getZoomLevel() + ZOOM_STEP, ZOOM_MAX);
     webContents.setZoomLevel(next);
     return true;
   }
 
   // Cmd/Ctrl + "-" (unshifted) or "_" (Shift+-) → zoom out.
-  if (input.key === "-" || input.key === "_") {
+  if (
+    (input.key === "-" && !input.shift) ||
+    (input.key === "_" && input.shift)
+  ) {
     const next = Math.max(webContents.getZoomLevel() - ZOOM_STEP, ZOOM_MIN);
     webContents.setZoomLevel(next);
     return true;
   }
 
   // Cmd/Ctrl + 0 → reset zoom to 100%.
-  if (input.key === "0") {
+  if (input.key === "0" && !input.shift) {
     webContents.setZoomLevel(0);
     return true;
   }
@@ -83,6 +93,9 @@ export function handleAppShortcut(
   // Cmd/Ctrl + Shift + W is reserved for "close window" — do not intercept.
   // Return a signal so the caller can send IPC to the renderer.
   if (input.key.toLowerCase() === "w" && !input.shift) {
+    // Holding Cmd/Ctrl+W must not race through several product tabs. Swallow
+    // Electron's repeated keydown without issuing another close request.
+    if (input.isAutoRepeat) return true;
     return "close-tab";
   }
 

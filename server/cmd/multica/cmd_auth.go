@@ -74,7 +74,11 @@ func resolveToken(cmd *cobra.Command) string {
 	if v := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); v != "" {
 		return v
 	}
-	if inAgentExecutionContext() {
+	// Inside a daemon-managed task, never fall back to the user-global config
+	// token: that silent fallback is how agent writes land as the wrong actor.
+	// inDaemonManagedExecutionContext already covers the MULTICA_DAEMON_PORT
+	// signal for subprocesses that lost MULTICA_AGENT_ID / MULTICA_TASK_ID.
+	if inDaemonManagedExecutionContext() {
 		return ""
 	}
 	profile := resolveProfile(cmd)
@@ -426,7 +430,7 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 		return err
 	}
 
-	serverURL := resolveServerURL(cmd)
+	serverURL := resolveLoginTokenServerURL(cmd)
 	client := cli.NewAPIClient(serverURL, "", token)
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -445,6 +449,9 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 	cfg.WorkspaceID = ""
 	cfg.Token = token
 	cfg.ServerURL = serverURL
+	if cfg.AppURL == "" && serverURL == defaultCloudServerURL {
+		cfg.AppURL = defaultCloudAppURL
+	}
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}

@@ -9,6 +9,7 @@ import {
   ArrowLeftRight,
   ArrowUp,
   CalendarClock,
+  CalendarDays,
   Check,
   ChevronRight,
   Maximize2,
@@ -34,8 +35,8 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
-import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
+import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, useUploadGate, useEditorUpload } from "../editor";
+import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
@@ -47,9 +48,8 @@ import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-stor
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { useAttachLabelToIssue } from "@multica/core/labels";
 import {
-  api,
   ApiError,
   DuplicateIssueErrorBodySchema,
   type DuplicateIssueErrorBody,
@@ -159,7 +159,7 @@ function CreateRunHint({
             <ActorAvatar
               actorType={avatarType}
               actorId={avatarId}
-              size={16}
+              size="sm"
               profileLink={false}
             />
           )}
@@ -188,6 +188,7 @@ export function ManualCreatePanel({
   setIsExpanded: (v: boolean) => void;
 }) {
   const { t } = useT("modals");
+  const { t: tEditor } = useT("editor");
   const router = useNavigation();
   const p = useWorkspacePaths();
   const workspaceName = useCurrentWorkspace()?.name;
@@ -223,6 +224,7 @@ export function ManualCreatePanel({
   });
   const [startDate, setStartDate] = useState<string | null>(draft.startDate);
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
+  const [labelIds, setLabelIds] = useState<string[]>(draft.labelIds);
   const [projectId, setProjectId] = useState<string | undefined>(
     (data?.project_id as string) || undefined,
   );
@@ -240,6 +242,10 @@ export function ManualCreatePanel({
   // mounts the inline pill (the popover's anchor) AND opens the calendar.
   // When the popover closes without a value set, the pill unmounts again.
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
+  // Due date follows the same overflow pattern as start date: collapsed into
+  // the ⋯ menu by default, mounted inline (as the popover anchor) only when it
+  // has a value or the user just opened it from the menu.
+  const [dueDatePickerOpen, setDueDatePickerOpen] = useState(false);
   // Children live as full Issue objects — the picker always returns the whole
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
@@ -276,7 +282,11 @@ export function ManualCreatePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { uploadWithToast } = useFileUpload(api);
+  const { uploadWithToast } = useEditorUpload();
+  // Gate every action that fixes this draft: Create, Enter on the title, and
+  // the switch to agent mode (which re-serializes the description into a
+  // prompt and would carry a stripped body across).
+  const uploadGate = useUploadGate(descEditorRef);
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
     if (result) {
@@ -300,15 +310,18 @@ export function ManualCreatePanel({
   };
   const updateStartDate = (v: string | null) => { setStartDate(v); setDraft({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
+  const updateLabelIds = (ids: string[]) => { setLabelIds(ids); setDraft({ labelIds: ids }); };
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
+  const attachLabelMutation = useAttachLabelToIssue();
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
     setPriority("none");
     setStartDate(null);
     setDueDate(null);
+    setLabelIds([]);
     setProjectId(undefined);
     setParentIssueId(undefined);
     setStage(null);
@@ -322,6 +335,7 @@ export function ManualCreatePanel({
       assigneeId,
       startDate: null,
       dueDate: null,
+      labelIds: [],
       attachments: [],
     });
     descEditorRef.current?.clearContent();
@@ -330,6 +344,8 @@ export function ManualCreatePanel({
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
+    // Covers both the Create button and TitleEditor's Enter, which route here.
+    if (uploadGate.isBlocked()) return;
     setSubmitting(true);
     try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
@@ -346,6 +362,12 @@ export function ManualCreatePanel({
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
         attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
+        // The server attaches these in the same transaction as the create and
+        // echoes them back as `issue.labels`, so a stale selection fails the
+        // create instead of leaving a committed-but-unlabeled issue. A legacy
+        // backend that predates this ignores the field — handled by the
+        // compatibility fallback below.
+        label_ids: labelIds.length > 0 ? labelIds : undefined,
         parent_issue_id: parentIssueId,
         // Stage is only meaningful for a sub-issue (relative to its siblings).
         stage: parentIssueId && stage != null ? stage : undefined,
@@ -383,6 +405,32 @@ export function ManualCreatePanel({
                   total: childIssues.length,
                 }),
           );
+        }
+      }
+
+      // Backend-compatibility fallback for the rolling deploy window: the web
+      // app auto-deploys on merge but the backend deploys manually, so a newer
+      // web build can briefly talk to a backend that predates atomic label
+      // creation. That backend silently ignores `label_ids` and returns an
+      // issue with no `labels` field. Only then do we fall back to the legacy
+      // per-label attach so the user's labels aren't silently dropped. When
+      // `labels` is present (current backend) the atomic path already ran, so
+      // we skip this — no double-write, no per-label fan-out.
+      if (labelIds.length > 0 && issue.labels === undefined) {
+        const results = await Promise.allSettled(
+          labelIds.map((labelId) =>
+            attachLabelMutation.mutateAsync({ issueId: issue.id, labelId }),
+          ),
+        );
+        let labelsFailed = 0;
+        for (const result of results) {
+          if (result.status === "rejected") {
+            labelsFailed += 1;
+            console.error("[create-issue] label attach fallback failed", result.reason);
+          }
+        }
+        if (labelsFailed > 0) {
+          toast.error(t(($) => $.create_issue.toast_link_labels_failed));
         }
       }
 
@@ -494,6 +542,10 @@ export function ManualCreatePanel({
   // needs it so the new issue is still created as a sub-issue when the user
   // flips from "Add sub issue" → "Create with agent".
   const switchToAgent = () => {
+    // Serializing mid-upload packs a description that has already lost the
+    // pending image into the agent prompt, and the draft it came from is
+    // cleared below — the file would be unrecoverable.
+    if (uploadGate.isBlocked()) return;
     const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
     const prompt = [title.trim(), desc].filter(Boolean).join("\n\n");
     // Title + description have been packed into the agent prompt — clear them
@@ -591,6 +643,7 @@ export function ManualCreatePanel({
                 placeholder={t(($) => $.create_issue.description_placeholder)}
                 onUpdate={(md) => setDraft({ description: md })}
                 onUploadFile={handleUpload}
+                onUploadingChange={uploadGate.onUploadingChange}
                 debounceMs={500}
                 attachments={draftAttachments}
               />
@@ -631,10 +684,13 @@ export function ManualCreatePanel({
                 align="start"
               />
 
-              {/* Due date */}
-              <DueDatePicker
-                dueDate={dueDate}
-                onUpdate={(u) => updateDueDate(u.due_date ?? null)}
+              {/* Labels — occupies the slot that used to hold Due date so the
+                  add-label entry is exposed directly on the dialog. Draft mode:
+                  selection is local until the issue is created (handleSubmit
+                  attaches the labels afterward). */}
+              <LabelPicker
+                selectedIds={labelIds}
+                onSelectedIdsChange={updateLabelIds}
                 triggerRender={<PillButton />}
                 align="start"
               />
@@ -671,6 +727,21 @@ export function ManualCreatePanel({
                   align="start"
                   open={startDatePickerOpen}
                   onOpenChange={setStartDatePickerOpen}
+                />
+              )}
+
+              {/* Due date — collapsed into the ⋯ menu by default (moved off
+                  the toolbar to make room for Labels). Same reveal rule as
+                  start date: inline only when it has a value or the user just
+                  opened it from the overflow menu. */}
+              {(dueDate || dueDatePickerOpen) && (
+                <DueDatePicker
+                  dueDate={dueDate}
+                  onUpdate={(u) => updateDueDate(u.due_date ?? null)}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={dueDatePickerOpen}
+                  onOpenChange={setDueDatePickerOpen}
                 />
               )}
 
@@ -735,6 +806,12 @@ export function ManualCreatePanel({
                   }
                 />
                 <DropdownMenuContent align="start" className="w-auto">
+                  {!dueDate && (
+                    <DropdownMenuItem onClick={() => setDueDatePickerOpen(true)}>
+                      <CalendarDays className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_due_date)}
+                    </DropdownMenuItem>
+                  )}
                   {!startDate && (
                     <DropdownMenuItem onClick={() => setStartDatePickerOpen(true)}>
                       <CalendarClock className="h-3.5 w-3.5" />
@@ -807,6 +884,7 @@ export function ManualCreatePanel({
             <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-h-7 items-center gap-2">
                 <FileUploadButton
+                  multiple
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>
@@ -814,8 +892,11 @@ export function ManualCreatePanel({
                 <button
                   type="button"
                   onClick={switchToAgent}
+                  disabled={uploadGate.uploading}
+                  aria-disabled={uploadGate.uploading || undefined}
+                  aria-busy={uploadGate.uploading || undefined}
                   title={t(($) => $.create_issue.switch_to_agent_tooltip)}
-                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer"
+                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
                   {t(($) => $.create_issue.switch_to_agent)}
@@ -836,8 +917,18 @@ export function ManualCreatePanel({
                     </Tooltip>
                   </TooltipProvider>
                 ) : (
-                  <Button size="sm" onClick={handleSubmit} disabled={submitting}>
-                    {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
+                  <Button
+                    size="sm"
+                    onClick={handleSubmit}
+                    disabled={submitting || uploadGate.uploading}
+                    aria-disabled={uploadGate.uploading || undefined}
+                    aria-busy={uploadGate.uploading || undefined}
+                  >
+                    {submitting
+                      ? t(($) => $.create_issue.submitting)
+                      : uploadGate.uploading
+                        ? tEditor(($) => $.upload.in_progress)
+                        : t(($) => $.create_issue.submit)}
                   </Button>
                 )}
               </div>

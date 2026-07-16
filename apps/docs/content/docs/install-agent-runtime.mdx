@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 12 supported tools so the daemon can detect them.
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 16 supported tools so the daemon can detect them.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 12 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 16 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -31,9 +31,9 @@ multica daemon restart
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
 
-## The 12 supported tools
+## The 16 supported tools
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 12.
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 16.
 
 ### Claude Code (Anthropic)
 
@@ -66,6 +66,8 @@ The CLI counterpart to the Cursor editor. **Session resumption works** with curr
 | Install | Install the [Cursor editor](https://cursor.com/) and then the CLI per their docs at [docs.cursor.com](https://docs.cursor.com/). The binary name is `cursor-agent`, not `cursor`. |
 | Authentication | Sign in through the Cursor editor; the CLI reuses that session. |
 
+For authenticated MCP servers, Cursor stores OAuth state in the project data directory where the auth flow first ran. Multica isolates managed Cursor MCP runs with a per-task `CURSOR_DATA_DIR`, so it does not scan or copy every file under `~/.cursor/projects`. To opt in for one agent, set the agent custom env key `CURSOR_MCP_AUTH_SOURCE` to the absolute path of the trusted `mcp-auth.json` file, or to the Cursor project data directory containing that file. Multica links or seeds only that `mcp-auth.json` into the isolated task project data directory. When symlinks are supported, Cursor token refreshes may write back to the trusted source; environments that cannot create symlinks fall back to copying the file.
+
 ### GitHub Copilot
 
 Model routing goes through your GitHub account entitlement — the tool doesn't pick a model itself; GitHub decides which model you get.
@@ -77,16 +79,6 @@ Model routing goes through your GitHub account entitlement — the tool doesn't 
 | Authentication | Browser-based GitHub login through the CLI. |
 | Notes | Requires an active GitHub Copilot subscription on the signed-in account. |
 
-### Gemini (Google)
-
-Supports the Gemini 2.5 and 3 series. No session resumption, no MCP — suitable for one-shot tasks.
-
-| | |
-|---|---|
-| Daemon looks for | `gemini` |
-| Install | Follow the official guide at [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli). The standard route is the npm package `@google/gemini-cli`. |
-| Authentication | `gemini` will prompt for a Google account login, or set `GEMINI_API_KEY`. |
-
 ### OpenCode (SST)
 
 Open-source CLI agent. Dynamically discovers available models from its own configuration file — good fit for users who want to bring their own model catalog. Consumes the agent's `mcp_config` field through `OPENCODE_CONFIG_CONTENT`.
@@ -96,6 +88,17 @@ Open-source CLI agent. Dynamically discovers available models from its own confi
 | Daemon looks for | `opencode` |
 | Install | Follow the official guide at [opencode.ai](https://opencode.ai/) or the GitHub repo at [github.com/sst/opencode](https://github.com/sst/opencode). The typical route is the install script or the npm package. |
 | Authentication | Configure your model provider(s) per OpenCode's docs (Anthropic, OpenAI, etc.). |
+
+### DevEco Code (Huawei)
+
+**DevEco Code** is Huawei's independent coding agent for HarmonyOS, built on the OpenCode engine. It ships its own model catalog and Huawei-account auth. Multica drives it over `deveco run --format json`; models are discovered dynamically from `deveco models` (built-in `deveco/GLM-5.1`). MCP servers are configured through DevEco's native config (`DEVECO_CONFIG_CONTENT`); Multica-side `mcp_config` wiring is in progress.
+
+| | |
+|---|---|
+| Daemon looks for | `deveco` |
+| Install | `npm install -g @deveco/deveco-code`. See the official README at [gitcode.com/openharmony-sig/deveco-code](https://gitcode.com/openharmony-sig/deveco-code/blob/develop/README.en.md) or the npm page at [npmjs.com/package/@deveco/deveco-code](https://www.npmjs.com/package/@deveco/deveco-code). |
+| Platforms | Windows x64 and macOS (arm64/x64) only — no Linux build is published. |
+| Authentication | Huawei-account login through the DevEco CLI. |
 
 ### Kiro CLI (Amazon)
 
@@ -119,7 +122,7 @@ ACP-protocol agent, primarily aimed at the Chinese market. MCP config is passed 
 
 ### Hermes (Nous Research)
 
-ACP-protocol agent (shares the transport with Kimi). Session resumption works, and MCP config is passed through ACP `mcpServers`. The skill injection path falls back to the generic `.agent_context/skills/` — verify your skills are loading before relying on them.
+ACP-protocol agent (shares the transport with Kimi). Session resumption works, and MCP config is passed through ACP `mcpServers`. Hermes discovers skills only from its home (`~/.hermes/skills/`), so when an agent has skills assigned Multica points `HERMES_HOME` at a per-task overlay of your `~/.hermes/` (real home mirrored by symlink; a derived `config.yaml` references your existing skills as external roots) and writes the assigned skills into its `skills/` directory for native discovery. Tasks with no assigned skills run against your real home unchanged.
 
 | | |
 |---|---|
@@ -147,16 +150,58 @@ Minimalist. **Session resumption is unusual** — the resume id is the path to a
 | Install | See Inflection's CLI docs at [pi.ai](https://pi.ai/). |
 | Authentication | Per the vendor's docs. |
 
+### CodeBuddy (Tencent)
+
+A Claude Code–compatible CLI agent. Multica drives it with the same stream-json protocol as Claude Code: session resumption works via `--resume`, MCP config is passed through `--mcp-config`. CodeBuddy ships its own native config directory rather than reusing Claude's, so skills land in `.codebuddy/skills/` and the runtime brief is written to `CODEBUDDY.md`. Models are discovered dynamically.
+
+| | |
+|---|---|
+| Daemon looks for | `codebuddy` |
+| Install | See the official CLI docs at [codebuddy.ai/cli](https://www.codebuddy.ai/cli). |
+| Authentication | Per the vendor's docs. |
+
+### Qoder (Alibaba)
+
+Agentic coding CLI using the ACP protocol over stdio (shares the transport with Hermes, Kimi, and Kiro CLI). Session resumption works through ACP `session/resume`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically, and skills are copied into `.qoder/skills/`.
+
+| | |
+|---|---|
+| Daemon looks for | `qodercli` |
+| Install | See the official CLI docs at [qoder.com/cli](https://qoder.com/cli). |
+| Authentication | Per the vendor's docs. |
+
+### Trae CLI (ByteDance)
+
+ByteDance's official TRAE CLI (`traecli`, paired with the Trae IDE — **not** the open-source `bytedance/trae-agent`). It is ACP-native, so Multica drives it over stdio via `traecli acp serve --yolo`, sharing the transport with Hermes, Kimi, Kiro CLI, and Qoder. Session resumption works through ACP `session/load`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically (switched per task via `session/set_model`), and skills are copied into `.traecli/skills/`.
+
+| | |
+|---|---|
+| Daemon looks for | `traecli` |
+| Install | See the official CLI docs at [docs.trae.cn/cli](https://docs.trae.cn/cli). |
+| Authentication | Run `traecli` once interactively to complete the browser-based enterprise login (the token persists in `~/.trae` plus the OS keyring). Logging into the Trae **IDE** does not log in the CLI — they are separate. |
+| Notes | traecli reads project rules from `.trae/rules/` and has no `--system-prompt` flag, so Multica delivers its runtime brief inline in the prompt. Set a daemon-wide default model with `MULTICA_TRAECLI_MODEL`. |
+
 ### Antigravity (Google)
 
-Google's Antigravity CLI (`agy`). Pairs with Google's Antigravity service and runs Gemini-backed models. Session resumption works through `--conversation <id>`, captured by the daemon from the CLI log file. Model selection is managed inside the Antigravity CLI itself — Multica disables the per-agent model picker for this provider. Skills are written to `.agents/skills/` (the CLI inherits Gemini CLI's workspace skill layout — see [Antigravity docs](https://antigravity.google/docs/gcli-migration)).
+Google's Antigravity CLI (`agy`). Pairs with Google's Antigravity service and runs Gemini-backed models. Multica launches it with `agy -p`, the daemon-compatible non-interactive mode; current Antigravity CLI releases can execute tools from that mode, while `agy -i` requires an attached TTY. Session resumption works through `--conversation <id>`, captured by the daemon from the CLI log file. Model selection is managed inside the Antigravity CLI itself — Multica disables the per-agent model picker for this provider. Skills are written to `.agents/skills/` (the CLI inherits Gemini CLI's workspace skill layout — see [Antigravity docs](https://antigravity.google/docs/gcli-migration)).
 
 | | |
 |---|---|
 | Daemon looks for | `agy` |
 | Install | Follow the official guide at [antigravity.google/docs/cli-overview](https://antigravity.google/docs/cli-overview). The CLI ships pre-built — run `agy install` once to wire up PATH and shell aliases. |
 | Authentication | Run `agy` once interactively and complete the Google account login, or sign in via the Antigravity desktop app — the CLI reuses the keyring entry the GUI writes. |
-| Notes | The CLI emits plain assistant text on stdout, not a structured event stream; intermediate "I will run X" lines and the final reply are both relayed to Multica as text. |
+| Notes | The CLI emits plain assistant text on stdout, not a structured event stream; intermediate "I will run X" lines and the final reply are both relayed to Multica as text, and per-tool telemetry is not available today. |
+
+### Grok (xAI)
+
+xAI's Grok Build CLI (`grok`). Multica drives it over ACP via `grok --no-auto-update agent --always-approve stdio`, sharing the transport with Hermes, Kimi, Kiro CLI, Qoder, and Trae. It selects an auth method advertised by `initialize` and completes the headless `authenticate` handshake before any session operation. Session resumption works through ACP `session/load`. Models are discovered from `session/new`. MCP config is passed through ACP `mcpServers`. Skills are copied into `.grok/skills/`; user skills are discovered from `$GROK_HOME/skills/` (default `~/.grok/skills/`) and `~/.agents/skills/`.
+
+| | |
+|---|---|
+| Daemon looks for | `grok` |
+| Install | Install the Grok Build CLI and ensure `grok` is on `PATH` (often `~/.grok/bin`). |
+| Authentication | Run `grok login` for cached-token auth, or set `XAI_API_KEY`. The CLI must advertise the corresponding ACP method. |
+| Notes | Override the binary with `MULTICA_GROK_PATH` and the default model with `MULTICA_GROK_MODEL` (e.g. `grok-4.5`). Minimum CLI version: `0.2.89`. |
 
 ## After installing
 

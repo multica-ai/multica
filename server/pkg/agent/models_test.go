@@ -11,7 +11,7 @@ import (
 
 func TestListModelsStaticProviders(t *testing.T) {
 	ctx := context.Background()
-	for _, provider := range []string{"claude", "codex", "gemini", "cursor"} {
+	for _, provider := range []string{"claude", "codex", "cursor"} {
 		got, err := ListModels(ctx, provider, "")
 		if err != nil {
 			t.Fatalf("ListModels(%q) error: %v", provider, err)
@@ -80,60 +80,55 @@ func TestClaudeStaticModelsExposesFable5(t *testing.T) {
 	}
 }
 
-func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
-	// Gemini CLI has no `models list` subcommand, so we expose the
-	// CLI's own aliases (auto / pro / flash / flash-lite) plus
-	// explicit version pins including Gemini 3. Regression guard
-	// for multica-ai/multica#1503 — Gemini 3 must be selectable.
-	models := geminiStaticModels()
+func TestClaudeStaticModelsExposesSonnet5(t *testing.T) {
+	models := claudeStaticModels()
 	ids := map[string]Model{}
+	defaults := 0
 	for _, m := range models {
 		ids[m.ID] = m
-	}
-	for _, want := range []string{
-		"auto", "auto-gemini-2.5",
-		"pro", "flash", "flash-lite",
-		"gemini-3-pro-preview", "gemini-3-flash-preview",
-		"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
-	} {
-		if _, ok := ids[want]; !ok {
-			t.Errorf("missing expected Gemini model %q in: %+v", want, models)
+		if m.Default {
+			defaults++
 		}
 	}
-	auto, ok := ids["auto"]
-	if !ok || !auto.Default {
-		t.Errorf("expected `auto` to be the default Gemini entry, got %+v", auto)
+
+	sonnet, ok := ids["claude-sonnet-5"]
+	if !ok {
+		t.Fatalf("missing Claude Sonnet 5 in: %+v", models)
 	}
-	for _, m := range models {
-		if m.Provider != "google" {
-			t.Errorf("all Gemini entries must carry Provider=google, got %+v", m)
-		}
+	if sonnet.Label != "Claude Sonnet 5" || sonnet.Provider != "anthropic" || sonnet.Default {
+		t.Errorf("unexpected Sonnet 5 entry: %+v", sonnet)
+	}
+	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
+		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
 	}
 }
 
-func TestCodexStaticModelsExposesGPT55(t *testing.T) {
-	// Codex CLI has no `models list` subcommand so the catalog is
-	// hand-maintained. Regression guard for multica-ai/multica#2009 —
-	// GPT-5.5 must be selectable, and the badge default must point at
-	// the latest release rather than lagging a version behind.
+func TestCodexStaticModelsMatchVerifiedFallbackCatalog(t *testing.T) {
+	// This fallback is used for Codex <0.122.0 and whenever dynamic bundled
+	// discovery fails. Keep the latest verified visible models plus 5.3 Codex
+	// for older installations, but do not resurrect guessed/nonexistent IDs.
 	models := codexStaticModels()
 	ids := map[string]Model{}
 	for _, m := range models {
 		ids[m.ID] = m
 	}
 	for _, want := range []string{
-		"gpt-5.5", "gpt-5.5-mini",
-		"gpt-5.4", "gpt-5.4-mini",
-		"gpt-5.3-codex", "gpt-5",
-		"o3", "o3-mini",
+		"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+		"gpt-5.5", "gpt-5.4", "gpt-5.4-mini",
+		"gpt-5.3-codex", "gpt-5.2",
 	} {
 		if _, ok := ids[want]; !ok {
 			t.Errorf("missing expected Codex model %q in: %+v", want, models)
 		}
 	}
-	latest, ok := ids["gpt-5.5"]
+	for _, unwanted := range []string{"gpt-5.5-mini", "gpt-5", "o3", "o3-mini"} {
+		if _, ok := ids[unwanted]; ok {
+			t.Errorf("unexpected stale/invalid Codex model %q in fallback: %+v", unwanted, models)
+		}
+	}
+	latest, ok := ids["gpt-5.6-sol"]
 	if !ok || !latest.Default {
-		t.Errorf("expected `gpt-5.5` to be the default Codex entry, got %+v", latest)
+		t.Errorf("expected `gpt-5.6-sol` to be the default Codex entry, got %+v", latest)
 	}
 	defaults := 0
 	for _, m := range models {
@@ -146,6 +141,15 @@ func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 	}
 	if defaults != 1 {
 		t.Errorf("expected exactly one default Codex entry, got %d", defaults)
+	}
+	if got := ids["gpt-5.6-sol"].Thinking; got == nil || got.DefaultLevel != "low" || !hasThinkingLevel(got, "max") || !hasThinkingLevel(got, "ultra") {
+		t.Errorf("unexpected gpt-5.6-sol thinking catalog: %+v", got)
+	}
+	if got := ids["gpt-5.6-luna"].Thinking; got == nil || !hasThinkingLevel(got, "max") || hasThinkingLevel(got, "ultra") {
+		t.Errorf("unexpected gpt-5.6-luna thinking catalog: %+v", got)
+	}
+	if got := ids["gpt-5.3-codex"].Thinking; got == nil || !hasThinkingLevel(got, "xhigh") || hasThinkingLevel(got, "max") || hasThinkingLevel(got, "ultra") {
+		t.Errorf("unexpected gpt-5.3-codex thinking catalog: %+v", got)
 	}
 }
 
@@ -361,7 +365,6 @@ func TestStaticCatalogsHaveAtMostOneDefault(t *testing.T) {
 	catalogs := map[string][]Model{
 		"claude":  claudeStaticModels(),
 		"codex":   codexStaticModels(),
-		"gemini":  geminiStaticModels(),
 		"cursor":  cursorStaticModels(),
 		"copilot": copilotStaticModels(),
 	}

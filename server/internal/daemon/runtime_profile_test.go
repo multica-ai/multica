@@ -197,6 +197,9 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	if got.path != "/opt/bin/company-codex" {
 		t.Errorf("profileLaunchSpecs[prof-1].path = %q, want /opt/bin/company-codex", got.path)
 	}
+	if got.version != "9.9.9" {
+		t.Errorf("profileLaunchSpecs[prof-1].version = %q, want 9.9.9", got.version)
+	}
 	if strings.Join(got.fixedArgs, " ") != "--model composer-2.5" {
 		t.Errorf("profileLaunchSpecs[prof-1].fixedArgs = %v, want [--model composer-2.5]", got.fixedArgs)
 	}
@@ -241,6 +244,54 @@ func TestRegisterRuntimes_SkipsProfileNotOnPath(t *testing.T) {
 	}
 	if len(fx.sentFailures) != 1 || fx.sentFailures[0]["profile_id"] != "prof-1" {
 		t.Fatalf("sent failures = %+v, want prof-1", fx.sentFailures)
+	}
+}
+
+// TestRegisterRuntimes_SkipsUnsupportedProfileFamily verifies historical
+// profiles whose protocol_family is no longer supported are not registered as
+// online runtimes even when their command still resolves locally.
+func TestRegisterRuntimes_SkipsUnsupportedProfileFamily(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{"gemini": "/usr/bin/gemini"})
+
+	profiles := []RuntimeProfile{{
+		ID:             "prof-gemini",
+		WorkspaceID:    "ws-1",
+		DisplayName:    "Old Gemini",
+		ProtocolFamily: "gemini",
+		CommandName:    "gemini",
+		Enabled:        true,
+	}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{}
+
+	_, sig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+	if sig == "" {
+		t.Errorf("profileSig must still be returned for unsupported historical profiles")
+	}
+	if _, ok := d.profileLaunchSpecs["prof-gemini"]; ok {
+		t.Errorf("profileLaunchSpecs should not record an unsupported profile")
+	}
+	if len(fx.sentRuntimes) != 0 {
+		t.Fatalf("sent runtimes = %+v, want none", fx.sentRuntimes)
+	}
+	if len(fx.sentFailures) != 1 {
+		t.Fatalf("sent failures = %+v, want one unsupported profile failure", fx.sentFailures)
+	}
+	failure := fx.sentFailures[0]
+	if failure["profile_id"] != "prof-gemini" {
+		t.Errorf("failure profile_id = %v, want prof-gemini", failure["profile_id"])
+	}
+	if failure["command_name"] != "gemini" {
+		t.Errorf("failure command_name = %v, want gemini", failure["command_name"])
+	}
+	reason, _ := failure["reason"].(string)
+	if !strings.Contains(reason, "unsupported protocol_family: gemini") {
+		t.Errorf("failure reason = %q, want unsupported protocol_family: gemini", reason)
 	}
 }
 
@@ -347,13 +398,13 @@ func stubProfilePathExecutable(t *testing.T, executable map[string]bool) {
 func TestCustomCommandPathForRuntime(t *testing.T) {
 	d := freshDaemon("")
 	d.profileLaunchSpecs = map[string]profileLaunchSpec{
-		"prof-1": {path: "/opt/bin/company-codex", fixedArgs: []string{"--model", "composer-2.5"}},
+		"prof-1": {path: "/opt/bin/company-codex", version: "9.8.7", fixedArgs: []string{"--model", "composer-2.5"}},
 	}
 	// rt-custom is a custom-profile runtime; rt-builtin is a normal one.
 	d.runtimeIndex["rt-custom"] = Runtime{ID: "rt-custom", Provider: "codex", ProfileID: "prof-1"}
 	d.runtimeIndex["rt-builtin"] = Runtime{ID: "rt-builtin", Provider: "claude"}
 
-	if spec, ok := d.customProfileLaunchForRuntime("rt-custom"); !ok || spec.path != "/opt/bin/company-codex" || strings.Join(spec.fixedArgs, " ") != "--model composer-2.5" {
+	if spec, ok := d.customProfileLaunchForRuntime("rt-custom"); !ok || spec.path != "/opt/bin/company-codex" || spec.version != "9.8.7" || strings.Join(spec.fixedArgs, " ") != "--model composer-2.5" {
 		t.Errorf("custom runtime: got (%+v, %v), want profile launch spec", spec, ok)
 	}
 	if spec, ok := d.customProfileLaunchForRuntime("rt-builtin"); ok || spec.path != "" {

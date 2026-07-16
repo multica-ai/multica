@@ -62,6 +62,19 @@ func (f *fakeStdin) Lines() []string {
 	return lines
 }
 
+type fakeStdinWithHook struct {
+	fakeStdin
+	afterWrite func()
+}
+
+func (f *fakeStdinWithHook) Write(p []byte) (int, error) {
+	n, err := f.fakeStdin.Write(p)
+	if f.afterWrite != nil {
+		f.afterWrite()
+	}
+	return n, err
+}
+
 func splitLines(s string) []string {
 	var lines []string
 	start := 0
@@ -702,6 +715,61 @@ func TestParseCodexSessionFileSubtractsCachedInput(t *testing.T) {
 	}
 }
 
+// The per-task CODEX_HOME must win over the ambient env / global home so usage
+// is read from the same task-local sessions Codex actually wrote to (MUL-4424).
+func TestCodexSessionRootPrefersExplicitTaskHome(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+	envHome := t.TempDir()
+	taskHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(envHome, "sessions"), 0o755); err != nil {
+		t.Fatalf("mkdir env sessions: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(taskHome, "sessions"), 0o755); err != nil {
+		t.Fatalf("mkdir task sessions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", envHome)
+
+	if got, want := codexSessionRoot(taskHome), filepath.Join(taskHome, "sessions"); got != want {
+		t.Errorf("explicit task home ignored: got %q, want %q", got, want)
+	}
+	if got, want := codexSessionRoot(""), filepath.Join(envHome, "sessions"); got != want {
+		t.Errorf("empty task home should fall back to ambient CODEX_HOME: got %q, want %q", got, want)
+	}
+}
+
+func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Now().Add(-time.Minute)
+	dateDir := filepath.Join(taskHome, "sessions",
+		fmt.Sprintf("%04d", startTime.Year()),
+		fmt.Sprintf("%02d", int(startTime.Month())),
+		fmt.Sprintf("%02d", startTime.Day()),
+	)
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-13T00:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`,
+		`{"timestamp":"2026-07-13T00:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":20},"model":"gpt-5.6-sol"}}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout.jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome)
+	if got == nil {
+		t.Fatal("expected usage scanned from the per-task home")
+	}
+	if got.usage.InputTokens != 500 || got.usage.OutputTokens != 20 {
+		t.Errorf("usage = %+v, want input=500 output=20", got.usage)
+	}
+	if got.model != "gpt-5.6-sol" {
+		t.Errorf("model = %q, want gpt-5.6-sol", got.model)
+	}
+}
+
 func TestCodexRawItemCommandExecution(t *testing.T) {
 	t.Parallel()
 
@@ -910,6 +978,31 @@ func TestCodexRequestPrefersContextCancellationOverProcessExit(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("request error = %v, want context.Canceled", err)
+	}
+}
+
+func TestCodexRequestPrefersReadyResponseOverProcessExit(t *testing.T) {
+	t.Parallel()
+
+	var c *codexClient
+	fs := &fakeStdinWithHook{}
+	fs.afterWrite = func() {
+		c.handleLine(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`)
+		c.markProcessExited(errCodexProcessExited)
+	}
+	c = &codexClient{
+		cfg:         Config{Logger: slog.Default()},
+		stdin:       fs,
+		pending:     make(map[int]*pendingRPC),
+		processDone: make(chan struct{}),
+	}
+
+	result, err := c.request(context.Background(), "thread/start", map[string]any{})
+	if err != nil {
+		t.Fatalf("request error = %v, want ready response", err)
+	}
+	if string(result) != `{"ok":true}` {
+		t.Fatalf("response = %s, want {\"ok\":true}", result)
 	}
 }
 
@@ -1230,6 +1323,44 @@ func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	}
 }
 
+// codexTurnInput carries the user-visible disclosure when a resume was expected
+// but the backend landed on a fresh thread. Paired with
+// TestCodexStartOrResumeThreadFallsBackOnResumeError (which proves the live
+// thread/resume RPC returns resumed=false on a recoverable error), this proves
+// the real fallback surfaces the notice while a successful resume does not
+// (MUL-4424).
+func TestCodexTurnInput(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "do the task"
+	text := func(input []map[string]any) string {
+		if len(input) != 1 {
+			t.Fatalf("expected a single input block, got %d", len(input))
+		}
+		s, _ := input[0]["text"].(string)
+		return s
+	}
+
+	// Resume expected but the backend fell back to a fresh thread → disclose,
+	// and the original prompt must still be delivered.
+	fallback := text(codexTurnInput(prompt, true, false))
+	if !strings.Contains(fallback, "previous conversation context could not be restored") {
+		t.Errorf("expected continuity notice on resume fallback, got:\n%s", fallback)
+	}
+	if !strings.HasSuffix(fallback, prompt) {
+		t.Errorf("prompt must survive alongside the notice, got:\n%s", fallback)
+	}
+
+	// Successful resume, or an ordinary fresh start with no resume expected →
+	// no notice, prompt delivered verbatim.
+	if got := text(codexTurnInput(prompt, true, true)); got != prompt {
+		t.Errorf("successful resume must not add a notice, got:\n%s", got)
+	}
+	if got := text(codexTurnInput(prompt, false, false)); got != prompt {
+		t.Errorf("fresh start must not add a notice, got:\n%s", got)
+	}
+}
+
 func TestCodexStartOrResumeThreadDoesNotFallBackAfterProcessExit(t *testing.T) {
 	t.Parallel()
 
@@ -1464,6 +1595,346 @@ func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Every startup RPC shares one handshake bound, so the *successful*
+	// preamble RPCs (e.g. initialize) must also round-trip within it. The fake
+	// app-server is a forked /bin/sh script; under parallel test load its
+	// startup + first read/echo can spike well past a few hundred ms, which
+	// used to make initialize spuriously time out before the subtest reached
+	// the RPC it targets. Keep this comfortably above sh startup jitter yet
+	// below the 5s semantic timeout and the 10s executeFakeCodex ceiling.
+	const handshakeTimeout = 3 * time.Second
+	tests := []struct {
+		name   string
+		method string
+		body   string
+		opts   ExecOptions
+	}{
+		{
+			name:   "initialize",
+			method: "initialize",
+			body: "" +
+				`read line` + "\n" +
+				`read line` + "\n",
+		},
+		{
+			name:   "thread start",
+			method: "thread/start",
+			body: "" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":1,"result":{}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n",
+		},
+		{
+			name:   "thread resume",
+			method: "thread/resume",
+			body: "" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":1,"result":{}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n",
+			opts: ExecOptions{ResumeSessionID: "thr-prior"},
+		},
+		{
+			name:   "turn start",
+			method: "turn/start",
+			body: "" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":1,"result":{}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-timeout"}}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			fakePath := writeFakeCodexAppServer(t, tc.body)
+			tc.opts.HandshakeTimeout = handshakeTimeout
+			tc.opts.SemanticInactivityTimeout = 5 * time.Second
+
+			started := time.Now()
+			result := executeFakeCodex(t, fakePath, tc.opts)
+			elapsed := time.Since(started)
+
+			if result.Status != "failed" {
+				t.Fatalf("expected failed, got status=%q error=%q", result.Status, result.Error)
+			}
+			for _, want := range []string{CodexHandshakeTimeoutMarker, tc.method, handshakeTimeout.String()} {
+				if !strings.Contains(result.Error, want) {
+					t.Fatalf("expected error to contain %q, got %q", want, result.Error)
+				}
+			}
+			// Proves the RPC was bounded rather than hanging to the 10s
+			// executeFakeCodex ceiling; the handshake fires at ~3s and
+			// shutdown is fast (closing stdin EOFs the fake).
+			if elapsed > 8*time.Second {
+				t.Fatalf("handshake timeout took %s, expected < 8s", elapsed)
+			}
+		})
+	}
+}
+
+func TestCodexExecuteRetriesInitializeTimeoutOnceAfterCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	countPath := filepath.Join(t.TempDir(), "launch-count")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
+		`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
+		`read line`+"\n"+
+		`if test "$count" -eq 1; then sleep 5; exit 0; fi`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-retried"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-retried","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   10 * time.Second,
+		HandshakeTimeout:          100 * time.Millisecond,
+		SemanticInactivityTimeout: time.Second,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected retry to complete, got status=%q error=%q", result.Status, result.Error)
+	}
+	data, err := os.ReadFile(countPath)
+	if err != nil {
+		t.Fatalf("read launch count: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "2" {
+		t.Fatalf("launch count = %q, want 2", got)
+	}
+}
+
+func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	t.Run("both attempts time out", func(t *testing.T) {
+		countPath := filepath.Join(t.TempDir(), "launch-count")
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
+			`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
+			`read line`+"\n"+
+			`sleep 1`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+		if result.Status != "failed" || !strings.Contains(result.Error, CodexHandshakeTimeoutMarker) {
+			t.Fatalf("expected final initialize timeout, got status=%q error=%q", result.Status, result.Error)
+		}
+		data, _ := os.ReadFile(countPath)
+		if got := strings.TrimSpace(string(data)); got != "2" {
+			t.Fatalf("launch count = %q, want 2", got)
+		}
+	})
+
+	t.Run("semantic activity suppresses retry", func(t *testing.T) {
+		countPath := filepath.Join(t.TempDir(), "launch-count")
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`echo x >> `+countPath+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"unexpected","item":{"type":"commandExecution","id":"cmd-1","command":"true"}}}'`+"\n"+
+			`sleep 1`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+		if result.Status != "failed" {
+			t.Fatalf("expected failed, got %q", result.Status)
+		}
+		data, _ := os.ReadFile(countPath)
+		if got := strings.Count(string(data), "x"); got != 1 {
+			t.Fatalf("launch count = %d, want 1", got)
+		}
+	})
+
+	t.Run("unconfirmed cleanup suppresses retry", func(t *testing.T) {
+		codexCleanupConfirmationOverride.Store(-1)
+		defer codexCleanupConfirmationOverride.Store(0)
+		countPath := filepath.Join(t.TempDir(), "launch-count")
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`echo x >> `+countPath+"\n"+
+			`read line`+"\n"+
+			`sleep 1`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+		if !strings.Contains(result.Error, "retry suppressed: process cleanup/reap not confirmed") {
+			t.Fatalf("expected cleanup reason, got %q", result.Error)
+		}
+		data, _ := os.ReadFile(countPath)
+		if got := strings.Count(string(data), "x"); got != 1 {
+			t.Fatalf("launch count = %d, want 1", got)
+		}
+	})
+}
+
+func TestCodexExecuteDoesNotSerializeConcurrentLaunches(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`sleep 0.4`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-concurrent"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-concurrent","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+
+	maxActiveCodexLaunchesObserved.Store(0)
+	results := make(chan Result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			backend, _ := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+			if err != nil {
+				results <- Result{Status: "failed", Error: err.Error()}
+				return
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+			results <- <-session.Result
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		if result := <-results; result.Status != "completed" {
+			t.Fatalf("concurrent result failed: %+v", result)
+		}
+	}
+	if got := maxActiveCodexLaunchesObserved.Load(); got < 2 {
+		t.Fatalf("launches appear serialized: max active=%d", got)
+	}
+}
+
+func TestSanitizeCodexDiagnosticRedactsSecrets(t *testing.T) {
+	got := sanitizeCodexDiagnostic("Authorization: Bearer bearer-token\n" +
+		`{"token":"json-token","auth": "json-auth", "api_key":"json-key"}` +
+		"\npassword=plain-secret\x00")
+	for _, secret := range []string{"bearer-token", "json-token", "json-auth", "json-key", "plain-secret"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("sanitized diagnostic leaked %q: %q", secret, got)
+		}
+	}
+}
+
+func TestCodexExecuteRedactsStderrFromResultAndLogs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	const (
+		bearer     = "bearer-secret-value"
+		jsonToken  = "json-secret-value"
+		standalone = "sk-abcdefghijklmnopqrstuvwxyz123456"
+	)
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`echo 'Authorization: Bearer `+bearer+`' >&2`+"\n"+
+		`echo '{"token":"`+jsonToken+`"}' >&2`+"\n"+
+		`echo '`+standalone+`' >&2`+"\n"+
+		`exit 2`+"\n")
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	combined := result.Error + "\n" + logs.String()
+	for _, secret := range []string{bearer, jsonToken, standalone} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("stderr secret leaked: %q in %q", secret, combined)
+		}
+	}
+}
+
+func TestCodexExecuteDoesNotProbeVersionBeforeInitialize(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-fast-init"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-fast-init","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+	data, err := os.ReadFile(fakePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = bytes.Replace(data, []byte(`echo "codex-cli 0.0.0-test"; exit 0`), []byte(`sleep 2; echo "codex-cli 0.0.0-test"; exit 0`), 1)
+	writeTestExecutable(t, fakePath, data)
+
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default(), CodexVersion: "cached-test-version"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("Execute blocked on version probe before initialize: %s", elapsed)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	if result := <-session.Result; result.Status != "completed" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestCodexExecuteRetriesAfterSignaledProcessIsReaped(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux signal/reap semantics regression")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	defer codexGracefulShutdownTimeoutNanos.Store(0)
+	countPath := filepath.Join(t.TempDir(), "launch-count")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
+		`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
+		`read line`+"\n"+
+		`if test "$count" -eq 1; then exec sleep 30; fi`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-signaled"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-signaled","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+	result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+	if result.Status != "completed" {
+		t.Fatalf("signaled/reaped first attempt should retry: %+v", result)
+	}
+}
+
 func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -1572,6 +2043,85 @@ func TestCodexExecuteFailsWhenProcessExitsDuringActiveTurn(t *testing.T) {
 	}
 	if strings.Contains(result.Error, "timeout") {
 		t.Fatalf("process exit should fail fast instead of timeout, got %q", result.Error)
+	}
+}
+func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos
+	// globally, so running concurrently with other codex Execute tests
+	// would shrink their grace window too and risk flakes.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Regression for GH#4520. On `thread/resume`, the fake codex emits a
+	// single stdout line larger than the daemon's bufio.Scanner cap (10 MB),
+	// which trips "bufio.Scanner: token too long" in the reader goroutine.
+	// Pre-fix, drainAndWait then hung forever on cmd.Wait(): the reader had
+	// stopped consuming the pipe, codex was blocked writing into a full
+	// stdout buffer, stdin.Close never unblocked codex, and the deferred
+	// cancel() ran AFTER drainAndWait in the LIFO defer order. The failed
+	// Result therefore never reached the outer daemon and its
+	// fresh-session fallback never fired.
+	//
+	// Post-fix, drainAndWait does graceful-then-cancel in two bounded phases
+	// (see codex.go), and cmd.Cancel group-SIGKILLs the codex tree so the
+	// process exits even when stdin EOF isn't sufficient. We verify the
+	// failed Result reaches the caller within a small bound and carries an
+	// empty SessionID so the outer daemon's PriorSessionID-with-empty-
+	// SessionID fallback can retry a fresh session.
+	codexGracefulShutdownTimeoutNanos.Store(int64(500 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		// Emit a > 10 MB single line with no embedded newline. printf
+		// avoids the trailing newline echo would add; head + tr generates
+		// the bulk payload in pure POSIX shell. The scanner errors out at
+		// 10 MB even though we write 11 MB.
+		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
+		`head -c 11000000 /dev/zero | tr '\0' 'x'`+"\n"+
+		`printf '"}}\n'`+"\n"+
+		// Hold the process open without reading more stdin. Pre-fix this
+		// hangs cmd.Wait() because codex never sees stdin EOF (it isn't
+		// in a read syscall) and the stdout pipe stays full. Cleanup must
+		// fall back to the group-SIGKILL path to make progress.
+		`sleep 30`+"\n")
+
+	start := time.Now()
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Cwd:                       t.TempDir(),
+		ResumeSessionID:           "thr_prior",
+		Timeout:                   30 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	elapsed := time.Since(start)
+
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q, elapsed=%s)",
+			result.Status, result.Error, elapsed)
+	}
+	if !strings.Contains(result.Error, "token too long") {
+		t.Fatalf("expected error to surface scanner overflow cause, got %q",
+			result.Error)
+	}
+	// Empty SessionID is the contract the outer daemon fallback relies on
+	// (daemon.go: result.Status == "failed" && PriorSessionID != "" &&
+	// result.SessionID == "" → retry fresh). Verify thread/resume failure
+	// preserves that contract.
+	if result.SessionID != "" {
+		t.Fatalf("expected empty SessionID so outer fallback retries fresh, got %q",
+			result.SessionID)
+	}
+	// With the shrunken 500 ms grace, two bounded phases plus the SIGKILL
+	// round-trip should complete in ~1-2 s. Pre-fix this test would block
+	// until the executeFakeCodex 10 s outer timeout and fail with "timeout
+	// waiting for result". We assert a much tighter bound so a future
+	// regression cannot quietly slip back up to 10 s.
+	if elapsed > 5*time.Second {
+		t.Fatalf("cleanup took %s, expected < 5s with shrunken grace (bug regressed?)",
+			elapsed)
 	}
 }
 
@@ -1788,6 +2338,35 @@ func TestCodexExecuteSemanticInactivityDoesNotAffectNormalTurnCompletion(t *test
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-normal","turn":{"id":"turn-normal"}}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-normal","item":{"type":"agentMessage","id":"msg-1","text":"Done"}}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-normal","turn":{"id":"turn-normal","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Done" {
+		t.Fatalf("expected output Done, got %q", result.Output)
+	}
+}
+
+func TestCodexExecuteTurnCompletionCanPrecedeTurnStartResponse(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-reordered"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-reordered","turn":{"id":"turn-reordered"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-reordered","item":{"type":"agentMessage","id":"msg-1","text":"Done"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-reordered","turn":{"id":"turn-reordered","status":"completed"}}}'`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                   5 * time.Second,
@@ -2163,6 +2742,14 @@ func TestEnsureCodexMcpConfigWritesManagedBlock(t *testing.T) {
 			t.Fatalf("expected %q in:\n%s", want, got)
 		}
 	}
+	for _, unexpected := range []string{
+		`experimental_use_rmcp_client`,
+		`http_headers`,
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("stdio servers should not get remote MCP key %q, got:\n%s", unexpected, got)
+		}
+	}
 
 	fi, err := os.Stat(tmp)
 	if err != nil {
@@ -2170,6 +2757,145 @@ func TestEnsureCodexMcpConfigWritesManagedBlock(t *testing.T) {
 	}
 	if mode := fi.Mode().Perm(); mode != 0o600 {
 		t.Fatalf("expected mode 0o600 for secret-bearing config, got %o", mode)
+	}
+}
+
+func TestEnsureCodexMcpConfigTranslatesRemoteHTTPServer(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tmp, []byte("sandbox_mode = \"workspace-write\"\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	raw := json.RawMessage(`{"mcpServers":{"composio":{"type":"http","url":"https://mcp.example.test/notion","headers":{"Authorization":"Bearer test-token","x-api-key":"secret"}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		`[mcp_servers.composio]`,
+		`url = "https://mcp.example.test/notion"`,
+		`http_headers = { Authorization = "Bearer test-token", x-api-key = "secret" }`,
+		`experimental_use_rmcp_client = true`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{
+		`type = "http"`,
+		"\nheaders = ",
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("remote HTTP server should not render %q, got:\n%s", unexpected, got)
+		}
+	}
+}
+
+func TestEnsureCodexMcpConfigDropsInternalSelectors(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"],"env":{"API_KEY":"secret"},"timeout":30,"tools":{"include":["kb_get"]},"prompts":{"include":["daily"]},"resources":{"include":["docs"]}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		`[mcp_servers.fetch]`,
+		`command = "uvx"`,
+		`args = ["mcp-server-fetch"]`,
+		`env = { API_KEY = "secret" }`,
+		`timeout = 30`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{
+		"\ntools = ",
+		"\nprompts = ",
+		"\nresources = ",
+		"kb_get",
+		"daily",
+		"docs",
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("internal MCP selector %q must not render into Codex config.toml:\n%s", unexpected, got)
+		}
+	}
+}
+
+func TestEnsureCodexMcpConfigDropsInternalSelectorsFromRemoteHTTPServer(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	raw := json.RawMessage(`{"mcpServers":{"remote":{"type":"http","url":"https://mcp.example.test/session","headers":{"Authorization":"Bearer test-token"},"timeout":45,"tools":{"include":["kb_get"]},"prompts":{"include":["daily"]},"resources":{"include":["docs"]}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		`[mcp_servers.remote]`,
+		`url = "https://mcp.example.test/session"`,
+		`http_headers = { Authorization = "Bearer test-token" }`,
+		`timeout = 45`,
+		`experimental_use_rmcp_client = true`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{
+		"\ntools = ",
+		"\nprompts = ",
+		"\nresources = ",
+		"kb_get",
+		"daily",
+		"docs",
+		`type = "http"`,
+		"\nheaders = ",
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("internal or provider-incompatible key %q must not render into Codex config.toml:\n%s", unexpected, got)
+		}
+	}
+}
+
+func TestRenderCodexMcpServersBlockTreatsURLOnlyServerAsRemote(t *testing.T) {
+	t.Parallel()
+
+	block, hasServers, err := renderCodexMcpServersBlock(json.RawMessage(`{"mcpServers":{"remote":{"url":"https://mcp.example.test/session"}}}`))
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !hasServers {
+		t.Fatal("expected server to render")
+	}
+	for _, want := range []string{
+		`[mcp_servers.remote]`,
+		`url = "https://mcp.example.test/session"`,
+		`experimental_use_rmcp_client = true`,
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("expected %q in:\n%s", want, block)
+		}
 	}
 }
 

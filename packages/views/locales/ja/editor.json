@@ -7,6 +7,7 @@
     "highlight": "ハイライト",
     "link": "リンク",
     "list": "リスト",
+    "task_list": "タスクリスト",
     "quote": "引用",
     "url_aria_label": "URL",
     "heading_dropdown": {
@@ -70,6 +71,10 @@
   },
   "file_card": {
     "uploading": "{{filename}} をアップロード中"
+  },
+  "upload": {
+    "failed": "{{filename}} をアップロードできませんでした: {{reason}}",
+    "in_progress": "アップロード中…"
   },
   "title_editor": {
     "title_aria_label": "タイトル"

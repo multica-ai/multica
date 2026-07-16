@@ -41,6 +41,8 @@
   "leaderboard": {
     "title": "Leaderboard",
     "caption": "{{count}} agents",
+    "caption_with_deleted": "{{count}} agents · {{deleted}} deleted",
+    "deleted_agents": "Deleted agents",
     "header_agent": "Agent",
     "header_tokens": "Tokens",
     "header_cost": "Cost",

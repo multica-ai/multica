@@ -394,8 +394,11 @@ Before opening a PR for a new screen / mutation / realtime hook:
 2. API methods → `fetchValidated` / `fetchValidatedWith` (or raw
    `this.fetch` only for writes with no consumed response).
 3. Query key → factory in `data/queries/<feature>.ts`, 3-segment shape.
-4. Mutations → optimistic three-step (snapshot → patch → rollback) +
-   settle invalidate, all keys via factory.
+4. Mutations → optimistic only when the post-state is locally predictable,
+   the user stays on the same screen, failure is rare, and rollback is
+   trivial. When that gate passes, use snapshot → patch → rollback +
+   settle invalidate, all keys via factory. Create/delete/navigate/confirm
+   flows await the server instead.
 5. Realtime → `useWSSubscriptions(setup, deps)`, typed `ws.on<E>()`,
    per-event patching (no global invalidate) when payload carries the
    full object.

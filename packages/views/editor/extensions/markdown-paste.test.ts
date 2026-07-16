@@ -63,6 +63,10 @@ function nodeText(node: JsonNode): string {
   return (node.content ?? []).map(nodeText).join("");
 }
 
+function unescapeMarkdownSyntax(md: string): string {
+  return md.replace(/\\([\\`*_[\]~])/g, "$1");
+}
+
 function expectLiteralPaste(editor: Editor, text: string) {
   editor.commands.setTextSelection(1);
   const parseSpy = vi.spyOn(editor.markdown!, "parse");
@@ -72,7 +76,7 @@ function expectLiteralPaste(editor: Editor, text: string) {
   expect(handled).toBe(true);
   expect(parseSpy).not.toHaveBeenCalled();
   expect(editor.getText()).toBe(text);
-  expect(editor.getMarkdown()).toBe(text);
+  expect(unescapeMarkdownSyntax(editor.getMarkdown())).toBe(text);
 }
 
 describe("markdownPaste — code block context", () => {

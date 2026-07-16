@@ -27,7 +27,7 @@ vi.mock("./terminate-task-confirm-dialog", () => ({
   TerminateTaskConfirmDialog: () => null,
 }));
 
-import { ActiveTaskRow } from "./execution-log-section";
+import { ActiveTaskRow, TaskCommentCoverage } from "./execution-log-section";
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -61,11 +61,20 @@ afterEach(() => {
 
 describe("ActiveTaskRow", () => {
   it("renders running status as elapsed time only", () => {
-    renderWithI18n(<ActiveTaskRow task={makeTask()} issueId="issue-1" />);
+    renderWithI18n(
+      <ActiveTaskRow
+        task={makeTask({
+          trigger_comment_id: "comment-3",
+          coalesced_comment_ids: ["comment-1", "comment-2"],
+        })}
+        issueId="issue-1"
+      />,
+    );
 
     expect(screen.getByText("5m 04s")).toBeInTheDocument();
     expect(screen.queryByText(/events?/i)).not.toBeInTheDocument();
     expect(screen.getByText("Started from comment")).toBeInTheDocument();
+    expect(screen.getByText("Includes 3 comments")).toBeInTheDocument();
     expect(screen.getByText("View transcript")).toBeInTheDocument();
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
@@ -85,5 +94,125 @@ describe("ActiveTaskRow", () => {
     expect(transcriptButton.parentElement?.className).toContain(
       "[@media(hover:hover)]:group-hover/execution-log-row:flex",
     );
+  });
+});
+
+describe("TaskCommentCoverage", () => {
+  it.each<AgentTask["status"]>([
+    "queued",
+    "dispatched",
+    "waiting_local_directory",
+    "running",
+    "completed",
+    "failed",
+  ])("shows merged comment coverage for %s tasks", (status) => {
+    renderWithI18n(
+      <TaskCommentCoverage
+        task={makeTask({
+          status,
+          trigger_comment_id: "comment-3",
+          coalesced_comment_ids: ["comment-1", "comment-2"],
+          delivered_comment_ids:
+            status === "queued"
+              ? undefined
+              : ["comment-1", "comment-2", "comment-3"],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Includes 3 comments")).toBeInTheDocument();
+  });
+
+  it("uses the unique planned union for queued tasks", () => {
+    renderWithI18n(
+      <TaskCommentCoverage
+        task={makeTask({
+          status: "queued",
+          trigger_comment_id: "comment-2",
+          coalesced_comment_ids: ["comment-1", "comment-2", "comment-1"],
+          delivered_comment_ids: ["comment-1"],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Includes 2 comments")).toBeInTheDocument();
+    expect(screen.queryByText("Includes 4 comments")).not.toBeInTheDocument();
+  });
+
+  it("prefers the actual delivery receipt after a task is claimed", () => {
+    renderWithI18n(
+      <TaskCommentCoverage
+        task={makeTask({
+          trigger_comment_id: "comment-3",
+          coalesced_comment_ids: ["comment-1", "comment-2"],
+          delivered_comment_ids: ["comment-1", "comment-2", "comment-2"],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Includes 2 comments")).toBeInTheDocument();
+    expect(screen.queryByText("Includes 3 comments")).not.toBeInTheDocument();
+  });
+
+  it("falls back to planned coverage for legacy claimed-task rows", () => {
+    renderWithI18n(
+      <TaskCommentCoverage
+        task={makeTask({
+          trigger_comment_id: "comment-3",
+          coalesced_comment_ids: ["comment-1", "comment-2"],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Includes 3 comments")).toBeInTheDocument();
+  });
+
+  it("treats an explicitly empty delivery receipt as authoritative", () => {
+    renderWithI18n(
+      <TaskCommentCoverage
+        task={makeTask({
+          trigger_comment_id: "comment-3",
+          coalesced_comment_ids: ["comment-1", "comment-2"],
+          delivered_comment_ids: [],
+        })}
+      />,
+    );
+
+    expect(screen.queryByText(/Includes \d+ comments?/)).not.toBeInTheDocument();
+  });
+
+  it("stays hidden for one comment but shows a cancelled task receipt", () => {
+    const { rerender } = renderWithI18n(
+      <TaskCommentCoverage
+        task={makeTask({ trigger_comment_id: "comment-1" })}
+      />,
+    );
+    expect(screen.queryByText(/Includes \d+ comments?/)).not.toBeInTheDocument();
+
+    rerender(
+      <TaskCommentCoverage
+        task={makeTask({
+          status: "cancelled",
+          trigger_comment_id: "comment-2",
+          coalesced_comment_ids: ["comment-1"],
+          delivered_comment_ids: ["comment-1", "comment-2"],
+        })}
+      />,
+    );
+    expect(screen.getByText("Includes 2 comments")).toBeInTheDocument();
+  });
+
+  it("renders the Chinese comment count", () => {
+    renderWithI18n(
+      <TaskCommentCoverage
+        task={makeTask({
+          trigger_comment_id: "comment-3",
+          coalesced_comment_ids: ["comment-1", "comment-2"],
+        })}
+      />,
+      { locale: "zh-Hans" },
+    );
+
+    expect(screen.getByText("包含 3 条评论")).toBeInTheDocument();
   });
 });

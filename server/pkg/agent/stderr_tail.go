@@ -27,8 +27,9 @@ type stderrTail struct {
 	inner io.Writer
 	max   int
 
-	mu  sync.Mutex
-	buf []byte
+	mu    sync.Mutex
+	buf   []byte
+	total int64
 }
 
 func newStderrTail(inner io.Writer, max int) *stderrTail {
@@ -43,12 +44,19 @@ func (s *stderrTail) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	s.mu.Lock()
+	s.total += int64(len(p))
 	s.buf = append(s.buf, p...)
 	if len(s.buf) > s.max {
 		s.buf = s.buf[len(s.buf)-s.max:]
 	}
 	s.mu.Unlock()
 	return len(p), nil
+}
+
+func (s *stderrTail) TotalBytes() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.total
 }
 
 // Tail returns the captured stderr with leading/trailing whitespace

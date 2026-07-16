@@ -149,6 +149,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 				if evt.ResultText != "" && output.Len() == 0 {
 					output.WriteString(evt.ResultText)
+					trySend(msgCh, Message{Type: MessageText, Content: evt.ResultText})
 				}
 				b.accumulateResultUsage(resultUsage, &evt, configuredModel)
 				if evt.hasResultUsage() {

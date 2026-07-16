@@ -42,7 +42,7 @@ Multica 支持两种邮件发送通道——[Resend](https://resend.com/) 适合
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `RESEND_API_KEY` | 空 | Resend API key |
-| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | 发件地址（必须是 Resend 账号已验证的域名；走 SMTP 时同时作为 `From:` 头）|
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Resend 发件地址（必须是 Resend 账号已验证的域名；`SMTP_FROM_EMAIL` 未设置时，SMTP 也会使用它）|
 
 ### SMTP relay
 
@@ -52,6 +52,7 @@ Multica 支持两种邮件发送通道——[Resend](https://resend.com/) 适合
 | `SMTP_PORT` | `25` | SMTP 端口。STARTTLS 提交端口用 `587`；SMTPS（隐式 TLS，自动启用）用 `465` |
 | `SMTP_USERNAME` | 空 | SMTP 用户名。留空表示未认证 relay |
 | `SMTP_PASSWORD` | 空 | SMTP 密码 |
+| `SMTP_FROM_EMAIL` | 空 | SMTP 的 `MAIL FROM` 和 `From:` 发件地址。未设置时回退到 `RESEND_FROM_EMAIL` |
 | `SMTP_TLS` | `starttls` | TLS 模式。`implicit`（别名 `smtps`、`ssl`）在连接时立即进行 TLS 握手（SMTPS）；`465` 端口会自动启用。未设置 / `starttls` 则在连接后通过 STARTTLS 升级 |
 | `SMTP_TLS_INSECURE` | `false` | 设为 `true` 跳过 TLS 证书校验（仅限私有 CA / 自签证书）|
 | `SMTP_EHLO_NAME` | 机器主机名 | 向 relay 通告的 EHLO/HELO 名称。当严格的 relay（例如 Google Workspace `smtp-relay.gmail.com`）拒绝来自公网 IP 的默认问候时，填一个真实的 FQDN——否则 relay 会直接断开连接，并在后续某条命令上表现为一个不知所云的 `EOF` |
@@ -157,6 +158,7 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `REDIS_URL` | 空 | Redis 连接 URL（例如 `redis://localhost:6379/0`）。不设时认证端点的限流功能直接关闭。同一个 Redis 也被实时事件 fan-out、PAT 缓存、守护进程 token 缓存复用；不设时这些组件分别回落到内存模式 / 直查 DB |
+| `REDIS_DISABLE_CLIENT_NAME` | `false` | 设为 `true` 可跳过每次 Redis 连接时的 `CLIENT SETNAME` 握手。使用托管 Redis（如 GCP Memorystore 或限制了 ACL 的 AWS ElastiCache）等封禁 `CLIENT` 命令的服务时**必须开启**。启用后连接在 `CLIENT LIST` 输出中会失去描述性名称，但能兼容受限的托管服务 |
 | `RATE_LIMIT_AUTH` | `5` | 单 IP 每分钟对 `/auth/send-code` 和 `/auth/google` 的最大请求数 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | 单 IP 每分钟对 `/auth/verify-code` 的最大请求数 |
 | `RATE_LIMIT_TRUSTED_PROXIES` | 空 | 逗号分隔的 CIDR 列表，列在内的来源 IP 才允许通过 `X-Forwarded-For` 标识客户端。默认空 = **永不信任 XFF**，限流器只看直连的 `RemoteAddr` |
@@ -180,25 +182,36 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | 任务轮询频率 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 并发任务上限 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 单次任务的绝对墙钟上限；`0` = 不设上限，任务只受看门狗约束（活跃任务不会因为跑得久被杀）。想要硬性成本/资源天花板时再设一个正值 |
-| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 空闲看门狗：backend 持续静默（无消息、消息队列为空、且没有工具在途）这么久就 force-stop。`0` = 关闭整套看门狗 |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 空闲看门狗：backend 持续静默（无消息、消息队列为空、且没有工具在途）这么久就 force-stop。`0` = 关闭整套看门狗，包括 provider 专用阈值 |
+| `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 首 token 未到或流式回复中断时的专用无消息阈值；`0` = 回退到 `MULTICA_AGENT_IDLE_WATCHDOG`，更大的值不能放宽全局阈值 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 工具在途时的静默上限：某个工具调用发出后长时间无任何输出（疑似卡死的子进程）这么久就 force-stop。`0` = 关闭该兜底（在途工具永不被停）|
 | `MULTICA_<PROVIDER>_PATH` | 对应 CLI 名 | 各 AI 编程工具的可执行文件路径（如 `MULTICA_CLAUDE_PATH`）|
 | `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI 编程工具的默认模型 |
+| `MULTICA_<PROVIDER>_ARGS` | 空 | 守护进程级的默认 CLI 参数，作用于该后端的每个任务，并排在各智能体自身的 `custom_args` 之前。支持 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS` |
 
 完整解释每个参数对守护进程行为的影响，见 [守护进程与运行时](/daemon-runtimes)。
+
+### 默认智能体参数（`MULTICA_<PROVIDER>_ARGS`）
+
+为某个后端设置一层**全机队默认**的 CLI 参数——可以方便地给一台守护进程上的所有智能体应用一个默认的成本或资源基线（例如 `--max-turns`），而不必逐个修改每个智能体的 `custom_args`。这是一层默认值，而不是不可突破的硬上限：每个智能体自己的 `custom_args` 会追加在后面，并可以覆盖它（见下方**优先级**）。
+
+- **优先级：** 默认参数先生效，随后追加各智能体自己的 `custom_args`。对于带取值的参数，由下游 CLI 自己的参数解析器决定最终生效值（多数工具采用「后者覆盖」），因此单个智能体可以调高某个守护进程默认值，但在智能体没有覆盖的地方，默认值依然生效。
+- **解析：** 取值按 POSIX shell-word 规则切分，因此引号可用——`MULTICA_CLAUDE_ARGS='--append-system-prompt "multi word"'` 会解析为两个 token。
+- **安全：** 默认参数层和各智能体的 `custom_args` 层都会经过同一套 blocked-flags 过滤，因此协议关键标志（如 Claude 的 `-p`、`--output-format`、`--input-format`、`--permission-mode`、`--mcp-config`，以及 Codex 的 `--listen`）无法从任何一层注入。
+- **未设置 / 为空** 表示不改变行为。
 
 ## 前端访问控制
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
-| `FRONTEND_ORIGIN` | 空 | 前端地址。邀请邮件里的链接、CORS 白名单、cookie domain 都从这里推导。邮件链接在不设时会 fallback 到托管版域名 `https://app.multica.ai`——self-host 必须显式填 |
+| `FRONTEND_ORIGIN` | 空 | 前端地址。邀请邮件里的链接、CORS 白名单、cookie domain 都从这里推导。邮件链接在不设时会 fallback 到托管版域名 `https://multica.ai`——self-host 必须显式填 |
 | `MULTICA_APP_URL` | 空 | CLI 登录流程使用的前端 URL。Web UI 也会用它显示带你自己 app domain 的 self-host 守护进程 setup 命令；同源部署中，如果 `MULTICA_PUBLIC_URL` 未设置，它也会作为守护进程的 `server_url` |
 | `MULTICA_PUBLIC_URL` | 空 | 公开 API URL，不带结尾 slash。用于 autopilot webhook URL，也会被 Web UI 用作守护进程的 `server_url` |
 | `CORS_ALLOWED_ORIGINS` | 空 | 额外的 CORS 允许来源（逗号分隔）|
 | `ALLOWED_ORIGINS` | 空 | WebSocket 专用的 origin 白名单（逗号分隔）；不设就按 `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` 顺序回落 |
 
 <Callout type="warning">
-**`FRONTEND_ORIGIN` 不设就有两个静默失败**：（1）邀请邮件里的链接指向 `https://app.multica.ai`（托管版的域名），用户点了跳不回你的 self-host 实例；（2）WebSocket 连接的 Origin 校验回落到 `localhost:3000 / 5173 / 5174`，生产部署的 WebSocket 全部被拒，前端看起来「实时更新不工作」。
+**`FRONTEND_ORIGIN` 不设就有两个静默失败**：（1）邀请邮件里的链接指向 `https://multica.ai`（托管版的域名），用户点了跳不回你的 self-host 实例；（2）WebSocket 连接的 Origin 校验回落到 `localhost:3000 / 5173 / 5174`，生产部署的 WebSocket 全部被拒，前端看起来「实时更新不工作」。
 </Callout>
 
 ## GitHub 集成

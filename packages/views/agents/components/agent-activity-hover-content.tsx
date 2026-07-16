@@ -61,7 +61,11 @@ export function AgentActivityHoverContent({
   return (
     <div className="flex flex-col gap-2">
       <div className="text-xs font-medium text-muted-foreground">
-        {t(($) => $.agent_activity.hover_header, { count: tasks.length })}
+        {/* One row per task, so count tasks — not agents. A single agent can
+            run several tasks at once, so an agent-worded header here would
+            disagree with the workspace chip's unique-agent count (e.g. chip
+            "2 working" but header "3 agents working"). */}
+        {t(($) => $.agent_activity.hover_header_tasks, { count: tasks.length })}
       </div>
       <div className="flex flex-col gap-1.5">
         {tasks.map((task) => {
@@ -100,7 +104,7 @@ export function AgentActivityHoverContent({
                 initials={getActorInitials("agent", task.agent_id)}
                 avatarUrl={getActorAvatarUrl("agent", task.agent_id)}
                 isAgent
-                size={18}
+                size="sm"
               />
               <span className="flex-1 truncate font-medium">
                 {getActorName("agent", task.agent_id)}

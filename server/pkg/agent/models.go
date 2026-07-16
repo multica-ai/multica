@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"regexp"
@@ -41,8 +42,8 @@ type Model struct {
 }
 
 // ModelThinking carries the per-model reasoning/effort catalog
-// surfaced by an agent runtime. Values are runtime-native — Codex
-// emits "none|minimal|low|medium|high|xhigh"; Claude emits
+// surfaced by an agent runtime. Values are runtime-native — Codex can emit
+// "none|minimal|low|medium|high|xhigh|max|ultra"; Claude emits
 // "low|medium|high|xhigh|max". The frontend renders SupportedLevels
 // as-is so what users see matches each CLI's own UI.
 type ModelThinking struct {
@@ -80,14 +81,14 @@ const modelCacheTTL = 60 * time.Second
 
 // ListModels returns the models supported by the given agent provider.
 // For providers with a known static catalog it returns the baked-in
-// list; for providers with a CLI discovery mechanism (opencode, pi,
-// openclaw) it shells out with caching and falls back to the static
-// list on failure.
+// list; for providers with a CLI discovery mechanism (codex, opencode,
+// pi, openclaw) it shells out with caching and falls back where the
+// provider has a safe static catalog.
 //
 // For claude, codex, and opencode, the catalog is augmented with per-model
-// thinking-level options discovered from the local CLI. Discovery failures
-// silently leave Thinking == nil on each entry, which the UI treats as
-// "no picker for this model" rather than blocking model selection.
+// thinking-level options discovered from the local CLI. Codex discovery
+// failures fall back to a model + thinking snapshot; providers without a safe
+// fallback leave Thinking nil, which makes the UI hide the thinking picker.
 //
 // executablePath lets the caller point at a non-default binary; pass
 // "" to use the provider's default name on PATH.
@@ -98,17 +99,22 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		annotateClaudeThinking(ctx, models, executablePath)
 		return models, nil
 	case "codex":
-		models := codexStaticModels()
-		annotateCodexThinking(ctx, models, executablePath)
-		return models, nil
-	case "gemini":
-		return geminiStaticModels(), nil
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
+			return discoverCodexModels(ctx, executablePath), nil
+		})
 	case "antigravity":
 		// agy 1.0.6 added a `--model` flag plus an `agy models` catalog
 		// command (MUL-3125). Enumerate it on demand like the other
 		// dynamic-discovery backends.
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverAntigravityModels(ctx, executablePath)
+		})
+	case "traecli":
+		// Official TRAE CLI is ACP-native: it returns its model catalog from
+		// session/new. Enumerate it on demand like the other ACP backends
+		// (requires a logged-in traecli; falls back to manual entry on error).
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverTraecliModels(ctx, executablePath)
 		})
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
@@ -138,6 +144,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
 		})
+	case "deveco":
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
+			return discoverDevecoModels(ctx, executablePath)
+		})
 	case "pi":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverPiModels(ctx, executablePath)
@@ -154,6 +164,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 			}
 			annotateCodebuddyThinking(ctx, models, executablePath)
 			return models, nil
+		})
+	case "grok":
+		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
+		// comes from session/new. Falls back to a small static list so the
+		// UI picker stays usable offline / unauthenticated.
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverGrokModels(ctx, executablePath)
 		})
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
@@ -204,8 +221,6 @@ func acceptedModelIDsForProvider(providerType string) (map[string]bool, bool) {
 		return modelIDSet(claudeStaticModels()), true
 	case providerType == "codex":
 		return modelIDSet(codexStaticModels()), true
-	case providerType == "gemini":
-		return modelIDSet(geminiStaticModels()), true
 	default:
 		return nil, false
 	}
@@ -225,8 +240,7 @@ func isRuntimeSpecificModelID(model string) bool {
 	}
 	return modelHasKnownPrefix(model) ||
 		modelIDSet(claudeStaticModels())[model] ||
-		modelIDSet(codexStaticModels())[model] ||
-		modelIDSet(geminiStaticModels())[model]
+		modelIDSet(codexStaticModels())[model]
 }
 
 func modelHasKnownPrefix(model string) bool {
@@ -285,6 +299,7 @@ func discoveryCacheKey(providerType, executablePath string) string {
 // the everyday workhorse (Opus is reserved for advisor-style flows).
 func claudeStaticModels() []Model {
 	return []Model{
+		{ID: "claude-sonnet-5", Label: "Claude Sonnet 5", Provider: "anthropic"},
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
 		{ID: "claude-fable-5", Label: "Claude Fable 5", Provider: "anthropic"},
 		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},
@@ -295,42 +310,72 @@ func claudeStaticModels() []Model {
 	}
 }
 
+// codexStaticModels is the fallback for Codex versions older than 0.122.0
+// and for failed/malformed `codex debug models --bundled` calls. Keep it in
+// sync with the visible entries in the newest locally verified bundled
+// catalog, plus still-common models from older Codex releases. Each entry
+// carries its own reasoning catalog so old/offline CLIs retain the same model
+// + thinking picker contract as dynamic discovery.
 func codexStaticModels() []Model {
+	// `Default` here is NOT a user-facing "default model" badge — the picker
+	// stopped rendering that (Multica follows the CLI config when the model is
+	// unset). It only marks the current flagship for the "default must track
+	// the latest release" catalog guard
+	// (TestCodexStaticModelsMatchVerifiedFallbackCatalog,
+	// multica#2009). It is deliberately NOT used to validate effort for an
+	// empty (follow-CLI-config) model: that config can resolve to any model,
+	// so ValidateThinkingLevel fails an empty codex model closed rather than
+	// borrowing this entry's catalog (which alone advertises `ultra`) — see
+	// ValidateThinkingLevel and MUL-4347. Keep exactly one entry flagged.
+	standardThinking := func(defaultLevel string, includeMax, includeUltra bool) *ModelThinking {
+		levels := []ThinkingLevel{
+			{Value: "low", Label: "Low", Description: "Fast responses with lighter reasoning"},
+			{Value: "medium", Label: "Medium", Description: "Balances speed and reasoning depth for everyday tasks"},
+			{Value: "high", Label: "High", Description: "Greater reasoning depth for complex problems"},
+			{Value: "xhigh", Label: "Extra high", Description: "Extra high reasoning depth for complex problems"},
+		}
+		if includeMax {
+			levels = append(levels, ThinkingLevel{Value: "max", Label: "Max", Description: "Maximum reasoning depth for the hardest problems"})
+		}
+		if includeUltra {
+			levels = append(levels, ThinkingLevel{Value: "ultra", Label: "Ultra", Description: "Maximum reasoning with automatic task delegation"})
+		}
+		return &ModelThinking{DefaultLevel: defaultLevel, SupportedLevels: levels}
+	}
+	gpt52Thinking := func() *ModelThinking {
+		return &ModelThinking{
+			DefaultLevel: "medium",
+			SupportedLevels: []ThinkingLevel{
+				{Value: "low", Label: "Low", Description: "Balances speed with some reasoning; useful for straightforward queries and short explanations"},
+				{Value: "medium", Label: "Medium", Description: "Provides a solid balance of reasoning depth and latency for general-purpose tasks"},
+				{Value: "high", Label: "High", Description: "Maximizes reasoning depth for complex or ambiguous problems"},
+				{Value: "xhigh", Label: "Extra high", Description: "Extra high reasoning for complex problems"},
+			},
+		}
+	}
 	return []Model{
-		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai", Default: true},
-		{ID: "gpt-5.5-mini", Label: "GPT-5.5 mini", Provider: "openai"},
-		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
-		{ID: "gpt-5.4-mini", Label: "GPT-5.4 mini", Provider: "openai"},
-		{ID: "gpt-5.3-codex", Label: "GPT-5.3 Codex", Provider: "openai"},
-		{ID: "gpt-5", Label: "GPT-5", Provider: "openai"},
-		{ID: "o3", Label: "o3", Provider: "openai"},
-		{ID: "o3-mini", Label: "o3-mini", Provider: "openai"},
+		{ID: "gpt-5.6-sol", Label: "GPT-5.6-Sol", Provider: "openai", Default: true, Thinking: standardThinking("low", true, true)},
+		{ID: "gpt-5.6-terra", Label: "GPT-5.6-Terra", Provider: "openai", Thinking: standardThinking("medium", true, true)},
+		{ID: "gpt-5.6-luna", Label: "GPT-5.6-Luna", Provider: "openai", Thinking: standardThinking("medium", true, false)},
+		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai", Thinking: standardThinking("medium", false, false)},
+		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai", Thinking: standardThinking("medium", false, false)},
+		{ID: "gpt-5.4-mini", Label: "GPT-5.4-Mini", Provider: "openai", Thinking: standardThinking("medium", false, false)},
+		{ID: "gpt-5.3-codex", Label: "GPT-5.3-Codex", Provider: "openai", Thinking: standardThinking("medium", false, false)},
+		{ID: "gpt-5.2", Label: "GPT-5.2", Provider: "openai", Thinking: gpt52Thinking()},
 	}
 }
 
-// geminiStaticModels lists the values we pass via `gemini -m`. Gemini
-// CLI has no `models list` subcommand, so dynamic discovery isn't
-// possible; the next best thing is to expose the CLI's own aliases
-// (auto / pro / flash / flash-lite and the `auto-gemini-*` family)
-// alongside a few explicit version pins. Aliases track whatever the
-// installed CLI considers current (see `resolveModel` in the CLI's
-// packages/core/src/config/models.ts), so new Gemini releases light
-// up without a Multica redeploy. Default is `auto` to match Google's
-// recommendation — the CLI picks Pro vs Flash per task and falls back
-// when quota is exhausted.
-func geminiStaticModels() []Model {
-	return []Model{
-		{ID: "auto", Label: "Auto (Gemini 3)", Provider: "google", Default: true},
-		{ID: "auto-gemini-2.5", Label: "Auto (Gemini 2.5)", Provider: "google"},
-		{ID: "pro", Label: "Pro", Provider: "google"},
-		{ID: "flash", Label: "Flash", Provider: "google"},
-		{ID: "flash-lite", Label: "Flash Lite", Provider: "google"},
-		{ID: "gemini-3-pro-preview", Label: "Gemini 3 Pro (preview)", Provider: "google"},
-		{ID: "gemini-3-flash-preview", Label: "Gemini 3 Flash (preview)", Provider: "google"},
-		{ID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro", Provider: "google"},
-		{ID: "gemini-2.5-flash", Label: "Gemini 2.5 Flash", Provider: "google"},
-		{ID: "gemini-2.5-flash-lite", Label: "Gemini 2.5 Flash Lite", Provider: "google"},
-	}
+// discoverTraecliModels spins up a throwaway `traecli acp serve --yolo` process
+// and parses the model catalog traecli returns from session/new (same shape as
+// Kiro/Qoder). The official TRAE CLI must be logged in for the catalog to be
+// non-empty; on any failure the caller falls back to the manual-entry field.
+func discoverTraecliModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "traecli",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-traecli-discovery-",
+		acpArgs:      []string{"acp", "serve", "--yolo"},
+	})
 }
 
 // cursorStaticModels is a minimal fallback used when
@@ -844,7 +889,8 @@ func discoverQoderModels(ctx context.Context, executablePath string) ([]Model, e
 
 // acpDiscoveryProvider configures how discoverACPModels launches an
 // ACP-speaking agent CLI. The shared helper drives every CLI in
-// the same way (initialize → session/new → parse models block) — the
+// the same way (initialize → optional authenticate → session/new → parse
+// models block) — the
 // per-provider differences are which binary to spawn, which env
 // vars suppress interactive prompts during init, what argv puts
 // the binary into ACP server mode (most use `acp`, Copilot uses
@@ -858,6 +904,14 @@ type acpDiscoveryProvider struct {
 	// acpArgs is the argv passed to the binary to start it in ACP
 	// server mode. Defaults to []string{"acp"} when nil/empty.
 	acpArgs []string
+	// selectAuthMethod inspects the initialize response and child environment
+	// after initialize succeeds. A non-nil selector must return one advertised
+	// method id; its error aborts discovery before any session operation.
+	selectAuthMethod func(json.RawMessage, []string) (string, error)
+	// strictErrors surfaces stage-specific handshake errors to the caller.
+	// Legacy discovery providers keep their empty-list behavior; Grok enables
+	// this so it can log the actual fallback reason.
+	strictErrors bool
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
@@ -866,11 +920,17 @@ type acpDiscoveryProvider struct {
 // `models.availableModels` / `models.currentModelId`. Provider-specific
 // `launchArgs` select ACP mode (e.g. `acp` vs `--acp`).
 func discoverACPModels(ctx context.Context, executablePath string, p acpDiscoveryProvider) ([]Model, error) {
+	fail := func(stage string, err error) ([]Model, error) {
+		if p.strictErrors {
+			return nil, fmt.Errorf("ACP model discovery %s failed: %w", stage, err)
+		}
+		return []Model{}, nil
+	}
 	if executablePath == "" {
 		executablePath = p.defaultBin
 	}
 	if _, err := exec.LookPath(executablePath); err != nil {
-		return []Model{}, nil
+		return fail("executable lookup", err)
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -881,23 +941,22 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	}
 	cmd := exec.CommandContext(runCtx, executablePath, cmdArgs...)
 	hideAgentWindow(cmd)
-	if len(p.extraEnv) > 0 {
-		cmd.Env = append(os.Environ(), p.extraEnv...)
-	}
+	childEnv := append(os.Environ(), p.extraEnv...)
+	cmd.Env = childEnv
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return []Model{}, nil
+		return fail("stdin setup", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		stdin.Close()
-		return []Model{}, nil
+		return fail("stdout setup", err)
 	}
 	// Discard stderr; noisy logs here don't help us and we don't
 	// want them bleeding into the daemon log every 60s.
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
-		return []Model{}, nil
+		return fail("process start", err)
 	}
 	// Ensure the child process is always reaped.
 	defer func() {
@@ -906,7 +965,12 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 		_, _ = cmd.Process.Wait()
 	}()
 
-	writeACP := func(id int, method string, params map[string]any) error {
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
+	nextID := 1
+	requestACP := func(method string, params map[string]any) (json.RawMessage, error) {
+		id := nextID
+		nextID++
 		msg := map[string]any{
 			"jsonrpc": "2.0",
 			"id":      id,
@@ -915,20 +979,64 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 		}
 		data, err := json.Marshal(msg)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		data = append(data, '\n')
-		_, err = stdin.Write(data)
-		return err
+		if _, err = stdin.Write(data); err != nil {
+			return nil, err
+		}
+
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			var env struct {
+				ID     json.RawMessage `json:"id"`
+				Result json.RawMessage `json:"result"`
+				Error  json.RawMessage `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(line), &env); err != nil || string(env.ID) != fmt.Sprint(id) {
+				continue
+			}
+			if len(env.Error) > 0 && string(env.Error) != "null" {
+				var rpcErr struct {
+					Code    int             `json:"code"`
+					Message string          `json:"message"`
+					Data    json.RawMessage `json:"data"`
+				}
+				_ = json.Unmarshal(env.Error, &rpcErr)
+				detail := ""
+				if len(rpcErr.Data) > 0 && string(rpcErr.Data) != "null" {
+					if err := json.Unmarshal(rpcErr.Data, &detail); err != nil {
+						detail = strings.TrimSpace(string(rpcErr.Data))
+					}
+				}
+				return nil, &acpRPCError{Method: method, Code: rpcErr.Code, Message: rpcErr.Message, Data: detail}
+			}
+			if len(env.Result) == 0 {
+				return nil, fmt.Errorf("response contained neither result nor error")
+			}
+			return env.Result, nil
+		}
+		if err := scanner.Err(); err != nil {
+			return nil, err
+		}
+		if err := runCtx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, io.ErrUnexpectedEOF
 	}
 
-	// Send initialize + session/new.
-	if err := writeACP(1, "initialize", map[string]any{
+	// Each stage is response-driven. In particular, do not guess Grok's auth
+	// method or enqueue session/new before initialize/authenticate succeeds.
+	initResult, err := requestACP("initialize", map[string]any{
 		"protocolVersion":    1,
 		"clientInfo":         map[string]any{"name": p.clientName, "version": "0.1.0"},
 		"clientCapabilities": map[string]any{},
-	}); err != nil {
-		return []Model{}, nil
+	})
+	if err != nil {
+		return fail("initialize", err)
 	}
 
 	// session/new requires a valid cwd — use a temp directory we
@@ -936,55 +1044,38 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	// be in the middle of another task's worktree).
 	tmp, err := os.MkdirTemp("", p.tmpdirPrefix)
 	if err != nil {
-		return []Model{}, nil
+		return fail("temporary cwd", err)
 	}
 	defer os.RemoveAll(tmp)
 
-	if err := writeACP(2, "session/new", map[string]any{
+	if p.selectAuthMethod != nil {
+		methodID, err := p.selectAuthMethod(initResult, childEnv)
+		if err != nil {
+			return fail("auth method selection", err)
+		}
+		if _, err := requestACP("authenticate", map[string]any{
+			"methodId": methodID,
+			"_meta":    map[string]any{"headless": true},
+		}); err != nil {
+			return fail(fmt.Sprintf("authenticate (%s)", methodID), err)
+		}
+	}
+
+	sessionResult, err := requestACP("session/new", map[string]any{
 		"cwd":        tmp,
 		"mcpServers": []any{},
-	}); err != nil {
-		return []Model{}, nil
+	})
+	if err != nil {
+		return fail("session/new", err)
 	}
-
-	// Read responses until we see the one for id=2 (session/new).
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
-	deadline := time.After(12 * time.Second)
-	done := make(chan []Model, 1)
-	go func() {
-		defer close(done)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			var env struct {
-				ID     json.Number     `json:"id"`
-				Result json.RawMessage `json:"result"`
-			}
-			if err := json.Unmarshal([]byte(line), &env); err != nil {
-				continue
-			}
-			if env.ID.String() != "2" || len(env.Result) == 0 {
-				continue
-			}
-			done <- parseACPSessionNewModels(env.Result)
-			return
-		}
-	}()
-
-	select {
-	case models := <-done:
-		if models == nil {
-			return []Model{}, nil
-		}
-		return models, nil
-	case <-deadline:
-		return []Model{}, nil
-	case <-runCtx.Done():
-		return []Model{}, nil
+	models := parseACPSessionNewModels(sessionResult)
+	if models == nil {
+		return fail("session/new model parsing", fmt.Errorf("response contained no model catalog"))
 	}
+	if err := runCtx.Err(); err != nil {
+		return fail("completion", err)
+	}
+	return models, nil
 }
 
 // parseACPSessionNewModels extracts the model catalog from an ACP
@@ -1118,6 +1209,66 @@ func parseAntigravityModels(output string) []Model {
 		})
 	}
 	return models
+}
+
+// discoverGrokModels spins up `grok agent --always-approve stdio` and parses
+// the model catalog from session/new (same shape as Kiro/Qoder/Trae). Requires
+// an authenticated Grok CLI; on any failure falls back to grokStaticModels.
+func discoverGrokModels(ctx context.Context, executablePath string) ([]Model, error) {
+	// Match the daemon's runtime launch: `--no-auto-update` (global) so a
+	// background update check can't stall discovery. Auth is selected only
+	// after initialize returns the methods this installed CLI actually offers.
+	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "grok",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-grok-discovery-",
+		acpArgs:      []string{"--no-auto-update", "agent", "--always-approve", "stdio"},
+		selectAuthMethod: func(initResult json.RawMessage, childEnv []string) (string, error) {
+			return selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY"))
+		},
+		strictErrors: true,
+	})
+	if err != nil || len(models) == 0 {
+		if err != nil {
+			slog.Debug("grok model discovery fell back to static catalog", "error", err)
+		}
+		return grokStaticModels(), nil
+	}
+	for i := range models {
+		if models[i].Provider == "" {
+			models[i].Provider = "xai"
+		}
+	}
+	annotateGrokThinking(models)
+	return models, nil
+}
+
+// grokStaticModels is the offline fallback catalog for the Grok Build CLI.
+// IDs match a typical signed-in `session/new` / `grok models` listing.
+func grokStaticModels() []Model {
+	models := []Model{
+		{ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai", Default: true},
+		{ID: "grok-composer-2.5-fast", Label: "Grok Composer 2.5 Fast", Provider: "xai"},
+	}
+	annotateGrokThinking(models)
+	return models
+}
+
+// annotateGrokThinking attaches only capabilities confirmed by xAI's
+// per-model reasoning documentation. session/new does not advertise effort
+// catalogs, so unknown and composer models deliberately keep Thinking nil
+// instead of exposing values that may fail at runtime.
+func annotateGrokThinking(models []Model) {
+	for i := range models {
+		if models[i].ID != "grok-4.5" {
+			continue
+		}
+		models[i].Thinking = &ModelThinking{SupportedLevels: []ThinkingLevel{
+			{Value: "low", Label: "Low"},
+			{Value: "medium", Label: "Medium"},
+			{Value: "high", Label: "High"},
+		}}
+	}
 }
 
 // discoverCursorModels runs `cursor-agent --list-models` and parses

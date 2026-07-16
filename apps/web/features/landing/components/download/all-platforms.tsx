@@ -1,27 +1,13 @@
 import Link from "next/link";
-import {
-  captureDownloadInitiated,
-  type DownloadInitiatedPayload,
-} from "@multica/core/analytics";
 import { useLocale } from "../../i18n";
-import type { DetectResult } from "../../utils/os-detect";
 import type { DownloadAssets } from "../../utils/parse-release-assets";
 import { AppleIcon, LinuxIcon, WindowsIcon } from "./os-icons";
-
-type Platform = DownloadInitiatedPayload["platform"];
-type Arch = DownloadInitiatedPayload["arch"];
-type Format = DownloadInitiatedPayload["format"];
 
 interface Props {
   assets: DownloadAssets;
   /** Link to GitHub releases page, used when individual asset URLs
    *  couldn't be resolved (API down / parse failure). */
   fallbackHref: string;
-  /** Release tag (e.g. "v0.2.13"); null on fetch failure. */
-  version: string | null;
-  /** Current OS/arch guess. Used only to compute `matched_detect` on
-   *  the download_initiated event — the row UI itself is static. */
-  detected: DetectResult | null;
 }
 
 /**
@@ -32,30 +18,9 @@ interface Props {
 export function AllPlatforms({
   assets,
   fallbackHref,
-  version,
-  detected,
 }: Props) {
   const { t } = useLocale();
   const d = t.download.allPlatforms;
-
-  const trackClick = (platform: Platform, arch: Arch, format: Format) => {
-    if (!version) return;
-    captureDownloadInitiated({
-      platform,
-      arch,
-      format,
-      version,
-      // Manual pick from the matrix — Hero is the primary CTA.
-      primary_cta: false,
-      // True only when the row matches what we guessed client-side.
-      // Lets us measure detect accuracy from the miss rate on this
-      // event alone (no need to cross-join to download_page_viewed).
-      matched_detect:
-        !!detected &&
-        detected.os === platform &&
-        detected.arch === arch,
-    });
-  };
 
   return (
     <section
@@ -70,17 +35,30 @@ export function AllPlatforms({
         <div className="mt-10 overflow-hidden rounded-2xl border border-[#0a0d12]/10">
           <Row
             icon={<AppleIcon className="text-[#0a0d12]" />}
-            label={d.macLabel}
+            label={d.macArm64Label}
             formats={[
               {
                 label: d.formatDmg,
                 href: assets.macArm64Dmg,
-                onClick: () => trackClick("mac", "arm64", "dmg"),
               },
               {
                 label: d.formatZip,
                 href: assets.macArm64Zip,
-                onClick: () => trackClick("mac", "arm64", "zip"),
+              },
+            ]}
+            unavailable={d.unavailable}
+          />
+          <Row
+            icon={<AppleIcon className="text-[#0a0d12]" />}
+            label={d.macX64Label}
+            formats={[
+              {
+                label: d.formatDmg,
+                href: assets.macX64Dmg,
+              },
+              {
+                label: d.formatZip,
+                href: assets.macX64Zip,
               },
             ]}
             unavailable={d.unavailable}
@@ -92,7 +70,6 @@ export function AllPlatforms({
               {
                 label: d.formatExe,
                 href: assets.winX64Exe,
-                onClick: () => trackClick("windows", "x64", "exe"),
               },
             ]}
             unavailable={d.unavailable}
@@ -104,7 +81,6 @@ export function AllPlatforms({
               {
                 label: d.formatExe,
                 href: assets.winArm64Exe,
-                onClick: () => trackClick("windows", "arm64", "exe"),
               },
             ]}
             unavailable={d.unavailable}
@@ -116,17 +92,14 @@ export function AllPlatforms({
               {
                 label: d.formatAppImage,
                 href: assets.linuxAmd64AppImage,
-                onClick: () => trackClick("linux", "x64", "appimage"),
               },
               {
                 label: d.formatDeb,
                 href: assets.linuxAmd64Deb,
-                onClick: () => trackClick("linux", "x64", "deb"),
               },
               {
                 label: d.formatRpm,
                 href: assets.linuxAmd64Rpm,
-                onClick: () => trackClick("linux", "x64", "rpm"),
               },
             ]}
             unavailable={d.unavailable}
@@ -138,17 +111,14 @@ export function AllPlatforms({
               {
                 label: d.formatAppImage,
                 href: assets.linuxArm64AppImage,
-                onClick: () => trackClick("linux", "arm64", "appimage"),
               },
               {
                 label: d.formatDeb,
                 href: assets.linuxArm64Deb,
-                onClick: () => trackClick("linux", "arm64", "deb"),
               },
               {
                 label: d.formatRpm,
                 href: assets.linuxArm64Rpm,
-                onClick: () => trackClick("linux", "arm64", "rpm"),
               },
             ]}
             unavailable={d.unavailable}
@@ -156,10 +126,8 @@ export function AllPlatforms({
           />
         </div>
 
-        <p className="mt-6 text-[13px] text-[#0a0d12]/60">{d.intelNote}</p>
-
         {isFallbackNeeded(assets) ? (
-          <p className="mt-2 text-[13px] text-[#0a0d12]/60">
+          <p className="mt-6 text-[13px] text-[#0a0d12]/60">
             <Link
               href={fallbackHref}
               className="underline decoration-[#0a0d12]/30 underline-offset-4 hover:text-[#0a0d12] hover:decoration-[#0a0d12]/70"
@@ -185,7 +153,6 @@ interface RowProps {
   formats: {
     label: string;
     href: string | undefined;
-    onClick: () => void;
   }[];
   unavailable: string;
   isLast?: boolean;
@@ -208,7 +175,6 @@ function Row({ icon, label, formats, unavailable, isLast }: RowProps) {
             <a
               key={f.label}
               href={f.href}
-              onClick={f.onClick}
               className="inline-flex items-center gap-1.5 rounded-lg border border-[#0a0d12]/12 bg-white px-3 py-1.5 text-[13px] font-medium transition-colors hover:border-[#0a0d12]/30 hover:bg-[#0a0d12]/5"
             >
               {f.label}
@@ -229,10 +195,10 @@ function Row({ icon, label, formats, unavailable, isLast }: RowProps) {
   );
 }
 
-// Ten desktop artifacts are expected per release (two Mac,
+// Twelve desktop artifacts are expected per release (four Mac,
 // two Windows, six Linux). If any are missing, surface the GitHub
 // fallback link so users on an orphaned row have a way out.
-const EXPECTED_ASSET_COUNT = 10;
+const EXPECTED_ASSET_COUNT = 12;
 
 function isFallbackNeeded(assets: DownloadAssets): boolean {
   return Object.values(assets).filter(Boolean).length < EXPECTED_ASSET_COUNT;

@@ -26,6 +26,8 @@
     "new_project": "新建项目",
     "copy_issue_link": "复制 issue 链接",
     "copy_identifier": "复制标识符 ({{identifier}})",
+    "fold_all_comments": "收起全部评论",
+    "unfold_all_comments": "展开全部评论",
     "switch_to_light": "切换到浅色主题",
     "switch_to_dark": "切换到深色主题",
     "use_system_theme": "跟随系统主题"

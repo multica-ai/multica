@@ -4,6 +4,7 @@ import {
   buildRuntimeMachines,
   filterRuntimeMachines,
   runtimeMachineCounts,
+  sharedCustomName,
   splitRuntimeName,
 } from "./runtime-machines";
 
@@ -50,6 +51,57 @@ describe("runtime machine grouping", () => {
       issueCount: 0,
       providerNames: ["claude", "codex"],
     });
+  });
+
+  it("uses the online daemon CLI version instead of a stale offline report", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          id: "rt-online",
+          provider: "claude",
+          metadata: { cli_version: "0.4.0", launched_by: "desktop" },
+        }),
+        makeRuntime({
+          id: "rt-stale",
+          provider: "copilot",
+          status: "offline",
+          last_seen_at: new Date(NOW - 4 * 24 * 60 * 60_000).toISOString(),
+          metadata: { cli_version: "0.3.17", launched_by: "desktop" },
+        }),
+      ],
+      { now: NOW },
+    );
+
+    expect(machines).toHaveLength(1);
+    expect(machines[0]?.cliVersion).toBe("0.4.0");
+    expect(machines[0]?.launchedBy).toBe("desktop");
+  });
+
+  it("uses a machine-wide custom name as the machine title, over the local name", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({ id: "rt-claude", provider: "claude", custom_name: "Bohan's MacBook" }),
+        makeRuntime({ id: "rt-codex", provider: "codex", custom_name: "Bohan's MacBook" }),
+      ],
+      { now: NOW, localDaemonId: "daemon-1", localMachineName: "dev-machine.local" },
+    );
+
+    expect(machines).toHaveLength(1);
+    expect(machines[0]?.title).toBe("Bohan's MacBook");
+  });
+
+  it("ignores a one-off per-runtime custom name for the machine title", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({ id: "rt-claude", provider: "claude", custom_name: "just this one" }),
+        makeRuntime({ id: "rt-codex", provider: "codex" }),
+      ],
+      { now: NOW, localDaemonId: "daemon-1" },
+    );
+
+    // Not shared across all runtimes on the machine, so it must not stand in
+    // for the whole machine's name — the device name wins instead.
+    expect(machines[0]?.title).toBe("dev-machine.local");
   });
 
   it("counts machines with any offline runtime as issues", () => {
@@ -320,5 +372,35 @@ describe("splitRuntimeName", () => {
       base: "Codex cloud",
       hostname: null,
     });
+  });
+});
+
+describe("sharedCustomName", () => {
+  it("returns the name when every runtime shares one non-empty custom_name", () => {
+    expect(
+      sharedCustomName([
+        makeRuntime({ id: "a", custom_name: "Bohan's MacBook" }),
+        makeRuntime({ id: "b", custom_name: "Bohan's MacBook" }),
+      ]),
+    ).toBe("Bohan's MacBook");
+  });
+
+  it("returns null when only some runtimes are named (a lone per-runtime name is not the machine name)", () => {
+    expect(
+      sharedCustomName([
+        makeRuntime({ id: "a", custom_name: "just this one" }),
+        makeRuntime({ id: "b", custom_name: null }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("returns null when the names disagree, or the set is empty", () => {
+    expect(
+      sharedCustomName([
+        makeRuntime({ id: "a", custom_name: "Air" }),
+        makeRuntime({ id: "b", custom_name: "Pro" }),
+      ]),
+    ).toBeNull();
+    expect(sharedCustomName([])).toBeNull();
   });
 });

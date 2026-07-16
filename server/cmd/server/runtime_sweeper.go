@@ -37,11 +37,19 @@ const (
 	// means something went wrong (e.g. StartTask API call failed silently).
 	dispatchTimeoutSeconds = 300.0
 	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this. It is a
-	// coarse server-side backstop keyed on started_at (it does NOT look at task
-	// activity) — mainly for runs whose daemon died without reporting. The
-	// daemon itself decides stuck-vs-long-running by activity (idle/tool
-	// watchdog), so this only needs to sit generously above any realistic single
-	// run rather than track a per-run wall-clock cap (MUL-3064).
+	// coarse server-side backstop keyed on started_at, AND-gated by daemon
+	// liveness (agent_runtime.last_seen_at freshness within
+	// staleThresholdSeconds): a running task whose runtime is still
+	// heartbeating is NEVER killed by this wall clock, even after the timeout
+	// elapses. This is what lets healthy multi-hour research / training runs
+	// survive on self-hosted deployments (MUL-4107) — the daemon itself
+	// decides stuck-vs-long-running via its inactivity watchdogs (idle/tool),
+	// so the server-side wall clock is only a defensive backstop for the
+	// pathological case where a runtime row somehow retains status='online'
+	// with a stale DB heartbeat for longer than this timeout. The primary
+	// "daemon died" path is `sweepStaleRuntimes` in the same tick (Redis
+	// liveness + DB stale + FailTasksForOfflineRuntimes), which typically
+	// reclaims orphaned tasks within ~180s.
 	runningTimeoutSeconds = 9000.0
 	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
 	// for longer than this without ever being claimed. This is the cleanup
@@ -60,6 +68,14 @@ const (
 	// ticks and 500 rows/tick we drain 60k rows/hour worst case — plenty
 	// of headroom for the documented backlog without monopolising DB CPU.
 	queuedExpireBatchSize = 500
+	// chatFinalizeGraceSeconds is how long a cancelled chat task's deferred
+	// empty/non-empty judgment (#5219) waits for the daemon's cancel-ack
+	// before the sweeper settles it. Covers the daemon's 5s cancellation
+	// poll plus the bounded 10s+12s transcript drain wait (#5210) plus
+	// network slack; past this the daemon is presumed dead or partitioned.
+	chatFinalizeGraceSeconds = 60.0
+	// chatFinalizeBatchSize caps deferred finalizations per tick.
+	chatFinalizeBatchSize = 100
 )
 
 // runRuntimeSweeper periodically marks runtimes as offline if their
@@ -85,6 +101,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
+			sweepDeferredChatFinalizations(ctx, queries, taskSvc)
 			gcRuntimes(ctx, queries, bus)
 		}
 	}
@@ -239,14 +256,25 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 }
 
 // sweepStaleTasks fails tasks stuck in dispatched/running for too long,
-// even when the runtime is still online. This handles cases where:
-// - The agent process hangs and the daemon is still heartbeating
-// - The daemon failed to report task completion/failure
-// - A server restart left tasks in a non-terminal state
+// even when the runtime is still online at the row level. Each branch pairs
+// the wall clock with a task-appropriate liveness signal so healthy long
+// runs are preserved:
+//   - dispatched: excludes rows with an active prepare_lease (renewed by
+//     the daemon between claim and StartTask).
+//   - running: excludes rows whose runtime is 'online' with a fresh
+//     last_seen_at (renewed by the daemon heartbeat ~every 15s).
+//
+// The daemon-dead case is primarily handled upstream by sweepStaleRuntimes
+// in the same tick; this function is a defensive backstop for the residual
+// edge where a runtime row lingers online-with-stale-heartbeat past the
+// wall clock (MUL-4107).
 func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) {
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
 		DispatchTimeoutSecs: dispatchTimeoutSeconds,
 		RunningTimeoutSecs:  runningTimeoutSeconds,
+		// Reuse the runtime stale window so the running-task backstop
+		// exactly matches what sweepStaleRuntimes considers "not alive".
+		RuntimeStaleSecs: staleThresholdSeconds,
 	})
 	if err != nil {
 		slog.Warn("task sweeper: failed to clean up stale tasks", "error", err)
@@ -283,6 +311,29 @@ func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *
 	slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
 	taskSvc.CaptureQueuedExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
+}
+
+// sweepDeferredChatFinalizations settles cancelled chat tasks whose deferred
+// empty/non-empty judgment (#5219) never received a daemon cancel-ack within
+// the grace period — the daemon died, was partitioned, or its ack was lost.
+// FinalizeDeferredCancelledChat claims the marker atomically, so racing a
+// late ack is harmless.
+func sweepDeferredChatFinalizations(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService) {
+	rows, err := queries.ListChatFinalizeDeferredExpired(ctx, db.ListChatFinalizeDeferredExpiredParams{
+		GraceSecs:  chatFinalizeGraceSeconds,
+		MaxPerTick: chatFinalizeBatchSize,
+	})
+	if err != nil {
+		slog.Warn("chat finalize sweeper: list deferred failed", "error", err)
+		return
+	}
+	if len(rows) == 0 {
+		return
+	}
+	for _, t := range rows {
+		taskSvc.FinalizeDeferredCancelledChat(ctx, t.ID)
+	}
+	slog.Info("chat finalize sweeper: settled deferred cancellations", "count", len(rows))
 }
 
 // broadcastFailedTasks is preserved as a thin shim for the integration tests

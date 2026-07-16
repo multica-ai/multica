@@ -17,6 +17,9 @@ export interface CreateIssueRequest {
   start_date?: string;
   due_date?: string;
   attachment_ids?: string[];
+  /** Issue-scoped label IDs to attach in the same transaction as the create.
+   *  Unknown or non-issue ids are rejected by the server with 400. */
+  label_ids?: string[];
 }
 
 export interface UpdateIssueRequest {
@@ -81,6 +84,12 @@ export interface ListIssuesParams {
   priority?: IssuePriority;
   assignee_id?: string;
   assignee_ids?: string[];
+  /**
+   * Narrow to issues assigned to the given actor kinds (member / agent /
+   * squad). Same semantics as `ListGroupedIssuesParams.assignee_types` —
+   * powers the workspace Members/Agents tabs server-side.
+   */
+  assignee_types?: IssueAssigneeType[];
   creator_id?: string;
   project_id?: string;
   /**
@@ -94,6 +103,9 @@ export interface ListIssuesParams {
   involves_user_id?: string;
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
+  /** Custom-property filter: definition id → accepted values (option ids or
+   *  "true"/"false" for checkbox). OR within a definition, AND across. */
+  properties?: Record<string, string[]>;
   open_only?: boolean;
   /**
    * Restrict the result to issues with at least one of `start_date` /
@@ -105,7 +117,7 @@ export interface ListIssuesParams {
   date_field?: "created_at" | "updated_at";
   date_start?: string;
   date_end?: string;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date" | `property:${string}`;
   sort_direction?: "asc" | "desc";
 }
 
@@ -130,6 +142,9 @@ export interface ListGroupedIssuesParams {
   involves_user_id?: string;
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
+  /** Custom-property filter: definition id → accepted values (option ids or
+   *  "true"/"false" for checkbox). OR within a definition, AND across. */
+  properties?: Record<string, string[]>;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];
@@ -141,7 +156,7 @@ export interface ListGroupedIssuesParams {
   date_field?: "created_at" | "updated_at";
   date_start?: string;
   date_end?: string;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date" | `property:${string}`;
   sort_direction?: "asc" | "desc";
 }
 
