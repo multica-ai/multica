@@ -379,10 +379,6 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					finalStatus = "completed"
 					finalError = ""
 				} else if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
-					b.cfg.Logger.Warn("kiro session/prompt failed after completed task result; preserving completed task status", "error", err)
-					finalStatus = "completed"
-					finalError = ""
-				} else if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
 					// See the hermes backend: the runtime echoes the
 					// requested id back from session/resume even when
 					// the session is gone, so the stale id only fails

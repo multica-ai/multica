@@ -1366,6 +1366,7 @@ func parseToolArgsJSON(argsText string) map[string]any {
 //   - {type:"diff", path, oldText, newText} — FileEdit output. Rendered
 //     as a minimal unified-diff header so the UI distinguishes writes
 //     from reads without needing a diff viewer.
+//
 // acpRawText renders an ACP output field (rawOutput / output) that may arrive
 // as either a JSON string or a structured value. Some model adapters — notably
 // Kiro's GPT-5.6 Sol path — send the completed tool_call_update's rawOutput as
@@ -1387,7 +1388,6 @@ func acpRawText(raw json.RawMessage) string {
 	return string(raw)
 }
 
-//
 // Terminal blocks ({type:"terminal", terminalId}) reference a remote
 // terminal the client would normally subscribe to via terminal/output;
 // we don't advertise terminal capability so we never receive those in

@@ -609,6 +609,7 @@ func TestKiroBackendTreatsCompletedCommentAddWithNonTerminalTitleAsCompleted(t *
 //     ({"items":[{"Json":{...}}]}), which — when rawOutput was typed as a Go
 //     string — made json.Unmarshal fail and drop the whole update, status and
 //     all, so no completion signal ever reached the guard.
+//
 // Frames use the real wire form: method "session/update" + "sessionUpdate".
 func fakeKiroACPRealGPT56SolCloseErrorScript(command string) string {
 	return `#!/bin/sh
@@ -818,6 +819,80 @@ func TestKiroBackendClearsSessionIDWhenSetModelSessionNotFound(t *testing.T) {
 		}
 		if !strings.Contains(result.Error, `could not switch to model "auto"`) {
 			t.Errorf("expected error to name the requested model, got %q", result.Error)
+		}
+		if result.SessionID != "" {
+			t.Errorf("expected empty session id so the daemon's fresh-session retry fires, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// fakeKiroACPStalePromptScript impersonates kiro when a resumed session is
+// gone and there is NO model override: session/load returns an empty result
+// (so the requested id is kept), then session/prompt — not set_model — is the
+// call that surfaces the dead session, with kiro's observed -32603 +
+// "No session found with id ..." wording.
+func fakeKiroACPStalePromptScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/load"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"No session found with id ses_stale"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKiroBackendClearsSessionIDWhenPromptSessionNotFound pins the prompt-path
+// sibling of the stale-session fix. Without a model override, session/prompt
+// (not session/set_model) is where a dead resumed session surfaces. The result
+// MUST be failed with an empty SessionID so the daemon's fresh-session retry
+// (gated on SessionID == "") fires. A regression in the -32603 guard once
+// turned this into status="completed" + a preserved stale SessionID, which
+// both faked success and skipped the retry.
+func TestKiroBackendClearsSessionIDWhenPromptSessionNotFound(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPStalePromptScript()))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_stale",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed for a stale resumed session at prompt time, got %q (error=%q)", result.Status, result.Error)
 		}
 		if result.SessionID != "" {
 			t.Errorf("expected empty session id so the daemon's fresh-session retry fires, got %q", result.SessionID)
