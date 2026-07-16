@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net/http"
@@ -276,13 +277,8 @@ func parseMarkdownReferenceDefinitions(markdown string) map[string]markdownRefer
 }
 
 func parseMarkdownReferenceDefinitionAt(markdown string, start int) (label, destination string, end int, ok bool) {
-	i := start
-	indent := 0
-	for i < len(markdown) && markdown[i] == ' ' && indent < 4 {
-		i++
-		indent++
-	}
-	if indent > 3 || i >= len(markdown) || markdown[i] != '[' {
+	i, ok := skipMarkdownReferenceDefinitionLinePrefix(markdown, start)
+	if !ok || i >= len(markdown) || markdown[i] != '[' {
 		return "", "", 0, false
 	}
 	labelEnd, ok := findMarkdownLabelEnd(markdown, i)
@@ -313,16 +309,92 @@ func skipMarkdownReferenceDefinitionSpaces(markdown string, i int) (int, bool) {
 	}
 	if i < len(markdown) && (markdown[i] == '\n' || markdown[i] == '\r') {
 		i = consumeMarkdownLineEnding(markdown, i)
-		indent := 0
-		for i < len(markdown) && markdown[i] == ' ' && indent < 4 {
-			i++
-			indent++
-		}
-		if indent > 3 || i >= len(markdown) || markdown[i] == '\n' || markdown[i] == '\r' {
+		var ok bool
+		i, ok = skipMarkdownReferenceDefinitionLinePrefix(markdown, i)
+		if !ok || i >= len(markdown) || markdown[i] == '\n' || markdown[i] == '\r' {
 			return 0, false
 		}
 	}
 	return i, true
+}
+
+func skipMarkdownReferenceDefinitionLinePrefix(markdown string, i int) (int, bool) {
+	for {
+		j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
+		if !ok || j >= len(markdown) || markdown[j] != '>' {
+			break
+		}
+		j++
+		if j < len(markdown) && (markdown[j] == ' ' || markdown[j] == '\t') {
+			j++
+		}
+		i = j
+	}
+
+	j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
+	if !ok {
+		return 0, false
+	}
+	if after, ok := skipMarkdownListMarker(markdown, j); ok {
+		i = after
+		for {
+			j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
+			if !ok || j >= len(markdown) || markdown[j] != '>' {
+				break
+			}
+			j++
+			if j < len(markdown) && (markdown[j] == ' ' || markdown[j] == '\t') {
+				j++
+			}
+			i = j
+		}
+	}
+	return skipUpToThreeMarkdownSpaces(markdown, i)
+}
+
+func skipUpToThreeMarkdownSpaces(markdown string, i int) (int, bool) {
+	spaces := 0
+	for i+spaces < len(markdown) && markdown[i+spaces] == ' ' {
+		spaces++
+	}
+	if spaces > 3 {
+		return 0, false
+	}
+	return i + spaces, true
+}
+
+func skipMarkdownListMarker(markdown string, i int) (int, bool) {
+	if i >= len(markdown) {
+		return 0, false
+	}
+	if markdown[i] == '-' || markdown[i] == '+' || markdown[i] == '*' {
+		if i+1 < len(markdown) && (markdown[i+1] == ' ' || markdown[i+1] == '\t') {
+			return skipMarkdownListMarkerPadding(markdown, i+2), true
+		}
+		return 0, false
+	}
+	if markdown[i] < '0' || markdown[i] > '9' {
+		return 0, false
+	}
+	j := i
+	for j < len(markdown) && markdown[j] >= '0' && markdown[j] <= '9' && j-i < 9 {
+		j++
+	}
+	if j == i || j >= len(markdown) || (markdown[j] != '.' && markdown[j] != ')') {
+		return 0, false
+	}
+	j++
+	if j < len(markdown) && (markdown[j] == ' ' || markdown[j] == '\t') {
+		return skipMarkdownListMarkerPadding(markdown, j+1), true
+	}
+	return 0, false
+}
+
+func skipMarkdownListMarkerPadding(markdown string, i int) int {
+	for i < len(markdown) && (markdown[i] == ' ' || markdown[i] == '\t') {
+		i++
+	}
+	return i
 }
 
 func parseMarkdownReferenceDefinitionDestination(markdown string, i int) (string, int, bool) {
@@ -347,6 +419,9 @@ func parseMarkdownReferenceDefinitionDestination(markdown string, i int) (string
 	depth := 0
 	for i < len(markdown) {
 		if markdown[i] == '\\' {
+			if i+1 >= len(markdown) {
+				return "", 0, false
+			}
 			i += 2
 			continue
 		}
@@ -495,6 +570,11 @@ func isMarkdownSpace(c byte) bool {
 }
 
 func isLocalMarkdownImageDestination(destination string) bool {
+	return isLocalMarkdownImageDestinationRaw(destination) ||
+		isLocalMarkdownImageDestinationRaw(decodeMarkdownDestinationForClassification(destination))
+}
+
+func isLocalMarkdownImageDestinationRaw(destination string) bool {
 	lower := strings.ToLower(destination)
 	if strings.HasPrefix(lower, "file:") || strings.HasPrefix(destination, "/") ||
 		strings.HasPrefix(destination, `\\`) {
@@ -504,6 +584,24 @@ func isLocalMarkdownImageDestination(destination string) bool {
 		((destination[0] >= 'a' && destination[0] <= 'z') ||
 			(destination[0] >= 'A' && destination[0] <= 'Z')) &&
 		destination[1] == ':' && (destination[2] == '/' || destination[2] == '\\')
+}
+
+func decodeMarkdownDestinationForClassification(destination string) string {
+	var decoded strings.Builder
+	for i := 0; i < len(destination); i++ {
+		if destination[i] == '\\' && i+1 < len(destination) && isASCIIpunct(destination[i+1]) {
+			decoded.WriteByte(destination[i+1])
+			i++
+			continue
+		}
+		decoded.WriteByte(destination[i])
+	}
+	return html.UnescapeString(decoded.String())
+}
+
+func isASCIIpunct(c byte) bool {
+	return (c >= '!' && c <= '/') || (c >= ':' && c <= '@') ||
+		(c >= '[' && c <= '`') || (c >= '{' && c <= '~')
 }
 
 // HTTPClientConfig configures the production Lark HTTP APIClient.
