@@ -1479,6 +1479,9 @@ func (s *TaskService) EnqueueChannelChatTask(ctx context.Context, chatSession db
 
 	var task db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		if _, err := qtx.LockChatSessionForChannelInput(ctx, chatSession.ID); err != nil {
+			return fmt.Errorf("lock channel chat input: %w", err)
+		}
 		task, err = qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
 			AgentID:              chatSession.AgentID,
 			RuntimeID:            agent.RuntimeID,
@@ -1509,8 +1512,8 @@ func (s *TaskService) EnqueueChannelChatTask(ctx context.Context, chatSession db
 		if err != nil {
 			return fmt.Errorf("claim channel chat input: %w", err)
 		}
-		if len(claimed) != len(messageIDs) {
-			return fmt.Errorf("claim channel chat input: claimed %d of %d messages", len(claimed), len(messageIDs))
+		if !containsAllUUIDs(claimed, messageIDs) {
+			return fmt.Errorf("claim channel chat input: one or more explicit messages were unavailable")
 		}
 		return nil
 	}); err != nil {
@@ -1537,6 +1540,19 @@ func uniqueUUIDs(ids []pgtype.UUID) []pgtype.UUID {
 		unique = append(unique, id)
 	}
 	return unique
+}
+
+func containsAllUUIDs(haystack, needles []pgtype.UUID) bool {
+	found := make(map[pgtype.UUID]struct{}, len(haystack))
+	for _, id := range haystack {
+		found[id] = struct{}{}
+	}
+	for _, id := range needles {
+		if _, ok := found[id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // DirectChatSendResult carries the rows a transactional direct-chat send

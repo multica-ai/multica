@@ -32,12 +32,22 @@ func (q *Queries) ChatSessionHasUserMessage(ctx context.Context, chatSessionID p
 }
 
 const claimChannelChatInputMessages = `-- name: ClaimChannelChatInputMessages :many
+WITH boundary AS (
+    SELECT created_at, id
+    FROM chat_message
+    WHERE chat_session_id = $2
+      AND id = ANY($3::uuid[])
+      AND role = 'user'
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+)
 UPDATE chat_message m
 SET task_id = $1
+FROM boundary b
 WHERE m.chat_session_id = $2
-  AND m.id = ANY($3::uuid[])
   AND m.role = 'user'
   AND m.task_id IS NULL
+  AND (m.created_at, m.id) <= (b.created_at, b.id)
 RETURNING m.id
 `
 
@@ -47,7 +57,10 @@ type ClaimChannelChatInputMessagesParams struct {
 	MessageIds    []pgtype.UUID `json:"message_ids"`
 }
 
-// Seals exactly the rows accumulated by the channel debounce window.
+// Seals the explicit debounce batch plus older unowned channel user messages.
+// The newest explicit row is the recovery boundary: this rediscovers durable
+// messages whose in-memory trigger was lost across a process restart without
+// absorbing messages appended after this flush began.
 func (q *Queries) ClaimChannelChatInputMessages(ctx context.Context, arg ClaimChannelChatInputMessagesParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, claimChannelChatInputMessages, arg.TaskID, arg.ChatSessionID, arg.MessageIds)
 	if err != nil {
@@ -1073,6 +1086,22 @@ func (q *Queries) ListPendingChatTasksByCreator(ctx context.Context, arg ListPen
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockChatSessionForChannelInput = `-- name: LockChatSessionForChannelInput :one
+SELECT id FROM chat_session
+WHERE id = $1
+FOR UPDATE
+`
+
+// Serializes channel flushes for one session. The lock also fences concurrent
+// chat_message inserts through their FK key-share lock, so the recovery claim
+// below has a stable upper boundary and cannot absorb a newer inbound message.
+func (q *Queries) LockChatSessionForChannelInput(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockChatSessionForChannelInput, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const lockChatSessionForDelete = `-- name: LockChatSessionForDelete :one

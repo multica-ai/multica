@@ -227,6 +227,93 @@ func TestChannelChat_DuplicateMessageIDsAreClaimedOnce(t *testing.T) {
 	}
 }
 
+func TestChannelChat_RecoversUnownedInputAfterRouterRestart(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	_, sessionID, _, _ := setupDirectChatSession(t, ctx, "channel restart recovery")
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	appendUser := func(content string) pgtype.UUID {
+		t.Helper()
+		message, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			ChatSessionID: session.ID,
+			Role:          "user",
+			Content:       content,
+		})
+		if err != nil {
+			t.Fatalf("append channel input: %v", err)
+		}
+		return message.ID
+	}
+
+	appendUser("U1 before restart")
+	u2 := appendUser("U2 after restart")
+	task, err := testHandler.TaskService.EnqueueChannelChatTask(
+		ctx, session, parseUUID(testUserID), false, []pgtype.UUID{u2},
+	)
+	if err != nil {
+		t.Fatalf("enqueue post-restart channel task: %v", err)
+	}
+	owned, err := testHandler.Queries.ListChatInputMessages(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list recovered input: %v", err)
+	}
+	if got := msgContents(owned); len(got) != 2 || got[0] != "U1 before restart" || got[1] != "U2 after restart" {
+		t.Fatalf("recovered input = %v, want U1 then U2", got)
+	}
+}
+
+func TestChannelChat_RecoversRolledBackBatchAfterRouterRestart(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	_, sessionID, _, _ := setupDirectChatSession(t, ctx, "channel failed flush recovery")
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	appendUser := func(content string) pgtype.UUID {
+		t.Helper()
+		message, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			ChatSessionID: session.ID,
+			Role:          "user",
+			Content:       content,
+		})
+		if err != nil {
+			t.Fatalf("append channel input: %v", err)
+		}
+		return message.ID
+	}
+
+	u1 := appendUser("failed U1")
+	missing := parseUUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	if _, err := testHandler.TaskService.EnqueueChannelChatTask(
+		ctx, session, parseUUID(testUserID), false, []pgtype.UUID{u1, missing},
+	); err == nil {
+		t.Fatal("enqueue with a missing explicit message must roll back")
+	}
+
+	u2 := appendUser("later U2")
+	task, err := testHandler.TaskService.EnqueueChannelChatTask(
+		ctx, session, parseUUID(testUserID), false, []pgtype.UUID{u2},
+	)
+	if err != nil {
+		t.Fatalf("enqueue after simulated restart: %v", err)
+	}
+	owned, err := testHandler.Queries.ListChatInputMessages(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list recovered failed batch: %v", err)
+	}
+	if got := msgContents(owned); len(got) != 2 || got[0] != "failed U1" || got[1] != "later U2" {
+		t.Fatalf("recovered failed input = %v, want U1 then U2", got)
+	}
+}
+
 // TestCompleteTask_ChatEmptyOutputWritesNoResponse: an empty final output is a
 // visible, terminal no_response outcome — exactly one assistant row with
 // message_kind='no_response' and a non-empty fallback body, task completed, and

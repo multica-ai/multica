@@ -333,6 +333,9 @@ func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg cha
 	}
 	flush := func() {
 		messageIDs, forceFresh := r.takePendingBatch(key, fresh)
+		if len(messageIDs) == 0 {
+			return
+		}
 		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, forceFresh, messageIDs)
 	}
 	r.batcher.Schedule(key, flush)
@@ -351,7 +354,7 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 
 	session, err := r.reader.GetChatSession(ctx, sessionID)
 	if err != nil {
-		r.restorePendingBatch(keyForSession(sessionID), messageIDs, forceFresh)
+		r.restoreAndScheduleRun(set, inst, msg, sessionID, initiatorUserID, messageIDs, forceFresh)
 		r.logger.Error("channel router: flush reload chat session failed",
 			"chat_session_id", uuidString(sessionID), "err", err.Error())
 		r.clearTyping(ctx, set, sessionID)
@@ -369,11 +372,26 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 		case errors.Is(err, service.ErrChatTaskAgentArchived):
 			r.emitFlushReply(ctx, set, inst, msg, sessionID, OutcomeAgentArchived)
 		default:
-			r.restorePendingBatch(keyForSession(sessionID), messageIDs, forceFresh)
+			r.restoreAndScheduleRun(set, inst, msg, sessionID, initiatorUserID, messageIDs, forceFresh)
 			r.logger.Error("channel router: flush enqueue chat task failed",
 				"chat_session_id", uuidString(sessionID), "err", err.Error())
 		}
 	}
+}
+
+func (r *Router) restoreAndScheduleRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, ids []pgtype.UUID, forceFresh bool) {
+	key := keyForSession(sessionID)
+	r.restorePendingBatch(key, ids, forceFresh)
+	if r.batcher == nil {
+		return
+	}
+	r.batcher.ScheduleIfAbsent(key, func() {
+		messageIDs, retryFresh := r.takePendingBatch(key, forceFresh)
+		if len(messageIDs) == 0 {
+			return
+		}
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, retryFresh, messageIDs)
+	})
 }
 
 func (r *Router) appendPendingInput(key string, id pgtype.UUID) {

@@ -103,6 +103,30 @@ func (b *pendingBatcher) Schedule(key string, flush func()) {
 	b.mu.Unlock()
 }
 
+// ScheduleIfAbsent arms a retry without replacing a newer inbound message's
+// pending flush closure. It returns whether a timer was added.
+func (b *pendingBatcher) ScheduleIfAbsent(key string, flush func()) bool {
+	b.mu.Lock()
+	if b.stopped {
+		b.mu.Unlock()
+		flush()
+		return true
+	}
+	if _, ok := b.pending[key]; ok {
+		b.mu.Unlock()
+		return false
+	}
+	b.seq++
+	gen := b.seq
+	b.pending[key] = &pendingEntry{
+		flush: flush,
+		gen:   gen,
+		timer: b.afterFunc(b.window, func() { b.onFire(key, gen) }),
+	}
+	b.mu.Unlock()
+	return true
+}
+
 // onFire runs the flush for key if it is still the live, armed generation. It
 // is the timer callback; in production it runs on time.AfterFunc's goroutine,
 // so the flush is naturally detached from the inbound path.

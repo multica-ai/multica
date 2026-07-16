@@ -132,6 +132,14 @@ SELECT id FROM chat_session
 WHERE id = $1
 FOR UPDATE;
 
+-- name: LockChatSessionForChannelInput :one
+-- Serializes channel flushes for one session. The lock also fences concurrent
+-- chat_message inserts through their FK key-share lock, so the recovery claim
+-- below has a stable upper boundary and cannot absorb a newer inbound message.
+SELECT id FROM chat_session
+WHERE id = $1
+FOR UPDATE;
+
 -- name: DeleteChatSession :exec
 -- Hard delete. chat_message rows cascade via FK ON DELETE CASCADE; the
 -- chat_session_id on agent_task_queue is set NULL by FK so completed/failed
@@ -231,13 +239,26 @@ WHERE id = $1
 RETURNING *;
 
 -- name: ClaimChannelChatInputMessages :many
--- Seals exactly the rows accumulated by the channel debounce window.
+-- Seals the explicit debounce batch plus older unowned channel user messages.
+-- The newest explicit row is the recovery boundary: this rediscovers durable
+-- messages whose in-memory trigger was lost across a process restart without
+-- absorbing messages appended after this flush began.
+WITH boundary AS (
+    SELECT created_at, id
+    FROM chat_message
+    WHERE chat_session_id = sqlc.arg(chat_session_id)
+      AND id = ANY(sqlc.arg(message_ids)::uuid[])
+      AND role = 'user'
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+)
 UPDATE chat_message m
 SET task_id = sqlc.arg(task_id)
+FROM boundary b
 WHERE m.chat_session_id = sqlc.arg(chat_session_id)
-  AND m.id = ANY(sqlc.arg(message_ids)::uuid[])
   AND m.role = 'user'
   AND m.task_id IS NULL
+  AND (m.created_at, m.id) <= (b.created_at, b.id)
 RETURNING m.id;
 
 -- name: IsChannelChatSession :one

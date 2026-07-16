@@ -550,6 +550,35 @@ func TestRouter_FlushFailureRestoresInputForNextFlush(t *testing.T) {
 	}
 }
 
+func TestRouter_FlushFailureRearmsRetryWithoutAnotherMessage(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	h.tasks.err = errors.New("transient enqueue failure")
+	messageID := uuidFromString(t, "66666666-6666-6666-6666-666666666666")
+	h.binder.appendResult.MessageID = messageID
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+
+	timers.fireArmed()
+	if got := h.router.batcher.pendingCount(); got != 1 {
+		t.Fatalf("failed flush must rearm one retry timer, pending=%d", got)
+	}
+	h.tasks.mu.Lock()
+	h.tasks.err = nil
+	h.tasks.mu.Unlock()
+	timers.fireArmed()
+
+	calls := h.tasks.inputCalls()
+	if len(calls) != 2 {
+		t.Fatalf("enqueue calls = %d, want failed attempt plus timer retry", len(calls))
+	}
+	if len(calls[1]) != 1 || calls[1][0] != messageID {
+		t.Fatalf("retry input = %v, want original failed batch", calls[1])
+	}
+}
+
 func TestRouter_ForceFresh_Propagates(t *testing.T) {
 	h := newHarness(t)
 	msg := p2pMessage(t)
