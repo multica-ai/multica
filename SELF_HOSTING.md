@@ -431,6 +431,30 @@ If the selected GHCR tag has not been published yet, fall back to `make selfhost
 
 > **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** That's migration `103`'s fail-closed guard: it requires `task_usage_hourly` to be seeded before the legacy daily rollups are dropped. As of MUL-2957 `migrate up` runs that backfill automatically right before applying `103`, so the upgrade completes in a single invocation. If you are still on a pre-MUL-2957 binary or the auto-hook fails, run `backfill_task_usage_hourly` manually first, then re-run the upgrade. Full instructions in [Advanced Configuration → Usage Dashboard Rollup](SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
 
+### Direct production upgrade (no Docker)
+
+For self-host deployments that run the backend and frontend directly from the checkout (no Docker Compose), `make upgrade` rebuilds both halves with the **single upstream-verified baseline** so the Help sidebar's two rows — Frontend and Backend — never drift out of sync:
+
+```bash
+git pull
+make upgrade
+# then restart your running processes, e.g.:
+#   pm2 restart all
+#   # or, if you launched them via nohup:
+kill -TERM $(pgrep -f 'server/bin/server|next start') && \
+  nohup ./server/bin/server > /tmp/multica-server.log 2>&1 & \
+  nohup bash -c 'cd apps/web && exec pnpm exec next start -p 3001' > /tmp/multica-web-prod.log 2>&1 &
+```
+
+What `make upgrade` does, in order:
+
+1. Calls `scripts/resolve-official-baseline.sh` once to pick the upstream-verified tag (`vX.Y.Z`); if the resolver can't reach the upstream or the checkout has no `v*` tag reachable, set `BASELINE_OVERRIDE=vX.Y.Z` to supply an explicit trusted baseline (see [Recovery when baseline can't be resolved](#recovery-when-baseline-cant-be-resolved)).
+2. Writes the resolved baseline to `NEXT_PUBLIC_APP_VERSION` in `.env` (preserves a backup at `.env.bak`) so the frontend prod bundle can bake it in at `pnpm build` time.
+3. Rebuilds the backend binary with `-X main.version=<baseline>` so `server_version` in `/api/config` reflects the new baseline.
+4. Runs `pnpm build` in `apps/web`, producing a fresh frontend prod bundle whose `Help` menu shows the same `<baseline>`.
+
+After `make upgrade` completes, restart the backend and frontend processes with your supervisor (PM2, systemd, nohup, etc.). The Help sidebar will then show `Frontend vX.Y.Z` and `Backend vX.Y.Z` for the new release. If `.env` is missing, `make upgrade` aborts early — copy from `.env.example` first.
+
 ---
 
 ## Manual Docker Compose Setup

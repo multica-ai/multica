@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build build-prod test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
+.PHONY: help makehelp dev server daemon cli multica build build-prod upgrade test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -382,3 +382,30 @@ clean: ## Remove build caches, generated binaries, and temp files
 	rm -rf .turbo apps/*/.turbo packages/*/.turbo
 	rm -rf apps/*/*.tsbuildinfo packages/*/*.tsbuildinfo
 	@echo "✓ Clean complete."
+
+# Resolves the upstream-verified baseline once, then rebuilds the backend
+# (with -X main.version=<baseline>) and the frontend prod bundle (with
+# NEXT_PUBLIC_APP_VERSION=<baseline> in .env) so a single `make upgrade`
+# brings both halves of runtime build provenance up to date.
+#
+# Assumes you're running the backend via nohup/PM2 and the frontend via
+# `next start` (or another supervisor). After the build, restart the
+# running processes — this target does not kill or restart them itself,
+# since the supervisor varies per deployment.
+upgrade: ## Rebuild backend + frontend prod bundle with the resolved official baseline
+	@if [ -z "$(BASELINE_OVERRIDE)" ]; then \
+		BASELINE=$$(bash scripts/resolve-official-baseline.sh) || exit 1; \
+	else \
+		BASELINE=$(BASELINE_OVERRIDE); \
+	fi
+	@echo "==> Official baseline: $$BASELINE"
+	@if [ ! -f .env ]; then \
+		echo "Missing .env. Copy from .env.example first." >&2; exit 1; \
+	fi
+	@sed -i.bak "s|^NEXT_PUBLIC_APP_VERSION=.*|NEXT_PUBLIC_APP_VERSION=$$BASELINE|" .env
+	@echo "==> .env: NEXT_PUBLIC_APP_VERSION set to $$BASELINE (backup at .env.bak)"
+	cd server && CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=$$BASELINE" -o bin/server ./cmd/server
+	cd apps/web && pnpm build
+	@echo ""
+	@echo "Built with baseline $$BASELINE. Restart the running backend and frontend processes"
+	@echo "to pick up the new artifacts (e.g. \`pm2 restart all\` or your usual supervisor)."
