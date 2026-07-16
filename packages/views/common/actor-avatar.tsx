@@ -270,22 +270,21 @@ function SquadAvatarHoverCard({
   );
 }
 
-// Matches Base UI PreviewCard's OPEN_DELAY, so the emulated first-dwell open
-// below feels identical to the native hover-open.
-const HOVER_CARD_OPEN_DELAY = 600;
-
 // Common chrome shared between agent and member hover cards. Keeps focus
 // behaviour and width consistent so the two surfaces feel structurally
 // parallel — content varies, frame doesn't.
 //
-// The HoverCard (Base UI PreviewCard root + trigger) mounts lazily on first
-// pointerenter/focus: dense surfaces render hundreds of these avatars and the
-// per-instance popup machinery was a measurable slice of surface remount cost.
-// Cold phase renders the same span with identical classes, so the swap is
-// invisible. Because the pointer is already inside the trigger when the real
-// HoverCard mounts, Base UI's own hover-open never fires for that first dwell
-// — a manual timer with the same delay emulates it; afterwards Base UI drives
-// the controlled `open` via `onOpenChange`.
+// Do NOT defer-mount the HoverCard on pointerenter to save per-avatar mount
+// cost (MUL-4827). Base UI drives hover through native mouseenter/mouseleave
+// listeners on the trigger element, and installs its close path *inside* the
+// mouseleave handler — so a trigger that never received a real mouseenter can
+// neither cancel a pending open nor ever hover-close. Warming on pointerenter
+// swaps the node mid-gesture and loses exactly those events, which made
+// brushed-past avatars pop open ~600ms later and stick. This is the same
+// invariant DeferredPopup documents: deferral is only sound for events that
+// END a gesture (click/Enter), and hover starts one. Mounting the root eagerly
+// costs ~0.15ms of JS per avatar and adds zero DOM while closed (the popup
+// subtree, and its queries, stay unmounted until open).
 function ActorAvatarHoverCardShell({
   content,
   children,
@@ -295,10 +294,6 @@ function ActorAvatarHoverCardShell({
 }) {
   const triggerRef = useRef<HTMLSpanElement>(null);
   const [standalone, setStandalone] = useState(false);
-  const [warm, setWarm] = useState(false);
-  const [open, setOpen] = useState(false);
-  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const restoreFocusRef = useRef(false);
 
   useEffect(() => {
     const el = triggerRef.current;
@@ -307,59 +302,17 @@ function ActorAvatarHoverCardShell({
     setStandalone(!ancestor);
   }, []);
 
-  // A focus-triggered swap unmounts the focused cold span; give focus back to
-  // the real trigger so Escape/blur keep working.
-  useEffect(() => {
-    if (warm && restoreFocusRef.current) {
-      restoreFocusRef.current = false;
-      triggerRef.current?.focus();
-    }
-  }, [warm]);
-
-  const clearOpenTimer = () => {
-    if (openTimerRef.current !== null) {
-      clearTimeout(openTimerRef.current);
-      openTimerRef.current = null;
-    }
-  };
-  useEffect(() => clearOpenTimer, []);
-
   const tabIndex = standalone ? 0 : -1;
   const className = standalone
     ? "inline-flex cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     : "inline-flex cursor-pointer";
 
-  if (!warm) {
-    return (
-      <span
-        ref={triggerRef}
-        tabIndex={tabIndex}
-        className={className}
-        onPointerEnter={() => {
-          setWarm(true);
-          openTimerRef.current = setTimeout(
-            () => setOpen(true),
-            HOVER_CARD_OPEN_DELAY,
-          );
-        }}
-        onFocus={() => {
-          restoreFocusRef.current = true;
-          setWarm(true);
-          setOpen(true);
-        }}
-      >
-        {children}
-      </span>
-    );
-  }
-
   return (
-    <HoverCard open={open} onOpenChange={setOpen}>
+    <HoverCard>
       <HoverCardTrigger
         render={<span ref={triggerRef} />}
         tabIndex={tabIndex}
         className={className}
-        onPointerLeave={clearOpenTimer}
       >
         {children}
       </HoverCardTrigger>
