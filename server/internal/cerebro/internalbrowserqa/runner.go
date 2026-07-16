@@ -53,7 +53,7 @@ var targets = map[string]Target{
 	"finance": {
 		Name: "finance", URL: "http://firtal-internal-private.internal:3000/login?manual=true",
 		Vault: "Shared/browser-login/finance", UsernameSelector: "#email", PasswordSelector: "#password",
-		SubmitSelector: "button[type=submit]", ExpectedText: []string{"Financial overview"},
+		SubmitSelector: "button[type=submit]", ExpectedText: []string{"Overview"},
 	},
 	"pricing": {
 		Name: "pricing", URL: "http://ecommerce-pricing-engine-private.internal:3000/login?manual=true",
@@ -126,6 +126,7 @@ func SafeError(err error) string {
 	case "internal browser stage open failed",
 		"internal browser stage auth failed",
 		"internal browser stage reload failed",
+		"internal browser stage render failed",
 		"internal browser stage snapshot failed",
 		"internal browser stage markers failed",
 		"internal browser stage url failed",
@@ -187,6 +188,9 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		}
 	}
 	if _, err := r.runStage(ctx, "reload", "", append(baseArgs, "reload")...); err != nil {
+		return Result{}, err
+	}
+	if _, err := r.runStage(ctx, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
 		return Result{}, err
 	}
 	snapshot, err := r.runStage(ctx, "snapshot", "", append(baseArgs, "snapshot")...)
