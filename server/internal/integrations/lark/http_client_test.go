@@ -620,7 +620,16 @@ func TestSanitizeMarkdownForLarkCard_LocalPathFormats(t *testing.T) {
 		{"file_unix", `![](file:///var/run/app/image.png)`, `[image omitted]`},
 		{"file_windows", `![](file:///C:/Users/agent/image.png)`, `[image omitted]`},
 		{"file_host", `![](file://host/share/image.png)`, `[image omitted]`},
+		{"windows_spaces", `![scan](C:\Program Files\app\x.png)`, `[scan omitted]`},
+		{"angle_windows_spaces", `![scan](<C:\Program Files\app\x.png>)`, `[scan omitted]`},
+		{"windows_unc", `![scan](\\server\share\x.png)`, `[scan omitted]`},
+		{"optional_title", `![scan](/tmp/x.png "preview")`, `[scan omitted]`},
+		{"balanced_parentheses", `![scan](/tmp/screenshot(1).png)`, `[scan omitted]`},
+		{"escaped_parenthesis", `![scan](/tmp/screenshot\(1\).png)`, `[scan omitted]`},
 		{"remote_url", `![logo](https://example.com/image.png)`, `![logo](https://example.com/image.png)`},
+		{"remote_url_with_title", `![logo](https://example.com/image.png "preview")`, `![logo](https://example.com/image.png "preview")`},
+		{"mixed_images", `![logo](https://example.com/logo.png) ![scan](/tmp/scan.png)`, `![logo](https://example.com/logo.png) [scan omitted]`},
+		{"malformed_local_image", `![scan](/tmp/scan.png`, `![scan](/tmp/scan.png`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

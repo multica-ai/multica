@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,20 +62,158 @@ const (
 	codeTokenInvalid = 99991664
 )
 
-var localMarkdownImageRE = regexp.MustCompile(`(?i)!\[([^\]]*)\]\(\s*(?:file:[^)\s]+|/[^)\s]+|[a-z]:[\\/][^)\s]+)\s*\)`)
-
 func sanitizeMarkdownForLarkCard(markdown string) string {
-	return localMarkdownImageRE.ReplaceAllStringFunc(markdown, func(match string) string {
-		parts := localMarkdownImageRE.FindStringSubmatch(match)
-		if len(parts) != 2 {
-			return match
+	var sanitized strings.Builder
+	last := 0
+	for start := 0; start < len(markdown)-1; {
+		relative := strings.Index(markdown[start:], "![")
+		if relative < 0 {
+			break
 		}
-		label := strings.TrimSpace(parts[1])
+		start += relative
+		end, label, destination, ok := parseMarkdownImage(markdown, start)
+		if !ok {
+			start += 2
+			continue
+		}
+		if !isLocalMarkdownImageDestination(destination) {
+			start = end
+			continue
+		}
+
+		sanitized.WriteString(markdown[last:start])
+		label = strings.TrimSpace(label)
 		if label == "" {
 			label = "image"
 		}
-		return fmt.Sprintf("[%s omitted]", label)
-	})
+		fmt.Fprintf(&sanitized, "[%s omitted]", label)
+		last = end
+		start = end
+	}
+	if last == 0 {
+		return markdown
+	}
+	sanitized.WriteString(markdown[last:])
+	return sanitized.String()
+}
+
+// parseMarkdownImage returns the full image span and its destination. It uses
+// a small scanner instead of a regular expression because destinations may be
+// angle-bracketed, followed by a title, or contain balanced/escaped
+// parentheses.
+func parseMarkdownImage(markdown string, start int) (end int, label, destination string, ok bool) {
+	if start < 0 || start+2 > len(markdown) || markdown[start:start+2] != "![" {
+		return 0, "", "", false
+	}
+
+	labelEnd := -1
+	for i := start + 2; i < len(markdown); i++ {
+		if markdown[i] == '\\' {
+			i++
+			continue
+		}
+		if markdown[i] == ']' {
+			labelEnd = i
+			break
+		}
+	}
+	if labelEnd < 0 || labelEnd+1 >= len(markdown) || markdown[labelEnd+1] != '(' {
+		return 0, "", "", false
+	}
+
+	i := labelEnd + 2
+	for i < len(markdown) && isMarkdownSpace(markdown[i]) {
+		i++
+	}
+	destinationStart := i
+	destinationEnd := -1
+	angleDestination := i < len(markdown) && markdown[i] == '<'
+	if angleDestination {
+		destinationStart++
+		i++
+	}
+
+	depth := 0
+	var titleQuote byte
+	titleParen := false
+	for i < len(markdown) {
+		c := markdown[i]
+		if c == '\\' {
+			i += 2
+			continue
+		}
+		if angleDestination {
+			if c == '>' {
+				destinationEnd = i
+				angleDestination = false
+			}
+			i++
+			continue
+		}
+		if titleQuote != 0 {
+			if c == titleQuote {
+				titleQuote = 0
+			}
+			i++
+			continue
+		}
+		if titleParen {
+			if c == ')' {
+				titleParen = false
+			}
+			i++
+			continue
+		}
+		if isMarkdownSpace(c) && depth == 0 && destinationEnd < 0 {
+			next := i
+			for next < len(markdown) && isMarkdownSpace(markdown[next]) {
+				next++
+			}
+			if next < len(markdown) && (markdown[next] == '"' || markdown[next] == '\'') {
+				destinationEnd = i
+				titleQuote = markdown[next]
+				i = next + 1
+				continue
+			}
+			if next < len(markdown) && markdown[next] == '(' {
+				destinationEnd = i
+				titleParen = true
+				i = next + 1
+				continue
+			}
+		}
+		switch c {
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				if destinationEnd < 0 {
+					destinationEnd = i
+				}
+				return i + 1, markdown[start+2 : labelEnd],
+					strings.TrimSpace(markdown[destinationStart:destinationEnd]), true
+			}
+			depth--
+		}
+		i++
+	}
+	return 0, "", "", false
+}
+
+func isMarkdownSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+func isLocalMarkdownImageDestination(destination string) bool {
+	lower := strings.ToLower(destination)
+	if strings.HasPrefix(lower, "file:") || strings.HasPrefix(destination, "/") ||
+		strings.HasPrefix(destination, `\\`) {
+		return true
+	}
+	return len(destination) >= 3 &&
+		((destination[0] >= 'a' && destination[0] <= 'z') ||
+			(destination[0] >= 'A' && destination[0] <= 'Z')) &&
+		destination[1] == ':' && (destination[2] == '/' || destination[2] == '\\')
 }
 
 // HTTPClientConfig configures the production Lark HTTP APIClient.
