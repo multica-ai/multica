@@ -455,7 +455,7 @@ func runKiroCloseErrorScript(t *testing.T, script string) Result {
 	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("kiro", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new kiro backend: %v", err)
 	}
@@ -865,7 +865,7 @@ func TestKiroBackendClearsSessionIDWhenPromptSessionNotFound(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
 	writeTestExecutable(t, fakePath, []byte(fakeKiroACPStalePromptScript()))
 
-	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("kiro", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new kiro backend: %v", err)
 	}
