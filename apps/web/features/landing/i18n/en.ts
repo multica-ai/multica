@@ -294,6 +294,37 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.3",
+        date: "2026-07-16",
+        title: "Dedicated issue windows, an archived inbox, and steadier agent runs",
+        changes: [],
+        features: [
+          "Open any issue in its own window in the desktop app.",
+          "Your Inbox now has an Archived view, with one click to bring anything back.",
+          "Give each custom field its own icon so it is easy to spot at a glance.",
+          "Self-hosted deployments can now choose which machines each part runs on.",
+        ],
+        improvements: [
+          "Retrying a failed agent task now keeps the work it already did, instead of starting over.",
+          "Sending a message or creating an issue now waits for attachments to finish, so files are never dropped.",
+          "Antigravity runs now tell you when a live view is not available, instead of showing nothing.",
+          "The download page now offers Intel Mac builds directly.",
+          "Downloaded attachments keep their original non-English names.",
+        ],
+        fixes: [
+          "Switching the agent while writing a new chat no longer loses what you typed.",
+          "Agents can again hand off work by @mentioning each other during autopilot runs.",
+          "Autopilot runs now use the latest project settings.",
+          "Long agent tasks no longer end silently or get marked done before they finish.",
+          "Completed tasks on the new Codex gpt-5.6 Sol model are no longer flipped to failed.",
+          "Codex agents no longer fail on slow startups or when writing files on Linux.",
+          "Labels you pick while creating an issue are now saved together with it, every time.",
+          "Pasting formatted text into a comment no longer leaves stray ++ marks.",
+          "Hover cards no longer pop up when you just move the mouse past an avatar.",
+          "The Linux desktop app now installs under the name multica-desktop.",
+        ],
+      },
+      {
         version: "0.4.2",
         date: "2026-07-15",
         title: "Custom issue fields, human attribution, and Grok agents",
