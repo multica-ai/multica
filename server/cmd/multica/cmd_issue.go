@@ -810,7 +810,7 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
-		assignee := taskSafeAssigneeDisplay(ctx, client, issue)
+		assignee := taskSafeAssigneeDisplay(cmd, ctx, client, issue)
 		startDate := strVal(issue, "start_date")
 		if startDate != "" && len(startDate) >= 10 {
 			startDate = startDate[:10]
@@ -1366,7 +1366,7 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 	if toNameSet && toTypeSet {
 		return fmt.Errorf("--to and --to-type are mutually exclusive")
 	}
-	if inTaskScopedCLIContext() && !unassign {
+	if inTaskScopedCLIContext(cmd) && !unassign {
 		if toNameSet || !toIDSet || !toTypeSet {
 			return fmt.Errorf("task-scoped issue assign requires --to-id <canonical-uuid> and --to-type member|agent|squad")
 		}
@@ -1398,7 +1398,7 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 	if unassign {
 		body["assignee_type"] = nil
 		body["assignee_id"] = nil
-	} else if inTaskScopedCLIContext() {
+	} else if inTaskScopedCLIContext(cmd) {
 		body["assignee_type"] = toType
 		body["assignee_id"] = toID
 		displayTarget = toType + ":" + toID
@@ -1915,7 +1915,7 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	}
 
 	var actors actorDisplayLookup
-	if !inTaskScopedCLIContext() {
+	if !inTaskScopedCLIContext(cmd) {
 		actors = loadActorDisplayLookup(ctx, client)
 	}
 	headers := []string{"ID", "PARENT", "AUTHOR", "TYPE", "CONTENT", "CREATED"}
@@ -1937,7 +1937,7 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 		authorType := strVal(c, "author_type")
 		authorID := strVal(c, "author_id")
 		author := authorType + ":" + authorID
-		if !inTaskScopedCLIContext() {
+		if !inTaskScopedCLIContext(cmd) {
 			author = actors.actor(authorType, authorID)
 		}
 		rows = append(rows, []string{
@@ -1956,7 +1956,7 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	attachments, _ := cmd.Flags().GetStringSlice("attachment")
 	allowExternal, _ := cmd.Flags().GetBool("allow-external-file")
-	if inTaskScopedCLIContext() && (len(attachments) > 0 || allowExternal) {
+	if inTaskScopedCLIContext(cmd) && (len(attachments) > 0 || allowExternal) {
 		return fmt.Errorf("task-scoped issue comment add prohibits attachment upload and --allow-external-file")
 	}
 
@@ -2112,7 +2112,7 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 	}
 
 	var actors actorDisplayLookup
-	if !inTaskScopedCLIContext() {
+	if !inTaskScopedCLIContext(cmd) {
 		actors = loadActorDisplayLookup(ctx, client)
 	}
 	fullID, _ := cmd.Flags().GetBool("full-id")
@@ -2134,7 +2134,7 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 		}
 		agentID := strVal(r, "agent_id")
 		agent := agentID
-		if !inTaskScopedCLIContext() {
+		if !inTaskScopedCLIContext(cmd) {
 			agent = actors.agent(agentID)
 		}
 		rows = append(rows, []string{
@@ -2279,7 +2279,7 @@ func runIssueRerun(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, task)
 	}
 	agent := strVal(task, "agent_id")
-	if !inTaskScopedCLIContext() {
+	if !inTaskScopedCLIContext(cmd) {
 		agent = loadActorDisplayLookup(ctx, client).agent(agent)
 	}
 	fmt.Fprintf(os.Stdout, "Re-enqueued task %s on agent %s\n", strVal(task, "id"), agent)
@@ -2823,13 +2823,13 @@ func formatAssignee(issue map[string]any, actors actorDisplayLookup) string {
 	return actors.actor(aType, aID)
 }
 
-func taskSafeAssigneeDisplay(ctx context.Context, client *cli.APIClient, issue map[string]any) string {
+func taskSafeAssigneeDisplay(cmd *cobra.Command, ctx context.Context, client *cli.APIClient, issue map[string]any) string {
 	aType := strVal(issue, "assignee_type")
 	aID := strVal(issue, "assignee_id")
 	if aType == "" || aID == "" {
 		return ""
 	}
-	if inTaskScopedCLIContext() {
+	if inTaskScopedCLIContext(cmd) {
 		return aType + ":" + aID
 	}
 	return formatAssignee(issue, loadActorDisplayLookup(ctx, client))

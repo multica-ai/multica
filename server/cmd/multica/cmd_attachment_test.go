@@ -107,9 +107,6 @@ func TestRunAttachmentUploadSendsTaskIDAndPrintsContract(t *testing.T) {
 	}))
 	defer srv.Close()
 	setCLITestServerEnv(t, srv.URL)
-	// An agent upload always carries a task-scoped mat_ token; set one so the
-	// daemon-managed-context gate in newAPIClient admits the request.
-	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
 	dir := t.TempDir()
 	imgPath := filepath.Join(dir, "chart.png")
@@ -161,7 +158,6 @@ func TestRunAttachmentUploadNonImageUsesFileCardMarkdown(t *testing.T) {
 	}))
 	defer srv.Close()
 	setCLITestServerEnv(t, srv.URL)
-	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
 	dir := t.TempDir()
 	docPath := filepath.Join(dir, "report.pdf")
@@ -206,7 +202,6 @@ func TestRunAttachmentUploadEscapesFilename(t *testing.T) {
 	}))
 	defer srv.Close()
 	setCLITestServerEnv(t, srv.URL)
-	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
 	dir := t.TempDir()
 	docPath := filepath.Join(dir, "a]b.pdf")
@@ -234,7 +229,6 @@ func TestRunAttachmentUploadRequiresTask(t *testing.T) {
 	}))
 	defer srv.Close()
 	setCLITestServerEnv(t, srv.URL)
-	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
 	dir := t.TempDir()
 	imgPath := filepath.Join(dir, "chart.png")

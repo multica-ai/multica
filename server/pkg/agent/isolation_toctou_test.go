@@ -215,6 +215,90 @@ func TestLinuxBoundArgsReserveLeadingExtraFiles(t *testing.T) {
 	}
 }
 
+func TestBoundIsolationRejectsExactReadOnlyFileReplacement(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX path replacement")
+	}
+
+	root := t.TempDir()
+	authority := filepath.Join(t.TempDir(), "task-authority.json")
+	if err := os.WriteFile(authority, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := bindTaskIsolationPolicy(TaskIsolationPolicy{
+		WritableRoots: []string{root},
+		ReadOnlyFiles: []ReadOnlyFileMount{{Source: authority, Target: "/run/multica/task-authority.json"}},
+	})
+	if err != nil {
+		t.Fatalf("bind policy: %v", err)
+	}
+	defer policy.Close()
+
+	old := filepath.Join(filepath.Dir(authority), "old-authority")
+	if err := os.Rename(authority, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(authority, []byte("replacement"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := recheckBoundIsolation(policy); err == nil {
+		t.Fatal("exact read-only file replacement unexpectedly passed recheck")
+	}
+}
+
+func TestLinuxBoundArgsMountExactReadOnlyFileAfterWritableRoots(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux bubblewrap FD layout")
+	}
+
+	root := t.TempDir()
+	authority := filepath.Join(t.TempDir(), "task-authority.json")
+	executablePath := filepath.Join(root, "tool")
+	if err := os.WriteFile(authority, []byte("authority"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executablePath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := bindTaskIsolationPolicy(TaskIsolationPolicy{
+		WritableRoots: []string{root},
+		ReadOnlyFiles: []ReadOnlyFileMount{{Source: authority, Target: "/run/multica/task-authority.json"}},
+	})
+	if err != nil {
+		t.Fatalf("bind policy: %v", err)
+	}
+	defer policy.Close()
+	executable, err := executableIdentity(executablePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer executable.Close()
+	cwd, err := currentWorkingDirectoryIdentity(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cwd.Close()
+
+	args, _, err := renderLinuxBubblewrapArgsBound(policy, executable, cwd, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindIndex := isolationSequenceIndex(args, "--bind-fd", root)
+	readOnlyIndex := isolationSequenceIndex(args, "--ro-bind-fd", "/run/multica/task-authority.json")
+	if bindIndex < 0 || readOnlyIndex < 0 || readOnlyIndex <= bindIndex {
+		t.Fatalf("exact file was not mounted read-only after writable parent: %#v", args)
+	}
+}
+
+func isolationSequenceIndex(values []string, operation, target string) int {
+	for i := 0; i+2 < len(values); i++ {
+		if values[i] == operation && values[i+2] == target {
+			return i
+		}
+	}
+	return -1
+}
+
 func isolationContainsSequence(values []string, sequence ...string) bool {
 	for i := 0; i+len(sequence) <= len(values); i++ {
 		match := true

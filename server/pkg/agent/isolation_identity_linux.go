@@ -16,7 +16,7 @@ func openPathIdentityLinux(path string, directory bool) (*os.File, os.FileInfo, 
 	if directory {
 		flags |= unix.O_PATH | unix.O_DIRECTORY
 	} else {
-		flags |= unix.O_RDONLY
+		flags |= unix.O_RDONLY | unix.O_NONBLOCK
 	}
 
 	fd, err := openat2NoSymlinks(unix.AT_FDCWD, path, flags)
@@ -43,9 +43,9 @@ func openPathIdentityLinux(path string, directory bool) (*os.File, os.FileInfo, 
 		_ = file.Close()
 		return nil, nil, fmt.Errorf("path %q is not a directory", path)
 	}
-	if !directory && info.IsDir() {
+	if !directory && !info.Mode().IsRegular() {
 		_ = file.Close()
-		return nil, nil, fmt.Errorf("path %q is a directory", path)
+		return nil, nil, fmt.Errorf("path %q is not a regular file", path)
 	}
 	return file, info, nil
 }

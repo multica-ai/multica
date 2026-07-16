@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/multica-ai/multica/server/internal/taskauth"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -32,6 +33,10 @@ func buildTaskIsolationPolicy(params taskIsolationParams) (agent.TaskIsolationPo
 		return agent.TaskIsolationPolicy{}, "", err
 	}
 	taskTempDir, err := existingTaskDirectory("task temp directory", params.TaskTempDir)
+	if err != nil {
+		return agent.TaskIsolationPolicy{}, "", err
+	}
+	taskAuthority, err := existingTaskRegularFile("task authority", params.TaskAuthority)
 	if err != nil {
 		return agent.TaskIsolationPolicy{}, "", err
 	}
@@ -93,8 +98,12 @@ func buildTaskIsolationPolicy(params taskIsolationParams) (agent.TaskIsolationPo
 		}
 	}
 	policy := agent.TaskIsolationPolicy{
-		WritableRoots:  uniqueTaskPaths(writable),
-		ReadOnlyRoots:  uniqueTaskPaths(readOnly),
+		WritableRoots: uniqueTaskPaths(writable),
+		ReadOnlyRoots: uniqueTaskPaths(readOnly),
+		ReadOnlyFiles: []agent.ReadOnlyFileMount{{
+			Source: taskAuthority,
+			Target: taskauth.FixedPath,
+		}},
 		SystemRoots:    existingTaskSystemRoots(),
 		ForbiddenRoots: uniqueTaskPaths(forbidden),
 		Network:        agent.NetworkAccessPublicAndLoopback,
@@ -171,18 +180,34 @@ func existingTaskDirectory(kind, path string) (string, error) {
 }
 
 func existingTaskExecutable(kind, path string) (string, error) {
-	resolved, err := existingTaskPath(kind, path)
+	resolved, info, err := existingTaskRegularFileInfo(kind, path)
 	if err != nil {
 		return "", err
 	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return "", fmt.Errorf("stat %s %q: %w", kind, resolved, err)
-	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-		return "", fmt.Errorf("%s %q is not an executable regular file", kind, resolved)
+	if info.Mode().Perm()&0o111 == 0 {
+		return "", fmt.Errorf("%s %q is not executable", kind, resolved)
 	}
 	return resolved, nil
+}
+
+func existingTaskRegularFile(kind, path string) (string, error) {
+	resolved, _, err := existingTaskRegularFileInfo(kind, path)
+	return resolved, err
+}
+
+func existingTaskRegularFileInfo(kind, path string) (string, os.FileInfo, error) {
+	resolved, err := existingTaskPath(kind, path)
+	if err != nil {
+		return "", nil, err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", nil, fmt.Errorf("stat %s %q: %w", kind, resolved, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", nil, fmt.Errorf("%s %q is not a regular file", kind, resolved)
+	}
+	return resolved, info, nil
 }
 
 func existingTaskPath(kind, path string) (string, error) {

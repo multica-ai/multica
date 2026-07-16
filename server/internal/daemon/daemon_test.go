@@ -22,6 +22,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/taskauth"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -315,13 +316,14 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 
 	overrideRoot := filepath.Join(t.TempDir(), "custom-env-home")
 	task := Task{
-		ID:          "task-private-home",
-		WorkspaceID: "ws-private-home",
+		ID:          "20000000-0000-0000-0000-000000000001",
+		WorkspaceID: "20000000-0000-0000-0000-000000000002",
+		AgentID:     "20000000-0000-0000-0000-000000000003",
 		RuntimeID:   "rt-private-home",
 		IssueID:     "issue-private-home",
 		AuthToken:   "mat_private_home",
 		Agent: &AgentData{
-			ID:   "agent-private-home",
+			ID:   "20000000-0000-0000-0000-000000000003",
 			Name: "private-home-agent",
 			CustomEnv: map[string]string{
 				"CAPTURE_FILE":    captureFile,
@@ -440,6 +442,32 @@ func directTaskLauncherFactory() agent.CommandBuilder {
 	return directTaskCommandLauncher{}
 }
 
+func recordTaskAuthorityDir(t *testing.T) (func() (string, error), *string) {
+	t.Helper()
+	root := t.TempDir()
+	var created string
+	return func() (string, error) {
+		if created != "" {
+			return "", errors.New("task authority directory created more than once")
+		}
+		created = filepath.Join(root, "authority")
+		if err := os.Mkdir(created, 0o700); err != nil {
+			return "", err
+		}
+		return created, nil
+	}, &created
+}
+
+func assertTaskAuthorityDirRemoved(t *testing.T, created *string) {
+	t.Helper()
+	if *created == "" {
+		t.Fatal("task authority directory was not created")
+	}
+	if _, err := os.Stat(*created); !os.IsNotExist(err) {
+		t.Fatalf("task authority directory %q was not removed: %v", *created, err)
+	}
+}
+
 type runTaskRepoCache struct {
 	syncErr     error
 	path        string
@@ -495,6 +523,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	if err := os.MkdirAll(repoPath, 0o700); err != nil {
 		t.Fatalf("create repo cache fixture: %v", err)
 	}
+	authorityDir, createdAuthorityDir := recordTaskAuthorityDir(t)
 	d := &Daemon{
 		taskExecutionCapable:     true,
 		client:                   client,
@@ -505,6 +534,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 		activeEnvRoots:           make(map[string]int),
 		repoCheckoutCapabilities: make(map[string]*repoCheckoutCapability),
 		taskLauncher:             directTaskLauncherFactory,
+		taskAuthorityDir:         authorityDir,
 		cfg: Config{
 			WorkspacesRoot: t.TempDir(),
 			AgentTimeout:   15 * time.Second,
@@ -515,14 +545,15 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 		},
 	}
 	task := Task{
-		ID:          "task-capability",
-		WorkspaceID: "ws-capability",
+		ID:          "30000000-0000-0000-0000-000000000001",
+		WorkspaceID: "30000000-0000-0000-0000-000000000002",
+		AgentID:     "30000000-0000-0000-0000-000000000003",
 		RuntimeID:   "rt-capability",
 		IssueID:     "issue-capability",
 		AuthToken:   "mat_capability",
 		Repos:       []RepoData{{URL: "https://example.com/repo.git", Ref: "refs/heads/main"}},
 		Agent: &AgentData{
-			ID:   "agent-capability",
+			ID:   "30000000-0000-0000-0000-000000000003",
 			Name: "capability-agent",
 			CustomEnv: map[string]string{
 				"CAPTURE_FILE":                captureFile,
@@ -553,6 +584,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	if len(d.repoCheckoutCapabilities) != 0 {
 		t.Fatalf("capability registry contains %d entries after task completion", len(d.repoCheckoutCapabilities))
 	}
+	assertTaskAuthorityDirRemoved(t, createdAuthorityDir)
 }
 
 func TestRunTaskRepoCacheFailureDoesNotStartBackend(t *testing.T) {
@@ -577,6 +609,7 @@ exit 1
 			Body:       io.NopCloser(strings.NewReader("{}")),
 		}, nil
 	})
+	authorityDir, createdAuthorityDir := recordTaskAuthorityDir(t)
 	d := &Daemon{
 		taskExecutionCapable:     true,
 		client:                   client,
@@ -587,6 +620,7 @@ exit 1
 		activeEnvRoots:           make(map[string]int),
 		repoCheckoutCapabilities: make(map[string]*repoCheckoutCapability),
 		taskLauncher:             directTaskLauncherFactory,
+		taskAuthorityDir:         authorityDir,
 		cfg: Config{
 			WorkspacesRoot: t.TempDir(),
 			AgentTimeout:   5 * time.Second,
@@ -597,14 +631,15 @@ exit 1
 		},
 	}
 	task := Task{
-		ID:          "task-cache-fail",
-		WorkspaceID: "ws-cache-fail",
+		ID:          "40000000-0000-0000-0000-000000000001",
+		WorkspaceID: "40000000-0000-0000-0000-000000000002",
+		AgentID:     "40000000-0000-0000-0000-000000000003",
 		RuntimeID:   "rt-cache-fail",
 		IssueID:     "issue-cache-fail",
 		AuthToken:   "mat_cache_fail",
 		Repos:       []RepoData{{URL: "https://example.com/repo.git"}},
 		Agent: &AgentData{
-			ID:   "agent-cache-fail",
+			ID:   "40000000-0000-0000-0000-000000000003",
 			Name: "cache-fail-agent",
 			CustomEnv: map[string]string{
 				"STARTED_FILE": startedFile,
@@ -622,6 +657,151 @@ exit 1
 	if len(d.repoCheckoutCapabilities) != 0 {
 		t.Fatalf("cache failure registered %d checkout capabilities", len(d.repoCheckoutCapabilities))
 	}
+	assertTaskAuthorityDirRemoved(t, createdAuthorityDir)
+}
+
+func TestRunTaskCancellationCleansTaskAuthority(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script agent fixture is POSIX-only")
+	}
+
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	client := NewClient("http://multica.test")
+	client.client.Transport = taskHomeRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})
+	cache := &runTaskRepoCache{syncStarted: make(chan struct{})}
+	authorityDir, createdAuthorityDir := recordTaskAuthorityDir(t)
+	d := &Daemon{
+		taskExecutionCapable: true,
+		client:               client,
+		repoCache:            cache,
+		logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:           make(map[string]*workspaceState),
+		runtimeIndex:         map[string]Runtime{"rt-cancel": {ID: "rt-cancel", Provider: "claude"}},
+		activeEnvRoots:       make(map[string]int),
+		taskLauncher:         directTaskLauncherFactory,
+		taskAuthorityDir:     authorityDir,
+		cfg: Config{
+			WorkspacesRoot: t.TempDir(), ServerBaseURL: "http://multica.test",
+			Agents: map[string]AgentEntry{"claude": {Path: fakeBin}},
+		},
+	}
+	task := Task{
+		ID: "41000000-0000-0000-0000-000000000001", WorkspaceID: "41000000-0000-0000-0000-000000000002",
+		AgentID: "41000000-0000-0000-0000-000000000003", RuntimeID: "rt-cancel", IssueID: "issue-cancel",
+		AuthToken: "mat_cancel", Repos: []RepoData{{URL: "https://example.com/repo.git"}},
+		Agent: &AgentData{ID: "41000000-0000-0000-0000-000000000003", Name: "cancel-agent"},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := d.runTask(ctx, task, "claude", 0, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		done <- err
+	}()
+	select {
+	case <-cache.syncStarted:
+	case <-time.After(time.Second):
+		t.Fatal("repo cache sync did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("runTask error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runTask ignored cancellation")
+	}
+	assertTaskAuthorityDirRemoved(t, createdAuthorityDir)
+}
+
+func TestRunTaskLauncherFailureCleansTaskAuthority(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable fixture is POSIX-only")
+	}
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	client := NewClient("http://multica.test")
+	client.client.Transport = taskHomeRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})
+	authorityDir, createdAuthorityDir := recordTaskAuthorityDir(t)
+	d := &Daemon{
+		taskExecutionCapable: true, client: client, logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces: make(map[string]*workspaceState), runtimeIndex: map[string]Runtime{"rt-launcher": {ID: "rt-launcher", Provider: "claude"}},
+		activeEnvRoots: make(map[string]int), taskAuthorityDir: authorityDir,
+		cfg: Config{WorkspacesRoot: t.TempDir(), ServerBaseURL: "http://multica.test", Agents: map[string]AgentEntry{"claude": {Path: fakeBin}}},
+	}
+	task := Task{
+		ID: "42000000-0000-0000-0000-000000000001", WorkspaceID: "42000000-0000-0000-0000-000000000002",
+		AgentID: "42000000-0000-0000-0000-000000000003", RuntimeID: "rt-launcher", IssueID: "issue-launcher",
+		AuthToken: "mat_launcher", Agent: &AgentData{ID: "42000000-0000-0000-0000-000000000003", Name: "launcher-agent"},
+	}
+	_, err := d.runTask(context.Background(), task, "claude", 0, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil || !strings.Contains(err.Error(), "task command launcher factory is unavailable") {
+		t.Fatalf("runTask error = %v, want launcher failure", err)
+	}
+	assertTaskAuthorityDirRemoved(t, createdAuthorityDir)
+}
+
+func TestRunTaskLocalDirectoryKeepsAuthorityOutsideWorkDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script agent fixture is POSIX-only")
+	}
+	workDir := t.TempDir()
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	script := `#!/bin/sh
+IFS= read -r _
+printf '%s\n' '{"type":"system","session_id":"sess-local-authority"}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-local-authority","result":"done"}'
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	client := NewClient("http://multica.test")
+	client.client.Transport = taskHomeRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})
+	authorityDir, createdAuthorityDir := recordTaskAuthorityDir(t)
+	d := &Daemon{
+		taskExecutionCapable: true, client: client, logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces: make(map[string]*workspaceState), runtimeIndex: map[string]Runtime{"rt-local": {ID: "rt-local", Provider: "claude"}},
+		activeEnvRoots: make(map[string]int), taskLauncher: directTaskLauncherFactory, taskAuthorityDir: authorityDir,
+		cfg: Config{DaemonID: "daemon-local", WorkspacesRoot: t.TempDir(), AgentTimeout: 5 * time.Second, ServerBaseURL: "http://multica.test", Agents: map[string]AgentEntry{"claude": {Path: fakeBin}}},
+	}
+	resourceRef, err := json.Marshal(localDirectoryRef{LocalPath: workDir, DaemonID: "daemon-local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := Task{
+		ID: "43000000-0000-0000-0000-000000000001", WorkspaceID: "43000000-0000-0000-0000-000000000002",
+		AgentID: "43000000-0000-0000-0000-000000000003", RuntimeID: "rt-local", IssueID: "issue-local",
+		AuthToken: "mat_local", Agent: &AgentData{ID: "43000000-0000-0000-0000-000000000003", Name: "local-agent"},
+		ProjectResources: []ProjectResourceData{{ResourceType: localDirectoryResourceType, ResourceRef: resourceRef}},
+	}
+	result, err := d.runTask(context.Background(), task, "claude", 0, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil || result.Status != "completed" {
+		t.Fatalf("runTask = (%#v, %v), want completed", result, err)
+	}
+	err = filepath.WalkDir(workDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Name() == taskauth.FileName {
+			t.Fatalf("task authority was written into local workdir at %q", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertTaskAuthorityDirRemoved(t, createdAuthorityDir)
 }
 
 func TestTaskScopedAuthToken(t *testing.T) {
@@ -2649,12 +2829,13 @@ func TestBuildTaskIsolationPolicyUsesExactTaskAuthority(t *testing.T) {
 	envRoot := filepath.Join(root, "env")
 	workDir := filepath.Join(root, "external-worktree")
 	taskTempDir := filepath.Join(envRoot, "tmp")
+	authorityDir := filepath.Join(root, "daemon-private-authority")
 	bareRepo := filepath.Join(root, "cache", "repo.git")
 	providerRoot := filepath.Join(root, "runtime", "node_modules", "@vendor", "agent")
 	providerBin := filepath.Join(providerRoot, "bin", "agent.js")
 	nodeBin := filepath.Join(root, "runtime", "bin", "node")
 	selfExecutable := filepath.Join(root, "bin", "multica")
-	for _, dir := range []string{envRoot, workDir, taskTempDir, bareRepo, filepath.Dir(providerBin), filepath.Dir(nodeBin), filepath.Dir(selfExecutable)} {
+	for _, dir := range []string{envRoot, workDir, taskTempDir, authorityDir, bareRepo, filepath.Dir(providerBin), filepath.Dir(nodeBin), filepath.Dir(selfExecutable)} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %q: %v", dir, err)
 		}
@@ -2668,6 +2849,7 @@ func TestBuildTaskIsolationPolicyUsesExactTaskAuthority(t *testing.T) {
 	if err := os.WriteFile(selfExecutable, []byte("multica"), 0o755); err != nil {
 		t.Fatalf("write self executable: %v", err)
 	}
+	authorityPath := writeTaskAuthorityFixture(t, authorityDir)
 
 	ownerHome := filepath.Join(root, "owner")
 	for _, rel := range []string{".multica", ".codex", ".config/opencode"} {
@@ -2683,6 +2865,7 @@ func TestBuildTaskIsolationPolicyUsesExactTaskAuthority(t *testing.T) {
 			LocalDirectory: true,
 		},
 		TaskTempDir:    taskTempDir,
+		TaskAuthority:  authorityPath,
 		Repos:          []resolvedTaskRepo{{URL: "https://example.com/repo.git", BarePath: bareRepo}},
 		Executable:     providerBin,
 		OwnerHome:      ownerHome,
@@ -2713,6 +2896,12 @@ func TestBuildTaskIsolationPolicyUsesExactTaskAuthority(t *testing.T) {
 	if !slices.Contains(policy.ReadOnlyRoots, bareRepo) {
 		t.Errorf("read-only roots %v missing exact repo %q", policy.ReadOnlyRoots, bareRepo)
 	}
+	if len(policy.ReadOnlyFiles) != 1 || policy.ReadOnlyFiles[0].Source != resolvedTestPath(t, authorityPath) || policy.ReadOnlyFiles[0].Target != taskauth.FixedPath {
+		t.Fatalf("read-only authority mounts = %#v", policy.ReadOnlyFiles)
+	}
+	if slices.Contains(policy.WritableRoots, resolvedTestPath(t, authorityDir)) {
+		t.Fatalf("authority source directory %q must not be writable", authorityDir)
+	}
 	if slices.Contains(policy.WritableRoots, filepath.Dir(bareRepo)) || slices.Contains(policy.ReadOnlyRoots, filepath.Dir(bareRepo)) {
 		t.Fatalf("policy exposed repo cache parent %q", filepath.Dir(bareRepo))
 	}
@@ -2742,6 +2931,23 @@ func TestBuildTaskIsolationPolicyUsesExactTaskAuthority(t *testing.T) {
 	}
 }
 
+func writeTaskAuthorityFixture(t *testing.T, root string) string {
+	t.Helper()
+	path, err := taskauth.Write(root, taskauth.Authority{
+		ManagedBy:   taskauth.ManagedBy,
+		Version:     taskauth.Version,
+		ServerURL:   "https://api.example.test",
+		WorkspaceID: "10000000-0000-0000-0000-000000000001",
+		Token:       "mat_test_authority",
+		TaskID:      "10000000-0000-0000-0000-000000000002",
+		AgentID:     "10000000-0000-0000-0000-000000000003",
+	})
+	if err != nil {
+		t.Fatalf("write task authority fixture: %v", err)
+	}
+	return path
+}
+
 func resolvedTestPath(t *testing.T, path string) string {
 	t.Helper()
 	resolved, err := filepath.EvalSymlinks(path)
@@ -2766,6 +2972,7 @@ func TestBuildTaskIsolationPolicyRejectsOwnerConfigOverlap(t *testing.T) {
 	_, _, err := buildTaskIsolationPolicy(taskIsolationParams{
 		Environment:    &execenv.Environment{RootDir: envRoot, WorkDir: envRoot},
 		TaskTempDir:    envRoot,
+		TaskAuthority:  writeTaskAuthorityFixture(t, t.TempDir()),
 		Executable:     executable,
 		OwnerHome:      ownerHome,
 		SelfExecutable: executable,
@@ -2794,6 +3001,7 @@ func TestBuildTaskIsolationPolicyForbidsCustomHermesSourceHome(t *testing.T) {
 	policy, _, err := buildTaskIsolationPolicy(taskIsolationParams{
 		Environment:      &execenv.Environment{RootDir: envRoot, WorkDir: envRoot},
 		TaskTempDir:      envRoot,
+		TaskAuthority:    writeTaskAuthorityFixture(t, t.TempDir()),
 		Executable:       executable,
 		OwnerHome:        filepath.Join(root, "owner"),
 		HermesSourceHome: hermesSource,
@@ -2824,6 +3032,7 @@ func TestBuildTaskIsolationPolicyRejectsHermesSourceOverlap(t *testing.T) {
 	_, _, err := buildTaskIsolationPolicy(taskIsolationParams{
 		Environment:      &execenv.Environment{RootDir: envRoot, WorkDir: envRoot},
 		TaskTempDir:      envRoot,
+		TaskAuthority:    writeTaskAuthorityFixture(t, t.TempDir()),
 		Executable:       executable,
 		OwnerHome:        filepath.Join(root, "owner"),
 		HermesSourceHome: envRoot,
@@ -2860,6 +3069,7 @@ func TestBuildTaskIsolationPolicySupportsAbsoluteShebang(t *testing.T) {
 	policy, taskPath, err := buildTaskIsolationPolicy(taskIsolationParams{
 		Environment:    &execenv.Environment{RootDir: envRoot, WorkDir: envRoot},
 		TaskTempDir:    envRoot,
+		TaskAuthority:  writeTaskAuthorityFixture(t, t.TempDir()),
 		Executable:     provider,
 		OwnerHome:      filepath.Join(root, "owner"),
 		SelfExecutable: self,
@@ -2898,6 +3108,7 @@ func TestBuildTaskIsolationPolicyRejectsMissingShebangRuntime(t *testing.T) {
 	_, _, err := buildTaskIsolationPolicy(taskIsolationParams{
 		Environment:    &execenv.Environment{RootDir: envRoot, WorkDir: envRoot},
 		TaskTempDir:    envRoot,
+		TaskAuthority:  writeTaskAuthorityFixture(t, t.TempDir()),
 		Executable:     provider,
 		OwnerHome:      filepath.Join(root, "owner"),
 		SelfExecutable: self,

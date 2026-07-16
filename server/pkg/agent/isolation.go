@@ -22,9 +22,15 @@ const (
 type TaskIsolationPolicy struct {
 	WritableRoots  []string
 	ReadOnlyRoots  []string
+	ReadOnlyFiles  []ReadOnlyFileMount
 	SystemRoots    []string
 	ForbiddenRoots []string
 	Network        NetworkAccess
+}
+
+type ReadOnlyFileMount struct {
+	Source string
+	Target string
 }
 
 type platformIsolation interface {
@@ -67,9 +73,12 @@ func (p TaskIsolationPolicy) Validated() (TaskIsolationPolicy, error) {
 	if p.ForbiddenRoots, err = validateRoots("forbidden", p.ForbiddenRoots); err != nil {
 		return TaskIsolationPolicy{}, err
 	}
+	allowedRoots := append(append(append([]string(nil), p.WritableRoots...), p.ReadOnlyRoots...), p.SystemRoots...)
+	if p.ReadOnlyFiles, err = validateReadOnlyFiles(p.ReadOnlyFiles, p.WritableRoots, p.ForbiddenRoots); err != nil {
+		return TaskIsolationPolicy{}, err
+	}
 
-	allowed := append(append(append([]string(nil), p.WritableRoots...), p.ReadOnlyRoots...), p.SystemRoots...)
-	for _, root := range allowed {
+	for _, root := range allowedRoots {
 		for _, forbidden := range p.ForbiddenRoots {
 			if pathsOverlap(root, forbidden) {
 				return TaskIsolationPolicy{}, fmt.Errorf("allowed root %q overlaps forbidden root %q", root, forbidden)
@@ -77,6 +86,46 @@ func (p TaskIsolationPolicy) Validated() (TaskIsolationPolicy, error) {
 		}
 	}
 	return p, nil
+}
+
+func validateReadOnlyFiles(files []ReadOnlyFileMount, writableRoots, forbiddenRoots []string) ([]ReadOnlyFileMount, error) {
+	seenTargets := make(map[string]struct{}, len(files))
+	validated := make([]ReadOnlyFileMount, 0, len(files))
+	for _, mount := range files {
+		source, err := validateAbsolutePath("read-only file source", mount.Source)
+		if err != nil {
+			return nil, err
+		}
+		target, err := validateAbsolutePath("read-only file target", mount.Target)
+		if err != nil {
+			return nil, err
+		}
+		if pathsOverlap(target, "/dev") || pathsOverlap(target, "/proc") {
+			return nil, fmt.Errorf("read-only file target %q overlaps an isolated pseudo-filesystem", target)
+		}
+		if _, exists := seenTargets[target]; exists {
+			return nil, fmt.Errorf("duplicate read-only file target %q", target)
+		}
+		seenTargets[target] = struct{}{}
+		for _, writable := range writableRoots {
+			if pathWithin(source, writable) {
+				return nil, fmt.Errorf("read-only file source %q is inside writable root %q", source, writable)
+			}
+		}
+		for _, forbidden := range forbiddenRoots {
+			if pathWithin(source, forbidden) {
+				return nil, fmt.Errorf("read-only file source %q is inside forbidden root %q", source, forbidden)
+			}
+		}
+		identity, err := openFileIdentity("read-only file source", source)
+		if err != nil {
+			return nil, err
+		}
+		_ = identity.Close()
+		validated = append(validated, ReadOnlyFileMount{Source: source, Target: target})
+	}
+	sort.Slice(validated, func(i, j int) bool { return validated[i].Target < validated[j].Target })
+	return validated, nil
 }
 
 func validateRoots(kind string, roots []string) ([]string, error) {

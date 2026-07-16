@@ -14,7 +14,26 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/taskauth"
 )
+
+func bindTaskScopeTestAuthority(cmd *cobra.Command) {
+	valueOr := func(name, fallback string) string {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+		return fallback
+	}
+	withTaskAuthority(cmd, taskauth.Authority{
+		ManagedBy:   taskauth.ManagedBy,
+		Version:     taskauth.Version,
+		ServerURL:   strings.TrimRight(valueOr("MULTICA_SERVER_URL", "https://api.example.test"), "/"),
+		WorkspaceID: valueOr("MULTICA_WORKSPACE_ID", taskScopedCLIWorkspaceID),
+		Token:       valueOr("MULTICA_TOKEN", "mat_contract_test"),
+		TaskID:      valueOr("MULTICA_TASK_ID", taskScopedCLITaskID),
+		AgentID:     valueOr("MULTICA_AGENT_ID", taskScopedCLIAgentID),
+	})
+}
 
 func newTaskScopeTestCommand(path []string, ran *bool) (*cobra.Command, error) {
 	root := &cobra.Command{
@@ -56,6 +75,9 @@ func executeTaskScopeTestCommand(t *testing.T, path []string, extraArgs ...strin
 		t.Fatalf("new command: %v", err)
 	}
 	root.SetArgs(append(extraArgs, path...))
+	if managedTaskSignalPresent() {
+		bindTaskScopeTestAuthority(root)
+	}
 	err = root.Execute()
 	return ran, err
 }
@@ -337,6 +359,7 @@ func assertTaskScopedCLIRequests(t *testing.T, recorder *taskScopedCLIRecorder, 
 func newTaskScopedIssueGetCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "get"}
 	cmd.Flags().String("output", "table", "")
+	bindTaskScopeTestAuthority(cmd)
 	return cmd
 }
 
@@ -352,6 +375,7 @@ func newTaskScopedIssueCommentListCmd() *cobra.Command {
 	cmd.Flags().Bool("full", false, "")
 	cmd.Flags().String("before", "", "")
 	cmd.Flags().String("before-id", "", "")
+	bindTaskScopeTestAuthority(cmd)
 	return cmd
 }
 
@@ -362,12 +386,14 @@ func newTaskScopedIssueAssignCmd() *cobra.Command {
 	cmd.Flags().String("to-type", "", "")
 	cmd.Flags().Bool("unassign", false, "")
 	cmd.Flags().String("output", "json", "")
+	bindTaskScopeTestAuthority(cmd)
 	return cmd
 }
 
 func newTaskScopedIssueStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "status"}
 	cmd.Flags().String("output", "json", "")
+	bindTaskScopeTestAuthority(cmd)
 	return cmd
 }
 
@@ -375,12 +401,14 @@ func newTaskScopedIssueRunsCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "runs"}
 	cmd.Flags().String("output", "table", "")
 	cmd.Flags().Bool("full-id", false, "")
+	bindTaskScopeTestAuthority(cmd)
 	return cmd
 }
 
 func newTaskScopedIssueRerunCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "rerun"}
 	cmd.Flags().String("output", "table", "")
+	bindTaskScopeTestAuthority(cmd)
 	return cmd
 }
 
@@ -389,6 +417,7 @@ func newTaskScopedIssueRunMessagesCmd() *cobra.Command {
 	cmd.Flags().String("output", "table", "")
 	cmd.Flags().Int("since", 0, "")
 	cmd.Flags().String("issue", "", "")
+	bindTaskScopeTestAuthority(cmd)
 	return cmd
 }
 
@@ -420,6 +449,7 @@ func TestTaskScopedIssueCLIUsesOnlyBoundIssueAPIs(t *testing.T) {
 			name: "comment add",
 			run: func(t *testing.T) error {
 				cmd := newIssueCommentAddTestCmd()
+				bindTaskScopeTestAuthority(cmd)
 				_ = cmd.Flags().Set("content", "bounded comment")
 				_, err := captureStdout(t, func() error { return runIssueCommentAdd(cmd, []string{taskScopedCLIIssueID}) })
 				return err
@@ -507,6 +537,7 @@ func TestTaskScopedIssueCLILocallyRejectsManagementLookups(t *testing.T) {
 	}
 
 	comment := newIssueCommentAddTestCmd()
+	bindTaskScopeTestAuthority(comment)
 	_ = comment.Flags().Set("content", "bounded")
 	_ = comment.Flags().Set("attachment", "artifact.txt")
 	if err := runIssueCommentAdd(comment, []string{taskScopedCLIIssueID}); err == nil || !strings.Contains(err.Error(), "prohibits attachment") {
@@ -527,8 +558,10 @@ func TestHumanIssueGetTableKeepsActorDisplayLookup(t *testing.T) {
 	t.Setenv("MULTICA_WORKSPACE_ID", taskScopedCLIWorkspaceID)
 	t.Setenv("MULTICA_TOKEN", "mul_human_test")
 
+	cmd := &cobra.Command{Use: "get"}
+	cmd.Flags().String("output", "table", "")
 	out, err := captureStdout(t, func() error {
-		return runIssueGet(newTaskScopedIssueGetCmd(), []string{taskScopedCLIIssueID})
+		return runIssueGet(cmd, []string{taskScopedCLIIssueID})
 	})
 	if err != nil {
 		t.Fatalf("human issue get: %v", err)
@@ -545,5 +578,38 @@ func TestHumanIssueGetTableKeepsActorDisplayLookup(t *testing.T) {
 	}
 	if !foundAgentLookup {
 		t.Fatalf("human context did not preserve agent display lookup: %#v", requests)
+	}
+}
+
+func TestTaskAuthorityLocatorEnvironmentCannotRedirectFixedPath(t *testing.T) {
+	authorityServer, _ := newTaskScopedCLIContractServer(t)
+	defer authorityServer.Close()
+
+	var attackerRequests int
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attackerRequests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"` + taskScopedCLIIssueID + `","identifier":"ATH-75","title":"stolen"}`))
+	}))
+	defer attacker.Close()
+
+	clearTaskScopeContext(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", attacker.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", taskScopedCLIWorkspaceID)
+	t.Setenv("MULTICA_TOKEN", "mat_contract_test")
+	t.Setenv("MULTICA_TASK_ID", taskScopedCLITaskID)
+	t.Setenv("MULTICA_AGENT_ID", taskScopedCLIAgentID)
+
+	t.Setenv("MULTICA_TASK_AUTHORITY_PATH", filepath.Join(t.TempDir(), "attacker-authority.json"))
+
+	cmd := &cobra.Command{Use: "get"}
+	cmd.Flags().String("output", "table", "")
+	err := runIssueGet(cmd, []string{taskScopedCLIIssueID})
+	if err == nil || !strings.Contains(err.Error(), "authority") {
+		t.Fatalf("environment redirect error = %v, want authority mismatch rejection", err)
+	}
+	if attackerRequests != 0 {
+		t.Fatalf("task credential was redirected to attacker endpoint (%d requests)", attackerRequests)
 	}
 }

@@ -29,9 +29,15 @@ func (p *pathIdentity) Close() error {
 type boundIsolationPolicy struct {
 	WritableRoots  []pathIdentity
 	ReadOnlyRoots  []pathIdentity
+	ReadOnlyFiles  []boundReadOnlyFileMount
 	SystemRoots    []pathIdentity
 	ForbiddenRoots []pathIdentity
 	Network        NetworkAccess
+}
+
+type boundReadOnlyFileMount struct {
+	Identity pathIdentity
+	Target   string
 }
 
 func (p *boundIsolationPolicy) Close() error {
@@ -51,6 +57,11 @@ func (p *boundIsolationPolicy) Close() error {
 			}
 		}
 	}
+	for i := range p.ReadOnlyFiles {
+		if err := p.ReadOnlyFiles[i].Identity.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
 	return first
 }
 
@@ -58,10 +69,19 @@ func (p boundIsolationPolicy) policy() TaskIsolationPolicy {
 	return TaskIsolationPolicy{
 		WritableRoots:  identityPaths(p.WritableRoots),
 		ReadOnlyRoots:  identityPaths(p.ReadOnlyRoots),
+		ReadOnlyFiles:  identityFileMounts(p.ReadOnlyFiles),
 		SystemRoots:    identityPaths(p.SystemRoots),
 		ForbiddenRoots: identityPaths(p.ForbiddenRoots),
 		Network:        p.Network,
 	}
+}
+
+func identityFileMounts(values []boundReadOnlyFileMount) []ReadOnlyFileMount {
+	out := make([]ReadOnlyFileMount, 0, len(values))
+	for _, value := range values {
+		out = append(out, ReadOnlyFileMount{Source: value.Identity.Path, Target: value.Target})
+	}
+	return out
 }
 
 func identityPaths(values []pathIdentity) []string {
@@ -90,6 +110,13 @@ func bindTaskIsolationPolicy(policy TaskIsolationPolicy) (*boundIsolationPolicy,
 	}
 	if bound.ReadOnlyRoots, err = openDirectoryIdentities("read-only", validated.ReadOnlyRoots); err != nil {
 		return nil, err
+	}
+	for _, mount := range validated.ReadOnlyFiles {
+		identity, openErr := openFileIdentity("read-only file source", mount.Source)
+		if openErr != nil {
+			return nil, openErr
+		}
+		bound.ReadOnlyFiles = append(bound.ReadOnlyFiles, boundReadOnlyFileMount{Identity: identity, Target: mount.Target})
 	}
 	if bound.SystemRoots, err = openDirectoryIdentities("system", validated.SystemRoots); err != nil {
 		return nil, err
@@ -144,9 +171,9 @@ func openFileIdentity(kind, path string) (pathIdentity, error) {
 	if err != nil {
 		return pathIdentity{}, fmt.Errorf("open %s %q: %w", kind, clean, err)
 	}
-	if info.IsDir() {
+	if !info.Mode().IsRegular() {
 		_ = file.Close()
-		return pathIdentity{}, fmt.Errorf("%s %q is a directory", kind, clean)
+		return pathIdentity{}, fmt.Errorf("%s %q is not a regular file", kind, clean)
 	}
 	return pathIdentity{Path: clean, File: file, Info: info}, nil
 }
@@ -165,6 +192,11 @@ func recheckBoundIsolation(policy *boundIsolationPolicy) error {
 			if err := recheckPathIdentity(&group[i]); err != nil {
 				return err
 			}
+		}
+	}
+	for i := range policy.ReadOnlyFiles {
+		if err := recheckPathIdentity(&policy.ReadOnlyFiles[i].Identity); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -228,6 +260,12 @@ func openPathIdentityPortable(path string, directory bool) (*os.File, os.FileInf
 		// remaining symlink is treated as an unsafe alias.
 		return nil, nil, fmt.Errorf("path %q must not be a symlink", path)
 	}
+	if directory && !info.IsDir() {
+		return nil, nil, fmt.Errorf("path %q is not a directory", path)
+	}
+	if !directory && !info.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("path %q is not a regular file", path)
+	}
 	file, err := os.OpenFile(path, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, nil, err
@@ -245,9 +283,9 @@ func openPathIdentityPortable(path string, directory bool) (*os.File, os.FileInf
 		_ = file.Close()
 		return nil, nil, fmt.Errorf("path %q is not a directory", path)
 	}
-	if !directory && opened.IsDir() {
+	if !directory && !opened.Mode().IsRegular() {
 		_ = file.Close()
-		return nil, nil, fmt.Errorf("path %q is a directory", path)
+		return nil, nil, fmt.Errorf("path %q is not a regular file", path)
 	}
 	return file, opened, nil
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/selfexec"
+	"github.com/multica-ai/multica/server/internal/taskauth"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
@@ -158,6 +159,7 @@ type resolvedTaskRepo struct {
 type taskIsolationParams struct {
 	Environment      *execenv.Environment
 	TaskTempDir      string
+	TaskAuthority    string
 	Repos            []resolvedTaskRepo
 	Executable       string
 	OwnerHome        string
@@ -175,7 +177,8 @@ type Daemon struct {
 	logger     *slog.Logger
 	// taskLauncher is initialized by New. Tests that construct Daemon directly
 	// must opt into an explicit launcher; a missing factory fails closed.
-	taskLauncher func() agent.CommandBuilder
+	taskLauncher     func() agent.CommandBuilder
+	taskAuthorityDir func() (string, error)
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
@@ -344,6 +347,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		taskLauncher: func() agent.CommandBuilder {
 			return agent.NewCommandLauncher()
 		},
+		taskAuthorityDir: ensureTaskAuthorityDir,
 	}
 	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
 	d.runner = taskRunnerFunc(d.runTask)
@@ -4075,6 +4079,31 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
 		return TaskResult{}, err
 	}
+	authorityDirFactory := d.taskAuthorityDir
+	if authorityDirFactory == nil {
+		authorityDirFactory = ensureTaskAuthorityDir
+	}
+	authorityDir, err := authorityDirFactory()
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("prepare task authority dir: %w", err)
+	}
+	defer func() {
+		if cerr := os.RemoveAll(authorityDir); cerr != nil {
+			taskLog.Warn("task authority dir cleanup failed", "path", authorityDir, "error", cerr)
+		}
+	}()
+	authorityPath, err := taskauth.Write(authorityDir, taskauth.Authority{
+		ManagedBy:   taskauth.ManagedBy,
+		Version:     taskauth.Version,
+		ServerURL:   d.cfg.ServerBaseURL,
+		WorkspaceID: task.WorkspaceID,
+		Token:       agentToken,
+		TaskID:      task.ID,
+		AgentID:     task.AgentID,
+	})
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("publish task authority: %w", err)
+	}
 	var resolvedTaskRepos []resolvedTaskRepo
 	repoCheckoutToken := ""
 	if len(task.Repos) > 0 {
@@ -4130,6 +4159,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	isolationPolicy, taskPath, err := buildTaskIsolationPolicy(taskIsolationParams{
 		Environment:      env,
 		TaskTempDir:      taskTempDir,
+		TaskAuthority:    authorityPath,
 		Repos:            resolvedTaskRepos,
 		Executable:       entry.Path,
 		OwnerHome:        ownerHome,
@@ -5207,11 +5237,20 @@ func ensureTaskTempDir(envRoot string, workspaceID string, taskID string) (strin
 	if taskID == "" {
 		return "", errors.New("task id is empty")
 	}
-	dir, err := os.MkdirTemp(socketSafeTempBaseDir(), "multica-task-")
+	return ensurePrivateTaskDir("multica-task-")
+}
+
+func ensureTaskAuthorityDir() (string, error) {
+	return ensurePrivateTaskDir("multica-task-authority-")
+}
+
+func ensurePrivateTaskDir(prefix string) (string, error) {
+	dir, err := os.MkdirTemp(socketSafeTempBaseDir(), prefix)
 	if err != nil {
 		return "", err
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
+		_ = os.RemoveAll(dir)
 		return "", err
 	}
 	return dir, nil

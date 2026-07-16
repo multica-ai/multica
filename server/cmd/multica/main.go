@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -9,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/taskauth"
 )
 
 var (
@@ -41,7 +44,23 @@ var taskScopedCLICommands = map[string]struct{}{
 }
 
 func enforceTaskScopedCLI(cmd *cobra.Command, _ []string) error {
-	if !inTaskScopedCLIContext() {
+	authority, present := taskAuthorityFromContext(cmd)
+	if !present {
+		loaded, err := taskauth.Load(taskauth.FixedPath)
+		if err != nil {
+			if managedTaskSignalPresent() || !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("managed task authority unavailable: %w", err)
+			}
+			return nil
+		}
+		authority = loaded
+		cmd.SetContext(context.WithValue(cmd.Context(), taskAuthorityContextKey{}, authority))
+	}
+	if err := validateTaskAuthorityCompatibility(authority); err != nil {
+		return err
+	}
+
+	if !inTaskScopedCLIContext(cmd) {
 		return nil
 	}
 
@@ -58,8 +77,51 @@ func enforceTaskScopedCLI(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func inTaskScopedCLIContext() bool {
-	return strings.HasPrefix(os.Getenv("MULTICA_TOKEN"), "mat_") || inDaemonManagedExecutionContext()
+type taskAuthorityContextKey struct{}
+
+func taskAuthorityFromContext(cmd *cobra.Command) (taskauth.Authority, bool) {
+	if cmd == nil || cmd.Context() == nil {
+		return taskauth.Authority{}, false
+	}
+	authority, ok := cmd.Context().Value(taskAuthorityContextKey{}).(taskauth.Authority)
+	return authority, ok
+}
+
+func withTaskAuthority(cmd *cobra.Command, authority taskauth.Authority) {
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	cmd.SetContext(context.WithValue(parent, taskAuthorityContextKey{}, authority))
+}
+
+func inTaskScopedCLIContext(cmd *cobra.Command) bool {
+	_, ok := taskAuthorityFromContext(cmd)
+	return ok
+}
+
+func managedTaskSignalPresent() bool {
+	return strings.HasPrefix(strings.TrimSpace(os.Getenv("MULTICA_TOKEN")), "mat_") || inDaemonManagedExecutionContext()
+}
+
+func validateTaskAuthorityCompatibility(authority taskauth.Authority) error {
+	values := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{name: "MULTICA_SERVER_URL", got: strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_SERVER_URL")), "/"), want: authority.ServerURL},
+		{name: "MULTICA_WORKSPACE_ID", got: strings.TrimSpace(os.Getenv("MULTICA_WORKSPACE_ID")), want: authority.WorkspaceID},
+		{name: "MULTICA_TOKEN", got: strings.TrimSpace(os.Getenv("MULTICA_TOKEN")), want: authority.Token},
+		{name: "MULTICA_TASK_ID", got: strings.TrimSpace(os.Getenv("MULTICA_TASK_ID")), want: authority.TaskID},
+		{name: "MULTICA_AGENT_ID", got: strings.TrimSpace(os.Getenv("MULTICA_AGENT_ID")), want: authority.AgentID},
+	}
+	for _, value := range values {
+		if value.got != "" && value.got != value.want {
+			return fmt.Errorf("managed task authority mismatch for %s", value.name)
+		}
+	}
+	return nil
 }
 
 func init() {

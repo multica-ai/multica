@@ -78,6 +78,99 @@ func TestTaskIsolationPolicyRejectsRelativeDotDotAndMissingRoots(t *testing.T) {
 	}
 }
 
+func TestTaskIsolationPolicyValidatesExactReadOnlyFiles(t *testing.T) {
+	root := t.TempDir()
+	writable := filepath.Join(root, "task")
+	private := filepath.Join(root, "daemon-private")
+	forbidden := filepath.Join(root, "owner")
+	if err := os.MkdirAll(writable, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(private, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(forbidden, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	authority := filepath.Join(private, "task-authority.json")
+	if err := os.WriteFile(authority, []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	validated, err := (TaskIsolationPolicy{
+		WritableRoots: []string{writable},
+		ReadOnlyFiles: []ReadOnlyFileMount{{Source: authority, Target: "/run/multica/task-authority.json"}},
+	}).Validated()
+	if err != nil {
+		t.Fatalf("valid exact file rejected: %v", err)
+	}
+	if len(validated.ReadOnlyFiles) != 1 || validated.ReadOnlyFiles[0].Source != authority || validated.ReadOnlyFiles[0].Target != "/run/multica/task-authority.json" {
+		t.Fatalf("validated exact files = %#v", validated.ReadOnlyFiles)
+	}
+
+	writableAuthority := filepath.Join(writable, "task-authority.json")
+	if err := os.WriteFile(writableAuthority, []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (TaskIsolationPolicy{
+		WritableRoots: []string{writable},
+		ReadOnlyFiles: []ReadOnlyFileMount{{Source: writableAuthority, Target: "/run/multica/task-authority.json"}},
+	}).Validated(); err == nil {
+		t.Fatal("read-only file source inside writable root unexpectedly accepted")
+	}
+
+	directory := filepath.Join(writable, "directory")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	symlink := filepath.Join(writable, "authority-link")
+	if err := os.Symlink(authority, symlink); err != nil {
+		t.Fatal(err)
+	}
+	forbiddenFile := filepath.Join(forbidden, "authority.json")
+	if err := os.WriteFile(forbiddenFile, []byte("forbidden"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		source string
+		target string
+	}{
+		{name: "missing", source: filepath.Join(writable, "missing"), target: "/run/multica/task-authority.json"},
+		{name: "directory", source: directory, target: "/run/multica/task-authority.json"},
+		{name: "symlink", source: symlink, target: "/run/multica/task-authority.json"},
+		{name: "inside forbidden root", source: forbiddenFile, target: "/run/multica/task-authority.json"},
+		{name: "relative target", source: authority, target: "run/multica/task-authority.json"},
+		{name: "proc target", source: authority, target: "/proc/task-authority.json"},
+		{name: "dev target", source: authority, target: "/dev/task-authority.json"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := (TaskIsolationPolicy{
+				WritableRoots:  []string{writable},
+				ReadOnlyFiles:  []ReadOnlyFileMount{{Source: tt.source, Target: tt.target}},
+				ForbiddenRoots: []string{forbidden},
+			}).Validated()
+			if err == nil {
+				t.Fatalf("exact file mount %#v unexpectedly accepted", tt)
+			}
+		})
+	}
+
+	assertFIFOReadOnlyFileRejected(t, writable)
+
+	if _, err := (TaskIsolationPolicy{
+		WritableRoots: []string{writable},
+		ReadOnlyFiles: []ReadOnlyFileMount{
+			{Source: authority, Target: "/run/multica/task-authority.json"},
+			{Source: forbiddenFile, Target: "/run/multica/task-authority.json"},
+		},
+	}).Validated(); err == nil {
+		t.Fatal("duplicate exact-file target unexpectedly accepted")
+	}
+}
+
 func TestStableSystemPathAliasesArePlatformBoundAndExact(t *testing.T) {
 	t.Parallel()
 

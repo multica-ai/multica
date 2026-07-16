@@ -388,9 +388,6 @@ func TestRunIssueCommentAddRejectsExternalAttachmentWithZeroUploads(t *testing.T
 	}))
 	defer srv.Close()
 	setCLITestServerEnv(t, srv.URL)
-	// mat_ prefix clears the daemon-managed execution-context guard both in CI
-	// and when the suite runs inside an agent task (leftover daemon marker).
-	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
 	// A valid attachment inside the workdir, FOLLOWED BY an external one.
 	t.Chdir(t.TempDir())

@@ -71,6 +71,9 @@ func init() {
 }
 
 func resolveToken(cmd *cobra.Command) string {
+	if authority, ok := taskAuthorityFromContext(cmd); ok {
+		return authority.Token
+	}
 	if v := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); v != "" {
 		return v
 	}

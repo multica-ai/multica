@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/taskauth"
 )
 
 var agentCmd = &cobra.Command{
@@ -249,6 +250,16 @@ func resolveProfile(cmd *cobra.Command) string {
 }
 
 func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
+	if authority, ok := taskAuthorityFromContext(cmd); ok {
+		client := cli.NewAPIClient(authority.ServerURL, authority.WorkspaceID, authority.Token)
+		client.AgentID = authority.AgentID
+		client.TaskID = authority.TaskID
+		return client, nil
+	}
+	if managedTaskSignalPresent() {
+		return nil, fmt.Errorf("managed task authority is required at %s", taskauth.FixedPath)
+	}
+
 	serverURL := resolveServerURL(cmd)
 	workspaceID := resolveWorkspaceID(cmd)
 	token := resolveToken(cmd)
@@ -256,20 +267,6 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	if serverURL == "" {
 		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
 	}
-	if inDaemonManagedExecutionContext() && !strings.HasPrefix(token, "mat_") {
-		// When the ONLY daemon signal is a workdir marker (no MULTICA_AGENT_ID /
-		// MULTICA_TASK_ID / MULTICA_DAEMON_PORT), the likeliest cause outside a
-		// real task is a leftover marker from a crashed daemon task in a
-		// local_directory. Name the exact file so a normal user can recover
-		// instead of hitting an opaque "requires mat_ token" error.
-		if !inAgentExecutionContext() && os.Getenv("MULTICA_DAEMON_PORT") == "" {
-			if markerPath := daemonTaskContextMarkerPath(); markerPath != "" {
-				return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token; detected a daemon task marker at %s — if you are not running inside an agent task this is likely a leftover, remove it and retry", markerPath)
-			}
-		}
-		return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token")
-	}
-
 	client := cli.NewAPIClient(serverURL, workspaceID, token)
 	// When running inside a daemon task, attribute actions to the agent.
 	if agentID := os.Getenv("MULTICA_AGENT_ID"); agentID != "" {
@@ -379,6 +376,9 @@ func daemonTaskContextMarkerPath() string {
 }
 
 func resolveWorkspaceID(cmd *cobra.Command) string {
+	if authority, ok := taskAuthorityFromContext(cmd); ok {
+		return authority.WorkspaceID
+	}
 	val := cli.FlagOrEnv(cmd, "workspace-id", "MULTICA_WORKSPACE_ID", "")
 	if val != "" {
 		return val

@@ -123,16 +123,15 @@ func TestNewAPIClient_WorkdirParentEscapeFailsClosed(t *testing.T) {
 	}
 	if _, err := newAPIClient(testCmd()); err == nil {
 		t.Fatal("newAPIClient(): expected fail-closed error from workdir-parent escape, got nil")
-	} else if !strings.Contains(err.Error(), "mat_") {
-		t.Fatalf("error should demand a task-scoped mat_ token; got %q", err.Error())
+	} else if !strings.Contains(err.Error(), "managed task authority") {
+		t.Fatalf("error should demand managed task authority; got %q", err.Error())
 	}
 }
 
-// TestNewAPIClient_LeftoverMarkerActionableError verifies that a stale
-// daemon-task marker with no daemon env (the local_directory crash-leftover
-// case) fails closed with an actionable message that names the marker file,
-// rather than an opaque "requires mat_ token" error.
-func TestNewAPIClient_LeftoverMarkerActionableError(t *testing.T) {
+// TestNewAPIClient_LeftoverMarkerRequiresAuthority verifies that a stale
+// daemon-task marker with no daemon env still fails closed. A marker is only a
+// managed-context signal; it cannot replace the daemon-published authority.
+func TestNewAPIClient_LeftoverMarkerRequiresAuthority(t *testing.T) {
 	chdirWithDaemonTaskMarker(t)
 	t.Setenv("MULTICA_AGENT_ID", "")
 	t.Setenv("MULTICA_TASK_ID", "")
@@ -142,10 +141,8 @@ func TestNewAPIClient_LeftoverMarkerActionableError(t *testing.T) {
 
 	if _, err := newAPIClient(testCmd()); err == nil {
 		t.Fatal("newAPIClient(): expected error for leftover daemon-task marker, got nil")
-	} else if !strings.Contains(err.Error(), execenv.TaskContextMarkerRelPath) {
-		t.Fatalf("error should name the marker path; got %q", err.Error())
-	} else if !strings.Contains(err.Error(), "leftover") {
-		t.Fatalf("error should hint it may be a leftover; got %q", err.Error())
+	} else if !strings.Contains(err.Error(), "managed task authority") {
+		t.Fatalf("error should demand managed task authority; got %q", err.Error())
 	}
 }
 
@@ -436,8 +433,8 @@ func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
 		if err == nil {
 			t.Fatal("newAPIClient(): expected error without task token")
 		}
-		if !strings.Contains(err.Error(), "mat_ token") {
-			t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+		if !strings.Contains(err.Error(), "managed task authority") {
+			t.Fatalf("newAPIClient() error = %q, want authority guidance", err.Error())
 		}
 	})
 
@@ -448,15 +445,17 @@ func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
 		if err == nil {
 			t.Fatal("newAPIClient(): expected error with member token")
 		}
-		if !strings.Contains(err.Error(), "mat_ token") {
-			t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+		if !strings.Contains(err.Error(), "managed task authority") {
+			t.Fatalf("newAPIClient() error = %q, want authority guidance", err.Error())
 		}
 	})
 
-	t.Run("task token succeeds", func(t *testing.T) {
+	t.Run("task authority succeeds", func(t *testing.T) {
 		t.Setenv("MULTICA_TOKEN", "mat_task_token")
 
-		client, err := newAPIClient(testCmd())
+		cmd := testCmd()
+		bindTaskScopeTestAuthority(cmd)
+		client, err := newAPIClient(cmd)
 		if err != nil {
 			t.Fatalf("newAPIClient(): %v", err)
 		}
@@ -483,8 +482,8 @@ func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("newAPIClient(): expected error without task token")
 	}
-	if !strings.Contains(err.Error(), "mat_ token") {
-		t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+	if !strings.Contains(err.Error(), "managed task authority") {
+		t.Fatalf("newAPIClient() error = %q, want authority guidance", err.Error())
 	}
 }
 
@@ -505,8 +504,8 @@ func TestNewAPIClient_WorkdirMarkerRequiresTaskToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("newAPIClient(): expected error without task token")
 	}
-	if !strings.Contains(err.Error(), "mat_ token") {
-		t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+	if !strings.Contains(err.Error(), "managed task authority") {
+		t.Fatalf("newAPIClient() error = %q, want authority guidance", err.Error())
 	}
 }
 

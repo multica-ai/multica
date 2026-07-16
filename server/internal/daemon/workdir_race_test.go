@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/taskauth"
 )
 
 // TestHandleTask_DoesNotCallStartTaskItself is the regression guard for
@@ -166,8 +167,9 @@ func TestRunTask_InjectsPrivateTaskTempDir(t *testing.T) {
 	}
 
 	workspacesRoot := filepath.Join(t.TempDir(), strings.Repeat("long-workspaces-root-", 3))
-	workspaceID := "ws-private-temp"
-	taskID := "task-private-temp-with-long-id-that-would-overflow-socket-paths"
+	workspaceID := "50000000-0000-0000-0000-000000000001"
+	taskID := "50000000-0000-0000-0000-000000000002"
+	agentID := "50000000-0000-0000-0000-000000000003"
 	envRoot := execenv.PredictRootDir(workspacesRoot, workspaceID, taskID)
 
 	captureFile := filepath.Join(t.TempDir(), "agent-env.txt")
@@ -178,7 +180,14 @@ if [ -d "$TMPDIR" ]; then
 else
   tmpdir_exists=no
 fi
-printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nTMPDIR_EXISTS=%s\n' "$TMPDIR" "$TMP" "$TEMP" "$tmpdir_exists" > "$CAPTURE_FILE"
+authority="$TMPDIR/task-authority.json"
+if [ -e "$authority" ]; then
+  authority_source_exposed=yes
+else
+  authority_source_exposed=no
+fi
+printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nTMPDIR_EXISTS=%s\nAUTHORITY_SOURCE_EXPOSED=%s\n' \
+  "$TMPDIR" "$TMP" "$TEMP" "$tmpdir_exists" "$authority_source_exposed" > "$CAPTURE_FILE"
 IFS= read -r _
 printf '%s\n' '{"type":"system","session_id":"sess-private-temp"}'
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-private-temp","result":"done"}'
@@ -216,11 +225,12 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	task := Task{
 		ID:          taskID,
 		WorkspaceID: workspaceID,
+		AgentID:     agentID,
 		RuntimeID:   "rt-1",
 		IssueID:     "issue-private-temp",
 		AuthToken:   "mat_private_temp",
 		Agent: &AgentData{
-			ID:   "agent-private-temp",
+			ID:   agentID,
 			Name: "test-agent",
 			CustomEnv: map[string]string{
 				"CAPTURE_FILE": captureFile,
@@ -262,6 +272,9 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	}
 	if got["TMPDIR_EXISTS"] != "yes" {
 		t.Fatalf("fake agent saw TMPDIR_EXISTS=%q, want yes", got["TMPDIR_EXISTS"])
+	}
+	if got["AUTHORITY_SOURCE_EXPOSED"] != "no" {
+		t.Fatalf("task authority source alias was exposed at %q", filepath.Join(got["TMPDIR"], taskauth.FileName))
 	}
 	taskTempDir := got["TMPDIR"]
 	if strings.HasPrefix(taskTempDir, envRoot) {

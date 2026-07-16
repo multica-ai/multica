@@ -144,6 +144,15 @@ func renderLinuxBubblewrapArgsBound(policy *boundIsolationPolicy, executable, cw
 			args = append(args, "--dir", parent)
 		}
 	}
+	for _, file := range policy.ReadOnlyFiles {
+		for _, parent := range missingNamespaceParents(file.Target) {
+			if _, ok := created[parent]; ok {
+				continue
+			}
+			created[parent] = struct{}{}
+			args = append(args, "--dir", parent)
+		}
+	}
 
 	if leadingExtraFiles < 0 {
 		return nil, nil, fmt.Errorf("leading extra files count must not be negative")
@@ -162,6 +171,14 @@ func renderLinuxBubblewrapArgsBound(policy *boundIsolationPolicy, executable, cw
 			args = append(args, "--ro-bind-fd", fmt.Sprintf("%d", childFD), m.identity.Path)
 		}
 		extraFiles = append(extraFiles, m.identity.File)
+		childFD++
+	}
+	for _, file := range policy.ReadOnlyFiles {
+		if file.Identity.File == nil {
+			return nil, nil, fmt.Errorf("linux isolation file %q is missing a descriptor", file.Identity.Path)
+		}
+		args = append(args, "--ro-bind-fd", fmt.Sprintf("%d", childFD), file.Target)
+		extraFiles = append(extraFiles, file.Identity.File)
 		childFD++
 	}
 
@@ -185,6 +202,13 @@ func rejectLinuxHostPseudoFilesystemBindings(policy TaskIsolationPolicy) error {
 		for _, isolated := range []string{"/dev", "/proc"} {
 			if pathsOverlap(root, isolated) {
 				return fmt.Errorf("allowed root %q overlaps isolated Linux pseudo-filesystem %q", root, isolated)
+			}
+		}
+	}
+	for _, file := range policy.ReadOnlyFiles {
+		for _, isolated := range []string{"/dev", "/proc"} {
+			if pathsOverlap(file.Target, isolated) {
+				return fmt.Errorf("read-only file target %q overlaps isolated Linux pseudo-filesystem %q", file.Target, isolated)
 			}
 		}
 	}
