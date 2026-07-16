@@ -1798,10 +1798,9 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         },
         macIntel: {
           title: "macOS용 Multica",
-          sub: "Apple Silicon이 필요합니다. Intel Mac은 아직 지원하지 않습니다.",
-          disabledCta: "Apple Silicon 필요",
-          intelHint:
-            "Intel Mac을 사용 중인가요? 아래 CLI를 사용하세요. 같은 데몬이 실행됩니다.",
+          sub: "Intel · 데몬 포함, 별도 설정 없음",
+          primary: "다운로드(.dmg)",
+          altZip: "또는 .zip 다운로드",
         },
         winX64: {
           title: "Windows용 Multica",
@@ -1823,12 +1822,13 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           title: "플랫폼 선택",
           sub: "모든 설치 파일은 아래에 정리되어 있습니다.",
         },
-        safariMacHint: "Intel Mac을 사용 중인가요? 아래 CLI를 사용하세요.",
+        safariMacHint: "Intel Mac을 사용 중인가요? 아래에서 Intel 버전을 선택하세요.",
         archFallbackHint: "아키텍처가 맞지 않나요? 아래에서 모든 형식을 확인하세요.",
       },
       allPlatforms: {
         title: "모든 플랫폼",
-        macLabel: "macOS · Apple Silicon",
+        macArm64Label: "macOS · Apple Silicon",
+        macX64Label: "macOS · Intel",
         winX64Label: "Windows · x64",
         winArm64Label: "Windows · ARM64",
         linuxX64Label: "Linux · x64",
@@ -1839,8 +1839,6 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         formatAppImage: ".AppImage",
         formatDeb: ".deb",
         formatRpm: ".rpm",
-        intelNote:
-          "Apple Silicon만 지원합니다. 이번 릴리스에서는 Intel Mac을 지원하지 않습니다.",
         unavailable: "사용할 수 없음",
       },
       cli: {

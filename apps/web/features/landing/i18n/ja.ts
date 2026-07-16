@@ -1773,10 +1773,9 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         },
         macIntel: {
           title: "macOS 版 Multica",
-          sub: "Apple Silicon が必要です。Intel Mac はまだ対応していません。",
-          disabledCta: "Apple Silicon が必要",
-          intelHint:
-            "Intel Mac をお使いですか? 下の CLI をご利用ください。同じデーモンが動きます。",
+          sub: "Intel · デーモン同梱、設定不要",
+          primary: "ダウンロード(.dmg)",
+          altZip: "または .zip をダウンロード",
         },
         winX64: {
           title: "Windows 版 Multica",
@@ -1798,12 +1797,13 @@ export function createJaDict(allowSignup: boolean): LandingDict {
           title: "プラットフォームを選択",
           sub: "すべてのインストーラーは下にまとまっています。",
         },
-        safariMacHint: "Intel Mac をお使いですか? 下の CLI をご利用ください。",
+        safariMacHint: "Intel Mac をお使いですか? 下の Intel 版を選択してください。",
         archFallbackHint: "アーキテクチャが合いませんか? 下ですべての形式を確認してください。",
       },
       allPlatforms: {
         title: "すべてのプラットフォーム",
-        macLabel: "macOS · Apple Silicon",
+        macArm64Label: "macOS · Apple Silicon",
+        macX64Label: "macOS · Intel",
         winX64Label: "Windows · x64",
         winArm64Label: "Windows · ARM64",
         linuxX64Label: "Linux · x64",
@@ -1814,8 +1814,6 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         formatAppImage: ".AppImage",
         formatDeb: ".deb",
         formatRpm: ".rpm",
-        intelNote:
-          "Apple Silicon のみ対応です。このリリースでは Intel Mac には対応していません。",
         unavailable: "利用できません",
       },
       cli: {
