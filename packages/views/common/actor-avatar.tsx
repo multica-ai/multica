@@ -208,7 +208,6 @@ export function AgentStatusDot({ agentId, size }: { agentId: string; size?: Avat
   return (
     <span
       aria-label={`Status: ${label}`}
-      title={label}
       className={`absolute bottom-0 right-0 rounded-full ring-1 ring-background ${dotClass} ${dotSize}`}
     />
   );
