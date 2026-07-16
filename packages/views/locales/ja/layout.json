@@ -23,7 +23,7 @@
     "backend_label": "バックエンド",
     "frontend_unavailable": "フロントエンドのバージョンを取得できません",
     "backend_unavailable": "バックエンドのバージョンを取得できません",
-    "backend_loading": "バックエンドのバージョン取得中…"
+    "backend_loading": "バックエンドのバージョン取得中..."
   },
   "workspace_loader": {
     "loading_workspace": "ワークスペースを読み込み中…",

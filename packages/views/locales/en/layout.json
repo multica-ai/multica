@@ -23,7 +23,7 @@
     "backend_label": "Backend",
     "frontend_unavailable": "Frontend unavailable",
     "backend_unavailable": "Backend unavailable",
-    "backend_loading": "Backend loading…"
+    "backend_loading": "Backend loading..."
   },
   "workspace_loader": {
     "loading_workspace": "Loading workspace…",
