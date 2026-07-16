@@ -28,6 +28,12 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	}
 }
 
+func TestDefaultGCIntervalIsTwoHours(t *testing.T) {
+	if DefaultGCInterval != 2*time.Hour {
+		t.Fatalf("DefaultGCInterval = %s, want 2h", DefaultGCInterval)
+	}
+}
+
 func TestPatternsFromEnv_DropsSeparatorBearingEntries(t *testing.T) {
 	t.Setenv("MULTICA_GC_ARTIFACT_PATTERNS", "node_modules, .next ,foo/bar, ../etc, ,target")
 	got := patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", nil)

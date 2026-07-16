@@ -253,8 +253,10 @@ type Daemon struct {
 	pauseClaims    bool // when true, the batch poller skips claiming
 	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
-	activeEnvRootsMu sync.Mutex
-	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
+	activeEnvRootsMu   sync.Mutex
+	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
+	activeEnvRoots     map[string]int  // env root path -> reference count (handles reuse paths marked twice)
+	deletingEnvRoots   map[string]bool // env roots reserved by GC; new tasks wait until the mutation finishes
 
 	activeCodexStoresMu   sync.Mutex
 	activeCodexStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
@@ -311,6 +313,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		resolvedPaths:             make(map[string]healedAgent),
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
+		deletingEnvRoots:          make(map[string]bool),
 		activeCodexStores:         make(map[string]int),
 		deletingCodexStores:       make(map[string]bool),
 		localPathLocks:            NewLocalPathLocker(),
@@ -322,6 +325,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		workspaceChanges:          newWorkspaceChangeSignal(),
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
 	}
+	d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
 	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
@@ -5012,6 +5016,10 @@ func (d *Daemon) markActiveEnvRoot(envRoot string) {
 	}
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
+	d.ensureActiveEnvRootStateLocked()
+	for d.deletingEnvRoots[envRoot] {
+		d.activeEnvRootsCond.Wait()
+	}
 	d.activeEnvRoots[envRoot]++
 }
 
@@ -5021,6 +5029,7 @@ func (d *Daemon) unmarkActiveEnvRoot(envRoot string) {
 	}
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
+	d.ensureActiveEnvRootStateLocked()
 	if d.activeEnvRoots[envRoot] <= 1 {
 		delete(d.activeEnvRoots, envRoot)
 		return
@@ -5031,7 +5040,44 @@ func (d *Daemon) unmarkActiveEnvRoot(envRoot string) {
 func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
+	d.ensureActiveEnvRootStateLocked()
 	return d.activeEnvRoots[envRoot] > 0
+}
+
+func (d *Daemon) ensureActiveEnvRootStateLocked() {
+	if d.activeEnvRoots == nil {
+		d.activeEnvRoots = make(map[string]int)
+	}
+	if d.deletingEnvRoots == nil {
+		d.deletingEnvRoots = make(map[string]bool)
+	}
+	if d.activeEnvRootsCond == nil {
+		d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
+	}
+}
+
+// reserveEnvRootForGC atomically confirms that no live task is using envRoot
+// and prevents a new task from entering until release runs. This closes the
+// check-then-remove race between the GC loop and task startup: either GC sees
+// the active task and skips, or task startup waits for the mutation to finish
+// and recreates/uses the post-GC environment.
+func (d *Daemon) reserveEnvRootForGC(envRoot string) (release func(), ok bool) {
+	if envRoot == "" {
+		return nil, false
+	}
+	d.activeEnvRootsMu.Lock()
+	defer d.activeEnvRootsMu.Unlock()
+	d.ensureActiveEnvRootStateLocked()
+	if d.activeEnvRoots[envRoot] > 0 || d.deletingEnvRoots[envRoot] {
+		return nil, false
+	}
+	d.deletingEnvRoots[envRoot] = true
+	return func() {
+		d.activeEnvRootsMu.Lock()
+		delete(d.deletingEnvRoots, envRoot)
+		d.activeEnvRootsCond.Broadcast()
+		d.activeEnvRootsMu.Unlock()
+	}, true
 }
 
 // markActiveCodexStore records that a task is about to use the given per-issue
