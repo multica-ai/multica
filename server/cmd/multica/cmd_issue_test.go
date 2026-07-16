@@ -2892,17 +2892,17 @@ func TestRunIssueListSendsSortAndDirection(t *testing.T) {
 
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
-	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
 	cmd := newIssueListTestCmd()
 	_ = cmd.Flags().Set("output", "json")
-	_ = cmd.Flags().Set("sort", "created_at")
+	_ = cmd.Flags().Set("sort", "updated_at")
 	_ = cmd.Flags().Set("direction", "DESC")
 	if err := runIssueList(cmd, nil); err != nil {
 		t.Fatalf("runIssueList: %v", err)
 	}
-	if got := gotQuery.Get("sort"); got != "created_at" {
-		t.Fatalf("sort query = %q, want created_at", got)
+	if got := gotQuery.Get("sort"); got != "updated_at" {
+		t.Fatalf("sort query = %q, want updated_at", got)
 	}
 	if got := gotQuery.Get("direction"); got != "desc" {
 		t.Fatalf("direction query = %q, want desc (lower-cased)", got)
@@ -2912,7 +2912,7 @@ func TestRunIssueListSendsSortAndDirection(t *testing.T) {
 func TestRunIssueListRejectsInvalidSortAndDirection(t *testing.T) {
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
-	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
 	cmd := newIssueListTestCmd()
 	_ = cmd.Flags().Set("sort", "nonsense")
@@ -2938,7 +2938,7 @@ func TestRunIssueListRejectsInvalidSortAndDirection(t *testing.T) {
 func TestRunIssueListRejectsDirectionWithoutDirectionalSort(t *testing.T) {
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
-	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
 	cases := []struct {
 		name string

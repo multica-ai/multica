@@ -234,7 +234,11 @@ function BoardViewImpl({
     },
     [setIssuePropertyMutation, t, unsetIssuePropertyMutation],
   );
-  const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
+  const sortFieldKey = sortBy === "created_at"
+    ? "created"
+    : sortBy === "updated_at"
+      ? "updated"
+      : sortBy;
   const sortPropertyId = propertyIdFromViewKey(sortBy);
   const sortLabel = sortBy !== "position"
     ? t(($) => $.board.ordered_by, {

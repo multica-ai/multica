@@ -25,7 +25,7 @@ export type SwimlaneGrouping = "parent" | "project" | "assignee";
  * static fields, so property sorts fall back to `position` server-side and
  * re-sort in the surface data hook.
  */
-export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title" | `property:${string}`;
+export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "updated_at" | "title" | `property:${string}`;
 export type SortDirection = "asc" | "desc";
 export type IssueDateField = "created_at" | "updated_at";
 
@@ -68,6 +68,7 @@ export const SORT_OPTIONS: { value: StaticSortField; label: string }[] = [
   { value: "start_date", label: "Start date" },
   { value: "due_date", label: "Due date" },
   { value: "created_at", label: "Created date" },
+  { value: "updated_at", label: "Updated date" },
   { value: "title", label: "Title" },
 ];
 

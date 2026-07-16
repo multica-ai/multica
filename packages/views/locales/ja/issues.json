@@ -80,6 +80,7 @@
     "sort_start_date": "開始日",
     "sort_due_date": "期限",
     "sort_created": "作成日",
+    "sort_updated": "更新日",
     "sort_title": "タイトル",
     "card_priority": "優先度",
     "card_description": "説明",

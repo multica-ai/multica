@@ -371,7 +371,7 @@ var validIssuePriorities = []string{
 // always sorted ascending (the board's manual drag order), so --direction is
 // only meaningful for the other columns.
 var validIssueSortColumns = []string{
-	"position", "title", "created_at", "start_date", "due_date", "priority",
+	"position", "title", "created_at", "updated_at", "start_date", "due_date", "priority",
 }
 
 // directionalIssueSortColumns are the sort keys for which --direction is
@@ -444,7 +444,7 @@ func init() {
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
-	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, start_date, due_date, priority")
+	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, updated_at, start_date, due_date, priority")
 	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column (position is always ascending)")
 
 	// issue get

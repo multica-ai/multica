@@ -12,6 +12,15 @@ function issueWith(id: string, value?: number | string, position = 0): Issue {
   } as unknown as Issue;
 }
 
+function issueUpdatedAt(id: string, updatedAt: string): Issue {
+  return {
+    id,
+    position: 0,
+    updated_at: updatedAt,
+    properties: {},
+  } as unknown as Issue;
+}
+
 describe("sortIssues property sorts", () => {
   it("sorts number values numerically, missing values last", () => {
     const sorted = sortIssues(
@@ -47,5 +56,19 @@ describe("sortIssues property sorts", () => {
       "asc",
     );
     expect(sorted.map((i) => i.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("sortIssues updated date sort", () => {
+  it("sorts updated_at in both directions", () => {
+    const issues = [
+      issueUpdatedAt("older", "2026-07-15T10:00:00Z"),
+      issueUpdatedAt("newer", "2026-07-16T10:00:00Z"),
+    ];
+
+    expect(sortIssues(issues, "updated_at", "asc").map((issue) => issue.id))
+      .toEqual(["older", "newer"]);
+    expect(sortIssues(issues, "updated_at", "desc").map((issue) => issue.id))
+      .toEqual(["newer", "older"]);
   });
 });

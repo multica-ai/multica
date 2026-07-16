@@ -60,6 +60,10 @@ export function sortIssues(
         return (
           new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         );
+      case "updated_at":
+        return (
+          new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()
+        );
       case "title":
         return a.title.localeCompare(b.title);
       case "position":

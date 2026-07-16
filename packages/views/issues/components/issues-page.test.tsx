@@ -218,6 +218,7 @@ vi.mock("@multica/core/issues/stores/view-store", () => ({
     { value: "priority", label: "Priority" },
     { value: "due_date", label: "Due date" },
     { value: "created_at", label: "Created date" },
+    { value: "updated_at", label: "Updated date" },
     { value: "title", label: "Title" },
   ],
   GROUPING_OPTIONS: [
