@@ -3,6 +3,12 @@ package protocol
 import "encoding/json"
 
 const (
+	// RuntimeCapabilityTaskExecution is persisted on each registered runtime
+	// whose daemon proved it can execute task commands through the Linux
+	// bubblewrap FD-bound sandbox. Unlike X-Client-Capabilities, this value is
+	// claim authority and must be read from the runtime row's metadata.
+	RuntimeCapabilityTaskExecution = "linux-bubblewrap-fd-v1"
+
 	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
 	DaemonCapabilityCoalescedCommentsV1 = "coalesced-comments-v1"
 	// DaemonCapabilityRPCV1 advertises that the daemon can carry

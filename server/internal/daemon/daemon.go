@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
@@ -251,6 +252,10 @@ type Daemon struct {
 	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
 	ready         atomic.Bool        // false until preflight completes; gates /health status (starting -> running)
+	// taskExecutionCapable is set once at startup after the local Linux
+	// bubblewrap FD-bound smoke probe succeeds. It gates registration, polling,
+	// and final execution independently of server behavior.
+	taskExecutionCapable bool
 
 	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
 	// microseconds it takes to make a decision; ClaimTask itself runs without
@@ -955,6 +960,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 		logFields = append(logFields, "profile", d.cfg.Profile)
 	}
 	d.logger.Info("starting daemon", logFields...)
+	if err := agent.ProbeTaskExecutionCapability(ctx); err != nil {
+		d.taskExecutionCapable = false
+		d.logger.Warn("task execution disabled: secure Linux executor probe failed", "error", err)
+	} else {
+		d.taskExecutionCapable = true
+		d.logger.Info("secure Linux task executor enabled", "capability", protocol.RuntimeCapabilityTaskExecution)
+	}
 	d.logger.Debug("daemon config resolved",
 		"daemon_id", d.cfg.DaemonID,
 		"device_name", d.cfg.DeviceName,
@@ -1141,7 +1153,7 @@ func (d *Daemon) customProfileLaunchForRuntime(runtimeID string) (profileLaunchS
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
-	var runtimes []map[string]string
+	var runtimes []map[string]any
 	var failedProfiles []map[string]string
 	for name, entry := range d.cfg.Agents {
 		// Self-heal a pinned executable path an in-place upgrade deleted
@@ -1165,12 +1177,16 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
-		runtimes = append(runtimes, map[string]string{
+		runtimeRegistration := map[string]any{
 			"name":    displayName,
 			"type":    name,
 			"version": version,
 			"status":  "online",
-		})
+		}
+		if d.taskExecutionCapable {
+			runtimeRegistration["capabilities"] = []string{protocol.RuntimeCapabilityTaskExecution}
+		}
+		runtimes = append(runtimes, runtimeRegistration)
 	}
 
 	// Append any workspace custom runtime profiles whose command resolves on
@@ -1241,7 +1257,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 // that as "unknown, do not overwrite a previously-stored signature" (otherwise
 // a transient 5xx would silently flip the daemon into thinking the workspace
 // has zero profiles).
-func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]string, failedProfiles *[]map[string]string) string {
+func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]any, failedProfiles *[]map[string]string) string {
 	resp, err := d.client.GetRuntimeProfiles(ctx, workspaceID)
 	if err != nil {
 		// Best-effort: never fail registration because profiles couldn't be
@@ -1334,13 +1350,17 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		d.logger.Info("registering custom runtime profile",
 			"workspace_id", workspaceID, "profile_id", profile.ID,
 			"protocol_family", profile.ProtocolFamily, "command_path", resolved)
-		*runtimes = append(*runtimes, map[string]string{
+		runtimeRegistration := map[string]any{
 			"name":       displayName,
 			"type":       profile.ProtocolFamily,
 			"version":    version,
 			"status":     "online",
 			"profile_id": profile.ID,
-		})
+		}
+		if d.taskExecutionCapable {
+			runtimeRegistration["capabilities"] = []string{protocol.RuntimeCapabilityTaskExecution}
+		}
+		*runtimes = append(*runtimes, runtimeRegistration)
 	}
 	return profileSetSignature(resp.RuntimeProfiles)
 }
@@ -2756,6 +2776,12 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 		if pollerCtx.Err() != nil {
 			return
 		}
+		if !d.taskExecutionCapable {
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
+		}
 
 		runtimeIDs := d.allRuntimeIDs()
 		if len(runtimeIDs) == 0 {
@@ -3699,6 +3725,9 @@ func skillRefFromBundle(bundle SkillData) SkillRefData {
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
+	if !d.taskExecutionCapable {
+		return TaskResult{}, fmt.Errorf("refusing to spawn agent: secure Linux task executor is unavailable")
+	}
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
 	// CLI would otherwise silently fall back to the user-global config — a

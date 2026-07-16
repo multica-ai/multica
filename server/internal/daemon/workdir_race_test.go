@@ -122,12 +122,13 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 	// regression guard is the order of /start vs. os.MkdirAll(envRoot).
 	missingBin := filepath.Join(t.TempDir(), "definitely-not-claude")
 	d := &Daemon{
-		client:         NewClient(srv.URL),
-		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-		workspaces:     make(map[string]*workspaceState),
-		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
-		activeEnvRoots: make(map[string]int),
-		taskLauncher:   directTaskLauncherFactory,
+		taskExecutionCapable: true,
+		client:               NewClient(srv.URL),
+		logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:           make(map[string]*workspaceState),
+		runtimeIndex:         map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots:       make(map[string]int),
+		taskLauncher:         directTaskLauncherFactory,
 		cfg: Config{
 			WorkspacesRoot: workspacesRoot,
 			Agents: map[string]AgentEntry{
@@ -195,12 +196,13 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	t.Cleanup(srv.Close)
 
 	d := &Daemon{
-		client:         NewClient(srv.URL),
-		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-		workspaces:     make(map[string]*workspaceState),
-		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
-		activeEnvRoots: make(map[string]int),
-		taskLauncher:   directTaskLauncherFactory,
+		taskExecutionCapable: true,
+		client:               NewClient(srv.URL),
+		logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:           make(map[string]*workspaceState),
+		runtimeIndex:         map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots:       make(map[string]int),
+		taskLauncher:         directTaskLauncherFactory,
 		cfg: Config{
 			WorkspacesRoot: workspacesRoot,
 			AgentTimeout:   15 * time.Second,
@@ -316,12 +318,13 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 
 	missingBin := filepath.Join(t.TempDir(), "definitely-not-claude")
 	d := &Daemon{
-		client:         NewClient(srv.URL),
-		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-		workspaces:     make(map[string]*workspaceState),
-		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
-		activeEnvRoots: make(map[string]int),
-		taskLauncher:   directTaskLauncherFactory,
+		taskExecutionCapable: true,
+		client:               NewClient(srv.URL),
+		logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:           make(map[string]*workspaceState),
+		runtimeIndex:         map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots:       make(map[string]int),
+		taskLauncher:         directTaskLauncherFactory,
 		cfg: Config{
 			WorkspacesRoot: workspacesRoot,
 			Agents: map[string]AgentEntry{

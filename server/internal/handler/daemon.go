@@ -188,6 +188,9 @@ type DaemonRegisterRequest struct {
 		// Type carries the protocol family for both built-in and custom rows
 		// so task routing (agent.New) is unchanged.
 		ProfileID string `json:"profile_id"`
+		// Capabilities are persisted into this runtime row's metadata. The
+		// server recognizes only exact, allow-listed runtime capabilities.
+		Capabilities []string `json:"capabilities,omitempty"`
 	} `json:"runtimes"`
 	FailedProfiles []struct {
 		ProfileID   string `json:"profile_id"`
@@ -333,6 +336,29 @@ func sharedDaemonCustomName(names []pgtype.Text) (string, bool) {
 	return first, true
 }
 
+func normalizeRuntimeCapabilities(values []string) []string {
+	if len(values) == 1 && values[0] == protocol.RuntimeCapabilityTaskExecution {
+		return []string{protocol.RuntimeCapabilityTaskExecution}
+	}
+	return []string{}
+}
+
+func runtimeCanExecuteTasks(rt db.AgentRuntime) bool {
+	var metadata map[string]json.RawMessage
+	if len(rt.Metadata) == 0 || json.Unmarshal(rt.Metadata, &metadata) != nil || metadata == nil {
+		return false
+	}
+	raw, ok := metadata["capabilities"]
+	if !ok {
+		return false
+	}
+	var capabilities []string
+	if json.Unmarshal(raw, &capabilities) != nil {
+		return false
+	}
+	return len(capabilities) == 1 && capabilities[0] == protocol.RuntimeCapabilityTaskExecution
+}
+
 func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	var req DaemonRegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -411,9 +437,10 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			status = "offline"
 		}
 		metadata, _ := json.Marshal(map[string]any{
-			"version":     runtime.Version,
-			"cli_version": req.CLIVersion,
-			"launched_by": req.LaunchedBy,
+			"version":      runtime.Version,
+			"cli_version":  req.CLIVersion,
+			"launched_by":  req.LaunchedBy,
+			"capabilities": normalizeRuntimeCapabilities(runtime.Capabilities),
 		})
 
 		var registered db.AgentRuntime
@@ -1472,6 +1499,9 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		if rt.DaemonID.Valid && rt.DaemonID.String != req.DaemonID {
 			continue
 		}
+		if !runtimeCanExecuteTasks(rt) {
+			continue
+		}
 		runtimeByID[uuidToString(rt.ID)] = rt
 		authorized = append(authorized, rt.ID)
 	}
@@ -2423,6 +2453,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 	runtimeWorkspaceID := uuidToString(runtime.WorkspaceID)
 	authMs = time.Since(start).Milliseconds()
+	if !runtimeCanExecuteTasks(runtime) {
+		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
+		outcome = "runtime_incapable"
+		return
+	}
 
 	claimStart := time.Now()
 	task, err := h.TaskService.ClaimTaskForRuntime(r.Context(), parseUUID(runtimeID))

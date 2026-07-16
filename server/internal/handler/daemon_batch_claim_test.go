@@ -87,6 +87,79 @@ func TestClaimTasksByRuntime_RoutesAcrossRuntimesAndMintsTokens(t *testing.T) {
 	}
 }
 
+func TestClaimTasksByRuntimeSkipsIncapableRuntimeWithoutChangingTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, visibility, owner_id)
+		VALUES ($1, NULL, 'Incapable runtime', 'cloud', 'handler_test_runtime', 'online', 'x', '{}'::jsonb, now(), 'private', $2)
+		RETURNING id`, testWorkspaceID, testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create incapable runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Incapable runtime agent")
+	taskID := seedQueuedIssueTask(t, ctx, agentID, runtimeID, issueID)
+
+	w := postBatchClaim(t, testWorkspaceID, []string{runtimeID}, 1)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp batchClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Tasks) != 0 {
+		t.Fatalf("incapable runtime claimed %d tasks, want 0", len(resp.Tasks))
+	}
+	var status string
+	var dispatchedAt, startedAt any
+	if err := testPool.QueryRow(ctx, `SELECT status, dispatched_at, started_at FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status, &dispatchedAt, &startedAt); err != nil {
+		t.Fatalf("read task state: %v", err)
+	}
+	if status != "queued" || dispatchedAt != nil || startedAt != nil {
+		t.Fatalf("incapable claim changed task: status=%s dispatched_at=%v started_at=%v", status, dispatchedAt, startedAt)
+	}
+}
+
+func TestClaimTasksByRuntimeClaimsOnlyCapableRuntime(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	capableID := createClaimReclaimRuntime(t, ctx, "Mixed capable runtime")
+	var incapableID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, visibility, owner_id)
+		VALUES ($1, NULL, 'Mixed incapable runtime', 'cloud', 'handler_test_runtime', 'online', 'x', '{}'::jsonb, now(), 'private', $2)
+		RETURNING id`, testWorkspaceID, testUserID).Scan(&incapableID); err != nil {
+		t.Fatalf("create incapable runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, incapableID) })
+	capableAgent, capableIssue := createClaimReclaimAgentAndIssue(t, ctx, capableID, "Mixed capable agent")
+	incapableAgent, incapableIssue := createClaimReclaimAgentAndIssue(t, ctx, incapableID, "Mixed incapable agent")
+	seedQueuedIssueTask(t, ctx, capableAgent, capableID, capableIssue)
+	incapableTask := seedQueuedIssueTask(t, ctx, incapableAgent, incapableID, incapableIssue)
+
+	w := postBatchClaim(t, testWorkspaceID, []string{incapableID, capableID}, 2)
+	var resp batchClaimResponse
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &resp) != nil {
+		t.Fatalf("mixed claim failed: code=%d body=%s", w.Code, w.Body.String())
+	}
+	if len(resp.Tasks) != 1 || resp.Tasks[0].RuntimeID != capableID {
+		t.Fatalf("mixed claim tasks = %+v, want only capable runtime %s", resp.Tasks, capableID)
+	}
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, incapableTask).Scan(&status); err != nil {
+		t.Fatalf("read incapable task: %v", err)
+	}
+	if status != "queued" {
+		t.Fatalf("incapable task status = %s, want queued", status)
+	}
+}
+
 // TestClaimTasksByRuntime_SkipsCrossWorkspaceRuntime is the security-critical
 // case: a daemon token scoped to workspace A must not claim a task routed to a
 // runtime in workspace B, even when B's runtime_id is included in the request.

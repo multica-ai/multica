@@ -296,12 +296,13 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 
 	workspacesRoot := t.TempDir()
 	d := &Daemon{
-		client:         client,
-		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-		workspaces:     make(map[string]*workspaceState),
-		runtimeIndex:   map[string]Runtime{"rt-private-home": {ID: "rt-private-home", Provider: "claude"}},
-		activeEnvRoots: make(map[string]int),
-		taskLauncher:   directTaskLauncherFactory,
+		taskExecutionCapable: true,
+		client:               client,
+		logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:           make(map[string]*workspaceState),
+		runtimeIndex:         map[string]Runtime{"rt-private-home": {ID: "rt-private-home", Provider: "claude"}},
+		activeEnvRoots:       make(map[string]int),
+		taskLauncher:         directTaskLauncherFactory,
 		cfg: Config{
 			WorkspacesRoot: workspacesRoot,
 			AgentTimeout:   15 * time.Second,
@@ -494,6 +495,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 		t.Fatalf("create repo cache fixture: %v", err)
 	}
 	d := &Daemon{
+		taskExecutionCapable:     true,
 		client:                   client,
 		repoCache:                &runTaskRepoCache{path: repoPath},
 		logger:                   slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -575,6 +577,7 @@ exit 1
 		}, nil
 	})
 	d := &Daemon{
+		taskExecutionCapable:     true,
 		client:                   client,
 		repoCache:                &runTaskRepoCache{syncErr: errors.New("cache unavailable")},
 		logger:                   slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -666,6 +669,14 @@ func TestTaskScopedAuthToken(t *testing.T) {
 				t.Fatalf("taskScopedAuthToken() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRunTaskRefusesWithoutTaskExecutionCapability(t *testing.T) {
+	d := &Daemon{}
+	_, err := d.runTask(context.Background(), Task{}, "codex", 0, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil || !strings.Contains(err.Error(), "secure Linux task executor is unavailable") {
+		t.Fatalf("runTask error = %v, want secure executor refusal", err)
 	}
 }
 

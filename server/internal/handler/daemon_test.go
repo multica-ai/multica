@@ -181,7 +181,8 @@ func createClaimReclaimRuntime(t *testing.T, ctx context.Context, name string) s
 			workspace_id, daemon_id, name, runtime_mode, provider,
 			status, device_info, metadata, last_seen_at, visibility, owner_id
 		)
-		VALUES ($1, NULL, $2, 'cloud', 'handler_test_runtime', 'online', 'claim reclaim fixture', '{}'::jsonb, now(), 'private', $3)
+		VALUES ($1, NULL, $2, 'cloud', 'handler_test_runtime', 'online', 'claim reclaim fixture',
+		        '{"capabilities":["linux-bubblewrap-fd-v1"]}'::jsonb, now(), 'private', $3)
 		RETURNING id
 	`, testWorkspaceID, name, testUserID).Scan(&runtimeID); err != nil {
 		t.Fatalf("setup: create runtime: %v", err)
@@ -189,6 +190,55 @@ func createClaimReclaimRuntime(t *testing.T, ctx context.Context, name string) s
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
 
 	return runtimeID
+}
+
+func TestRuntimeCanExecuteTasksRequiresExactPersistedCapability(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata string
+		want     bool
+	}{
+		{name: "exact", metadata: `{"capabilities":["linux-bubblewrap-fd-v1"]}`, want: true},
+		{name: "missing", metadata: `{}`},
+		{name: "null", metadata: `null`},
+		{name: "array metadata", metadata: `[]`},
+		{name: "invalid", metadata: `{`},
+		{name: "non-array", metadata: `{"capabilities":"linux-bubblewrap-fd-v1"}`},
+		{name: "mixed type", metadata: `{"capabilities":["linux-bubblewrap-fd-v1",1]}`},
+		{name: "unknown", metadata: `{"capabilities":["unknown"]}`},
+		{name: "case mismatch", metadata: `{"capabilities":["Linux-bubblewrap-fd-v1"]}`},
+		{name: "mixed capability", metadata: `{"capabilities":["linux-bubblewrap-fd-v1","unknown"]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt := db.AgentRuntime{Metadata: []byte(tt.metadata)}
+			if got := runtimeCanExecuteTasks(rt); got != tt.want {
+				t.Fatalf("runtimeCanExecuteTasks(%s) = %v, want %v", tt.metadata, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeRuntimeCapabilitiesRequiresExactSingleton(t *testing.T) {
+	tests := []struct {
+		name   string
+		values []string
+		want   int
+	}{
+		{name: "exact", values: []string{"linux-bubblewrap-fd-v1"}, want: 1},
+		{name: "missing"},
+		{name: "unknown", values: []string{"unknown"}},
+		{name: "case mismatch", values: []string{"Linux-bubblewrap-fd-v1"}},
+		{name: "mixed", values: []string{"linux-bubblewrap-fd-v1", "unknown"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeRuntimeCapabilities(tt.values)
+			if len(got) != tt.want {
+				t.Fatalf("normalizeRuntimeCapabilities(%v) = %v, want length %d", tt.values, got, tt.want)
+			}
+		})
+	}
 }
 
 func createClaimReclaimAgentAndIssue(t *testing.T, ctx context.Context, runtimeID, name string) (string, string) {
@@ -893,6 +943,55 @@ func TestClaimTaskByRuntime_MissingRuntimeOwnerCancelsAndRejects(t *testing.T) {
 	}
 }
 
+func TestClaimTaskByRuntimeHeaderCannotGrantTaskExecutionCapability(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider,
+			status, device_info, metadata, last_seen_at, visibility, owner_id
+		)
+		VALUES ($1, NULL, 'Header cannot grant runtime', 'cloud', 'handler_test_runtime',
+		        'online', 'header capability fixture', '{}'::jsonb, now(), 'private', $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: create runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Header cannot grant agent")
+	taskID := seedQueuedIssueTask(t, ctx, agentID, runtimeID, issueID)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "header-cannot-grant")
+	req.Header.Set("X-Client-Capabilities", protocol.RuntimeCapabilityTaskExecution)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Task any `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Task != nil {
+		t.Fatalf("header granted task execution authority: %s", w.Body.String())
+	}
+	var status string
+	var dispatchedAt, startedAt any
+	if err := testPool.QueryRow(ctx, `SELECT status, dispatched_at, started_at FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status, &dispatchedAt, &startedAt); err != nil {
+		t.Fatalf("read task state: %v", err)
+	}
+	if status != "queued" || dispatchedAt != nil || startedAt != nil {
+		t.Fatalf("header-only claim changed task: status=%s dispatched_at=%v started_at=%v", status, dispatchedAt, startedAt)
+	}
+}
+
 func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -927,6 +1026,59 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	rt := runtimes[0].(map[string]any)
 	runtimeID := rt["id"].(string)
 	testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+}
+
+func TestDaemonRegisterPersistsAndRevokesTaskExecutionCapability(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	daemonID := "task-capability-registration"
+	register := func(capabilities []string) string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+			"workspace_id": testWorkspaceID,
+			"daemon_id":    daemonID,
+			"device_name":  "capability-test-device",
+			"runtimes": []map[string]any{{
+				"name":         "capability-runtime",
+				"type":         "codex",
+				"version":      "test",
+				"status":       "online",
+				"capabilities": capabilities,
+			}},
+		}, testWorkspaceID, daemonID)
+		testHandler.DaemonRegister(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode register response: %v", err)
+		}
+		return resp["runtimes"].([]any)[0].(map[string]any)["id"].(string)
+	}
+
+	runtimeID := register([]string{protocol.RuntimeCapabilityTaskExecution})
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+	var metadata []byte
+	if err := testPool.QueryRow(ctx, `SELECT metadata FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&metadata); err != nil {
+		t.Fatalf("read capable runtime metadata: %v", err)
+	}
+	if !runtimeCanExecuteTasks(db.AgentRuntime{Metadata: metadata}) {
+		t.Fatalf("registered metadata did not retain exact task capability: %s", metadata)
+	}
+
+	if got := register(nil); got != runtimeID {
+		t.Fatalf("re-registration created runtime %s, want existing %s", got, runtimeID)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT metadata FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&metadata); err != nil {
+		t.Fatalf("read revoked runtime metadata: %v", err)
+	}
+	if runtimeCanExecuteTasks(db.AgentRuntime{Metadata: metadata}) {
+		t.Fatalf("re-registration without capability retained stale authority: %s", metadata)
+	}
 }
 
 func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
