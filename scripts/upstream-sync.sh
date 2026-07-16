@@ -61,31 +61,55 @@ if ! git merge --no-commit --no-ff "${UPSTREAM_REMOTE}/main"; then
   exit 1
 fi
 
-# 7a. Apply upstream deletions (files upstream removed but the merge couldn't
-#     auto-resolve because the fork co-touched them).
-mapfile -t UPSTREAM_DELETIONS < <(
-  git log --diff-filter=D --name-only --pretty=format: \
-    "${FORK_POINT}..${UPSTREAM_REMOTE}/main" | sort -u | sed '/^$/d'
-)
-for path in "${UPSTREAM_DELETIONS[@]}"; do
-  if git ls-files --error-unmatch -- "${path}" >/dev/null 2>&1; then
-    keep=false
-    for k in "${KEEP_OURS[@]}"; do [ "${path}" = "${k}" ] && keep=true; done
-    "${keep}" || git rm -q -- "${path}"
-  fi
-done
+# 7a. Enforce upstream authority on every non-fork-owned path.
+#
+#     The fork's ONLY intentional divergences are the files it changed since the
+#     fork-point (FORK_POINT..origin/main). Every other path must equal
+#     upstream/main exactly. Resetting them here catches two failure modes the
+#     old "replay the D-log" deletion sweep silently missed:
+#       * upstream deletions the merge kept — renames and merge-commit deletes
+#         don't reliably surface in `git log --diff-filter=D` over the range; and
+#       * silent line-level mis-merges — because the git merge-base predates the
+#         cursor, a file can auto-merge WITHOUT a conflict into "fork-stale +
+#         upstream" combined content (duplicated blocks, imports of a module
+#         upstream deleted, ...). These never appear in the conflict list.
+FORK_OWNED=$(git diff --name-only "${FORK_POINT}" "${FORK_REMOTE}/${FORK_BRANCH}" | sort -u)
 
-# 7b. Regression check — files upstream has at HEAD that the fork lost.
-#     Should be empty; if not, something over-deleted and we fail loud.
-LOST=$(
-  comm -23 \
-    <(git ls-tree -r "${UPSTREAM_REMOTE}/main" --name-only | sort) \
-    <(git ls-tree -r HEAD --name-only | sort)
-)
-if [ -n "${LOST}" ]; then
-  echo "ERROR: fork is missing files that exist on upstream/main:"
-  echo "${LOST}"
-  echo "Investigate before pushing — likely an over-deletion."
+RESET_TO_UPSTREAM=()
+UPSTREAM_DELETIONS=()
+while IFS= read -r path; do
+  [ -z "${path}" ] && continue
+  # Intentional fork divergences (incl. KEEP_OURS docs) are left untouched.
+  if printf '%s\n' "${FORK_OWNED}" | grep -qxF -- "${path}"; then
+    continue
+  fi
+  keep=false
+  for k in "${KEEP_OURS[@]}"; do [ "${path}" = "${k}" ] && keep=true; done
+  if "${keep}"; then
+    continue
+  fi
+  if git cat-file -e "${UPSTREAM_REMOTE}/main:${path}" 2>/dev/null; then
+    git checkout "${UPSTREAM_REMOTE}/main" -- "${path}"
+    git add -- "${path}"
+    RESET_TO_UPSTREAM+=("${path}")
+  else
+    git rm -q -- "${path}"
+    UPSTREAM_DELETIONS+=("${path}")
+  fi
+done < <(git diff --cached --name-only "${UPSTREAM_REMOTE}/main" | sort -u)
+
+# 7b. Invariant guard — after enforcement no non-fork-owned path may differ from
+#     upstream/main. Compare against the STAGED INDEX, not HEAD: `git merge
+#     --no-commit` does NOT advance HEAD, so a HEAD comparison reads the
+#     pre-merge tree and false-positives on every real sync (missing every file
+#     upstream added since the fork-point).
+STRAY=$(comm -23 \
+  <(git diff --cached --name-only "${UPSTREAM_REMOTE}/main" | sort -u) \
+  <(printf '%s\n' "${FORK_OWNED}"))
+if [ -n "${STRAY}" ]; then
+  echo "ERROR: non-fork-owned paths still diverge from upstream/main after enforcement:"
+  echo "${STRAY}"
+  echo "Investigate before pushing — enforcement or fork-owned detection is wrong."
   exit 3
 fi
 
@@ -114,7 +138,15 @@ git push -u "${FORK_REMOTE}" "${BRANCH}"
 
 DRIFT_PATHS=(.github/ gitops/ server/migrations/)
 DRIFT=$(git diff --stat "${UPSTREAM_REMOTE}/main..HEAD" -- "${DRIFT_PATHS[@]}" || true)
-DELETED_LIST=$(printf -- '- %s\n' "${UPSTREAM_DELETIONS[@]}")
+
+DELETED_LIST=""
+if [ "${#UPSTREAM_DELETIONS[@]}" -gt 0 ]; then
+  DELETED_LIST=$(printf -- '- %s\n' "${UPSTREAM_DELETIONS[@]}")
+fi
+RESET_LIST=""
+if [ "${#RESET_TO_UPSTREAM[@]}" -gt 0 ]; then
+  RESET_LIST=$(printf -- '- %s\n' "${RESET_TO_UPSTREAM[@]}")
+fi
 
 gh pr create \
   --base main \
@@ -130,6 +162,9 @@ Sync upstream multica-ai/multica from \`${FORK_SHORT}\` to \`${UPSTREAM_SHORT}\`
 
 ## Upstream deletions applied
 ${DELETED_LIST:-_none in this range_}
+
+## Non-fork-owned files reset to upstream (silent mis-merges corrected)
+${RESET_LIST:-_none in this range_}
 
 ## Drift in fork-sensitive paths
 \`\`\`
