@@ -260,7 +260,8 @@ func TestCommandLauncherCanonicalizesStableSystemExecutableAlias(t *testing.T) {
 		t.Skip("Linux usr-merge aliases")
 	}
 	resolved, err := filepath.EvalSymlinks("/bin/sh")
-	if err != nil || resolved == "/bin/sh" {
+	canonical, stableAlias := stableSystemAliasPathForOS("linux", "/bin/sh")
+	if err != nil || !stableAlias || !pathWithin(resolved, canonicalRoot(canonical)) {
 		t.Skip("host does not use /bin as a symlink alias")
 	}
 	root := t.TempDir()
@@ -282,5 +283,27 @@ func TestCommandLauncherCanonicalizesStableSystemExecutableAlias(t *testing.T) {
 	prepared := cmd.(*PreparedCommand)
 	if prepared.cmd.Args[len(prepared.cmd.Args)-3] != resolved {
 		t.Fatalf("wrapped executable = %q, want %q", prepared.cmd.Args[len(prepared.cmd.Args)-3], resolved)
+	}
+}
+
+func TestResolvedStableSystemExecutableAliasStaysInCanonicalRoot(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		resolved string
+		want     bool
+	}{
+		{name: "direct usr merge target", path: "/bin/sh", resolved: "/usr/bin/sh", want: true},
+		{name: "command alias in usr bin", path: "/bin/sh", resolved: "/usr/bin/dash", want: true},
+		{name: "usr local escape", path: "/bin/tool", resolved: "/usr/local/bin/tool"},
+		{name: "opt escape", path: "/bin/tool", resolved: "/opt/tool"},
+		{name: "unlisted alias", path: "/sbin/tool", resolved: "/usr/sbin/tool"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isResolvedStableSystemAliasForOS("linux", tt.path, tt.resolved); got != tt.want {
+				t.Fatalf("isResolvedStableSystemAliasForOS(%q, %q) = %v, want %v", tt.path, tt.resolved, got, tt.want)
+			}
+		})
 	}
 }

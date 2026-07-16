@@ -134,31 +134,61 @@ func resolveStableSystemPathAlias(kind, path string) (string, error) {
 	if resolved == clean {
 		return clean, nil
 	}
-	if !isStableSystemPathAlias(clean, resolved) {
-		return "", fmt.Errorf("%s %q resolves through symlink to %q", kind, clean, resolved)
+	if isStableSystemPathAlias(clean, resolved) {
+		return resolved, nil
 	}
-	return resolved, nil
+	if isResolvedStableSystemAliasForOS(runtime.GOOS, clean, resolved) {
+		return resolved, nil
+	}
+	return "", fmt.Errorf("%s %q resolves through symlink to %q", kind, clean, resolved)
 }
 
-func isStableSystemPathAliasForOS(goos, path, resolved string) bool {
-	var aliases map[string]string
+func isResolvedStableSystemAliasForOS(goos, path, resolved string) bool {
+	canonical, ok := stableSystemAliasPathForOS(goos, path)
+	return ok && pathWithin(resolved, canonicalRoot(canonical))
+}
+
+func stableSystemAliasPathForOS(goos, path string) (string, bool) {
+	for alias, canonical := range stableSystemAliasesForOS(goos) {
+		if path == alias {
+			return canonical, true
+		}
+		if strings.HasPrefix(path, alias+"/") {
+			return canonical + strings.TrimPrefix(path, alias), true
+		}
+	}
+	return "", false
+}
+
+func canonicalRoot(path string) string {
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(parts) < 2 {
+		return path
+	}
+	return "/" + filepath.Join(parts[0], parts[1])
+}
+
+func stableSystemAliasesForOS(goos string) map[string]string {
 	switch goos {
 	case "darwin":
-		aliases = map[string]string{
+		return map[string]string{
 			"/etc": "/private/etc",
 			"/tmp": "/private/tmp",
 			"/var": "/private/var",
 		}
 	case "linux":
-		aliases = map[string]string{
+		return map[string]string{
 			"/bin":   "/usr/bin",
 			"/lib":   "/usr/lib",
 			"/lib64": "/usr/lib64",
 		}
 	default:
-		return false
+		return nil
 	}
-	for alias, canonical := range aliases {
+}
+
+func isStableSystemPathAliasForOS(goos, path, resolved string) bool {
+	for alias, canonical := range stableSystemAliasesForOS(goos) {
 		if path == alias && resolved == canonical {
 			return true
 		}
