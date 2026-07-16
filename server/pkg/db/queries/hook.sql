@@ -21,6 +21,15 @@ RETURNING *;
 SELECT * FROM hook
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetHookForUpdate :one
+-- Row-locking load used by PATCH so concurrent edits to the same hook serialize:
+-- the lock holder allocates the next revision and repoints the active pointer
+-- before the next waiter reads MAX(revision), so idx_hook_revision_unique can
+-- never be violated by a MAX+1 race (MUL-4332 PR2 review point 4).
+SELECT * FROM hook
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: ListHooksByWorkspace :many
 SELECT * FROM hook
 WHERE workspace_id = $1 AND archived_at IS NULL

@@ -129,18 +129,17 @@ func (h *Handler) CreateHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var spec automation.HookSpec
-	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	author, ok := h.resolveHookAuthor(w, r, userID, workspaceID)
+	spec, ok := decodeHookSpec(w, r)
 	if !ok {
 		return
 	}
 
-	result, err := h.HookService.CreateHook(r.Context(), workspaceUUID, spec, author)
+	author, canInvoke, ok := h.resolveHookWriter(w, r, userID, workspaceID)
+	if !ok {
+		return
+	}
+
+	result, err := h.HookService.CreateHook(r.Context(), workspaceUUID, spec, author, canInvoke)
 	if err != nil {
 		h.writeHookError(w, err)
 		return
@@ -201,16 +200,15 @@ func (h *Handler) UpdateHook(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var spec automation.HookSpec
-	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	author, ok := h.resolveHookAuthor(w, r, userID, workspaceID)
+	spec, ok := decodeHookSpec(w, r)
 	if !ok {
 		return
 	}
-	result, err := h.HookService.UpdateHook(r.Context(), workspaceUUID, hookUUID, spec, author)
+	author, canInvoke, ok := h.resolveHookWriter(w, r, userID, workspaceID)
+	if !ok {
+		return
+	}
+	result, err := h.HookService.UpdateHook(r.Context(), workspaceUUID, hookUUID, spec, author, canInvoke)
 	if err != nil {
 		h.writeHookError(w, err)
 		return
@@ -232,6 +230,11 @@ func (h *Handler) setHookEnabled(w http.ResponseWriter, r *http.Request, enabled
 	if !h.hookEnabled(w, r) {
 		return
 	}
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 	workspaceUUID, hookUUID, ok := h.hookPathParams(w, r)
 	if !ok {
 		return
@@ -247,7 +250,11 @@ func (h *Handler) setHookEnabled(w http.ResponseWriter, r *http.Request, enabled
 		}
 		reason = body.Reason
 	}
-	result, err := h.HookService.SetEnabled(r.Context(), workspaceUUID, hookUUID, enabled, reason)
+	author, _, ok := h.resolveHookWriter(w, r, userID, workspaceID)
+	if !ok {
+		return
+	}
+	result, err := h.HookService.SetEnabled(r.Context(), workspaceUUID, hookUUID, enabled, reason, author)
 	if err != nil {
 		h.writeHookError(w, err)
 		return
@@ -260,11 +267,20 @@ func (h *Handler) DeleteHook(w http.ResponseWriter, r *http.Request) {
 	if !h.hookEnabled(w, r) {
 		return
 	}
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 	workspaceUUID, hookUUID, ok := h.hookPathParams(w, r)
 	if !ok {
 		return
 	}
-	if err := h.HookService.ArchiveHook(r.Context(), workspaceUUID, hookUUID); err != nil {
+	author, _, ok := h.resolveHookWriter(w, r, userID, workspaceID)
+	if !ok {
+		return
+	}
+	if err := h.HookService.ArchiveHook(r.Context(), workspaceUUID, hookUUID, author); err != nil {
 		h.writeHookError(w, err)
 		return
 	}
@@ -306,28 +322,61 @@ func (h *Handler) hookPathParams(w http.ResponseWriter, r *http.Request) (pgtype
 	return workspaceUUID, hookUUID, true
 }
 
-// resolveHookAuthor derives the audit creator actor and the accountable human
-// principal (§8). A member acts under their own authority; an agent must resolve
-// to the human behind its current task, otherwise creation is refused — an agent
-// UUID is never a substitute for a human authorization principal.
-func (h *Handler) resolveHookAuthor(w http.ResponseWriter, r *http.Request, userID, workspaceID string) (service.HookAuthor, bool) {
+// decodeHookSpec strictly decodes the request body into a HookSpec, rejecting
+// unknown fields so a stray top-level or nested key can never be silently
+// accepted (MUL-4332 PR2 review point 3). Per-action disallowed fields are
+// rejected by the automation validator.
+func decodeHookSpec(w http.ResponseWriter, r *http.Request) (automation.HookSpec, bool) {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	var spec automation.HookSpec
+	if err := dec.Decode(&spec); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return automation.HookSpec{}, false
+	}
+	return spec, true
+}
+
+// resolveHookWriter derives the audit creator actor, the accountable human
+// principal (§8), and whether that principal is a workspace owner/admin, plus the
+// agent-admission callback used for fail-closed trigger_agent validation. A
+// member acts under their own authority; an agent must resolve to the human
+// behind its current task. The resolved principal must still be a workspace
+// member (review point 2) — an agent UUID is never a substitute for a human, and
+// a departed principal can no longer author hooks.
+func (h *Handler) resolveHookWriter(w http.ResponseWriter, r *http.Request, userID, workspaceID string) (service.HookAuthor, service.CanInvokeAgent, bool) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	actorUUID, err := util.ParseUUID(actorID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid actor id")
-		return service.HookAuthor{}, false
+		return service.HookAuthor{}, nil, false
 	}
 	principal := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	if principal == "" {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
-		return service.HookAuthor{}, false
+		return service.HookAuthor{}, nil, false
 	}
 	principalUUID, err := util.ParseUUID(principal)
 	if err != nil {
 		writeError(w, http.StatusForbidden, "no accountable authorization principal")
-		return service.HookAuthor{}, false
+		return service.HookAuthor{}, nil, false
 	}
-	return service.HookAuthor{ActorType: actorType, ActorID: actorUUID, PrincipalUserID: principalUUID}, true
+	// The accountable principal must still be a member of this workspace.
+	member, err := h.getWorkspaceMember(r.Context(), principal, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "authorization principal is not a member of this workspace")
+		return service.HookAuthor{}, nil, false
+	}
+	author := service.HookAuthor{
+		ActorType:        actorType,
+		ActorID:          actorUUID,
+		PrincipalUserID:  principalUUID,
+		IsWorkspaceAdmin: roleAllowed(member.Role, "owner", "admin"),
+	}
+	canInvoke := func(agent db.Agent) bool {
+		return h.canInvokeAgent(r.Context(), agent, actorType, actorID, principal, workspaceID)
+	}
+	return author, canInvoke, true
 }
 
 func (h *Handler) writeHookError(w http.ResponseWriter, err error) {
@@ -339,6 +388,8 @@ func (h *Handler) writeHookError(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrHookNotFound):
 		writeError(w, http.StatusNotFound, "hook not found")
 	case errors.Is(err, service.ErrHookSystemManaged):
+		writeError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, service.ErrHookForbidden):
 		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, service.ErrHookNoPrincipal):
 		writeError(w, http.StatusForbidden, "no accountable authorization principal")

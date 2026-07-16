@@ -79,6 +79,17 @@ func TestValidateRejectsInvalidSpecs(t *testing.T) {
 		{"set_issue_status missing status", func(s *HookSpec) {
 			s.Do = []ActionSpec{{Type: ActionSetIssueStatus, IssueID: uuidC}}
 		}, "requires status"},
+		{"set_issue_status invalid status enum", func(s *HookSpec) {
+			s.Do = []ActionSpec{{Type: ActionSetIssueStatus, IssueID: uuidC, Status: "ascended"}}
+		}, "not a valid issue status"},
+		{"add_comment with disallowed agent_id field", func(s *HookSpec) {
+			s.Do = []ActionSpec{{Type: ActionAddComment, IssueID: uuidC, Message: "hi", AgentID: uuidA}}
+		}, "does not accept field"},
+		{"issues_status invalid status enum", func(s *HookSpec) {
+			s.When = WhenSpec{Event: "issue.status_changed"}
+			s.Fire = FireSpec{Mode: FirePerEvent}
+			s.If = []ConditionSpec{{IssuesStatus: &IssuesStatusCond{IDs: []string{uuidA}, All: "ascended"}}}
+		}, "not a valid issue status"},
 		{"trigger_agent bad agent", func(s *HookSpec) {
 			s.Do = []ActionSpec{{Type: ActionTriggerAgent, IssueID: uuidC, AgentID: "x"}}
 		}, "valid agent_id"},

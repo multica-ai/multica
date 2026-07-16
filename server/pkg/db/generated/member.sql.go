@@ -86,6 +86,32 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 	return i, err
 }
 
+const getMemberInWorkspace = `-- name: GetMemberInWorkspace :one
+SELECT id, workspace_id, user_id, role, created_at FROM member
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetMemberInWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Workspace-scoped member existence check by member row id. Used to fail-closed
+// validate a send_inbox action target belongs to the hook's workspace
+// (MUL-4332 PR2 review point 2).
+func (q *Queries) GetMemberInWorkspace(ctx context.Context, arg GetMemberInWorkspaceParams) (Member, error) {
+	row := q.db.QueryRow(ctx, getMemberInWorkspace, arg.ID, arg.WorkspaceID)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listMembers = `-- name: ListMembers :many
 SELECT id, workspace_id, user_id, role, created_at FROM member
 WHERE workspace_id = $1

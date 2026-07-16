@@ -135,6 +135,23 @@ var validIssueFields = map[string]bool{
 	IssueFieldParentIssueID: true,
 }
 
+// validIssueStatuses mirrors the issue.status DB CHECK (migrations/001) and the
+// handler's validIssueStatuses. A status-valued condition or action is rejected
+// unless its value is one of these, so a hook can never persist an unreachable
+// status (MUL-4332 PR2 review point 3).
+var validIssueStatuses = map[string]bool{
+	"backlog":     true,
+	"todo":        true,
+	"in_progress": true,
+	"in_review":   true,
+	"done":        true,
+	"blocked":     true,
+	"cancelled":   true,
+}
+
+// isValidIssueStatus reports whether s is a persistable issue status.
+func isValidIssueStatus(s string) bool { return validIssueStatuses[s] }
+
 // conditionDependencyEvent maps a condition to the single v1 domain event that
 // can change its truth value. A rising_edge hook must listen to exactly that
 // event so its latch can be re-evaluated (§5.2). In the v1 fixed vocabulary

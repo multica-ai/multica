@@ -12,6 +12,9 @@ import (
 const (
 	MaxActionsPerHook = 8
 	MaxNameLength     = 200
+	MaxConditionIDs   = 100
+	MaxMatchSetSize   = 100
+	MaxMessageLength  = 4000
 )
 
 // ValidationError is a user-fixable problem with a hook spec. Handlers map it to
@@ -19,6 +22,14 @@ const (
 type ValidationError struct{ msg string }
 
 func (e *ValidationError) Error() string { return e.msg }
+
+// NewValidationError builds a ValidationError. Exported so callers that extend
+// author-time validation with checks this pure package cannot do (e.g. the
+// service's workspace-scoped target existence checks) surface the same typed
+// error and share the handler's single 400 mapping.
+func NewValidationError(format string, args ...any) *ValidationError {
+	return &ValidationError{msg: fmt.Sprintf(format, args...)}
+}
 
 func verr(format string, args ...any) error {
 	return &ValidationError{msg: fmt.Sprintf(format, args...)}
@@ -117,6 +128,9 @@ func validateMatch(raw []byte, schema EventSchema) error {
 }
 
 func validateClauseValues(field string, kind FieldKind, clause MatchClause) error {
+	if clause.Op == MatchIn && len(clause.Set) > MaxMatchSetSize {
+		return verr("match field %q has %d values, at most %d allowed", field, len(clause.Set), MaxMatchSetSize)
+	}
 	if kind != FieldUUID {
 		return nil // string fields accept any scalar; existence needs no value check
 	}
@@ -156,6 +170,9 @@ func validateIssuesStatus(c IssuesStatusCond) error {
 	if len(c.IDs) == 0 {
 		return verr("issues_status.ids must not be empty")
 	}
+	if len(c.IDs) > MaxConditionIDs {
+		return verr("issues_status.ids has %d ids, at most %d allowed", len(c.IDs), MaxConditionIDs)
+	}
 	for _, id := range c.IDs {
 		if !validUUID(id) {
 			return verr("issues_status.ids must be uuids, got %q", id)
@@ -164,6 +181,13 @@ func validateIssuesStatus(c IssuesStatusCond) error {
 	hasAll, hasAny := c.All != "", c.Any != ""
 	if hasAll == hasAny {
 		return verr("exactly one of issues_status.all or issues_status.any must be set")
+	}
+	status := c.All
+	if hasAny {
+		status = c.Any
+	}
+	if !isValidIssueStatus(status) {
+		return verr("issues_status status %q is not a valid issue status", status)
 	}
 	return nil
 }
@@ -179,8 +203,19 @@ func validateIssueField(c IssueFieldCond) error {
 	if hasEq == hasIn {
 		return verr("exactly one of issue_field.eq or issue_field.in must be set")
 	}
-	// Field-typed values: status is a free string; the id-shaped fields require uuids.
-	if c.Field != IssueFieldStatus {
+	if len(c.In) > MaxConditionIDs {
+		return verr("issue_field.in has %d values, at most %d allowed", len(c.In), MaxConditionIDs)
+	}
+	switch c.Field {
+	case IssueFieldStatus:
+		// status is a free string but must be a persistable issue status.
+		for _, v := range collectValues(c.Eq, c.In) {
+			if !isValidIssueStatus(v) {
+				return verr("issue_field status %q is not a valid issue status", v)
+			}
+		}
+	default:
+		// id-shaped fields (assignee_id / parent_issue_id) require uuids.
 		if hasEq && !validUUID(c.Eq) {
 			return verr("issue_field.eq must be a uuid for field %q", c.Field)
 		}
@@ -191,6 +226,16 @@ func validateIssueField(c IssueFieldCond) error {
 		}
 	}
 	return nil
+}
+
+// collectValues returns eq (if set) plus the in slice as one list.
+func collectValues(eq string, in []string) []string {
+	out := make([]string, 0, len(in)+1)
+	if eq != "" {
+		out = append(out, eq)
+	}
+	out = append(out, in...)
+	return out
 }
 
 func validateFire(spec HookSpec) error {
@@ -225,12 +270,30 @@ func validateRisingEdgeCoverage(spec HookSpec) error {
 	return nil
 }
 
+// actionAllowedFields declares the exact set of ActionSpec parameter fields each
+// action type may set. Any other non-empty field is rejected so a stray param
+// (e.g. an agent_id smuggled onto add_comment) can never be persisted onto a
+// revision (MUL-4332 PR2 review point 3).
+var actionAllowedFields = map[string]map[string]bool{
+	ActionSetIssueStatus: {"issue_id": true, "status": true},
+	ActionTriggerAgent:   {"issue_id": true, "agent_id": true},
+	ActionAddComment:     {"issue_id": true, "message": true},
+	ActionSendInbox:      {"member_id": true, "message": true},
+	ActionRunAutopilot:   {"autopilot_id": true},
+}
+
 func validateAction(a ActionSpec) error {
 	if systemActionTypes[a.Type] {
 		return verr("action type %q is reserved for system hooks", a.Type)
 	}
 	if !userActionTypes[a.Type] {
 		return verr("unknown action type %q", a.Type)
+	}
+	if err := rejectUnexpectedActionFields(a); err != nil {
+		return err
+	}
+	if a.Message != "" && len(a.Message) > MaxMessageLength {
+		return verr("%s message must be at most %d characters", a.Type, MaxMessageLength)
 	}
 	switch a.Type {
 	case ActionSetIssueStatus:
@@ -239,6 +302,9 @@ func validateAction(a ActionSpec) error {
 		}
 		if a.Status == "" {
 			return verr("set_issue_status requires status")
+		}
+		if !isValidIssueStatus(a.Status) {
+			return verr("set_issue_status status %q is not a valid issue status", a.Status)
 		}
 	case ActionTriggerAgent:
 		if !validUUID(a.IssueID) {
@@ -264,6 +330,26 @@ func validateAction(a ActionSpec) error {
 	case ActionRunAutopilot:
 		if !validUUID(a.AutopilotID) {
 			return verr("run_autopilot requires a valid autopilot_id")
+		}
+	}
+	return nil
+}
+
+// rejectUnexpectedActionFields fails if the action sets any parameter field not
+// allowed for its type — strict "exactly the allowed fields" enforcement.
+func rejectUnexpectedActionFields(a ActionSpec) error {
+	allowed := actionAllowedFields[a.Type]
+	present := map[string]string{
+		"issue_id":     a.IssueID,
+		"status":       a.Status,
+		"agent_id":     a.AgentID,
+		"member_id":    a.MemberID,
+		"message":      a.Message,
+		"autopilot_id": a.AutopilotID,
+	}
+	for field, value := range present {
+		if value != "" && !allowed[field] {
+			return verr("%s does not accept field %q", a.Type, field)
 		}
 	}
 	return nil

@@ -179,6 +179,47 @@ func (q *Queries) CreateHookRevision(ctx context.Context, arg CreateHookRevision
 	return i, err
 }
 
+const getHookForUpdate = `-- name: GetHookForUpdate :one
+SELECT id, workspace_id, name, enabled, active_revision_id, scope_type, scope_id, retire_after_event_seq, origin, system_key, system_version, creator_actor_type, creator_actor_id, authorization_principal_user_id, disabled_reason, created_at, updated_at, archived_at FROM hook
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type GetHookForUpdateParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Row-locking load used by PATCH so concurrent edits to the same hook serialize:
+// the lock holder allocates the next revision and repoints the active pointer
+// before the next waiter reads MAX(revision), so idx_hook_revision_unique can
+// never be violated by a MAX+1 race (MUL-4332 PR2 review point 4).
+func (q *Queries) GetHookForUpdate(ctx context.Context, arg GetHookForUpdateParams) (Hook, error) {
+	row := q.db.QueryRow(ctx, getHookForUpdate, arg.ID, arg.WorkspaceID)
+	var i Hook
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Enabled,
+		&i.ActiveRevisionID,
+		&i.ScopeType,
+		&i.ScopeID,
+		&i.RetireAfterEventSeq,
+		&i.Origin,
+		&i.SystemKey,
+		&i.SystemVersion,
+		&i.CreatorActorType,
+		&i.CreatorActorID,
+		&i.AuthorizationPrincipalUserID,
+		&i.DisabledReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ArchivedAt,
+	)
+	return i, err
+}
+
 const getHookInWorkspace = `-- name: GetHookInWorkspace :one
 SELECT id, workspace_id, name, enabled, active_revision_id, scope_type, scope_id, retire_after_event_seq, origin, system_key, system_version, creator_actor_type, creator_actor_id, authorization_principal_user_id, disabled_reason, created_at, updated_at, archived_at FROM hook
 WHERE id = $1 AND workspace_id = $2

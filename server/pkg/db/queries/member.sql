@@ -7,6 +7,13 @@ ORDER BY created_at ASC;
 SELECT * FROM member
 WHERE id = $1;
 
+-- name: GetMemberInWorkspace :one
+-- Workspace-scoped member existence check by member row id. Used to fail-closed
+-- validate a send_inbox action target belongs to the hook's workspace
+-- (MUL-4332 PR2 review point 2).
+SELECT * FROM member
+WHERE id = $1 AND workspace_id = $2;
+
 -- name: GetMemberByUserAndWorkspace :one
 SELECT * FROM member
 WHERE user_id = $1 AND workspace_id = $2;
