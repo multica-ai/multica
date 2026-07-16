@@ -64,10 +64,9 @@ type CodexHomeOptions struct {
 	SessionStoreKey string
 	// WritableRoots are extra absolute paths written into the config.toml
 	// `[sandbox_workspace_write] writable_roots` so the workspace-write sandbox
-	// (Linux) can write outside the task workdir — the per-task writable HOME and
-	// this workspace's repo cache root (worktree gitdirs). Only meaningful when
-	// the policy resolves to workspace-write; ignored on darwin
-	// danger-full-access. See task_home.go and MUL-4856.
+	// (Linux) can write outside the task workdir — the per-task writable HOME.
+	// Only meaningful when the policy resolves to workspace-write; ignored on
+	// darwin danger-full-access. See task_home.go and MUL-4856.
 	WritableRoots []string
 }
 

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // Background (MUL-4856)
@@ -17,21 +18,28 @@ import (
 //   - npm writes `~/.npm/_cacache` → EROFS on `npm install`.
 //   - Prisma hardcodes `os.homedir()/.cache/prisma` (it ignores XDG) → EROFS on
 //     `prisma generate`. Only redirecting HOME can fix Prisma.
-//   - git worktree commits write the per-worktree gitdir and shared object
-//     store under `{WorkspacesRoot}/.repos/…`, also outside the workdir → EROFS.
 //
 // Reads are unrestricted under workspace-write — only writes are sandboxed — so
 // the fix is to (1) give each task a writable HOME under its env root, (2) point
-// HOME/XDG/npm_config_cache at it, and (3) add that home plus the repo cache
-// root to the Codex `writable_roots`. Because the redirected HOME is otherwise
-// empty, we seed it with symlinks to the user's real credential/identity files
-// so `git commit`, `git push`, and private-registry `npm install` keep working
-// (the symlink targets stay read-only, which is fine — those flows only read
-// them). This mirrors the existing per-task CODEX_HOME seeding precedent.
+// HOME/XDG/npm_config_cache at it, and (3) add that home to the Codex
+// `writable_roots` (it lives outside the cwd, so it needs an explicit grant).
+// Because the redirected HOME is otherwise empty, we seed it with symlinks to
+// the user's real credential/identity files so private-registry `npm install`
+// (and git/gh reads, when git is usable) keep working — reads through the
+// symlink resolve the real file, which stays read-only, and those flows only
+// read them. This mirrors the existing per-task CODEX_HOME seeding precedent.
 //
-// This only applies to the codex provider under the workspace-write policy;
-// macOS Codex uses danger-full-access (no filesystem sandbox), and other
-// providers are not sandboxed, so their real HOME stays writable.
+// Scope: Linux codex only. macOS Codex uses danger-full-access (no filesystem
+// sandbox), and Windows has no Landlock sandbox (and unreliable symlink
+// permissions), so neither needs — nor should get — a redirected HOME. Other
+// providers are not sandboxed either.
+//
+// NOT covered here: `git commit` inside a checked-out worktree. Codex's
+// workspace-write reads the worktree's `.git` pointer file, resolves the real
+// gitdir, and keeps that gitdir read-only even when it sits inside a
+// writable_root (see codex-rs default_read_only_subpaths_for_writable_root), so
+// `writable_roots` cannot unblock it. That needs a Codex metadata-write
+// permission path and is tracked separately (GitHub multica-ai/multica#2925).
 
 // taskHomeSeedEntries are top-level entries symlinked from the user's real home
 // into the per-task HOME so credential/identity reads keep resolving after HOME
@@ -130,23 +138,26 @@ func TaskHomeEnv(taskHome string) map[string]string {
 }
 
 // prepareCodexSandboxHome sets up the per-task writable HOME and computes the
-// Codex `writable_roots` for a task, but only when the codex sandbox policy is
-// workspace-write (Linux). On darwin danger-full-access the filesystem is not
-// sandboxed, so it returns an empty home and nil roots and the caller leaves the
-// real HOME in place.
+// Codex `writable_roots`, but only for Linux codex under the workspace-write
+// sandbox. On macOS (danger-full-access) and Windows (no Landlock sandbox) it
+// returns an empty home and nil roots, and the caller leaves the real HOME in
+// place. goos defaults to runtime.GOOS; it is a parameter so tests can exercise
+// each platform deterministically.
 //
 // It returns the task home path (empty when no redirect is needed) and the
-// writable roots to add to the config.toml: the task home plus this workspace's
-// repo cache root (where worktree gitdirs and shared objects live). The repo
-// cache root is created up front so the Landlock rule references an existing
-// path.
-func prepareCodexSandboxHome(envRoot, workspacesRoot, workspaceID, codexVersion string, logger *slog.Logger) (taskHome string, writableRoots []string, err error) {
+// writable roots to add to the config.toml — just the task home, which lives
+// outside the sandbox cwd and is not a git metadata dir, so Codex does not
+// re-protect it.
+func prepareCodexSandboxHome(envRoot, goos, codexVersion string, logger *slog.Logger) (taskHome string, writableRoots []string, err error) {
 	if envRoot == "" {
 		// No task env root to anchor the home under (legacy local_directory
 		// reuse fallback). Leave the real HOME in place.
 		return "", nil, nil
 	}
-	if codexSandboxPolicyFor("", codexVersion).Mode != "workspace-write" {
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	if goos != "linux" || codexSandboxPolicyFor(goos, codexVersion).Mode != "workspace-write" {
 		return "", nil, nil
 	}
 
@@ -154,23 +165,5 @@ func prepareCodexSandboxHome(envRoot, workspacesRoot, workspaceID, codexVersion 
 	if err := prepareTaskHome(taskHome, logger); err != nil {
 		return "", nil, err
 	}
-	writableRoots = []string{taskHome}
-
-	// The shared repo cache holds worktree gitdirs and the shared object store,
-	// both outside the task workdir. Grant this workspace's cache subtree write
-	// access so the agent's `git commit`/`git push` inside a worktree succeeds.
-	// Scoped to {workspaceID} rather than the whole .repos root so a task cannot
-	// write to another workspace's caches.
-	if workspacesRoot != "" && workspaceID != "" {
-		reposWorkspaceRoot := filepath.Join(workspacesRoot, ".repos", workspaceID)
-		if err := os.MkdirAll(reposWorkspaceRoot, 0o755); err != nil {
-			if logger != nil {
-				logger.Warn("execenv: task home: ensure repo cache writable root failed", "path", reposWorkspaceRoot, "error", err)
-			}
-		} else {
-			writableRoots = append(writableRoots, reposWorkspaceRoot)
-		}
-	}
-
-	return taskHome, writableRoots, nil
+	return taskHome, []string{taskHome}, nil
 }

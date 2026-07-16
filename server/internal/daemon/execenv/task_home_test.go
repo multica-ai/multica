@@ -90,33 +90,19 @@ func TestEnsureCodexSandboxConfigWritableRoots(t *testing.T) {
 	}
 }
 
-// TestPrepareCodexSandboxHome verifies the platform gating: workspace-write
-// (Linux) produces a writable home plus writable roots; danger-full-access
-// (macOS, unknown version) produces neither.
-func TestPrepareCodexSandboxHome(t *testing.T) {
+// TestPrepareCodexSandboxHomeLinux verifies the Linux path creates a writable
+// home and returns exactly that home as the only writable root (no repo cache —
+// Codex re-protects resolved gitdirs, so writable_roots can't unblock git; see
+// task_home.go / #2925).
+func TestPrepareCodexSandboxHomeLinux(t *testing.T) {
 	// Not parallel: mutates HOME via os.UserHomeDir seeding in prepareTaskHome.
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
 
 	envRoot := t.TempDir()
-	workspacesRoot := t.TempDir()
-	const wsID = "ws-123"
-
-	// Force the workspace-write branch regardless of the host GOOS by using the
-	// same policy function the code uses — on any non-darwin build this is
-	// workspace-write. We can't override GOOS here, so assert on the policy.
-	wantWorkspaceWrite := codexSandboxPolicyFor("", "").Mode == "workspace-write"
-
-	home, roots, err := prepareCodexSandboxHome(envRoot, workspacesRoot, wsID, "", testLogger())
+	home, roots, err := prepareCodexSandboxHome(envRoot, "linux", "", testLogger())
 	if err != nil {
 		t.Fatalf("prepareCodexSandboxHome: %v", err)
-	}
-
-	if !wantWorkspaceWrite {
-		if home != "" || roots != nil {
-			t.Fatalf("danger-full-access host should skip the writable home, got home=%q roots=%v", home, roots)
-		}
-		return
 	}
 
 	wantHome := filepath.Join(envRoot, "home")
@@ -126,12 +112,29 @@ func TestPrepareCodexSandboxHome(t *testing.T) {
 	if fi, err := os.Stat(home); err != nil || !fi.IsDir() {
 		t.Errorf("task home dir not created: err=%v", err)
 	}
-	wantRepos := filepath.Join(workspacesRoot, ".repos", wsID)
-	if len(roots) != 2 || roots[0] != wantHome || roots[1] != wantRepos {
-		t.Errorf("writable roots = %v, want [%q %q]", roots, wantHome, wantRepos)
+	if len(roots) != 1 || roots[0] != wantHome {
+		t.Errorf("writable roots = %v, want [%q]", roots, wantHome)
 	}
-	if fi, err := os.Stat(wantRepos); err != nil || !fi.IsDir() {
-		t.Errorf("repo cache writable root not created up front: err=%v", err)
+}
+
+// TestPrepareCodexSandboxHomeNonLinux verifies macOS and Windows skip the
+// redirect entirely (real HOME stays writable / no Landlock sandbox), and that
+// no home directory is created.
+func TestPrepareCodexSandboxHomeNonLinux(t *testing.T) {
+	for _, goos := range []string{"darwin", "windows"} {
+		t.Run(goos, func(t *testing.T) {
+			envRoot := t.TempDir()
+			home, roots, err := prepareCodexSandboxHome(envRoot, goos, "", testLogger())
+			if err != nil {
+				t.Fatalf("prepareCodexSandboxHome(%s): %v", goos, err)
+			}
+			if home != "" || roots != nil {
+				t.Fatalf("%s should skip the writable home, got home=%q roots=%v", goos, home, roots)
+			}
+			if _, err := os.Stat(filepath.Join(envRoot, "home")); !os.IsNotExist(err) {
+				t.Errorf("%s must not create a task home dir, stat err=%v", goos, err)
+			}
+		})
 	}
 }
 

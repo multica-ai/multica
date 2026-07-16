@@ -42,11 +42,10 @@ type codexSandboxPolicy struct {
 	// `[sandbox_workspace_write] writable_roots`, granting write access outside
 	// the sandbox cwd (the task workdir). Under workspace-write (Linux Landlock)
 	// everything outside the cwd is read-only, which breaks tools that write to
-	// $HOME (npm, Prisma) and git worktree commits whose gitdir lives in the
-	// shared repo cache. The daemon points these paths at the per-task writable
-	// HOME and this workspace's repo cache root. Only emitted when Mode is
-	// "workspace-write"; empty on darwin danger-full-access, where the
-	// filesystem is not sandboxed at all. See task_home.go.
+	// $HOME (npm, Prisma). The daemon points this at the per-task writable HOME.
+	// Only emitted when Mode is "workspace-write"; empty on darwin
+	// danger-full-access, where the filesystem is not sandboxed at all. See
+	// task_home.go.
 	WritableRoots []string
 	// Reason is a short human-readable label used in warn-level logs.
 	Reason string
