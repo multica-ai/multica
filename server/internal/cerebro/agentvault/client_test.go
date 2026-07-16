@@ -178,7 +178,7 @@ func TestRevealCredential_ViaConnectionFetchesOnlyRequestedKey(t *testing.T) {
 		t.Errorf("Authorization = %q", sawAuth)
 	}
 	query, _ := url.ParseQuery(sawQuery)
-	if query.Get("vault") != "Shared/browser-login/registry" || query.Get("reveal") != "true" || query.Get("key") != "PASSWORD" {
+	if query.Get("vault") != "shared-browser-login-registry" || query.Get("reveal") != "true" || query.Get("key") != "PASSWORD" {
 		t.Errorf("query = %q", sawQuery)
 	}
 }

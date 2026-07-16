@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type Credential struct {
@@ -53,7 +54,7 @@ var targets = map[string]Target{
 	"finance": {
 		Name: "finance", URL: "http://firtal-internal-private.internal:3000/login?manual=true",
 		Vault: "Shared/browser-login/finance", UsernameSelector: "#email", PasswordSelector: "#password",
-		SubmitSelector: "button[type=submit]", ExpectedText: []string{"Financial overview"},
+		SubmitSelector: "button[type=submit]", ExpectedText: []string{"Your roles:"},
 	},
 	"pricing": {
 		Name: "pricing", URL: "http://ecommerce-pricing-engine-private.internal:3000/login?manual=true",
@@ -105,15 +106,34 @@ type Result struct {
 }
 
 type Runner struct {
-	commander Commander
+	commander      Commander
+	openTimeout    time.Duration
+	stageTimeout   time.Duration
+	cleanupTimeout time.Duration
 }
 
 func NewRunner(commander Commander) *Runner {
-	return &Runner{commander: commander}
+	return &Runner{
+		commander: commander, openTimeout: 60 * time.Second,
+		stageTimeout: 30 * time.Second, cleanupTimeout: 30 * time.Second,
+	}
 }
 
 func (r *Runner) runStage(ctx context.Context, stage, stdin string, args ...string) ([]byte, error) {
-	output, err := r.commander.Run(ctx, stdin, args...)
+	stageTimeout := r.stageTimeout
+	if stage == "open" {
+		stageTimeout = r.openTimeout
+	}
+	if stageTimeout <= 0 {
+		if stage == "open" {
+			stageTimeout = 60 * time.Second
+		} else {
+			stageTimeout = 30 * time.Second
+		}
+	}
+	stageCtx, cancel := context.WithTimeout(ctx, stageTimeout)
+	defer cancel()
+	output, err := r.commander.Run(stageCtx, stdin, args...)
 	if err != nil {
 		return nil, fmt.Errorf("internal browser stage %s failed", stage)
 	}
@@ -126,6 +146,7 @@ func SafeError(err error) string {
 	case "internal browser stage open failed",
 		"internal browser stage auth failed",
 		"internal browser stage reload failed",
+		"internal browser stage render failed",
 		"internal browser stage snapshot failed",
 		"internal browser stage markers failed",
 		"internal browser stage url failed",
@@ -156,7 +177,15 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		return Result{}, err
 	}
 	baseArgs := []string{"--session", session}
-	defer func() { _, _ = r.commander.Run(context.Background(), "", append(baseArgs, "close")...) }()
+	defer func() {
+		cleanupTimeout := r.cleanupTimeout
+		if cleanupTimeout <= 0 {
+			cleanupTimeout = 30 * time.Second
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+		defer cancel()
+		_, _ = r.commander.Run(cleanupCtx, "", append(baseArgs, "close")...)
+	}()
 
 	if _, err := r.runStage(ctx, "open", "", append(baseArgs, "open", target.URL)...); err != nil {
 		return Result{}, err
@@ -175,6 +204,7 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 			rootURL := parsed.Scheme + "://" + parsed.Host + "/"
 			commands = append(commands,
 				[]string{"cookies", "set", "multica_auth", credential.SessionToken, "--url", rootURL, "--httpOnly", "--sameSite", "Strict"},
+				[]string{"cookies", "set", "multica_logged_in", "1", "--url", rootURL, "--sameSite", "Lax"},
 				[]string{"open", rootURL},
 			)
 		}
@@ -186,6 +216,9 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		}
 	}
 	if _, err := r.runStage(ctx, "reload", "", append(baseArgs, "reload")...); err != nil {
+		return Result{}, err
+	}
+	if _, err := r.runStage(ctx, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
 		return Result{}, err
 	}
 	snapshot, err := r.runStage(ctx, "snapshot", "", append(baseArgs, "snapshot")...)
