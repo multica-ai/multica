@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 )
@@ -103,5 +104,13 @@ func TestVerifyInternalAgentBrowserPrintsOnlySanitizedResult(t *testing.T) {
 	}
 	if bytes.Contains(out.Bytes(), []byte("password")) || bytes.Contains(out.Bytes(), []byte("username")) {
 		t.Fatalf("credential field leaked to output: %s", out.String())
+	}
+}
+
+func TestConfigureInternalBrowserVerifyClientAllowsBrowserStartup(t *testing.T) {
+	client := cli.NewAPIClient("https://example.invalid", "workspace-id", "task-token")
+	configureInternalBrowserVerifyClient(client)
+	if client.HTTPClient.Timeout != 2*time.Minute {
+		t.Fatalf("timeout = %s, want 2m", client.HTTPClient.Timeout)
 	}
 }

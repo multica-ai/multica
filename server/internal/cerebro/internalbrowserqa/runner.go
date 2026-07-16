@@ -112,6 +112,29 @@ func NewRunner(commander Commander) *Runner {
 	return &Runner{commander: commander}
 }
 
+func (r *Runner) runStage(ctx context.Context, stage, stdin string, args ...string) ([]byte, error) {
+	output, err := r.commander.Run(ctx, stdin, args...)
+	if err != nil {
+		return nil, fmt.Errorf("internal browser stage %s failed", stage)
+	}
+	return output, nil
+}
+
+func SafeError(err error) string {
+	message := err.Error()
+	switch message {
+	case "internal browser stage open failed",
+		"internal browser stage auth failed",
+		"internal browser stage reload failed",
+		"internal browser stage snapshot failed",
+		"internal browser stage markers failed",
+		"internal browser stage url failed",
+		"internal browser stage errors failed":
+		return message
+	}
+	return "internal browser verification failed"
+}
+
 func (r *Runner) Verify(ctx context.Context, app string, credential Credential) (Result, error) {
 	target, err := TargetFor(app)
 	if err != nil {
@@ -135,7 +158,7 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	baseArgs := []string{"--session", session}
 	defer func() { _, _ = r.commander.Run(context.Background(), "", append(baseArgs, "close")...) }()
 
-	if _, err := r.commander.Run(ctx, "", append(baseArgs, "open", target.URL)...); err != nil {
+	if _, err := r.runStage(ctx, "open", "", append(baseArgs, "open", target.URL)...); err != nil {
 		return Result{}, err
 	}
 	if target.Vault != "" || target.SessionCookie {
@@ -158,27 +181,27 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		commands = append(commands, []string{"wait", "1500"})
 		payload, _ := json.Marshal(commands)
 		// This output is deliberately discarded: the stdin payload contains secrets.
-		if _, err := r.commander.Run(ctx, string(payload), append(baseArgs, "batch")...); err != nil {
+		if _, err := r.runStage(ctx, "auth", string(payload), append(baseArgs, "batch")...); err != nil {
 			return Result{}, err
 		}
 	}
-	if _, err := r.commander.Run(ctx, "", append(baseArgs, "reload")...); err != nil {
+	if _, err := r.runStage(ctx, "reload", "", append(baseArgs, "reload")...); err != nil {
 		return Result{}, err
 	}
-	snapshot, err := r.commander.Run(ctx, "", append(baseArgs, "snapshot")...)
+	snapshot, err := r.runStage(ctx, "snapshot", "", append(baseArgs, "snapshot")...)
 	if err != nil {
 		return Result{}, err
 	}
 	for _, marker := range target.ExpectedText {
 		if !strings.Contains(string(snapshot), marker) {
-			return Result{}, fmt.Errorf("internal browser verification did not reach the expected UI")
+			return Result{}, fmt.Errorf("internal browser stage markers failed")
 		}
 	}
-	finalURL, err := r.commander.Run(ctx, "", append(baseArgs, "get", "url")...)
+	finalURL, err := r.runStage(ctx, "url", "", append(baseArgs, "get", "url")...)
 	if err != nil {
 		return Result{}, err
 	}
-	rawErrors, err := r.commander.Run(ctx, "", append(baseArgs, "errors")...)
+	rawErrors, err := r.runStage(ctx, "errors", "", append(baseArgs, "errors")...)
 	if err != nil {
 		return Result{}, err
 	}

@@ -80,7 +80,7 @@ func (h *Handler) VerifyInternalAgentBrowser(w http.ResponseWriter, r *http.Requ
 	result, err := h.InternalBrowserQA.Verify(r.Context(), target.Name, credential)
 	if err != nil {
 		h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "deny", "browser verification failed")
-		writeError(w, http.StatusBadGateway, "internal browser verification failed")
+		writeError(w, http.StatusBadGateway, internalbrowserqa.SafeError(err))
 		return
 	}
 	h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "allow", "internal target verified")
