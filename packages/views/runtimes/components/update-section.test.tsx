@@ -51,6 +51,12 @@ describe("UpdateSection read-only status", () => {
     renderSection({ runtimeId: null });
 
     expect(await screen.findByText("Latest")).toBeInTheDocument();
+    expect(screen.getByText("Read-only")).toBeInTheDocument();
+    expect(
+      screen.getByTitle(
+        "Only runtime owners and workspace admins can update the CLI.",
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Update" }),
     ).not.toBeInTheDocument();
@@ -68,6 +74,7 @@ describe("UpdateSection read-only status", () => {
     renderSection({ runtimeId: null, launchedBy: "desktop" });
 
     expect(screen.getByText("Managed by Desktop")).toBeInTheDocument();
+    expect(screen.queryByText("Read-only")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Update" }),
     ).not.toBeInTheDocument();
@@ -85,6 +92,7 @@ describe("UpdateSection read-only status", () => {
     renderSection({ runtimeId: null, currentVersion: "v0.3.17" });
 
     expect(await screen.findByText("available")).toBeInTheDocument();
+    expect(screen.getByText("Read-only")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Update" }),
     ).not.toBeInTheDocument();
