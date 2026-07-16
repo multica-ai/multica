@@ -424,6 +424,10 @@ export type CerebroFlagKey =
   // aggregated per config version over the runs that actually used it.
   // Default OFF until QA'd on staging.
   | "cerebro_agent_quality"
+  // FIR-3212: Engine support panel on the agent Instructions tab — which run
+  // settings the agent's runtime actually honours, which it drops silently,
+  // and how it accepts a system prompt. Default OFF until QA'd on staging.
+  | "cerebro_agent_setup_capabilities"
   // FIR-2698: Settings tab for the single-source model registry (prices,
   // context windows, display labels) with propose → review → approve
   // versioning. Default OFF until the tab has been QA'd on staging.
@@ -843,6 +847,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-3212: default OFF until QA'd on staging.
   cerebro_agent_production_prompt: false,
   cerebro_agent_quality: false,
+  cerebro_agent_setup_capabilities: false,
   // FIR-2698: default OFF until QA'd on staging.
   cerebro_model_registry: false,
   // FIR-3172: default OFF. Enabling is a separate release decision.
@@ -966,6 +971,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Add a Quality tab on the agent page measuring each configuration version on the runs that actually used it: judge verdicts (solution) and human signals like reactions and approvals (satisfaction), always with sample sizes and honest missing states. Off hides the tab; measurements are kept.",
+  },
+  {
+    key: "cerebro_agent_setup_capabilities",
+    label: "Agent engine support panel",
+    group: "agents",
+    description:
+      "Add an Engine support panel on the agent Instructions tab showing, for the engine the agent actually runs on: which run settings are honoured, which are dropped silently, and how the engine accepts a system prompt. Unknown support is shown as unknown, never as unsupported. Off hides the panel.",
   },
   {
     key: "cerebro_model_registry",

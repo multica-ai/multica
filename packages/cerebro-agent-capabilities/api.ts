@@ -153,6 +153,49 @@ const AgentCapabilityObservedAccessSchema = z
   })
   .loose();
 
+// FIR-3212 — which run settings the agent's runtime provider actually honours.
+// `handling` is a server enum (honoured|ignored_logged|ignored_silent);
+// `effective` is the one-bit answer so a UI can grey out a control without
+// knowing the vocabulary. status=unknown means "we cannot say" — a UI that
+// greys out controls on unknown would hide settings that may work.
+const AgentCapabilityExecOptionSchema = z
+  .object({
+    field: z.string().default(""),
+    handling: z.string().default(""),
+    effective: z.boolean().default(false),
+  })
+  .loose();
+
+// native=false with a non-empty mode list means the text is spliced into the
+// user message — the UI must not present that as system-prompt semantics.
+const AgentCapabilitySystemPromptSupportSchema = z
+  .object({
+    native: z.boolean().default(false),
+    modes: z.array(z.string()).default([]),
+  })
+  .loose();
+
+const AgentCapabilityRuntimeOptionsSchema = z
+  .object({
+    status: z.string().default("unknown"),
+    provider: z.string().default(""),
+    cli_version: z.string().default(""),
+    runtime_id: z.string().default(""),
+    exec_options: z.array(AgentCapabilityExecOptionSchema).default([]),
+    silently_ignored: z.array(z.string()).default([]),
+    system_prompt: AgentCapabilitySystemPromptSupportSchema.optional(),
+  })
+  .loose();
+
+const EMPTY_RUNTIME_OPTIONS = {
+  status: "unknown",
+  provider: "",
+  cli_version: "",
+  runtime_id: "",
+  exec_options: [],
+  silently_ignored: [],
+};
+
 const EMPTY_OBSERVED_ACCESS = {
   status: "unknown",
   window_days: 30,
@@ -205,6 +248,9 @@ export const AgentCapabilitiesSchema = z
       mcp_servers: [],
       has_mcp_config: false,
     }),
+    runtime_options: AgentCapabilityRuntimeOptionsSchema.default(
+      EMPTY_RUNTIME_OPTIONS,
+    ),
   })
   .loose();
 
@@ -230,6 +276,15 @@ export type AgentCapabilityObservedAccess = z.infer<
   typeof AgentCapabilityObservedAccessSchema
 >;
 export type AgentCapabilityLimits = z.infer<typeof AgentCapabilityLimitsSchema>;
+export type AgentCapabilityExecOption = z.infer<
+  typeof AgentCapabilityExecOptionSchema
+>;
+export type AgentCapabilitySystemPromptSupport = z.infer<
+  typeof AgentCapabilitySystemPromptSupportSchema
+>;
+export type AgentCapabilityRuntimeOptions = z.infer<
+  typeof AgentCapabilityRuntimeOptionsSchema
+>;
 export type AgentCapabilities = z.infer<typeof AgentCapabilitiesSchema>;
 
 const EMPTY_CAPABILITIES: AgentCapabilities = {
@@ -247,6 +302,7 @@ const EMPTY_CAPABILITIES: AgentCapabilities = {
   runtime_secrets: EMPTY_RUNTIME_SECRET_SET,
   observed_access: EMPTY_OBSERVED_ACCESS,
   limits: { mcp_servers: [], has_mcp_config: false },
+  runtime_options: EMPTY_RUNTIME_OPTIONS,
 };
 
 export async function getAgentCapabilities(

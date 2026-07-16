@@ -164,7 +164,7 @@ func TestObservedToolStatus(t *testing.T) {
 		{"allow", true, observedStatusAllowed, false},
 		{"ask", true, observedStatusNeedsApproval, false},
 		{"deny", true, observedStatusBlocked, true},
-		{"", false, observedStatusUnmapped, true},   // no policy row → drift
+		{"", false, observedStatusUnmapped, true},     // no policy row → drift
 		{"weird", true, observedStatusUnmapped, true}, // enum drift → treated as unmapped
 	}
 	for _, c := range cases {
@@ -234,5 +234,58 @@ func TestObservedAccessFromUsage_NoRunsIsNotConfigured(t *testing.T) {
 	}
 	if got.WindowDays != observedAccessWindowDays {
 		t.Fatalf("expected window_days %d, got %d", observedAccessWindowDays, got.WindowDays)
+	}
+}
+
+// CEREBRO-PATCH(agent-capabilities-runtime-options-test): FIR-3212 slice 6 —
+// the runtime_options section that lets the Setup screen drive its fields from
+// what the agent's engine actually honours.
+
+func TestRuntimeExecOptionsFromProvider_KnownProvider(t *testing.T) {
+	got := runtimeExecOptionsFromProvider("claude", "2.1.209", "rt-1")
+	if got.Status != capStatusKnown {
+		t.Fatalf("status = %q, want %q", got.Status, capStatusKnown)
+	}
+	if got.Provider != "claude" || got.CliVersion != "2.1.209" || got.RuntimeID != "rt-1" {
+		t.Fatalf("identity fields wrong: %+v", got)
+	}
+	if len(got.ExecOptions) == 0 {
+		t.Fatal("claude must expose a non-empty exec-options matrix")
+	}
+	if got.SystemPrompt == nil {
+		t.Fatal("claude must report system-prompt support")
+	}
+	if !got.SystemPrompt.Native {
+		t.Fatal("claude has a native system-prompt channel")
+	}
+	modes := map[string]bool{}
+	for _, m := range got.SystemPrompt.Modes {
+		modes[m] = true
+	}
+	if !modes["append"] || !modes["replace"] {
+		t.Fatalf("claude modes = %v, want append+replace", got.SystemPrompt.Modes)
+	}
+}
+
+func TestRuntimeExecOptionsFromProvider_UnknownProviderIsUnknownNotEmpty(t *testing.T) {
+	got := runtimeExecOptionsFromProvider("some-future-engine", "", "rt-2")
+	if got.Status != capStatusUnknown {
+		t.Fatalf("status = %q, want %q — unknown must never read as 'supports nothing'", got.Status, capStatusUnknown)
+	}
+	if got.ExecOptions == nil || got.SilentlyIgnored == nil {
+		t.Fatal("slices must be non-nil so JSON renders [] instead of null")
+	}
+	if got.SystemPrompt != nil {
+		t.Fatal("no system-prompt claim may be made for an unknown provider")
+	}
+}
+
+func TestRuntimeExecOptionsFromProvider_PrependOnlyProviderIsNotNative(t *testing.T) {
+	got := runtimeExecOptionsFromProvider("opencode", "", "rt-3")
+	if got.SystemPrompt == nil {
+		t.Fatal("opencode must report system-prompt support")
+	}
+	if got.SystemPrompt.Native {
+		t.Fatal("opencode splices into the user message — it must not claim native system-prompt semantics")
 	}
 }

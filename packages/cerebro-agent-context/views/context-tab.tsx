@@ -12,10 +12,12 @@ import type { Agent, AgentRuntime } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { AgentContextVersionsPanel } from "./components/agent-context-versions-panel";
 import { AgentContextChangeRequestQueue } from "./components/agent-context-change-request-queue";
 import { AgentContextProposeDialog } from "./components/agent-context-propose-dialog";
 import { AgentContextObservabilityPanel } from "./components/agent-context-observability-panel";
+import { AgentContextRuntimeSupportPanel } from "./components/agent-context-runtime-support-panel";
 
 export interface AgentDetailTabExtension {
   id: string;
@@ -54,9 +56,12 @@ export function CerebroAgentContextTab({
 
   const isOwner = !!(userId && agent.owner_id && agent.owner_id === userId);
   const canManage = canEdit || isOwner;
+  const runtimeSupportOn = useFeatureFlag("cerebro_agent_setup_capabilities");
 
   return (
     <div className="space-y-5 p-4 md:p-6">
+      {runtimeSupportOn && <AgentContextRuntimeSupportPanel agent={agent} />}
+
       <AgentContextProposeDialog agent={agent} canReview={canManage} />
 
       <div className="my-1 h-px bg-border" />

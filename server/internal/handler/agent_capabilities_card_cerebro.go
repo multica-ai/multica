@@ -25,10 +25,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	cerebrocapabilities "github.com/multica-ai/multica/server/internal/cerebro/capabilities"
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
+	pkgagent "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -246,6 +248,74 @@ type AgentCapabilities struct {
 	// declared policy so undeclared/blocked use (drift) is visible on the card.
 	ObservedAccess AgentCapabilityObservedAccess `json:"observed_access"`
 	Limits         AgentCapabilityLimits         `json:"limits"`
+	// CEREBRO-PATCH(agent-capabilities-runtime-options): FIR-3212 slice 6 — which
+	// run settings the agent's runtime provider actually honours, so the Setup
+	// screen can derive its fields from the engine instead of a hand-written list.
+	RuntimeOptions AgentCapabilityRuntimeOptions `json:"runtime_options"`
+}
+
+// AgentCapabilityRuntimeOptions reports, for the runtime the agent actually runs
+// on, which ExecOptions fields are honoured, which are dropped without a word,
+// and how (or whether) the provider accepts a system prompt. status=unknown means
+// "we cannot say" — never "supports nothing" (StaticCatalog contract).
+type AgentCapabilityRuntimeOptions struct {
+	Status          string                                  `json:"status"` // known | unknown
+	Provider        string                                  `json:"provider,omitempty"`
+	CliVersion      string                                  `json:"cli_version,omitempty"`
+	RuntimeID       string                                  `json:"runtime_id,omitempty"`
+	ExecOptions     []cerebrocapabilities.ExecOptionSupport `json:"exec_options"`
+	SilentlyIgnored []string                                `json:"silently_ignored"`
+	SystemPrompt    *AgentCapabilitySystemPromptSupport     `json:"system_prompt,omitempty"`
+}
+
+// AgentCapabilitySystemPromptSupport mirrors agent.SystemPromptSupport on the
+// wire. Native=false with a non-empty mode list means the text is spliced into
+// the user message — the UI must not present that as system-prompt semantics.
+type AgentCapabilitySystemPromptSupport struct {
+	Native bool     `json:"native"`
+	Modes  []string `json:"modes"`
+}
+
+// runtimeExecOptionsFromProvider is the pure core of buildRuntimeExecOptions
+// (unit-tested without a DB).
+func runtimeExecOptionsFromProvider(provider, cliVersion, runtimeID string) AgentCapabilityRuntimeOptions {
+	out := AgentCapabilityRuntimeOptions{
+		Status:          capStatusUnknown,
+		Provider:        provider,
+		CliVersion:      cliVersion,
+		RuntimeID:       runtimeID,
+		ExecOptions:     []cerebrocapabilities.ExecOptionSupport{},
+		SilentlyIgnored: []string{},
+	}
+	if rows, ok := cerebrocapabilities.ExecOptionsFor(provider); ok {
+		out.Status = capStatusKnown
+		out.ExecOptions = rows
+		if ignored := cerebrocapabilities.SilentlyIgnoredBy(provider); ignored != nil {
+			out.SilentlyIgnored = ignored
+		}
+	}
+	if support, ok := pkgagent.SystemPromptSupportFor(provider); ok {
+		modes := make([]string, 0, len(support.Modes))
+		for _, m := range support.Modes {
+			modes = append(modes, string(m))
+		}
+		out.SystemPrompt = &AgentCapabilitySystemPromptSupport{Native: support.Native, Modes: modes}
+	}
+	return out
+}
+
+// buildRuntimeExecOptions resolves the agent's actual runtime row and reports
+// the ExecOptions support matrix for its provider. A missing/unreadable runtime
+// yields status=unknown with the runtime id preserved for debugging.
+func (h *Handler) buildRuntimeExecOptions(r *http.Request, agent db.Agent) AgentCapabilityRuntimeOptions {
+	rt, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID:          agent.RuntimeID,
+		WorkspaceID: agent.WorkspaceID,
+	})
+	if err != nil {
+		return runtimeExecOptionsFromProvider("", "", uuidToString(agent.RuntimeID))
+	}
+	return runtimeExecOptionsFromProvider(rt.Provider, rt.CliVersion.String, uuidToString(rt.ID))
 }
 
 // GetAgentCapabilities handles GET /api/agents/{id}/capabilities. Access control
@@ -350,6 +420,10 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 
 	// LIMITS — sandbox policy + MCP server surface.
 	out.Limits = buildAgentCapabilityLimits(agent.RuntimeConfig, agent.McpConfig)
+
+	// RUNTIME OPTIONS — the ExecOptions support matrix for the runtime the agent
+	// actually runs on, so the Setup screen offers only fields the engine honours.
+	out.RuntimeOptions = h.buildRuntimeExecOptions(r, agent)
 
 	writeJSON(w, http.StatusOK, out)
 }

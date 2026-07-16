@@ -78,6 +78,13 @@
       "default": false
     },
     {
+      "key": "cerebro_agent_setup_capabilities",
+      "label": "Agent engine support panel",
+      "description": "Add an Engine support panel on the agent Instructions tab showing, for the engine the agent actually runs on: which run settings are honoured, which are dropped silently, and how the engine accepts a system prompt. Unknown support is shown as unknown, never as unsupported. Off hides the panel.",
+      "group": "agents",
+      "default": false
+    },
+    {
       "key": "cerebro_model_registry",
       "label": "Model registry",
       "description": "Add a Model registry tab under Settings: view and propose changes to model prices, context windows, and display labels. Changes go through the same propose → review → approve flow as Agent Context, so a bad edit never lands without a second pair of eyes.",

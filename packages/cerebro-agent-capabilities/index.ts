@@ -3,6 +3,9 @@ export {
   getAgentCapabilities,
   AgentCapabilitiesSchema,
   type AgentCapabilities,
+  type AgentCapabilityExecOption,
+  type AgentCapabilityRuntimeOptions,
+  type AgentCapabilitySystemPromptSupport,
 } from "./api";
 export {
   createAgentCapabilitiesTabs,

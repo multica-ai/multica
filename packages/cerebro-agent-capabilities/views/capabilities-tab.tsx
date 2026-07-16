@@ -112,6 +112,14 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
       drift_count: 0,
     },
     limits: { mcp_servers: [], has_mcp_config: false },
+    runtime_options: {
+      status: "unknown",
+      provider: "",
+      cli_version: "",
+      runtime_id: "",
+      exec_options: [],
+      silently_ignored: [],
+    },
   };
 
   const sandboxText = formatSandbox(caps.limits.sandbox);
