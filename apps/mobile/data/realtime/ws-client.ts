@@ -27,6 +27,7 @@ import type {
   WSEventType,
   WSMessage,
 } from "@multica/core/types";
+import { Platform } from "react-native";
 
 /** Generic handler used internally by the dispatcher map. Each `on<E>()`
  *  call narrows this to `(payload: WSEventPayload<E>, actorId?) => void`
@@ -62,6 +63,7 @@ export interface WSClientOptions {
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_CAP_MS = 30_000;
 const RECONNECT_MAX_EXPONENT = 6; // 1s → 64s ceiling, capped at 30s
+const CLIENT_OS = Platform.OS;
 
 /**
  * Lifecycle state — drives whether onclose schedules a reconnect:
@@ -188,7 +190,7 @@ export class WSClient {
     const url = new URL(this.opts.url);
     url.searchParams.set("workspace_slug", this.opts.workspaceSlug);
     url.searchParams.set("client_platform", "mobile");
-    url.searchParams.set("client_os", "ios");
+    url.searchParams.set("client_os", CLIENT_OS);
     if (this.opts.clientVersion) {
       url.searchParams.set("client_version", this.opts.clientVersion);
     }

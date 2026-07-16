@@ -1,6 +1,6 @@
-# Multica Mobile (iOS)
+# Multica Mobile (iOS + Android)
 
-Expo + React Native iOS client for Multica. Independent from web/desktop — shares only types from `@multica/core/`. See [`CLAUDE.md`](./CLAUDE.md) for the locked tech-stack baseline and import rules.
+Expo + React Native mobile client for Multica. Independent from web/desktop — shares only types from `@multica/core/`. See [`CLAUDE.md`](./CLAUDE.md) for the locked tech-stack baseline and import rules.
 
 ## Just want to use it on your phone? (no development)
 
@@ -42,10 +42,59 @@ Everything below is for app developers — you can ignore the rest if you only w
 | `pnpm ios:mobile:device:staging:release` | Full rebuild + install on **USB iPhone**, Release (standalone) | staging |
 | `pnpm ios:mobile:device:prod` | Full rebuild + install on **USB iPhone**, Debug | production |
 | `pnpm ios:mobile:device:prod:release` | Full rebuild + install on **USB iPhone**, Release (standalone) | production |
+| `pnpm android:mobile` | Full rebuild + install on **Android emulator / device**, Debug | local |
+| `pnpm android:mobile:staging` | Full rebuild + install on **Android emulator / device**, Debug | staging |
+| `pnpm android:mobile:prod` | Full rebuild + install on **Android emulator / device**, Debug | production |
+| `pnpm android:mobile:device` | Full rebuild + install on **USB Android device**, Debug | local |
+| `pnpm android:mobile:device:staging` | Full rebuild + install on **USB Android device**, Debug | staging |
+| `pnpm android:mobile:device:prod` | Full rebuild + install on **USB Android device**, Debug | production |
+| `pnpm android:mobile:prod:release` | Build standalone **Android Release APK** | production |
 
 `dev:*` runs Metro only — assumes the matching variant is already installed. `ios:mobile*` does a full native rebuild + install.
 
-Bundle id and display name switch on `APP_ENV` (see `app.config.ts`), so Dev / Staging / Production variants can coexist on the same device or simulator.
+Bundle id / Android package name and display name switch on `APP_ENV` (see `app.config.ts`), so Dev / Staging / Production variants can coexist on the same device or simulator.
+
+## Try it on Android
+
+The Android path uses the same Expo app as iOS. Install Android Studio or the
+Android SDK command-line tools, make sure an emulator is running or a USB device
+is visible in `adb devices`, then run:
+
+```bash
+pnpm android:mobile:staging
+```
+
+For local backend testing, create `apps/mobile/.env.development.local` from the
+template and point `EXPO_PUBLIC_API_URL` at your Mac's LAN IP. Then run:
+
+```bash
+pnpm android:mobile
+```
+
+If your shell defaults to an older Java, run Android commands with a modern JDK:
+
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+pnpm android:mobile:staging
+```
+
+The first Android run performs an Expo prebuild and creates the native Gradle
+project if `apps/mobile/android/` is missing.
+
+To build a standalone production APK that connects to `multica.ai`, run:
+
+```bash
+pnpm android:mobile:prod:release
+```
+
+The APK is written to:
+
+```text
+apps/mobile/android/app/build/outputs/apk/release/multica-production-release.apk
+```
+
+This is a local sideload build signed with the generated debug keystore, not a
+Play Store upload artifact.
 
 ## First-time setup
 
