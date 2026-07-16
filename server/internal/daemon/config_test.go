@@ -432,6 +432,48 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_OpenCodeIdleWatchdog(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_OPENCODE_IDLE_WATCHDOG", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with default: %v", err)
+	}
+	if cfg.OpenCodeIdleWatchdog != DefaultOpenCodeIdleWatchdog {
+		t.Fatalf("OpenCodeIdleWatchdog = %s, want default %s", cfg.OpenCodeIdleWatchdog, DefaultOpenCodeIdleWatchdog)
+	}
+
+	t.Setenv("MULTICA_OPENCODE_IDLE_WATCHDOG", "7m")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with env: %v", err)
+	}
+	if cfg.OpenCodeIdleWatchdog != 7*time.Minute {
+		t.Fatalf("OpenCodeIdleWatchdog = %s, want 7m from env", cfg.OpenCodeIdleWatchdog)
+	}
+
+	// Zero disables the OpenCode-specific override while leaving the generic
+	// AgentIdleWatchdog as the fallback for OpenCode runs.
+	t.Setenv("MULTICA_OPENCODE_IDLE_WATCHDOG", "0")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with zero env: %v", err)
+	}
+	if cfg.OpenCodeIdleWatchdog != 0 {
+		t.Fatalf("OpenCodeIdleWatchdog = %s, want zero from env", cfg.OpenCodeIdleWatchdog)
+	}
+}
+
 // TestLoadConfig_AutoUpdateDefault_CloudOn confirms the symmetric case: a
 // daemon pointed at Multica's hosted cloud keeps the historical opt-in
 // auto-update default. We pass the WSS form of the URL to also exercise that

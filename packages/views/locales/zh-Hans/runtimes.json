@@ -241,6 +241,8 @@
     "version_unknown": "未知",
     "managed_by_desktop": "由桌面端管理",
     "managed_by_desktop_title": "CLI 二进制由 Multica 桌面端管理 —— 升级桌面端即可升级 CLI。",
+    "read_only": "只读",
+    "read_only_title": "只有运行时所有者和工作区管理员可以更新 CLI。",
     "latest": "最新",
     "available": "可用",
     "action": "更新",

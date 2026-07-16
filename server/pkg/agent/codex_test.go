@@ -1685,6 +1685,256 @@ func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteRetriesInitializeTimeoutOnceAfterCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	countPath := filepath.Join(t.TempDir(), "launch-count")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
+		`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
+		`read line`+"\n"+
+		`if test "$count" -eq 1; then sleep 5; exit 0; fi`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-retried"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-retried","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   10 * time.Second,
+		HandshakeTimeout:          100 * time.Millisecond,
+		SemanticInactivityTimeout: time.Second,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected retry to complete, got status=%q error=%q", result.Status, result.Error)
+	}
+	data, err := os.ReadFile(countPath)
+	if err != nil {
+		t.Fatalf("read launch count: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "2" {
+		t.Fatalf("launch count = %q, want 2", got)
+	}
+}
+
+func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	t.Run("both attempts time out", func(t *testing.T) {
+		countPath := filepath.Join(t.TempDir(), "launch-count")
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
+			`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
+			`read line`+"\n"+
+			`sleep 1`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+		if result.Status != "failed" || !strings.Contains(result.Error, CodexHandshakeTimeoutMarker) {
+			t.Fatalf("expected final initialize timeout, got status=%q error=%q", result.Status, result.Error)
+		}
+		data, _ := os.ReadFile(countPath)
+		if got := strings.TrimSpace(string(data)); got != "2" {
+			t.Fatalf("launch count = %q, want 2", got)
+		}
+	})
+
+	t.Run("semantic activity suppresses retry", func(t *testing.T) {
+		countPath := filepath.Join(t.TempDir(), "launch-count")
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`echo x >> `+countPath+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"unexpected","item":{"type":"commandExecution","id":"cmd-1","command":"true"}}}'`+"\n"+
+			`sleep 1`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+		if result.Status != "failed" {
+			t.Fatalf("expected failed, got %q", result.Status)
+		}
+		data, _ := os.ReadFile(countPath)
+		if got := strings.Count(string(data), "x"); got != 1 {
+			t.Fatalf("launch count = %d, want 1", got)
+		}
+	})
+
+	t.Run("unconfirmed cleanup suppresses retry", func(t *testing.T) {
+		codexCleanupConfirmationOverride.Store(-1)
+		defer codexCleanupConfirmationOverride.Store(0)
+		countPath := filepath.Join(t.TempDir(), "launch-count")
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`echo x >> `+countPath+"\n"+
+			`read line`+"\n"+
+			`sleep 1`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+		if !strings.Contains(result.Error, "retry suppressed: process cleanup/reap not confirmed") {
+			t.Fatalf("expected cleanup reason, got %q", result.Error)
+		}
+		data, _ := os.ReadFile(countPath)
+		if got := strings.Count(string(data), "x"); got != 1 {
+			t.Fatalf("launch count = %d, want 1", got)
+		}
+	})
+}
+
+func TestCodexExecuteDoesNotSerializeConcurrentLaunches(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`sleep 0.4`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-concurrent"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-concurrent","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+
+	maxActiveCodexLaunchesObserved.Store(0)
+	results := make(chan Result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			backend, _ := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+			if err != nil {
+				results <- Result{Status: "failed", Error: err.Error()}
+				return
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+			results <- <-session.Result
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		if result := <-results; result.Status != "completed" {
+			t.Fatalf("concurrent result failed: %+v", result)
+		}
+	}
+	if got := maxActiveCodexLaunchesObserved.Load(); got < 2 {
+		t.Fatalf("launches appear serialized: max active=%d", got)
+	}
+}
+
+func TestSanitizeCodexDiagnosticRedactsSecrets(t *testing.T) {
+	got := sanitizeCodexDiagnostic("Authorization: Bearer bearer-token\n" +
+		`{"token":"json-token","auth": "json-auth", "api_key":"json-key"}` +
+		"\npassword=plain-secret\x00")
+	for _, secret := range []string{"bearer-token", "json-token", "json-auth", "json-key", "plain-secret"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("sanitized diagnostic leaked %q: %q", secret, got)
+		}
+	}
+}
+
+func TestCodexExecuteRedactsStderrFromResultAndLogs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	const (
+		bearer     = "bearer-secret-value"
+		jsonToken  = "json-secret-value"
+		standalone = "sk-abcdefghijklmnopqrstuvwxyz123456"
+	)
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`echo 'Authorization: Bearer `+bearer+`' >&2`+"\n"+
+		`echo '{"token":"`+jsonToken+`"}' >&2`+"\n"+
+		`echo '`+standalone+`' >&2`+"\n"+
+		`exit 2`+"\n")
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	combined := result.Error + "\n" + logs.String()
+	for _, secret := range []string{bearer, jsonToken, standalone} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("stderr secret leaked: %q in %q", secret, combined)
+		}
+	}
+}
+
+func TestCodexExecuteDoesNotProbeVersionBeforeInitialize(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-fast-init"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-fast-init","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+	data, err := os.ReadFile(fakePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = bytes.Replace(data, []byte(`echo "codex-cli 0.0.0-test"; exit 0`), []byte(`sleep 2; echo "codex-cli 0.0.0-test"; exit 0`), 1)
+	writeTestExecutable(t, fakePath, data)
+
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default(), CodexVersion: "cached-test-version"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("Execute blocked on version probe before initialize: %s", elapsed)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	if result := <-session.Result; result.Status != "completed" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestCodexExecuteRetriesAfterSignaledProcessIsReaped(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux signal/reap semantics regression")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	defer codexGracefulShutdownTimeoutNanos.Store(0)
+	countPath := filepath.Join(t.TempDir(), "launch-count")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
+		`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
+		`read line`+"\n"+
+		`if test "$count" -eq 1; then exec sleep 30; fi`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-signaled"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-signaled","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+	result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+	if result.Status != "completed" {
+		t.Fatalf("signaled/reaped first attempt should retry: %+v", result)
+	}
+}
+
 func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {

@@ -19,7 +19,6 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 
 	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 10)
-	var output strings.Builder
 
 	msg := claudeSDKMessage{
 		Type: "assistant",
@@ -31,10 +30,13 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
 
-	if output.String() != "Hello world" {
-		t.Fatalf("expected output 'Hello world', got %q", output.String())
+	if output != "Hello world" {
+		t.Fatalf("expected output 'Hello world', got %q", output)
+	}
+	if tools != 0 {
+		t.Fatalf("expected no tool uses, got %d", tools)
 	}
 	select {
 	case m := <-ch:
@@ -51,7 +53,6 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 
 	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 10)
-	var output strings.Builder
 
 	msg := claudeSDKMessage{
 		Type: "assistant",
@@ -68,10 +69,13 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 		}),
 	}
 
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
 
-	if output.String() != "" {
-		t.Fatalf("tool_use should not add to output, got %q", output.String())
+	if output != "" {
+		t.Fatalf("tool_use should not add to output, got %q", output)
+	}
+	if tools != 1 {
+		t.Fatalf("expected one tool use, got %d", tools)
 	}
 	select {
 	case m := <-ch:
@@ -268,7 +272,6 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 
 	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 10)
-	var output strings.Builder
 
 	msg := claudeSDKMessage{
 		Type:    "assistant",
@@ -276,10 +279,13 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	}
 
 	// Should not panic
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
 
-	if output.String() != "" {
-		t.Fatalf("expected empty output for invalid JSON, got %q", output.String())
+	if output != "" {
+		t.Fatalf("expected empty output for invalid JSON, got %q", output)
+	}
+	if tools != 0 {
+		t.Fatalf("expected no tool uses for invalid JSON, got %d", tools)
 	}
 	select {
 	case m := <-ch:

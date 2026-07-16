@@ -1772,6 +1772,94 @@ func TestExecuteAndDrain_IdleWatchdog_FiresWhenNoMessageEverArrives(t *testing.T
 	}
 }
 
+func TestExecuteAndDrain_IdleWatchdog_UsesPerRunOverride(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 500 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	start := time.Now()
+	result, _, err := d.executeAndDrain(
+		ctx,
+		idleWatchdogBackend{emitOne: true},
+		"p",
+		agent.ExecOptions{IdleWatchdogTimeout: 50 * time.Millisecond},
+		slog.Default(),
+		"t-idle-override",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected status=idle_watchdog, got %q (err=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "50ms") {
+		t.Fatalf("expected error to report the per-run threshold, got %q", result.Error)
+	}
+	if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
+		t.Fatalf("per-run watchdog override did not fire promptly: %s", elapsed)
+	}
+}
+
+func TestExecuteAndDrain_IdleWatchdog_GlobalDisableWinsOverPerRunOverride(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 0
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+
+	result, _, err := d.executeAndDrain(
+		ctx,
+		idleWatchdogBackend{emitOne: true},
+		"p",
+		agent.ExecOptions{IdleWatchdogTimeout: 20 * time.Millisecond},
+		slog.Default(),
+		"t-idle-global-off",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "cancelled" {
+		t.Fatalf("global watchdog disable must win; got status=%q (err=%q)", result.Status, result.Error)
+	}
+}
+
+func TestExecuteAndDrain_IdleWatchdog_PerRunOverrideCannotExtendGlobalWindow(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	result, _, err := d.executeAndDrain(
+		ctx,
+		idleWatchdogBackend{emitOne: true},
+		"p",
+		agent.ExecOptions{IdleWatchdogTimeout: 500 * time.Millisecond},
+		slog.Default(),
+		"t-idle-global-bound",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected status=idle_watchdog, got %q (err=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "50ms") {
+		t.Fatalf("provider override must not extend the global threshold, got %q", result.Error)
+	}
+}
+
 func TestExecuteAndDrain_IdleWatchdog_DisabledWhenZero(t *testing.T) {
 	t.Parallel()
 
@@ -1893,6 +1981,30 @@ func TestExecuteAndDrain_IdleWatchdog_DoesNotFireDuringInFlightToolCall(t *testi
 	}
 	if result.Status != "completed" {
 		t.Fatalf("expected status=completed, got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
+func TestExecuteAndDrain_IdleWatchdog_PerRunOverrideStillUsesToolWindow(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 500 * time.Millisecond
+	d.cfg.AgentToolWatchdog = 500 * time.Millisecond
+
+	result, _, err := d.executeAndDrain(
+		context.Background(),
+		longToolCallBackend{toolSilence: 200 * time.Millisecond},
+		"p",
+		agent.ExecOptions{IdleWatchdogTimeout: 50 * time.Millisecond},
+		slog.Default(),
+		"t-long-tool-override",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("per-run idle override must not replace the tool window; got status=%q (err=%q)", result.Status, result.Error)
 	}
 }
 

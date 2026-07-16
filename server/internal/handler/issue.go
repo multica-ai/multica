@@ -2308,6 +2308,10 @@ type CreateIssueRequest struct {
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	// LabelIDs are issue-scoped labels to attach to the new issue in the same
+	// transaction as the create. Unknown or non-issue ids are rejected with
+	// 400 (service.ErrIssueLabelNotFound) rather than silently dropped.
+	LabelIDs []string `json:"label_ids,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
 	// platform-internal flows can deterministically locate it later. Only
 	// trusted callers should set these — currently the daemon CLI passes
@@ -2406,6 +2410,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// without duplicating the lookup here.
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
+	if !ok {
+		return
+	}
+
+	labelIDs, ok := parseUUIDSliceOrBadRequest(w, req.LabelIDs, "label_ids")
 	if !ok {
 		return
 	}
@@ -2528,14 +2537,21 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		OriginID:       originID,
 		Stage:          ptrToInt4(req.Stage),
 		AttachmentIDs:  attachmentIDs,
+		LabelIDs:       labelIDs,
 		AllowDuplicate: req.AllowDuplicate,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
 		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
-		BroadcastPayload: func(issue db.Issue, atts []db.Attachment) map[string]any {
+		BroadcastPayload: func(issue db.Issue, atts []db.Attachment, labels []db.IssueLabel) map[string]any {
 			payload := issueToResponse(issue, prefix)
 			payload.Attachments = buildAttachmentResponses(atts)
+			// Carry the authoritative label snapshot so every online client
+			// renders the new issue already labeled. Non-nil (even empty)
+			// pointer = authoritative list; the old flow's separate
+			// issue_labels:changed broadcast is gone.
+			labelResponses := labelsToResponse(labels)
+			payload.Labels = &labelResponses
 			return map[string]any{"issue": payload}
 		},
 	})
@@ -2558,6 +2574,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "project not found in this workspace")
 		return
 	}
+	if errors.Is(err, service.ErrIssueLabelNotFound) {
+		writeError(w, http.StatusBadRequest, "one or more labels not found in this workspace")
+		return
+	}
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error())
@@ -2569,6 +2589,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	resp := issueToResponse(issue, prefix)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
+	// Echo the authoritative labels attached in the create transaction. Always
+	// non-nil (empty slice when none) so a newer client can tell the backend
+	// understood label_ids and skip its legacy post-create attach fallback.
+	labelResponses := labelsToResponse(res.Labels)
+	resp.Labels = &labelResponses
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -2992,7 +3017,7 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 		return db.Agent{}, false, false
 	}
-	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID)) {
+	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.effectiveInvoker(), uuidToString(issue.WorkspaceID)) {
 		return db.Agent{}, false, false
 	}
 	// Coalescing queue: pending is still a valid route target, but callers

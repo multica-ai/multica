@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -114,6 +115,32 @@ func truncateForSummary(s string, maxRunes int) string {
 		return string(rs)
 	}
 	return string(rs[:maxRunes]) + "…"
+}
+
+// maxSynthesizedFallbackCommentRunes bounds the completion-fallback comment that
+// CompleteTask synthesizes from a task's final output when the agent left no
+// comment of its own during the run. A real final assistant message is at most
+// a few thousand words; anything larger is a runaway raw-stream dump — every
+// streamed text delta concatenated together plus a literal `tool call` line per
+// tool_use event — which some runtimes/providers emit as the task's Output on
+// long, tool-heavy runs. Such a dump (observed at 190–264 KB) must never be
+// posted, even partially, to the issue thread (GH #5455).
+const maxSynthesizedFallbackCommentRunes = 8000
+
+const oversizedFallbackCommentNotice = "This task completed, but its output was too large to post safely. The raw output was not posted. Review the task in this issue's Execution log."
+
+// truncateFallbackCommentBody bounds a synthesized completion-fallback comment
+// body. Unlike truncateForSummary (which flattens newlines for a one-line row
+// snapshot), it preserves genuine final messages below the cap verbatim. Output
+// above the cap is untrusted: the reported failure mode puts process narration
+// and tool traces at the head, so retaining any excerpt can expose execution
+// details and still discard the final answer. Replace the entire body with a
+// fixed notice instead. Callers pass the already-redacted body.
+func truncateFallbackCommentBody(body string, maxRunes int) string {
+	if utf8.RuneCountInString(body) <= maxRunes {
+		return body
+	}
+	return oversizedFallbackCommentNotice
 }
 
 const (
@@ -2672,7 +2699,10 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 							"agent_id", util.UUIDToString(task.AgentID),
 						)
 					} else {
-						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID, pgtype.UUID{})
+						// Redact first, then bound: a runaway raw-stream Output (GH #5455)
+						// must never reach the issue thread, even as a clipped excerpt.
+						content := truncateFallbackCommentBody(redact.Text(body), maxSynthesizedFallbackCommentRunes)
+						s.createAgentComment(ctx, task.IssueID, task.AgentID, content, "comment", task.TriggerCommentID, task.ID)
 					}
 				}
 			}
@@ -3030,13 +3060,38 @@ var retryableReasons = map[string]bool{
 
 func resumeUnsafeFailureReason(reason string) bool {
 	switch reason {
-	// Keep in sync with GetLastTaskSession / GetLastChatTaskSession and
-	// CreateRetryTask's fresh-session CASE WHEN.
-	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity":
+	// Failures that poison the agent CONVERSATION (not the workdir): resuming
+	// the same session would immediately replay the stuck/oversized state.
+	// Keep in sync with the GetLastTaskSession / GetLastChatTaskSession resume
+	// blacklists. (CreateRetryTask's fresh-session CASE WHEN only needs the
+	// subset of these that is also auto-retryable, currently
+	// codex_semantic_inactivity.)
+	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity", "agent_error.context_overflow":
 		return true
 	default:
 		return false
 	}
+}
+
+// ResumeUnsafeFailure reports whether a failed task's agent session must NOT be
+// resumed on a retry. It combines the failure_reason poison set
+// (resumeUnsafeFailureReason) with the SAME defense-in-depth on raw error text
+// that the GetLastTaskSession / GetLastChatTaskSession resume queries apply: an
+// Anthropic 400 invalid_request_error means the conversation history itself is
+// unprocessable even when failure_reason was mis- or un-classified (legacy
+// 'agent_error' rows written before MUL-1921, or deploy-window rows). Callers
+// that only have a failure_reason (e.g. at fail time) may pass an empty
+// errorText.
+//
+// This is the shared source of truth for the manual-retry claim path, which
+// reads the exact source task instead of GetLastTaskSession and would otherwise
+// bypass the error-text guard.
+func ResumeUnsafeFailure(failureReason, errorText string) bool {
+	if resumeUnsafeFailureReason(failureReason) {
+		return true
+	}
+	lower := strings.ToLower(errorText)
+	return strings.Contains(lower, "400") && strings.Contains(lower, "invalid_request_error")
 }
 
 // retryEligible reports whether a failed task qualifies for an automatic retry
@@ -3147,13 +3202,22 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 //     or squad leader). This preserves the CLI / API contract for callers
 //     that have an issue ID but no specific task to target.
 //
-// The new task is flagged force_fresh_session=true so the daemon starts a
-// clean agent session instead of resuming the prior (agent_id, issue_id)
-// session. A user clicking rerun has just judged the prior output bad —
-// resuming the same conversation would replay the same poisoned state.
-// Auto-retry of an orphaned mid-flight failure (HandleFailedTasks →
-// MaybeRetryFailedTask → CreateRetryTask) does NOT take this path, so
-// MUL-1128's mid-flight resume contract is preserved.
+// A retry ALWAYS reuses the source task's workdir when it still exists on
+// disk (MUL-4869): a transient failure — network, provider 5xx/rate-limit,
+// runtime_offline, timeout, or an auth/quota/config error the user has since
+// fixed — should not throw away the work already done. Only the agent SESSION
+// is conditionally resumed, and that decision is made later by the daemon claim
+// handler from the SOURCE task (via rerun_of_task_id), NOT baked into this row.
+// enqueueRerunTask pins force_fresh_session=true so an old claim handler during
+// a rolling deploy degrades to a clean start rather than resuming a different
+// execution; the new claim handler ignores the flag for reruns and resumes the
+// session only when the source failure did not poison the conversation (see
+// service.ResumeUnsafeFailure) and the source ran on the same runtime. When the
+// dir is objectively unreusable (GC'd, absent on the claiming runtime, or never
+// recorded) the daemon falls back to a fresh workdir. Auto-retry of an orphaned
+// mid-flight failure (HandleFailedTasks → MaybeRetryFailedTask →
+// CreateRetryTask) takes its own path, so MUL-1128's mid-flight resume contract
+// is preserved.
 //
 // ErrRerunInvokeNotAllowed signals that RerunIssue refused to rerun because the
 // current operator may not invoke the resolved target agent. The handler maps it
@@ -3340,8 +3404,16 @@ func (s *TaskService) promoteNewestSurvivingComment(ctx context.Context, ids []p
 // When the target agent is the issue's single-agent assignee we use the
 // assignee-driven path (enqueueIssueTask) so the issue-assignee bookkeeping
 // stays in sync; otherwise (squad member, prior assignee that has since been
-// reassigned, mention agent) we use the mention path with the same
-// force_fresh_session=true contract.
+// reassigned, mention agent) we use the mention path.
+//
+// force_fresh_session is pinned to true on every rerun row on purpose. It is
+// the rollback-safe legacy signal: an OLD claim handler (mid rolling deploy)
+// gates the whole resume lookup on !force_fresh_session, so it starts clean
+// instead of resuming via the (agent, issue) most-recent query — which could
+// pick a different execution than the one the user clicked. The NEW claim
+// handler ignores this flag for reruns and instead reads the exact source task
+// (rerun_of_task_id) to reuse its workdir and, when the failure did not poison
+// the conversation, resume its session (MUL-4869).
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
