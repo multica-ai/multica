@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiClient } from "./client";
 import { parseWithFallback } from "./schema";
-import { EMPTY_ISSUE } from "./schemas";
 
 // Helper: stub fetch with a single JSON response. Status defaults to 200.
 function stubFetchJson(body: unknown, status = 200) {
@@ -94,10 +93,35 @@ describe("ApiClient schema fallback", () => {
 
   describe("createIssue", () => {
     // The create modal decides whether to run its label-attach fallback by
-    // reading `labels` off the parsed response, so these guard the exact three
-    // shapes: absent (older backend) → undefined, valid → Label[], malformed →
-    // undefined (never a wrong shape masquerading as "handled").
-    const validIssue = { ...EMPTY_ISSUE, id: "issue-1", title: "Created" };
+    // reading `labels` off the parsed response, and treats a rejection as a
+    // failed create (keep the draft, failure toast). So: a valid issue with
+    // any labels shape resolves (labels absent → undefined, valid → Label[],
+    // malformed → undefined), but a body that isn't a usable issue rejects
+    // rather than fabricating a blank "success".
+    const validIssue = {
+      id: "issue-1",
+      workspace_id: "ws-1",
+      number: 1,
+      identifier: "MUL-1",
+      title: "Created",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 0,
+      stage: null,
+      start_date: null,
+      due_date: null,
+      metadata: {},
+      properties: {},
+      created_at: "2025-01-01T00:00:00Z",
+      updated_at: "2025-01-01T00:00:00Z",
+    };
     const label = {
       id: "label-1",
       workspace_id: "ws-1",
@@ -139,12 +163,16 @@ describe("ApiClient schema fallback", () => {
       expect(issue.labels).toBeUndefined();
     });
 
-    it("degrades to the empty issue rather than throwing when the whole body is malformed", async () => {
+    it("rejects when the whole response body is not a usable issue (no fake success)", async () => {
       stubFetchJson({ not: "an issue" }, 201);
       const client = new ApiClient("https://api.example.test");
-      const issue = await client.createIssue({ title: "Created" });
-      expect(issue).toEqual(EMPTY_ISSUE);
-      expect(issue.labels).toBeUndefined();
+      await expect(client.createIssue({ title: "Created" })).rejects.toThrow();
+    });
+
+    it("rejects when the created issue has an empty id", async () => {
+      stubFetchJson({ ...validIssue, id: "" }, 201);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.createIssue({ title: "Created" })).rejects.toThrow();
     });
   });
 

@@ -203,7 +203,6 @@ import {
   FALLBACK_AUTOPILOT_RUN,
   ListIssuesResponseSchema,
   CreateIssueResponseSchema,
-  EMPTY_ISSUE,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -663,13 +662,23 @@ export class ApiClient {
     // Parse through a schema (not a raw cast): the create modal keys its
     // label-attach compatibility fallback off `labels` being absent vs a
     // validated Label[], so an unvalidated wrong shape must not slip through.
+    // Unlike list endpoints, a create that returns an unusable body is a
+    // FAILED mutation, not a safe-empty read: fall back to null and reject so
+    // the modal keeps the draft and shows a failure toast instead of a blank
+    // "created" card pointing at an empty issue id. parseWithFallback already
+    // logged the schema issues + raw payload; the empty message lets the modal
+    // render its localized "failed to create" toast.
     const raw = await this.fetch<unknown>("/api/issues", {
       method: "POST",
       body: JSON.stringify(data),
     });
-    return parseWithFallback(raw, CreateIssueResponseSchema, EMPTY_ISSUE, {
+    const issue = parseWithFallback<Issue | null>(raw, CreateIssueResponseSchema, null, {
       endpoint: "POST /api/issues",
     });
+    if (!issue) {
+      throw new Error();
+    }
+    return issue;
   }
 
   async quickCreateIssue(data: {

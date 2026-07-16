@@ -19,7 +19,6 @@ import type {
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
   InboxWorkspaceUnread,
-  Issue,
   Label,
   IssueProperty,
   ListPropertiesResponse,
@@ -470,45 +469,24 @@ export const ListIssuesResponseSchema = z.object({
   total: z.number().default(0),
 }).loose();
 
-// Response schema for POST /api/issues. `labels` is the backend-compatibility
-// signal the create modal reads to decide whether the backend attached labels
-// in the create transaction (present) or predates that (absent → fall back to
-// per-label attach). Validate it strictly as Label[] and degrade any malformed
-// value to `undefined` — the same as an absent field — so a wrong shape (null,
-// object, a garbage array) can never masquerade as "handled" and suppress the
-// fallback. See packages/views/modals/create-issue.tsx. Unlike the loose
-// IssueSchema.labels (z.array(z.unknown())), the elements are fully validated.
+// Response schema for POST /api/issues. Two tightenings over IssueSchema:
+//
+//   - `id` must be non-empty. A created issue always carries a real id, so an
+//     empty/absent id means the create effectively failed. createIssue turns a
+//     schema failure into a rejection (not a fabricated success), so tightening
+//     id here routes an id-less body to that same failure path.
+//   - `labels` is the backend-compatibility signal the create modal reads to
+//     decide whether the backend attached labels in the create transaction
+//     (present) or predates that (absent → fall back to per-label attach).
+//     Validate it strictly as Label[] and degrade a malformed value to
+//     `undefined` — the same as an absent field — so a wrong shape (null,
+//     object, a garbage array) can never masquerade as "handled" and suppress
+//     the fallback. Unlike the loose IssueSchema.labels (z.array(z.unknown())),
+//     the elements are fully validated. See packages/views/modals/create-issue.tsx.
 export const CreateIssueResponseSchema = IssueSchema.extend({
+  id: z.string().min(1),
   labels: z.array(LabelSchema).optional().catch(undefined),
 }).loose();
-
-// Never-throw fallback for a create response that fails the schema entirely.
-// `labels` is left undefined so the modal treats it as an older backend and
-// falls back to the per-label attach rather than silently dropping labels.
-export const EMPTY_ISSUE: Issue = {
-  id: "",
-  workspace_id: "",
-  number: 0,
-  identifier: "",
-  title: "",
-  description: null,
-  status: "todo",
-  priority: "none",
-  assignee_type: null,
-  assignee_id: null,
-  creator_type: "member",
-  creator_id: "",
-  parent_issue_id: null,
-  project_id: null,
-  position: 0,
-  stage: null,
-  start_date: null,
-  due_date: null,
-  metadata: {},
-  properties: {},
-  created_at: "",
-  updated_at: "",
-};
 
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   issues: [],
