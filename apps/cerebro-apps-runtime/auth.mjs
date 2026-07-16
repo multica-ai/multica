@@ -2,16 +2,21 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 export function signServiceRequest(secret, method, path, body = Buffer.alloc(0), now = new Date()) {
   const timestamp = now.toISOString();
-  const bodyHash = createHash("sha256").update(body).digest("hex");
-  const signature = createHmac("sha256", secret).update(`${method}\n${path}\n${bodyHash}\n${timestamp}`).digest("hex");
-  return { timestamp, signature: `sha256=${signature}` };
+  return { timestamp, signature: signatureForTimestamp(secret, method, path, body, timestamp) };
 }
 
 export function verifyServiceRequest(secret, method, path, body, signed, now = new Date()) {
-  const signedAt = Date.parse(signed?.timestamp ?? "");
+  const timestamp = signed?.timestamp ?? "";
+  const signedAt = Date.parse(timestamp);
   if (!Number.isFinite(signedAt) || Math.abs(now.getTime() - signedAt) > 120_000) return false;
-  const expected = signServiceRequest(secret, method, path, body, new Date(signedAt));
-  return safeEqual(expected.signature, signed.signature ?? "");
+  const expected = signatureForTimestamp(secret, method, path, body, timestamp);
+  return safeEqual(expected, signed.signature ?? "");
+}
+
+function signatureForTimestamp(secret, method, path, body, timestamp) {
+  const bodyHash = createHash("sha256").update(body).digest("hex");
+  const signature = createHmac("sha256", secret).update(`${method}\n${path}\n${bodyHash}\n${timestamp}`).digest("hex");
+  return `sha256=${signature}`;
 }
 
 export function mintBundleToken(secret, appId, version, now = new Date(), ttlMs = 30 * 60_000) {
