@@ -1,0 +1,118 @@
+package internalbrowserqa
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+type commandCall struct {
+	args  []string
+	stdin string
+}
+
+type recordingCommander struct {
+	calls []commandCall
+}
+
+func (c *recordingCommander) Run(_ context.Context, stdin string, args ...string) ([]byte, error) {
+	c.calls = append(c.calls, commandCall{args: append([]string(nil), args...), stdin: stdin})
+	switch {
+	case len(args) > 0 && args[len(args)-1] == "url":
+		return []byte("http://firtal-data-registry-private.internal:3000/\n"), nil
+	case len(args) > 0 && args[len(args)-1] == "snapshot":
+		return []byte("Dashboard\nData Sources\nFinancial overview\nIssues\nAgents\nDesk\nAnalytics\nLogout\n"), nil
+	case len(args) > 0 && args[len(args)-1] == "errors":
+		return []byte("[]\n"), nil
+	default:
+		return nil, nil
+	}
+}
+
+func TestTargetForUsesOnlyInternalAllowlist(t *testing.T) {
+	target, err := TargetFor("registry")
+	if err != nil {
+		t.Fatalf("TargetFor(registry): %v", err)
+	}
+	if target.URL != "http://firtal-data-registry-private.internal:3000/auth/login?manual=true" {
+		t.Fatalf("registry URL = %q", target.URL)
+	}
+	if !strings.HasSuffix(target.Host(), ".internal:3000") {
+		t.Fatalf("registry host = %q, want internal host", target.Host())
+	}
+	if _, err := TargetFor("https://registry.firtal.com"); err == nil {
+		t.Fatal("arbitrary public URL was accepted as a target")
+	}
+}
+
+func TestRunnerSendsCredentialsOnlyThroughBatchStdin(t *testing.T) {
+	const username = "registry-test@example.com"
+	const password = "password-must-never-leak"
+	commander := &recordingCommander{}
+	runner := NewRunner(commander)
+
+	result, err := runner.Verify(context.Background(), "registry", Credential{Username: username, Password: password})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	encoded, _ := json.Marshal(result)
+	if strings.Contains(string(encoded), username) || strings.Contains(string(encoded), password) {
+		t.Fatalf("result leaked a credential: %s", encoded)
+	}
+
+	var secretCallCount int
+	for _, call := range commander.calls {
+		argv := strings.Join(call.args, " ")
+		if strings.Contains(argv, username) || strings.Contains(argv, password) {
+			t.Fatalf("credential leaked into argv: %q", argv)
+		}
+		if strings.Contains(call.stdin, username) || strings.Contains(call.stdin, password) {
+			secretCallCount++
+			if len(call.args) == 0 || call.args[len(call.args)-1] != "batch" {
+				t.Fatalf("credential was sent outside batch stdin: args=%v", call.args)
+			}
+		}
+	}
+	if secretCallCount != 1 {
+		t.Fatalf("secret-bearing stdin calls = %d, want 1", secretCallCount)
+	}
+}
+
+func TestRunnerRejectsCredentialForNoLoginTarget(t *testing.T) {
+	runner := NewRunner(&recordingCommander{})
+	_, err := runner.Verify(context.Background(), "customer-service", Credential{Username: "unexpected", Password: "unexpected"})
+	if err == nil {
+		t.Fatal("credential was accepted for a no-login target")
+	}
+}
+
+func TestRunnerSendsSessionCookieOnlyThroughBatchStdin(t *testing.T) {
+	const sessionToken = "signed-session-must-never-leak"
+	commander := &recordingCommander{}
+	runner := NewRunner(commander)
+
+	result, err := runner.Verify(context.Background(), "multica", Credential{SessionToken: sessionToken})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	encoded, _ := json.Marshal(result)
+	if strings.Contains(string(encoded), sessionToken) {
+		t.Fatalf("result leaked session token: %s", encoded)
+	}
+	var stdinCount int
+	for _, call := range commander.calls {
+		if strings.Contains(strings.Join(call.args, " "), sessionToken) {
+			t.Fatalf("session token leaked into argv: %v", call.args)
+		}
+		if strings.Contains(call.stdin, sessionToken) {
+			stdinCount++
+			if call.args[len(call.args)-1] != "batch" {
+				t.Fatalf("session token sent outside batch stdin: %v", call.args)
+			}
+		}
+	}
+	if stdinCount != 1 {
+		t.Fatalf("secret-bearing stdin calls = %d, want 1", stdinCount)
+	}
+}

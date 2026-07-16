@@ -146,6 +146,7 @@ import (
 	cerebrowebfetchpolicy "github.com/multica-ai/multica/server/internal/cerebro/webfetchpolicy"
 	// CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 Agent Vault broker module import
 	cerebroagentvault "github.com/multica-ai/multica/server/internal/cerebro/agentvault"
+	cerebrointernalbrowserqa "github.com/multica-ai/multica/server/internal/cerebro/internalbrowserqa"
 	// CEREBRO-PATCH(cerebro-mcp-relay-wire): FIR-1563 MCP connection relay module import
 	cerebromcprelay "github.com/multica-ai/multica/server/internal/cerebro/mcprelay"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -653,6 +654,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	avMod := cerebroagentvault.NewModule(pool)                                                                              // CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 per-agent Agent Vault broker at claim.
 	h.AgentVaultBroker = avMod.Service                                                                                      // CEREBRO-PATCH(cerebro-agentvault-broker-service): TECH-3196 expose grant-reconciling service.
 	h.PersonalBrowserSecrets = cerebroagentvault.NewClient(cerebroagentvault.LoadConfig(), cerebroConnectionsHandler.Store) // CEREBRO-PATCH(personal-browser-secure-fill): FIR-3006 server-only value bridge.
+	h.InternalBrowserQA = cerebrointernalbrowserqa.NewRunner(cerebrointernalbrowserqa.ExecCommander{})                      // CEREBRO-PATCH(internal-agent-browser-qa): FIR-3006 server-side *.internal browser verification.
 	// CEREBRO-PATCH(cerebro-agentvault-mirror-wire): FIR-1739 Part B project tool-policy credential grants onto the Agent Vault access table.
 	avMod.Service.SetGrantMirror(&chainCredentialGrantSource{policy: cerebrotoolpolicy.NewStore(pool), creds: cerebroQueries}, avMod.Store)
 	// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent access-table CRUD handler; FIR-2478 vault-listing resolves the "Agent Vault" connection.
@@ -2122,8 +2124,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/cerebro/issues/check-similar/event", h.DupCheckEvent)
 			// CEREBRO-PATCH(personal-browser-authorize-route): FIR-2037 per-action personal-browser gate (agent token; host-conditioned, Base=Deny).
 			r.Post("/api/cerebro/personal-browser/authorize", h.AuthorizePersonalBrowser)
-			r.Post("/api/cerebro/personal-browser/secure-fill", h.SecureFillPersonalBrowser) // CEREBRO-PATCH(personal-browser-secure-fill): FIR-3006
-			r.Post("/api/cerebro/agent-browser/provision-auth", h.ProvisionAgentBrowserAuth) // CEREBRO-PATCH(agent-browser-vault-route): FIR-3006
+			r.Post("/api/cerebro/personal-browser/secure-fill", h.SecureFillPersonalBrowser)   // CEREBRO-PATCH(personal-browser-secure-fill): FIR-3006
+			r.Post("/api/cerebro/agent-browser/provision-auth", h.ProvisionAgentBrowserAuth)   // CEREBRO-PATCH(agent-browser-vault-route): FIR-3006
+			r.Post("/api/cerebro/agent-browser/internal-verify", h.VerifyInternalAgentBrowser) // CEREBRO-PATCH(internal-agent-browser-qa-route): FIR-3006
 			// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools for the Multica MCP server (agent token; default-deny per agent).
 			r.Get("/api/cerebro/connection-tools", cerebroConnectionToolsHandler.List)
 			r.Post("/api/cerebro/connection-tools/call", cerebroConnectionToolsHandler.Call)

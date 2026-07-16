@@ -33,14 +33,26 @@ FROM alpine:3.21
 RUN apk add --no-cache \
     antiword \
     ca-certificates \
+    chromium \
+    freetype \
     git \
+    harfbuzz \
     libreoffice-writer \
+    nodejs \
+    npm \
+    nss \
     poppler-utils \
     su-exec \
     tesseract-ocr \
     tesseract-ocr-data-dan \
     tesseract-ocr-data-eng \
+    ttf-freefont \
     tzdata
+
+RUN npm install --global agent-browser@0.26.0 \
+    && npm cache clean --force
+
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 WORKDIR /app
 

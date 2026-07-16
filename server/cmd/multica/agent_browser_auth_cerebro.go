@@ -43,6 +43,18 @@ type agentBrowserProvisionOptions struct {
 	PasswordKey string
 }
 
+type internalBrowserVerifyRequest struct {
+	App string `json:"app"`
+}
+
+type internalBrowserVerifyResponse struct {
+	App          string   `json:"app"`
+	InternalHost string   `json:"internal_host"`
+	FinalURL     string   `json:"final_url"`
+	Markers      []string `json:"markers"`
+	Errors       []string `json:"errors"`
+}
+
 type agentBrowserAuthSaver interface {
 	Save(ctx context.Context, profile, loginURL, username, password string) error
 }
@@ -110,6 +122,32 @@ var agentBrowserProvisionAuthCmd = &cobra.Command{
 	},
 }
 
+func verifyInternalAgentBrowser(ctx context.Context, client *cli.APIClient, out io.Writer, app string) error {
+	var response internalBrowserVerifyResponse
+	if err := client.PostJSON(ctx, "/api/cerebro/agent-browser/internal-verify", internalBrowserVerifyRequest{App: app}, &response); err != nil {
+		return err
+	}
+	return json.NewEncoder(out).Encode(response)
+}
+
+var agentBrowserInternalVerifyCmd = &cobra.Command{
+	Use:   "internal-verify",
+	Short: "Verify an allowlisted app through its Sliplane internal host",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		app, _ := cmd.Flags().GetString("app")
+		if app == "" {
+			return fmt.Errorf("--app is required")
+		}
+		client, ctx, cancel, err := appClient(cmd)
+		if err != nil {
+			return err
+		}
+		defer cancel()
+		return verifyInternalAgentBrowser(ctx, client, os.Stdout, app)
+	},
+}
+
 func init() {
 	agentBrowserProvisionAuthCmd.Flags().String("profile-name", "", "agent-browser auth profile name")
 	agentBrowserProvisionAuthCmd.Flags().String("url", "", "Login page URL")
@@ -117,4 +155,6 @@ func init() {
 	agentBrowserProvisionAuthCmd.Flags().String("username-key", "", "Credential key containing the login username")
 	agentBrowserProvisionAuthCmd.Flags().String("password-key", "", "Credential key containing the login password")
 	agentBrowserCmd.AddCommand(agentBrowserProvisionAuthCmd)
+	agentBrowserInternalVerifyCmd.Flags().String("app", "", "Allowlisted app: multica, cerebro, registry, finance, pricing, or customer-service")
+	agentBrowserCmd.AddCommand(agentBrowserInternalVerifyCmd)
 }

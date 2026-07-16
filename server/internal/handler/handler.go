@@ -275,6 +275,9 @@ type Handler struct {
 	// PersonalBrowserSecrets is the server-only Agent Vault reader used by
 	// secure-fill. Its returned value must never enter an agent response or log.
 	PersonalBrowserSecrets PersonalBrowserSecretReader
+	// CEREBRO-PATCH(internal-agent-browser-qa): FIR-3006 runs browser QA from the
+	// Sliplane server so target traffic stays on *.internal.
+	InternalBrowserQA InternalBrowserQARunner
 	// CEREBRO-PATCH(handler-capability-card-tools): TECH-3642 capabilities card reuses the tool-policy table.
 	CapabilityToolPolicy AgentCapabilityToolTabler
 	// CEREBRO-PATCH(handler-capability-card-conns): TECH-3642 capabilities card reuses the connections list.

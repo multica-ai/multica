@@ -26,3 +26,18 @@ func TestProvisionAgentBrowserAuthRejectsNonTaskToken(t *testing.T) {
 		t.Fatal("response leaked a credential key")
 	}
 }
+
+func TestVerifyInternalAgentBrowserRejectsNonTaskToken(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodPost, "/api/cerebro/agent-browser/internal-verify", strings.NewReader(`{"app":"registry"}`))
+	rec := httptest.NewRecorder()
+
+	h.VerifyInternalAgentBrowser(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-task-token status = %d, want 403", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "registry-test") {
+		t.Fatal("response leaked credential material")
+	}
+}

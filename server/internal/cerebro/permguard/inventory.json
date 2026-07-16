@@ -1957,6 +1957,10 @@
       "gate": "task_token + exact Agent Vault credential.reveal Allow on browser-testers group"
     },
     {
+      "id": "POST /api/cerebro/agent-browser/internal-verify",
+      "gate": "task_token + browser-testers group; exact Agent Vault credential.reveal Allow for credential-backed targets"
+    },
+    {
       "id": "POST /api/cerebro/connection-tools/call",
       "gate": "connection_endpoint_policy — agent-only (X-Actor-Source=task_token); per-agent default-deny via toolpolicy.ConnectionEndpointEffective; behind feature flag cerebro_api_connection_tools (FIR-2273)"
     }
@@ -2495,6 +2499,10 @@
     {
       "id": "agent-browser provision-auth",
       "gate": "via:POST /api/cerebro/agent-browser/provision-auth"
+    },
+    {
+      "id": "agent-browser internal-verify",
+      "gate": "via:POST /api/cerebro/agent-browser/internal-verify"
     },
     {
       "id": "analytics backfill",

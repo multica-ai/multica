@@ -76,3 +76,32 @@ func TestAgentBrowserAuthSaveArgsExcludePassword(t *testing.T) {
 		t.Fatalf("argv = %#v, want %#v", args, want)
 	}
 }
+
+func TestVerifyInternalAgentBrowserPrintsOnlySanitizedResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/api/cerebro/agent-browser/internal-verify" {
+			t.Fatalf("path = %q", req.URL.Path)
+		}
+		var body internalBrowserVerifyRequest
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.App != "registry" {
+			t.Fatalf("app = %q", body.App)
+		}
+		_, _ = w.Write([]byte(`{"app":"registry","internal_host":"firtal-data-registry-private.internal:3000","final_url":"http://firtal-data-registry-private.internal:3000/","markers":["Dashboard"],"errors":[]}`))
+	}))
+	defer server.Close()
+
+	client := cli.NewAPIClient(server.URL, "workspace-id", "task-token")
+	var out bytes.Buffer
+	if err := verifyInternalAgentBrowser(context.Background(), client, &out, "registry"); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(out.Bytes(), []byte(`"app":"registry"`)) {
+		t.Fatalf("missing sanitized result: %s", out.String())
+	}
+	if bytes.Contains(out.Bytes(), []byte("password")) || bytes.Contains(out.Bytes(), []byte("username")) {
+		t.Fatalf("credential field leaked to output: %s", out.String())
+	}
+}
