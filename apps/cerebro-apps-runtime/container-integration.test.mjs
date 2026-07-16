@@ -11,7 +11,10 @@ const APP_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const APP_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const VERSION = "1.0.0";
 
-test("killing app A leaves app B healthy on an internal-only network", { timeout: 60_000 }, async (t) => {
+// A cold GitHub runner may spend more than one minute building the worker image
+// before the isolation assertions begin. Keep the behavioural wait loops short,
+// but allow the one-time image build to complete on an uncached runner.
+test("killing app A leaves app B healthy on an internal-only network", { timeout: 120_000 }, async (t) => {
   try {
     await exec("docker", ["info"]);
   } catch {
