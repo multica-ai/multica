@@ -24,7 +24,7 @@ func TestCLIConfig_BackwardCompat_OldFileLoadsWithNilBackends(t *testing.T) {
 	}
 	historical := `{
   "server_url": "https://api.multica.ai",
-  "app_url": "https://app.multica.ai",
+  "app_url": "https://multica.ai",
   "workspace_id": "ws-123",
   "token": "mul_abcdef"
 }`
@@ -177,7 +177,7 @@ func TestCLIConfig_ProfileCommandOverrides_RoundTrip(t *testing.T) {
 
 	original := CLIConfig{
 		ServerURL:   "https://api.multica.ai",
-		AppURL:      "https://app.multica.ai",
+		AppURL:      "https://multica.ai",
 		WorkspaceID: "ws-123",
 		Token:       "mul_xyz",
 		Backends: &BackendOverrides{

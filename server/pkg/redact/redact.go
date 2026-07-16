@@ -26,17 +26,40 @@ var patterns = []secretPattern{
 	// PEM private keys (multi-line)
 	{regexp.MustCompile(`(?s)-----BEGIN[A-Z\s]*PRIVATE KEY-----.*?-----END[A-Z\s]*PRIVATE KEY-----`), "[REDACTED PRIVATE KEY]"},
 
-	// GitHub tokens (classic PAT, fine-grained, OAuth, etc.)
+	// GitHub tokens (classic PAT, OAuth, user-to-server, server-to-server, refresh)
 	{regexp.MustCompile(`\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,255}\b`), "[REDACTED GITHUB TOKEN]"},
+
+	// GitHub fine-grained personal access tokens use the github_pat_ prefix,
+	// which the classic ghp_/gho_/... pattern above does not cover. Without
+	// this line a fine-grained PAT emitted in agent output leaks unredacted
+	// to the database and WebSocket broadcast.
+	{regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,255}\b`), "[REDACTED GITHUB TOKEN]"},
 
 	// OpenAI / Anthropic API keys
 	{regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}\b`), "[REDACTED API KEY]"},
 
-	// Slack tokens
-	{regexp.MustCompile(`\bxox[bporas]-[A-Za-z0-9\-]{10,}\b`), "[REDACTED SLACK TOKEN]"},
+	// Slack bot/user/legacy tokens. The char class includes 'e' so the
+	// newer xoxe- config/refresh tokens are covered alongside xoxb/p/o/r/a/s.
+	{regexp.MustCompile(`\bxox[bporase]-[A-Za-z0-9\-]{10,}\b`), "[REDACTED SLACK TOKEN]"},
+
+	// Slack app-level tokens use the xapp- prefix, which the xox*- rule above
+	// does not match. Without this an app-level token echoed in agent output
+	// leaks unredacted to the DB / WebSocket broadcast.
+	{regexp.MustCompile(`\bxapp-[A-Za-z0-9-]{10,}\b`), "[REDACTED SLACK TOKEN]"},
 
 	// GitLab personal access tokens
 	{regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}\b`), "[REDACTED GITLAB TOKEN]"},
+
+	// Google API keys always start with the AIza prefix and are 39 chars total
+	// (AIza + 35). Capture and restore the trailing delimiter so keys ending in
+	// a non-word character such as '-' are still redacted.
+	{regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}([^0-9A-Za-z_-]|$)`), "[REDACTED GOOGLE API KEY]$1"},
+
+	// Stripe secret / restricted live keys (sk_live_ / rk_live_). The sk-
+	// rule above only matches the hyphen form used by OpenAI/Anthropic; Stripe
+	// uses an underscore, so live keys are not covered without this. Publishable
+	// keys (pk_live_) are intentionally excluded — they are not secret.
+	{regexp.MustCompile(`\b(?:sk|rk)_live_[0-9A-Za-z]{16,}\b`), "[REDACTED STRIPE KEY]"},
 
 	// JWT tokens (three base64url segments)
 	{regexp.MustCompile(`\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`), "[REDACTED JWT]"},

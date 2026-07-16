@@ -18,6 +18,14 @@ import { useT } from "../../../i18n";
 const HIGHLIGHT_CLASS = "bg-accent";
 const ITEM_SELECTOR = "button[data-picker-item]:not(:disabled)";
 
+/**
+ * Default class of the picker popover trigger. Shared with the deferred
+ * (pre-mount) lookalike trigger in `DeferredPopup` call sites so the swap on
+ * first interaction is pixel-identical.
+ */
+export const PICKER_TRIGGER_CLASS =
+  "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden";
+
 // ---------------------------------------------------------------------------
 // PropertyPicker — generic Popover shell with optional search
 // ---------------------------------------------------------------------------
@@ -145,7 +153,7 @@ export function PropertyPicker({
 
   const popoverTrigger = (
     <PopoverTrigger
-      className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+      className={triggerRender ? undefined : PICKER_TRIGGER_CLASS}
       render={triggerRender}
     >
       {trigger}

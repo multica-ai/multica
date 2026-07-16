@@ -136,6 +136,21 @@ func TestClassifyRules(t *testing.T) {
 		// 14. Catchall.
 		{"unrecognized", "the agent gave up for reasons unknown", ReasonAgentUnknown},
 		{"sentence with no marker", "Hello world.", ReasonAgentUnknown},
+
+		// 15. Digit-boundary regression: 3-digit HTTP status codes must NOT
+		//     match when embedded in a longer number. Before the fix these
+		//     landed in provider auth/quota/capacity buckets, masking hard
+		//     process failures under a provider reason and polluting failure
+		//     observability.
+		{"402 embedded not quota", "agent consumed 402913 tokens before crashing", ReasonAgentUnknown},
+		{"529 embedded not capacity", "request latency was 15290ms; then it panicked: signal killed", ReasonAgentProcessFailure},
+		{"403 embedded not auth", "processed 4030 items, then exit status 1", ReasonAgentProcessFailure},
+		{"401 embedded not auth", "job 24019 finished, process exited with status 2", ReasonAgentProcessFailure},
+		{"429 embedded not capacity", "seq 14290 unknown outcome", ReasonAgentUnknown},
+		// Genuine status codes with a boundary still classify correctly.
+		{"402 boundary still quota", "API Error: 402 Payment Required", ReasonAgentProviderQuotaLimit},
+		{"403 boundary still auth", "HTTP 403 Forbidden", ReasonAgentProviderAuthOrAccess},
+		{"429 boundary still capacity", "got 429 from provider", ReasonAgentProviderCapacityOrRateLimit},
 	}
 
 	for _, c := range cases {

@@ -54,6 +54,7 @@ type gcStats struct {
 	skipped         int            // task dirs left untouched
 	artifactDirs    int            // task dirs that had at least one artifact reclaimed
 	artifactRemoved int            // count of removed artifact subdirs
+	storesReclaimed int            // per-issue Codex session stores reclaimed past their TTL
 	bytesReclaimed  int64          // total bytes freed in this cycle
 	byPattern       map[string]int // basename -> reclaim count, for visibility
 }
@@ -82,13 +83,22 @@ func (d *Daemon) runGC(ctx context.Context) {
 	// Prune stale worktree references from all bare repo caches.
 	d.pruneRepoWorktrees(root)
 
-	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 {
+	// Reclaim per-issue Codex session stores idle past their TTL. These live
+	// under the shared ~/.codex home (outside WorkspacesRoot) so resume survives
+	// the task GC, which means they need their own bounded lifecycle (MUL-4424).
+	if storesRemoved, storeBytes := execenv.PruneCodexSessionStores(d.cfg.Profile, d.cfg.GCCodexSessionTTL, time.Now(), d.reserveCodexStoreForDeletion, d.logger); storesRemoved > 0 {
+		stats.storesReclaimed += storesRemoved
+		stats.bytesReclaimed += storeBytes
+	}
+
+	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 {
 		d.logger.Info("gc: cycle complete",
 			"cleaned", stats.cleaned,
 			"orphaned", stats.orphaned,
 			"skipped", stats.skipped,
 			"artifact_dirs", stats.artifactDirs,
 			"artifact_removed", stats.artifactRemoved,
+			"codex_session_stores_reclaimed", stats.storesReclaimed,
 			"bytes_reclaimed", stats.bytesReclaimed,
 			"by_pattern", stats.byPattern,
 		)

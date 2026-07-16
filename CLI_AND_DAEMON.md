@@ -151,6 +151,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
 | [Qoder CLI](https://docs.qoder.com/) | `qodercli` | Qoder ACP coding agent |
 | [Trae](https://docs.trae.cn/cli) | `traecli` | ByteDance TRAE CLI (ACP via `traecli acp serve`) |
+| [Grok Build CLI](https://docs.x.ai/) | `grok` | xAI Grok Build CLI (ACP via `grok agent stdio`) |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -172,6 +173,7 @@ Daemon behavior is configured via flags or environment variables:
 | Heartbeat interval | `--heartbeat-interval` | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` |
 | Agent timeout | `--agent-timeout` | `MULTICA_AGENT_TIMEOUT` | `0` (no cap; bounded by the watchdogs) |
 | Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` |
+| OpenCode idle watchdog | — | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` (`0` falls back to the generic idle watchdog; cannot extend it) |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
@@ -226,6 +228,8 @@ Agent-specific overrides:
 | `MULTICA_QODER_MODEL` | Override the Qoder model used |
 | `MULTICA_TRAECLI_PATH` | Custom path to the `traecli` binary |
 | `MULTICA_TRAECLI_MODEL` | Override the Trae model used (a model id from your logged-in traecli catalog, e.g. `Doubao-Seed-2.1-Pro`) |
+| `MULTICA_GROK_PATH` | Custom path to the `grok` binary (defaults to `grok` on PATH; often `~/.grok/bin/grok`) |
+| `MULTICA_GROK_MODEL` | Override the Grok model used (e.g. `grok-4.5`) |
 
 If a previously generated `~/.multica/hooks` wrapper is first on `PATH` and calls the same command name again, the daemon skips that hooks directory during built-in agent discovery and records the real binary path behind it. If your interactive shell still recurses when you run `claude`, `codex`, or `hermes` manually, remove the hooks entry from your shell startup file or replace the wrapper body with an absolute `exec /path/to/real-binary "$@"`.
 
@@ -582,16 +586,17 @@ multica project get <id> --output json
 multica project create --title "2026 Week 16 Sprint" --icon "🏃" --lead "Lambda"
 ```
 
-Flags: `--title` (required), `--description`, `--status`, `--icon`, `--lead`.
+Flags: `--title` (required), `--description`, `--status`, `--icon`, `--lead`, `--start-date`, `--due-date`. Dates are calendar days (`YYYY-MM-DD`).
 
 ### Update Project
 
 ```bash
 multica project update <id> --title "New title" --status in_progress
 multica project update <id> --lead "Lambda"
+multica project update <id> --due-date 2026-04-15
 ```
 
-Flags: `--title`, `--description`, `--status`, `--icon`, `--lead`.
+Flags: `--title`, `--description`, `--status`, `--icon`, `--lead`, `--start-date`, `--due-date`. For the date flags, pass an empty string (e.g. `--start-date ""`) to clear the date.
 
 ### Change Status
 

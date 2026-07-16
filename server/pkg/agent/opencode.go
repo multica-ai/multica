@@ -227,6 +227,11 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		} else if exitErr != nil && scanResult.status == "completed" {
 			scanResult.status = "failed"
 			scanResult.errMsg = fmt.Sprintf("opencode exited with error: %v", exitErr)
+		} else if exitErr != nil && scanResult.noTerminalSignal {
+			// Status is already "failed" from the terminal-signal guard; append
+			// the process exit detail so a mid-step crash still surfaces the
+			// signal / exit code that killed it.
+			scanResult.errMsg = fmt.Sprintf("%s; opencode exited with error: %v", scanResult.errMsg, exitErr)
 		}
 
 		b.cfg.Logger.Info("opencode finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
@@ -260,11 +265,12 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 // eventResult holds the accumulated state from processing the event stream.
 type eventResult struct {
-	status    string
-	errMsg    string
-	output    string
-	sessionID string
-	usage     TokenUsage // accumulated token usage across all steps
+	status           string
+	errMsg           string
+	output           string
+	sessionID        string
+	usage            TokenUsage // accumulated token usage across all steps
+	noTerminalSignal bool       // guard fired: stream reached EOF before a step or required continuation completed
 }
 
 // processEvents reads JSON lines from r, dispatches events to ch, and returns
@@ -275,6 +281,26 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	var usage TokenUsage
 	finalStatus := "completed"
 	var finalError string
+
+	// Track step bracketing so a stream that ends mid-step is not mistaken for a
+	// clean completion. OpenCode's JSON stream has no terminal result event
+	// (unlike Claude's type:"result"), so "no error seen" is not proof the run
+	// finished. opencode emits tool_use only on terminal states (completed or
+	// error), so a dangling tool call implies an unclosed step — step bracketing
+	// is the positive terminal signal. Recovered tool errors (state.status ==
+	// "error") are normal in healthy runs and must not affect status.
+	//
+	// Step bracketing alone is not enough: step_finish carries a reason
+	// (FinishReason: "stop", "tool-calls", …), and a run that still has tool
+	// results to feed back normally closes its step with reason "tool-calls"
+	// before the next step_start. Some providers return "stop" despite emitting
+	// tool calls, though, and OpenCode deliberately continues those runs when a
+	// non-provider-executed tool result must be fed back to the model. Track both
+	// signals so EOF in either continuation gap fails closed. A missing reason
+	// retains the older step-bracketing behavior for protocol compatibility.
+	openStep := false                // between a step_start and its step_finish
+	stepHasContinuationTool := false // current step has a local tool result OpenCode must feed back
+	awaitingContinuation := false    // the last step_finish still required another step
 
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
@@ -299,11 +325,21 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			b.handleTextEvent(event, ch, &output)
 		case "tool_use":
 			b.handleToolUseEvent(event, ch)
+			if event.Part.Metadata == nil || !event.Part.Metadata.ProviderExecuted {
+				stepHasContinuationTool = true
+			}
 		case "error":
 			b.handleErrorEvent(event, ch, &finalStatus, &finalError)
 		case "step_start":
+			openStep = true
+			stepHasContinuationTool = false
+			awaitingContinuation = false
 			trySend(ch, Message{Type: MessageStatus, Status: "running"})
 		case "step_finish":
+			openStep = false
+			awaitingContinuation = event.Part.Reason == "tool-calls" ||
+				(event.Part.Reason != "" && stepHasContinuationTool)
+			stepHasContinuationTool = false
 			// Accumulate token usage from step_finish events.
 			if t := event.Part.Tokens; t != nil {
 				usage.InputTokens += t.Input
@@ -325,12 +361,30 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		}
 	}
 
+	// Require a positive terminal signal. A clean EOF while a step is still
+	// open — or right after a step that finished with reason "tool-calls",
+	// whose continuation step never started — means the run did not finish:
+	// its provider stream died and `opencode run` exited without emitting an
+	// error event. Fail closed on that structural evidence rather than
+	// reporting a false-green completion.
+	noTerminalSignal := false
+	if finalStatus == "completed" && (openStep || awaitingContinuation) {
+		finalStatus = "failed"
+		if openStep {
+			finalError = "opencode stream ended without a terminal signal (step still open at EOF)"
+		} else {
+			finalError = "opencode stream ended without a terminal signal (last step required a continuation that never started)"
+		}
+		noTerminalSignal = true
+	}
+
 	return eventResult{
-		status:    finalStatus,
-		errMsg:    finalError,
-		output:    output.String(),
-		sessionID: sessionID,
-		usage:     usage,
+		status:           finalStatus,
+		errMsg:           finalError,
+		output:           output.String(),
+		sessionID:        sessionID,
+		usage:            usage,
+		noTerminalSignal: noTerminalSignal,
 	}
 }
 
@@ -490,9 +544,20 @@ type opencodeEventPart struct {
 	Tool   string             `json:"tool,omitempty"`
 	CallID string             `json:"callID,omitempty"`
 	State  *opencodeToolState `json:"state,omitempty"`
+	// OpenCode excludes provider-executed tools when deciding whether a tool
+	// result requires another model step.
+	Metadata *opencodePartMetadata `json:"metadata,omitempty"`
 
 	// step_finish token usage
 	Tokens *opencodeTokens `json:"tokens,omitempty"`
+
+	// step_finish reason (FinishReason: "stop", "tool-calls", …). Absent on
+	// older opencode versions whose step-finish parts predate the field.
+	Reason string `json:"reason,omitempty"`
+}
+
+type opencodePartMetadata struct {
+	ProviderExecuted bool `json:"providerExecuted,omitempty"`
 }
 
 // opencodeTokens represents token usage in a step_finish event.

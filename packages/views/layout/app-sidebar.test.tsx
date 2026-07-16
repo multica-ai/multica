@@ -3,10 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { chatSessions, detail, deletePin, navigation, pins, summary, workspaces } = vi.hoisted(() => ({
-  chatSessions: { current: [] as { unread_count?: number }[] },
+const { appForeground, chatSessions, chatStore, detail, deletePin, inboxItems, navigation, pins, summary, workspaces } = vi.hoisted(() => ({
+  appForeground: { current: true },
+  chatSessions: { current: [] as { id?: string; unread_count?: number }[] },
+  chatStore: { current: { activeSessionId: null as string | null, isOpen: false } },
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
+  inboxItems: { current: [] as { id: string; read: boolean }[] },
   navigation: { current: { pathname: "/acme/issues" } },
   summary: { current: [] as { workspace_id: string; count: number }[] },
   workspaces: {
@@ -84,6 +87,9 @@ vi.mock("@multica/ui/components/ui/tooltip", () => ({
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
 }));
+vi.mock("../common/use-app-foreground", () => ({
+  useAppForeground: () => appForeground.current,
+}));
 vi.mock("./help-launcher", () => ({ HelpLauncher: () => null }));
 vi.mock("../auth", () => ({ useLogout: () => vi.fn() }));
 vi.mock("../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
@@ -97,6 +103,14 @@ vi.mock("@multica/ui/components/common/actor-avatar", () => ({ ActorAvatar: () =
 
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (selector: (state: { user: { id: string } }) => unknown) => selector({ user: { id: "user-1" } }),
+}));
+// Callable-store shape (selectorFn + getState) per the repo testing rules.
+vi.mock("@multica/core/chat", () => ({
+  useChatStore: Object.assign(
+    (selector: (state: { activeSessionId: string | null; isOpen: boolean }) => unknown) =>
+      selector(chatStore.current),
+    { getState: () => chatStore.current },
+  ),
 }));
 vi.mock("@multica/core/paths", () => ({
   paths: { workspace: (slug: string) => ({ issues: () => `/${slug}/issues` }) },
@@ -149,7 +163,6 @@ vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ mod
 vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));
 vi.mock("@multica/core/pins/queries", () => ({ pinListOptions: () => ({ queryKey: ["pins"] }) }));
 vi.mock("@multica/core/projects/queries", () => ({ projectDetailOptions: () => ({ queryKey: ["project"] }) }));
-vi.mock("@multica/core/runtimes/hooks", () => ({ useMyRuntimesNeedUpdate: () => false }));
 vi.mock("@multica/core/workspace/queries", () => ({
   myInvitationListOptions: () => ({ queryKey: ["invitations"] }),
   workspaceKeys: { myInvitations: () => ["invitations"] },
@@ -162,6 +175,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
     if (queryKey[0] === "pins") return { data: pins.current };
     if (queryKey[0] === "issue") return detail.current;
     if (queryKey[0] === "inbox" && queryKey[1] === "unread-summary") return { data: summary.current };
+    if (queryKey[0] === "inbox") return { data: inboxItems.current };
     if (queryKey[0] === "workspaces") return { data: workspaces.current };
     if (queryKey[0] === "chat" && queryKey[2] === "sessions") return { data: chatSessions.current };
     return { data: [] };
@@ -286,13 +300,31 @@ describe("workspace-switcher dropdown per-workspace dot", () => {
 describe("personal nav — Chat", () => {
   beforeEach(() => {
     chatSessions.current = [];
+    inboxItems.current = [];
     navigation.current = { pathname: "/acme/issues" };
+    chatStore.current = { activeSessionId: null, isOpen: false };
+    appForeground.current = true;
   });
 
   // The mocked SidebarMenuButton exposes the AppLink target as `data-href`
   // and renders the label + badge as its children.
   const chatNav = (container: HTMLElement) =>
     container.querySelector<HTMLElement>('button[data-href="/acme/chat"]');
+  const chatBadge = (container: HTMLElement) =>
+    chatNav(container)?.querySelector("number-flow-react") ?? null;
+
+  it("keeps persistent Inbox and Chat counters static", () => {
+    inboxItems.current = [{ id: "inbox-1", read: false }];
+    chatSessions.current = [{ id: "chat-1", unread_count: 2 }];
+    const { container } = render(<AppSidebar />);
+    const inboxBadge = container
+      .querySelector<HTMLElement>('button[data-href="/acme/inbox"]')
+      ?.querySelector("number-flow-react") as (HTMLElement & { animated?: boolean }) | null;
+    const currentChatBadge = chatBadge(container) as (HTMLElement & { animated?: boolean }) | null;
+
+    expect(inboxBadge?.animated).toBe(false);
+    expect(currentChatBadge?.animated).toBe(false);
+  });
 
   it("renders a Chat nav link to the workspace chat route", () => {
     const { container } = render(<AppSidebar />);
@@ -300,14 +332,64 @@ describe("personal nav — Chat", () => {
   });
 
   it("badges the Chat nav with the summed unread_count of chat sessions", () => {
-    chatSessions.current = [{ unread_count: 3 }, { unread_count: 2 }, { unread_count: 0 }];
+    chatSessions.current = [{ id: "a", unread_count: 3 }, { id: "b", unread_count: 2 }, { id: "c", unread_count: 0 }];
     const { container } = render(<AppSidebar />);
-    expect(chatNav(container)?.textContent).toContain("5");
+    expect(chatBadge(container)).toHaveAttribute("aria-label", "5");
   });
 
   it("shows no Chat unread badge when every session is read", () => {
-    chatSessions.current = [{ unread_count: 0 }, {}];
+    chatSessions.current = [{ id: "a", unread_count: 0 }, { id: "b" }];
     const { container } = render(<AppSidebar />);
-    expect(chatNav(container)?.textContent ?? "").not.toMatch(/\d/);
+    expect(chatBadge(container)).toBeNull();
+  });
+
+  it("excludes the session being viewed on the chat page from the badge", () => {
+    // The thread list zeroes the open session's row badge; the aggregate
+    // must follow, or a reply landing in the open conversation flashes a
+    // count with no matching row.
+    chatSessions.current = [{ id: "a", unread_count: 2 }, { id: "b", unread_count: 3 }];
+    navigation.current = { pathname: "/acme/chat" };
+    chatStore.current = { activeSessionId: "a", isOpen: false };
+    const { container } = render(<AppSidebar />);
+    expect(chatBadge(container)).toHaveAttribute("aria-label", "3");
+  });
+
+  it("excludes the viewed session when the floating chat window is open off-route", () => {
+    chatSessions.current = [{ id: "a", unread_count: 2 }, { id: "b", unread_count: 3 }];
+    navigation.current = { pathname: "/acme/issues" };
+    chatStore.current = { activeSessionId: "a", isOpen: true };
+    const { container } = render(<AppSidebar />);
+    expect(chatBadge(container)).toHaveAttribute("aria-label", "3");
+  });
+
+  it("still counts a remembered selection when no chat surface is showing it", () => {
+    // activeSessionId persists after the chat page closes; with both
+    // surfaces closed nothing will auto mark-read, so the badge must count.
+    chatSessions.current = [{ id: "a", unread_count: 2 }, { id: "b", unread_count: 3 }];
+    navigation.current = { pathname: "/acme/issues" };
+    chatStore.current = { activeSessionId: "a", isOpen: false };
+    const { container } = render(<AppSidebar />);
+    expect(chatBadge(container)).toHaveAttribute("aria-label", "5");
+  });
+
+  it("counts the active session while the floating window is open but the app is backgrounded", () => {
+    // A reply landing while the app is not in the foreground is NOT auto
+    // marked-read (MUL-4485), so its unread must still badge — otherwise the
+    // notification is silently eaten while the user is away.
+    chatSessions.current = [{ id: "a", unread_count: 2 }, { id: "b", unread_count: 3 }];
+    navigation.current = { pathname: "/acme/issues" };
+    chatStore.current = { activeSessionId: "a", isOpen: true };
+    appForeground.current = false;
+    const { container } = render(<AppSidebar />);
+    expect(chatBadge(container)).toHaveAttribute("aria-label", "5");
+  });
+
+  it("counts the active session on the chat route while the app is backgrounded", () => {
+    chatSessions.current = [{ id: "a", unread_count: 2 }, { id: "b", unread_count: 3 }];
+    navigation.current = { pathname: "/acme/chat" };
+    chatStore.current = { activeSessionId: "a", isOpen: false };
+    appForeground.current = false;
+    const { container } = render(<AppSidebar />);
+    expect(chatBadge(container)).toHaveAttribute("aria-label", "5");
   });
 });

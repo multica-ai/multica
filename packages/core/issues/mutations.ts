@@ -317,7 +317,13 @@ export function useUpdateIssue() {
       // out false unless the server coerced a different value, so this pass
       // is the plain surgical patch it always was.
       const { suppress_run: _suppressRun, handoff_note: _handoffNote, id: _id, ...intent } = vars;
-      const reconcile = applyIssueChange(qc, wsId, serverIssue.id, serverIssue, {
+      // Drop `properties` from the reconcile payload: the bag is owned by the
+      // property mutation pipeline (single-key atomic writes + its own
+      // optimistic state). An UpdateIssue snapshot taken before a concurrent
+      // property write resolves would otherwise overwrite the newer bag
+      // (clean-room review F3 response-ordering race).
+      const { properties: _staleBag, ...reconcilable } = serverIssue;
+      const reconcile = applyIssueChange(qc, wsId, serverIssue.id, reconcilable as typeof serverIssue, {
         changed: issueChangedDims(intent, serverIssue),
         baseIssue: serverIssue,
       });

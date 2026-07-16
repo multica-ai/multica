@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { QueryKey } from "@tanstack/react-query";
 import type {
   Issue,
@@ -20,7 +21,9 @@ import {
   type IssueSurfaceQueryPlan,
 } from "@multica/core/issues/surface/query-plan";
 import type { IssueScope } from "@multica/core/issues/surface/scope";
-import type { IssueDateFilter } from "@multica/core/issues/stores/view-store";
+import type { IssueDateFilter, SortField } from "@multica/core/issues/stores/view-store";
+import { propertyListOptions } from "@multica/core/properties";
+import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { IssueFilters } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
@@ -129,6 +132,7 @@ export function useIssueSurfaceController({
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
   const cardProperties = useViewStore((s) => s.cardProperties);
@@ -155,14 +159,54 @@ export function useIssueSurfaceController({
     () => issueDateFilterToApiParams(dateFilter),
     [dateFilter],
   );
-  const sort = useMemo<IssueSortParam>(
-    () => ({
-      sort_by: sortBy,
-      sort_direction: sortBy !== "position" ? sortDirection : undefined,
-      ...dateParams,
-    }),
-    [dateParams, sortBy, sortDirection],
+  // Active property catalog. Persisted view state can outlive definitions
+  // (archive/delete): filters keyed by a non-active definition are stripped
+  // before they reach the predicates, and a sort on a non-active definition
+  // degrades to manual order — matching what the header already shows.
+  const { data: workspaceProperties = [], isSuccess: catalogSettled } = useQuery(propertyListOptions(wsId));
+  const activePropertyIds = useMemo(
+    () => new Set(workspaceProperties.map((p) => p.id)),
+    [workspaceProperties],
   );
+  const effectivePropertyFilters = useMemo(() => {
+    // While the catalog is still loading (or errored), persisted filters are
+    // passed through UNCHANGED: treating a cold catalog as confirmed-empty
+    // would silently drop the user's filters on first paint (clean-room
+    // review F6). Old servers 404 into a SETTLED empty catalog, so the
+    // stripping below still protects that path.
+    if (!catalogSettled) return propertyFilters;
+    const entries = Object.entries(propertyFilters).filter(
+      ([propertyId, selected]) => selected.length > 0 && activePropertyIds.has(propertyId),
+    );
+    if (entries.length === Object.keys(propertyFilters).length) return propertyFilters;
+    return Object.fromEntries(entries);
+  }, [activePropertyIds, catalogSettled, propertyFilters]);
+
+  // Custom-property sorts and filters are served by the backend: the sort
+  // param carries `property:<id>` (typed ORDER BY expression server-side)
+  // and the window bag carries the property filter, so results are correct
+  // across pagination — not just the loaded window. A sort pinned to a
+  // non-active definition degrades to position order.
+  const rawPropertySortId = propertyIdFromViewKey(sortBy);
+  const propertySortId =
+    rawPropertySortId && (!catalogSettled || activePropertyIds.has(rawPropertySortId))
+      ? rawPropertySortId
+      : null;
+  const sort = useMemo<IssueSortParam>(() => {
+    const sortBy_: IssueSortParam["sort_by"] = propertySortId
+      ? `property:${propertySortId}`
+      : rawPropertySortId
+        ? "position"
+        : (sortBy as Exclude<SortField, `property:${string}`>);
+    return {
+      sort_by: sortBy_,
+      sort_direction: sortBy_ !== "position" ? sortDirection : undefined,
+      ...dateParams,
+      ...(Object.keys(effectivePropertyFilters).length > 0
+        ? { properties: effectivePropertyFilters }
+        : {}),
+    };
+  }, [dateParams, effectivePropertyFilters, propertySortId, rawPropertySortId, sortBy, sortDirection]);
 
   const selection = useCreateIssueSurfaceSelection(
     scopeKey,
@@ -198,6 +242,7 @@ export function useIssueSurfaceController({
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,
     labelFilters,
+    propertyFilters: effectivePropertyFilters,
     agentRunningFilter,
     showSubIssues,
     loadProjects:

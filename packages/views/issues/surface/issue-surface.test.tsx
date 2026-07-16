@@ -23,6 +23,21 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => mockWsId.current,
 }));
 
+// The list/board virtualize their rows via react-virtuoso; jsdom has no layout
+// so the real Virtuoso renders nothing (and throws on its resize plumbing).
+// Render items inline so these surface-level loading-semantics assertions still
+// see the issues the virtualized list would show.
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: ({ data, itemContent, components }: any) => (
+    <div data-testid="virtuoso-mock">
+      {(data ?? []).map((item: any, i: number) => (
+        <div key={i}>{itemContent(i, item)}</div>
+      ))}
+      {components?.Footer ? <components.Footer /> : null}
+    </div>
+  ),
+}));
+
 const mockAuthUser = { id: "user-1", email: "test@test.com", name: "Test User" };
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
@@ -83,6 +98,7 @@ function makeIssue(id: string, title: string, projectId: string): Issue {
     due_date: null,
     labels: [],
     metadata: {},
+    properties: {},
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   };

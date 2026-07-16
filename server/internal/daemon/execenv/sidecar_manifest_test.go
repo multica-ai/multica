@@ -144,6 +144,7 @@ func runPrepareLikeCycle(t *testing.T, workDir, envRoot, provider string, ctx Ta
 // one — review the test diff before merging.
 var allFileBasedProviders = []string{
 	"claude",
+	"codebuddy",
 	"codex",
 	"copilot",
 	"opencode",
@@ -223,6 +224,7 @@ func TestPrepareThenCleanupSidecarsPreservesUserSkillSibling(t *testing.T) {
 		userSkillFile string // path under userSkillRel
 	}{
 		{"claude", filepath.Join(".claude", "skills", "my-own"), "SKILL.md"},
+		{"codebuddy", filepath.Join(".codebuddy", "skills", "my-own"), "SKILL.md"},
 		{"copilot", filepath.Join(".github", "skills", "my-own"), "SKILL.md"},
 		{"opencode", filepath.Join(".opencode", "skills", "my-own"), "SKILL.md"},
 		{"openclaw", filepath.Join("skills", "my-own"), "SKILL.md"},
@@ -287,6 +289,7 @@ func TestPrepareThenCleanupSidecarsPreservesUnrelatedUserFiles(t *testing.T) {
 		userFile string // path under workDir
 	}{
 		{"claude", filepath.Join(".claude", "settings.json")},
+		{"codebuddy", filepath.Join(".codebuddy", "settings.json")},
 		{"copilot", filepath.Join(".github", "CODEOWNERS")},
 		{"opencode", filepath.Join(".opencode", "config.json")},
 		{"pi", filepath.Join(".pi", "config.toml")},
@@ -613,6 +616,7 @@ var sameSlugSkillProviderCases = []struct {
 	skillDir string // relative path under workDir for the colliding slug
 }{
 	{"claude", filepath.Join(".claude", "skills", "issue-review")},
+	{"codebuddy", filepath.Join(".codebuddy", "skills", "issue-review")},
 	{"copilot", filepath.Join(".github", "skills", "issue-review")},
 	{"opencode", filepath.Join(".opencode", "skills", "issue-review")},
 	{"openclaw", filepath.Join("skills", "issue-review")},

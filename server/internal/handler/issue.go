@@ -56,7 +56,10 @@ type IssueResponse struct {
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
-	Metadata    map[string]any          `json:"metadata"`
+	Metadata map[string]any `json:"metadata"`
+	// Properties is the custom-property value bag keyed by property definition
+	// UUID (see property.go). Always emitted, mirroring Metadata.
+	Properties  map[string]any          `json:"properties"`
 	Reactions   []IssueReactionResponse `json:"reactions,omitempty"`
 	Attachments []AttachmentResponse    `json:"attachments,omitempty"`
 	// Labels are bulk-attached by list/detail endpoints so the client can render
@@ -109,6 +112,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
+		Properties:    parseIssueProperties(i.Properties),
 	}
 }
 
@@ -137,6 +141,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
+		Properties:    parseIssueProperties(i.Properties),
 	}
 }
 
@@ -160,12 +165,14 @@ func (h *Handler) labelsByIssue(ctx context.Context, wsUUID pgtype.UUID, issueID
 	for _, r := range rows {
 		issueID := uuidToString(r.IssueID)
 		out[issueID] = append(out[issueID], LabelResponse{
-			ID:          uuidToString(r.ID),
-			WorkspaceID: uuidToString(r.WorkspaceID),
-			Name:        r.Name,
-			Color:       r.Color,
-			CreatedAt:   timestampToString(r.CreatedAt),
-			UpdatedAt:   timestampToString(r.UpdatedAt),
+			ID:           uuidToString(r.ID),
+			WorkspaceID:  uuidToString(r.WorkspaceID),
+			ResourceType: r.ResourceType,
+			Name:         r.Name,
+			Description:  r.Description,
+			Color:        r.Color,
+			CreatedAt:    timestampToString(r.CreatedAt),
+			UpdatedAt:    timestampToString(r.UpdatedAt),
 		})
 	}
 	return out
@@ -195,6 +202,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
+		Properties:    parseIssueProperties(i.Properties),
 	}
 }
 
@@ -817,6 +825,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	propertiesFilter, ok := parsePropertiesFilterParam(w, r.URL.Query().Get("properties"))
+	if !ok {
+		return
+	}
 	dateFilter, ok := parseIssueDateFilter(w, r.URL.Query())
 	if !ok {
 		return
@@ -824,15 +836,27 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
+		// Serialize the parsed AND-of-ORs groups into the single jsonb param
+		// the static query unrolls (see properties_filter in ListOpenIssues).
+		var openPropertiesFilter []byte
+		if len(propertiesFilter) > 0 {
+			marshaled, marshalErr := json.Marshal(propertiesFilter)
+			if marshalErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to list issues")
+				return
+			}
+			openPropertiesFilter = marshaled
+		}
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
-			WorkspaceID:    wsUUID,
-			Priority:       priorityFilter,
-			AssigneeID:     assigneeFilter,
-			AssigneeIds:    assigneeIdsFilter,
-			CreatorID:      creatorFilter,
-			ProjectID:      projectFilter,
-			InvolvesUserID: involvesUserFilter,
-			MetadataFilter: metadataFilter,
+			WorkspaceID:      wsUUID,
+			Priority:         priorityFilter,
+			AssigneeID:       assigneeFilter,
+			AssigneeIds:      assigneeIdsFilter,
+			CreatorID:        creatorFilter,
+			ProjectID:        projectFilter,
+			InvolvesUserID:   involvesUserFilter,
+			MetadataFilter:   metadataFilter,
+			PropertiesFilter: openPropertiesFilter,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -908,15 +932,38 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// the user defines order through drag-and-drop, reversing it has no
 	// product meaning.
 	sortCol := "position"
+	sortIsExpr := false
+	sortIsProperty := false
 	if s := r.URL.Query().Get("sort"); s != "" {
 		switch s {
 		case "position", "title", "created_at", "start_date", "due_date":
 			sortCol = s
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
+			sortIsExpr = true
 		default:
-			writeError(w, http.StatusBadRequest, "invalid sort value")
-			return
+			// property:<definitionId> sorts by the custom-property value
+			// (typed expression); unknown/archived definitions degrade to
+			// position order instead of erroring stale clients.
+			expr, handled, sortErr := h.propertySortExpr(r, workspaceID, s)
+			if !handled {
+				writeError(w, http.StatusBadRequest, "invalid sort value")
+				return
+			}
+			if sortErr != nil {
+				if sortErr.Error() == "invalid sort value" || sortErr.Error() == "invalid workspace id" {
+					writeError(w, http.StatusBadRequest, sortErr.Error())
+					return
+				}
+				slog.Warn("propertySortExpr failed", append(logger.RequestAttrs(r), "error", sortErr)...)
+				writeError(w, http.StatusInternalServerError, "failed to resolve sort")
+				return
+			}
+			if expr != "" {
+				sortCol = expr
+				sortIsExpr = true
+				sortIsProperty = true
+			}
 		}
 	}
 	sortDir := "ASC"
@@ -969,6 +1016,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if metadataFilter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
 	}
+	if propertiesFilter != nil {
+		where = append(where, propertiesFilterPredicate(propertiesFilter, addArg))
+	}
 	where = appendIssueDateFilter(where, addArg, dateFilter)
 	if involvesUserFilter.Valid {
 		ref := addArg(involvesUserFilter)
@@ -1009,11 +1059,13 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// Build ORDER BY clause.
 	orderBy := sortCol
-	if !strings.HasPrefix(sortCol, "CASE") {
+	if !sortIsExpr {
 		orderBy = "i." + sortCol
 	}
 	orderBy += " " + sortDir
-	if sortCol == "start_date" || sortCol == "due_date" {
+	if sortCol == "start_date" || sortCol == "due_date" || sortIsProperty {
+		// Property values are sparse: issues without one sort last in both
+		// directions (mirrors the client comparator).
 		orderBy += " NULLS LAST"
 	}
 	orderBy += ", i.created_at DESC"
@@ -1023,7 +1075,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties
 FROM issue i
 WHERE %s
 ORDER BY %s
@@ -1060,6 +1112,8 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
+			&row.Stage,
+			&row.Properties,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -1336,6 +1390,11 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	} else if filter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(filter))))
 	}
+	if filter, ok := parsePropertiesFilterParam(w, r.URL.Query().Get("properties")); !ok {
+		return
+	} else if filter != nil {
+		where = append(where, propertiesFilterPredicate(filter, addArg))
+	}
 	// Mirror the involves_user_id 4-branch UNION from sqlc's ListIssues /
 	// ListOpenIssues / CountIssues. ListGroupedIssues is a hand-written dynamic
 	// SQL builder that does not share parameters with sqlc, so the fragment is
@@ -1476,15 +1535,38 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sortCol := "position"
+	sortIsExpr := false
+	sortIsProperty := false
 	if s := r.URL.Query().Get("sort"); s != "" {
 		switch s {
 		case "position", "title", "created_at", "start_date", "due_date":
 			sortCol = s
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
+			sortIsExpr = true
 		default:
-			writeError(w, http.StatusBadRequest, "invalid sort value")
-			return
+			// property:<definitionId> sorts by the custom-property value
+			// (typed expression); unknown/archived definitions degrade to
+			// position order instead of erroring stale clients.
+			expr, handled, sortErr := h.propertySortExpr(r, workspaceID, s)
+			if !handled {
+				writeError(w, http.StatusBadRequest, "invalid sort value")
+				return
+			}
+			if sortErr != nil {
+				if sortErr.Error() == "invalid sort value" || sortErr.Error() == "invalid workspace id" {
+					writeError(w, http.StatusBadRequest, sortErr.Error())
+					return
+				}
+				slog.Warn("propertySortExpr failed", append(logger.RequestAttrs(r), "error", sortErr)...)
+				writeError(w, http.StatusInternalServerError, "failed to resolve sort")
+				return
+			}
+			if expr != "" {
+				sortCol = expr
+				sortIsExpr = true
+				sortIsProperty = true
+			}
 		}
 	}
 	sortDir := "ASC"
@@ -1503,11 +1585,11 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	intraGroupOrder := sortCol
-	if !strings.HasPrefix(sortCol, "CASE") {
+	if !sortIsExpr {
 		intraGroupOrder = "i." + sortCol
 	}
 	intraGroupOrder += " " + sortDir
-	if sortCol == "start_date" || sortCol == "due_date" {
+	if sortCol == "start_date" || sortCol == "due_date" || sortIsProperty {
 		intraGroupOrder += " NULLS LAST"
 	}
 	intraGroupOrder += ", i.created_at DESC"
@@ -1519,8 +1601,8 @@ WITH ranked AS (
 	SELECT
 		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-		i.parent_issue_id, i.position, i.due_date, i.created_at, i.updated_at,
-		i.number, i.project_id, i.metadata,
+		i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at,
+		i.number, i.project_id, i.metadata, i.stage, i.properties,
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
 			PARTITION BY i.assignee_type, i.assignee_id
@@ -1532,8 +1614,8 @@ WITH ranked AS (
 SELECT
 	id, workspace_id, title, description, status, priority,
 	assignee_type, assignee_id, creator_type, creator_id,
-	parent_issue_id, position, due_date, created_at, updated_at,
-	number, project_id, metadata, group_total
+	parent_issue_id, position, start_date, due_date, created_at, updated_at,
+	number, project_id, metadata, stage, properties, group_total
 FROM ranked
 WHERE rn > %s AND rn <= %s + %s
 ORDER BY
@@ -1571,12 +1653,15 @@ ORDER BY
 			&row.CreatorID,
 			&row.ParentIssueID,
 			&row.Position,
+			&row.StartDate,
 			&row.DueDate,
 			&row.CreatedAt,
 			&row.UpdatedAt,
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
+			&row.Stage,
+			&row.Properties,
 			&row.GroupTotal,
 		); err != nil {
 			slog.Warn("ListGroupedIssues scan failed", "error", err)
@@ -2100,6 +2185,10 @@ type CreateIssueRequest struct {
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	// LabelIDs are issue-scoped labels to attach to the new issue in the same
+	// transaction as the create. Unknown or non-issue ids are rejected with
+	// 400 (service.ErrIssueLabelNotFound) rather than silently dropped.
+	LabelIDs []string `json:"label_ids,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
 	// platform-internal flows can deterministically locate it later. Only
 	// trusted callers should set these — currently the daemon CLI passes
@@ -2198,6 +2287,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// without duplicating the lookup here.
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
+	if !ok {
+		return
+	}
+
+	labelIDs, ok := parseUUIDSliceOrBadRequest(w, req.LabelIDs, "label_ids")
 	if !ok {
 		return
 	}
@@ -2320,14 +2414,21 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		OriginID:       originID,
 		Stage:          ptrToInt4(req.Stage),
 		AttachmentIDs:  attachmentIDs,
+		LabelIDs:       labelIDs,
 		AllowDuplicate: req.AllowDuplicate,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
 		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
-		BroadcastPayload: func(issue db.Issue, atts []db.Attachment) map[string]any {
+		BroadcastPayload: func(issue db.Issue, atts []db.Attachment, labels []db.IssueLabel) map[string]any {
 			payload := issueToResponse(issue, prefix)
 			payload.Attachments = buildAttachmentResponses(atts)
+			// Carry the authoritative label snapshot so every online client
+			// renders the new issue already labeled. Non-nil (even empty)
+			// pointer = authoritative list; the old flow's separate
+			// issue_labels:changed broadcast is gone.
+			labelResponses := labelsToResponse(labels)
+			payload.Labels = &labelResponses
 			return map[string]any{"issue": payload}
 		},
 	})
@@ -2350,6 +2451,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "project not found in this workspace")
 		return
 	}
+	if errors.Is(err, service.ErrIssueLabelNotFound) {
+		writeError(w, http.StatusBadRequest, "one or more labels not found in this workspace")
+		return
+	}
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error())
@@ -2361,6 +2466,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	resp := issueToResponse(issue, prefix)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
+	// Echo the authoritative labels attached in the create transaction. Always
+	// non-nil (empty slice when none) so a newer client can tell the backend
+	// understood label_ids and skip its legacy post-create attach fallback.
+	labelResponses := labelsToResponse(res.Labels)
+	resp.Labels = &labelResponses
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -2647,8 +2757,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// and it self-cancelled a run that reassigned the issue from inside itself.
 	// Ownership handoff no longer implies interruption; the new assignee's run,
 	// if any, is enqueued by WillEnqueueRun below and runs alongside whatever
-	// was already in flight. Explicit terminal actions — issue → cancelled and
-	// delete — still cancel active tasks (see below / DeleteIssue).
+	// was already in flight. No status change — not even → cancelled — cancels
+	// active tasks: a user clicking "cancel" on an issue has no expectation that
+	// it stops in-flight agent runs, so that implicit coupling is gone
+	// (MUL-4465). Deleting an issue still cancels its tasks (see DeleteIssue),
+	// because the tasks' owning issue ceases to exist.
 	if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
 		service.IssueTriggerInput{
 			Issue:           issue,
@@ -2659,13 +2772,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.issueTriggerWriteProbe(r, actorType, issue),
 	); ok && !req.SuppressRun {
 		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote)
-	}
-
-	// Cancel active tasks when the issue is cancelled by a user.
-	// This is distinct from agent-managed status transitions — cancellation
-	// is a user-initiated terminal action that should stop execution.
-	if statusChanged && issue.Status == "cancelled" {
-		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 	}
 
 	// Platform-driven parent notification: when this issue transitions into
@@ -2788,7 +2894,7 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 		return db.Agent{}, false, false
 	}
-	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID)) {
+	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.effectiveInvoker(), uuidToString(issue.WorkspaceID)) {
 		return db.Agent{}, false, false
 	}
 	// Coalescing queue: pending is still a valid route target, but callers
@@ -3166,10 +3272,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.Updates.HandoffNote)
 		}
 
-		// Cancel active tasks when the issue is cancelled by a user.
-		if statusChanged && issue.Status == "cancelled" {
-			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
-		}
+		// No status change — not even → cancelled — cancels active tasks here,
+		// mirroring UpdateIssue (MUL-4465). See that handler for the rationale.
 
 		// Platform-driven parent notification, mirrored from UpdateIssue
 		// (MUL-2538) but DEFERRED to after the loop. Evaluating the stage

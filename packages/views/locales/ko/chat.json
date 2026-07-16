@@ -1,7 +1,8 @@
 {
   "page": {
     "title": "채팅",
-    "select_prompt": "대화를 선택하거나 +로 새로 시작하세요"
+    "select_prompt": "대화를 선택하거나 +로 새로 시작하세요",
+    "agent_link_no_access": "이 에이전트와 채팅할 권한이 없습니다."
   },
   "fab": {
     "running": "Multica가 작업 중입니다...",
@@ -17,6 +18,7 @@
     "send_tooltip": "보내기",
     "stop_tooltip": "중지",
     "send_failed_toast": "메시지를 보내지 못했습니다",
+    "send_blocked_toast": "메시지가 전송되지 않았습니다 — 이 에이전트를 사용할 권한이 없습니다",
     "attachment_bind_failed_toast": "메시지는 보냈지만 파일이 첨부되지 않았습니다. 잠시 후 다시 시도해 주세요.",
     "add_tooltip": "추가",
     "upload_file": "이미지 또는 파일"

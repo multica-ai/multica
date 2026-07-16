@@ -18,7 +18,8 @@
     "docs": "ドキュメント",
     "changelog": "変更ログ",
     "discord": "Discord",
-    "feedback": "フィードバック"
+    "feedback": "フィードバック",
+    "server_version": "サーバーバージョン {{version}}"
   },
   "workspace_loader": {
     "loading_workspace": "ワークスペースを読み込み中…",

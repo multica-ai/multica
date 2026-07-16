@@ -264,6 +264,32 @@ func TestCommentTriggeredBriefResumedNoDeltaSkipsDefaultThreadRead(t *testing.T)
 	}
 }
 
+// When the daemon could not honor an expected resume, the brief must make the
+// context loss user-visible by instructing the agent to disclose it — not leave
+// it as a silent restart (MUL-4424).
+func TestBriefSurfacesResumeUnavailable(t *testing.T) {
+	t.Parallel()
+	const issueID = "11111111-2222-3333-4444-555555555555"
+	base := TaskContextForEnv{IssueID: issueID, TriggerCommentID: "trigger-1", TriggerThreadID: "thread-1"}
+
+	lost := base
+	lost.PriorSessionResumeUnavailable = true
+	out := buildMetaSkillContent("codex", lost)
+	for _, want := range []string{
+		"## Session Continuity Notice",
+		"could NOT be restored",
+		"tell the user up front",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("resume-unavailable brief missing %q\n---\n%s", want, out)
+		}
+	}
+
+	if strings.Contains(buildMetaSkillContent("codex", base), "Session Continuity Notice") {
+		t.Error("brief must not show the continuity notice when no resume was lost")
+	}
+}
+
 // Assignment-triggered briefs are the high-risk path for role conflicts:
 // non-executor agents still need issue context, but the runtime workflow must
 // not turn status changes, investigation, implementation, or delegation into
@@ -776,6 +802,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		filename string
 	}{
 		{"claude", "CLAUDE.md"},
+		{"codebuddy", "CODEBUDDY.md"},
 		{"codex", "AGENTS.md"},
 		{"copilot", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
@@ -823,12 +850,36 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 	}
 }
 
+// CodeBuddy is a Claude Code fork but ships its own native config
+// directory (~/.codebuddy, .codebuddy/) rather than reusing Claude's
+// ~/.claude / CLAUDE.md paths (see
+// https://www.codebuddy.ai/docs/cli/codebuddy-dir). This pins the two
+// providers to different target filenames so a future edit can't
+// silently re-merge them.
+func TestRuntimeConfigPathDistinguishesCodebuddyFromClaude(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	claudePath := runtimeConfigPath(dir, "claude")
+	codebuddyPath := runtimeConfigPath(dir, "codebuddy")
+
+	if claudePath != filepath.Join(dir, "CLAUDE.md") {
+		t.Errorf("claude runtime config path = %q, want CLAUDE.md", claudePath)
+	}
+	if codebuddyPath != filepath.Join(dir, "CODEBUDDY.md") {
+		t.Errorf("codebuddy runtime config path = %q, want CODEBUDDY.md", codebuddyPath)
+	}
+	if claudePath == codebuddyPath {
+		t.Fatal("claude and codebuddy must not share a runtime config path")
+	}
+}
+
 func TestInjectRuntimeConfigUnknownProviderSkipsWrite(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	// Seed all three candidate filenames so we can verify none of them get
+	// Seed all candidate filenames so we can verify none of them get
 	// written when the provider is unknown.
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+	for _, name := range []string{"CLAUDE.md", "CODEBUDDY.md", "AGENTS.md"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("untouched\n"), 0o644); err != nil {
 			t.Fatalf("seed %s: %v", name, err)
 		}
@@ -839,7 +890,7 @@ func TestInjectRuntimeConfigUnknownProviderSkipsWrite(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("InjectRuntimeConfig: %v", err)
 	}
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+	for _, name := range []string{"CLAUDE.md", "CODEBUDDY.md", "AGENTS.md"} {
 		got, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
@@ -1061,7 +1112,7 @@ func TestCleanupRuntimeConfigNoOpCases(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		// Seed every candidate filename to verify none of them get touched.
-		for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+		for _, name := range []string{"CLAUDE.md", "CODEBUDDY.md", "AGENTS.md"} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte("untouched\n"), 0o644); err != nil {
 				t.Fatalf("seed %s: %v", name, err)
 			}
@@ -1069,7 +1120,7 @@ func TestCleanupRuntimeConfigNoOpCases(t *testing.T) {
 		if err := CleanupRuntimeConfig(dir, "totally-unknown-provider"); err != nil {
 			t.Errorf("unknown provider must be no-op, got: %v", err)
 		}
-		for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+		for _, name := range []string{"CLAUDE.md", "CODEBUDDY.md", "AGENTS.md"} {
 			got, err := os.ReadFile(filepath.Join(dir, name))
 			if err != nil {
 				t.Fatalf("read %s: %v", name, err)
@@ -1124,6 +1175,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		filename string
 	}{
 		{"claude", "CLAUDE.md"},
+		{"codebuddy", "CODEBUDDY.md"},
 		{"codex", "AGENTS.md"},
 		{"copilot", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},

@@ -1,7 +1,8 @@
 {
   "page": {
     "title": "聊天",
-    "select_prompt": "选择一个对话，或点 + 新建"
+    "select_prompt": "选择一个对话，或点 + 新建",
+    "agent_link_no_access": "你没有权限与该智能体聊天。"
   },
   "fab": {
     "running": "Multica 正在工作...",
@@ -17,6 +18,7 @@
     "send_tooltip": "发送",
     "stop_tooltip": "停止",
     "send_failed_toast": "发送消息失败",
+    "send_blocked_toast": "消息未发送——你已没有该智能体的使用权限",
     "attachment_bind_failed_toast": "消息已发送，但文件未能附加。请稍后重试。",
     "add_tooltip": "添加",
     "upload_file": "图片或文件"

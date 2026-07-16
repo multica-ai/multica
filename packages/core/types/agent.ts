@@ -109,6 +109,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "codex",
   "copilot",
   "opencode",
+  "deveco",
   "openclaw",
   "hermes",
   "pi",
@@ -118,6 +119,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "antigravity",
   "qoder",
   "traecli",
+  "grok",
 ] as const;
 
 export type RuntimeProtocolFamily =
@@ -193,6 +195,50 @@ export interface AgentActivityBucket {
 export interface AgentRunCount {
   agent_id: string;
   run_count: number;
+}
+
+/**
+ * A departed-member-safe user ref resolved from the global user table. `name` /
+ * `email` / `avatar_url` are absent until the server hydrates them (present on
+ * user-facing task surfaces). Render defensively — fall back to a generic label
+ * when only `id` is available. See MUL-4302 §9.
+ */
+export interface AttributionUser {
+  id: string;
+  name?: string;
+  email?: string;
+  avatar_url?: string;
+}
+
+/** The kind-tagged handle to a run's direct cause (comment, autopilot run, ...). */
+export interface TaskEvidence {
+  kind: string;
+  ref_id: string;
+}
+
+/**
+ * The resolved accountable-human provenance of an agent run (MUL-4302 §9). Free-text
+ * `source` (server may add new levels), so switch on it with a default branch.
+ */
+export interface TaskAttribution {
+  /**
+   * Waterfall level that resolved the accountable human:
+   * `direct_human` | `delegation` | `comment_source` | `rule_owner` |
+   * `owner_fallback` | `backfill` | `unattributed`. Never blank.
+   */
+  source: string;
+  /** False for degraded sources (owner_fallback / backfill / unattributed). */
+  precise: boolean;
+  /** The accountable human ("on behalf of"). Absent when unattributed. */
+  initiator?: AttributionUser;
+  /** The authorization human; absent for autopilot runs (rule_owner / owner_fallback). */
+  originator?: AttributionUser;
+  /** The direct cause of the run, for a jump-to-evidence affordance. */
+  evidence?: TaskEvidence;
+  rule_version_id?: string;
+  delegated_from_task_id?: string;
+  retry_of_task_id?: string;
+  rerun_of_task_id?: string;
 }
 
 export interface AgentTask {
@@ -293,6 +339,12 @@ export interface AgentTask {
    * shares and screenshots also stay safe).
    */
   relative_work_dir?: string;
+  /**
+   * Resolved accountable-human provenance of this run (MUL-4302 §9): who it ran
+   * "on behalf of", how that was resolved, and the evidence/lineage. Present on
+   * user-facing task surfaces; older backends omit it — render conditionally.
+   */
+  attribution?: TaskAttribution;
 }
 
 export interface Agent {
@@ -409,6 +461,8 @@ export interface AgentSkillSummary {
   id: string;
   name: string;
   description: string;
+	/** Older servers omit this field; consumers must treat that as enabled. */
+	enabled?: boolean;
 }
 
 export interface CreateAgentRequest {
@@ -438,6 +492,14 @@ export interface CreateAgentRequest {
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
+  /** Workspace skill IDs attached atomically with the agent row. */
+  skill_ids?: string[];
+}
+
+export interface AgentBuilderSession {
+  session_id: string;
+  builder_agent_id: string;
+  runtime_id: string;
 }
 
 /** Agent template summary — fields needed by the picker grid. Does NOT
@@ -624,6 +686,8 @@ export interface SkillSummary {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+	/** Present only when returned from an agent-scoped assignment endpoint. */
+	enabled?: boolean;
 }
 
 export interface Skill extends SkillSummary {
@@ -874,8 +938,17 @@ export interface RuntimeLocalSkillSummary {
    * discovery omit the field; treat `undefined` as unknown rather than
    * asserting either origin.
    */
-  root?: "provider" | "universal";
+  root?: "provider" | "universal" | "plugin";
+  /** Enabled runtime plugin that contributed this skill, when applicable. */
+  plugin?: string;
   file_count: number;
+}
+
+export interface RuntimeLocalMcpServerSummary {
+	name: string;
+	transport?: "stdio" | "http" | "sse" | "unknown";
+	source?: string;
+	enabled: boolean;
 }
 
 export interface RuntimeLocalSkillListRequest {
@@ -884,6 +957,8 @@ export interface RuntimeLocalSkillListRequest {
   status: RuntimeLocalSkillStatus;
   skills?: RuntimeLocalSkillSummary[];
   supported: boolean;
+	mcp_servers?: RuntimeLocalMcpServerSummary[];
+	mcp_supported?: boolean;
   error?: string;
   created_at: string;
   updated_at: string;
@@ -918,6 +993,8 @@ export interface RuntimeLocalSkillImportRequest {
 export interface RuntimeLocalSkillsResult {
   skills: RuntimeLocalSkillSummary[];
   supported: boolean;
+	mcpServers: RuntimeLocalMcpServerSummary[];
+	mcpSupported: boolean;
 }
 
 export interface RuntimeLocalSkillImportResult {

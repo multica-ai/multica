@@ -400,6 +400,7 @@ RETURNING *;
 -- name: UpdateComment :one
 UPDATE comment SET
     content = $2,
+    source_task_id = sqlc.narg(source_task_id),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
