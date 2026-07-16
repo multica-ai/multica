@@ -179,6 +179,7 @@ func TestRunnerReturnsOnlySafeFailureStage(t *testing.T) {
 func TestRunnerBoundsStagesAndCleanup(t *testing.T) {
 	runner := &Runner{
 		commander:      blockingCommander{},
+		openTimeout:    20 * time.Millisecond,
 		stageTimeout:   5 * time.Millisecond,
 		cleanupTimeout: 5 * time.Millisecond,
 	}
@@ -187,7 +188,7 @@ func TestRunnerBoundsStagesAndCleanup(t *testing.T) {
 	if err == nil || err.Error() != "internal browser stage open failed" {
 		t.Fatalf("error = %v", err)
 	}
-	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+	if elapsed := time.Since(started); elapsed < 20*time.Millisecond || elapsed > 100*time.Millisecond {
 		t.Fatalf("bounded runner took %s", elapsed)
 	}
 }
