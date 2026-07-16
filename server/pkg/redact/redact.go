@@ -59,11 +59,7 @@ func InputMap(m map[string]any) map[string]any {
 	}
 	out := make(map[string]any, len(m))
 	for k, v := range m {
-		if s, ok := v.(string); ok {
-			out[k] = Text(s)
-		} else {
-			out[k] = v
-		}
+		out[k] = redactInputValue(k, v) // CEREBRO-PATCH(oauth-refresh-redaction): recurse through structured tool input before persistence.
 	}
 	return out
 }

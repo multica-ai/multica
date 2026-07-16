@@ -15,8 +15,8 @@ Multica backend, so it needs no inbound port, DNS, domain, or tunnel.
 
 - the cerebro `multica` binary (from `server/`, so it carries our patches — not
   the upstream GitHub release),
-- the **Claude Code CLI** (`@anthropic-ai/claude-code`) and **Pi Coding Agent**
-  (`@earendil-works/pi-coding-agent`) that the daemon shells out to,
+- the **Claude Code CLI**, pinned **Pi Coding Agent** and pinned **Hermes Agent**
+  that the daemon shells out to,
 - `git` (per-task repo checkouts), `ripgrep`, `curl`, `jq`,
 - a non-root `multica` user.
 
@@ -38,6 +38,10 @@ with a 30-minute TTL and will fail on the next restart.
 | `MULTICA_WORKSPACE_ID` | with token | Workspace the runtime serves. |
 | `MULTICA_SETUP_TOKEN` | other path | One-time setup token (`mst_…`) from the "Add runtime" dialog; exchanged on first boot. |
 | `GITHUB_TOKEN` | for private repos | Lets the daemon clone private Firtal repos into task worktrees. |
+| `MULTICA_PI_MODEL` | no | Primary Pi model. Defaults to `openai-codex/gpt-5.3-codex` (ChatGPT Pro). |
+| `FIRTAL_REGISTRY_URL` | for backup | Firtal Data Registry base URL used by the managed AI Gateway backup. |
+| `FIRTAL_REGISTRY_KEY` | for backup | Infisical-backed service credential for the AI Gateway. It is never written into Pi or Hermes config. |
+| `FIRTAL_REGISTRY_MODEL` | no | Backup model. Defaults to the managed `claude-sonnet-5`. |
 | `MULTICA_DEVICE_LABEL` | no | Name shown in the runtimes list (default `cloud-runtime`). |
 | `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` | no | Committer identity for agent commits. |
 
@@ -52,10 +56,12 @@ sourced from Infisical; do not bake them into the image or this repo.
 | `/home/multica/.multica` | Config + daemon token. Persist it so restarts skip re-provisioning. |
 | `/home/multica/workspaces` | Per-task git worktrees. Persist to reuse checkouts and resume sessions; safe to treat as ephemeral cache otherwise. |
 
-Pi stores its settings and OAuth refresh credentials under
-`/home/multica/.multica/pi` through `PI_CODING_AGENT_DIR`. This keeps the
-credentials on the existing config volume across image rebuilds. Never print,
-copy into git, or attach the contents of `auth.json` to an issue.
+Pi stores settings and OAuth refresh credentials under
+`/home/multica/.multica/pi` through `PI_CODING_AGENT_DIR`. Hermes stores the
+same classes of state under `/home/multica/.multica/hermes` through
+`HERMES_HOME`. Both therefore survive image rebuilds on the existing config
+volume. Never print, copy into git, or attach either `auth.json` file to an
+issue.
 
 ## Deploy on Sliplane (outline)
 
@@ -68,19 +74,63 @@ copy into git, or attach the contents of `auth.json` to an issue.
    `multica daemon status` (via Sliplane shell) shows `running` with `claude`
    and `pi` detected.
 
-## One-time Pi subscription login
+## ChatGPT Pro primary, Firtal AI Gateway backup
 
-Pi's `openai-codex` provider uses a ChatGPT Plus or Pro subscription. After the
-first image deployment, open a shell for the private runtime service and run
-`pi`. Enter `/login`, select **OpenAI Codex**, and complete the URL/code flow in
-the account owner's browser. The resulting refresh credentials are written to
-the persistent Pi config directory above and refresh automatically.
+Both Pi and Hermes support the `openai-codex` provider through a ChatGPT Plus or
+Pro subscription. After the first image deployment, open a shell for the
+private runtime service:
+
+1. Run `pi`, enter `/login`, select **OpenAI Codex**, and complete the URL/code
+   flow in the account owner's browser.
+2. Run `hermes model`, select **OpenAI Codex**, and complete its device-code
+   login with the same ChatGPT Pro account.
+
+Each agent stores its own OAuth refresh credential on the persistent volume and
+renews short-lived access automatically. There is no separate permanent key to
+copy: the persisted, automatically rotated refresh credential is the
+long-lived login mechanism.
+
+At startup, the entrypoint installs the Infisical-backed Firtal AI Gateway as a
+backup in both agents. Hermes uses its native fallback chain. Multica retries a
+failed Pi call through the gateway only before Pi has emitted text or started a
+tool; it never retries after a possible side effect. The gateway credential is
+read from `FIRTAL_REGISTRY_KEY` at runtime and is not persisted in agent config.
 
 Do not replace this flow with `OPENAI_API_KEY`: that is a separate API-billing
-identity and does not use the requested ChatGPT subscription. After login, run
-`pi --list-models openai-codex` in the service shell, confirm that Multica lists
-the Pi runtime, and complete a real Pi-assigned issue before declaring the
-runtime ready.
+identity and does not use the requested ChatGPT subscription.
+
+## Replace a compromised ChatGPT OAuth login
+
+Deleting a local credential is not sufficient revocation: Pi's `/logout` only
+removes its local copy, and OpenAI documents that **Log out all** does not manage
+[Codex CLI or third-party **Sign in with ChatGPT** sessions](https://help.openai.com/en/articles/20001257-managing-active-sessions-in-chatgpt/).
+Use this sequence:
+
+1. In ChatGPT, open **Settings → Connectors** and disconnect the relevant Codex
+   CLI / **Sign in with ChatGPT** authorization if it is shown.
+2. In the service shell, remove the old local credentials with Pi `/logout`
+   for `openai-codex` and `hermes auth logout openai-codex`.
+3. If an API key was generated by the authorization and is visible in the
+   OpenAI API dashboard, revoke that key separately. OpenAI confirms that
+   [disconnecting OAuth does not revoke an auto-generated API key](https://help.openai.com/en/articles/11381614-api-codex-cli-and-sign-in-with-chatgpt).
+4. Restart the service, then repeat both ChatGPT Pro login flows above. Never
+   paste the old credential into a comment, log, command output, or support
+   ticket.
+
+## Release canary
+
+Run the same check after deployment and again after one service restart:
+
+```sh
+runtime-agent-canary all
+```
+
+`PI PRIMARY PASS` proves the ChatGPT Pro path works. If the primary path is
+temporarily unavailable, `PI FALLBACK PASS` proves continuity through Firtal AI
+Gateway. `HERMES PASS` proves Hermes completed through its configured primary or
+native fallback. Do not move Mette, Jack, or Michael to the cloud runtime until
+both post-deploy and post-restart checks exit successfully and the provider
+route shown by the service diagnostics has been reviewed.
 
 ## Honest note on Claude auth
 

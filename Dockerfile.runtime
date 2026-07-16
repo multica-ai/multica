@@ -45,7 +45,7 @@ FROM node:22-bookworm-slim
 # ripgrep: Claude Code's search backend. curl/jq/ca-certificates: setup-token
 # exchange + TLS. tini: clean PID 1 signal handling for the long-running daemon.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git ripgrep curl jq ca-certificates tini \
+      git ripgrep curl jq ca-certificates tini python3 python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Agent CLIs that the daemon shells out to. Pi is pinned so an upstream CLI
@@ -53,11 +53,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g @anthropic-ai/claude-code && claude --version
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.80.7 \
     && pi --version
+RUN python3 -m venv /opt/hermes \
+    && /opt/hermes/bin/pip install --no-cache-dir hermes-agent==0.18.2 \
+    && ln -s /opt/hermes/bin/hermes /usr/local/bin/hermes \
+    && hermes version
 
 COPY --from=builder /src/server/bin/multica /usr/local/bin/multica
 COPY docker/runtime-entrypoint.sh /usr/local/bin/runtime-entrypoint.sh
+COPY scripts/cerebro/runtime-agent-canary.sh /usr/local/bin/runtime-agent-canary
+COPY docker/configure-hermes-fallback.py /usr/local/lib/multica/configure-hermes-fallback.py
+COPY docker/pi-firtal-gateway.ts /usr/local/lib/multica/pi-firtal-gateway.ts
 RUN sed -i 's/\r$//' /usr/local/bin/runtime-entrypoint.sh \
-    && chmod +x /usr/local/bin/runtime-entrypoint.sh
+    && chmod +x /usr/local/bin/runtime-entrypoint.sh /usr/local/bin/runtime-agent-canary
 
 # Run as a non-root user (container-hardening baseline, FIR-2105).
 RUN useradd --create-home --shell /bin/bash multica
@@ -68,7 +75,9 @@ ENV HOME=/home/multica \
     MULTICA_WORKSPACES_ROOT=/home/multica/workspaces \
     MULTICA_CLAUDE_PATH=/usr/local/bin/claude \
     MULTICA_PI_PATH=/usr/local/bin/pi \
-    PI_CODING_AGENT_DIR=/home/multica/.multica/pi
+    MULTICA_HERMES_PATH=/usr/local/bin/hermes \
+    PI_CODING_AGENT_DIR=/home/multica/.multica/pi \
+    HERMES_HOME=/home/multica/.multica/hermes
 
 # No EXPOSE — the runtime makes only outbound connections.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/runtime-entrypoint.sh"]

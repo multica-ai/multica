@@ -1607,3 +1607,14 @@ The intake contract, validation and Gateway tool remain fork-owned in `server/in
 | `pi-harness` | `server/go.mod`; `Dockerfile.runtime` | Build the fork-owned harness package into the runtime image without placing its implementation in an upstream server zone. |
 
 Approved by Jesper Hvejsel on FIR-3272: “byg det hele uden stop og deploy”, 2026-07-15.
+
+## FIR-3362 — Stable Pi and Hermes cloud runtime
+
+| Patch | Location | Reason |
+|---|---|---|
+| `oauth-refresh-redaction` | `server/pkg/redact/redact.go` | Route nested task input through the Cerebro-owned recursive redactor so PI/Hermes OAuth refresh credentials cannot reach stored messages or logs. Patterns and synthetic regressions live in `cerebro_oauth.go` and `cerebro_oauth_test.go`. |
+| `pi-safe-provider-diagnostics` | `server/pkg/agent/pi.go` | Replace raw Pi stderr/provider errors with a bounded, centrally redacted diagnostic and a safe provider category. Implementation and tests live in `cerebro_pi_diagnostics.go` and its test sibling. |
+| `hermes-safe-provider-diagnostics` | `server/pkg/agent/hermes.go` | Send Hermes stderr through the same line-safe central redactor before either daemon logging or provider-error classification, including credentials split across process write boundaries. The writer and synthetic regression live in `cerebro_secret_safe_writer.go` and its test sibling. |
+| `pi-gateway-fallback` | `server/pkg/agent/pi.go` | Keep the original one-attempt Pi execution behind the Cerebro-owned fallback wrapper. It retries through Firtal AI Gateway only before text or tool activity, preventing duplicate side effects and ensuring only the successful fallback session is pinned. |
+
+The runtime-image, entrypoint, fallback-provider helpers, canary, and cloud runbook are deployment-owned surfaces outside the upstream server zone. ChatGPT Pro is the primary provider for both Pi and Hermes; the Infisical-backed Firtal AI Gateway is the managed backup.
