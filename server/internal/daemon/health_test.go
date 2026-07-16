@@ -426,6 +426,89 @@ func TestShutdownHandlerPostCancelsDaemonContext(t *testing.T) {
 	}
 }
 
+func TestShutdownHandlerRequireIdleAtomicallyBlocksNewClaims(t *testing.T) {
+	t.Parallel()
+
+	const credential = "operator-shutdown-credential"
+	cancelled := make(chan struct{}, 1)
+	d := &Daemon{cancelFunc: func() { cancelled <- struct{}{} }}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/shutdown", nil)
+	req.Header.Set(ShutdownCredentialHeader, credential)
+	req.Header.Set(ShutdownRequireIdleHeader, "true")
+
+	d.shutdownHandler(credential).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if d.tryEnterClaim() {
+		t.Fatal("idle shutdown released the claim barrier before process cancellation")
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("idle shutdown did not cancel daemon context")
+	}
+}
+
+func TestShutdownHandlerRequireIdleRejectsTaskOrClaimRace(t *testing.T) {
+	t.Parallel()
+
+	const credential = "operator-shutdown-credential"
+	for name, makeBusy := range map[string]func(*Daemon){
+		"active task": func(d *Daemon) { d.activeTasks.Add(1) },
+		"claim in flight": func(d *Daemon) {
+			if !d.tryEnterClaim() {
+				t.Fatal("failed to establish in-flight claim")
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			cancelled := make(chan struct{}, 1)
+			d := &Daemon{cancelFunc: func() { cancelled <- struct{}{} }}
+			makeBusy(d)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/shutdown", nil)
+			req.Header.Set(ShutdownCredentialHeader, credential)
+			req.Header.Set(ShutdownRequireIdleHeader, "true")
+
+			d.shutdownHandler(credential).ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+			}
+			select {
+			case <-cancelled:
+				t.Fatal("busy idle shutdown cancelled daemon context")
+			case <-time.After(20 * time.Millisecond):
+			}
+		})
+	}
+}
+
+func TestShutdownHandlerRequireIdleReleasesBarrierWhenShutdownUnavailable(t *testing.T) {
+	t.Parallel()
+
+	const credential = "operator-shutdown-credential"
+	d := &Daemon{}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/shutdown", nil)
+	req.Header.Set(ShutdownCredentialHeader, credential)
+	req.Header.Set(ShutdownRequireIdleHeader, "true")
+
+	d.shutdownHandler(credential).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
+	}
+	if !d.tryEnterClaim() {
+		t.Fatal("failed idle shutdown left the claim barrier set")
+	}
+	d.exitClaim()
+}
+
 func TestShutdownHandlerRejectsMissingOrInvalidOperatorCredential(t *testing.T) {
 	t.Parallel()
 

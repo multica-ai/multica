@@ -27,6 +27,10 @@ import {
 import { fetchDaemonHealth } from "./daemon-health";
 import { decideAutomaticRestart } from "./restart-decision";
 import {
+  DaemonLifecycleCoordinator,
+  daemonStopArgs,
+} from "./daemon-lifecycle-coordinator";
+import {
   daemonLifecycleUnreachable,
   isDaemonExternallyManaged,
   normalizeHostOS,
@@ -66,7 +70,7 @@ let statusPollTimer: ReturnType<typeof setInterval> | null = null;
 let logTailWatcher: { path: string; listener: StatsListener } | null = null;
 let currentState: DaemonStatus["state"] = "installing_cli";
 let getMainWindow: () => BrowserWindow | null = () => null;
-let operationInProgress = false;
+const lifecycleCoordinator = new DaemonLifecycleCoordinator();
 let cachedCliBinary: string | null | undefined = undefined;
 let cliResolvePromise: Promise<string | null> | null = null;
 let cachedCliBinaryVersion: string | null | undefined = undefined;
@@ -794,18 +798,6 @@ async function reauthenticate(
   return { ok: true };
 }
 
-async function withGuard<T>(fn: () => Promise<T>): Promise<T | { success: false; error: string }> {
-  if (operationInProgress) {
-    return { success: false, error: "Another daemon operation is in progress" };
-  }
-  operationInProgress = true;
-  try {
-    return await fn();
-  } finally {
-    operationInProgress = false;
-  }
-}
-
 function profileArgs(active: ActiveProfile): string[] {
   return active.name ? ["--profile", active.name] : [];
 }
@@ -819,7 +811,7 @@ function desktopSpawnEnv(): NodeJS.ProcessEnv {
   return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
 }
 
-async function startDaemon(): Promise<{ success: boolean; error?: string }> {
+async function startDaemonUnlocked(): Promise<{ success: boolean; error?: string }> {
   const bin = await resolveCliBinary();
   if (!bin) return { success: false, error: "multica CLI is not installed" };
 
@@ -880,7 +872,9 @@ async function lifecycleBlockedByForeignDaemon(): Promise<boolean> {
   );
 }
 
-async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
+async function stopDaemonUnlocked(
+  options: { requireIdle?: boolean } = {},
+): Promise<{ success: boolean; error?: string }> {
   // Central lifecycle guard: a daemon running in an environment we can't drive
   // (e.g. Linux in WSL2 behind a Windows desktop) can't be stopped by the
   // native CLI — it would act on the host process namespace and no-op, while
@@ -894,28 +888,31 @@ async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
   if (!bin) return { success: false, error: "multica CLI is not installed" };
 
   const active = await ensureActiveProfile();
+  const previousState = currentState;
   currentState = "stopping";
   // An explicit stop is a clean reset — drop any pending auth-failure verdict.
   authExpired = false;
   startingSince = null;
   sendStatus({ state: "stopping" });
 
-  const args = ["daemon", "stop", ...profileArgs(active)];
+  const args = daemonStopArgs(active.name, options.requireIdle === true);
 
   return new Promise((resolve) => {
     execFile(bin, args, { timeout: 15_000 }, (err) => {
       if (err) {
+        currentState = previousState;
+        sendStatus({ state: previousState });
         resolve({ success: false, error: err.message });
       } else {
+        currentState = "stopped";
+        sendStatus({ state: "stopped" });
         resolve({ success: true });
       }
-      currentState = "stopped";
-      sendStatus({ state: "stopped" });
     });
   });
 }
 
-async function restartDaemon(
+async function restartDaemonUnlocked(
   options: { requireIdle?: boolean } = {},
 ): Promise<{ success: boolean; error?: string }> {
   // Same central, live-preflighted guard as stopDaemon: we can neither stop nor
@@ -936,9 +933,25 @@ async function restartDaemon(
       };
     }
   }
-  const stopResult = await stopDaemon();
+  const stopResult = await stopDaemonUnlocked(options);
   if (!stopResult.success) return stopResult;
-  return startDaemon();
+  return startDaemonUnlocked();
+}
+
+function startDaemon(): Promise<{ success: boolean; error?: string }> {
+  return lifecycleCoordinator.run(startDaemonUnlocked);
+}
+
+function stopDaemon(
+  options: { requireIdle?: boolean } = {},
+): Promise<{ success: boolean; error?: string }> {
+  return lifecycleCoordinator.run(() => stopDaemonUnlocked(options));
+}
+
+function restartDaemon(
+  options: { requireIdle?: boolean } = {},
+): Promise<{ success: boolean; error?: string }> {
+  return lifecycleCoordinator.run(() => restartDaemonUnlocked(options));
 }
 
 async function retryPendingAutomaticRestarts(): Promise<void> {
@@ -1110,9 +1123,9 @@ export function setupDaemonManager(
       await pollOnce();
     }
   });
-  ipcMain.handle("daemon:start", () => withGuard(() => startDaemon()));
-  ipcMain.handle("daemon:stop", () => withGuard(() => stopDaemon()));
-  ipcMain.handle("daemon:restart", () => withGuard(() => restartDaemon()));
+  ipcMain.handle("daemon:start", () => startDaemon());
+  ipcMain.handle("daemon:stop", () => stopDaemon());
+  ipcMain.handle("daemon:restart", () => restartDaemon());
   ipcMain.handle("daemon:get-status", () => fetchHealth());
   // The host's OS name, available regardless of daemon state. The Runtimes
   // page uses it as a fallback identity for "this machine" when no

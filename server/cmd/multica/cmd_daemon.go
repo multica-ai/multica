@@ -101,6 +101,7 @@ func init() {
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
 
 	daemonStatusCmd.Flags().String("output", "table", "Output format: table or json")
+	daemonStopCmd.Flags().Bool("require-idle", false, "Stop only if no task or claim is in flight")
 
 	// restart shares all the same flags as start
 	rf := daemonRestartCmd.Flags()
@@ -616,7 +617,7 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Fprintln(os.Stderr, "Stopping daemon...")
 		}
-		if err := requestDaemonShutdown(healthPort, credential); err != nil {
+		if err := requestDaemonShutdown(healthPort, credential, false); err != nil {
 			return fmt.Errorf("request daemon shutdown: %w", err)
 		}
 		// Wait until the port is fully released (not merely past "running"),
@@ -666,7 +667,11 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("load daemon shutdown credential: %w", err)
 	}
 	diagnostics, _ := requestDaemonDiagnostics(ctx, healthPort, credential)
-	if err := requestDaemonShutdown(healthPort, credential); err != nil {
+	requireIdle, err := cmd.Flags().GetBool("require-idle")
+	if err != nil {
+		return fmt.Errorf("read require-idle flag: %w", err)
+	}
+	if err := requestDaemonShutdown(healthPort, credential, requireIdle); err != nil {
 		return fmt.Errorf("request daemon shutdown: %w", err)
 	}
 
@@ -696,7 +701,7 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 // requestDaemonShutdown POSTs to the daemon's /shutdown endpoint to ask it
 // to exit gracefully. Returns an error if the request could not be delivered
 // (network error, non-2xx status, or the endpoint predates this change).
-func requestDaemonShutdown(healthPort int, credential string) error {
+func requestDaemonShutdown(healthPort int, credential string, requireIdle bool) error {
 	if strings.TrimSpace(credential) == "" {
 		return errors.New("shutdown credential is required")
 	}
@@ -706,6 +711,9 @@ func requestDaemonShutdown(healthPort int, credential string) error {
 		return err
 	}
 	req.Header.Set(daemon.ShutdownCredentialHeader, credential)
+	if requireIdle {
+		req.Header.Set(daemon.ShutdownRequireIdleHeader, "true")
+	}
 	client := &http.Client{
 		Timeout: 2 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error {

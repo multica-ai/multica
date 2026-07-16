@@ -39,7 +39,7 @@ func TestRequestDaemonShutdownSendsOperatorCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse test server port: %v", err)
 	}
-	if err := requestDaemonShutdown(port, credential); err != nil {
+	if err := requestDaemonShutdown(port, credential, false); err != nil {
 		t.Fatalf("request shutdown: %v", err)
 	}
 
@@ -78,7 +78,7 @@ func TestRequestDaemonShutdownDoesNotForwardCredentialAcrossRedirect(t *testing.
 	if err != nil {
 		t.Fatalf("parse test server port: %v", err)
 	}
-	if err := requestDaemonShutdown(port, credential); err == nil {
+	if err := requestDaemonShutdown(port, credential, false); err == nil {
 		t.Fatal("redirected shutdown request unexpectedly succeeded")
 	}
 	select {
@@ -91,8 +91,37 @@ func TestRequestDaemonShutdownDoesNotForwardCredentialAcrossRedirect(t *testing.
 func TestRequestDaemonShutdownRejectsMissingCredential(t *testing.T) {
 	t.Parallel()
 
-	if err := requestDaemonShutdown(1, " \n\t"); err == nil {
+	if err := requestDaemonShutdown(1, " \n\t", false); err == nil {
 		t.Fatal("shutdown request without a credential unexpectedly succeeded")
+	}
+}
+
+func TestRequestDaemonShutdownCanRequireIdle(t *testing.T) {
+	t.Parallel()
+
+	const credential = "operator-shutdown-credential"
+	requestHeaders := make(chan http.Header, 1)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestHeaders <- r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	if err := requestDaemonShutdown(port, credential, true); err != nil {
+		t.Fatalf("request shutdown: %v", err)
+	}
+	if got := (<-requestHeaders).Get(daemon.ShutdownRequireIdleHeader); got != "true" {
+		t.Fatalf("require-idle header = %q, want true", got)
 	}
 }
 

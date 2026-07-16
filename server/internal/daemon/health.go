@@ -31,7 +31,8 @@ const (
 	// ShutdownCredentialHeader carries the operator-only credential accepted
 	// by POST /shutdown. It is intentionally separate from task checkout
 	// capabilities and is never exposed by /health or task environments.
-	ShutdownCredentialHeader = "X-Multica-Shutdown-Credential"
+	ShutdownCredentialHeader  = "X-Multica-Shutdown-Credential"
+	ShutdownRequireIdleHeader = "X-Multica-Shutdown-Require-Idle"
 	// ShutdownCredentialFileName is the profile-local state file read by the
 	// lifecycle CLI. Its contents are generated afresh by each daemon process.
 	ShutdownCredentialFileName = "daemon.shutdown-token"
@@ -247,6 +248,16 @@ func (d *Daemon) shutdownHandler(credential string) http.HandlerFunc {
 		}
 		if !validOperatorCredential(credential, r.Header.Get(ShutdownCredentialHeader)) {
 			http.Error(w, "invalid shutdown credential", http.StatusUnauthorized)
+			return
+		}
+		requireIdle := r.Header.Get(ShutdownRequireIdleHeader) == "true"
+		if requireIdle && !d.trySetClaimBarrier() {
+			http.Error(w, "daemon is busy", http.StatusConflict)
+			return
+		}
+		if requireIdle && d.cancelFunc == nil {
+			d.releaseClaimBarrier()
+			http.Error(w, "daemon shutdown unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
