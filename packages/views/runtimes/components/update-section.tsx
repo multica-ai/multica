@@ -5,6 +5,7 @@ import {
   XCircle,
   ArrowUpCircle,
   Check,
+  Lock,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { api } from "@multica/core/api";
@@ -211,6 +212,16 @@ export function UpdateSection({
                 </span>
                 <span className="text-xs text-muted-foreground">{t(($) => $.update.available)}</span>
               </>
+            )}
+
+            {hasUpdate && !runtimeId && (
+              <span
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+                title={t(($) => $.update.read_only_title)}
+              >
+                <Lock className="h-3 w-3" />
+                {t(($) => $.update.read_only)}
+              </span>
             )}
 
             {hasUpdate && runtimeId && isOnline && !status && (

@@ -96,6 +96,13 @@ Worktrees share one PostgreSQL container and get isolated DB names/ports via `.e
 
 CI runs Node 22, Go 1.26.1, and a `pgvector/pgvector:pg17` PostgreSQL service.
 
+## Database and Migration Rules
+
+These are hard requirements for every new or modified database design and production migration:
+
+- Do not add database foreign keys (`FOREIGN KEY` / `REFERENCES`), cascading deletes, or cascading updates. Resolve relationships, validation, and dependent cleanup explicitly in application code. Use an application transaction when cleanup and the parent operation must commit or roll back atomically.
+- Every index created by a migration must use `CREATE INDEX CONCURRENTLY` or `CREATE UNIQUE INDEX CONCURRENTLY`, including indexes on newly created tables. PostgreSQL rejects concurrent index creation inside a transaction or a multi-command string, so keep each concurrent index build in its own single-statement migration file. The repository migration runner executes migration files outside an explicit transaction to support this.
+
 ## Coding Rules
 
 - TypeScript strict mode is enabled; keep types explicit.

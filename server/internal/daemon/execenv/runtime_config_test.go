@@ -802,6 +802,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		filename string
 	}{
 		{"claude", "CLAUDE.md"},
+		{"codebuddy", "CODEBUDDY.md"},
 		{"codex", "AGENTS.md"},
 		{"copilot", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
@@ -849,12 +850,36 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 	}
 }
 
+// CodeBuddy is a Claude Code fork but ships its own native config
+// directory (~/.codebuddy, .codebuddy/) rather than reusing Claude's
+// ~/.claude / CLAUDE.md paths (see
+// https://www.codebuddy.ai/docs/cli/codebuddy-dir). This pins the two
+// providers to different target filenames so a future edit can't
+// silently re-merge them.
+func TestRuntimeConfigPathDistinguishesCodebuddyFromClaude(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	claudePath := runtimeConfigPath(dir, "claude")
+	codebuddyPath := runtimeConfigPath(dir, "codebuddy")
+
+	if claudePath != filepath.Join(dir, "CLAUDE.md") {
+		t.Errorf("claude runtime config path = %q, want CLAUDE.md", claudePath)
+	}
+	if codebuddyPath != filepath.Join(dir, "CODEBUDDY.md") {
+		t.Errorf("codebuddy runtime config path = %q, want CODEBUDDY.md", codebuddyPath)
+	}
+	if claudePath == codebuddyPath {
+		t.Fatal("claude and codebuddy must not share a runtime config path")
+	}
+}
+
 func TestInjectRuntimeConfigUnknownProviderSkipsWrite(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	// Seed all three candidate filenames so we can verify none of them get
+	// Seed all candidate filenames so we can verify none of them get
 	// written when the provider is unknown.
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+	for _, name := range []string{"CLAUDE.md", "CODEBUDDY.md", "AGENTS.md"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("untouched\n"), 0o644); err != nil {
 			t.Fatalf("seed %s: %v", name, err)
 		}
@@ -865,7 +890,7 @@ func TestInjectRuntimeConfigUnknownProviderSkipsWrite(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("InjectRuntimeConfig: %v", err)
 	}
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+	for _, name := range []string{"CLAUDE.md", "CODEBUDDY.md", "AGENTS.md"} {
 		got, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
@@ -1087,7 +1112,7 @@ func TestCleanupRuntimeConfigNoOpCases(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		// Seed every candidate filename to verify none of them get touched.
-		for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+		for _, name := range []string{"CLAUDE.md", "CODEBUDDY.md", "AGENTS.md"} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte("untouched\n"), 0o644); err != nil {
 				t.Fatalf("seed %s: %v", name, err)
 			}
@@ -1095,7 +1120,7 @@ func TestCleanupRuntimeConfigNoOpCases(t *testing.T) {
 		if err := CleanupRuntimeConfig(dir, "totally-unknown-provider"); err != nil {
 			t.Errorf("unknown provider must be no-op, got: %v", err)
 		}
-		for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+		for _, name := range []string{"CLAUDE.md", "CODEBUDDY.md", "AGENTS.md"} {
 			got, err := os.ReadFile(filepath.Join(dir, name))
 			if err != nil {
 				t.Fatalf("read %s: %v", name, err)
@@ -1150,6 +1175,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		filename string
 	}{
 		{"claude", "CLAUDE.md"},
+		{"codebuddy", "CODEBUDDY.md"},
 		{"codex", "AGENTS.md"},
 		{"copilot", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},

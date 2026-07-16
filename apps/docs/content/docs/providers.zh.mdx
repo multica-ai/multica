@@ -15,7 +15,7 @@ Multica 内置支持 **16 款 AI 编程工具**。它们都实现了同一套接
 |---|---|---|---|---|---|
 | **Antigravity** | Google | ✅（`--conversation <id>`）| ❌ | `.agents/skills/` | 动态发现（`agy models`）|
 | **Claude Code** | Anthropic | ✅ | ✅ | `.claude/skills/` | 静态 + flag |
-| **CodeBuddy** | Tencent | ✅ | ✅ | `.claude/skills/` | 动态发现 |
+| **CodeBuddy** | Tencent | ✅ | ✅ | `.codebuddy/skills/` | 动态发现 |
 | **Codex** | OpenAI | ✅ | ✅ | `$CODEX_HOME/skills/` | 静态 |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静态（账号权益决定）|
 | **Cursor** | Anysphere | ✅ | ✅ | `.cursor/skills/` | 动态发现 |
@@ -42,7 +42,7 @@ Anthropic 出品。**新用户首选**——功能最完整：会话恢复真用
 
 ### CodeBuddy
 
-Tencent 出品。一款兼容 Claude Code 的 CLI agent——Multica 用和 Claude Code 一样的 stream-json 协议驱动它，所以会话恢复可用（通过 `--resume`），MCP 配置通过 `--mcp-config` 传入，skill 沿用 Claude Code 的 `.claude/skills/` 布局。模型为动态发现。
+Tencent 出品。一款兼容 Claude Code 的 CLI agent——Multica 用和 Claude Code 一样的 stream-json 协议驱动它，所以会话恢复可用（通过 `--resume`），MCP 配置通过 `--mcp-config` 传入。CodeBuddy 使用自己原生的配置目录，而不是复用 Claude 的，所以 skill 放在 `.codebuddy/skills/`，运行时说明写入 `CODEBUDDY.md`。模型为动态发现。
 
 ### Codex
 
@@ -125,7 +125,7 @@ xAI 的 Grok Build CLI（`grok`）。Multica 通过 `grok --no-auto-update agent
 | 工具 | 路径 | 是否原生发现 |
 |---|---|---|
 | Claude Code | `.claude/skills/` | ✅ 原生 |
-| CodeBuddy | `.claude/skills/` | ✅ 原生 |
+| CodeBuddy | `.codebuddy/skills/` | ✅ 原生 |
 | Codex | `$CODEX_HOME/skills/` | ✅ 原生 |
 | Copilot | `.github/skills/` | ✅ 原生 |
 | Cursor | `.cursor/skills/` | ✅ 原生 |

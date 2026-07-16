@@ -15,7 +15,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 |---|---|---|---|---|---|
 | **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | Dynamic discovery (`agy models`) |
 | **Claude Code** | Anthropic | ✅ | ✅ | `.claude/skills/` | Static + flag |
-| **CodeBuddy** | Tencent | ✅ | ✅ | `.claude/skills/` | Dynamic discovery |
+| **CodeBuddy** | Tencent | ✅ | ✅ | `.codebuddy/skills/` | Dynamic discovery |
 | **Codex** | OpenAI | ✅ | ✅ | `$CODEX_HOME/skills/` | Static |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | Static (determined by account entitlement) |
 | **Cursor** | Anysphere | ✅ | ✅ | `.cursor/skills/` | Dynamic discovery |
@@ -42,7 +42,7 @@ From Anthropic. **First choice for new users** — the most complete feature set
 
 ### CodeBuddy
 
-From Tencent. A Claude Code–compatible CLI agent — Multica drives it with the same stream-json protocol as Claude Code, so session resumption works (via `--resume`), MCP config is passed through `--mcp-config`, and skills use Claude Code's `.claude/skills/` layout. Models are discovered dynamically.
+From Tencent. A Claude Code–compatible CLI agent — Multica drives it with the same stream-json protocol as Claude Code, so session resumption works (via `--resume`) and MCP config is passed through `--mcp-config`. CodeBuddy ships its own native config directory rather than reusing Claude's, so skills land in `.codebuddy/skills/` and the runtime brief is written to `CODEBUDDY.md`. Models are discovered dynamically.
 
 ### Codex
 
@@ -134,7 +134,7 @@ Each tool uses **its own** skill discovery path. Before a task runs, the Multica
 | Tool | Path | Native discovery? |
 |---|---|---|
 | Claude Code | `.claude/skills/` | ✅ Native |
-| CodeBuddy | `.claude/skills/` | ✅ Native |
+| CodeBuddy | `.codebuddy/skills/` | ✅ Native |
 | Codex | `$CODEX_HOME/skills/` | ✅ Native |
 | Copilot | `.github/skills/` | ✅ Native |
 | Cursor | `.cursor/skills/` | ✅ Native |

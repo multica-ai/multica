@@ -236,13 +236,13 @@ export function DesktopShell() {
             {slug && <WindowToolbar />}
             {slug && <AppSidebar topSlot={<SidebarTopSpacer />} searchSlot={<SearchTrigger />} />}
             {/* Right side: header + content container */}
-            <motion.div layout transition={toolbarMotion} className="flex flex-1 min-w-0 flex-col">
+            <div className="flex flex-1 min-w-0 flex-col">
               <MainTopBar />
               <MainCanvas>
                 <TabContent />
                 {slug && <FloatingChat />}
               </MainCanvas>
-            </motion.div>
+            </div>
           </SidebarProvider>
         </div>
         {slug && <ModalRegistry />}

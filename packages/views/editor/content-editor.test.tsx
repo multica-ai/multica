@@ -81,6 +81,13 @@ vi.mock("./attachment-download-context", () => ({
 
 const editorRef = vi.hoisted<{ current: unknown }>(() => ({ current: null }));
 const onCreateFired = vi.hoisted(() => ({ value: false }));
+// Transaction listeners registered via `editor.on("transaction", …)`. The
+// upload-state publisher subscribes here; `emitTransaction` stands in for
+// ProseMirror dispatching a doc change.
+const transactionListeners = vi.hoisted(() => ({ current: [] as Array<() => void> }));
+const emitTransaction = () => {
+  for (const listener of [...transactionListeners.current]) listener();
+};
 const latestEditorOptions = vi.hoisted<{
   current?: { onUpdate?: (args: { editor: unknown }) => void };
 }>(() => ({}));
@@ -106,6 +113,15 @@ vi.mock("@tiptap/react", () => ({
           setTextSelection: mockSetTextSelection,
         },
         getMarkdown: () => editorState.markdown,
+        on: (event: string, cb: () => void) => {
+          if (event === "transaction") transactionListeners.current.push(cb);
+        },
+        off: (event: string, cb: () => void) => {
+          if (event !== "transaction") return;
+          transactionListeners.current = transactionListeners.current.filter(
+            (listener) => listener !== cb,
+          );
+        },
         view: { dispatch: mockDispatch },
         state: {
           get tr() {
@@ -146,6 +162,7 @@ describe("ContentEditor", () => {
     editorState.markdown = "";
     editorState.uploadingNodes = [];
     editorRef.current = null;
+    transactionListeners.current = [];
     onCreateFired.value = false;
     latestEditorOptions.current = undefined;
     providerProps.attachments = undefined;
@@ -190,6 +207,19 @@ describe("ContentEditor", () => {
       "new content from server",
       expect.objectContaining({ emitUpdate: false, contentType: "markdown" }),
     );
+  });
+
+  it("does not parse the initial defaultValue twice when markdown round-trip canonicalizes it", () => {
+    // useEditor already parsed defaultValue through its `content` option. The
+    // editor's canonical Markdown can legitimately differ from the source, so
+    // that difference alone must not trigger an immediate second setContent.
+    editorState.markdown = "- [ ] canonical task";
+
+    render(
+      <ContentEditor defaultValue={"- [ ] source task\n\ncontinuation"} />,
+    );
+
+    expect(mockSetContent).not.toHaveBeenCalled();
   });
 
   it("does not sync while a file upload is in flight (in-flight upload node must survive external defaultValue changes)", () => {
@@ -447,6 +477,121 @@ function makeAttachment(id: string, overrides: Partial<Attachment> = {}): Attach
 function asUploadResult(att: Attachment): UploadResult {
   return { ...att, link: att.url, markdownLink: `/api/attachments/${att.id}/download` };
 }
+
+// MUL-4808 — the document IS the upload queue, so hosts gate submit off it
+// instead of each keeping a counter. These pin the publisher's contract.
+describe("ContentEditor — onUploadingChange (MUL-4808)", () => {
+  const uploadingNode = { attrs: { uploading: true } };
+  const settledNode = { attrs: { uploading: false } };
+
+  it("publishes true when a node starts uploading and false once it settles", () => {
+    const onUploadingChange = vi.fn();
+    render(<ContentEditor onUploadingChange={onUploadingChange} />);
+    // Mount publishes the current answer so the host can't be left holding a
+    // stale one from a previous editor instance (see the remount case below).
+    expect(onUploadingChange).toHaveBeenLastCalledWith(false);
+
+    editorState.uploadingNodes = [uploadingNode];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(true);
+
+    editorState.uploadingNodes = [settledNode];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("keeps publishing true until the LAST concurrent upload settles", () => {
+    const onUploadingChange = vi.fn();
+    render(<ContentEditor onUploadingChange={onUploadingChange} />);
+
+    editorState.uploadingNodes = [{ attrs: { uploading: true } }, { attrs: { uploading: true } }];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(true);
+
+    // First of two finishes — submit must STAY gated.
+    editorState.uploadingNodes = [settledNode, { attrs: { uploading: true } }];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(true);
+
+    editorState.uploadingNodes = [settledNode, settledNode];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  // The regression that rules out driving this off `onUpdate`: a failed upload
+  // removes its placeholder, and since the blob URL was stripped from
+  // serialized markdown all along, the markdown is byte-identical before and
+  // after. onUpdate is debounced AND skips no-change emissions, so the host
+  // would stay gated forever with no pending upload left to un-gate it.
+  it("publishes false when a failed upload's placeholder is removed, even though the markdown never changed", () => {
+    const onUploadingChange = vi.fn();
+    const onUpdate = vi.fn();
+    editorState.markdown = "same body";
+    render(<ContentEditor onUploadingChange={onUploadingChange} onUpdate={onUpdate} />);
+
+    editorState.uploadingNodes = [uploadingNode];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(true);
+
+    // Upload fails → node removed. Markdown is unchanged throughout.
+    editorState.uploadingNodes = [];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(false);
+    expect(editorState.markdown).toBe("same body");
+  });
+
+  it("publishes only on flips, not on every transaction", () => {
+    const onUploadingChange = vi.fn();
+    render(<ContentEditor onUploadingChange={onUploadingChange} />);
+    onUploadingChange.mockClear(); // drop the mount publish
+
+    editorState.uploadingNodes = [uploadingNode];
+    act(() => emitTransaction());
+    // Typing while the upload is still in flight: same answer, no re-publish.
+    act(() => emitTransaction());
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenCalledTimes(1);
+  });
+
+  // An editor torn down mid-upload takes its pending node with it, but the
+  // host's gate state survives. Hosts that remount the editor under a living
+  // parent — comment edit (cancel → re-enter) and chat (agent switch rebuilds
+  // it by `key`) — would otherwise be stuck disabled forever, with no pending
+  // upload left in the document to ever flip them back.
+  it("republishes on remount so a host can't stay gated by a dead editor's upload", () => {
+    const onUploadingChange = vi.fn();
+    const { unmount } = render(<ContentEditor onUploadingChange={onUploadingChange} />);
+
+    editorState.uploadingNodes = [uploadingNode];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(true);
+
+    // Editor dies while the upload is still pending; the host stays mounted
+    // holding `uploading: true`.
+    unmount();
+    editorRef.current = null;
+    onCreateFired.value = false;
+    editorState.uploadingNodes = [];
+
+    onUploadingChange.mockClear();
+    render(<ContentEditor onUploadingChange={onUploadingChange} />);
+    expect(onUploadingChange).toHaveBeenCalledWith(false);
+  });
+
+  it("does not subscribe at all when the host omits onUploadingChange", () => {
+    render(<ContentEditor />);
+    // Non-gating hosts (the autosaved description editor) must not pay for a
+    // doc scan on every keystroke.
+    expect(transactionListeners.current).toHaveLength(0);
+  });
+
+  it("unsubscribes on unmount", () => {
+    const { unmount } = render(<ContentEditor onUploadingChange={vi.fn()} />);
+    expect(transactionListeners.current).toHaveLength(1);
+    unmount();
+    expect(transactionListeners.current).toHaveLength(0);
+  });
+});
 
 // MUL-3192 — surfaces like the quick-create modal upload images through the
 // editor without a server-supplied `attachments` prop. Without in-session

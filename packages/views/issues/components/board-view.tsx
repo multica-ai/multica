@@ -147,7 +147,7 @@ function buildGroups(
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_IDS: string[] = [];
 
-export function BoardView({
+function BoardViewImpl({
   issues,
   assigneeGroups,
   assigneeGroupQueryKey,
@@ -781,3 +781,11 @@ function BoardHiddenColumnsPanel({
     />
   );
 }
+
+/**
+ * Memoized: the surface controller re-renders on loading-flag flips (e.g. a
+ * query enabling when the view changes) — without memo every such flip
+ * re-rendered this entire view tree (hundreds of ms). All props are
+ * referentially stable useMemo/useCallback outputs from the controller.
+ */
+export const BoardView = memo(BoardViewImpl);

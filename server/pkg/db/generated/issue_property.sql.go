@@ -68,14 +68,15 @@ func (q *Queries) CountIssuesUsingPropertyOptions(ctx context.Context, arg Count
 }
 
 const createIssueProperty = `-- name: CreateIssueProperty :one
-INSERT INTO issue_property (workspace_id, name, type, description, config, position)
+INSERT INTO issue_property (workspace_id, name, type, description, icon, config, position)
 SELECT $1::uuid,
        $2::text,
        $3::text,
        $4::text,
-       $5::jsonb,
+       $5::text,
+       $6::jsonb,
        COALESCE((SELECT MAX(position) FROM issue_property WHERE workspace_id = $1::uuid), 0) + 1
-RETURNING id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at
+RETURNING id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon
 `
 
 type CreateIssuePropertyParams struct {
@@ -83,6 +84,7 @@ type CreateIssuePropertyParams struct {
 	Name        string      `json:"name"`
 	Type        string      `json:"type"`
 	Description string      `json:"description"`
+	Icon        string      `json:"icon"`
 	Config      []byte      `json:"config"`
 }
 
@@ -93,6 +95,7 @@ func (q *Queries) CreateIssueProperty(ctx context.Context, arg CreateIssueProper
 		arg.Name,
 		arg.Type,
 		arg.Description,
+		arg.Icon,
 		arg.Config,
 	)
 	var i IssueProperty
@@ -107,6 +110,7 @@ func (q *Queries) CreateIssueProperty(ctx context.Context, arg CreateIssueProper
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Icon,
 	)
 	return i, err
 }
@@ -160,7 +164,7 @@ func (q *Queries) DeleteIssuePropertyValue(ctx context.Context, arg DeleteIssueP
 }
 
 const getIssueProperty = `-- name: GetIssueProperty :one
-SELECT id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at FROM issue_property
+SELECT id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon FROM issue_property
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -183,12 +187,13 @@ func (q *Queries) GetIssueProperty(ctx context.Context, arg GetIssuePropertyPara
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Icon,
 	)
 	return i, err
 }
 
 const listIssueProperties = `-- name: ListIssueProperties :many
-SELECT p.id, p.workspace_id, p.name, p.type, p.description, p.config, p.position, p.archived_at, p.created_at, p.updated_at,
+SELECT p.id, p.workspace_id, p.name, p.type, p.description, p.config, p.position, p.archived_at, p.created_at, p.updated_at, p.icon,
     (
         SELECT COUNT(*) FROM issue i
         WHERE i.workspace_id = p.workspace_id
@@ -216,6 +221,7 @@ type ListIssuePropertiesRow struct {
 	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Icon        string             `json:"icon"`
 	UsageCount  int64              `json:"usage_count"`
 }
 
@@ -242,6 +248,7 @@ func (q *Queries) ListIssueProperties(ctx context.Context, arg ListIssueProperti
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Icon,
 			&i.UsageCount,
 		); err != nil {
 			return nil, err
@@ -314,11 +321,12 @@ const updateIssueProperty = `-- name: UpdateIssueProperty :one
 UPDATE issue_property SET
     name = COALESCE($3, name),
     description = COALESCE($4, description),
-    config = COALESCE($5, config),
-    archived_at = CASE WHEN $6::bool THEN $7 ELSE archived_at END,
+    icon = COALESCE($5, icon),
+    config = COALESCE($6, config),
+    archived_at = CASE WHEN $7::bool THEN $8 ELSE archived_at END,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at
+RETURNING id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon
 `
 
 type UpdateIssuePropertyParams struct {
@@ -326,6 +334,7 @@ type UpdateIssuePropertyParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Name        pgtype.Text        `json:"name"`
 	Description pgtype.Text        `json:"description"`
+	Icon        pgtype.Text        `json:"icon"`
 	Config      []byte             `json:"config"`
 	ArchivedSet bool               `json:"archived_set"`
 	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
@@ -340,6 +349,7 @@ func (q *Queries) UpdateIssueProperty(ctx context.Context, arg UpdateIssueProper
 		arg.WorkspaceID,
 		arg.Name,
 		arg.Description,
+		arg.Icon,
 		arg.Config,
 		arg.ArchivedSet,
 		arg.ArchivedAt,
@@ -356,6 +366,7 @@ func (q *Queries) UpdateIssueProperty(ctx context.Context, arg UpdateIssueProper
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Icon,
 	)
 	return i, err
 }

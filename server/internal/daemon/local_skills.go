@@ -121,8 +121,18 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 
 	var providerRoot string
 	switch provider {
-	case "claude", "codebuddy":
+	case "claude":
 		providerRoot = filepath.Join(home, ".claude", "skills")
+	case "codebuddy":
+		// CodeBuddy Code is a Claude Code fork but ships its own native
+		// config directory; it does NOT read ~/.claude/skills unless the
+		// user manually symlinks it in (the vendor's documented Claude
+		// Code migration path). See
+		// https://www.codebuddy.ai/docs/cli/codebuddy-dir ("Global
+		// directory ~/.codebuddy/") and
+		// https://www.codebuddy.ai/docs/cli/skills ("User-level Skills:
+		// ~/.codebuddy/skills/").
+		providerRoot = filepath.Join(home, ".codebuddy", "skills")
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 		if codexHome == "" {
@@ -173,7 +183,7 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		{path: providerRoot, kind: localSkillRootProvider},
 		{path: filepath.Join(home, ".agents", "skills"), kind: localSkillRootUniversal},
 	}
-	if provider == "claude" || provider == "codebuddy" {
+	if provider == "claude" {
 		for _, plugin := range listEnabledClaudePlugins(home) {
 			manifest, _ := readClaudePluginManifest(plugin.InstallPath)
 			for _, path := range claudePluginComponentPaths(

@@ -61,6 +61,7 @@ import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import type { IssueProperty } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PropertyIcon } from "../../common/property-icon";
 import { LabelChip } from "../../labels/label-chip";
 import {
   SORT_OPTIONS,
@@ -1233,7 +1234,11 @@ export function IssueDisplayControls({
               return (
                 <DropdownMenuSub key={property.id}>
                   <DropdownMenuSubTrigger>
-                    <SlidersHorizontal className="size-3.5" />
+                    {property.icon ? (
+                      <PropertyIcon property={property} className="size-3.5 text-xs" />
+                    ) : (
+                      <SlidersHorizontal className="size-3.5" />
+                    )}
                     <span className="flex-1 truncate">{property.name}</span>
                     {selected.length > 0 && (
                       <span className="text-xs text-primary font-medium">
@@ -1322,7 +1327,8 @@ export function IssueDisplayControls({
                         ))}
                         {groupableProperties.map((property) => (
                           <DropdownMenuRadioItem key={property.id} value={`property:${property.id}`}>
-                            {property.name}
+                            <PropertyIcon property={property} className="size-3.5 text-xs" />
+                            <span>{property.name}</span>
                           </DropdownMenuRadioItem>
                         ))}
                       </DropdownMenuRadioGroup>
@@ -1394,7 +1400,8 @@ export function IssueDisplayControls({
                       ))}
                       {sortableProperties.map((property) => (
                         <DropdownMenuRadioItem key={property.id} value={`property:${property.id}`}>
-                          {property.name}
+                          <PropertyIcon property={property} className="size-3.5 text-xs" />
+                          <span>{property.name}</span>
                         </DropdownMenuRadioItem>
                       ))}
                     </DropdownMenuRadioGroup>
@@ -1451,7 +1458,10 @@ export function IssueDisplayControls({
                     key={property.id}
                     className="flex cursor-pointer items-center justify-between"
                   >
-                    <span className="truncate text-sm">{property.name}</span>
+                    <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
+                      <PropertyIcon property={property} className="size-3.5 text-xs" />
+                      <span className="truncate">{property.name}</span>
+                    </span>
                     <Switch
                       size="sm"
                       checked={cardPropertyIds.includes(property.id)}

@@ -152,7 +152,7 @@ Minimalist. **Session resumption is unusual** — the resume id is the path to a
 
 ### CodeBuddy (Tencent)
 
-A Claude Code–compatible CLI agent. Multica drives it with the same stream-json protocol as Claude Code: session resumption works via `--resume`, MCP config is passed through `--mcp-config`, and skills land in `.claude/skills/`. Models are discovered dynamically.
+A Claude Code–compatible CLI agent. Multica drives it with the same stream-json protocol as Claude Code: session resumption works via `--resume`, MCP config is passed through `--mcp-config`. CodeBuddy ships its own native config directory rather than reusing Claude's, so skills land in `.codebuddy/skills/` and the runtime brief is written to `CODEBUDDY.md`. Models are discovered dynamically.
 
 | | |
 |---|---|

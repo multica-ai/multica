@@ -28,7 +28,6 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
-import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -49,14 +48,9 @@ import { MermaidDiagram } from "./mermaid-diagram";
 import { HtmlBlockPreview } from "./html-block-preview";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
 import { Attachment as AttachmentRenderer } from "./attachment";
+import { highlightCode } from "./syntax-highlight";
 import "katex/dist/katex.min.css";
 import "./styles/index.css";
-
-// ---------------------------------------------------------------------------
-// Lowlight — same engine + language set as Tiptap's CodeBlockLowlight
-// ---------------------------------------------------------------------------
-
-const lowlight = createLowlight(common);
 
 // Code fences that the `code` renderer returns as a non-<code> React element
 // (Mermaid diagram, HTML preview iframe). The `pre` renderer below unwraps
@@ -192,7 +186,13 @@ function getTextContent(node: ReactNode): string {
   return "";
 }
 
-function ReadonlyCodeBlock({ children }: { children: ReactNode }) {
+function ReadonlyCodeBlock({
+  children,
+  language,
+}: {
+  children: ReactNode;
+  language?: string;
+}) {
   const { t } = useT("editor");
   const [copied, setCopied] = useState(false);
   const code = useMemo(
@@ -212,6 +212,13 @@ function ReadonlyCodeBlock({ children }: { children: ReactNode }) {
   return (
     <div className="code-block-wrapper group/code relative my-3">
       <div className="absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100 focus-within:opacity-100">
+        {/* Same hover chrome as the editable code block's header
+            (code-block-view.tsx): language label + copy. */}
+        {language && (
+          <span className="text-xs text-muted-foreground select-none">
+            {language}
+          </span>
+        )}
         <button
           type="button"
           onClick={handleCopy}
@@ -226,7 +233,10 @@ function ReadonlyCodeBlock({ children }: { children: ReactNode }) {
           )}
         </button>
       </div>
-      <pre className="!m-0 pr-12">{children}</pre>
+      {/* No extra right padding: `.rich-text-editor pre` outranks utility
+          padding classes anyway, and the editable NodeView uses the same
+          1rem — keeping them identical keeps line wrapping identical. */}
+      <pre className="!m-0">{children}</pre>
     </div>
   );
 }
@@ -362,9 +372,7 @@ function buildComponents(): Partial<Components> {
       // Block code — highlight with lowlight, output hljs classes
       const code = String(children).replace(/\n$/, "");
       try {
-        const tree = lang
-          ? lowlight.highlight(lang, code)
-          : lowlight.highlightAuto(code);
+        const tree = highlightCode(code, lang);
         const html = toHtml(tree);
         if (html) {
           return (
@@ -399,13 +407,15 @@ function buildComponents(): Partial<Components> {
       // Match by exact class token: a substring `includes("language-html")`
       // would also fire on neighboring languages like `language-htmlbars`
       // and silently strip their <pre> wrapper.
+      let language: string | undefined;
       if (isValidElement(children)) {
         const childProps = children.props as { className?: string };
         if (PRE_UNWRAP_RE.test(childProps.className ?? "")) {
           return <>{children}</>;
         }
+        language = /language-(\w+)/.exec(childProps.className ?? "")?.[1];
       }
-      return <ReadonlyCodeBlock>{children}</ReadonlyCodeBlock>;
+      return <ReadonlyCodeBlock language={language}>{children}</ReadonlyCodeBlock>;
     },
   };
 }

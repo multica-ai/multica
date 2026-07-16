@@ -150,7 +150,7 @@ ACP 协议 agent（和 Kimi 共享传输层）。会话续接可用，MCP 配置
 
 ### CodeBuddy（Tencent）
 
-一款兼容 Claude Code 的 CLI agent。Multica 用和 Claude Code 一样的 stream-json 协议驱动它：会话续接通过 `--resume` 可用，MCP 配置通过 `--mcp-config` 传入，skill 放在 `.claude/skills/`。模型为动态发现。
+一款兼容 Claude Code 的 CLI agent。Multica 用和 Claude Code 一样的 stream-json 协议驱动它：会话续接通过 `--resume` 可用，MCP 配置通过 `--mcp-config` 传入。CodeBuddy 使用自己原生的配置目录，而不是复用 Claude 的，所以 skill 放在 `.codebuddy/skills/`，运行时说明写入 `CODEBUDDY.md`。模型为动态发现。
 
 | | |
 |---|---|

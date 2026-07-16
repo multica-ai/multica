@@ -150,7 +150,7 @@ ACP 프로토콜 에이전트입니다(Kimi와 전송 방식을 공유). 세션 
 
 ### CodeBuddy (Tencent)
 
-Claude Code 호환 CLI 에이전트입니다. Multica는 Claude Code와 동일한 stream-json 프로토콜로 구동합니다: 세션 재개는 `--resume`로 동작하고, MCP 구성은 `--mcp-config`로 전달되며, 스킬은 `.claude/skills/`에 배치됩니다. 모델은 동적으로 탐색됩니다.
+Claude Code 호환 CLI 에이전트입니다. Multica는 Claude Code와 동일한 stream-json 프로토콜로 구동합니다: 세션 재개는 `--resume`로 동작하고, MCP 구성은 `--mcp-config`로 전달됩니다. CodeBuddy는 Claude의 디렉터리를 재사용하지 않고 자체 설정 디렉터리를 사용하므로, 스킬은 `.codebuddy/skills/`에 배치되고 런타임 브리핑은 `CODEBUDDY.md`에 기록됩니다. 모델은 동적으로 탐색됩니다.
 
 | | |
 |---|---|

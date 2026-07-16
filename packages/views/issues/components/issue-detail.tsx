@@ -31,7 +31,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -45,6 +45,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
+import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
@@ -90,9 +91,8 @@ import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { api } from "@multica/core/api";
 import { useTimeAgo } from "../../i18n";
+import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
@@ -727,7 +727,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     currentUserRole === "owner" || currentUserRole === "admin";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
-  const { uploadWithToast } = useFileUpload(api);
+  // Description autosave is deliberately NOT gated (no explicit submit; the
+  // editor already strips `blob:` before serializing and binds ids on the
+  // later save). It still needs the failure toast, or a failed upload just
+  // erases its own placeholder and the file disappears unexplained.
+  const { uploadWithToast } = useEditorUpload();
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: layoutId,
   });
@@ -786,6 +790,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso prop would never receive the element. Callback ref + state fixes
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  // Pull-based scroll restoration (MUL-4741): the platform serves the offset
+  // captured when this route was last left. The ref-attach assignment covers
+  // the flat render modes (real heights at commit); the virtualized browsing
+  // mode feeds the offset into Virtuoso's initialScrollTop below so the
+  // list's first render already materializes the rows around it.
+  const restoredScrollTop = useRestoredScrollOffset("main");
+  const restoreScrollRef = useRestoredScrollRef("main");
+  const attachScrollContainer = useCallback(
+    (el: HTMLDivElement | null) => {
+      setScrollContainerEl(el);
+      restoreScrollRef(el);
+    },
+    [restoreScrollRef],
+  );
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   // User preference: pin the bottom comment bar to the scroll viewport.
   const stickyComposer = useCommentComposerStore((s) => s.sticky);
@@ -1297,8 +1315,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
+  // Keep the description editor mounted from the start. Unlike the empty
+  // composer shells, a long rendered description cannot swap between
+  // react-markdown and ProseMirror without small per-block height differences
+  // accumulating into a visible scroll/layout jump. The chunked Markdown path
+  // keeps this single eager editor affordable; title and composers stay lazy.
+  const titleEditorRef = useRef<TitleEditorRef>(null);
+  const titleLazy = useLazyEditor({ editorRef: titleEditorRef, resetKey: id });
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
+    onDrop: (files) => files.forEach((file) => descEditorRef.current?.uploadFile(file)),
   });
   // Pending uploads in the description editor. We don't pass `issueId` on
   // upload (to avoid orphaning attachments when the user deletes the file
@@ -1607,7 +1632,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 (!p.archived && visibleCustomProps.has(p.id)),
             )
             .map((p) => (
-              <PropRow key={p.id} label={p.name}>
+              <PropRow
+                key={p.id}
+                label={
+                  <>
+                    <PropertyIcon property={p} className="size-3.5 text-xs" />
+                    <span className="truncate">{p.name}</span>
+                  </>
+                }
+              >
                 <CustomPropertyValueEditor
                   issue={issue}
                   property={p}
@@ -1684,7 +1717,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             onClick={() => addCustomProp(p.id)}
                             className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-foreground/90 transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
                           >
-                            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            {p.icon ? (
+                              <PropertyIcon property={p} className="size-3.5 text-xs" />
+                            ) : (
+                              <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            )}
                             <span className="truncate">{p.name}</span>
                           </button>
                         ))}
@@ -2051,21 +2088,48 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             the gutter restores symmetry; overlay-scrollbar platforms reserve
             nothing and render unchanged. */}
         <div
-          ref={setScrollContainerEl}
+          ref={attachScrollContainer}
           data-tab-scroll-root
           className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
-          <TitleEditor
-            key={`title-${id}`}
-            defaultValue={issue.title}
-            placeholder={t(($) => $.detail.title_placeholder)}
-            className="w-full text-2xl font-bold leading-snug tracking-tight"
-            onBlur={(value) => {
-              const trimmed = value.trim();
-              if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
-            }}
-          />
+          {titleLazy.active && (
+            <div className={titleLazy.ready ? undefined : "hidden"}>
+              <TitleEditor
+                key={`title-${id}`}
+                ref={titleEditorRef}
+                defaultValue={issue.title}
+                placeholder={t(($) => $.detail.title_placeholder)}
+                className="w-full text-2xl font-bold leading-snug tracking-tight"
+                onReady={titleLazy.onReady}
+                onBlur={(value) => {
+                  const trimmed = value.trim();
+                  if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
+                }}
+              />
+            </div>
+          )}
+          {!titleLazy.ready && (
+            <div
+              role="button"
+              tabIndex={0}
+              className="w-full cursor-text text-2xl font-bold leading-snug tracking-tight"
+              onClick={(e) => {
+                // A drag-selection (copying the title) must not summon the editor.
+                const sel = window.getSelection();
+                if (sel && !sel.isCollapsed) return;
+                titleLazy.activate({ x: e.clientX, y: e.clientY });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  titleLazy.activate();
+                }
+              }}
+            >
+              {issue.title}
+            </div>
+          )}
 
           {parentIssue && (
             <AppLink
@@ -2351,6 +2415,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
                       data={items}
+                      initialScrollTop={restoredScrollTop}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
                       computeItemKey={(_i, item) => `${item.kind}:${item.id}`}
                       skipAnimationFrameInResizeObserver

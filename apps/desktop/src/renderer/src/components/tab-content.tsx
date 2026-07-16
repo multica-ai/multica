@@ -1,55 +1,50 @@
-import { Activity, useEffect } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { RouterProvider } from "react-router-dom";
-import { useActiveGroup } from "@/stores/tab-store";
-import { TabNavigationProvider } from "@/platform/navigation";
-import { useTabRouterSync } from "@/hooks/use-tab-router-sync";
-import { useTabScrollRestore } from "@/hooks/use-tab-scroll-restore";
-import type { Tab } from "@/stores/tab-store";
+import { useQueryClient } from "@tanstack/react-query";
+import { ScrollRestorationProvider } from "@multica/views/platform";
+import { useActiveGroup, useTabStore } from "@/stores/tab-store";
+import {
+  createScrollRestorationAdapter,
+  getAppRouter,
+  initTabCoordinator,
+  registerActiveHostElement,
+  registerCoordinatorQueryClient,
+} from "@/platform/tab-coordinator";
 
 /**
- * Inner wrapper rendered inside each tab's RouterProvider. The router
- * reference is stable for a tab's lifetime, so passing it in directly
- * (instead of re-deriving from the store) avoids needless re-renders.
- */
-function TabRouterInner({ tab }: { tab: Tab }) {
-  useTabRouterSync(tab.id, tab.router);
-  return null;
-}
-
-/**
- * Wraps a tab's subtree so its scroll position survives the round trip
- * through `<Activity mode="hidden">`. Lives inside Activity so the hook's
- * effects cycle with the tab's visibility — see `useTabScrollRestore` for
- * the mechanism. `display: contents` keeps the wrapper transparent to
- * the surrounding flex layout.
- */
-function TabScrollRestoreWrapper({
-  tabPath,
-  children,
-}: {
-  tabPath: string;
-  children: React.ReactNode;
-}) {
-  const ref = useTabScrollRestore(tabPath);
-  return (
-    <div ref={ref} style={{ display: "contents" }}>
-      {children}
-    </div>
-  );
-}
-
-/**
- * Renders the active workspace's tabs using Activity for state preservation.
- * Only the active tab is visible; hidden tabs keep their DOM and React state.
+ * Renders the active tab session through THE single app router
+ * (MUL-4741 single-router session architecture).
  *
- * When switching workspaces, the previous workspace's tabs unmount entirely
- * and the new workspace's tabs mount fresh — cross-workspace state
- * preservation is an explicit non-goal (keeping all workspaces' tabs warm
- * simultaneously would bloat memory and make workspace switching feel
- * anything but "switching").
+ * Exactly one tab is mounted at a time. Switching tabs remounts this host
+ * (the key includes the tab id), and reload() remounts it without switching
+ * (the key includes mountGeneration). Inactive tabs are pure state — their
+ * restorable view state lives in the session memento, captured by the
+ * Coordinator on deactivation and restored here on mount:
+ *
+ *   - restore is PULL-based: views ask for their saved offset while they
+ *     mount (ScrollRestorationProvider) — virtualized lists feed it into
+ *     their initial render, plain containers assign it at ref-attach. The
+ *     first painted frame is already at the restored position; cold
+ *     restores show the correct shell + skeletons and settle when data
+ *     lands, never a flash of another workspace's data.
  */
 export function TabContent() {
   const group = useActiveGroup();
+  const generation = useTabStore((s) => s.mountGeneration);
+  const qc = useQueryClient();
+
+  // Wire the Coordinator before the first host mount so the router already
+  // projects the active session's URL when RouterProvider first renders.
+  // useState's initializer is the earliest once-per-tree hook slot; the call
+  // is idempotent.
+  useState(() => {
+    initTabCoordinator();
+    return true;
+  });
+
+  useEffect(() => {
+    registerCoordinatorQueryClient(qc);
+  }, [qc]);
 
   // Sync document.title when switching tabs within the active workspace.
   useEffect(() => {
@@ -61,20 +56,35 @@ export function TabContent() {
   if (!group) return null;
 
   return (
-    <>
-      {group.tabs.map((tab) => (
-        <Activity
-          key={tab.id}
-          mode={tab.id === group.activeTabId ? "visible" : "hidden"}
-        >
-          <TabScrollRestoreWrapper tabPath={tab.path}>
-            <TabNavigationProvider router={tab.router}>
-              <RouterProvider router={tab.router} />
-              <TabRouterInner tab={tab} />
-            </TabNavigationProvider>
-          </TabScrollRestoreWrapper>
-        </Activity>
-      ))}
-    </>
+    <ActiveTabHost
+      key={`${group.activeTabId}:${generation}`}
+      tabId={group.activeTabId}
+    />
+  );
+}
+
+function ActiveTabHost({ tabId }: { tabId: string }) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const router = getAppRouter();
+  const scrollAdapter = useMemo(
+    () => createScrollRestorationAdapter(tabId),
+    [tabId],
+  );
+
+  // The Coordinator captures the outgoing memento from this element while
+  // the store notification is still synchronous (pre-unmount).
+  useLayoutEffect(() => {
+    registerActiveHostElement(hostRef.current);
+    return () => registerActiveHostElement(null);
+  }, []);
+
+  // `display: contents` keeps the wrapper transparent to the surrounding
+  // flex layout.
+  return (
+    <div ref={hostRef} style={{ display: "contents" }}>
+      <ScrollRestorationProvider adapter={scrollAdapter}>
+        <RouterProvider router={router} />
+      </ScrollRestorationProvider>
+    </div>
   );
 }

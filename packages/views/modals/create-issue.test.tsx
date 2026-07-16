@@ -1,14 +1,16 @@
 import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enModals from "../locales/en/modals.json";
+import enEditor from "../locales/en/editor.json";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, modals: enModals },
+  // `editor` carries the shared upload-gate copy ("Uploading…").
+  en: { common: enCommon, modals: enModals, editor: enEditor },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -21,6 +23,7 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
+const mockAttachLabel = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
@@ -138,6 +141,10 @@ vi.mock("@multica/core/issues/mutations", () => ({
   useUpdateIssue: () => ({ mutate: vi.fn() }),
 }));
 
+vi.mock("@multica/core/labels", () => ({
+  useAttachLabelToIssue: () => ({ mutateAsync: mockAttachLabel }),
+}));
+
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: mockUploadWithToast }),
 }));
@@ -182,17 +189,36 @@ vi.mock("@multica/core/api", async () => {
   };
 });
 
-vi.mock("../editor", () => {
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onUploadFile, placeholder, attachments }: any, ref: any) => {
+vi.mock("../editor", async () => {
+  // Real submit gate (pure React) driven by the mock editor's
+  // `hasActiveUploads` / `onUploadingChange`.
+  const uploadGate = await vi.importActual<typeof import("../editor/use-upload-gate")>(
+    "../editor/use-upload-gate",
+  );
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onUploadFile, onUploadingChange, placeholder, attachments }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
+    // Mirrors the real editor's `uploading` node attrs: the placeholder is in
+    // the doc from before the await until the upload settles, and the host
+    // hears about it through onUploadingChange.
+    const inFlightRef = useRef(0);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       clearContent: () => {
         valueRef.current = "";
         setValue("");
       },
-      uploadFile: (file: File) => onUploadFile?.(file),
+      uploadFile: async (file: File) => {
+        inFlightRef.current += 1;
+        if (inFlightRef.current === 1) onUploadingChange?.(true);
+        try {
+          return await onUploadFile?.(file);
+        } finally {
+          inFlightRef.current -= 1;
+          if (inFlightRef.current === 0) onUploadingChange?.(false);
+        }
+      },
+      hasActiveUploads: () => inFlightRef.current > 0,
     }));
     return (
       <>
@@ -212,6 +238,12 @@ vi.mock("../editor", () => {
   ContentEditor.displayName = "ContentEditor";
 
   return {
+    ...uploadGate,
+    useEditorUpload: () => ({
+      uploadWithToast: mockUploadWithToast,
+      upload: vi.fn(),
+      uploading: false,
+    }),
     useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
     FileDropOverlay: () => null,
     ContentEditor,
@@ -302,13 +334,17 @@ vi.mock("@multica/ui/components/ui/button", () => ({
     disabled,
     onClick,
     type = "button",
+    ...rest
   }: {
     children: React.ReactNode;
     disabled?: boolean;
     onClick?: () => void;
     type?: "button" | "submit" | "reset";
+    // The real Button spreads the rest onto the element; forwarding them keeps
+    // accessibility props (aria-busy / aria-disabled) assertable here.
+    [key: string]: unknown;
   }) => (
-    <button type={type} disabled={disabled} onClick={onClick}>
+    <button type={type} disabled={disabled} onClick={onClick} {...rest}>
       {children}
     </button>
   ),
@@ -424,7 +460,12 @@ describe("CreateIssueModal", () => {
       identifier: "TES-123",
       title: "Ship create issue regression coverage",
       status: "todo",
+      // Current backend echoes the attached labels, so the create flow skips
+      // the legacy per-label attach fallback. Empty is enough — what matters
+      // is that the field is present (not undefined).
+      labels: [],
     });
+    mockAttachLabel.mockResolvedValue({ labels: [] });
   });
 
   it("shows success feedback with a direct path to the new issue", async () => {
@@ -472,6 +513,71 @@ describe("CreateIssueModal", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-123");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
+  });
+
+  it("forwards selected labels in the create payload so they attach in the same transaction", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.labelIds = [
+      "aaaaaaaa-1111-2222-3333-444444444444",
+      "bbbbbbbb-1111-2222-3333-444444444444",
+    ];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Labeled issue" },
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Labeled issue",
+          label_ids: [
+            "aaaaaaaa-1111-2222-3333-444444444444",
+            "bbbbbbbb-1111-2222-3333-444444444444",
+          ],
+        }),
+      );
+    });
+    // Backend echoed `labels`, so the atomic path handled it — no legacy
+    // per-label attach fallback should run.
+    expect(mockAttachLabel).not.toHaveBeenCalled();
+  });
+
+  it("falls back to per-label attach when an older backend omits labels from the create response", async () => {
+    const user = userEvent.setup();
+    // Older backend: ignores label_ids and returns an issue with no `labels`
+    // field (the rolling-deploy window where web is ahead of the backend).
+    mockCreateIssue.mockResolvedValueOnce({
+      id: "issue-123",
+      identifier: "TES-123",
+      title: "Labeled issue",
+      status: "todo",
+    });
+    mockDraftStore.draft.labelIds = [
+      "aaaaaaaa-1111-2222-3333-444444444444",
+      "bbbbbbbb-1111-2222-3333-444444444444",
+    ];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Labeled issue" },
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockAttachLabel).toHaveBeenCalledTimes(2);
+    });
+    expect(mockAttachLabel).toHaveBeenCalledWith({
+      issueId: "issue-123",
+      labelId: "aaaaaaaa-1111-2222-3333-444444444444",
+    });
+    expect(mockAttachLabel).toHaveBeenCalledWith({
+      issueId: "issue-123",
+      labelId: "bbbbbbbb-1111-2222-3333-444444444444",
+    });
   });
 
   it("keeps manual mode open and clears content when create another is enabled", async () => {
@@ -884,5 +990,80 @@ describe("CreateIssueModal", () => {
     await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
 
     expect(mockSetDraft).toHaveBeenCalledWith({ title: "", description: "" });
+  });
+
+  // MUL-4808 — manual create had no upload gate at all: Create, Enter on the
+  // title, and Switch to Agent would each fix the draft while an image was
+  // still uploading, dropping it from the description with no warning.
+  describe("upload submit gate", () => {
+    /** Attach a file whose upload stays in flight until the caller releases it. */
+    function startPendingUpload() {
+      let release!: (result: unknown) => void;
+      mockUploadWithToast.mockImplementationOnce(
+        () => new Promise((resolve) => { release = resolve; }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Upload file" }));
+      return { release: (result: unknown) => release(result) };
+    }
+
+    function renderManual(onSwitchMode = vi.fn()) {
+      const view = renderModal(
+        <ManualCreatePanel
+          onClose={vi.fn()}
+          onSwitchMode={onSwitchMode}
+          isExpanded={false}
+          setIsExpanded={vi.fn()}
+        />,
+      );
+      return { ...view, onSwitchMode };
+    }
+
+    it("disables Create and shows Uploading… while an upload is in flight", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      await user.type(screen.getByPlaceholderText("Issue title"), "Has a screenshot");
+
+      const pending = startPendingUpload();
+
+      const createButton = await screen.findByRole("button", { name: "Uploading…" });
+      await waitFor(() => expect(createButton).toBeDisabled());
+      expect(createButton).toHaveAttribute("aria-busy", "true");
+
+      await act(async () => { pending.release({ id: "att-1", url: "https://cdn/x.png" }); });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Create Issue" })).not.toBeDisabled(),
+      );
+    });
+
+    it("blocks Enter on the title while an upload is in flight", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      const title = screen.getByPlaceholderText("Issue title");
+      await user.type(title, "Has a screenshot");
+
+      startPendingUpload();
+
+      // Title Enter routes to the same handler as the Create button but never
+      // consults its disabled state — the handler's own check is the gate.
+      fireEvent.keyDown(title, { key: "Enter" });
+      await Promise.resolve();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
+    });
+
+    it("blocks Switch to Agent while an upload is in flight", async () => {
+      const user = userEvent.setup();
+      const onSwitchMode = vi.fn();
+      renderManual(onSwitchMode);
+      await user.type(screen.getByPlaceholderText("Issue title"), "Has a screenshot");
+
+      startPendingUpload();
+
+      // The switch packs the description into an agent prompt and clears the
+      // manual draft — doing that mid-upload loses the image for good.
+      const switchButton = screen.getByRole("button", { name: /Switch to Agent/i });
+      await waitFor(() => expect(switchButton).toBeDisabled());
+      fireEvent.click(switchButton);
+      expect(onSwitchMode).not.toHaveBeenCalled();
+    });
   });
 });

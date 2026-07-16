@@ -310,13 +310,14 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent).toBe(literalCode);
   });
 
-  it("renders code blocks without a language tag (lowlight highlightAuto fallback)", () => {
-    const token = "mul_407ec1e4464b580304362ed749f821901fd7d310";
+  it("renders code blocks without a language tag as plaintext", () => {
+    const token = "const answer = 42;";
     const { container } = render(
       <ReadonlyContent content={["```", token, "```"].join("\n")} />,
     );
     const blockCode = container.querySelector("pre code");
     expect(blockCode?.textContent?.trim()).toBe(token);
+    expect(blockCode?.querySelector("span")).toBeNull();
   });
 
   it("copies the whole fenced code block from the readonly toolbar", async () => {
