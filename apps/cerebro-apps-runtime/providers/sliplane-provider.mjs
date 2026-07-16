@@ -1,11 +1,14 @@
 import { AppProvider } from "./provider.mjs";
+import { createHash } from "node:crypto";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$/;
+const COMMIT_SHA = /^[0-9a-f]{40}$/i;
 
 export function serviceNameForVersion(appId, version) {
   if (!UUID.test(appId) || !SEMVER.test(version)) throw new Error("Invalid app version identity");
-  return `cerebro-app-${appId.slice(0, 8).toLowerCase()}-v${version.replace(/[^0-9A-Za-z]+/g, "-").toLowerCase()}`;
+  const identity = createHash("sha256").update(`${appId.toLowerCase()}@${version}`).digest("hex").slice(0, 12);
+  return `cerebro-app-${appId.slice(0, 8).toLowerCase()}-${identity}`;
 }
 
 export class SliplaneProvider extends AppProvider {
@@ -14,7 +17,8 @@ export class SliplaneProvider extends AppProvider {
     this.apiKey = options.apiKey ?? process.env.SLIPLANE_KEY ?? "";
     this.projectId = options.projectId ?? process.env.CEREBRO_APPS_SLIPLANE_PROJECT_ID ?? "";
     this.serverId = options.serverId ?? process.env.CEREBRO_APPS_SLIPLANE_SERVER_ID ?? "";
-    this.workerBranch = options.workerBranch ?? process.env.CEREBRO_APPS_WORKER_BRANCH ?? "production";
+    this.workerBranch = options.workerBranch ?? process.env.CEREBRO_APPS_WORKER_BRANCH ?? "";
+    this.workerCommit = options.workerCommit ?? process.env.CEREBRO_APPS_WORKER_COMMIT ?? "";
     this.baseUrl = (options.baseUrl ?? "https://ctrl.sliplane.io/v0").replace(/\/$/, "");
     this.fetch = options.fetch ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? 10_000;
@@ -28,7 +32,10 @@ export class SliplaneProvider extends AppProvider {
       this.#requireConfiguration();
       const name = serviceNameForVersion(deployment.appId, deployment.version);
       let service = await this.#createService(name, deployment);
-      if (!service) service = await this.#findExistingService(name);
+      if (!service) {
+        service = await this.#findExistingService(name);
+        if (!this.#matchesDeployment(service, deployment)) throw new Error("existing Sliplane service identity mismatch");
+      }
       if (!service?.id || service.serverId && service.serverId !== this.serverId) throw new Error("invalid Sliplane service");
       const internalDomain = service.network?.internalDomain ?? service.internalDomain;
       if (!internalDomain || !internalDomain.endsWith(".internal")) throw new Error("missing internal domain");
@@ -68,7 +75,7 @@ export class SliplaneProvider extends AppProvider {
         branch: this.workerBranch,
         dockerContext: "/",
         dockerfilePath: "apps/cerebro-apps-runtime/Dockerfile.worker",
-        autoDeploy: true,
+        autoDeploy: false,
       },
       network: { public: false },
       env: [
@@ -78,6 +85,7 @@ export class SliplaneProvider extends AppProvider {
         { key: "BUNDLE_TOKEN", value: deployment.bundleToken ?? "", secret: true },
         { key: "BUNDLE_SHA256", value: deployment.bundleSha256 ?? "", secret: false },
         { key: "BACKEND_URL", value: deployment.backendUrl ?? "", secret: false },
+        { key: "WORKER_COMMIT", value: this.workerCommit, secret: false },
         { key: "INVOKE_KEY", value: deployment.invokeKey ?? "", secret: true },
         { key: "PORT", value: "4311", secret: false },
       ],
@@ -93,6 +101,15 @@ export class SliplaneProvider extends AppProvider {
     return services.find((service) => service.name === name && service.serverId === this.serverId);
   }
 
+  #matchesDeployment(service, deployment) {
+    if (!service) return false;
+    const env = new Map((service.env ?? []).map((entry) => [entry.key, String(entry.value ?? "")]));
+    return env.get("APP_ID") === deployment.appId
+      && env.get("APP_VERSION") === deployment.version
+      && env.get("BUNDLE_SHA256") === (deployment.bundleSha256 ?? "")
+      && env.get("WORKER_COMMIT") === this.workerCommit;
+  }
+
   async #waitUntilHealthy(internalDomain) {
     const deadline = Date.now() + this.healthTimeoutMs;
     const healthUrl = `http://${internalDomain}:${this.workerPort}/healthz`;
@@ -102,7 +119,7 @@ export class SliplaneProvider extends AppProvider {
         const response = await this.fetch(healthUrl, { signal: AbortSignal.timeout(Math.min(this.timeoutMs, remaining)) });
         if (response.ok) {
           const body = await response.json().catch(() => null);
-          if (body?.status === "ok") return;
+          if (body?.status === "ok" && body?.commit === this.workerCommit) return;
         }
       } catch (error) {
         console.error("Sliplane app health check failed", { error, internalDomain });
@@ -127,6 +144,6 @@ export class SliplaneProvider extends AppProvider {
   }
 
   #requireConfiguration() {
-    if (!this.apiKey || !this.projectId || !this.serverId || typeof this.fetch !== "function") throw new Error("Sliplane provider is not configured");
+    if (!this.apiKey || !this.projectId || !this.serverId || !this.workerBranch || !COMMIT_SHA.test(this.workerCommit) || typeof this.fetch !== "function") throw new Error("Sliplane provider is not configured");
   }
 }

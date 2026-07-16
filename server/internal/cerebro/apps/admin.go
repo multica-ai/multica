@@ -13,8 +13,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-var allergenFormatterID = uuid.MustParse("f1540000-0000-4154-8154-000000000001")
 var allergenFormatterSnapshot = json.RawMessage(`{"manifest":{"schema_version":"1","name":"Allergen Formatter","version":"1.0.0","scopes":[{"resource_type":"integration","resource_id":"ai_gateway","access":"write"}],"frontend":{"entry":"frontend/index.html"},"backend":{"entry":"backend/index.mjs"},"views":[{"id":"formatter","type":"form","title":"Format allergens"}]}}`)
+
+func allergenFormatterIDForWorkspace(workspaceID uuid.UUID) uuid.UUID {
+	return uuid.NewSHA1(workspaceID, []byte("cerebro-app:allergen-formatter"))
+}
 
 func isKnownAppCapability(value string) bool {
 	return value == "apps.create" || value == "apps.manage" || value == "apps.delete"
@@ -187,6 +190,7 @@ func (h *Handler) InstallAllergenFormatter(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	appID := allergenFormatterIDForWorkspace(workspaceID)
 	memberID, ok := requestUserID(w, r)
 	if !ok {
 		return
@@ -202,38 +206,54 @@ func (h *Handler) InstallAllergenFormatter(w http.ResponseWriter, r *http.Reques
 		writeError(w, 500, "built-in app bundle is invalid")
 		return
 	}
-	result, err := tx.Exec(r.Context(), `INSERT INTO cerebro_app(id,workspace_id,slug,name,description,icon,folder,owner_id,status) VALUES($1,$2,'allergen-formatter','Allergen Formatter','Format ingredients and return regulated allergens','blocks','Operations',$3,'draft') ON CONFLICT (id) DO NOTHING`, allergenFormatterID, workspaceID, memberID)
-	if err != nil || result.RowsAffected() != 1 {
+	result, err := tx.Exec(r.Context(), `INSERT INTO cerebro_app(id,workspace_id,slug,name,description,icon,folder,owner_id,status) VALUES($1,$2,'allergen-formatter','Allergen Formatter','Format ingredients and return regulated allergens','blocks','Operations',$3,'draft') ON CONFLICT (workspace_id,slug) DO NOTHING`, appID, workspaceID, memberID)
+	if err != nil {
+		writeError(w, 500, "failed to install Allergen Formatter")
+		return
+	}
+	if result.RowsAffected() == 0 {
+		var version, status string
+		err = h.pool.QueryRow(r.Context(), `SELECT d.version,d.status FROM cerebro_app a
+			JOIN cerebro_app_deployment d ON d.app_id=a.id
+			WHERE a.id=$1 AND a.workspace_id=$2 ORDER BY d.updated_at DESC LIMIT 1`, appID, workspaceID).Scan(&version, &status)
+		if err != nil {
+			writeError(w, http.StatusConflict, "Allergen Formatter conflicts with an existing app")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"id": appID, "name": "Allergen Formatter", "version": version, "status": status})
+		return
+	}
+	if result.RowsAffected() != 1 {
 		writeError(w, 409, "Allergen Formatter is already installed")
 		return
 	}
-	_, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_version(app_id,version,content_snapshot,release_notes,created_by) VALUES($1,'1.0.0',$2,'Initial FIR-154 release',$3)`, allergenFormatterID, allergenFormatterSnapshot, memberID)
+	_, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_version(app_id,version,content_snapshot,release_notes,created_by) VALUES($1,'1.0.0',$2,'Initial FIR-154 release',$3)`, appID, allergenFormatterSnapshot, memberID)
 	if err == nil {
-		err = StoreVersionBundle(r.Context(), tx, allergenFormatterID, "1.0.0", bundle)
+		err = StoreVersionBundle(r.Context(), tx, appID, "1.0.0", bundle)
 	}
 	if err == nil {
-		_, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_grant(app_id,version,scopes,status,requested_by,approved_by,approved_at) VALUES($1,'1.0.0',$2::jsonb->'manifest'->'scopes','approved',$3,$3,now())`, allergenFormatterID, allergenFormatterSnapshot, memberID)
+		_, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_grant(app_id,version,scopes,status,requested_by,approved_by,approved_at) VALUES($1,'1.0.0',$2::jsonb->'manifest'->'scopes','approved',$3,$3,now())`, appID, allergenFormatterSnapshot, memberID)
 	}
 	provider := strings.TrimSpace(os.Getenv("CEREBRO_APPS_RUNTIME_PROVIDER"))
 	if provider == "" {
 		provider = "docker"
 	}
 	if err == nil {
-		_, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_deployment(app_id,version,provider,status,bundle_sha256) VALUES($1,'1.0.0',$2,'pending',$3)`, allergenFormatterID, provider, bundle.SHA256)
+		_, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_deployment(app_id,version,provider,status,bundle_sha256) VALUES($1,'1.0.0',$2,'pending',$3)`, appID, provider, bundle.SHA256)
 	}
 	if err != nil || tx.Commit(r.Context()) != nil {
 		writeError(w, 500, "failed to install Allergen Formatter")
 		return
 	}
-	deployment := RuntimeDeploymentRequest{AppID: allergenFormatterID.String(), Version: "1.0.0", BundleSHA256: bundle.SHA256}
+	deployment := RuntimeDeploymentRequest{AppID: appID.String(), Version: "1.0.0", BundleSHA256: bundle.SHA256}
 	if h.runtime == nil || h.runtime.Deploy(r.Context(), deployment) != nil {
-		_, _ = h.pool.Exec(r.Context(), `UPDATE cerebro_app_deployment SET status='failed',last_error='App runtime is unavailable',updated_at=now() WHERE app_id=$1 AND version='1.0.0'`, allergenFormatterID)
-		slog.Error("built-in mini app runtime deployment failed", "app_id", allergenFormatterID)
+		_, _ = h.pool.Exec(r.Context(), `UPDATE cerebro_app_deployment SET status='failed',last_error='App runtime is unavailable',updated_at=now() WHERE app_id=$1 AND version='1.0.0'`, appID)
+		slog.Error("built-in mini app runtime deployment failed", "app_id", appID)
 		writeError(w, http.StatusBadGateway, "app runtime is unavailable")
 		return
 	}
-	_, _ = h.pool.Exec(r.Context(), `UPDATE cerebro_app_deployment SET status='provisioning',updated_at=now() WHERE app_id=$1 AND version='1.0.0'`, allergenFormatterID)
-	writeJSON(w, http.StatusAccepted, map[string]any{"id": allergenFormatterID, "name": "Allergen Formatter", "version": "1.0.0", "status": "provisioning"})
+	_, _ = h.pool.Exec(r.Context(), `UPDATE cerebro_app_deployment SET status='provisioning',updated_at=now() WHERE app_id=$1 AND version='1.0.0'`, appID)
+	writeJSON(w, http.StatusAccepted, map[string]any{"id": appID, "name": "Allergen Formatter", "version": "1.0.0", "status": "provisioning"})
 }
 
 func (h *Handler) AdminOverview(w http.ResponseWriter, r *http.Request) {

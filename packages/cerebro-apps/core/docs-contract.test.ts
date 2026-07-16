@@ -41,7 +41,7 @@ describe("mini-app documentation contract", () => {
     const requiredProofs = [
       "TestProductionMiniAppsContainNoWorkflowFakes",
       "TestBrokerIssuesAppBoundPersonalKeyAndCachesIt",
-      "TestAllFiveWorkflowTriggersHaveProductionRoutes",
+      "TestAppsExposeNoWorkflowRoutes",
       "TestAppConnectionCallAppliesConnectionAndHumanCeilings",
       "TestAppConnectionCallSupportsApprovedMCPToolAndHumanCeiling",
       "TestViewSubmissionCanResumeOneRequest",

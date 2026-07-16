@@ -86,6 +86,12 @@ jobs:
           pnpm generate:feature-catalog
           git diff --exit-code -- server/cmd/multica/cerebro_feature_catalog.json
 
+      # CEREBRO-PATCH(mini-apps-ci-image): Keep the image build outside the
+      # functional isolation test so its timeout measures runtime behavior only.
+      - name: Build mini-app worker image
+        timeout-minutes: 10
+        run: docker build -f apps/cerebro-apps-runtime/Dockerfile.worker -t "multica/cerebro-app-worker:ci-${GITHUB_SHA}" .
+
       - name: Build, type check, and test
         # CEREBRO-PATCH(ci-no-lint-no-mobile): cerebro fork drops lint enforcement
         # (codebase has ~73 i18next/no-literal-string violations on main) and the
@@ -94,6 +100,8 @@ jobs:
         # aligned (follow-up issue). @multica/docs is no longer present in the fork.
         # CEREBRO-PATCH(ci-parallel-turbo): Match the repo's four-way local test concurrency and retain a per-task timing summary.
         run: pnpm exec turbo build typecheck test --concurrency=4 --continue=dependencies-successful --summarize --filter='!@multica/mobile'
+        env:
+          CEREBRO_APPS_WORKER_IMAGE: multica/cerebro-app-worker:ci-${{ github.sha }}
 
       - name: Upload Turbo timing summary
         if: always()

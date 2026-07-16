@@ -10,6 +10,20 @@ const deployment = {
   bundleToken: "signed-bundle-token",
   invokeKey: "worker-invoke-key",
 };
+const workerCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+test("requires an explicit worker branch and exact worker commit before creating a service", async () => {
+  let requests = 0;
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    workerBranch: "main",
+    fetch: async () => (requests++, Response.json({}, { status: 201 })),
+  });
+  await assert.rejects(provider.createOrDeploy(deployment), /App deployment failed/);
+  assert.equal(requests, 0);
+});
 
 test("creates a private service on the runtime server and explicitly deploys it", async () => {
   const requests = [];
@@ -19,6 +33,7 @@ test("creates a private service on the runtime server and explicitly deploys it"
     projectId: "project-1",
     serverId: "server-1",
     workerBranch: "main",
+    workerCommit,
     healthPollMs: 1,
     healthTimeoutMs: 100,
     fetch: async (url, init = {}) => {
@@ -29,7 +44,7 @@ test("creates a private service on the runtime server and explicitly deploys it"
       if (String(url).endsWith("/services/service-1/deploy")) return Response.json({ status: "queued" }, { status: 202 });
       if (String(url) === "http://cerebro-app-f1540000-v1-2-3.internal:4311/healthz") {
         healthChecks++;
-        return Response.json({ status: healthChecks === 1 ? "starting" : "ok" }, { status: healthChecks === 1 ? 503 : 200 });
+        return Response.json({ status: healthChecks === 1 ? "starting" : "ok", commit: workerCommit }, { status: healthChecks === 1 ? 503 : 200 });
       }
       throw new Error(`unexpected request ${init.method} ${url}`);
     },
@@ -38,10 +53,11 @@ test("creates a private service on the runtime server and explicitly deploys it"
   const result = await provider.createOrDeploy(deployment);
   const create = requests[0];
   assert.equal(create.init.headers.authorization, "Bearer sliplane-secret");
-  assert.equal(create.body.name, "cerebro-app-f1540000-v1-2-3");
+  assert.equal(create.body.name, serviceNameForVersion(deployment.appId, deployment.version));
   assert.equal(create.body.serverId, "server-1");
   assert.deepEqual(create.body.network, { public: false });
   assert.equal(create.body.deployment.branch, "main");
+  assert.equal(create.body.deployment.autoDeploy, false);
   assert.equal(create.body.deployment.dockerfilePath, "apps/cerebro-apps-runtime/Dockerfile.worker");
   assert.deepEqual(create.body.env, [
     { key: "APP_ID", value: deployment.appId, secret: false },
@@ -50,6 +66,7 @@ test("creates a private service on the runtime server and explicitly deploys it"
     { key: "BUNDLE_TOKEN", value: deployment.bundleToken, secret: true },
     { key: "BUNDLE_SHA256", value: "", secret: false },
     { key: "BACKEND_URL", value: "", secret: false },
+    { key: "WORKER_COMMIT", value: workerCommit, secret: false },
     { key: "INVOKE_KEY", value: deployment.invokeKey, secret: true },
     { key: "PORT", value: "4311", secret: false },
   ]);
@@ -65,16 +82,23 @@ test("reuses a deterministic service after a create conflict", async () => {
     apiKey: "key",
     projectId: "project-1",
     serverId: "server-1",
+    workerBranch: "main",
+    workerCommit,
     fetch: async (url, init = {}) => {
       if (String(url).endsWith("/services") && init.method === "POST") {
         creates++;
         return new Response("already exists", { status: 409 });
       }
       if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) {
-        return Response.json([{ id: "existing", name: serviceNameForVersion(deployment.appId, deployment.version), serverId: "server-1", network: { internalDomain: "existing.internal" } }]);
+        return Response.json([{ id: "existing", name: serviceNameForVersion(deployment.appId, deployment.version), serverId: "server-1", network: { internalDomain: "existing.internal" }, env: [
+          { key: "APP_ID", value: deployment.appId },
+          { key: "APP_VERSION", value: deployment.version },
+          { key: "BUNDLE_SHA256", value: "" },
+          { key: "WORKER_COMMIT", value: workerCommit },
+        ] }]);
       }
       if (String(url).endsWith("/services/existing/deploy")) return Response.json({}, { status: 202 });
-      if (String(url) === "http://existing.internal:4311/healthz") return Response.json({ status: "ok" });
+      if (String(url) === "http://existing.internal:4311/healthz") return Response.json({ status: "ok", commit: workerCommit });
       throw new Error(`unexpected request ${init.method} ${url}`);
     },
   });
@@ -83,11 +107,49 @@ test("reuses a deterministic service after a create conflict", async () => {
   assert.equal(creates, 1);
 });
 
+test("service identity cannot collide on UUID prefixes or prerelease punctuation", () => {
+  assert.notEqual(
+    serviceNameForVersion("aaaaaaaa-1111-4111-8111-111111111111", "1.0.0"),
+    serviceNameForVersion("aaaaaaaa-2222-4222-8222-222222222222", "1.0.0"),
+  );
+  assert.notEqual(
+    serviceNameForVersion(deployment.appId, "1.0.0-alpha.1"),
+    serviceNameForVersion(deployment.appId, "1.0.0-alpha-1"),
+  );
+});
+
+test("rejects an existing service whose immutable deployment identity mismatches", async () => {
+  let deployCalled = false;
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    workerBranch: "main",
+    workerCommit,
+    fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/services") && init.method === "POST") return new Response("exists", { status: 409 });
+      if (String(url).endsWith("/services")) return Response.json([{
+        id: "wrong-service",
+        name: serviceNameForVersion(deployment.appId, deployment.version),
+        serverId: "server-1",
+        network: { internalDomain: "wrong.internal" },
+        env: [{ key: "APP_ID", value: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }],
+      }]);
+      if (String(url).includes("/deploy")) deployCalled = true;
+      throw new Error(`unexpected request ${init.method} ${url}`);
+    },
+  });
+  await assert.rejects(provider.createOrDeploy(deployment), /App deployment failed/);
+  assert.equal(deployCalled, false);
+});
+
 test("fails safely when the private worker never becomes healthy", async () => {
   const provider = new SliplaneProvider({
     apiKey: "key",
     projectId: "project-1",
     serverId: "server-1",
+    workerBranch: "main",
+    workerCommit,
     healthPollMs: 1,
     healthTimeoutMs: 5,
     fetch: async (url, init = {}) => {
@@ -103,11 +165,27 @@ test("fails safely when the private worker never becomes healthy", async () => {
   await assert.rejects(provider.createOrDeploy(deployment), /App deployment failed/);
 });
 
+test("rejects a healthy worker running a different commit", async () => {
+  const provider = new SliplaneProvider({
+    apiKey: "key", projectId: "project-1", serverId: "server-1", workerBranch: "main", workerCommit,
+    healthPollMs: 1, healthTimeoutMs: 5,
+    fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/services") && init.method === "POST") return Response.json({ id: "service-1", network: { internalDomain: "wrong-commit.internal" } }, { status: 201 });
+      if (String(url).endsWith("/services/service-1/deploy")) return Response.json({}, { status: 202 });
+      if (String(url) === "http://wrong-commit.internal:4311/healthz") return Response.json({ status: "ok", commit: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" });
+      throw new Error(`unexpected request ${init.method} ${url}`);
+    },
+  });
+  await assert.rejects(provider.createOrDeploy(deployment), /App deployment failed/);
+});
+
 test("masks Sliplane response bodies from callers", async () => {
   const provider = new SliplaneProvider({
     apiKey: "key",
     projectId: "project-1",
     serverId: "server-1",
+    workerBranch: "main",
+    workerCommit,
     fetch: async () => new Response("secret=/srv/private and api-key", { status: 500 }),
   });
   await assert.rejects(provider.createOrDeploy(deployment), (error) => {

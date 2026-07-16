@@ -6,7 +6,7 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { createAppTemplate, type AppSourceFile } from "../core/app-template";
-import { getAppDetail, publishAppVersion } from "../core/api";
+import { getAppDetail, getAppVersionFiles, publishAppVersion } from "../core/api";
 import { validateAppManifest } from "../core/schema";
 import { AppPublishDialog } from "./app-publish-dialog";
 
@@ -19,11 +19,21 @@ export function AppEditorPage({ appId }: { appId: string }) {
   const [publishing, setPublishing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [sourceVersion, setSourceVersion] = useState<string>();
 
   useEffect(() => {
     if (!enabled || !workspace) return;
     void getAppDetail(appId, workspace.slug)
-      .then((app) => setFiles(createAppTemplate(app.name, "0.1.0")))
+      .then(async (app) => {
+        if (app.current_version) {
+          const storedFiles = await getAppVersionFiles(appId, app.current_version, workspace.slug);
+          setFiles(storedFiles);
+          setSourceVersion(app.current_version);
+          return;
+        }
+        setFiles(createAppTemplate(app.name, "0.1.0"));
+        setSourceVersion(undefined);
+      })
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load app"));
   }, [appId, enabled, workspace]);
 
@@ -37,6 +47,7 @@ export function AppEditorPage({ appId }: { appId: string }) {
 
   return <div className="relative flex h-full min-h-0 flex-col bg-background">
     <div className="flex flex-wrap items-center gap-2 border-b p-3">
+      {sourceVersion ? <span className="text-xs text-muted-foreground">Editing {sourceVersion}</span> : null}
       <label className="inline-flex h-8 cursor-pointer items-center rounded-lg border px-3 text-sm">Import files<input aria-label="Import files" className="sr-only" type="file" multiple onChange={(event) => { void importFiles(event.currentTarget.files).then((next) => { if (next.length > 0) { setFiles(next); setActivePath(next[0]?.path ?? "app.json"); } }); }} /></label>
       <Button type="button" variant="outline" onClick={() => exportPackage(files)}>Export package</Button>
       <Button type="button" variant="outline" onClick={() => setPreviewing((value) => !value)}>{previewing ? "Edit files" : "Preview"}</Button>
@@ -49,13 +60,20 @@ export function AppEditorPage({ appId }: { appId: string }) {
       </div>
       {active && <Textarea aria-label={`Source for ${active.path}`} className="min-h-0 flex-1 resize-none rounded-none border-0 font-mono text-xs focus-visible:ring-0" value={active.content} onChange={(event) => setFiles((current) => current.map((file) => file.path === active.path ? { ...file, content: event.target.value } : file))} />}
     </div>}
-    {publishing && <AppPublishDialog defaultVersion="0.1.0" saving={saving} onCancel={() => setPublishing(false)} onPublish={async (version, releaseNotes) => {
+    {publishing && <AppPublishDialog defaultVersion={nextPatchVersion(sourceVersion)} saving={saving} onCancel={() => setPublishing(false)} onPublish={async (version, releaseNotes) => {
       setSaving(true); setError("");
-      try { await publishAppVersion(appId, { version, release_notes: releaseNotes, files }, workspace.slug); setPublishing(false); }
+      try { await publishAppVersion(appId, { version, release_notes: releaseNotes, files }, workspace.slug); setSourceVersion(version); setPublishing(false); }
       catch (cause) { setError(cause instanceof Error ? cause.message : "Could not publish app"); }
       finally { setSaving(false); }
     }} />}
   </div>;
+}
+
+function nextPatchVersion(version?: string): string {
+  if (!version) return "0.1.0";
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (!match) return "0.1.0";
+  return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`;
 }
 
 function validatePackage(files: AppSourceFile[]): string {

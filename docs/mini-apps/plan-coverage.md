@@ -11,7 +11,7 @@ Playwright Allergen Formatter flow.
 |---|---|---|---|
 | G1 | Production workflow execution contains no fake adapter path. | `TestProductionMiniAppsContainNoWorkflowFakes` | Compiled production package and real adapters |
 | G2 | Every Registry action is attributable to member, app, version, and run. | `TestBrokerIssuesAppBoundPersonalKeyAndCachesIt` plus the Registry audit integration in FIR-3172 | Registry session exchange and audit rows |
-| G3 | Schedule, webhook, data event, manual, and chat start durable Hatchet runs. | `TestAllFiveWorkflowTriggersHaveProductionRoutes` | PostgreSQL run rows and Hatchet dispatch |
+| G3 | Apps expose no workflow-specific routes or controls. | `TestAppsExposeNoWorkflowRoutes` | Compiled router and Apps browser surface |
 | G4 | Every documented SDK method has a live route, including API and MCP `connections.call`. | `TestAppConnectionCallAppliesConnectionAndHumanCeilings` and `TestAppConnectionCallSupportsApprovedMCPToolAndHumanCeiling` | Approved Connections with server-side credentials |
 | G5 | The app grant and acting person's access remain independent hard ceilings. | `TestAppConnectionCallAppliesConnectionAndHumanCeilings` plus Registry permission integration | Registry and Connection policy enforcement |
 | G6 | One app failure cannot affect another app. | `container-integration.test.mjs` | Docker daemon and two live app containers |
@@ -30,7 +30,7 @@ Playwright Allergen Formatter flow.
 | 0 | Per-app container, mount, limits, and egress | `apps/cerebro-apps-runtime/container-integration.test.mjs#killing app A leaves app B healthy on an internal-only network` |
 | 1 | Real Registry adapters and run trace | `server/internal/cerebro/apps/workflow_adapters_test.go#TestRegistryAdapterCallsRealV1RoutesWithRunTrace` |
 | 2 | Hatchet dispatch and private worker contract | `server/internal/cerebro/apps/workflow_dispatch_test.go#TestSubmitWorkflowRunUsesThePrivateWorkerContract` |
-| 3 | Five real trigger routes | `server/internal/cerebro/apps/workflow_triggers_test.go#TestAllFiveWorkflowTriggersHaveProductionRoutes` |
+| 3 | No workflow routes in Apps | `server/internal/cerebro/apps/workflow_triggers_test.go#TestAppsExposeNoWorkflowRoutes` |
 | 4 | Interactive card pause and resume | `server/internal/cerebro/apps/handler_test.go#TestViewSubmissionCanResumeOneRequest` |
 | 5 | SDK route integrity and scoped Connections | `server/internal/cerebro/runtime/api_connection_resolver_test.go#TestAppConnectionCallAppliesConnectionAndHumanCeilings` |
 | 6 | User-safe error masking | `apps/cerebro-apps-runtime/runtime.test.mjs#one failed worker does not affect runtime health` |

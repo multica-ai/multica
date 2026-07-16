@@ -10,6 +10,8 @@ The Cerebro server and runtime must share `CEREBRO_APPS_RUNTIME_SERVICE_KEY`. Se
 - `CEREBRO_APPS_RUNTIME_PROVIDER=sliplane`
 - `CEREBRO_APPS_SLIPLANE_PROJECT_ID`: project that owns app services
 - `CEREBRO_APPS_SLIPLANE_SERVER_ID`: the same server as the control plane
+- `CEREBRO_APPS_WORKER_BRANCH`: the explicit Git branch used to build private workers
+- `CEREBRO_APPS_WORKER_COMMIT`: the exact 40-character commit that the worker health check must report before a deployment becomes ready
 - `SLIPLANE_KEY`: service-management credential
 
 Published app services are created with `network.public=false`. The runtime stores the concrete `.internal` domain returned by Sliplane and never guesses a service hostname.

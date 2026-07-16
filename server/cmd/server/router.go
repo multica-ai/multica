@@ -966,12 +966,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Get("/api/cerebro/pricing", cerebroPricingHandler.Get)
 	// CEREBRO-PATCH(cerebro-exchange-rates-ingest-route): FIR-43 service-to-service exchange-rate ingestion from the multica-hatchet-worker. Outside the user-auth group on purpose — the worker presents CEREBRO_EXCHANGE_INGEST_KEY as a Bearer token (loopback-only when the key is unset). Backend is the sole writer of cerebro_exchange_rates.
 	r.Post("/api/cerebro/exchange-rates", cerebroExchangeRatesIngestHandler.Post)
-	// CEREBRO-PATCH(cerebro-mini-app-workflow-execute): FIR-3172 Hatchet worker callback. The service key is the only authority; person/app identity comes from the durable run envelope.
-	r.Post("/api/cerebro/apps/workflow-runs/{runId}/execute", cerebroAppsHandler.ExecuteWorkflowRun)
-	// CEREBRO-PATCH(cerebro-mini-app-trigger-ingress): FIR-3172 external triggers derive workspace and owner from the saved workflow; their token/service key is the credential.
-	r.Post("/api/cerebro/app-workflow-webhooks/{workflowId}/{token}", cerebroAppsHandler.TriggerWebhook)
-	r.Post("/api/cerebro/app-workflow-triggers/data-event", cerebroAppsHandler.TriggerDataEvent)
-	r.Post("/api/cerebro/app-workflow-triggers/schedule", cerebroAppsHandler.TriggerSchedule)
 	// CEREBRO-PATCH(cerebro-mini-app-runtime-ingress): FIR-3172 signed service-only bundle and deployment callbacks.
 	r.Get("/api/cerebro/apps-internal/deployments", cerebroAppsHandler.PendingDeployments)
 	r.Get("/api/cerebro/apps-internal/deployments/{id}/{version}", cerebroAppsHandler.DeploymentInfo)
@@ -1033,7 +1027,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/complete", h.CompleteTask)
 		r.Post("/tasks/{taskId}/fail", h.FailTask)
 		r.Post("/tasks/{taskId}/usage", h.ReportTaskUsage)
-		r.Post("/tasks/{taskId}/skill-usage", h.ReportTaskSkillUsage)          // CEREBRO-PATCH(task-skill-usage-route): FIR-2996 explicit runtime-reported skill invocations.
+		r.Post("/tasks/{taskId}/skill-usage", h.ReportTaskSkillUsage)         // CEREBRO-PATCH(task-skill-usage-route): FIR-2996 explicit runtime-reported skill invocations.
 		r.Post("/tasks/{taskId}/prompt-snapshot", h.ReportTaskPromptSnapshot) // CEREBRO-PATCH(run-prompt-snapshot): FIR-3212 byte-exact per-run production prompt evidence.
 		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
@@ -2216,10 +2210,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.With(cerebroAppsHandler.RequireCapability("apps.create")).Post("/", cerebroAppsHandler.Create)
 				r.With(cerebroAppsHandler.RequireCapability("apps.manage")).Get("/admin-overview", cerebroAppsHandler.AdminOverview)
 				r.With(cerebroAppsHandler.RequireCapability("apps.manage")).Post("/builtins/allergen-formatter/install", cerebroAppsHandler.InstallAllergenFormatter)
-				// CEREBRO-PATCH(cerebro-mini-app-detail-route): FIR-3172 app detail screen reads one app, its versions, and workflows.
+				// CEREBRO-PATCH(cerebro-mini-app-detail-route): FIR-3172 app detail screen reads one app and its versions.
 				r.Get("/{id}", cerebroAppsHandler.Get)
+				r.With(cerebroAppsHandler.RequireCapability("apps.manage")).Get("/{id}/versions/{version}/files", cerebroAppsHandler.VersionFiles)
 				r.With(cerebroAppsHandler.RequireCapability("apps.manage")).Post("/{id}/preview", cerebroAppsHandler.Preview)
 				r.With(cerebroAppsHandler.RequireCapability("apps.manage")).Post("/{id}/publish", cerebroAppsHandler.Publish)
+				r.With(cerebroAppsHandler.RequireCapability("apps.manage")).Post("/{id}/retry-deployment", cerebroAppsHandler.RetryDeployment)
 				r.With(cerebroAppsHandler.RequireCapability("apps.manage")).Post("/{id}/rollback", cerebroAppsHandler.Rollback)
 				r.With(cerebroAppsHandler.RequireCapability("apps.manage")).Post("/{id}/disable", cerebroAppsHandler.Disable)
 				r.With(cerebroAppsHandler.RequireCapability("apps.manage")).Post("/{id}/approve-scopes", cerebroAppsHandler.ApproveScopes)
@@ -2231,16 +2227,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/{id}/storage/{key}", cerebroAppsHandler.DeleteStorage)
 				r.Get("/view-requests/{requestId}", cerebroAppsHandler.GetViewRequest)
 				r.Post("/{id}/views/{viewId}/submissions", cerebroAppsHandler.SubmitView)
-				r.Post("/workflow-runs/{runId}/token", cerebroAppsHandler.IssueWorkflowToken)
-			})
-			// CEREBRO-PATCH(cerebro-mini-app-workflow-routes): FIR-3172 shared JSON workflow lifecycle.
-			r.Route("/api/cerebro/app-workflows", func(r chi.Router) {
-				r.Use(cerebroAppsHandler.RequireEnabled)
-				r.With(cerebroAppsHandler.RequireCapability("apps.manage")).Post("/", cerebroAppsHandler.CreateWorkflow)
-				r.Post("/{workflowId}/test", cerebroAppsHandler.TestWorkflow)
-				r.Post("/{workflowId}/chat", cerebroAppsHandler.TriggerChat)
-				r.With(cerebroAppsHandler.RequireCapability("apps.manage")).Post("/{workflowId}/{state:enable|disable}", cerebroAppsHandler.SetWorkflowEnabled)
-				r.Get("/{workflowId}/runs", cerebroAppsHandler.ListWorkflowRuns)
 			})
 			r.Post("/api/cerebro/connections/{id}/call", cerebroAppsHandler.CallConnection)
 			r.Route("/api/cerebro/app-folders", func(r chi.Router) {
