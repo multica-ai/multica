@@ -433,6 +433,18 @@ export const IssueTriggerPreviewSchema = z.object({
 // to {} so consumers never need to nil-guard `issue.metadata`.
 const IssueMetadataSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({});
 
+// Resolved catalog view of an issue's status (MUL-4809). Lenient like the rest
+// of this file: `category` stays a plain string so an unknown future Category
+// passes through instead of failing the whole issue, and `.loose()` preserves
+// any extra server fields.
+export const StatusDetailSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  category: z.string(),
+  icon: z.string(),
+  color: z.string(),
+}).loose();
+
 export const IssueSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -460,6 +472,11 @@ export const IssueSchema = z.object({
   properties: IssuePropertyValuesSchema,
   reactions: z.array(z.unknown()).optional(),
   labels: z.array(z.unknown()).optional(),
+  // Custom-status catalog fields (MUL-4809). Absent on older backends and on
+  // endpoints that don't hydrate them (optional); null when the issue has no
+  // status_id yet. Either way the client falls back to the legacy `status`.
+  status_id: z.string().nullish(),
+  status_detail: StatusDetailSchema.nullish(),
   created_at: z.string(),
   updated_at: z.string(),
 }).loose();

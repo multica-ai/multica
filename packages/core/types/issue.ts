@@ -10,6 +10,28 @@ export type IssueStatus =
   | "blocked"
   | "cancelled";
 
+// The 5 immutable status Categories — the only machine-readable status semantics
+// in the custom-status model (MUL-4809). A custom or built-in status belongs to
+// exactly one Category; automation branches on the Category, never the name.
+export type StatusCategory =
+  | "backlog"
+  | "todo"
+  | "in_progress"
+  | "done"
+  | "cancelled";
+
+// StatusDetail is the resolved catalog view of an issue's status, attached to
+// issue responses by list/detail endpoints (MUL-4809). Optional/nullable: absent
+// or null when the issue has no status_id yet — callers fall back to the legacy
+// `status` token. name/icon/color are human-facing; category is the machine key.
+export interface StatusDetail {
+  id: string;
+  name: string;
+  category: StatusCategory;
+  icon: string;
+  color: string;
+}
+
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
 export type IssueAssigneeType = "member" | "agent" | "squad";
@@ -64,6 +86,12 @@ export interface Issue {
   properties: IssuePropertyValues;
   reactions?: IssueReaction[];
   labels?: Label[];
+  // Authoritative custom-status catalog id + resolved detail (MUL-4809),
+  // bulk-attached by list/detail endpoints like `labels`. Absent/null when the
+  // issue has no status_id yet or on paths that don't hydrate them; the legacy
+  // `status` field stays the fallback.
+  status_id?: string | null;
+  status_detail?: StatusDetail | null;
   created_at: string;
   updated_at: string;
 }

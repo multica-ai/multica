@@ -91,6 +91,78 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listIssues status_detail (MUL-4809)", () => {
+    // Minimal valid issue row (only the non-defaulted fields).
+    const baseIssue = {
+      id: "issue-1",
+      workspace_id: "ws-1",
+      number: 1,
+      identifier: "MUL-1",
+      title: "Test",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 1,
+      start_date: null,
+      due_date: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+
+    it("parses an old-server issue that omits status_id / status_detail", async () => {
+      // Older backends predate MUL-4809 and send neither field. Must parse, not
+      // fall back, and leave the client on the legacy `status` token.
+      stubFetchJson({ issues: [baseIssue], total: 1 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssues();
+      expect(res.issues).toHaveLength(1);
+      expect(res.issues[0]?.status_id).toBeUndefined();
+      expect(res.issues[0]?.status_detail).toBeUndefined();
+      expect(res.issues[0]?.status).toBe("todo");
+    });
+
+    it("passes status_id / status_detail through and tolerates an unknown category", async () => {
+      stubFetchJson({
+        issues: [
+          {
+            ...baseIssue,
+            status_id: "st-1",
+            status_detail: {
+              id: "st-1",
+              name: "In Review",
+              category: "some_future_category",
+              icon: "in_review",
+              color: "success",
+            },
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssues();
+      expect(res.issues[0]?.status_id).toBe("st-1");
+      expect(res.issues[0]?.status_detail?.name).toBe("In Review");
+      expect(res.issues[0]?.status_detail?.category).toBe("some_future_category");
+    });
+
+    it("keeps the issue when status_detail is explicitly null", async () => {
+      stubFetchJson({
+        issues: [{ ...baseIssue, status_id: null, status_detail: null }],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssues();
+      expect(res.issues).toHaveLength(1);
+      expect(res.issues[0]?.status_detail ?? null).toBeNull();
+    });
+  });
+
   describe("searchIssues", () => {
     it("falls back to an empty result when the response is malformed", async () => {
       stubFetchJson({ issues: "not-an-array", total: 0 });
