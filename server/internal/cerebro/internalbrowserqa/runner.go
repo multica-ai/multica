@@ -107,18 +107,29 @@ type Result struct {
 
 type Runner struct {
 	commander      Commander
+	openTimeout    time.Duration
 	stageTimeout   time.Duration
 	cleanupTimeout time.Duration
 }
 
 func NewRunner(commander Commander) *Runner {
-	return &Runner{commander: commander, stageTimeout: 30 * time.Second, cleanupTimeout: 5 * time.Second}
+	return &Runner{
+		commander: commander, openTimeout: 60 * time.Second,
+		stageTimeout: 30 * time.Second, cleanupTimeout: 30 * time.Second,
+	}
 }
 
 func (r *Runner) runStage(ctx context.Context, stage, stdin string, args ...string) ([]byte, error) {
 	stageTimeout := r.stageTimeout
+	if stage == "open" {
+		stageTimeout = r.openTimeout
+	}
 	if stageTimeout <= 0 {
-		stageTimeout = 30 * time.Second
+		if stage == "open" {
+			stageTimeout = 60 * time.Second
+		} else {
+			stageTimeout = 30 * time.Second
+		}
 	}
 	stageCtx, cancel := context.WithTimeout(ctx, stageTimeout)
 	defer cancel()
@@ -169,7 +180,7 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	defer func() {
 		cleanupTimeout := r.cleanupTimeout
 		if cleanupTimeout <= 0 {
-			cleanupTimeout = 5 * time.Second
+			cleanupTimeout = 30 * time.Second
 		}
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 		defer cancel()
