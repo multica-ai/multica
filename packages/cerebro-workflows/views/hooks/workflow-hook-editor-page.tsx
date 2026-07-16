@@ -8,6 +8,7 @@ import { createHookDraft, type WorkflowHook } from "../../core/hook-types";
 import { createWorkflowHook, publishWorkflowHook, testWorkflowHook, updateWorkflowHook } from "../../core/hook-api";
 import { workflowHookDetailOptions, workflowHookKeys, workflowHookRunsOptions } from "../../core/queries";
 import { HookEditor } from "./hook-editor";
+import { useHookDirectory } from "./use-hook-directory";
 
 export function WorkflowHookEditorPage({ hookId }: { hookId?: string }) {
   const enabled = useFeatureFlag("cerebro_workflow_hooks");
@@ -20,6 +21,7 @@ export function WorkflowHookEditorPage({ hookId }: { hookId?: string }) {
 
 function WorkflowHookEditorLoaded({ wsId, workspaceSlug, hookId, onNavigate }: { wsId: string; workspaceSlug: string; hookId?: string; onNavigate: (path: string) => void }) {
 	const queryClient = useQueryClient();
+	const directory = useHookDirectory(wsId);
 	const detail = useQuery(workflowHookDetailOptions(wsId, hookId ?? ""));
 	const runs = useQuery(workflowHookRunsOptions(wsId, hookId ?? ""));
 	const save = useMutation({
@@ -40,5 +42,5 @@ function WorkflowHookEditorLoaded({ wsId, workspaceSlug, hookId, onNavigate }: {
 	if (hookId && detail.isLoading) return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading hook…</div>;
 	if (hookId && detail.isError) return <div className="flex h-full items-center justify-center text-sm text-destructive">Failed to load hook.</div>;
 	const hook = detail.data ?? createHookDraft();
-	return <HookEditor initialHook={hook} runs={runs.data ?? []} canPublish={hook.can_publish === true} onTest={() => test.mutate()} onBack={() => onNavigate(`/${workspaceSlug}/workflows/hooks`)} onSave={(next) => next.mode === "enforce" ? publish.mutate() : save.mutate(next)} />;
+	return <HookEditor initialHook={hook} directory={directory} runs={runs.data ?? []} canPublish={hook.can_publish === true} onTest={() => test.mutate()} onBack={() => onNavigate(`/${workspaceSlug}/workflows/hooks`)} onSave={(next) => next.mode === "enforce" ? publish.mutate() : save.mutate(next)} />;
 }

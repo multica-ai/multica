@@ -4,4 +4,5 @@ export * from "./queries";
 export * from "./templates";
 export * from "./types";
 export * from "./hook-types";
+export * from "./hook-validation";
 export * from "./hook-api";

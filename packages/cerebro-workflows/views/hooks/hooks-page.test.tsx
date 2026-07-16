@@ -16,11 +16,18 @@ describe("HooksPage", () => {
       { ...base, id: "on", name: "Live policy", mode: "enforce" },
       { ...base, id: "managed", name: "Managed policy", mode: "managed" },
     ]} />);
-    expect(screen.getAllByText("Trigger → 3 conditions → Block → 1 action")).toHaveLength(4);
+    expect(screen.getAllByText("Choose trigger → 0 conditions → Allow → 0 actions")).toHaveLength(4);
     expect(screen.getByText("Off")).toBeInTheDocument();
     expect(screen.getByText("Dry run")).toBeInTheDocument();
     expect(screen.getByText("Enforced")).toBeInTheDocument();
     expect(screen.getByText("Managed")).toBeInTheDocument();
     expect(screen.getAllByText("Never")).toHaveLength(4);
+  });
+
+  it("uses the shared page header and a responsive list without a wide table", () => {
+    const { container } = render(<HooksPage onOpenHook={vi.fn()} hooks={[]} />);
+    expect(screen.getByRole("heading", { name: "Hooks" })).toBeInTheDocument();
+    expect(container.querySelector("table")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New hook" })).toBeInTheDocument();
   });
 });

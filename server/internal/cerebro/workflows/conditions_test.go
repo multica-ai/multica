@@ -69,7 +69,7 @@ func TestEvaluate_UnknownOperatorFailsClosed(t *testing.T) {
 
 func TestHookConditionOperators(t *testing.T) {
 	ctx := map[string]any{
-		"agent":        map[string]any{"model": "gpt-5.6-codex"},
+		"agent":        map[string]any{"model": "codex-enterprise"},
 		"continuation": "wakeup",
 		"attempt":      2,
 	}
@@ -78,7 +78,7 @@ func TestHookConditionOperators(t *testing.T) {
 		cond Condition
 		want bool
 	}{
-		{name: "starts_with", cond: Condition{Field: "agent.model", Op: "starts_with", Value: "gpt-5.6"}, want: true},
+		{name: "starts_with", cond: Condition{Field: "agent.model", Op: "starts_with", Value: "codex"}, want: true},
 		{name: "exists", cond: Condition{Field: "continuation", Op: "exists"}, want: true},
 		{name: "missing does not exist", cond: Condition{Field: "missing", Op: "exists"}, want: false},
 		{name: "gte", cond: Condition{Field: "attempt", Op: "gte", Value: 2}, want: true},

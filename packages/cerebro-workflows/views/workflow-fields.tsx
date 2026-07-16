@@ -236,7 +236,7 @@ export function WebhookInboundFields({
   return (
     <div className="flex flex-col gap-3">
       {!workflowId && (
-        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-300">
+        <div className="rounded-md border border-warning/40 bg-warning/5 px-2 py-1 text-[11px] text-warning">
           Save the workflow first to generate a webhook token and URL.
         </div>
       )}
@@ -283,7 +283,7 @@ export function WebhookInboundFields({
       {(hmacToggled || signingSecretSet) && (
         <Field label="Signing secret">
           {oneTimeSecret ? (
-            <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 px-2 py-1 font-mono text-[11px] text-emerald-700 dark:text-emerald-300">
+            <div className="rounded-md border border-success/40 bg-success/5 px-2 py-1 font-mono text-[11px] text-success">
               {oneTimeSecret}
               <div className="mt-1 text-[10px] text-muted-foreground">
                 Save this now — the secret is shown only once.
@@ -537,7 +537,7 @@ export function WebhookOutboundFields({
 
       <Field label="Outbound signing secret (HMAC of request body)">
         {oneTimeSecret ? (
-          <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 px-2 py-1 font-mono text-[11px] text-emerald-700 dark:text-emerald-300">
+          <div className="rounded-md border border-success/40 bg-success/5 px-2 py-1 font-mono text-[11px] text-success">
             {oneTimeSecret}
             <div className="mt-1 text-[10px] text-muted-foreground">
               Save this now — the secret is shown only once.

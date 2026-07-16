@@ -81,6 +81,10 @@ func (h *HookAPI) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid workflow hook payload")
 		return
 	}
+	if err := validateTypedHookActions(policy); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	created, err := h.repository.Create(r.Context(), workspaceID, actor, policy)
 	if err != nil {
 		h.writeRepositoryError(w, err)
@@ -110,6 +114,10 @@ func (h *HookAPI) Update(w http.ResponseWriter, r *http.Request) {
 	var policy HookPolicy
 	if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid workflow hook payload")
+		return
+	}
+	if err := validateTypedHookActions(policy); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	updated, err := h.repository.Update(r.Context(), workspaceID, actor, id, policy)

@@ -49,8 +49,8 @@ export interface WorkflowHook {
   description: string;
   mode: HookMode;
   fail_mode: HookFailMode;
-  event_type: HookEventType;
-  binding: HookBinding;
+  events: HookEventType[];
+  bindings: HookBinding[];
   conditions: HookCondition[];
   decision: HookDecision;
   requirement: string;
@@ -94,21 +94,17 @@ export const HOOK_EVENT_OPTIONS: ReadonlyArray<{ value: HookEventType; label: st
 export function createHookDraft(): WorkflowHook {
   return {
     version: 1,
-    name: "Require a next step",
-    description: "No agent stops without a registered continuation",
+    name: "",
+    description: "",
     mode: "dry_run",
-    fail_mode: "closed",
-    event_type: "before.task.complete",
-    binding: { kind: "model", value: "gpt-5.6" },
-    conditions: [
-      { field: "issue.status", operator: "not_in", value: "done, cancelled", conjunction: "AND" },
-      { field: "continuation", operator: "not_exists", value: "", conjunction: "AND" },
-      { field: "attempt", operator: "lt", value: "3" },
-    ],
-    decision: "block",
-    requirement: "Choose a valid continuation before completing the task",
-    actions: [{ type: "audit.record", label: "Record audit event", config: {} }],
+    fail_mode: "warn",
+    events: [],
+    bindings: [],
+    conditions: [],
+    decision: "allow",
+    requirement: "",
+    actions: [],
     baseline_run_count: 0,
-	can_publish: false,
+    can_publish: false,
   };
 }

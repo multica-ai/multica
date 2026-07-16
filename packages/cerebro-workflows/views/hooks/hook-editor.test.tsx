@@ -22,10 +22,10 @@ describe("HookEditor", () => {
   });
 
   it("edits filters as field, operator, and value rows without raw JSON", () => {
-    render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
+    render(<HookEditor initialHook={{ ...createHookDraft(), events: ["before.task.complete"], conditions: [{ field: "issue.status", operator: "not_in", value: "done, cancelled" }] }} onSave={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Configure Filter" }));
-    expect(screen.getByLabelText("Filter field 1")).toHaveValue("issue.status");
-    expect(screen.getByLabelText("Filter operator 1")).toHaveValue("not_in");
+    expect(screen.getByLabelText("Filter field 1")).toHaveTextContent("issue.status");
+    expect(screen.getByLabelText("Filter operator 1")).toHaveTextContent("is not one of");
     expect(screen.getByLabelText("Filter value 1")).toHaveValue("done, cancelled");
     expect(screen.queryByText(/\{\s*"field"/)).not.toBeInTheDocument();
   });
@@ -33,15 +33,25 @@ describe("HookEditor", () => {
   it("uses the same scope step for agent, issue, and session", () => {
     render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Configure Applies to" }));
-    expect(screen.getByRole("option", { name: "Agent or model" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add scope" }));
+    fireEvent.click(screen.getByLabelText("Scope 1"));
+    expect(screen.getByRole("option", { name: "Agent" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Model" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Issue" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Chat or session" })).toBeInTheDocument();
   });
 
   it("keeps Publish disabled until dry-run evidence exists", () => {
-    const { rerender } = render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} canPublish={false} />);
+    const valid = {
+      ...createHookDraft(), name: "Guard completion", events: ["before.task.complete" as const],
+      bindings: [{ kind: "workspace" as const, value: "" }],
+      conditions: [{ field: "issue.status", operator: "eq", value: "todo" }],
+      decision: "block" as const, requirement: "Continue the issue",
+      actions: [{ type: "audit.record", label: "Record audit event", config: {} }],
+    };
+    const { rerender } = render(<HookEditor initialHook={valid} onSave={vi.fn()} canPublish={false} />);
     expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
-    rerender(<HookEditor initialHook={{ ...createHookDraft(), baseline_run_count: 4 }} onSave={vi.fn()} canPublish />);
+    rerender(<HookEditor initialHook={{ ...valid, baseline_run_count: 4 }} onSave={vi.fn()} canPublish />);
     expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
   });
 
@@ -54,15 +64,52 @@ describe("HookEditor", () => {
   });
 
   it("configures Start Handoff as a typed action without commands", () => {
-    render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
+    render(<HookEditor initialHook={{ ...createHookDraft(), actions: [{ type: "session.handoff", label: "Start Handoff", config: {} }] }} onSave={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Configure Action" }));
-    fireEvent.change(screen.getByLabelText("Action 1 type"), { target: { value: "session.handoff" } });
     expect(screen.getByLabelText("Handoff target")).toBeInTheDocument();
     expect(screen.getByLabelText("Handoff plan reference")).toBeInTheDocument();
-    expect(screen.getByLabelText("Start new session now")).toBeChecked();
+    expect(screen.getByRole("checkbox")).toBeChecked();
     expect(screen.getByLabelText("Handoff summary")).toBeInTheDocument();
     expect(screen.getByLabelText("Handoff done")).toBeInTheDocument();
     expect(screen.getByLabelText("Handoff remaining")).toBeInTheDocument();
     expect(screen.queryByLabelText(/command|shell/i)).not.toBeInTheDocument();
+  });
+
+  it("adds and removes conditions and actions", () => {
+    render(<HookEditor initialHook={{ ...createHookDraft(), events: ["before.task.complete"] }} onSave={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure Filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
+    expect(screen.getAllByRole("button", { name: /Remove condition/ })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Remove condition 1" }));
+    expect(screen.queryByRole("button", { name: /Remove condition/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Configure Action" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add action" }));
+    expect(screen.getByRole("button", { name: "Remove action 1" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove action 1" }));
+    expect(screen.queryByRole("button", { name: /Remove action/ })).not.toBeInTheDocument();
+  });
+
+  it("turns the chain plus controls into quick-add actions", () => {
+    render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Quick add filter" }));
+    expect(screen.getByRole("button", { name: "Remove condition 1" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Quick add action" }));
+    expect(screen.getByRole("button", { name: "Remove action 1" })).toBeInTheDocument();
+  });
+
+  it("shows honest completion state and the new skill and judge actions", () => {
+    render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Configure Trigger" })).toHaveAttribute("data-state", "incomplete");
+    fireEvent.click(screen.getByRole("button", { name: "Configure Action" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add action" }));
+    fireEvent.click(screen.getByLabelText("Action 1 type"));
+    expect(screen.getByRole("option", { name: "Run skill" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Judge gate" })).toBeInTheDocument();
+  });
+
+  it("uses a stacked layout on mobile-sized screens", () => {
+    const { container } = render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
+    expect(container.querySelector("main")).toHaveClass("grid-cols-1", "md:grid-cols-[minmax(18rem,430px)_minmax(0,1fr)]");
   });
 });

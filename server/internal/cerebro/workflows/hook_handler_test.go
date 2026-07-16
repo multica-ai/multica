@@ -56,6 +56,19 @@ func TestHookAPICreateAlwaysStartsInDryRun(t *testing.T) {
 	}
 }
 
+func TestHookAPIRejectsIncompleteTypedActionConfiguration(t *testing.T) {
+	repo := NewMemoryHookRepository()
+	auth := &fakeHookAuthorizer{allow: map[HookPermission]bool{HookPermissionWrite: true}}
+	router := hookTestRouter(NewHookAPI(repo, auth))
+	policy := newTestHookPolicy("", HookAllow, HookModeDryRun, HookBinding{Kind: HookScopeWorkspace, ID: hookTestWorkspaceID})
+	policy.Handlers[0].Actions = []HookAction{{Type: "judge.gate", Config: map[string]any{"agent_id": "11111111-1111-1111-1111-111111111111"}}}
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, hookRequest(t, http.MethodPost, "/", policy, "member-1", false))
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("create incomplete judge status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestHookAPIPublishRequiresHumanPermissionRunAndBaseline(t *testing.T) {
 	repo := NewMemoryHookRepository()
 	policy := newTestHookPolicy("22222222-2222-2222-2222-222222222222", HookBlock, HookModeDryRun, HookBinding{Kind: HookScopeWorkspace, ID: hookTestWorkspaceID})
@@ -82,7 +95,7 @@ func TestHookAPIPublishRequiresHumanPermissionRunAndBaseline(t *testing.T) {
 
 func TestHookAPITestCreatesFreshBaselineWithoutSideEffects(t *testing.T) {
 	repo := NewMemoryHookRepository()
-	policy := newTestHookPolicy("22222222-2222-2222-2222-222222222222", HookBlock, HookModeDryRun, HookBinding{Kind: HookScopeModel, ID: "gpt-5.6"})
+	policy := newTestHookPolicy("22222222-2222-2222-2222-222222222222", HookBlock, HookModeDryRun, HookBinding{Kind: HookScopeModel, ID: "claude-opus-4-6"})
 	repo.Seed(hookTestWorkspaceID, policy)
 	auth := &fakeHookAuthorizer{allow: map[HookPermission]bool{HookPermissionWrite: true}}
 	router := hookTestRouter(NewHookAPI(repo, auth))

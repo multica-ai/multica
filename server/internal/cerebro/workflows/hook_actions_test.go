@@ -16,11 +16,38 @@ func TestTypedActionRegistryContainsLegacyAndVersionOneActions(t *testing.T) {
 		"session.handoff", "task.retry", "task.cancel", "artifact.create_or_update",
 		"workflow.activate", "workflow.pause", "workflow.resume", "workflow.stop",
 		"approval.require", "audit.record", "metric.increment",
+		"skill.run", "judge.gate",
 	}
 	for _, name := range want {
 		if !registry.Has(name) {
 			t.Errorf("missing action %s", name)
 		}
+	}
+}
+
+func TestRunSkillAndJudgeGateDeclareCapabilities(t *testing.T) {
+	if got := hookActionCapability("skill.run"); got != "trigger_other_agent" {
+		t.Fatalf("skill.run capability = %q", got)
+	}
+	if got := hookActionCapability("judge.gate"); got != "trigger_other_agent" {
+		t.Fatalf("judge.gate capability = %q", got)
+	}
+}
+
+func TestValidateTypedHookActionsRejectsIncompleteSkillAndJudgeConfiguration(t *testing.T) {
+	for _, action := range []HookAction{
+		{Type: "skill.run", Config: map[string]any{}},
+		{Type: "judge.gate", Config: map[string]any{"agent_id": "11111111-1111-1111-1111-111111111111"}},
+	} {
+		if err := validateTypedHookAction(action); err == nil {
+			t.Fatalf("expected %s to be rejected", action.Type)
+		}
+	}
+	if err := validateTypedHookAction(HookAction{Type: "skill.run", Config: map[string]any{"skill_name": "verification-before-completion"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateTypedHookAction(HookAction{Type: "judge.gate", Config: map[string]any{"agent_id": "11111111-1111-1111-1111-111111111111", "rubric": "Every acceptance criterion passes"}}); err != nil {
+		t.Fatal(err)
 	}
 }
 

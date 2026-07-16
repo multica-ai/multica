@@ -121,7 +121,7 @@ export function WorkflowLoopControls({
         </Button>
       </div>
       {activate.isSuccess && (
-        <p className="text-xs text-green-600 dark:text-green-400">
+        <p className="text-xs text-success">
           Activated on this issue — it now runs this recipe independently of the project-wide
           compile.
         </p>
@@ -136,7 +136,7 @@ export function WorkflowLoopControls({
         <div className="flex flex-col gap-2 text-xs">
           <p className="text-muted-foreground">
             {loopState.data.stopped ? (
-              <span className="font-medium text-amber-600 dark:text-amber-400">
+              <span className="font-medium text-warning">
                 Paused · escalated to owner{loopState.data.stop_reason ? ` — ${loopState.data.stop_reason}` : ""}
               </span>
             ) : (

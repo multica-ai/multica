@@ -83,6 +83,11 @@ WHERE a.id=$1 AND a.workspace_id=$7 RETURNING id`, agentID, optionalHookUUID(eve
 			optionalHookUUID(hookConfigString(action.Config, "source_task_id", "")), actorID, squadID, workspaceID).Scan(&id)
 		return hookIDResult(id), err
 
+	case "skill.run":
+		return e.runSkill(ctx, workspaceID, actorID, policy, event, action.Config)
+	case "judge.gate":
+		return e.startJudgeGate(ctx, workspaceID, actorID, policy, event, action.Config)
+
 	case "wakeup.create":
 		fireAt, err := time.Parse(time.RFC3339, hookConfigString(action.Config, "fire_at", ""))
 		if err != nil {
@@ -127,6 +132,89 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, workspaceID, policy.CreatedByTyp
 	default:
 		return nil, ErrActionNotConfigured
 	}
+}
+
+func (e *PostgresHookActionExecutor) runSkill(ctx context.Context, workspaceID, actorID pgtype.UUID, policy HookPolicy, event HookEvent, config map[string]any) (map[string]any, error) {
+	skillName := strings.TrimSpace(hookConfigString(config, "skill_name", ""))
+	if skillName == "" {
+		return nil, errors.New("skill.run skill_name is required")
+	}
+	agentValue := hookConfigString(config, "agent_id", event.AgentID)
+	if agentValue == "" {
+		return nil, errors.New("skill.run agent_id is required when the event has no agent")
+	}
+	agentID, err := util.ParseUUID(agentValue)
+	if err != nil {
+		return nil, fmt.Errorf("skill.run agent_id: %w", err)
+	}
+	prompt := hookConfigString(config, "prompt", "Use the "+skillName+" skill for this workflow hook event.")
+	payload, _ := json.Marshal(map[string]any{
+		"type": "quick_create", "prompt": prompt, "workspace_id": event.WorkspaceID,
+		"requester_id": policy.CreatedByID, "workflow_hook_policy_id": policy.ID,
+		"workflow_skill_name": skillName, "workflow_target_issue_id": event.IssueID,
+	})
+	var taskID pgtype.UUID
+	delegatingAgentID := pgtype.UUID{}
+	if policy.CreatedByType == "agent" {
+		delegatingAgentID = actorID
+	}
+	err = e.db.QueryRow(ctx, `INSERT INTO agent_task_queue
+(agent_id,runtime_id,issue_id,status,priority,context,delegating_agent_id)
+SELECT a.id,a.runtime_id,$2,'queued',0,$3,$4 FROM agent a
+JOIN agent_skill ask ON ask.agent_id=a.id JOIN skill s ON s.id=ask.skill_id
+WHERE a.id=$1 AND a.workspace_id=$5 AND a.archived_at IS NULL AND a.runtime_id IS NOT NULL AND s.workspace_id=$5 AND s.name=$6
+	RETURNING agent_task_queue.id`, agentID, optionalHookUUID(event.IssueID), payload, delegatingAgentID, workspaceID, skillName).Scan(&taskID)
+	if err != nil {
+		return nil, fmt.Errorf("skill.run enqueue attached skill: %w", err)
+	}
+	return map[string]any{"task_id": util.UUIDToString(taskID), "skill_name": skillName}, nil
+}
+
+func (e *PostgresHookActionExecutor) startJudgeGate(ctx context.Context, workspaceID, actorID pgtype.UUID, policy HookPolicy, event HookEvent, config map[string]any) (map[string]any, error) {
+	if event.IssueID == "" {
+		return nil, errors.New("judge.gate requires an issue event")
+	}
+	issueID, err := util.ParseUUID(event.IssueID)
+	if err != nil {
+		return nil, fmt.Errorf("judge.gate issue_id: %w", err)
+	}
+	agentID, err := hookConfigUUID(config, "agent_id")
+	if err != nil {
+		return nil, fmt.Errorf("judge.gate agent_id: %w", err)
+	}
+	rubric := strings.TrimSpace(hookConfigString(config, "rubric", ""))
+	if rubric == "" {
+		return nil, errors.New("judge.gate rubric is required")
+	}
+	gate := "hook:" + policy.ID + ":" + event.EventID
+	checkID := hookConfigString(config, "check_id", "judge")
+	round := int32(event.Attempt)
+	if round < 1 {
+		round = 1
+	}
+	if _, err = e.db.Exec(ctx, `INSERT INTO cerebro_loop_judge_run (issue_id,gate,round,check_id,rubric)
+VALUES ($1,$2,$3,$4,$5) ON CONFLICT (issue_id,gate,round,check_id) DO NOTHING`, issueID, gate, round, checkID, rubric); err != nil {
+		return nil, fmt.Errorf("judge.gate enqueue verdict: %w", err)
+	}
+	prompt := "Judge the linked issue against this rubric:\n\n" + rubric + "\n\nReport pass or reject for gate " + gate + ", round " + fmt.Sprint(round) + ", check " + checkID + "."
+	payload, _ := json.Marshal(map[string]any{
+		"type": "quick_create", "prompt": prompt, "workspace_id": event.WorkspaceID,
+		"requester_id": policy.CreatedByID, "workflow_hook_policy_id": policy.ID,
+		"judge_gate": gate, "judge_round": round, "judge_check_id": checkID,
+	})
+	var taskID pgtype.UUID
+	delegatingAgentID := pgtype.UUID{}
+	if policy.CreatedByType == "agent" {
+		delegatingAgentID = actorID
+	}
+	err = e.db.QueryRow(ctx, `INSERT INTO agent_task_queue
+(agent_id,runtime_id,issue_id,status,priority,context,delegating_agent_id)
+SELECT a.id,a.runtime_id,$2,'queued',0,$3,$4 FROM agent a
+	WHERE a.id=$1 AND a.workspace_id=$5 AND a.archived_at IS NULL AND a.runtime_id IS NOT NULL RETURNING id`, agentID, issueID, payload, delegatingAgentID, workspaceID).Scan(&taskID)
+	if err != nil {
+		return nil, fmt.Errorf("judge.gate dispatch judge: %w", err)
+	}
+	return map[string]any{"task_id": util.UUIDToString(taskID), "gate": gate, "round": round, "check_id": checkID}, nil
 }
 
 func (e *PostgresHookActionExecutor) cancelWakeup(ctx context.Context, workspaceID pgtype.UUID, config map[string]any) (map[string]any, error) {
