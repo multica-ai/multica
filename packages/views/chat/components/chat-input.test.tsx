@@ -119,6 +119,11 @@ vi.mock("../../editor", async () => ({
       // the draft-switch flush that depends on it) is covered against the real
       // ContentEditor in chat-input-draft-isolation.test.tsx.
       flushPendingUpdate: () => null,
+      // Same file: the upload-pinned adopt path needs the real Guard 0, which
+      // this mock has no concept of. Kept so the ref honours the full contract.
+      adoptContent: (markdown: string) => {
+        valueRef.current = markdown;
+      },
     }));
     return (
       <textarea

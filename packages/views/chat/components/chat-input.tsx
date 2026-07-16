@@ -184,14 +184,32 @@ export function ChatInput({
   const appliedRestoreIdRef = useRef<string | null>(null);
   const editorKey = editorKeyOverride ?? CHAT_COMPOSER_EDITOR_KEY;
 
+  // The draft whose document the editor instance is currently HOLDING.
+  //
+  // Normally identical to `draftKey`. The two diverge only while an in-flight
+  // upload pins the instance to the source document: ContentEditor's Guard 0
+  // refuses to `setContent` over an `uploading` node, because wiping that node
+  // strands the upload's finalize and the file silently disappears. Until the
+  // upload settles the composer still shows — and still edits — the source
+  // draft, so every byte the instance produces belongs to THIS key, not to
+  // wherever the user has since navigated.
+  //
+  // `draftKey` answers "what is selected"; this answers "what is loaded". Every
+  // write the editor drives must use the latter.
+  const editorDraftKeyRef = useRef(draftKey);
+
   // Write a document into a draft slot: text, plus a prune of the attachments
   // its body no longer references (deleting an image's markdown drops the
   // staged upload with it). Shared by the live `onUpdate` and the draft-switch
   // flush below, so a document can never be filed under one rule by one path
-  // and a different rule by the other.
+  // and a different rule by the other. Attachments are read live for `key`
+  // rather than passed in — during a divergence the rendered `draftAttachments`
+  // belongs to the selected draft, not the loaded one.
   const commitDraft = useCallback(
-    (key: string, markdown: string, attachments: Attachment[]) => {
+    (key: string, markdown: string) => {
       setInputDraft(key, markdown);
+      const attachments =
+        useChatStore.getState().inputDraftAttachments[key] ?? EMPTY_ATTACHMENTS;
       if (attachments.length === 0) return;
       const referenced = attachments.filter((attachment) =>
         isAttachmentReferenced(markdown, attachment),
@@ -202,41 +220,6 @@ export function ChatInput({
     },
     [setInputDraft, setInputDraftAttachments],
   );
-
-  // Re-point the composer at a different draft slot WITHOUT letting the
-  // outgoing slot's unflushed keystrokes follow it.
-  //
-  // One editor instance serves every chat draft (see the editorKey note), and
-  // its `onUpdate` is debounced. A debounce armed while the user was on draft A
-  // fires up to `debounceMs` later, by which time `onUpdate` resolves to the
-  // latest render's closure — so it would write A's document into B's slot,
-  // breaking draft isolation and handing A's context to B's agent on send.
-  // Meanwhile ContentEditor's dirty guard suppresses B's incoming sync while
-  // those unflushed bytes are live, so B's own draft never even loads.
-  //
-  // Flushing takes the pending document back and files it under the key it was
-  // typed in, and leaves the editor clean so B's draft can sync in.
-  //
-  // useLayoutEffect, not useEffect, for two ordering reasons: passive effects
-  // run child-first, so a passive flush here would land AFTER ContentEditor's
-  // sync effect had already skipped on a dirty editor; and a layout effect is
-  // part of the commit, so no pending timer can fire ahead of it.
-  const draftKeyRef = useRef(draftKey);
-  useLayoutEffect(() => {
-    const previousKey = draftKeyRef.current;
-    if (previousKey === draftKey) return;
-    draftKeyRef.current = draftKey;
-    const pending = editorRef.current?.flushPendingUpdate() ?? null;
-    if (pending === null) return;
-    logger.debug("input.draft flush on key change", { from: previousKey, to: draftKey });
-    // Read the source slot's attachments live: this render's `draftAttachments`
-    // already belongs to the INCOMING key.
-    commitDraft(
-      previousKey,
-      pending,
-      useChatStore.getState().inputDraftAttachments[previousKey] ?? EMPTY_ATTACHMENTS,
-    );
-  }, [draftKey, commitDraft]);
   // Submit gate. `uploading` disables the SubmitButton the instant an upload
   // starts; `isBlocked()` is re-read inside handleSend for the paths that skip
   // the button entirely (Mod+Enter mid-paste, drag-drop racing the keyboard).
@@ -244,6 +227,56 @@ export function ChatInput({
   // used to be a local in-flight counter that a manual delete of the pending
   // image would leave stuck (MUL-4808).
   const uploadGate = useUploadGate(editorRef);
+
+  // Move the editor from the draft it holds to the draft that is selected.
+  //
+  // Two hazards make this more than "let the defaultValue sync handle it":
+  //
+  // 1. Unflushed keystrokes. `onUpdate` is debounced, and by the time a
+  //    debounce armed under draft A fires, `onUpdate` resolves to the latest
+  //    render's closure — it would file A's document under B. Flushing takes
+  //    those bytes back and commits them to the key they were typed in.
+  // 2. An in-flight upload. Guard 0 pins the document (see editorDraftKeyRef),
+  //    so the switch cannot happen yet at all: we leave BOTH the document and
+  //    its writes on the source key and retry when the gate clears
+  //    (`uploadGate.uploading` is a dep). Blocking navigation instead would be
+  //    a worse trade — the user waits on a network round-trip to change tabs.
+  //
+  // Case 2 also has to force the adopt afterwards: ContentEditor's sync effect
+  // CONSUMED the defaultValue change while Guard 0 was up (lastDefaultValueRef
+  // advances before the guard), so it will never re-run for that value and the
+  // target draft would never load on its own.
+  //
+  // useLayoutEffect, not useEffect, for two ordering reasons: passive effects
+  // run child-first, so a passive flush here would land AFTER ContentEditor's
+  // sync effect had already skipped on a dirty editor; and a layout effect is
+  // part of the commit, so no pending debounce timer can fire ahead of it.
+  const deferredAdoptRef = useRef(false);
+  useLayoutEffect(() => {
+    const loadedKey = editorDraftKeyRef.current;
+    if (loadedKey === draftKey) return;
+    if (editorRef.current?.hasActiveUploads() === true) {
+      // Pinned. Stay bound to the source draft until the upload settles.
+      deferredAdoptRef.current = true;
+      logger.debug("input.draft switch deferred by in-flight upload", {
+        from: loadedKey,
+        to: draftKey,
+      });
+      return;
+    }
+    const pending = editorRef.current?.flushPendingUpdate() ?? null;
+    if (pending !== null) {
+      logger.debug("input.draft flush on key change", { from: loadedKey, to: draftKey });
+      commitDraft(loadedKey, pending);
+    }
+    editorDraftKeyRef.current = draftKey;
+    if (!deferredAdoptRef.current) return;
+    deferredAdoptRef.current = false;
+    const incoming = useChatStore.getState().inputDrafts[draftKey] ?? "";
+    logger.debug("input.draft adopting after upload settled", { key: draftKey });
+    editorRef.current?.adoptContent(incoming);
+    setIsEmpty(!incoming.trim());
+  }, [draftKey, uploadGate.uploading, commitDraft]);
 
   // Maps "URL inserted into the editor" → "attachment row id" so that
   // on send we can ask the server to bind only the attachments still
@@ -317,11 +350,16 @@ export function ChatInput({
       if (result) {
         const persistedURL = result.markdownLink || result.link;
         uploadMapRef.current.set(persistedURL, result.id);
-        if (result.id) addInputDraftAttachment(draftKey, result);
+        // Bind to the draft this file is landing IN. The editor inserts the
+        // node into whatever document it currently holds, so while an earlier
+        // upload pins it to the source draft, that — not the selected draft —
+        // is where the body lives. Filing the row anywhere else splits a
+        // message from its own attachment.
+        if (result.id) addInputDraftAttachment(editorDraftKeyRef.current, result);
       }
       return result;
     },
-    [addInputDraftAttachment, draftKey, onUploadFile],
+    [addInputDraftAttachment, onUploadFile],
   );
 
   // Drop zone wraps the rounded card so a drop anywhere on the input
@@ -352,6 +390,20 @@ export function ChatInput({
     // still gate here.
     if (uploadGate.isBlocked()) {
       logger.debug("input.send skipped: uploads in flight");
+      return;
+    }
+    // The editor is still holding a DIFFERENT draft's document than the one
+    // selected — an upload pinned it and the adopt below has not run yet. The
+    // upload gate above covers most of that window, but not the sliver between
+    // the upload's final dispatch (node gone) and the re-render that adopts:
+    // React flushes that state update on a scheduler task, so a click can land
+    // first. Sending here would post the source draft's text into the selected
+    // session and then clear the wrong draft.
+    if (editorDraftKeyRef.current !== draftKey) {
+      logger.debug("input.send skipped: composer still holds another draft", {
+        loaded: editorDraftKeyRef.current,
+        selected: draftKey,
+      });
       return;
     }
     // Only send attachment IDs for uploads still present in the content.
@@ -472,7 +524,10 @@ export function ChatInput({
             placeholder={placeholder}
             onUpdate={(md) => {
               setIsEmpty(!md.trim());
-              commitDraft(draftKey, md, draftAttachments);
+              // The LOADED key, not the selected one: while an upload pins the
+              // document this fires for the source draft's body — including the
+              // upload's own completion dispatch.
+              commitDraft(editorDraftKeyRef.current, md);
             }}
             onSubmit={handleSend}
             onUploadFile={uploadEnabled ? handleUpload : undefined}
