@@ -2219,7 +2219,8 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 		t.Fatalf("prepareCodexHome failed: %v", err)
 	}
 
-	// Directory should contain a task-local sessions dir + auto-generated config.toml.
+	// Directory should contain task-local sessions, the model-cache config
+	// binding, and auto-generated config.toml.
 	entries, err := os.ReadDir(codexHome)
 	if err != nil {
 		t.Fatalf("failed to read codex-home: %v", err)
@@ -2237,8 +2238,11 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	if !entryNames["plugins"] {
 		t.Error("expected plugins directory for plugin cache exposure")
 	}
+	if !entryNames[codexModelsCacheBindingFile] {
+		t.Error("expected models cache config binding")
+	}
 	for name := range entryNames {
-		if name != "sessions" && name != "config.toml" && name != "plugins" {
+		if name != "sessions" && name != "config.toml" && name != "plugins" && name != codexModelsCacheBindingFile {
 			t.Errorf("unexpected entry: %s", name)
 		}
 	}
@@ -2972,6 +2976,204 @@ func TestReusePreservesTaskLocalModelsCacheOverStaleSharedSnapshot(t *testing.T)
 	}
 	if string(data) != `{"source":"task"}` {
 		t.Fatalf("task-local models cache = %q, want refreshed task cache", data)
+	}
+}
+
+func TestReuseInvalidatesTaskLocalModelsCacheWhenProviderConfigChanges(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	configPath := filepath.Join(sharedHome, "config.toml")
+	if err := os.WriteFile(configPath, []byte(`model_provider = "provider-a"`), 0o644); err != nil {
+		t.Fatalf("write provider A config: %v", err)
+	}
+	sharedCache := filepath.Join(sharedHome, "models_cache.json")
+	if err := os.WriteFile(sharedCache, []byte(`{"source":"shared-a"}`), 0o644); err != nil {
+		t.Fatalf("write provider A shared cache: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-codex-model-cache-provider-change",
+		TaskID:         "d5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	modelsCache := filepath.Join(env.CodexHome, "models_cache.json")
+	if err := os.WriteFile(modelsCache, []byte(`{"source":"task-a"}`), 0o644); err != nil {
+		t.Fatalf("refresh provider A task cache: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`model_provider = "provider-b"`), 0o644); err != nil {
+		t.Fatalf("write provider B config: %v", err)
+	}
+	// Even a changed shared snapshot is not safe to copy: Codex's cache format
+	// does not say which provider produced it.
+	if err := os.WriteFile(sharedCache, []byte(`{"source":"shared-b"}`), 0o644); err != nil {
+		t.Fatalf("write provider B shared cache: %v", err)
+	}
+
+	reused := Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+	if _, err := os.Lstat(modelsCache); !os.IsNotExist(err) {
+		t.Fatalf("provider A models cache survived provider change: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read provider B task config: %v", err)
+	}
+	if !strings.Contains(string(data), `model_provider = "provider-b"`) {
+		t.Fatalf("task config did not switch to provider B: %q", data)
+	}
+
+	// Once Codex refreshes the cache for provider B, another reuse with the
+	// unchanged binding must preserve it over the shared snapshot.
+	if err := os.WriteFile(modelsCache, []byte(`{"source":"task-b"}`), 0o644); err != nil {
+		t.Fatalf("write provider B task cache: %v", err)
+	}
+	if Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
+	}, testLogger()) == nil {
+		t.Fatal("second Reuse returned nil")
+	}
+	data, err = os.ReadFile(modelsCache)
+	if err != nil {
+		t.Fatalf("read provider B task cache: %v", err)
+	}
+	if string(data) != `{"source":"task-b"}` {
+		t.Fatalf("provider B task cache = %q, want task-refreshed cache", data)
+	}
+}
+
+func TestReuseInvalidatesTaskLocalModelsCacheWhenModelCatalogChanges(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_catalog_json = "catalog.json"`), 0o644); err != nil {
+		t.Fatalf("write model catalog config: %v", err)
+	}
+	catalogPath := filepath.Join(sharedHome, "catalog.json")
+	if err := os.WriteFile(catalogPath, []byte(`{"models":[{"slug":"model-a"}]}`), 0o644); err != nil {
+		t.Fatalf("write model catalog A: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "models_cache.json"), []byte(`{"source":"shared"}`), 0o644); err != nil {
+		t.Fatalf("write shared cache: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-codex-model-catalog-change",
+		TaskID:         "e5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-catalog-change"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	modelsCache := filepath.Join(env.CodexHome, "models_cache.json")
+	if err := os.WriteFile(modelsCache, []byte(`{"source":"task-a"}`), 0o644); err != nil {
+		t.Fatalf("refresh task cache: %v", err)
+	}
+	if err := os.WriteFile(catalogPath, []byte(`{"models":[{"slug":"model-b"}]}`), 0o644); err != nil {
+		t.Fatalf("write model catalog B: %v", err)
+	}
+
+	reused := Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-catalog-change"},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+	if _, err := os.Lstat(modelsCache); !os.IsNotExist(err) {
+		t.Fatalf("models cache survived model catalog change: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "catalog.json"))
+	if err != nil {
+		t.Fatalf("read refreshed task model catalog: %v", err)
+	}
+	if string(data) != `{"models":[{"slug":"model-b"}]}` {
+		t.Fatalf("task model catalog = %q", data)
+	}
+}
+
+func TestReuseInvalidatesUnboundLegacyModelsCache(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_provider = "provider-a"`), 0o644); err != nil {
+		t.Fatalf("write provider config: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-codex-model-cache-legacy",
+		TaskID:         "f5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	modelsCache := filepath.Join(env.CodexHome, "models_cache.json")
+	if err := os.WriteFile(modelsCache, []byte(`{"source":"legacy"}`), 0o644); err != nil {
+		t.Fatalf("write legacy task cache: %v", err)
+	}
+	if err := os.Remove(filepath.Join(env.CodexHome, codexModelsCacheBindingFile)); err != nil {
+		t.Fatalf("remove cache binding to simulate pre-fix home: %v", err)
+	}
+
+	if Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
+	}, testLogger()) == nil {
+		t.Fatal("Reuse returned nil")
+	}
+	if _, err := os.Lstat(modelsCache); !os.IsNotExist(err) {
+		t.Fatalf("unbound legacy cache survived reuse: %v", err)
+	}
+
+	// An existing pre-fix home without a cache is still not a fresh home. Do
+	// not attach a newly observed shared snapshot to an unknown prior config.
+	if err := os.Remove(filepath.Join(env.CodexHome, codexModelsCacheBindingFile)); err != nil {
+		t.Fatalf("remove cache binding again: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "models_cache.json"), []byte(`{"source":"shared"}`), 0o644); err != nil {
+		t.Fatalf("write shared cache: %v", err)
+	}
+	if Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
+	}, testLogger()) == nil {
+		t.Fatal("second Reuse returned nil")
+	}
+	if _, err := os.Lstat(modelsCache); !os.IsNotExist(err) {
+		t.Fatalf("shared cache seeded into existing unbound home: %v", err)
 	}
 }
 
