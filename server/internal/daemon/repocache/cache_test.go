@@ -167,6 +167,39 @@ func TestNewWithGitBrokerRejectsRelativeExecutable(t *testing.T) {
 	}
 }
 
+func TestNewWithGitBrokerRejectsExecutableUnderWritableParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows uses a different executable trust model")
+	}
+
+	contents, err := os.ReadFile(trustedGitForTest(t))
+	if err != nil {
+		t.Fatalf("read trusted Git executable: %v", err)
+	}
+	writableParent := t.TempDir()
+	gitCopy := filepath.Join(writableParent, "git")
+	if err := os.WriteFile(gitCopy, contents, 0o755); err != nil {
+		t.Fatalf("write Git executable copy: %v", err)
+	}
+
+	_, err = NewWithGitBroker(t.TempDir(), testLogger(), GitBrokerOptions{Executable: gitCopy})
+	if err == nil || (!strings.Contains(err.Error(), "git executable is not owned by root") &&
+		!strings.Contains(err.Error(), "root-owned system trust anchor")) {
+		t.Fatalf("NewWithGitBroker error = %v, want writable parent trust rejection", err)
+	}
+}
+
+func TestTrustedSystemGitExecutablePassesOwnerValidation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows uses a different executable trust model")
+	}
+
+	gitPath := trustedGitForTest(t)
+	if err := validateTrustedExecutablePath(gitPath); err != nil {
+		t.Fatalf("validateTrustedExecutablePath(%q): %v", gitPath, err)
+	}
+}
+
 func TestGitBrokerUsesCallerContextAndAbsoluteExecutable(t *testing.T) {
 	cache, err := NewWithGitBroker(t.TempDir(), testLogger(), GitBrokerOptions{
 		Executable: trustedGitForTest(t),
@@ -448,6 +481,306 @@ func TestSyncAndLookup(t *testing.T) {
 	if got := cache.Lookup("ws-999", sourceRepo); got != "" {
 		t.Fatalf("expected empty for unknown workspace, got %q", got)
 	}
+}
+
+func TestCacheOperationsRejectWritableBareRepository(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows uses a different repository metadata trust model")
+	}
+
+	operations := []struct {
+		name string
+		run  func(*Cache, string, string, string) error
+	}{
+		{
+			name: "sync",
+			run: func(cache *Cache, sourceRepo, _, _ string) error {
+				return cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}})
+			},
+		},
+		{
+			name: "lookup",
+			run: func(cache *Cache, sourceRepo, _, _ string) error {
+				if got := cache.Lookup("ws-1", sourceRepo); got != "" {
+					return fmt.Errorf("Lookup returned untrusted bare cache %q", got)
+				}
+				return nil
+			},
+		},
+		{
+			name: "resolve",
+			run: func(cache *Cache, sourceRepo, _, _ string) error {
+				_, err := cache.Resolve("ws-1", sourceRepo)
+				return err
+			},
+		},
+		{
+			name: "fetch",
+			run: func(cache *Cache, _, barePath, _ string) error {
+				return cache.Fetch(barePath)
+			},
+		},
+		{
+			name: "create-worktree",
+			run: func(cache *Cache, sourceRepo, _, workDir string) error {
+				_, err := cache.CreateWorktree(WorktreeParams{
+					WorkspaceID: "ws-1",
+					RepoURL:     sourceRepo,
+					WorkDir:     workDir,
+					AgentName:   "agent",
+					TaskID:      "untrusted-cache",
+				})
+				return err
+			},
+		},
+	}
+
+	for _, operation := range operations {
+		operation := operation
+		t.Run(operation.name, func(t *testing.T) {
+			sourceRepo := createTestRepo(t)
+			cache := New(t.TempDir(), testLogger())
+			if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+				t.Fatalf("initial Sync: %v", err)
+			}
+			barePath := cache.Lookup("ws-1", sourceRepo)
+			if barePath == "" {
+				t.Fatal("initial Lookup returned no bare cache")
+			}
+			beforeHead := gitOutputForTest(t, barePath, "rev-parse", "HEAD")
+			if err := os.Chmod(barePath, 0o777); err != nil {
+				t.Fatalf("make bare cache writable: %v", err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(barePath, 0o755) })
+
+			workDir := t.TempDir()
+			err := operation.run(cache, sourceRepo, barePath, workDir)
+			if operation.name == "lookup" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "group/world writable") {
+				t.Fatalf("%s error = %v, want writable bare cache rejection", operation.name, err)
+			}
+			if got := gitOutputForTest(t, barePath, "rev-parse", "HEAD"); got != beforeHead {
+				t.Fatalf("%s changed bare cache HEAD: got %q want %q", operation.name, got, beforeHead)
+			}
+			entries, readErr := os.ReadDir(workDir)
+			if readErr != nil {
+				t.Fatalf("read work directory: %v", readErr)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("%s created worktree content before trust rejection: %v", operation.name, entries)
+			}
+		})
+	}
+}
+
+func TestWorkspaceCacheTrustRejectsWritableDirectories(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows uses a different repository metadata trust model")
+	}
+
+	for _, target := range []string{"root", "workspace"} {
+		t.Run(target, func(t *testing.T) {
+			root := t.TempDir()
+			sourceRepo := createTestRepo(t)
+			cache := New(root, testLogger())
+			if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+				t.Fatalf("initial Sync: %v", err)
+			}
+			path := root
+			if target == "workspace" {
+				path = filepath.Join(root, "ws-1")
+			}
+			if err := os.Chmod(path, 0o777); err != nil {
+				t.Fatalf("make %s writable: %v", target, err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(path, 0o755) })
+
+			err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}})
+			if err == nil || !strings.Contains(err.Error(), "group/world writable") {
+				t.Fatalf("Sync error = %v, want writable %s rejection", err, target)
+			}
+			if got := cache.Lookup("ws-1", sourceRepo); got != "" {
+				t.Fatalf("Lookup returned cache through writable %s: %q", target, got)
+			}
+		})
+	}
+}
+
+func TestValidateDaemonOwnedDirectoryRejectsDifferentOwner(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows uses a different repository metadata trust model")
+	}
+
+	path := t.TempDir()
+	if err := validateDaemonOwnedDirectoryPathForUID(path, "test metadata", os.Geteuid()+1); err == nil || !strings.Contains(err.Error(), "daemon effective UID") {
+		t.Fatalf("owner validation error = %v, want daemon UID mismatch", err)
+	}
+}
+
+func TestValidateDaemonOwnedDirectoryStickyParentPolicy(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-specific root-owned sticky temp-parent policy")
+	}
+
+	child, err := os.MkdirTemp(os.TempDir(), "multica-sticky-parent-")
+	if err != nil {
+		t.Fatalf("create cache below system temp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(child) })
+	if err := os.Chmod(child, 0o755); err != nil {
+		t.Fatalf("secure cache child: %v", err)
+	}
+	if err := validateDaemonOwnedDirectoryPathForUID(child, "test cache", os.Geteuid()); err != nil {
+		t.Fatalf("root/daemon-owned sticky ancestor rejected: %v", err)
+	}
+	if err := validateDaemonOwnedDirectoryPathForUID(os.TempDir(), "test cache root", os.Geteuid()); err == nil {
+		t.Fatal("sticky system temp directory was accepted as cache root")
+	}
+
+	parent := t.TempDir()
+	child = filepath.Join(parent, "daemon-cache")
+	if err := os.Mkdir(child, 0o755); err != nil {
+		t.Fatalf("create daemon cache child: %v", err)
+	}
+	if err := os.Chmod(parent, 0o777); err != nil {
+		t.Fatalf("make non-sticky parent writable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+	if err := validateDaemonOwnedDirectoryPathForUID(child, "test cache", os.Geteuid()); err == nil || !strings.Contains(err.Error(), "group/world writable") {
+		t.Fatalf("non-sticky writable ancestor error = %v, want rejection", err)
+	}
+}
+
+func TestCreateWorktreeRejectsBareCacheReplacementAfterOpen(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows uses a different repository metadata trust model")
+	}
+
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	if barePath == "" {
+		t.Fatal("Lookup returned no bare cache")
+	}
+	originalPath := barePath + ".validated"
+	replaced := false
+	cache.bareCacheHook = func(stage, path string) {
+		if stage != "after-open" || replaced {
+			return
+		}
+		replaced = true
+		if err := os.Rename(path, originalPath); err != nil {
+			t.Fatalf("rename validated bare cache: %v", err)
+		}
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatalf("install replacement bare cache: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "replacement-sentinel.txt"), []byte("untouched"), 0o644); err != nil {
+			t.Fatalf("write replacement sentinel: %v", err)
+		}
+	}
+
+	_, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		AgentName:   "agent",
+		TaskID:      "bare-cache-replacement",
+	})
+	if err == nil || !strings.Contains(err.Error(), "path changed after ownership proof") {
+		t.Fatalf("CreateWorktree error = %v, want bare-cache identity rejection", err)
+	}
+	if !replaced {
+		t.Fatal("bare-cache replacement hook did not run")
+	}
+	contents, readErr := os.ReadFile(filepath.Join(barePath, "replacement-sentinel.txt"))
+	if readErr != nil || string(contents) != "untouched" {
+		t.Fatalf("replacement bare cache was modified: contents=%q err=%v", contents, readErr)
+	}
+}
+
+func TestClonePostconditionRejectsUntrustedBareRepository(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows uses a different repository metadata trust model")
+	}
+
+	root := t.TempDir()
+	sourceRepo := createTestRepo(t)
+	cache := New(root, testLogger())
+	cache.bareCacheHook = func(stage, barePath string) {
+		if stage == "after-clone" {
+			if err := os.Chmod(barePath, 0o777); err != nil {
+				t.Fatalf("make cloned bare cache writable: %v", err)
+			}
+		}
+	}
+
+	err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}})
+	if err == nil || !strings.Contains(err.Error(), "group/world writable") {
+		t.Fatalf("Sync error = %v, want clone postcondition rejection", err)
+	}
+	wsDir, pathErr := cache.workspaceCacheDir("ws-1", false)
+	if pathErr != nil {
+		t.Fatalf("workspaceCacheDir: %v", pathErr)
+	}
+	barePath, pathErr := cacheTargetPath(wsDir, sourceRepo)
+	if pathErr != nil {
+		t.Fatalf("cacheTargetPath: %v", pathErr)
+	}
+	if _, statErr := os.Lstat(barePath); !os.IsNotExist(statErr) {
+		t.Fatalf("untrusted cloned cache was not removed: %v", statErr)
+	}
+}
+
+func TestFetchRejectsBareRepositorySymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows uses a different repository metadata trust model")
+	}
+
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	linkPath := filepath.Join(filepath.Dir(barePath), "bare-link.git")
+	if err := os.Symlink(barePath, linkPath); err != nil {
+		t.Fatalf("create bare cache symlink: %v", err)
+	}
+
+	err := cache.Fetch(linkPath)
+	if err == nil || !strings.Contains(err.Error(), "resolves through symlink") {
+		t.Fatalf("Fetch error = %v, want bare cache symlink rejection", err)
+	}
+}
+
+func TestWorktreeLauncherSelection(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux uses the kernel-bound /proc/self/exe launcher")
+	}
+	launcher, err := worktreeLauncherExecutable()
+	if err != nil {
+		t.Fatalf("worktreeLauncherExecutable: %v", err)
+	}
+	if launcher != "/proc/self/exe" {
+		t.Fatalf("launcher = %q, want /proc/self/exe", launcher)
+	}
+}
+
+func gitOutputForTest(t *testing.T, repoPath string, args ...string) string {
+	t.Helper()
+	commandArgs := append([]string{"-C", repoPath}, args...)
+	out, err := exec.Command("git", commandArgs...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %s: %v", commandArgs, strings.TrimSpace(string(out)), err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func TestResolveReturnsCanonicalBareRepoIdentity(t *testing.T) {
@@ -981,6 +1314,510 @@ func TestCreateWorktreeRejectsExistingWorktreeFromDifferentBareCache(t *testing.
 	}
 	if got, readErr := os.ReadFile(filepath.Join(foreignPath, "untracked.txt")); readErr != nil || string(got) != "keep\n" {
 		t.Fatalf("foreign worktree modified before ownership proof: contents=%q err=%v", got, readErr)
+	}
+}
+
+func TestCreateWorktreeRejectsBorrowedWorktreeAdminDir(t *testing.T) {
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	firstWorkDir := t.TempDir()
+	first, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     firstWorkDir,
+		AgentName:   "agent",
+		TaskID:      "owner",
+	})
+	if err != nil {
+		t.Fatalf("create owned worktree: %v", err)
+	}
+	gitFile, err := os.ReadFile(filepath.Join(first.Path, ".git"))
+	if err != nil {
+		t.Fatalf("read owned worktree git file: %v", err)
+	}
+
+	secondWorkDir := t.TempDir()
+	dirName, err := worktreeDirName(sourceRepo)
+	if err != nil {
+		t.Fatalf("worktreeDirName: %v", err)
+	}
+	borrowerPath := filepath.Join(secondWorkDir, dirName)
+	if err := os.MkdirAll(borrowerPath, 0o755); err != nil {
+		t.Fatalf("create borrower checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(borrowerPath, ".git"), gitFile, 0o644); err != nil {
+		t.Fatalf("borrow worktree admin dir: %v", err)
+	}
+	sentinel := filepath.Join(borrowerPath, "borrower-sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("keep\n"), 0o644); err != nil {
+		t.Fatalf("write borrower sentinel: %v", err)
+	}
+
+	_, err = cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     secondWorkDir,
+		AgentName:   "agent",
+		TaskID:      "borrower",
+	})
+	if err == nil || !strings.Contains(err.Error(), "backlink identifies a different checkout") {
+		t.Fatalf("CreateWorktree error = %v, want git-dir backlink ownership error", err)
+	}
+	if got, readErr := os.ReadFile(sentinel); readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("borrower checkout was modified: contents=%q err=%v", got, readErr)
+	}
+}
+
+func TestCreateWorktreeRejectsExecutableRepositoryConfigBeforeUpdate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("identity-bound existing worktree updates are unsupported on windows")
+	}
+
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	workDir := t.TempDir()
+	first, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "agent",
+		TaskID:      "config-first",
+	})
+	if err != nil {
+		t.Fatalf("create initial worktree: %v", err)
+	}
+
+	marker := filepath.Join(t.TempDir(), "filter-process-ran")
+	filter := "sh -c 'printf filter >" + marker + "; cat'"
+	runGitAuthored(t, first.Path, "config", "--local", "filter.task-process.process", filter)
+	sentinel := filepath.Join(first.Path, "untracked-sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("keep\n"), 0o644); err != nil {
+		t.Fatalf("write untracked sentinel: %v", err)
+	}
+
+	_, err = cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "agent",
+		TaskID:      "config-second",
+	})
+	if err == nil || !strings.Contains(err.Error(), "filter.task-process.process") {
+		t.Fatalf("CreateWorktree error = %v, want executable repository config rejection", err)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("repository filter process executed, marker stat error = %v", statErr)
+	}
+	if got, readErr := os.ReadFile(sentinel); readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("worktree was modified before config rejection: contents=%q err=%v", got, readErr)
+	}
+}
+
+func TestCreateWorktreeRejectsRepositoryConfigIncludesBeforeUpdate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("identity-bound existing worktree updates are unsupported on windows")
+	}
+
+	for _, includeKey := range []string{
+		"include.path",
+		"includeIf.gitdir:**.path",
+	} {
+		t.Run(includeKey, func(t *testing.T) {
+			sourceRepo := createTestRepo(t)
+			if err := os.WriteFile(filepath.Join(sourceRepo, ".gitattributes"), []byte("payload.txt filter=included-filter\n"), 0o644); err != nil {
+				t.Fatalf("write attributes: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(sourceRepo, "payload.txt"), []byte("source\n"), 0o644); err != nil {
+				t.Fatalf("write payload: %v", err)
+			}
+			runGitAuthored(t, sourceRepo, "add", ".")
+			runGitAuthored(t, sourceRepo, "commit", "-m", "add filtered payload")
+
+			cache := New(t.TempDir(), testLogger())
+			if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+				t.Fatalf("sync failed: %v", err)
+			}
+			workDir := t.TempDir()
+			first, err := cache.CreateWorktree(WorktreeParams{
+				WorkspaceID: "ws-1",
+				RepoURL:     sourceRepo,
+				WorkDir:     workDir,
+				AgentName:   "agent",
+				TaskID:      "include-first",
+			})
+			if err != nil {
+				t.Fatalf("create initial worktree: %v", err)
+			}
+
+			marker := filepath.Join(t.TempDir(), "included-filter-ran")
+			includedConfig := filepath.Join(t.TempDir(), "included-config")
+			filter := "sh -c 'printf filter >" + marker + "; cat'"
+			contents := fmt.Sprintf("[filter \"included-filter\"]\n\tsmudge = %s\n\tclean = %s\n", filter, filter)
+			if err := os.WriteFile(includedConfig, []byte(contents), 0o600); err != nil {
+				t.Fatalf("write included config: %v", err)
+			}
+			runGitAuthored(t, first.Path, "config", "--local", includeKey, includedConfig)
+			if err := os.WriteFile(filepath.Join(first.Path, "payload.txt"), []byte("dirty\n"), 0o644); err != nil {
+				t.Fatalf("dirty filtered payload: %v", err)
+			}
+			sentinel := filepath.Join(first.Path, "untracked-sentinel.txt")
+			if err := os.WriteFile(sentinel, []byte("keep\n"), 0o644); err != nil {
+				t.Fatalf("write untracked sentinel: %v", err)
+			}
+
+			_, err = cache.CreateWorktree(WorktreeParams{
+				WorkspaceID: "ws-1",
+				RepoURL:     sourceRepo,
+				WorkDir:     workDir,
+				AgentName:   "agent",
+				TaskID:      "include-second",
+			})
+			if err == nil || !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(includeKey)) {
+				t.Fatalf("CreateWorktree error = %v, want repository include config rejection", err)
+			}
+			if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+				t.Fatalf("included repository filter executed, marker stat error = %v", statErr)
+			}
+			if got, readErr := os.ReadFile(sentinel); readErr != nil || string(got) != "keep\n" {
+				t.Fatalf("worktree was modified before include rejection: contents=%q err=%v", got, readErr)
+			}
+		})
+	}
+}
+
+func TestCreateWorktreeRejectsWritableRepositoryMetadataBeforeUpdate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("identity-bound existing worktree updates are unsupported on windows")
+	}
+
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	workDir := t.TempDir()
+	first, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "agent",
+		TaskID:      "metadata-mode-first",
+	})
+	if err != nil {
+		t.Fatalf("create initial worktree: %v", err)
+	}
+
+	gitFile, err := os.ReadFile(filepath.Join(first.Path, ".git"))
+	if err != nil {
+		t.Fatalf("read worktree .git file: %v", err)
+	}
+	gitDir := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(gitFile)), "gitdir: "))
+	if err := os.Chmod(gitDir, 0o777); err != nil {
+		t.Fatalf("make worktree metadata writable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(gitDir, 0o755) })
+	sentinel := filepath.Join(first.Path, "untracked-sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("keep\n"), 0o644); err != nil {
+		t.Fatalf("write untracked sentinel: %v", err)
+	}
+
+	_, err = cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "agent",
+		TaskID:      "metadata-mode-second",
+	})
+	if err == nil || !strings.Contains(err.Error(), "group/world writable") {
+		t.Fatalf("CreateWorktree error = %v, want writable metadata rejection", err)
+	}
+	if got, readErr := os.ReadFile(sentinel); readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("worktree was modified before metadata rejection: contents=%q err=%v", got, readErr)
+	}
+}
+
+func TestCreateWorktreeRejectsWorktreeReplacementDuringUpdate(t *testing.T) {
+	for _, replacementKind := range []string{"worktree", "parent"} {
+		for _, replacementStage := range []string{"after-owner-proof", "after-reset", "after-clean", "after-checkout", "after-checkout-retry"} {
+			t.Run(replacementKind+"/"+replacementStage, func(t *testing.T) {
+				sourceRepo := createTestRepo(t)
+				cache := New(t.TempDir(), testLogger())
+				if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+					t.Fatalf("sync failed: %v", err)
+				}
+				workDir := t.TempDir()
+				first, err := cache.CreateWorktree(WorktreeParams{
+					WorkspaceID: "ws-1",
+					RepoURL:     sourceRepo,
+					WorkDir:     workDir,
+					AgentName:   "agent",
+					TaskID:      "replacement-first",
+				})
+				if err != nil {
+					t.Fatalf("create initial worktree: %v", err)
+				}
+
+				movedPath := first.Path + "-moved"
+				movedParent := workDir + "-moved"
+				foreignSource := createTestRepo(t)
+				foreignSourceSentinel := filepath.Join(foreignSource, "foreign-sentinel.txt")
+				if err := os.WriteFile(foreignSourceSentinel, []byte("keep\n"), 0o644); err != nil {
+					t.Fatalf("write foreign source sentinel: %v", err)
+				}
+				runGitAuthored(t, foreignSource, "add", "foreign-sentinel.txt")
+				runGitAuthored(t, foreignSource, "commit", "-m", "add foreign sentinel")
+				foreignSentinel := filepath.Join(first.Path, "foreign-sentinel.txt")
+				replaced := false
+				cache.existingWorktreeHook = func(stage, worktreePath string) {
+					if stage != replacementStage || replaced {
+						return
+					}
+					replaced = true
+					if replacementKind == "parent" {
+						if err := os.Rename(workDir, movedParent); err != nil {
+							t.Fatalf("rename validated worktree parent: %v", err)
+						}
+						if err := os.MkdirAll(workDir, 0o755); err != nil {
+							t.Fatalf("install replacement parent: %v", err)
+						}
+					} else if err := os.Rename(worktreePath, movedPath); err != nil {
+						t.Fatalf("rename validated worktree: %v", err)
+					}
+					if out, err := exec.Command("git", "clone", foreignSource, worktreePath).CombinedOutput(); err != nil {
+						t.Fatalf("install replacement checkout: %s: %v", out, err)
+					}
+				}
+
+				agentName := "agent"
+				if replacementStage == "after-checkout" {
+					agentName = "fresh-agent"
+				}
+				_, err = cache.CreateWorktree(WorktreeParams{
+					WorkspaceID: "ws-1",
+					RepoURL:     sourceRepo,
+					WorkDir:     workDir,
+					AgentName:   agentName,
+					TaskID:      "replacement-second",
+				})
+				if err == nil {
+					t.Fatal("CreateWorktree succeeded after the validated worktree path was replaced")
+				}
+				if !replaced {
+					t.Fatalf("replacement hook did not run at %s: create error=%v", replacementStage, err)
+				}
+				if got, readErr := os.ReadFile(foreignSentinel); readErr != nil || string(got) != "keep\n" {
+					t.Fatalf("replacement checkout was modified: contents=%q err=%v create error=%v", got, readErr, err)
+				}
+			})
+		}
+	}
+}
+
+func TestCreateWorktreeRejectsRepositoryMetadataReplacementDuringUpdate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("identity-bound existing worktree updates are unsupported on windows")
+	}
+
+	for _, replacementKind := range []string{"worktree-git-dir", "git-common-dir"} {
+		for _, replacementStage := range []string{"after-owner-proof", "after-reset", "after-clean", "after-checkout", "after-checkout-retry"} {
+			t.Run(replacementKind+"/"+replacementStage, func(t *testing.T) {
+				sourceRepo := createTestRepo(t)
+				cache := New(t.TempDir(), testLogger())
+				if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+					t.Fatalf("sync failed: %v", err)
+				}
+				workDir := t.TempDir()
+				first, err := cache.CreateWorktree(WorktreeParams{
+					WorkspaceID: "ws-1",
+					RepoURL:     sourceRepo,
+					WorkDir:     workDir,
+					AgentName:   "agent",
+					TaskID:      "metadata-first",
+				})
+				if err != nil {
+					t.Fatalf("create initial worktree: %v", err)
+				}
+
+				gitFile, err := os.ReadFile(filepath.Join(first.Path, ".git"))
+				if err != nil {
+					t.Fatalf("read worktree .git file: %v", err)
+				}
+				gitDir := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(gitFile)), "gitdir: "))
+				if !filepath.IsAbs(gitDir) {
+					gitDir = filepath.Join(first.Path, gitDir)
+				}
+				gitDir, err = filepath.EvalSymlinks(gitDir)
+				if err != nil {
+					t.Fatalf("resolve worktree git dir: %v", err)
+				}
+				commonFile, err := os.ReadFile(filepath.Join(gitDir, "commondir"))
+				if err != nil {
+					t.Fatalf("read worktree common dir: %v", err)
+				}
+				commonDir := strings.TrimSpace(string(commonFile))
+				if !filepath.IsAbs(commonDir) {
+					commonDir = filepath.Join(gitDir, commonDir)
+				}
+				commonDir, err = filepath.EvalSymlinks(commonDir)
+				if err != nil {
+					t.Fatalf("resolve git common dir: %v", err)
+				}
+
+				target := gitDir
+				if replacementKind == "git-common-dir" {
+					target = commonDir
+				}
+				movedTarget := target + "-moved"
+				sentinel := filepath.Join(target, "replacement-sentinel.txt")
+				replaced := false
+				cache.existingWorktreeHook = func(stage, _ string) {
+					if stage != replacementStage || replaced {
+						return
+					}
+					replaced = true
+					if err := os.Rename(target, movedTarget); err != nil {
+						t.Fatalf("rename validated %s: %v", replacementKind, err)
+					}
+					if err := os.MkdirAll(target, 0o755); err != nil {
+						t.Fatalf("install replacement %s: %v", replacementKind, err)
+					}
+					if err := os.WriteFile(sentinel, []byte("keep\n"), 0o644); err != nil {
+						t.Fatalf("write replacement sentinel: %v", err)
+					}
+				}
+
+				agentName := "agent"
+				if replacementStage == "after-checkout" {
+					agentName = "fresh-agent"
+				}
+				_, err = cache.CreateWorktree(WorktreeParams{
+					WorkspaceID: "ws-1",
+					RepoURL:     sourceRepo,
+					WorkDir:     workDir,
+					AgentName:   agentName,
+					TaskID:      "metadata-second",
+				})
+				if err == nil {
+					t.Fatalf("CreateWorktree succeeded after %s replacement", replacementKind)
+				}
+				if !replaced {
+					t.Fatalf("replacement hook did not run at %s: %v", replacementStage, err)
+				}
+				if got, readErr := os.ReadFile(sentinel); readErr != nil || string(got) != "keep\n" {
+					t.Fatalf("replacement metadata directory was modified: contents=%q err=%v create error=%v", got, readErr, err)
+				}
+			})
+		}
+	}
+}
+
+func TestCreateWorktreeRejectsNewWorktreeReplacement(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("identity-bound new worktree validation is unsupported on windows")
+	}
+
+	for _, replacementKind := range []string{"worktree", "worktree-git-dir", "git-common-dir"} {
+		for _, replacementStage := range []string{"after-worktree-add", "before-exclude", "before-hook", "before-return"} {
+			t.Run(replacementKind+"/"+replacementStage, func(t *testing.T) {
+				sourceRepo := createTestRepo(t)
+				cache := New(t.TempDir(), testLogger())
+				if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+					t.Fatalf("sync failed: %v", err)
+				}
+				workDir := t.TempDir()
+				foreignSource := createTestRepo(t)
+				foreignSourceSentinel := filepath.Join(foreignSource, "foreign-sentinel.txt")
+				if err := os.WriteFile(foreignSourceSentinel, []byte("keep\n"), 0o644); err != nil {
+					t.Fatalf("write foreign source sentinel: %v", err)
+				}
+				runGitAuthored(t, foreignSource, "add", "foreign-sentinel.txt")
+				runGitAuthored(t, foreignSource, "commit", "-m", "add foreign sentinel")
+
+				replaced := false
+				var replacementSentinel string
+				cache.existingWorktreeHook = func(stage, worktreePath string) {
+					if stage != replacementStage || replaced {
+						return
+					}
+					replaced = true
+					gitFile, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+					if err != nil {
+						t.Fatalf("read new worktree .git file: %v", err)
+					}
+					gitDir := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(gitFile)), "gitdir: "))
+					if !filepath.IsAbs(gitDir) {
+						gitDir = filepath.Join(worktreePath, gitDir)
+					}
+					gitDir, err = filepath.EvalSymlinks(gitDir)
+					if err != nil {
+						t.Fatalf("resolve new worktree git dir: %v", err)
+					}
+					commonFile, err := os.ReadFile(filepath.Join(gitDir, "commondir"))
+					if err != nil {
+						t.Fatalf("read new worktree common dir: %v", err)
+					}
+					commonDir := strings.TrimSpace(string(commonFile))
+					if !filepath.IsAbs(commonDir) {
+						commonDir = filepath.Join(gitDir, commonDir)
+					}
+					commonDir, err = filepath.EvalSymlinks(commonDir)
+					if err != nil {
+						t.Fatalf("resolve new worktree common dir: %v", err)
+					}
+
+					switch replacementKind {
+					case "worktree":
+						if err := os.Rename(worktreePath, worktreePath+"-moved"); err != nil {
+							t.Fatalf("rename new worktree: %v", err)
+						}
+						if out, err := exec.Command("git", "clone", foreignSource, worktreePath).CombinedOutput(); err != nil {
+							t.Fatalf("install replacement checkout: %s: %v", out, err)
+						}
+						replacementSentinel = filepath.Join(worktreePath, "foreign-sentinel.txt")
+					case "worktree-git-dir", "git-common-dir":
+						target := gitDir
+						if replacementKind == "git-common-dir" {
+							target = commonDir
+						}
+						if err := os.Rename(target, target+"-moved"); err != nil {
+							t.Fatalf("rename new %s: %v", replacementKind, err)
+						}
+						if err := os.MkdirAll(target, 0o755); err != nil {
+							t.Fatalf("install replacement %s: %v", replacementKind, err)
+						}
+						replacementSentinel = filepath.Join(target, "replacement-sentinel.txt")
+						if err := os.WriteFile(replacementSentinel, []byte("keep\n"), 0o644); err != nil {
+							t.Fatalf("write replacement sentinel: %v", err)
+						}
+					}
+				}
+
+				_, err := cache.CreateWorktree(WorktreeParams{
+					WorkspaceID:         "ws-1",
+					RepoURL:             sourceRepo,
+					WorkDir:             workDir,
+					AgentName:           "agent",
+					TaskID:              "new-replacement",
+					CoAuthoredByEnabled: true,
+				})
+				if err == nil {
+					t.Fatal("CreateWorktree succeeded after new worktree identity replacement")
+				}
+				if !replaced {
+					t.Fatalf("replacement hook did not run at %s: create error=%v", replacementStage, err)
+				}
+				if got, readErr := os.ReadFile(replacementSentinel); readErr != nil || string(got) != "keep\n" {
+					t.Fatalf("replacement target was modified: contents=%q err=%v create error=%v", got, readErr, err)
+				}
+			})
+		}
 	}
 }
 

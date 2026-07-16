@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -187,14 +188,24 @@ printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_
 			t.Run(provider+"/"+tt.name, func(t *testing.T) {
 				t.Parallel()
 
-				fakePath := filepath.Join(t.TempDir(), provider)
+				root := t.TempDir()
+				fakePath := filepath.Join(root, provider)
 				script := "#!/bin/sh\nIFS= read -r _\n" + tt.scriptBody
 				writeTestExecutable(t, fakePath, []byte(script))
 
 				backend, err := New(provider, Config{
 					ExecutablePath: fakePath,
-					Env:            map[string]string{"IS_SANDBOX": "1"},
-					Logger:         slog.Default(),
+					Env: map[string]string{
+						"IS_SANDBOX": "1",
+						"PATH":       os.Getenv("PATH"),
+					},
+					Logger:   slog.Default(),
+					Launcher: newCommandLauncher(&recordingIsolation{}),
+					Isolation: &TaskIsolationPolicy{
+						WritableRoots: []string{root},
+						SystemRoots:   existingSystemRootsForTest(t),
+					},
+					TaskTempDir: root,
 				})
 				if err != nil {
 					t.Fatalf("New(%s): %v", provider, err)
@@ -202,7 +213,7 @@ printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_
 
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
-				session, err := backend.Execute(ctx, "test prompt", ExecOptions{Timeout: 10 * time.Second})
+				session, err := backend.Execute(ctx, "test prompt", ExecOptions{Cwd: root, Timeout: 10 * time.Second})
 				if err != nil {
 					t.Fatalf("Execute(%s): %v", provider, err)
 				}
