@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 type commandCall struct {
@@ -19,8 +20,15 @@ type recordingCommander struct {
 
 type failingCommander struct{}
 
+type blockingCommander struct{}
+
 func (failingCommander) Run(_ context.Context, _ string, _ ...string) ([]byte, error) {
 	return nil, errors.New("must not escape")
+}
+
+func (blockingCommander) Run(ctx context.Context, _ string, _ ...string) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 func (c *recordingCommander) Run(_ context.Context, stdin string, args ...string) ([]byte, error) {
@@ -29,7 +37,7 @@ func (c *recordingCommander) Run(_ context.Context, stdin string, args ...string
 	case len(args) > 0 && args[len(args)-1] == "url":
 		return []byte("http://firtal-data-registry-private.internal:3000/\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "snapshot":
-		return []byte("Dashboard\nData Sources\nOverview\nIssues\nAgents\nDesk\nAnalytics\nLogout\n"), nil
+		return []byte("Dashboard\nData Sources\nYour roles:\nIssues\nAgents\nDesk\nAnalytics\nLogout\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "errors":
 		return []byte("[]\n"), nil
 	default:
@@ -53,13 +61,13 @@ func TestTargetForUsesOnlyInternalAllowlist(t *testing.T) {
 	}
 }
 
-func TestFinanceTargetUsesProductionNavigationMarker(t *testing.T) {
+func TestFinanceTargetUsesAuthenticatedDashboardMarker(t *testing.T) {
 	target, err := TargetFor("finance")
 	if err != nil {
 		t.Fatalf("TargetFor(finance): %v", err)
 	}
-	if len(target.ExpectedText) != 1 || target.ExpectedText[0] != "Overview" {
-		t.Fatalf("finance markers = %v, want Overview", target.ExpectedText)
+	if len(target.ExpectedText) != 1 || target.ExpectedText[0] != "Your roles:" {
+		t.Fatalf("finance markers = %v, want Your roles:", target.ExpectedText)
 	}
 }
 
@@ -165,6 +173,22 @@ func TestRunnerReturnsOnlySafeFailureStage(t *testing.T) {
 	_, err := NewRunner(failingCommander{}).Verify(context.Background(), "customer-service", Credential{})
 	if err == nil || err.Error() != "internal browser stage open failed" {
 		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestRunnerBoundsStagesAndCleanup(t *testing.T) {
+	runner := &Runner{
+		commander:      blockingCommander{},
+		stageTimeout:   5 * time.Millisecond,
+		cleanupTimeout: 5 * time.Millisecond,
+	}
+	started := time.Now()
+	_, err := runner.Verify(context.Background(), "customer-service", Credential{})
+	if err == nil || err.Error() != "internal browser stage open failed" {
+		t.Fatalf("error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("bounded runner took %s", elapsed)
 	}
 }
 
