@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type Credential struct {
@@ -105,15 +106,23 @@ type Result struct {
 }
 
 type Runner struct {
-	commander Commander
+	commander      Commander
+	stageTimeout   time.Duration
+	cleanupTimeout time.Duration
 }
 
 func NewRunner(commander Commander) *Runner {
-	return &Runner{commander: commander}
+	return &Runner{commander: commander, stageTimeout: 30 * time.Second, cleanupTimeout: 5 * time.Second}
 }
 
 func (r *Runner) runStage(ctx context.Context, stage, stdin string, args ...string) ([]byte, error) {
-	output, err := r.commander.Run(ctx, stdin, args...)
+	stageTimeout := r.stageTimeout
+	if stageTimeout <= 0 {
+		stageTimeout = 30 * time.Second
+	}
+	stageCtx, cancel := context.WithTimeout(ctx, stageTimeout)
+	defer cancel()
+	output, err := r.commander.Run(stageCtx, stdin, args...)
 	if err != nil {
 		return nil, fmt.Errorf("internal browser stage %s failed", stage)
 	}
@@ -157,7 +166,15 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		return Result{}, err
 	}
 	baseArgs := []string{"--session", session}
-	defer func() { _, _ = r.commander.Run(context.Background(), "", append(baseArgs, "close")...) }()
+	defer func() {
+		cleanupTimeout := r.cleanupTimeout
+		if cleanupTimeout <= 0 {
+			cleanupTimeout = 5 * time.Second
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+		defer cancel()
+		_, _ = r.commander.Run(cleanupCtx, "", append(baseArgs, "close")...)
+	}()
 
 	if _, err := r.runStage(ctx, "open", "", append(baseArgs, "open", target.URL)...); err != nil {
 		return Result{}, err

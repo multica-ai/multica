@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 type commandCall struct {
@@ -19,8 +20,15 @@ type recordingCommander struct {
 
 type failingCommander struct{}
 
+type blockingCommander struct{}
+
 func (failingCommander) Run(_ context.Context, _ string, _ ...string) ([]byte, error) {
 	return nil, errors.New("must not escape")
+}
+
+func (blockingCommander) Run(ctx context.Context, _ string, _ ...string) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 func (c *recordingCommander) Run(_ context.Context, stdin string, args ...string) ([]byte, error) {
@@ -165,6 +173,22 @@ func TestRunnerReturnsOnlySafeFailureStage(t *testing.T) {
 	_, err := NewRunner(failingCommander{}).Verify(context.Background(), "customer-service", Credential{})
 	if err == nil || err.Error() != "internal browser stage open failed" {
 		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestRunnerBoundsStagesAndCleanup(t *testing.T) {
+	runner := &Runner{
+		commander:      blockingCommander{},
+		stageTimeout:   5 * time.Millisecond,
+		cleanupTimeout: 5 * time.Millisecond,
+	}
+	started := time.Now()
+	_, err := runner.Verify(context.Background(), "customer-service", Credential{})
+	if err == nil || err.Error() != "internal browser stage open failed" {
+		t.Fatalf("error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("bounded runner took %s", elapsed)
 	}
 }
 
