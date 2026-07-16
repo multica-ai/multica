@@ -232,6 +232,39 @@ func hasDanglingEntry(t *testing.T, repo, workdir string) bool {
 	return strings.Contains(worktreeList(t, repo), workdir)
 }
 
+// The crash-recovery path must be reachable from the NORMAL task path: creating
+// the next task's worktree opportunistically reaps a prior crash orphan's
+// registry entry AND its branch, with no GC wiring.
+func TestIsolated_NextTaskReapsCrashOrphanBranchAndEntry(t *testing.T) {
+	src := newSourceRepo(t)
+	crashedEnv := t.TempDir()
+	crashed, err := PrepareIsolatedLocalWorktree(src, isolatedWorkDir(crashedEnv), "task-deadbeef", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Daemon crash: envRoot vanishes, no `git worktree remove` ran.
+	if err := os.RemoveAll(crashedEnv); err != nil {
+		t.Fatal(err)
+	}
+
+	// A later, unrelated task on the same repo runs its normal prepare.
+	nextEnv := t.TempDir()
+	next, err := PrepareIsolatedLocalWorktree(src, isolatedWorkDir(nextEnv), "task-11112222", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { next.Remove(nil) })
+
+	// The crash orphan's registry entry and branch are gone; only the live one remains.
+	if list := worktreeList(t, src); strings.Contains(list, crashed.WorkDir) {
+		t.Fatalf("crash-orphan registry entry survived the next task's prepare:\n%s", list)
+	}
+	branches := listBranchesWithPrefix(src, worktreeBranchPrefix)
+	if len(branches) != 1 || branches[0] != next.Branch {
+		t.Fatalf("expected only the live branch %q after reap, got %v", next.Branch, branches)
+	}
+}
+
 func TestPruneOrphan_PreservesLiveWorktree(t *testing.T) {
 	src := newSourceRepo(t)
 	env := t.TempDir()

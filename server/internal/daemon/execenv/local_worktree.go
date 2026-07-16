@@ -108,11 +108,14 @@ func PrepareIsolatedLocalWorktree(sourceDir, workDir, taskID string, logger *slo
 
 	lock := lockForRepo(gitRoot)
 	lock.Lock()
-	// Self-heal: reclaim registry entries left dangling by a prior daemon crash
-	// (envRoot GC'd, no `git worktree remove` ran) before adding ours. `git
-	// worktree prune` only drops entries whose directory is already missing, so
-	// it can never touch a live sibling worktree.
-	pruneWorktrees(gitRoot)
+	// Self-heal before adding ours: reclaim BOTH the registry entries and the
+	// multica/worktree/* branches left behind by a prior daemon crash (envRoot
+	// GC'd, no `git worktree remove` ran). This is what makes crash recovery
+	// reachable from the normal task path — the fleet runs many tasks on one
+	// repo, so orphans are reaped within one task cycle without any GC wiring.
+	// It can never touch a live sibling: prune only drops entries whose dir is
+	// missing, and reap skips branches still checked out in a worktree.
+	reapOrphansLocked(gitRoot, logger)
 	err := setupGitWorktree(gitRoot, workDir, branch, "HEAD")
 	lock.Unlock()
 	if err != nil {
@@ -159,10 +162,17 @@ func PruneOrphanLocalWorktrees(sourceRepo string, logger *slog.Logger) error {
 	lock := lockForRepo(gitRoot)
 	lock.Lock()
 	defer lock.Unlock()
+	reapOrphansLocked(gitRoot, logger)
+	return nil
+}
 
+// reapOrphansLocked prunes dangling worktree registry entries and deletes any
+// multica/worktree/* branch no longer backing a live worktree. Caller MUST hold
+// lockForRepo(gitRoot). Safe against live worktrees: `git worktree prune` only
+// drops entries whose directory is missing, and a branch still checked out in a
+// worktree is skipped (and git refuses to delete it anyway).
+func reapOrphansLocked(gitRoot string, logger *slog.Logger) {
 	pruneWorktrees(gitRoot)
-
-	// Collect branches still backing a live worktree so we never delete one in use.
 	live := liveWorktreeBranches(gitRoot)
 	for _, br := range listBranchesWithPrefix(gitRoot, worktreeBranchPrefix) {
 		if live[br] {
@@ -173,7 +183,6 @@ func PruneOrphanLocalWorktrees(sourceRepo string, logger *slog.Logger) error {
 			logger.Warn("execenv: prune orphan worktree branch failed", "branch", br, "output", strings.TrimSpace(string(out)), "error", err)
 		}
 	}
-	return nil
 }
 
 // pruneWorktrees runs `git worktree prune` on repoRoot. Best-effort.
