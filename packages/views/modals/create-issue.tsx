@@ -65,6 +65,8 @@ import { SprintSelectField } from "@multica/cerebro-sprints/views";
 import { WorkflowSelectField } from "@multica/cerebro-workflows/views";
 // CEREBRO-PATCH(create-issue-workflow-activate-import): FIR-2283 v2 point 8 — activate the picked recipe on the new issue.
 import { useActivateWorkflowForCreate } from "@multica/cerebro-workflows/core";
+// CEREBRO-PATCH(create-issue-custom-properties): FIR-3447 — custom fields use a fork-owned adapter because upstream has no Create issue field surface.
+import { CreateIssueProperties, type CreateIssuePropertiesHandle } from "@multica/cerebro-issue-properties/views";
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -140,6 +142,8 @@ export function ManualCreatePanel({
   );
   // CEREBRO-PATCH(create-issue-workflow-field): FIR-2283 v2 point 8 — Issue workflow to activate on the new task.
   const [workflowId, setWorkflowId] = useState<string>("");
+  // CEREBRO-PATCH(create-issue-custom-properties): field state and post-create writes stay encapsulated in the fork-owned adapter.
+  const issuePropertiesRef = useRef<CreateIssuePropertiesHandle>(null);
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
@@ -216,6 +220,7 @@ export function ManualCreatePanel({
     setParentIssueId(undefined);
     setChildIssues([]);
     setAttachmentIds([]);
+    issuePropertiesRef.current?.reset(); // CEREBRO-PATCH(create-issue-custom-properties): clear custom values for Create another.
     setDraft({
       title: "",
       description: "",
@@ -247,6 +252,8 @@ export function ManualCreatePanel({
         parent_issue_id: parentIssueId,
         project_id: projectId,
       });
+
+      await issuePropertiesRef.current?.applyToIssue(issue.id); // CEREBRO-PATCH(create-issue-custom-properties): save selected fields through the upstream value API.
 
       // CEREBRO-PATCH(create-issue-sprint-assign): TECH-3620/TECH-3684 join the sprint (board preset or user-picked).
       if (sprintId) {
@@ -548,6 +555,9 @@ export function ManualCreatePanel({
 
               {/* CEREBRO-PATCH(create-issue-workflow-field): FIR-2283 v2 point 8 — pick an Issue workflow at creation; renders nothing when none exist or the flag is off. */}
               <WorkflowSelectField workspaceId={wsId} value={workflowId} onChange={setWorkflowId} className="max-w-48" triggerRender={<PillButton />} />
+
+              {/* CEREBRO-PATCH(create-issue-custom-properties): optional typed fields join the existing Create issue property row. */}
+              <CreateIssueProperties ref={issuePropertiesRef} />
 
               {/* Start date — collapsed into the ⋯ menu by default since it's
                   a low-frequency field. Renders inline only when the field

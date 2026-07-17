@@ -1651,3 +1651,12 @@ The runtime-image, entrypoint, fallback-provider helpers, canary, and cloud runb
 | `brief-layer-modes` | `server/internal/daemon/execenv/execenv.go`; `runtime_config.go`; `server/internal/daemon/daemon.go` | Carry the two per-agent brief-layer modes (`workspace_brief_mode`, `tools_brief_mode`) from the agent's `runtime_config` into brief rendering: one guard call-site swaps in the identity-only brief, one call-site routes the tools section through the fold. All logic lives in the cerebro siblings `cerebro_brief_layers.go` (execenv) and `cerebro_brief_layer_modes.go` (daemon + agentoffice). |
 
 Approved by Jesper Hvejsel on FIR-3212 ("Vi skal kun lave agent configuration fuld scope"), 2026-07-17. Standing FIR-3212 approval for marked patches recorded 2026-07-15.
+
+## FIR-3447 — Custom issue fields in Create issue
+
+| Patch | Location | Reason |
+|---|---|---|
+| `create-issue-custom-properties` | `packages/views/modals/create-issue.tsx`; `packages/views/package.json` | Mount the fork-owned Create issue adapter because upstream v0.4.4 supplies Issue detail editing and the value API, but no Create issue field surface. The typed field UI and post-create writes stay isolated in `packages/cerebro-issue-properties`. |
+| `issue-property-view-label-fallback` | `packages/views/issues/components/issues-header.tsx` | Keep existing static display labels type-safe while the property-aware view-state types are present but the separate list-surface UI slice has not landed. Unknown property-backed persisted values fall back to Manual/Status instead of breaking the header. |
+
+Approved by Jesper Hvejsel through FIR-3447 and plan artifact `019f704e-3865-7220-a109-6df596ccdf28`, 2026-07-17.

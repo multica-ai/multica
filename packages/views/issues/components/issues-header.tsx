@@ -1630,8 +1630,28 @@ export function IssueDisplayControls({
             : `${shortDateLabel(dateFilter.from)} - ${shortDateLabel(dateFilter.to)}`
       }`
     : null;
-  const sortLabel = t(($) => $.display[SORT_LABEL_KEY[sortBy]]);
-  const groupingLabel = t(($) => $.display[GROUPING_LABEL_KEY[grouping]]);
+  // CEREBRO-PATCH(issue-property-view-label-fallback): FIR-3447 — preserve the
+  // existing static labels until the later list-surface property slice lands.
+  const sortLabel = t(
+    ($) =>
+      $.display[
+        SORT_LABEL_KEY[
+          sortBy.startsWith("property:")
+            ? "position"
+            : (sortBy as keyof typeof SORT_LABEL_KEY)
+        ]
+      ],
+  );
+  const groupingLabel = t(
+    ($) =>
+      $.display[
+        GROUPING_LABEL_KEY[
+          grouping.startsWith("property:")
+            ? "status"
+            : (grouping as keyof typeof GROUPING_LABEL_KEY)
+        ]
+      ],
+  );
   const swimlaneGroupingLabel = t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[swimlaneGrouping]]);
   const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
 
