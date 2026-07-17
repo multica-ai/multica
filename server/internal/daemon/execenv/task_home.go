@@ -34,12 +34,11 @@ import (
 // permissions), so neither needs — nor should get — a redirected HOME. Other
 // providers are not sandboxed either.
 //
-// NOT covered here: `git commit` inside a checked-out worktree. Codex's
-// workspace-write reads the worktree's `.git` pointer file, resolves the real
-// gitdir, and keeps that gitdir read-only even when it sits inside a
-// writable_root (see codex-rs default_read_only_subpaths_for_writable_root), so
-// `writable_roots` cannot unblock it. That needs a Codex metadata-write
-// permission path and is tracked separately (GitHub multica-ai/multica#2925).
+// `git commit` inside a linked worktree has the same root sandbox constraint:
+// Codex resolves the worktree's `.git` pointer and keeps the external gitdir
+// read-only even inside a writable_root. The repo checkout path handles that
+// separately by giving Linux Codex tasks an isolated, task-local `.git`
+// directory instead of widening this writable-root grant (#2925).
 
 // taskHomeSeedEntries are top-level entries symlinked from the user's real home
 // into the per-task HOME so credential/identity reads keep resolving after HOME

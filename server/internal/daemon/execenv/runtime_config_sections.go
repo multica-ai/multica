@@ -208,7 +208,7 @@ func writeAvailableCommands(b *strings.Builder) {
 	b.WriteString("- `multica issue metadata list <issue-id> [--output json]` — list KV metadata.\n")
 	b.WriteString("- `multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]` — pin or overwrite a key.\n")
 	b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — remove a key.\n")
-	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — git worktree on a dedicated branch.\n\n")
+	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — repository checkout on a dedicated branch.\n\n")
 	b.WriteString("### Squad maintenance\n")
 	b.WriteString("- `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — change role in place (use this instead of remove+add).\n\n")
 }
@@ -244,7 +244,7 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		return
 	}
 	b.WriteString("## Repositories\n\n")
-	b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a git worktree on a dedicated branch).\n\n")
+	b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
 	for _, repo := range ctx.Repos {
 		if repo.Description != "" {
 			fmt.Fprintf(b, "- %s — %s\n", repo.URL, repo.Description)

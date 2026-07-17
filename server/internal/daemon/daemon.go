@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -48,9 +49,18 @@ var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace
 var ErrNoRuntimesToRegister = errors.New("no agent runtimes could be registered")
 
 const (
-	taskSlotWaitTimeout     = 2 * time.Second
-	taskSlotCapacityBackoff = 5 * time.Second
+	taskSlotWaitTimeout      = 2 * time.Second
+	taskSlotCapacityBackoff  = 5 * time.Second
+	repoCheckoutModeEnv      = "MULTICA_REPO_CHECKOUT_MODE"
+	repoCheckoutModeIsolated = "isolated"
 )
+
+func repoCheckoutModeFor(provider, goos string) string {
+	if provider == "codex" && goos == "linux" {
+		return repoCheckoutModeIsolated
+	}
+	return ""
+}
 
 var (
 	taskPrepareLeaseRefresh = 15 * time.Second
@@ -4179,6 +4189,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"TMPDIR":               taskTempDir,
 		"TMP":                  taskTempDir,
 		"TEMP":                 taskTempDir,
+	}
+	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
+		agentEnv[repoCheckoutModeEnv] = checkoutMode
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
