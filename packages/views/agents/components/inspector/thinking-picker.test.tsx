@@ -74,23 +74,18 @@ describe("ThinkingPicker", () => {
 
   it("calls onChange with the picked value and skips when the user re-picks the current value", () => {
     const { onChange } = renderPicker({ value: "low" });
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByRole("button", { name: "Thinking: Low" }));
 
     // Picking a new level fires onChange with the runtime-native value.
     fireEvent.click(screen.getByText("High"));
     expect(onChange).toHaveBeenCalledWith("high");
 
     // Re-opening and clicking the already-selected value is a no-op so we
-    // don't enqueue a redundant PATCH. The trigger also reads "Low", so
-    // there are two matches in the DOM — target the listbox item by
-    // selecting the option button explicitly.
+    // don't enqueue a redundant PATCH. Target the option by its visible label
+    // so the test follows the shared searchable selector contract.
     onChange.mockClear();
-    fireEvent.click(screen.getByRole("button"));
-    const lowOption = screen
-      .getAllByRole("button")
-      .find((b) => b.getAttribute("data-picker-item") !== null && b.textContent?.includes("Low"));
-    expect(lowOption).toBeDefined();
-    fireEvent.click(lowOption!);
+    fireEvent.click(screen.getByRole("button", { name: "Thinking: Low" }));
+    fireEvent.click(screen.getByRole("button", { name: "Low" }));
     expect(onChange).not.toHaveBeenCalled();
   });
 
