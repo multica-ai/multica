@@ -3525,8 +3525,18 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 // tasks already expose their current local-directory assignment, so their
 // existing reuse behavior remains unchanged. Leader tasks intentionally skip
 // that assignment and its lock; they may therefore reuse only directories
-// that resolve to the {workspace}/{task}/workdir shape, belong to a completed
-// non-local managed env, and carry a matching daemon task-context marker.
+// that resolve to the {workspace}/{task}/workdir shape, carry Prepare-time
+// managed-env provenance for the same workspace/issue/agent, and carry a
+// matching daemon task-context marker.
+//
+// Reuse eligibility is deliberately keyed off .managed_env.json (written by
+// execenv.Prepare) and NOT .gc_meta.json (written only after the task reaches
+// terminal state). The server's task-complete handler reconciles a follow-up
+// and wakes the runtime before the prior task's daemon handler writes the GC
+// file, so a successor can be claimed inside that window; keying off the
+// terminal file raced and dropped the session (MUL-4886). Both proofs this
+// function reads — the env-root provenance and the workdir task-context marker
+// — are written at Prepare time, so neither depends on completion ordering.
 func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignment, workspacesRoot string) bool {
 	if task.PriorWorkDir == "" || localAssignment != nil {
 		return false
@@ -3558,9 +3568,13 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 	if task.AgentID == "" || task.IssueID == "" {
 		return false
 	}
-	meta, err := execenv.ReadGCMeta(filepath.Dir(workdir))
-	if err != nil || meta.LocalDirectory || meta.Kind != execenv.GCKindIssue ||
-		meta.WorkspaceID != task.WorkspaceID || meta.IssueID != task.IssueID {
+	// Managed-env provenance is written only for non-local managed issue envs,
+	// so its presence (plus the workspace/issue/agent match) proves this is a
+	// safe daemon-managed reuse target and not a residual local_directory path.
+	prov, err := execenv.ReadManagedEnvProvenance(filepath.Dir(workdir))
+	if err != nil || prov.ManagedBy != execenv.ManagedEnvProvenanceManagedBy ||
+		prov.WorkspaceID != task.WorkspaceID || prov.IssueID != task.IssueID ||
+		prov.AgentID != task.AgentID {
 		return false
 	}
 
@@ -3934,8 +3948,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// loses the envRoot association the GC loop needs, and re-running
 	// Prepare against a stable user path is cheap (no clone, no copy).
 	// Leader tasks have no localAssignment; shouldReusePriorWorkdir separately
-	// requires matching managed-env metadata and a daemon-owned marker before
-	// allowing reuse, so a pre-fix leader session recorded against
+	// requires Prepare-time managed-env provenance and a daemon-owned marker
+	// before allowing reuse, so a pre-fix leader session recorded against
 	// local_directory still fails closed.
 	var agentMcpConfig json.RawMessage
 	var effectiveMcpConfig json.RawMessage

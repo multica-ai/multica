@@ -305,6 +305,25 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
 
+	// Persist managed-env provenance for non-local issue envs at Prepare time
+	// (not on completion, where .gc_meta.json is written). A same-issue
+	// follow-up can be claimed the instant the prior task completes — before
+	// the prior handler writes .gc_meta.json — so reuse eligibility must be
+	// provable from an artifact that exists the moment the env is created. Only
+	// managed (non-local_directory) issue envs get this marker; that is exactly
+	// the set squad-leader reuse targets (MUL-4886). Non-fatal: a write failure
+	// only costs the next follow-up its session reuse (it falls back to a fresh
+	// session), which must never block dispatching this task.
+	if params.LocalWorkDir == "" && params.Task.IssueID != "" {
+		if err := WriteManagedEnvProvenance(envRoot, ManagedEnvProvenance{
+			WorkspaceID: params.WorkspaceID,
+			IssueID:     params.Task.IssueID,
+			AgentID:     params.Task.AgentID,
+		}); err != nil && logger != nil {
+			logger.Warn("execenv: write managed env provenance failed (non-fatal); a follow-up may start a fresh session", "error", err)
+		}
+	}
+
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, "codex-home")
@@ -721,6 +740,65 @@ func ReadGCMeta(envRoot string) (*GCMeta, error) {
 		meta.Kind = GCKindIssue
 	}
 	return &meta, nil
+}
+
+const managedEnvProvenanceFile = ".managed_env.json"
+
+// ManagedEnvProvenanceManagedBy discriminates a managed-env provenance file
+// the daemon wrote from any lookalike JSON that happens to share the path.
+const ManagedEnvProvenanceManagedBy = "multica-daemon-managed-env"
+
+// ManagedEnvProvenance is persisted to .managed_env.json inside the env root at
+// Prepare time (NOT on completion, unlike .gc_meta.json). It records that this
+// env root is a daemon-managed, non-local_directory issue env owned by a
+// specific workspace/issue/agent.
+//
+// Its whole reason to exist is timing. A squad-leader follow-up on the same
+// issue can be claimed the instant the prior task completes — the server's
+// task-complete handler reconciles the follow-up and wakes the runtime before
+// the prior task's daemon handler writes .gc_meta.json. Keying reuse
+// eligibility off .gc_meta.json therefore raced: the successor read a
+// not-yet-written file and started a fresh session (MUL-4886). This marker is
+// on disk from the moment the env is created, so the successor can prove reuse
+// safety inside that window. It is written ONLY for non-local managed issue
+// envs, so its presence is itself the "safe to reuse, not a user
+// local_directory" assertion; see shouldReusePriorWorkdir.
+type ManagedEnvProvenance struct {
+	ManagedBy   string `json:"managed_by"`
+	WorkspaceID string `json:"workspace_id"`
+	IssueID     string `json:"issue_id"`
+	AgentID     string `json:"agent_id"`
+}
+
+// WriteManagedEnvProvenance persists the reuse-eligibility marker at the env
+// root. Callers must only invoke it for non-local_directory issue envs, since
+// the file's presence is the non-local assertion. ManagedBy is stamped here so
+// callers cannot forget the discriminator.
+func WriteManagedEnvProvenance(envRoot string, p ManagedEnvProvenance) error {
+	if envRoot == "" {
+		return nil
+	}
+	p.ManagedBy = ManagedEnvProvenanceManagedBy
+	data, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("marshal managed env provenance: %w", err)
+	}
+	return os.WriteFile(filepath.Join(envRoot, managedEnvProvenanceFile), data, 0o644)
+}
+
+// ReadManagedEnvProvenance reads the Prepare-time reuse-eligibility marker from
+// an env root. A missing or malformed file returns an error; callers fail
+// closed (no reuse) on any error.
+func ReadManagedEnvProvenance(envRoot string) (*ManagedEnvProvenance, error) {
+	data, err := os.ReadFile(filepath.Join(envRoot, managedEnvProvenanceFile))
+	if err != nil {
+		return nil, err
+	}
+	var p ManagedEnvProvenance
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
 
 // Cleanup tears down the execution environment.

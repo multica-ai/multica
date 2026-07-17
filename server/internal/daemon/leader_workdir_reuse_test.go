@@ -15,7 +15,16 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
-func TestRunTaskSquadLeaderReusesDaemonManagedWorkdir(t *testing.T) {
+// TestRunTaskSquadLeaderReusesWorkdirBeforeGCMetaWritten drives two real
+// runTask calls and asserts the follow-up reuses the first workdir and provider
+// session while NO .gc_meta.json exists. That absence is the whole point: the
+// server marks the prior task completed, reconciles the follow-up, and wakes
+// the runtime before the prior task's handler writes .gc_meta.json, so a
+// successor can be claimed inside that window (MUL-4886). Reuse must therefore
+// hinge on the Prepare-time .managed_env.json provenance, not the terminal GC
+// file. runTask writes that provenance via execenv.Prepare; this test never
+// writes .gc_meta.json, so it fails against the pre-fix GC-meta-keyed gate.
+func TestRunTaskSquadLeaderReusesWorkdirBeforeGCMetaWritten(t *testing.T) {
 	t.Parallel()
 
 	d, argsFile, cleanup := newLeaderReuseTestDaemon(t)
@@ -29,12 +38,11 @@ func TestRunTaskSquadLeaderReusesDaemonManagedWorkdir(t *testing.T) {
 	if firstResult.SessionID == "" || firstResult.WorkDir == "" {
 		t.Fatalf("first result missing resume state: %+v", firstResult)
 	}
-	if err := execenv.WriteGCMeta(firstResult.EnvRoot, execenv.GCMeta{
-		Kind:        execenv.GCKindIssue,
-		IssueID:     first.IssueID,
-		WorkspaceID: first.WorkspaceID,
-	}, d.logger); err != nil {
-		t.Fatalf("write first-run GC metadata: %v", err)
+	// Simulate the race window: the successor is claimed before the prior
+	// task's handler writes .gc_meta.json. The Prepare-time provenance is the
+	// only reuse signal available.
+	if _, err := os.Stat(filepath.Join(firstResult.EnvRoot, ".gc_meta.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected no .gc_meta.json before the completion handler runs; stat err = %v", err)
 	}
 
 	second := leaderReuseTestTask("task-second")
@@ -76,6 +84,38 @@ func TestRunTaskSquadLeaderDoesNotReuseExternalPriorWorkdir(t *testing.T) {
 	}
 }
 
+// TestShouldReusePriorWorkdirNonLeaderReusesUnchanged locks the refactor's
+// non-leader branch: the leader-only provenance/marker gate must not touch the
+// pre-existing behavior where any non-local prior workdir is reused.
+func TestShouldReusePriorWorkdirNonLeaderReusesUnchanged(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	task := leaderReuseTestTask("task-non-leader")
+	task.IsLeaderTask = false
+	task.PriorWorkDir = filepath.Join(root, "anything", "workdir")
+	if !shouldReusePriorWorkdir(task, nil, root) {
+		t.Fatal("non-leader task must reuse its prior workdir without any provenance requirement")
+	}
+}
+
+// TestShouldReusePriorWorkdirSquadLeaderAcceptsManagedProvenance is the unit
+// positive: managed shape + matching Prepare-time provenance + matching marker.
+func TestShouldReusePriorWorkdirSquadLeaderAcceptsManagedProvenance(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
+	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
+	writeLeaderManagedEnvProvenance(t, workDir, "ws-leader", "issue-leader", "agent-leader")
+
+	task := leaderReuseTestTask("task-accept")
+	task.PriorWorkDir = workDir
+	if !shouldReusePriorWorkdir(task, nil, root) {
+		t.Fatalf("leader did not reuse a fully-provenanced managed workdir %q", workDir)
+	}
+}
+
 func TestShouldReusePriorWorkdirSquadLeaderRejectsNonManagedPathUnderRoot(t *testing.T) {
 	t.Parallel()
 
@@ -92,69 +132,59 @@ func TestShouldReusePriorWorkdirSquadLeaderRejectsNonManagedPathUnderRoot(t *tes
 	}
 }
 
-func TestShouldReusePriorWorkdirSquadLeaderRejectsUnmarkedManagedShape(t *testing.T) {
+// TestShouldReusePriorWorkdirSquadLeaderRejectsManagedShapeWithoutProvenance
+// covers the race-critical case and the local_directory fail-closed guarantee:
+// a workdir with the right shape and a valid marker but NO .managed_env.json is
+// rejected. Local_directory envs never get provenance (Prepare skips it), and a
+// follow-up claimed before any provenance exists must start fresh rather than
+// risk reusing a user path.
+func TestShouldReusePriorWorkdirSquadLeaderRejectsManagedShapeWithoutProvenance(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	workDir := filepath.Join(root, "ws-leader", "not-a-task", "workdir")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		t.Fatalf("mkdir workdir: %v", err)
-	}
+	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
+	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
 
-	task := leaderReuseTestTask("task-unmarked-managed-shape")
+	task := leaderReuseTestTask("task-without-provenance")
 	task.PriorWorkDir = workDir
 	if shouldReusePriorWorkdir(task, nil, root) {
-		t.Fatalf("leader reused unmarked lookalike workdir %q", workDir)
+		t.Fatalf("leader reused marked workdir %q without managed-env provenance", workDir)
 	}
 }
 
+// TestShouldReusePriorWorkdirSquadLeaderRejectsMismatchedProvenanceOwner
+// rejects a provenance file whose workspace/issue/agent does not match the
+// claiming task, even when the marker is otherwise well-formed.
+func TestShouldReusePriorWorkdirSquadLeaderRejectsMismatchedProvenanceOwner(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
+	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
+	writeLeaderManagedEnvProvenance(t, workDir, "ws-leader", "issue-leader", "other-agent")
+
+	task := leaderReuseTestTask("task-mismatched-provenance")
+	task.PriorWorkDir = workDir
+	if shouldReusePriorWorkdir(task, nil, root) {
+		t.Fatalf("leader reused workdir %q with provenance owned by another agent", workDir)
+	}
+}
+
+// TestShouldReusePriorWorkdirSquadLeaderRejectsMismatchedTaskMarker keeps its
+// original intent — a marker for another agent must be refused — now with a
+// matching provenance in place so the check reaches the marker comparison.
 func TestShouldReusePriorWorkdirSquadLeaderRejectsMismatchedTaskMarker(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
 	writeLeaderTaskMarker(t, workDir, "other-agent", "issue-leader")
+	writeLeaderManagedEnvProvenance(t, workDir, "ws-leader", "issue-leader", "agent-leader")
 
 	task := leaderReuseTestTask("task-mismatched-marker")
 	task.PriorWorkDir = workDir
 	if shouldReusePriorWorkdir(task, nil, root) {
 		t.Fatalf("leader reused workdir %q with a marker for another agent", workDir)
-	}
-}
-
-func TestShouldReusePriorWorkdirSquadLeaderRejectsMarkerWithoutManagedGCMeta(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
-	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
-
-	task := leaderReuseTestTask("task-marker-without-gc-meta")
-	task.PriorWorkDir = workDir
-	if shouldReusePriorWorkdir(task, nil, root) {
-		t.Fatalf("leader reused marked workdir %q without managed GC metadata", workDir)
-	}
-}
-
-func TestShouldReusePriorWorkdirSquadLeaderRejectsLocalDirectoryGCMeta(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
-	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
-	if err := execenv.WriteGCMeta(filepath.Dir(workDir), execenv.GCMeta{
-		Kind:           execenv.GCKindIssue,
-		IssueID:        "issue-leader",
-		WorkspaceID:    "ws-leader",
-		LocalDirectory: true,
-	}, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatalf("write local-directory GC metadata: %v", err)
-	}
-
-	task := leaderReuseTestTask("task-local-directory-gc-meta")
-	task.PriorWorkDir = workDir
-	if shouldReusePriorWorkdir(task, nil, root) {
-		t.Fatalf("leader reused local-directory workdir %q without its path lock", workDir)
 	}
 }
 
@@ -227,6 +257,22 @@ func writeLeaderTaskMarker(t *testing.T, workDir, agentID, issueID string) {
 	marker := []byte(`{"managed_by":"` + execenv.TaskContextMarkerManagedBy + `","agent_id":"` + agentID + `","issue_id":"` + issueID + `"}`)
 	if err := os.WriteFile(markerPath, marker, 0o644); err != nil {
 		t.Fatalf("write marker: %v", err)
+	}
+}
+
+func writeLeaderManagedEnvProvenance(t *testing.T, workDir, workspaceID, issueID, agentID string) {
+	t.Helper()
+
+	envRoot := filepath.Dir(workDir)
+	if err := os.MkdirAll(envRoot, 0o755); err != nil {
+		t.Fatalf("mkdir env root: %v", err)
+	}
+	if err := execenv.WriteManagedEnvProvenance(envRoot, execenv.ManagedEnvProvenance{
+		WorkspaceID: workspaceID,
+		IssueID:     issueID,
+		AgentID:     agentID,
+	}); err != nil {
+		t.Fatalf("write managed env provenance: %v", err)
 	}
 }
 
