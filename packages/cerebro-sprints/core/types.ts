@@ -66,6 +66,16 @@ export interface SprintsListResponse {
   sprints: Sprint[];
 }
 
+export interface WorkspaceSprint extends Sprint {
+  project_title: string;
+  issue_count: number;
+  done_count: number;
+}
+
+export interface WorkspaceSprintsResponse {
+  sprints: WorkspaceSprint[];
+}
+
 /**
  * FIR-1657: one option in an issue's sprint picker. A sprint the issue may be
  * assigned to, annotated with its owning project's title and whether that

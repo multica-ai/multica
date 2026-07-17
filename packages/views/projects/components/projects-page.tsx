@@ -23,6 +23,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   projectListOptions,
+  projectTreeOptions,
   useUpdateProject,
   useDeleteProject,
   useProjectViewStore,
@@ -30,6 +31,10 @@ import {
   type ProjectListFilters,
   type ProjectSortField,
 } from "@multica/core/projects";
+// CEREBRO-PATCH(projects-tree-table-mount): FIR-3425 fork-owned tree-table rows.
+import { CerebroProjectTreeRows } from "@multica/cerebro-projects/views";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { workspaceSprintsOptions } from "@multica/cerebro-sprints/core";
 import {
   pinListOptions,
   useCreatePin,
@@ -343,6 +348,9 @@ function ProjectTableRow({
   isColVisible,
   selected,
   onToggleSelect,
+  namePrefix,
+  pathLabel,
+  contextOnly = false,
 }: {
   project: Project;
   pinned: boolean;
@@ -350,6 +358,9 @@ function ProjectTableRow({
   isColVisible: (key: ProjectColumnKey) => boolean;
   selected: boolean;
   onToggleSelect: () => void;
+  namePrefix?: React.ReactNode;
+  pathLabel?: string;
+  contextOnly?: boolean;
 }) {
   const wsPaths = useWorkspacePaths();
   const formatRelativeDate = useFormatRelativeDate();
@@ -360,18 +371,39 @@ function ProjectTableRow({
   );
 
   return (
-    <ListGridRow className={`h-11 ${selected ? "bg-accent/30" : ""}`}>
+    <ListGridRow className={`h-11 ${selected ? "bg-accent/30" : ""}${contextOnly ? " opacity-45" : ""}`}>
       <CheckboxCell checked={selected} onToggle={onToggleSelect} />
       <ListGridCell className="gap-2">
-        <ProjectIcon project={project} size="sm" />
-        <AppLink
-          href={wsPaths.projectDetail(project.id)}
-          className="min-w-0 truncate text-sm font-medium hover:underline"
-        >
-          {/* CEREBRO-PATCH(projects-page-row-lock): restricted-access lock indicator */}
-          {project.access === "restricted" && <RestrictedLock className="mr-1.5" />}
-          {project.title}
-        </AppLink>
+        {namePrefix ? (
+          <>
+            {namePrefix}
+            <ProjectIcon project={project} size="sm" />
+            <span className="flex min-w-0 flex-col">
+              <AppLink
+                href={wsPaths.projectDetail(project.id)}
+                className="min-w-0 truncate text-sm font-medium hover:underline"
+              >
+                {project.access === "restricted" && <RestrictedLock className="mr-1.5" />}
+                {project.title}
+              </AppLink>
+              {pathLabel && (
+                <span className="truncate text-[11px] text-muted-foreground">{pathLabel}</span>
+              )}
+            </span>
+          </>
+        ) : (
+          <>
+            <ProjectIcon project={project} size="sm" />
+          <AppLink
+            href={wsPaths.projectDetail(project.id)}
+            className="min-w-0 truncate text-sm font-medium hover:underline"
+          >
+            {/* CEREBRO-PATCH(projects-page-row-lock): restricted-access lock indicator */}
+            {project.access === "restricted" && <RestrictedLock className="mr-1.5" />}
+            {project.title}
+          </AppLink>
+          </>
+        )}
       </ListGridCell>
 
       {/* status — core column, always visible */}
@@ -768,6 +800,7 @@ function ProjectBatchToolbar({
 export function ProjectsPage() {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
   const currentUser = useAuthStore((s) => s.user);
   const { getActorName } = useActorName();
 
@@ -784,9 +817,19 @@ export function ProjectsPage() {
   const toggleFilter = useProjectViewStore((s) => s.toggleFilter);
   const clearFilters = useProjectViewStore((s) => s.clearFilters);
   const isCompact = viewMode === "compact";
+  const projectsTreeEnabled = useFeatureFlag("cerebro_projects_tree");
+  const sprintsEnabled = useFeatureFlag("cerebro_sprints");
   const isColVisible = (key: ProjectColumnKey) => !hiddenColumns.includes(key);
 
   const { data: projects = [], isLoading } = useQuery(projectListOptions(wsId));
+  const { data: projectTree = [], isLoading: isTreeLoading } = useQuery({
+    ...projectTreeOptions(wsId),
+    enabled: projectsTreeEnabled && !!wsId,
+  });
+  const { data: workspaceSprints = { sprints: [] } } = useQuery({
+    ...workspaceSprintsOptions(wsId),
+    enabled: projectsTreeEnabled && sprintsEnabled && !!wsId,
+  });
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: pins = [] } = useQuery({
     ...pinListOptions(wsId, currentUser?.id ?? ""),
@@ -1177,7 +1220,7 @@ export function ProjectsPage() {
           </div>
 
           {/* Body */}
-          {isLoading ? (
+          {isLoading || (projectsTreeEnabled && isTreeLoading) ? (
             <LoadingState isCompact={isCompact} />
           ) : visible.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center py-24 text-muted-foreground">
@@ -1202,17 +1245,53 @@ export function ProjectsPage() {
                   someSelected={someSelected}
                   onToggleAll={handleToggleAll}
                 />
-                {visible.map((project) => (
-                  <ProjectTableRow
-                    key={project.id}
-                    project={project}
-                    pinned={pinnedProjectIds.has(project.id)}
-                    canDelete={isWorkspaceAdmin}
+                {/* CEREBRO-PATCH(projects-tree-table-mount): feature-off preserves the upstream flat table. */}
+                {projectsTreeEnabled ? (
+                  <CerebroProjectTreeRows
+                    workspaceId={wsId}
+                    tree={projectTree}
+                    sprints={sprintsEnabled ? workspaceSprints.sprints : []}
+                    search={search}
+                    filters={filters}
+                    sortField={sortField}
+                    sortDirection={sortDirection}
                     isColVisible={isColVisible}
-                    selected={selectedIds.has(project.id)}
-                    onToggleSelect={() => toggleSelected(project.id)}
+                    renderProjectRow={({ project, namePrefix, pathLabel, contextOnly }) => (
+                      <ProjectTableRow
+                        key={project.id}
+                        project={project}
+                        pinned={pinnedProjectIds.has(project.id)}
+                        canDelete={isWorkspaceAdmin}
+                        isColVisible={isColVisible}
+                        selected={selectedIds.has(project.id)}
+                        onToggleSelect={() => toggleSelected(project.id)}
+                        namePrefix={namePrefix}
+                        pathLabel={search.trim() ? pathLabel : undefined}
+                        contextOnly={contextOnly}
+                      />
+                    )}
+                    renderSprintLink={(sprint, children) => (
+                      <AppLink
+                        href={wsPaths.sprintDetail(sprint.id)}
+                        className="min-w-0 hover:underline"
+                      >
+                        {children}
+                      </AppLink>
+                    )}
                   />
-                ))}
+                ) : (
+                  visible.map((project) => (
+                    <ProjectTableRow
+                      key={project.id}
+                      project={project}
+                      pinned={pinnedProjectIds.has(project.id)}
+                      canDelete={isWorkspaceAdmin}
+                      isColVisible={isColVisible}
+                      selected={selectedIds.has(project.id)}
+                      onToggleSelect={() => toggleSelected(project.id)}
+                    />
+                  ))
+                )}
               </ListGrid>
             </div>
           ) : (

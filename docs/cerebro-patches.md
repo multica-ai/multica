@@ -1651,3 +1651,11 @@ The runtime-image, entrypoint, fallback-provider helpers, canary, and cloud runb
 | `brief-layer-modes` | `server/internal/daemon/execenv/execenv.go`; `runtime_config.go`; `server/internal/daemon/daemon.go` | Carry the two per-agent brief-layer modes (`workspace_brief_mode`, `tools_brief_mode`) from the agent's `runtime_config` into brief rendering: one guard call-site swaps in the identity-only brief, one call-site routes the tools section through the fold. All logic lives in the cerebro siblings `cerebro_brief_layers.go` (execenv) and `cerebro_brief_layer_modes.go` (daemon + agentoffice). |
 
 Approved by Jesper Hvejsel on FIR-3212 ("Vi skal kun lave agent configuration fuld scope"), 2026-07-17. Standing FIR-3212 approval for marked patches recorded 2026-07-15.
+
+## FIR-3425 — Projects tree table
+
+| Patch | Location | Reason |
+|---|---|---|
+| `projects-tree-table-mount` | `packages/views/package.json`; `packages/views/projects/components/projects-page.tsx` | Mount the feature-flagged fork-owned project tree and sprint rows while preserving the existing flat table byte-for-byte when the flag is off. Tree state and presentation remain in `packages/cerebro-projects`. |
+
+Approved plan and delivery gate are attached to FIR-3425, 2026-07-17.

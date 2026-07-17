@@ -4,6 +4,8 @@ import {
   selectableSprintSchema,
   selectableSprintsListSchema,
   sprintSettingsSchema,
+  workspaceSprintSchema,
+  workspaceSprintsListSchema,
 } from "./api-schemas";
 
 // FIR-1657: the settings + selectable-sprints contracts must survive an older
@@ -73,5 +75,34 @@ describe("selectableSprintSchema", () => {
   it("list schema accepts an empty sprints array", () => {
     const parsed = selectableSprintsListSchema.parse({ sprints: [] });
     expect(parsed.sprints).toEqual([]);
+  });
+});
+
+describe("workspaceSprintSchema", () => {
+  const sprint = {
+    id: "s1",
+    workspace_id: "w1",
+    project_id: "p1",
+    project_title: "Firtal Enable",
+    name: "Sprint 1",
+    sequence_no: 1,
+    status: "active",
+    start_date: "2026-07-06",
+    end_date: "2026-07-19",
+    created_at: "2026-07-01T00:00:00Z",
+    updated_at: "2026-07-01T00:00:00Z",
+  };
+
+  it("defaults aggregate progress when an older backend omits it", () => {
+    const parsed = workspaceSprintSchema.parse(sprint);
+    expect(parsed.issue_count).toBe(0);
+    expect(parsed.done_count).toBe(0);
+  });
+
+  it("parses the one-request workspace sprint list with progress", () => {
+    const parsed = workspaceSprintsListSchema.parse({
+      sprints: [{ ...sprint, issue_count: 4, done_count: 3 }],
+    });
+    expect(parsed.sprints[0]).toMatchObject({ issue_count: 4, done_count: 3 });
   });
 });
