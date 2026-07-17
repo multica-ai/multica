@@ -599,6 +599,10 @@ func TestCreateWorktreeReusesIsolatedGitMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first CreateWorktree failed: %v", err)
 	}
+	const userBranch = "feature/keep-me"
+	runGitAuthored(t, first.Path, "checkout", "-b", userBranch)
+	addEmptyCommit(t, first.Path, "unpublished feature work")
+	userCommit := gitHead(t, first.Path)
 
 	addEmptyCommit(t, sourceRepo, "upstream advance")
 	wantHead := gitHead(t, sourceRepo)
@@ -627,17 +631,21 @@ func TestCreateWorktreeReusesIsolatedGitMetadata(t *testing.T) {
 		t.Fatalf("reused checkout HEAD = %s, want refreshed upstream %s", got, wantHead)
 	}
 
-	// Reuse must not accumulate earlier tasks' agent/* branches: the prior
-	// branch is pruned and only the freshly checked-out one remains locally.
+	// Reuse must not accumulate earlier tasks' agent/* branches, but it must
+	// preserve user-created branches and commits that may not exist remotely.
 	if err := runGit("-C", second.Path, "show-ref", "--verify", "refs/heads/"+first.BranchName); err == nil {
 		t.Fatalf("stale branch %s survived reuse", first.BranchName)
+	}
+	if got := gitRefCommit(t, second.Path, "refs/heads/"+userBranch); got != userCommit {
+		t.Fatalf("preserved user branch commit = %s, want %s", got, userCommit)
 	}
 	heads, err := runGitOutput("-C", second.Path, "for-each-ref", "--format=%(refname)", "refs/heads/")
 	if err != nil {
 		t.Fatalf("list local heads: %v", err)
 	}
-	if got := strings.TrimSpace(string(heads)); got != "refs/heads/"+second.BranchName {
-		t.Fatalf("reused checkout local heads = %q, want only refs/heads/%s", got, second.BranchName)
+	wantHeads := "refs/heads/" + second.BranchName + "\nrefs/heads/" + userBranch
+	if got := strings.TrimSpace(string(heads)); got != wantHeads {
+		t.Fatalf("reused checkout local heads = %q, want %q", got, wantHeads)
 	}
 }
 

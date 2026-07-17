@@ -654,7 +654,7 @@ func (c *Cache) createOrUpdateIsolatedCheckout(barePath, repoURL, checkoutPath, 
 		// Drop earlier tasks' agent/* heads so a reused workdir doesn't grow a
 		// new local branch on every checkout. Non-fatal: leftover branches are
 		// harmless clutter and must never fail the checkout.
-		if err := deleteLocalBranches(checkoutPath, actualBranch); err != nil {
+		if err := deleteStaleAgentBranches(checkoutPath, actualBranch); err != nil {
 			c.logger.Warn("repo checkout: prune stale branches failed (non-fatal)", "error", err)
 		}
 		return actualBranch, nil
@@ -737,7 +737,7 @@ func createIsolatedCheckout(barePath, repoURL, checkoutPath, branchName, baseRef
 	if out, err := runGitCombinedOutput("-C", checkoutPath, "remote", "remove", isolatedCacheRemoteName); err != nil {
 		return "", fmt.Errorf("remove cache remote: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	if err := deleteLocalBranches(checkoutPath, ""); err != nil {
+	if err := deleteAllLocalBranches(checkoutPath); err != nil {
 		return "", err
 	}
 	if out, err := runGitCombinedOutput("-C", checkoutPath, "remote", "add", "origin", repoURL); err != nil {
@@ -807,21 +807,23 @@ func syncIsolatedCheckoutRefs(barePath, checkoutPath, baseRef string) error {
 	return nil
 }
 
-// deleteLocalBranches removes local refs/heads/* from the isolated checkout.
-// A non-empty keepBranch is preserved: the reuse path passes the branch it just
-// checked out so a long-lived reused workdir drops earlier tasks' agent/*
-// heads instead of accumulating one per checkout (git also refuses to delete
-// the ref HEAD points at). An empty keepBranch removes every local head, which
-// the fresh-clone path needs before it creates the task branch from a detached
-// HEAD.
-func deleteLocalBranches(repoPath, keepBranch string) error {
-	out, err := runGitOutput("-C", repoPath, "for-each-ref", "--format=%(refname)", "refs/heads/")
+// deleteAllLocalBranches removes the heads copied from the bare cache into a
+// fresh local clone. The clone is detached and has no task-created branches to
+// preserve yet.
+func deleteAllLocalBranches(repoPath string) error {
+	return deleteLocalBranchesUnder(repoPath, "refs/heads/", "")
+}
+
+// deleteStaleAgentBranches prunes branches left by earlier Multica tasks while
+// preserving the current task branch and every user-created local branch.
+func deleteStaleAgentBranches(repoPath, keepBranch string) error {
+	return deleteLocalBranchesUnder(repoPath, "refs/heads/agent/", "refs/heads/"+keepBranch)
+}
+
+func deleteLocalBranchesUnder(repoPath, namespace, keepRef string) error {
+	out, err := runGitOutput("-C", repoPath, "for-each-ref", "--format=%(refname)", namespace)
 	if err != nil {
 		return fmt.Errorf("list local branches: %w", err)
-	}
-	var keepRef string
-	if keepBranch != "" {
-		keepRef = "refs/heads/" + keepBranch
 	}
 	for _, ref := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		ref = strings.TrimSpace(ref)
