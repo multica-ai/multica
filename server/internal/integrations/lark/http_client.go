@@ -291,12 +291,12 @@ type markdownReferenceDefinitionScanState struct {
 
 func (s *markdownReferenceDefinitionScanState) skipLine(markdown string, start int) bool {
 	if s.inFence {
-		if fence, fenceLen, ok := parseMarkdownFenceLine(markdown, start); ok && fence == s.fence && fenceLen >= s.fenceLen {
+		if parseMarkdownFenceCloseLine(markdown, start, s.fence, s.fenceLen) {
 			s.inFence = false
 		}
 		return true
 	}
-	if fence, fenceLen, ok := parseMarkdownFenceLine(markdown, start); ok {
+	if fence, fenceLen, ok := parseMarkdownFenceOpenLine(markdown, start); ok {
 		s.inFence = true
 		s.fence = fence
 		s.fenceLen = fenceLen
@@ -305,9 +305,9 @@ func (s *markdownReferenceDefinitionScanState) skipLine(markdown string, start i
 	return isIndentedMarkdownCodeLine(markdown, start)
 }
 
-func parseMarkdownFenceLine(markdown string, start int) (byte, int, bool) {
+func parseMarkdownFenceOpenLine(markdown string, start int) (byte, int, bool) {
 	lineEnd := markdownLineEnd(markdown, start)
-	i, ok := skipUpToThreeMarkdownSpaces(markdown, start)
+	i, ok := skipMarkdownReferenceDefinitionLinePrefix(markdown, start)
 	if !ok || i >= lineEnd || (markdown[i] != '`' && markdown[i] != '~') {
 		return 0, 0, false
 	}
@@ -327,6 +327,28 @@ func parseMarkdownFenceLine(markdown string, start int) (byte, int, bool) {
 		}
 	}
 	return fence, j - i, true
+}
+
+func parseMarkdownFenceCloseLine(markdown string, start int, fence byte, fenceLen int) bool {
+	lineEnd := markdownLineEnd(markdown, start)
+	i, ok := skipMarkdownReferenceDefinitionLinePrefix(markdown, start)
+	if !ok || i >= lineEnd || markdown[i] != fence {
+		return false
+	}
+	j := i
+	for j < lineEnd && markdown[j] == fence {
+		j++
+	}
+	if j-i < fenceLen {
+		return false
+	}
+	for j < lineEnd {
+		if markdown[j] != ' ' && markdown[j] != '	' {
+			return false
+		}
+		j++
+	}
+	return true
 }
 
 func isIndentedMarkdownCodeLine(markdown string, start int) bool {
