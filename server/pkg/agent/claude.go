@@ -359,7 +359,7 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool
 			resultStr := ""
 			if block.Content != nil {
 				resultStr = string(block.Content)
-				if claudeToolResultHasAsyncLaunch(block.Content) {
+				if streamJSONToolResultHasAsyncLaunch(block.Content) {
 					sawAsyncLaunch = true
 				}
 			}
@@ -387,7 +387,7 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 	if inputMap == nil {
 		inputMap = map[string]any{}
 	}
-	if forceClaudeToolInputForeground(inputMap) {
+	if forceStreamJSONToolInputForeground(inputMap) {
 		b.cfg.Logger.Info("claude: forced foreground tool execution",
 			"request_id", msg.RequestID,
 			"tool", req.ToolName,
@@ -415,50 +415,6 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 	if _, err := stdin.Write(data); err != nil {
 		b.cfg.Logger.Warn("claude: failed to write control response", "error", err)
 	}
-}
-
-func forceClaudeToolInputForeground(input map[string]any) bool {
-	if runInBackground, ok := input["run_in_background"].(bool); ok && runInBackground {
-		input["run_in_background"] = false
-		return true
-	}
-	return false
-}
-
-func claudeToolResultHasAsyncLaunch(raw json.RawMessage) bool {
-	if len(raw) == 0 {
-		return false
-	}
-	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return false
-	}
-	switch v := value.(type) {
-	case map[string]any:
-		if claudeMapHasAsyncLaunchStatus(v) {
-			return true
-		}
-		if content, ok := v["content"].([]any); ok {
-			return claudeArrayHasAsyncLaunchStatus(content)
-		}
-	case []any:
-		return claudeArrayHasAsyncLaunchStatus(v)
-	}
-	return false
-}
-
-func claudeArrayHasAsyncLaunchStatus(values []any) bool {
-	for _, value := range values {
-		if item, ok := value.(map[string]any); ok && claudeMapHasAsyncLaunchStatus(item) {
-			return true
-		}
-	}
-	return false
-}
-
-func claudeMapHasAsyncLaunchStatus(value map[string]any) bool {
-	status, ok := value["status"].(string)
-	return ok && status == "async_launched"
 }
 
 // ── Claude SDK JSON types ──

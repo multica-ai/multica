@@ -168,6 +168,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		sawResult := false
 		resultIsError := false
 		var sessionID string
+		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
 		eventCount := 0
 		invalidEventCount := 0
@@ -210,7 +211,9 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 					lastAssistantText = ""
 				}
 			case "user":
-				b.handleUser(msg, msgCh)
+				if b.handleUser(msg, msgCh) {
+					sawAsyncLaunch = true
+				}
 			case "system":
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
@@ -254,6 +257,10 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		// broken pipe, or been unblocked by the kill that ended cmd.
 		writeErr := <-writeDone
 
+		completionGuardError := ""
+		if sawAsyncLaunch {
+			completionGuardError = "codebuddy launched an async background task; Multica-managed runs require foreground execution"
+		}
 		finalStatus, finalOutput, finalError := finalizeStreamResult(
 			"codebuddy",
 			timeout,
@@ -268,7 +275,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				resultIsError:     resultIsError,
 				scanErr:           scanErr,
 			},
-			"",
+			completionGuardError,
 		)
 
 		if finalError != "" {
@@ -360,17 +367,21 @@ func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Me
 	return assistantText.String(), toolUseCount
 }
 
-func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message) {
+func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message) bool {
 	var content codebuddyMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
-		return
+		return false
 	}
 
+	sawAsyncLaunch := false
 	for _, block := range content.Content {
 		if block.Type == "tool_result" {
 			resultStr := ""
 			if block.Content != nil {
 				resultStr = string(block.Content)
+				if streamJSONToolResultHasAsyncLaunch(block.Content) {
+					sawAsyncLaunch = true
+				}
 			}
 			trySend(ch, Message{
 				Type:   MessageToolResult,
@@ -379,6 +390,7 @@ func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message
 			})
 		}
 	}
+	return sawAsyncLaunch
 }
 
 func (b *codebuddyBackend) handleControlRequest(msg codebuddySDKMessage, stdin interface{ Write([]byte) (int, error) }) {
@@ -394,6 +406,12 @@ func (b *codebuddyBackend) handleControlRequest(msg codebuddySDKMessage, stdin i
 	}
 	if inputMap == nil {
 		inputMap = map[string]any{}
+	}
+	if forceStreamJSONToolInputForeground(inputMap) {
+		b.cfg.Logger.Info("codebuddy: forced foreground tool execution",
+			"request_id", msg.RequestID,
+			"tool", req.ToolName,
+		)
 	}
 
 	response := map[string]any{
