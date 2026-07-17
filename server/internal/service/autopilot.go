@@ -270,24 +270,17 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 		task, taskErr := s.Queries.GetAutopilotTaskByRun(ctx, run.ID)
 		switch {
 		case taskErr == nil:
-			updated, updateErr := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
-				ID:     run.ID,
-				TaskID: task.ID,
-			})
-			switch {
-			case updateErr == nil:
-				s.TaskSvc.NotifyTaskEnqueued(ctx, task)
-				return &updated, nil
-			case errors.Is(updateErr, pgx.ErrNoRows):
-				// CAS lost: the task already finalized the run. Return the current
-				// (terminal) run rather than resurrecting it.
-				if reloaded, rerr := s.Queries.GetAutopilotRun(ctx, run.ID); rerr == nil {
-					return &reloaded, nil
-				}
-				return run, nil
-			default:
-				return run, fmt.Errorf("dispatch for webhook delivery: repair task linkage: %w", updateErr)
+			updated, bindErr := s.bindAutopilotRunTask(ctx, run.ID, task.ID)
+			if bindErr != nil {
+				return run, fmt.Errorf("dispatch for webhook delivery: repair task linkage: %w", bindErr)
 			}
+			// Only wake the daemon when this call actually (re)bound the task; if a
+			// racing finalizer already completed the run, updated is that terminal
+			// run and there is nothing to enqueue.
+			if !isAutopilotRunTerminalStatus(updated.Status) {
+				s.TaskSvc.NotifyTaskEnqueued(ctx, task)
+			}
+			return &updated, nil
 		case !errors.Is(taskErr, pgx.ErrNoRows):
 			return run, fmt.Errorf("dispatch for webhook delivery: lookup linked task: %w", taskErr)
 		}
@@ -519,8 +512,9 @@ func (s *AutopilotService) dispatchAutopilotRun(
 			if skipped, code := s.handleDispatchSkip(ctx, autopilot, run, err); skipped != nil {
 				return skipped, code, nil
 			}
-			s.failRun(ctx, run.ID, err.Error())
-			s.captureAutopilotRunFailed(autopilot, *run, source, err.Error())
+			if failed, won := s.failRun(ctx, run.ID, err.Error()); won {
+				s.captureAutopilotRunFailed(autopilot, failed, source, err.Error())
+			}
 			return run, dispatchFailReasonCode(err), fmt.Errorf("dispatch create_issue: %w", err)
 		}
 	case "run_only":
@@ -528,13 +522,15 @@ func (s *AutopilotService) dispatchAutopilotRun(
 			if skipped, code := s.handleDispatchSkip(ctx, autopilot, run, err); skipped != nil {
 				return skipped, code, nil
 			}
-			s.failRun(ctx, run.ID, err.Error())
-			s.captureAutopilotRunFailed(autopilot, *run, source, err.Error())
+			if failed, won := s.failRun(ctx, run.ID, err.Error()); won {
+				s.captureAutopilotRunFailed(autopilot, failed, source, err.Error())
+			}
 			return run, dispatchFailReasonCode(err), fmt.Errorf("dispatch run_only: %w", err)
 		}
 	default:
-		s.failRun(ctx, run.ID, "unknown execution_mode: "+autopilot.ExecutionMode)
-		s.captureAutopilotRunFailed(autopilot, *run, source, "unknown execution_mode: "+autopilot.ExecutionMode)
+		if failed, won := s.failRun(ctx, run.ID, "unknown execution_mode: "+autopilot.ExecutionMode); won {
+			s.captureAutopilotRunFailed(autopilot, failed, source, "unknown execution_mode: "+autopilot.ExecutionMode)
+		}
 		return run, dispatch.ReasonInternalError, fmt.Errorf("unknown execution_mode: %s", autopilot.ExecutionMode)
 	}
 
@@ -765,23 +761,11 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// the same pre-existing hang class as a crash before enqueue, and the sync's
 	// issue-scoped fallback still finalizes such a run.
 	if dispatchedTask.ID.Valid {
-		updatedRun, bindErr := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
-			ID:     run.ID,
-			TaskID: dispatchedTask.ID,
-		})
-		switch {
-		case bindErr == nil:
-			*run = updatedRun
-		case errors.Is(bindErr, pgx.ErrNoRows):
-			// CAS lost: the dispatched task already ran to terminal and finalized
-			// the run before this bind landed. Do NOT resurrect it to running —
-			// reload the terminal run and treat dispatch as succeeded.
-			if reloaded, rerr := s.Queries.GetAutopilotRun(ctx, run.ID); rerr == nil {
-				*run = reloaded
-			}
-		default:
-			return fmt.Errorf("bind autopilot run to dispatched task: %w", bindErr)
+		updatedRun, bindErr := s.bindAutopilotRunTask(ctx, run.ID, dispatchedTask.ID)
+		if bindErr != nil {
+			return bindErr
 		}
+		*run = updatedRun
 	}
 
 	slog.Info("autopilot dispatched (create_issue)",
@@ -974,16 +958,14 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		return fmt.Errorf("create autopilot task: %w", err)
 	}
 
-	// Update run with task reference.
-	updatedRun, err := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
-		ID:     run.ID,
-		TaskID: task.ID,
-	})
+	// Bind the run to its task (compare-and-set). A failure here is a real error
+	// — we must not report the dispatch as succeeded if we can't confirm the run
+	// now owns this task.
+	updatedRun, err := s.bindAutopilotRunTask(ctx, run.ID, task.ID)
 	if err != nil {
-		slog.Warn("failed to update run with task_id", "run_id", util.UUIDToString(run.ID), "error", err)
-	} else {
-		*run = updatedRun
+		return fmt.Errorf("bind run_only task: %w", err)
 	}
+	*run = updatedRun
 
 	// Drop the empty-claim cache and wake the daemon. dispatchRunOnly
 	// inserts the task row directly via Queries.CreateAutopilotTask
@@ -1004,6 +986,46 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 // state that finalizes an autopilot run.
 func isAutopilotTaskTerminal(status string) bool {
 	return status == "completed" || status == "failed" || status == "cancelled"
+}
+
+// isAutopilotRunTerminalStatus reports whether an autopilot_run has reached a
+// terminal state (no further transition is possible).
+func isAutopilotRunTerminalStatus(status string) bool {
+	return status == "completed" || status == "failed" || status == "skipped"
+}
+
+// bindAutopilotRunTask is the single, idempotent compare-and-set bind used by
+// every dispatch entry point (MUL-4809 §4.1). It advances the run to running and
+// records taskID, then returns the AUTHORITATIVE run so callers never report a
+// dispatch as landing work it did not:
+//
+//   - normal / same-task replay: the CAS succeeds and the bound run is returned.
+//   - CAS lost (pgx.ErrNoRows): reload and decide. A run that a racing task
+//     already finalized (terminal) is returned as-is — the work did land, just
+//     via the task path. Anything else — the run is active but bound to a
+//     DIFFERENT task, the row is gone, or the reload itself failed — is an error,
+//     so schedule/webhook callers do NOT record a phantom success.
+func (s *AutopilotService) bindAutopilotRunTask(ctx context.Context, runID, taskID pgtype.UUID) (db.AutopilotRun, error) {
+	updated, err := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
+		ID:     runID,
+		TaskID: taskID,
+	})
+	if err == nil {
+		return updated, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.AutopilotRun{}, fmt.Errorf("bind autopilot run to task: %w", err)
+	}
+	current, rerr := s.Queries.GetAutopilotRun(ctx, runID)
+	if rerr != nil {
+		return db.AutopilotRun{}, fmt.Errorf("bind autopilot run %s: reload after CAS miss: %w", util.UUIDToString(runID), rerr)
+	}
+	if isAutopilotRunTerminalStatus(current.Status) {
+		return current, nil // a racing task already finalized this run
+	}
+	// Active but the CAS excluded it: the run is bound to a different task.
+	return db.AutopilotRun{}, fmt.Errorf("bind autopilot run %s: run is %s bound to a different task, refusing to rebind to %s",
+		util.UUIDToString(runID), current.Status, util.UUIDToString(taskID))
 }
 
 // retryRootTaskID walks the retry_of_task_id chain up from task to the first
@@ -1228,14 +1250,23 @@ func (s *AutopilotService) handleDispatchSkip(ctx context.Context, ap db.Autopil
 	return run, skipErr.code
 }
 
-func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reason string) {
-	if _, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
+// failRun marks a run failed as a compare-and-set. It returns the updated
+// (failed) run and true only when THIS call actually won the terminal
+// transition. On a CAS miss (the run was already finalized by another path) it
+// returns false, and the caller MUST NOT record a failure — otherwise analytics
+// would double-count against a run the DB no longer let it overwrite.
+func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reason string) (db.AutopilotRun, bool) {
+	updated, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
 		ID:            runID,
 		FailureReason: pgtype.Text{String: reason, Valid: true},
-	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		// ErrNoRows = CAS lost: the run already reached a terminal state; nothing to do.
-		slog.Warn("failed to mark autopilot run as failed", "run_id", util.UUIDToString(runID), "error", err)
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("failed to mark autopilot run as failed", "run_id", util.UUIDToString(runID), "error", err)
+		}
+		return db.AutopilotRun{}, false
 	}
+	return updated, true
 }
 
 // shouldSkipDispatch is the pre-flight admission check from MUL-1899.

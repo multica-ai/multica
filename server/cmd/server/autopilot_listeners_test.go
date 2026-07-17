@@ -650,9 +650,10 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 // TestAutopilotRunTerminalTransitionsAreCAS locks in the compare-and-set
 // contract (MUL-4809 §4.1 P0-1): once a run is terminal, neither a racing
 // terminal write nor a late bind may overwrite or resurrect it. Concurrent
-// finalizers become first-writer-wins (the loser gets pgx.ErrNoRows), which is
-// what keeps a rolling deploy / task-vs-listener race from producing a wrong
-// terminal state or a "running + completed_at" row.
+// finalizers OF THIS BINARY become first-writer-wins (the loser gets
+// pgx.ErrNoRows). (Note: this cannot constrain an old-version pod still running
+// the unguarded write during a rolling deploy — that needs the deploy-enable
+// gate tracked as later work.)
 func TestAutopilotRunTerminalTransitionsAreCAS(t *testing.T) {
 	ctx := context.Background()
 	queries := db.New(testPool)

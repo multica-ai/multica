@@ -1740,9 +1740,11 @@ type UpdateAutopilotRunCompletedParams struct {
 }
 
 // Compare-and-set terminal transition (MUL-4809 §4.1): only an in-flight run may
-// be completed. Zero rows means another path (a racing task/issue listener, or a
-// rolling-deploy old pod) already wrote a terminal state — first writer wins;
-// the caller no-ops instead of overwriting the terminal state or re-publishing.
+// be completed. Zero rows means the run was already finalized by a concurrent
+// finalizer of THIS binary — first writer wins; the caller no-ops instead of
+// overwriting the terminal state or re-publishing. (This CAS cannot constrain an
+// OLD-version pod still running the unguarded write during a rolling deploy —
+// that requires the explicit deploy-enable gate tracked as later work.)
 func (q *Queries) UpdateAutopilotRunCompleted(ctx context.Context, arg UpdateAutopilotRunCompletedParams) (AutopilotRun, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotRunCompleted, arg.ID, arg.Result)
 	var i AutopilotRun
@@ -1843,7 +1845,9 @@ func (q *Queries) UpdateAutopilotRunIssueCreated(ctx context.Context, arg Update
 const updateAutopilotRunRunning = `-- name: UpdateAutopilotRunRunning :one
 UPDATE autopilot_run
 SET status = 'running', task_id = $2
-WHERE id = $1 AND status IN ('pending', 'issue_created', 'running')
+WHERE id = $1
+  AND status IN ('pending', 'issue_created', 'running')
+  AND (task_id IS NULL OR task_id = $2)
 RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id
 `
 
@@ -1852,11 +1856,16 @@ type UpdateAutopilotRunRunningParams struct {
 	TaskID pgtype.UUID `json:"task_id"`
 }
 
-// Compare-and-set bind (MUL-4809 §4.1): only advance a run that is NOT already
-// terminal. If the dispatched task finished and finalized the run before the
-// bind lands, this matches zero rows (pgx.ErrNoRows) instead of resurrecting a
-// completed/failed run back to running. Callers treat zero rows as "already
-// finalized" and reload rather than error.
+// Compare-and-set bind (MUL-4809 §4.1). Only a non-terminal run whose task_id is
+// unset OR already this same task may be bound:
+//   - task_id IS NULL      -> first bind wins.
+//   - task_id = $2         -> idempotent replay of the same bind (returns the row).
+//   - task_id = other task -> zero rows: the run is already bound to a DIFFERENT
+//     dispatched task and must not be re-bound (the first dispatched task owns it).
+//   - terminal status      -> zero rows: never resurrect a finalized run.
+//
+// Zero rows surfaces as pgx.ErrNoRows; callers reload to establish the
+// authoritative state (see bindAutopilotRunTask).
 func (q *Queries) UpdateAutopilotRunRunning(ctx context.Context, arg UpdateAutopilotRunRunningParams) (AutopilotRun, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotRunRunning, arg.ID, arg.TaskID)
 	var i AutopilotRun
