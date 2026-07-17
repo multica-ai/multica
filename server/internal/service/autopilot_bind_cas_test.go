@@ -131,17 +131,28 @@ func TestBindAutopilotRunTaskIsIdempotentAndExclusive(t *testing.T) {
 		t.Fatalf("run rebound to a different task: task_id=%x", cur.TaskID.Bytes)
 	}
 
-	// Once the run is terminal, a late bind returns the authoritative terminal
-	// run (not an error, not a resurrection).
+	// Once the run is terminal AND owned by A, a late bind by the SAME task A
+	// returns the authoritative terminal run (idempotent, not a resurrection).
 	if _, err := queries.UpdateAutopilotRunCompleted(ctx, db.UpdateAutopilotRunCompletedParams{ID: run.ID}); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 	term, err := svc.bindAutopilotRunTask(ctx, run.ID, taskA)
 	if err != nil {
-		t.Fatalf("bind after terminal should return the terminal run, got err: %v", err)
+		t.Fatalf("bind-after-terminal by the owning task should succeed, got err: %v", err)
 	}
 	if term.Status != "completed" {
 		t.Fatalf("bind after terminal: status=%q, want completed", term.Status)
+	}
+
+	// But a DIFFERENT task B binding after A already finalized the run must be
+	// refused — otherwise B's competing dispatch would be reported as landed. The
+	// run must still be owned by A.
+	if _, err := svc.bindAutopilotRunTask(ctx, run.ID, taskB); err == nil {
+		t.Fatal("bind-after-terminal by a different task must fail, not be reported as dispatched")
+	}
+	owner, _ := queries.GetAutopilotRun(ctx, run.ID)
+	if owner.TaskID.Bytes != taskA.Bytes || owner.Status != "completed" {
+		t.Fatalf("terminal run ownership changed: status=%q task_id=%x", owner.Status, owner.TaskID.Bytes)
 	}
 }
 

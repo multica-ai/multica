@@ -1021,7 +1021,19 @@ func (s *AutopilotService) bindAutopilotRunTask(ctx context.Context, runID, task
 		return db.AutopilotRun{}, fmt.Errorf("bind autopilot run %s: reload after CAS miss: %w", util.UUIDToString(runID), rerr)
 	}
 	if isAutopilotRunTerminalStatus(current.Status) {
-		return current, nil // a racing task already finalized this run
+		// A racing finalizer already ended the run. This is a legitimate idempotent
+		// success ONLY if this same task owns the run, or the run has no owning task
+		// yet (the pre-bind crash-window compatibility: it finalized via the
+		// issue-scoped fallback before any bind, so this dispatched task IS its
+		// work). A terminal run already owned by a DIFFERENT task means this is a
+		// competing dispatch — it must NOT be reported as landed, or the caller
+		// would wake / treat a second task as the run's work. "terminal" alone is
+		// not proof that THIS task landed.
+		if !current.TaskID.Valid || current.TaskID.Bytes == taskID.Bytes {
+			return current, nil
+		}
+		return db.AutopilotRun{}, fmt.Errorf("bind autopilot run %s: run is terminal (%s) owned by a different task, refusing to report bind of %s as dispatched",
+			util.UUIDToString(runID), current.Status, util.UUIDToString(taskID))
 	}
 	// Active but the CAS excluded it: the run is bound to a different task.
 	return db.AutopilotRun{}, fmt.Errorf("bind autopilot run %s: run is %s bound to a different task, refusing to rebind to %s",
