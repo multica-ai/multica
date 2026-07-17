@@ -42,6 +42,38 @@ const (
 	DecisionStop    Decision = "Stop"
 )
 
+type FunctionInput struct {
+	Name        string
+	Description string
+	OwnerType   string
+	OwnerID     uuid.UUID
+}
+
+func ValidateFunction(input FunctionInput) error {
+	if input.Name == "" {
+		return errors.New("function name is required")
+	}
+	if input.OwnerType != "member" && input.OwnerType != "agent" {
+		return errors.New("function owner type must be member or agent")
+	}
+	if input.OwnerID == uuid.Nil {
+		return errors.New("function owner id is required")
+	}
+	return nil
+}
+
+type Function struct {
+	ID          uuid.UUID
+	WorkspaceID uuid.UUID
+	Name        string
+	Description string
+	OwnerType   string
+	OwnerID     uuid.UUID
+	Active      bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type MetricInput struct {
 	Name          string
 	Family        MetricFamily

@@ -63,19 +63,25 @@ func TestStoreAppendObservationIsWorkspaceScopedAndAppendOnly(t *testing.T) {
 	})
 
 	ownerID := uuid.New()
-	var functionID, loopID, metricID uuid.UUID
-	if err := storeTestPool.QueryRow(ctx, `
-		INSERT INTO cerebro_ai_impact_function
-			(workspace_id, name, owner_type, owner_id)
-		VALUES ($1, 'Customer Service', 'member', $2)
-		RETURNING id`, workspaceID, ownerID).Scan(&functionID); err != nil {
+	store := NewStore(storeTestPool)
+	function, err := store.CreateFunction(ctx, workspaceID, FunctionInput{
+		Name:        "Customer Service",
+		Description: "Resolve customer needs",
+		OwnerType:   "member",
+		OwnerID:     ownerID,
+	})
+	if err != nil {
 		t.Fatalf("create function: %v", err)
 	}
+	if function.WorkspaceID != workspaceID || function.OwnerID != ownerID || !function.Active {
+		t.Fatalf("created function = %+v", function)
+	}
+	var loopID, metricID uuid.UUID
 	if err := storeTestPool.QueryRow(ctx, `
 		INSERT INTO cerebro_ai_impact_operating_loop
 			(workspace_id, function_id, name)
 		VALUES ($1, $2, 'Resolve customer need')
-		RETURNING id`, workspaceID, functionID).Scan(&loopID); err != nil {
+		RETURNING id`, workspaceID, function.ID).Scan(&loopID); err != nil {
 		t.Fatalf("create operating loop: %v", err)
 	}
 
@@ -90,7 +96,6 @@ func TestStoreAppendObservationIsWorkspaceScopedAndAppendOnly(t *testing.T) {
 		t.Fatalf("create metric: %v", err)
 	}
 
-	store := NewStore(storeTestPool)
 	input := ObservationInput{
 		MetricID:       metricID,
 		PeriodStart:    periodStart,

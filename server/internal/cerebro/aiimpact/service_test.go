@@ -13,6 +13,22 @@ type recordingObservationStore struct {
 	observations []Observation
 }
 
+func (s *recordingObservationStore) CreateFunction(
+	_ context.Context,
+	workspaceID uuid.UUID,
+	input FunctionInput,
+) (Function, error) {
+	return Function{
+		ID:          uuid.New(),
+		WorkspaceID: workspaceID,
+		Name:        input.Name,
+		Description: input.Description,
+		OwnerType:   input.OwnerType,
+		OwnerID:     input.OwnerID,
+		Active:      true,
+	}, nil
+}
+
 func (s *recordingObservationStore) AppendObservation(
 	_ context.Context,
 	_, _ uuid.UUID,

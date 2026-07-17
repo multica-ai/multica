@@ -12,20 +12,85 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
-// Handler exposes the AI Impact Observation HTTP seam.
+// Handler exposes the AI Impact HTTP seam.
 type Handler struct {
 	service *Service
 }
 
-// NewHandler constructs a Handler around the Observation service.
+// NewHandler constructs a Handler around the AI Impact service.
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-// Mount registers the AI Impact Observation routes on a workspace-scoped router.
+// Mount registers the AI Impact routes on a workspace-scoped router.
 func (h *Handler) Mount(r chi.Router) {
+	r.Post("/api/cerebro/ai-impact/functions", h.CreateFunction)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
 	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
+}
+
+type createFunctionRequest struct {
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	OwnerType   string    `json:"owner_type"`
+	OwnerID     uuid.UUID `json:"owner_id"`
+}
+
+type functionResponse struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	OwnerType   string    `json:"owner_type"`
+	OwnerID     uuid.UUID `json:"owner_id"`
+	Active      bool      `json:"active"`
+}
+
+func toFunctionResponse(function Function) functionResponse {
+	return functionResponse{
+		ID:          function.ID,
+		Name:        function.Name,
+		Description: function.Description,
+		OwnerType:   function.OwnerType,
+		OwnerID:     function.OwnerID,
+		Active:      function.Active,
+	}
+}
+
+// CreateFunction creates one workspace-scoped organizational function.
+func (h *Handler) CreateFunction(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, role, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+
+	var request createFunctionRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeObservationError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	input := FunctionInput{
+		Name:        request.Name,
+		Description: request.Description,
+		OwnerType:   request.OwnerType,
+		OwnerID:     request.OwnerID,
+	}
+	if err := ValidateFunction(input); err != nil {
+		writeObservationError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	function, err := h.service.CreateFunction(r.Context(), workspaceID, role, input)
+	if err != nil {
+		if errors.Is(err, ErrReadOnly) {
+			writeObservationError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		writeObservationError(w, http.StatusInternalServerError, "failed to create function")
+		return
+	}
+	writeObservationJSON(w, http.StatusCreated, toFunctionResponse(function))
 }
 
 type appendObservationRequest struct {

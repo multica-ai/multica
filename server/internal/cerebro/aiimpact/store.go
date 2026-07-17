@@ -16,6 +16,46 @@ type Store struct{ pool *pgxpool.Pool }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
+const functionColumns = `id, workspace_id, name, description, owner_type, owner_id,
+ active, created_at, updated_at`
+
+func scanFunction(row pgx.Row) (Function, error) {
+	var function Function
+	err := row.Scan(
+		&function.ID,
+		&function.WorkspaceID,
+		&function.Name,
+		&function.Description,
+		&function.OwnerType,
+		&function.OwnerID,
+		&function.Active,
+		&function.CreatedAt,
+		&function.UpdatedAt,
+	)
+	return function, err
+}
+
+func (s *Store) CreateFunction(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	input FunctionInput,
+) (Function, error) {
+	if err := ValidateFunction(input); err != nil {
+		return Function{}, err
+	}
+	return scanFunction(s.pool.QueryRow(ctx, `
+		INSERT INTO cerebro_ai_impact_function
+			(workspace_id, name, description, owner_type, owner_id)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING `+functionColumns,
+		workspaceID,
+		input.Name,
+		input.Description,
+		input.OwnerType,
+		input.OwnerID,
+	))
+}
+
 const observationColumns = `id, metric_id, period_start, period_end, value,
  evidence_status, confidence, source, method, created_at`
 

@@ -9,7 +9,8 @@ import (
 
 var ErrReadOnly = errors.New("AI Impact is read-only for workspace members")
 
-type ObservationStore interface {
+type ServiceStore interface {
+	CreateFunction(ctx context.Context, workspaceID uuid.UUID, input FunctionInput) (Function, error)
 	AppendObservation(
 		ctx context.Context,
 		workspaceID, actorID uuid.UUID,
@@ -20,11 +21,23 @@ type ObservationStore interface {
 }
 
 type Service struct {
-	store ObservationStore
+	store ServiceStore
 }
 
-func NewService(store ObservationStore) *Service {
+func NewService(store ServiceStore) *Service {
 	return &Service{store: store}
+}
+
+func (s *Service) CreateFunction(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	role string,
+	input FunctionInput,
+) (Function, error) {
+	if !CanConfigure(role) {
+		return Function{}, ErrReadOnly
+	}
+	return s.store.CreateFunction(ctx, workspaceID, input)
 }
 
 func (s *Service) AppendObservation(
