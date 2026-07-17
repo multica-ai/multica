@@ -19,8 +19,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-
-	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
@@ -65,23 +63,8 @@ var activeCodexLaunches atomic.Int64
 var maxActiveCodexLaunchesObserved atomic.Int64
 var codexCleanupConfirmationOverride atomic.Int32
 
-var (
-	codexAuthorizationHeaderRe = regexp.MustCompile(`(?im)(authorization\s*:\s*)[^\r\n]+`)
-	codexJSONSecretRe          = regexp.MustCompile(`(?i)("(?:token|auth|authorization|api[_-]?key|secret|password)"\s*:\s*)"(?:\\.|[^"\\])*"`)
-	codexDiagnosticSecretRe    = regexp.MustCompile(`(?i)(authorization|auth|api[_-]?key|token|secret|password)(\s*[:=]\s*)([^\s,;]+)`)
-)
-
 func sanitizeCodexDiagnostic(value string) string {
-	value = strings.Map(func(r rune) rune {
-		if r < 0x20 && r != '\n' && r != '\t' {
-			return -1
-		}
-		return r
-	}, value)
-	value = codexAuthorizationHeaderRe.ReplaceAllString(value, `$1[REDACTED]`)
-	value = codexJSONSecretRe.ReplaceAllString(value, `$1"[REDACTED]"`)
-	value = codexDiagnosticSecretRe.ReplaceAllString(value, `$1$2[REDACTED]`)
-	return redact.Text(value)
+	return sanitizeAgentDiagnostic(value)
 }
 
 func codexProcessExitStatus(state *os.ProcessState) any {
@@ -174,6 +157,17 @@ func hasManagedCodexMcpConfig(raw json.RawMessage) bool {
 // `$CODEX_HOME/config.toml`.
 var codexManagedMcpConfigKeyRe = regexp.MustCompile(`^\s*mcp_servers(?:\s*\.|\s*=|\s*$)`)
 
+// A daemon-managed shell_environment_policy must also win over profile and
+// custom-arg overrides. Match root and profile policy keys without catching an
+// unrelated table field that happens to use the same final key name.
+const (
+	codexShellEnvPolicyKeyPattern = `(?:shell_environment_policy|"shell_environment_policy"|'shell_environment_policy')`
+	codexProfileNameKeyPattern    = `(?:[A-Za-z0-9_-]+|"[^"]+"|'[^']+')`
+)
+
+var codexManagedShellEnvConfigKeyRe = regexp.MustCompile(
+	`^\s*(?:` + codexShellEnvPolicyKeyPattern + `|profiles\s*\.\s*` + codexProfileNameKeyPattern + `\s*\.\s*` + codexShellEnvPolicyKeyPattern + `)\s*(?:\.|=|$)`)
+
 // filterCodexCustomConfigOverrides drops `-c mcp_servers.…=` and
 // `--config mcp_servers.…=` entries from custom args. Codex's `-c` is
 // last-wins (verified against codex-cli 0.132.0), so without this filter a
@@ -183,6 +177,16 @@ var codexManagedMcpConfigKeyRe = regexp.MustCompile(`^\s*mcp_servers(?:\s*\.|\s*
 // to write into it are dropped with a warning rather than allowed to win.
 // Other `-c`/`--config` keys (e.g. `-c model="o3"`) pass through unchanged.
 func filterCodexCustomConfigOverrides(args []string, logger *slog.Logger) []string {
+	return filterCodexConfigOverrides(args, codexManagedMcpConfigKeyRe, "mcp_servers", logger)
+}
+
+func filterCodexShellEnvConfigOverrides(args []string, logger *slog.Logger) []string {
+	return filterCodexConfigOverrides(args, codexManagedShellEnvConfigKeyRe, shellEnvironmentPolicyConfigNamespace, logger)
+}
+
+const shellEnvironmentPolicyConfigNamespace = "shell_environment_policy"
+
+func filterCodexConfigOverrides(args []string, managedKeyRe *regexp.Regexp, namespace string, logger *slog.Logger) []string {
 	if len(args) == 0 {
 		return args
 	}
@@ -202,17 +206,16 @@ func filterCodexCustomConfigOverrides(args []string, logger *slog.Logger) []stri
 			if !hasInlineValue && i+1 < len(args) {
 				value = args[i+1]
 			}
-			if codexManagedMcpConfigKeyRe.MatchString(value) {
+			if managedKeyRe.MatchString(value) {
 				if logger != nil {
-					// Log the key only, never the value — mcp_servers.<name>.env
-					// is allowed to carry secrets and the whole point of moving
-					// this to config.toml is to keep raw values out of logs/argv.
+					// Log the key only, never the value. Managed config values
+					// may contain secrets and must stay out of logs/argv.
 					key := value
 					if eqIdx := strings.Index(value, "="); eqIdx >= 0 {
 						key = value[:eqIdx]
 					}
-					logger.Warn("custom_args: blocked mcp_servers override; daemon manages this via CODEX_HOME/config.toml",
-						"flag", flag, "key", strings.TrimSpace(key))
+					logger.Warn("custom_args: blocked managed Codex config override",
+						"namespace", namespace, "flag", flag, "key", strings.TrimSpace(key))
 				}
 				if !hasInlineValue && i+1 < len(args) {
 					i++ // skip the value arg
@@ -673,7 +676,8 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// echoed into the daemon's `agent command` log line below, so any
 	// inline env-bearing TOML would defeat the redaction. Writing through
 	// config.toml at 0o600 keeps the secret values out of argv and logs.
-	if codexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"]); codexHome != "" {
+	codexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
+	if codexHome != "" {
 		if err := ensureCodexMcpConfig(filepath.Join(codexHome, "config.toml"), opts.McpConfig, b.cfg.Logger); err != nil {
 			// Fail closed when we can't materialise the managed config.
 			// Warning-and-launching would silently fall back to the
@@ -693,6 +697,13 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		return nil, fmt.Errorf("codex: mcp_config is set but CODEX_HOME env var is not configured; cannot apply managed MCP")
 	}
 
+	if codexHome != "" {
+		// The daemon owns shell_environment_policy in the task-local config.
+		// Codex -c/--config overrides are last-wins, so remove user-provided
+		// root or profile policy overrides before building the final argv.
+		opts.ExtraArgs = filterCodexShellEnvConfigOverrides(opts.ExtraArgs, b.cfg.Logger)
+		opts.CustomArgs = filterCodexShellEnvConfigOverrides(opts.CustomArgs, b.cfg.Logger)
+	}
 	codexArgs := buildCodexArgs(opts, b.cfg.Logger)
 	cmd := exec.CommandContext(runCtx, execPath, codexArgs...)
 	hideAgentWindow(cmd)

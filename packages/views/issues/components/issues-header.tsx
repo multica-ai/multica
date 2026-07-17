@@ -743,12 +743,16 @@ export function ViewRefreshIndicator({ active }: { active: boolean }) {
 
 export function IssuesHeader({
   scopedIssues,
+  workingIssues,
   allowGantt = false,
   dateFilter = null,
   onDateFilterChange,
   isRefreshing = false,
 }: {
   scopedIssues: Issue[];
+  /** The rows the agents-working filter would leave on screen. Scopes the
+   *  chip: it counts the agents working on these rows. */
+  workingIssues: Issue[];
   allowGantt?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
@@ -764,14 +768,6 @@ export function IssuesHeader({
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const toggleAgentRunningFilter = useViewStore(
     (s) => s.toggleAgentRunningFilter,
-  );
-  // Scope the chip to whatever issues this page is currently showing.
-  // /issues uses the full workspace minus Members/Agents pill filtering;
-  // passing the visible-issue id set lets the chip count match the list
-  // length when the filter is on.
-  const scopedIssueIds = useMemo(
-    () => new Set(scopedIssues.map((i) => i.id)),
-    [scopedIssues],
   );
   const SCOPE_LABEL_KEY: Record<IssuesScope, "all_label" | "members_label" | "agents_label"> = {
     all: "all_label",
@@ -847,7 +843,7 @@ export function IssuesHeader({
           <WorkspaceAgentWorkingChip
             value={agentRunningFilter}
             onToggle={toggleAgentRunningFilter}
-            scopedIssueIds={scopedIssueIds}
+            workingIssues={workingIssues}
           />
           <IssueDisplayControls
             scopedIssues={scopedIssues}

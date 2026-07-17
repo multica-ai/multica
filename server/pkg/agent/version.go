@@ -27,6 +27,12 @@ var MinVersions = map[string]string{
 // this threshold all fail closed.
 const MinQuickCreateCLIVersion = "0.2.21"
 
+// MinQuickCreateFieldsCLIVersion is the first daemon release that carries
+// explicit quick-create priority and due-date fields from the claim response
+// into the generated issue-create prompt. Basic quick-create remains on the
+// older floor above; only requests using these optional fields need this gate.
+const MinQuickCreateFieldsCLIVersion = "0.4.3"
+
 // MinHandoffCLIVersion is the lowest multica CLI version whose daemon renders
 // the assignment handoff note into the run's opening prompt + issue_context.md
 // (MUL-3375). Unlike quick-create this is a SOFT gate: assigning an issue with
@@ -83,6 +89,13 @@ var devDescribeRe = regexp.MustCompile(`^v?\d+\.\d+\.\d+-\d+-g[0-9a-fA-F]+`)
 // itself is the shared signal, so the modal pre-check and this server gate
 // agree by construction without needing to compare separate env flags.
 func CheckMinCLIVersion(detected string) error {
+	return CheckMinCLIVersionFor(detected, MinQuickCreateCLIVersion)
+}
+
+// CheckMinCLIVersionFor applies the quick-create version policy against a
+// caller-provided capability floor. It preserves the dev-build exemption so
+// feature-specific server and frontend gates agree with the base gate.
+func CheckMinCLIVersionFor(detected, minimum string) error {
 	d := strings.TrimSpace(detected)
 	if d == "" {
 		return ErrCLIVersionMissing
@@ -94,7 +107,7 @@ func CheckMinCLIVersion(detected string) error {
 	if err != nil {
 		return ErrCLIVersionMissing
 	}
-	min, err := parseSemver(MinQuickCreateCLIVersion)
+	min, err := parseSemver(minimum)
 	if err != nil {
 		// Misconfiguration in the constant itself — fail closed as missing.
 		return ErrCLIVersionMissing

@@ -23,7 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
-	"github.com/multica-ai/multica/server/pkg/agent"
+	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -1898,6 +1898,8 @@ type QuickCreateIssueRequest struct {
 	AgentID       string   `json:"agent_id,omitempty"`
 	SquadID       string   `json:"squad_id,omitempty"`
 	Prompt        string   `json:"prompt"`
+	Priority      string   `json:"priority,omitempty"`
+	DueDate       string   `json:"due_date,omitempty"`
 	ProjectID     string   `json:"project_id,omitempty"`
 	ParentIssueID string   `json:"parent_issue_id,omitempty"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
@@ -1919,6 +1921,20 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	if prompt == "" {
 		writeError(w, http.StatusBadRequest, "prompt is required")
 		return
+	}
+	priority := strings.ToLower(strings.TrimSpace(req.Priority))
+	if priority != "" && priority != "urgent" && priority != "high" && priority != "medium" && priority != "low" {
+		writeError(w, http.StatusBadRequest, "priority must be one of: urgent, high, medium, low")
+		return
+	}
+	dueDate := strings.TrimSpace(req.DueDate)
+	if dueDate != "" {
+		parsed, err := util.ParseCalendarDate(dueDate)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid due_date format, expected YYYY-MM-DD")
+			return
+		}
+		dueDate = parsed.Time.Format("2006-01-02")
 	}
 
 	hasAgent := strings.TrimSpace(req.AgentID) != ""
@@ -2027,6 +2043,14 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, payload)
 		return
 	}
+	if priority != "" || dueDate != "" {
+		if status, payload := h.checkQuickCreateDaemonVersionAtLeast(
+			r.Context(), agent.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
+		); status != 0 {
+			writeJSON(w, status, payload)
+			return
+		}
+	}
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
@@ -2074,7 +2098,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		parentIssueUUID = pid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID, attachmentIDs)
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
@@ -2122,6 +2146,10 @@ func (h *Handler) isRuntimeOnline(ctx context.Context, runtimeID pgtype.UUID) bo
 //	  "runtime_id":      "<uuid>"
 //	}
 func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, runtimeID pgtype.UUID) (int, map[string]any) {
+	return h.checkQuickCreateDaemonVersionAtLeast(ctx, runtimeID, agentpkg.MinQuickCreateCLIVersion)
+}
+
+func (h *Handler) checkQuickCreateDaemonVersionAtLeast(ctx context.Context, runtimeID pgtype.UUID, minimum string) (int, map[string]any) {
 	rt, err := h.Queries.GetAgentRuntime(ctx, runtimeID)
 	if err != nil {
 		// Runtime row vanished between the online check and here — treat
@@ -2132,14 +2160,14 @@ func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, runtimeID p
 		}
 	}
 	current := readRuntimeCLIVersion(rt.Metadata)
-	switch err := agent.CheckMinCLIVersion(current); {
+	switch err := agentpkg.CheckMinCLIVersionFor(current, minimum); {
 	case err == nil:
 		return 0, nil
-	case errors.Is(err, agent.ErrCLIVersionMissing), errors.Is(err, agent.ErrCLIVersionTooOld):
+	case errors.Is(err, agentpkg.ErrCLIVersionMissing), errors.Is(err, agentpkg.ErrCLIVersionTooOld):
 		return http.StatusUnprocessableEntity, map[string]any{
 			"code":            "daemon_version_unsupported",
 			"current_version": current,
-			"min_version":     agent.MinQuickCreateCLIVersion,
+			"min_version":     minimum,
 			"runtime_id":      uuidToString(runtimeID),
 		}
 	default:
@@ -2149,7 +2177,7 @@ func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, runtimeID p
 		return http.StatusUnprocessableEntity, map[string]any{
 			"code":            "daemon_version_unsupported",
 			"current_version": current,
-			"min_version":     agent.MinQuickCreateCLIVersion,
+			"min_version":     minimum,
 			"runtime_id":      uuidToString(runtimeID),
 		}
 	}

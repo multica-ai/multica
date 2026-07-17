@@ -24,6 +24,8 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockAttachLabel = vi.hoisted(() => vi.fn());
+const mockListProperties = vi.hoisted(() => vi.fn());
+const mockSetIssueProperty = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
@@ -44,6 +46,7 @@ const mockDraftStore = {
     startDate: null,
     dueDate: null,
     labelIds: [] as string[],
+    propertyValues: {} as Record<string, string | number | boolean | string[]>,
     attachments: [] as Array<{
       id: string;
       workspace_id: string;
@@ -74,6 +77,27 @@ const mockQuickCreateStore = {
   setKeepOpen: mockSetKeepOpen,
 };
 
+type ManualCreateField =
+  | "status"
+  | "priority"
+  | "assignee"
+  | "labels"
+  | "project"
+  | "due_date"
+  | "start_date";
+
+const DEFAULT_MANUAL_FIELDS: ManualCreateField[] = [
+  "status",
+  "priority",
+  "assignee",
+  "labels",
+  "project",
+];
+
+const mockCreateSettingsStore = {
+  manualCreateFields: DEFAULT_MANUAL_FIELDS as ManualCreateField[],
+};
+
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: mockPush }),
 }));
@@ -82,6 +106,7 @@ vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ name: "Test Workspace" }),
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/ws-test/issues/${id}`,
+    settings: () => "/ws-test/settings",
   }),
 }));
 
@@ -136,6 +161,12 @@ vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
     (selector ? selector(mockQuickCreateStore) : mockQuickCreateStore),
 }));
 
+vi.mock("@multica/core/issues/stores/issue-create-settings-store", () => ({
+  useIssueCreateSettingsStore: (
+    selector?: (state: typeof mockCreateSettingsStore) => unknown,
+  ) => (selector ? selector(mockCreateSettingsStore) : mockCreateSettingsStore),
+}));
+
 vi.mock("@multica/core/issues/mutations", () => ({
   useCreateIssue: () => ({ mutateAsync: mockCreateIssue }),
   useUpdateIssue: () => ({ mutate: vi.fn() }),
@@ -144,6 +175,20 @@ vi.mock("@multica/core/issues/mutations", () => ({
 vi.mock("@multica/core/labels", () => ({
   useAttachLabelToIssue: () => ({ mutateAsync: mockAttachLabel }),
 }));
+
+vi.mock("@multica/core/properties", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/properties")>();
+  return {
+    ...actual,
+    useSetIssueProperty: () => ({
+      mutateAsync: ({ issueId, propertyId, value }: {
+        issueId: string;
+        propertyId: string;
+        value: string | number | boolean | string[];
+      }) => mockSetIssueProperty(issueId, propertyId, value),
+    }),
+  };
+});
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: mockUploadWithToast }),
@@ -182,7 +227,10 @@ vi.mock("@multica/core/api", async () => {
     typeof import("@multica/core/api/schemas")
   >("@multica/core/api/schemas");
   return {
-    api: {},
+    api: {
+      listProperties: mockListProperties,
+      setIssueProperty: mockSetIssueProperty,
+    },
     ApiError,
     parseWithFallback,
     DuplicateIssueErrorBodySchema,
@@ -290,7 +338,28 @@ vi.mock("../issues/components", () => ({
       onClick={() => onOpenChange?.(false)}
     />
   ),
-  LabelPicker: () => <div data-testid="label-picker" />,
+  // Labels can now be hidden via Settings → Issue and revealed from the
+  // overflow, so surface open/onOpenChange like the date pickers.
+  LabelPicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
+    <div
+      data-testid="label-picker"
+      data-open={open ? "true" : "false"}
+      onClick={() => onOpenChange?.(false)}
+    />
+  ),
+}));
+
+vi.mock("../issues/components/pickers/custom-property-picker", () => ({
+  CustomPropertyValueInput: ({ property, onChange }: any) => (
+    <button
+      type="button"
+      aria-label={`Edit ${property.name}`}
+      onClick={() => onChange("option-enterprise")}
+    >
+      {property.name}
+    </button>
+  ),
+  CustomPropertyValueDisplay: ({ value }: any) => <span>{String(value)}</span>,
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
@@ -315,6 +384,9 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
     <button type="button" onClick={onClick}>{children}</button>
   ),
   DropdownMenuSeparator: () => null,
+  DropdownMenuSub: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuSubTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuSubContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 vi.mock("./issue-picker-modal", () => ({
@@ -404,6 +476,7 @@ describe("CreateIssueModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuickCreateStore.keepOpen = false;
+    mockCreateSettingsStore.manualCreateFields = DEFAULT_MANUAL_FIELDS;
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
     });
@@ -418,6 +491,7 @@ describe("CreateIssueModal", () => {
     mockDraftStore.draft.startDate = null;
     mockDraftStore.draft.dueDate = null;
     mockDraftStore.draft.labelIds = [];
+    mockDraftStore.draft.propertyValues = {};
     mockDraftStore.draft.attachments = [];
     mockSetDraft.mockImplementation((patch: Partial<typeof mockDraftStore.draft>) => {
       mockDraftStore.draft = { ...mockDraftStore.draft, ...patch };
@@ -433,6 +507,7 @@ describe("CreateIssueModal", () => {
         startDate: null,
         dueDate: null,
         labelIds: [],
+        propertyValues: {},
         attachments: [],
       };
     });
@@ -466,6 +541,29 @@ describe("CreateIssueModal", () => {
       labels: [],
     });
     mockAttachLabel.mockResolvedValue({ labels: [] });
+    mockListProperties.mockResolvedValue({
+      properties: [
+        {
+          id: "property-tier",
+          workspace_id: "ws-test",
+          name: "Customer tier",
+          type: "select",
+          config: {
+            options: [
+              { id: "option-enterprise", name: "Enterprise", color: "#3b82f6" },
+            ],
+          },
+          position: 0,
+          archived: false,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+    mockSetIssueProperty.mockResolvedValue({
+      properties: { "property-tier": "option-enterprise" },
+    });
   });
 
   it("shows success feedback with a direct path to the new issue", async () => {
@@ -620,8 +718,30 @@ describe("CreateIssueModal", () => {
       startDate: null,
       dueDate: null,
       labelIds: [],
+      propertyValues: {},
       attachments: [],
     });
+  });
+
+  it("sets configured custom property values after the issue is created", async () => {
+    const user = userEvent.setup();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await screen.findByText("Customer tier");
+    await user.click(screen.getByText("Customer tier"));
+    await user.click(screen.getByRole("button", { name: "Edit Customer tier" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Enterprise follow-up");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockSetIssueProperty).toHaveBeenCalledWith(
+        "issue-123",
+        "property-tier",
+        "option-enterprise",
+      );
+    });
+    expect(mockClearDraft).toHaveBeenCalled();
   });
 
   it("persists manual-mode uploads in the issue draft", async () => {
@@ -967,6 +1087,55 @@ describe("CreateIssueModal", () => {
     expect(screen.queryByTestId("due-date-picker")).not.toBeInTheDocument();
   });
 
+  it("hides toolbar fields turned off in Settings → Issue and re-reveals them from the overflow", async () => {
+    const user = userEvent.setup();
+    mockCreateSettingsStore.manualCreateFields = ["status", "priority", "assignee", "project"];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.queryByTestId("label-picker")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Set labels/i }));
+
+    const picker = await screen.findByTestId("label-picker");
+    expect(picker).toHaveAttribute("data-open", "true");
+
+    await user.click(picker);
+
+    expect(screen.queryByTestId("label-picker")).not.toBeInTheDocument();
+  });
+
+  it("keeps a hidden field on the toolbar while it holds a value", () => {
+    mockCreateSettingsStore.manualCreateFields = ["status", "priority", "assignee", "project"];
+    mockDraftStore.draft.labelIds = ["label-1"];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.getByTestId("label-picker")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Set labels/i })).not.toBeInTheDocument();
+  });
+
+  it("renders due date inline when enabled in Settings → Issue", () => {
+    mockCreateSettingsStore.manualCreateFields = [...DEFAULT_MANUAL_FIELDS, "due_date"];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.getByTestId("due-date-picker")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Set due date/i })).not.toBeInTheDocument();
+  });
+
+  it("routes Customize fields to Settings → Issue and closes the dialog", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    renderModal(<CreateIssueModal onClose={onClose} />);
+
+    await user.click(screen.getByRole("button", { name: /Customize fields/i }));
+
+    expect(onClose).toHaveBeenCalled();
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/settings?tab=issue");
+  });
+
   // Title + description are packed into the agent prompt on switch; if we
   // leave them in the shared draft store, the next agent→manual switch
   // surfaces the stale manual draft on top of the prompt-as-description,
@@ -1035,16 +1204,12 @@ describe("CreateIssueModal", () => {
       );
     });
 
-    it("blocks Enter on the title while an upload is in flight", async () => {
+    it("never submits manual create from Enter in the title", async () => {
       const user = userEvent.setup();
       renderManual();
       const title = screen.getByPlaceholderText("Issue title");
       await user.type(title, "Has a screenshot");
 
-      startPendingUpload();
-
-      // Title Enter routes to the same handler as the Create button but never
-      // consults its disabled state — the handler's own check is the gate.
       fireEvent.keyDown(title, { key: "Enter" });
       await Promise.resolve();
       expect(mockCreateIssue).not.toHaveBeenCalled();

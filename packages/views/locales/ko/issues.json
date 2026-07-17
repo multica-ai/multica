@@ -343,9 +343,11 @@
     "hover_header_queued_other": "대기 중인 에이전트 {{count}}개",
     "status_running": "작업 중",
     "status_queued": "대기 중",
-    "chip_label": "작업 중",
     "empty_hover": "현재 작업 중인 에이전트가 없습니다",
-    "filter_active_label": "작업 중인 에이전트만 보는 중"
+    "filter_active_label": "에이전트가 작업 중인 issue만 보는 중",
+    "tasks_count_other": "task {{count}}개",
+    "chip_agents_working_other": "작업 중인 에이전트 {{count}}개",
+    "issues_count_other": "issue {{count}}개"
   },
   "agent_live": {
     "is_working": "{{name}} 작업 중",

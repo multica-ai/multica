@@ -1383,6 +1383,66 @@ func TestGetIssueGCCheck_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	}
 }
 
+func TestBatchIssueGCCheck_WithDaemonToken(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	var issueID string
+	err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
+		VALUES ($1, 'batch-gc-check-auth-test-issue', 'done', 'medium', $2, 'member')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID)
+	if err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	defer testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+
+	missingID := "00000000-0000-0000-0000-000000000099"
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check", map[string]any{
+		"issue_ids": []string{issueID, missingID},
+	}, testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "workspaceId", testWorkspaceID)
+
+	testHandler.BatchIssueGCCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BatchIssueGCCheck: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Issues []struct {
+			ID        string `json:"id"`
+			Found     bool   `json:"found"`
+			Status    string `json:"status"`
+			UpdatedAt string `json:"updated_at"`
+		} `json:"issues"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Issues) != 2 {
+		t.Fatalf("issues length = %d, want 2", len(resp.Issues))
+	}
+	if got := resp.Issues[0]; got.ID != issueID || !got.Found || got.Status != "done" || got.UpdatedAt == "" {
+		t.Fatalf("found issue result = %+v", got)
+	}
+	if got := resp.Issues[1]; got.ID != missingID || got.Found || got.Status != "" || got.UpdatedAt != "" {
+		t.Fatalf("missing issue result = %+v", got)
+	}
+
+	// A token for another workspace is rejected before any issue lookup.
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check", map[string]any{
+		"issue_ids": []string{issueID},
+	}, "00000000-0000-0000-0000-000000000000", "attacker-daemon")
+	req = withURLParam(req, "workspaceId", testWorkspaceID)
+	testHandler.BatchIssueGCCheck(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace batch: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // withURLParams merges the given chi URL parameters into the request context.
 // Unlike calling withURLParam twice (which replaces the whole chi.RouteContext
 // and loses earlier params), this preserves previously-added params.
@@ -3091,6 +3151,8 @@ type claimRuntimeGuardTask struct {
 	ChatMessage              string   `json:"chat_message"`
 	ThreadName               string   `json:"thread_name"`
 	QuickCreateAttachmentIDs []string `json:"quick_create_attachment_ids"`
+	QuickCreatePriority      string   `json:"quick_create_priority"`
+	QuickCreateDueDate       string   `json:"quick_create_due_date"`
 	ProjectID                string   `json:"project_id"`
 	ProjectDescription       string   `json:"project_description"`
 }
@@ -3853,6 +3915,8 @@ func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
 		"prompt":         quickPrompt,
 		"requester_id":   testUserID,
 		"workspace_id":   testWorkspaceID,
+		"priority":       "high",
+		"due_date":       "2026-08-01",
 		"attachment_ids": []string{attachmentID},
 	})
 
@@ -3869,6 +3933,9 @@ func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
 	}
 	if len(task.QuickCreateAttachmentIDs) != 1 || task.QuickCreateAttachmentIDs[0] != attachmentID {
 		t.Fatalf("quick-create attachment ids = %#v, want [%q]", task.QuickCreateAttachmentIDs, attachmentID)
+	}
+	if task.QuickCreatePriority != "high" || task.QuickCreateDueDate != "2026-08-01" {
+		t.Fatalf("quick-create fields = {%q, %q}, want {high, 2026-08-01}", task.QuickCreatePriority, task.QuickCreateDueDate)
 	}
 }
 

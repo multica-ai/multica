@@ -2,8 +2,11 @@ package agent
 
 import (
 	"io"
+	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 // agentStderrTailBytes bounds the stderr tail captured for inclusion in
@@ -12,6 +15,29 @@ import (
 // contain typical CLI error lines, small enough to stay sensible inside
 // a task-level Result.Error string.
 const agentStderrTailBytes = 2048
+
+var (
+	agentAuthorizationHeaderRe = regexp.MustCompile(`(?im)(authorization\s*:\s*)[^\r\n]+`)
+	agentJSONSecretRe          = regexp.MustCompile(`(?i)("(?:token|auth|authorization|api[_-]?key|secret|password)"\s*:\s*)"(?:\\.|[^"\\])*"`)
+	agentDiagnosticSecretRe    = regexp.MustCompile(`(?i)(authorization|auth|api[_-]?key|token|secret|password)(\s*[:=]\s*)([^\s,;]+)`)
+)
+
+// sanitizeAgentDiagnostic removes terminal control characters, common secret
+// shapes, and local home-directory details before a child-process diagnostic is
+// persisted in Result.Error. stderr is still forwarded to the local daemon log;
+// this helper protects the task row and user-visible failure comment.
+func sanitizeAgentDiagnostic(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 && r != '\n' && r != '\t' {
+			return -1
+		}
+		return r
+	}, value)
+	value = agentAuthorizationHeaderRe.ReplaceAllString(value, `$1[REDACTED]`)
+	value = agentJSONSecretRe.ReplaceAllString(value, `$1"[REDACTED]"`)
+	value = agentDiagnosticSecretRe.ReplaceAllString(value, `$1$2[REDACTED]`)
+	return redact.Text(value)
+}
 
 // stderrTail forwards writes to an inner writer (typically the daemon's
 // log) while also retaining a bounded tail of the bytes written. Consumers
@@ -59,13 +85,16 @@ func (s *stderrTail) TotalBytes() int64 {
 	return s.total
 }
 
-// Tail returns the captured stderr with leading/trailing whitespace
-// trimmed; empty string means nothing was written or everything was
-// whitespace.
+// Tail returns the captured stderr as valid UTF-8 with leading/trailing
+// whitespace trimmed. A byte-bounded tail can start or end partway through a
+// multi-byte rune, so invalid fragments are discarded before the diagnostic is
+// persisted. The inner writer still receives every original byte verbatim.
+// Empty string means nothing was written or no valid non-whitespace text was
+// captured.
 func (s *stderrTail) Tail() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return strings.TrimSpace(string(s.buf))
+	return strings.TrimSpace(strings.ToValidUTF8(string(s.buf), ""))
 }
 
 // withAgentStderr appends a stderr tail hint to an error message when
