@@ -225,8 +225,11 @@
     "thinking_clear_title": "Clear the override and let the local CLI config (claude/codex) decide the reasoning level"
   },
   "runtime_settings": {
+    "_comment_search_select": "CEREBRO-PATCH(agent-runtime-setting-search-select): searchable Effort and Speed selectors aligned with Model",
     "effort": "Effort",
     "speed": "Speed",
+    "search_effort": "Search effort",
+    "search_speed": "Search speed",
     "runtime_default": "Follow runtime default"
   },
   "model_dropdown": {

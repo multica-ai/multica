@@ -9,6 +9,7 @@
   },
   "exports": {
     ".": "./index.ts",
+    "./components/runtime-setting-search-select": "./components/runtime-setting-search-select.tsx",
     "./components/jump-to-latest-button": "./components/jump-to-latest-button.tsx",
     "./components/issue-context-trigger": "./components/issue-context-trigger.tsx",
     "./hooks/use-sticky-bottom": "./hooks/use-sticky-bottom.ts",

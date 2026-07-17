@@ -4,6 +4,8 @@ import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { Label } from "@multica/ui/components/ui/label";
+// CEREBRO-PATCH(agent-runtime-setting-search-select): reuse the protected Model-aligned selector.
+import { RuntimeSettingSearchSelect } from "@multica/cerebro-ui/components/runtime-setting-search-select";
 import { useT } from "../../i18n";
 
 export function RuntimeSettingsFields({
@@ -61,18 +63,15 @@ export function RuntimeSettingsFields({
           <Label htmlFor="agent-runtime-effort" className="text-xs text-muted-foreground">
             {t(($) => $.runtime_settings.effort)}
           </Label>
-          <select
-            id="agent-runtime-effort"
-            aria-label={t(($) => $.runtime_settings.effort)}
+          <RuntimeSettingSearchSelect
+            variant="form"
+            ariaLabel={t(($) => $.runtime_settings.effort)}
             value={thinkingLevel}
-            onChange={(event) => onThinkingChange(event.target.value)}
-            className="mt-1.5 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
-          >
-            <option value="">{t(($) => $.runtime_settings.runtime_default)}</option>
-            {thinkingLevels.map((level) => (
-              <option key={level.value} value={level.value}>{level.label}</option>
-            ))}
-          </select>
+            options={thinkingLevels}
+            defaultOption={{ value: "", label: t(($) => $.runtime_settings.runtime_default) }}
+            searchPlaceholder={t(($) => $.runtime_settings.search_effort)}
+            onChange={onThinkingChange}
+          />
         </div>
       )}
       {speedLevels.length > 0 && (
@@ -80,17 +79,14 @@ export function RuntimeSettingsFields({
           <Label htmlFor="agent-runtime-speed" className="text-xs text-muted-foreground">
             {t(($) => $.runtime_settings.speed)}
           </Label>
-          <select
-            id="agent-runtime-speed"
-            aria-label={t(($) => $.runtime_settings.speed)}
+          <RuntimeSettingSearchSelect
+            variant="form"
+            ariaLabel={t(($) => $.runtime_settings.speed)}
             value={speedMode || "standard"}
-            onChange={(event) => onSpeedChange(event.target.value)}
-            className="mt-1.5 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
-          >
-            {speedLevels.map((level) => (
-              <option key={level.value} value={level.value}>{level.label}</option>
-            ))}
-          </select>
+            options={speedLevels}
+            searchPlaceholder={t(($) => $.runtime_settings.search_speed)}
+            onChange={onSpeedChange}
+          />
         </div>
       )}
     </div>

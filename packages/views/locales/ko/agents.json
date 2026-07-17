@@ -225,8 +225,11 @@
     "thinking_clear_title": "재정의를 지우고 추론 수준을 로컬 CLI 설정(claude/codex)에 맡깁니다"
   },
   "runtime_settings": {
+    "_comment_search_select": "CEREBRO-PATCH(agent-runtime-setting-search-select): searchable Effort and Speed selectors aligned with Model",
     "effort": "추론 강도",
     "speed": "속도",
+    "search_effort": "추론 강도 검색",
+    "search_speed": "속도 검색",
     "runtime_default": "런타임 기본값 따르기"
   },
   "model_dropdown": {

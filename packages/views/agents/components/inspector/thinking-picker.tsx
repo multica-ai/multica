@@ -1,12 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import type { RuntimeModelThinkingLevel } from "@multica/core/types";
-import {
-  PickerItem,
-  PropertyPicker,
-} from "../../../issues/components/pickers";
-import { CHIP_CLASS } from "./chip";
+// CEREBRO-PATCH(agent-runtime-setting-search-select): align Effort with the searchable Model picker.
+import { RuntimeSettingSearchSelect } from "@multica/cerebro-ui/components/runtime-setting-search-select";
 import { useT } from "../../../i18n";
 
 /**
@@ -41,8 +37,6 @@ export function ThinkingPicker({
   onChange: (next: string) => Promise<void> | void;
 }) {
   const { t } = useT("agents");
-  const [open, setOpen] = useState(false);
-
   const selected = value ? levels.find((l) => l.value === value) : undefined;
   // Unknown-but-set value (model swap that dropped the option, CLI upgrade
   // that trimmed the catalog): show the raw token so the user can see what
@@ -51,14 +45,7 @@ export function ThinkingPicker({
   const triggerLabel = selected
     ? selected.label
     : value || t(($) => $.pickers.thinking_default);
-  const triggerTitle = t(($) => $.pickers.thinking_tooltip, {
-    value: triggerLabel,
-  });
-
-  const select = async (next: string) => {
-    setOpen(false);
-    if (next !== value) await onChange(next);
-  };
+  const triggerTitle = t(($) => $.pickers.thinking_tooltip, { value: triggerLabel });
 
   if (!canEdit) {
     return (
@@ -72,63 +59,15 @@ export function ThinkingPicker({
   }
 
   return (
-    <PropertyPicker
-      open={open}
-      onOpenChange={setOpen}
-      width="w-auto min-w-[14rem] max-w-md"
-      align="start"
-      tooltip={triggerTitle}
-      triggerRender={
-        <button
-          type="button"
-          className={CHIP_CLASS}
-          aria-label={triggerTitle}
-        />
-      }
-      trigger={
-        <span className="min-w-0 truncate font-mono text-[11px]">
-          {triggerLabel}
-        </span>
-      }
-    >
-      {levels.map((l) => (
-        <PickerItem
-          key={l.value}
-          selected={l.value === value}
-          onClick={() => void select(l.value)}
-        >
-          {/* PickerItem wraps children in a flex `<span>`. Putting a
-              `<div>` inside that <span> is block-in-inline (invalid HTML5)
-              and triggers browser quirks that shift descendant x-position.
-              Use a `<span>` with explicit `block` + `text-left` so layout
-              is deterministic across rows regardless of whether the label
-              row has the `default` badge sibling. */}
-          {/* No model-factory-default badge here on purpose: when the
-              picker is "Follow CLI config" (value === ""), Multica omits
-              `--effort` and the local CLI config decides — the model's
-              factory default is irrelevant to what actually fires, so
-              flagging one option as "default" was misleading. */}
-          <span className="block min-w-0 flex-1 text-left">
-            <span className="truncate text-[13px] font-medium">{l.label}</span>
-            {l.description && (
-              <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
-                {l.description}
-              </span>
-            )}
-          </span>
-        </PickerItem>
-      ))}
-
-      {value && (
-        <button
-          type="button"
-          onClick={() => void select("")}
-          className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/50"
-          title={t(($) => $.pickers.thinking_clear_title)}
-        >
-          {t(($) => $.pickers.thinking_clear)}
-        </button>
-      )}
-    </PropertyPicker>
+    <RuntimeSettingSearchSelect
+      variant="property"
+      ariaLabel={t(($) => $.inspector.prop_thinking)}
+      value={value}
+      options={levels}
+      defaultOption={{ value: "", label: t(($) => $.pickers.thinking_clear) }}
+      defaultOptionTitle={t(($) => $.pickers.thinking_clear_title)}
+      searchPlaceholder={t(($) => $.runtime_settings.search_effort)}
+      onChange={onChange}
+    />
   );
 }
