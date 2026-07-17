@@ -7,8 +7,10 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { useTranslation } from "react-i18next"
 
 import { useIsMobile } from "@multica/ui/hooks/use-mobile"
+import { useResizeGesture, type ResizeDelta } from "@multica/ui/hooks/use-resize-gesture"
 import { cn } from "@multica/ui/lib/utils"
 import { Button } from "@multica/ui/components/ui/button"
+import { resizeHandleVariants } from "@multica/ui/components/ui/resize-handle"
 import { Input } from "@multica/ui/components/ui/input"
 import { Separator } from "@multica/ui/components/ui/separator"
 import {
@@ -322,8 +324,6 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
   const toggleLabel = t(($) => $.toggle_sidebar)
   const didDragRef = React.useRef(false)
   const dragRef = React.useRef<{
-    pointerId: number
-    startX: number
     startWidth: number
     latestWidth: number
     direction: 1 | -1
@@ -331,27 +331,21 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
     gapEl: HTMLElement
     containerEl: HTMLElement
   } | null>(null)
-  const cancelActiveDragRef = React.useRef<(() => void) | null>(null)
 
-  React.useEffect(() => () => cancelActiveDragRef.current?.(), [])
-
-  const onPointerDown = React.useCallback(
-    (e: React.PointerEvent<HTMLButtonElement>) => {
-      if (e.button !== 0 || e.isPrimary === false) return
-      e.preventDefault()
-      cancelActiveDragRef.current?.()
+  const handleResizeStart = React.useCallback(
+    (e: React.PointerEvent<HTMLElement>) => {
       didDragRef.current = false
       const railEl = e.currentTarget
       const sidebarEl = railEl.closest<HTMLElement>("[data-slot='sidebar']")
       const wrapperEl = railEl.closest<HTMLElement>("[data-slot='sidebar-wrapper']")
       const gapEl = sidebarEl?.querySelector<HTMLElement>("[data-slot='sidebar-gap']")
       const containerEl = sidebarEl?.querySelector<HTMLElement>("[data-slot='sidebar-container']")
-      if (!sidebarEl || !wrapperEl || !gapEl || !containerEl) return
+      if (!sidebarEl || !wrapperEl || !gapEl || !containerEl) return false
 
-      const startWidth = clampSidebarWidth(containerEl.getBoundingClientRect().width)
+      const startWidth = clampSidebarWidth(
+        containerEl.getBoundingClientRect().width
+      )
       dragRef.current = {
-        pointerId: e.pointerId,
-        startX: e.clientX,
         startWidth,
         latestWidth: startWidth,
         direction: sidebarEl.dataset.side === "right" ? -1 : 1,
@@ -359,85 +353,62 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         gapEl,
         containerEl,
       }
-
       wrapperEl.setAttribute("data-sidebar-resizing", "true")
-      document.documentElement.setAttribute("data-sidebar-resizing", "true")
+      return true
+    },
+    []
+  )
 
-      let finished = false
-      const finishDrag = (mode: "commit" | "cancel") => {
-        if (finished) return
-        finished = true
+  const handleResize = React.useCallback(({ dx }: ResizeDelta) => {
+    const drag = dragRef.current
+    if (!drag) return
 
-        document.removeEventListener("pointermove", onPointerMove)
-        document.removeEventListener("pointerup", onPointerUp)
-        document.removeEventListener("pointercancel", onPointerCancel)
-        window.removeEventListener("blur", onWindowBlur)
-        railEl.removeEventListener("lostpointercapture", onLostPointerCapture)
+    // The gesture only reports past its threshold, so reaching here is what
+    // makes this a drag rather than a click-to-toggle.
+    didDragRef.current = true
+    const nextWidth = clampSidebarWidth(drag.startWidth + dx * drag.direction)
+    if (nextWidth === drag.latestWidth) return
 
-        const drag = dragRef.current
-        if (drag) {
-          if (mode === "commit" && didDragRef.current) {
-            drag.wrapperEl.style.setProperty(
-              "--sidebar-width",
-              `${drag.latestWidth}px`
-            )
-            commitWidth(drag.latestWidth)
-          }
-          drag.gapEl.style.removeProperty("width")
-          drag.containerEl.style.removeProperty("width")
-          drag.wrapperEl.removeAttribute("data-sidebar-resizing")
+    drag.latestWidth = nextWidth
+    // Only the two layout shells depend on the live width. Direct writes
+    // let the browser coalesce layout at paint time without a React commit
+    // or an inherited custom-property invalidation on the whole app tree.
+    drag.gapEl.style.width = `${nextWidth}px`
+    drag.containerEl.style.width = `${nextWidth}px`
+  }, [])
+
+  const handleResizeEnd = React.useCallback(
+    (mode: "commit" | "cancel") => {
+      const drag = dragRef.current
+      if (!drag) return
+      dragRef.current = null
+
+      try {
+        if (mode === "commit" && didDragRef.current) {
+          drag.wrapperEl.style.setProperty(
+            "--sidebar-width",
+            `${drag.latestWidth}px`
+          )
+          commitWidth(drag.latestWidth)
         }
-
-        dragRef.current = null
-        cancelActiveDragRef.current = null
-        document.documentElement.removeAttribute("data-sidebar-resizing")
-
-        if (railEl.hasPointerCapture?.(e.pointerId)) {
-          railEl.releasePointerCapture?.(e.pointerId)
-        }
+      } finally {
+        // Persisting the width can throw (storage quota); the preview must be
+        // torn down regardless or the sidebar keeps its inline drag width.
+        drag.gapEl.style.removeProperty("width")
+        drag.containerEl.style.removeProperty("width")
+        drag.wrapperEl.removeAttribute("data-sidebar-resizing")
       }
-
-      const onPointerMove = (event: PointerEvent) => {
-        const drag = dragRef.current
-        if (!drag || event.pointerId !== drag.pointerId) return
-
-        const delta = (event.clientX - drag.startX) * drag.direction
-        if (!didDragRef.current && Math.abs(delta) < SIDEBAR_DRAG_THRESHOLD) {
-          return
-        }
-
-        didDragRef.current = true
-        const nextWidth = clampSidebarWidth(drag.startWidth + delta)
-        if (nextWidth === drag.latestWidth) return
-
-        drag.latestWidth = nextWidth
-        // Only the two layout shells depend on the live width. Direct writes
-        // let the browser coalesce layout at paint time without a React commit
-        // or an inherited custom-property invalidation on the whole app tree.
-        drag.gapEl.style.width = `${nextWidth}px`
-        drag.containerEl.style.width = `${nextWidth}px`
-      }
-      const onPointerUp = (event: PointerEvent) => {
-        if (event.pointerId === e.pointerId) finishDrag("commit")
-      }
-      const onPointerCancel = (event: PointerEvent) => {
-        if (event.pointerId === e.pointerId) finishDrag("cancel")
-      }
-      const onLostPointerCapture = (event: PointerEvent) => {
-        if (event.pointerId === e.pointerId) finishDrag("cancel")
-      }
-      const onWindowBlur = () => finishDrag("cancel")
-
-      document.addEventListener("pointermove", onPointerMove)
-      document.addEventListener("pointerup", onPointerUp)
-      document.addEventListener("pointercancel", onPointerCancel)
-      window.addEventListener("blur", onWindowBlur)
-      railEl.addEventListener("lostpointercapture", onLostPointerCapture)
-      cancelActiveDragRef.current = () => finishDrag("cancel")
-      railEl.setPointerCapture?.(e.pointerId)
     },
     [commitWidth]
   )
+
+  const { onPointerDown } = useResizeGesture({
+    axis: "x",
+    threshold: SIDEBAR_DRAG_THRESHOLD,
+    onStart: handleResizeStart,
+    onMove: handleResize,
+    onEnd: handleResizeEnd,
+  })
 
   const handleClick = React.useCallback(() => {
     if (!didDragRef.current) toggleSidebar()
@@ -454,7 +425,8 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       onPointerDown={onPointerDown}
       title={toggleLabel}
       className={cn(
-        "absolute inset-y-0 z-20 hidden w-4 touch-none cursor-ew-resize transition-[transform,background-color] ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
+        resizeHandleVariants({ axis: "x", indicator: "line" }),
+        "absolute inset-y-0 z-20 hidden w-4 transition-[transform,background-color] ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
         "group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full hover:group-data-[collapsible=offcanvas]:bg-sidebar",
         "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
         "[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",

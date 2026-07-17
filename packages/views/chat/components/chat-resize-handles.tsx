@@ -1,34 +1,60 @@
 "use client";
 
-import React from "react";
+import { ResizeHandle } from "@multica/ui/components/ui/resize-handle";
+import type {
+  ResizeAxis,
+  ResizeDelta,
+} from "@multica/ui/hooks/use-resize-gesture";
+import { cn } from "@multica/ui/lib/utils";
 
-type DragDir = "left" | "top" | "corner";
+import type { DragDir } from "./use-chat-resize";
 
 interface ChatResizeHandlesProps {
-  onDragStart: (e: React.PointerEvent, dir: DragDir) => void;
+  onResizeStart: () => void;
+  onResize: (dir: DragDir, delta: ResizeDelta) => void;
+  onResizeEnd: () => void;
 }
 
-export function ChatResizeHandles({ onDragStart }: ChatResizeHandlesProps) {
+// The window is anchored bottom-right, so only the left edge, top edge and
+// top-left corner are draggable. Edge handles start past the corner's 16px box
+// so the three hit areas never overlap; the indicator sits on the window edge
+// itself rather than centred in the hit area.
+const HANDLES: {
+  dir: DragDir;
+  axis: ResizeAxis;
+  className: string;
+}[] = [
+  {
+    dir: "left",
+    axis: "x",
+    className: "left-0 top-4 bottom-0 w-2 z-10 after:start-0",
+  },
+  {
+    dir: "top",
+    axis: "y",
+    className: "top-0 left-4 right-0 h-2 z-10 after:top-0",
+  },
+  { dir: "corner", axis: "xy", className: "top-0 left-0 size-4 z-20" },
+];
+
+export function ChatResizeHandles({
+  onResizeStart,
+  onResize,
+  onResizeEnd,
+}: ChatResizeHandlesProps) {
   return (
     <>
-      {/* Left edge — expands width when dragged left */}
-      <div
-        aria-hidden
-        onPointerDown={(e) => onDragStart(e, "left")}
-        className="absolute left-0 top-4 bottom-0 w-1 z-10 cursor-col-resize"
-      />
-      {/* Top edge — expands height when dragged up */}
-      <div
-        aria-hidden
-        onPointerDown={(e) => onDragStart(e, "top")}
-        className="absolute top-0 left-4 right-0 h-1 z-10 cursor-row-resize"
-      />
-      {/* Top-left corner — expands both width and height */}
-      <div
-        aria-hidden
-        onPointerDown={(e) => onDragStart(e, "corner")}
-        className="absolute top-0 left-0 size-4 z-20 cursor-nw-resize"
-      />
+      {HANDLES.map(({ dir, axis, className }) => (
+        <ResizeHandle
+          key={dir}
+          aria-hidden
+          axis={axis}
+          className={cn("absolute", className)}
+          onResizeStart={onResizeStart}
+          onResize={(delta) => onResize(dir, delta)}
+          onResizeEnd={onResizeEnd}
+        />
+      ))}
     </>
   );
 }

@@ -2,8 +2,9 @@
 
 import React, { useRef, useCallback, useState, useEffect } from "react";
 import { CHAT_MIN_W, CHAT_MIN_H, useChatStore } from "@multica/core/chat";
+import type { ResizeDelta } from "@multica/ui/hooks/use-resize-gesture";
 
-type DragDir = "left" | "top" | "corner";
+export type DragDir = "left" | "top" | "corner";
 
 const MAX_RATIO = 0.9;
 const FALLBACK_MAX_W = 800;
@@ -73,68 +74,46 @@ export function useChatResize(
   }, [isExpanded, isAtMax, setChatSize, setExpanded]);
 
   // ── Drag ──────────────────────────────────────────────────────────────
-  const dragRef = useRef<{
-    startX: number;
-    startY: number;
-    startW: number;
-    startH: number;
-    dir: DragDir;
-  } | null>(null);
+  // The pointer gesture itself (capture, cursor lock, teardown) belongs to
+  // useResizeGesture in the handles; this hook only owns the size maths.
+  const dragRef = useRef<{ startW: number; startH: number } | null>(null);
 
-  const startDrag = useCallback(
-    (e: React.PointerEvent, dir: DragDir) => {
-      e.preventDefault();
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  const handleResizeStart = useCallback(() => {
+    dragRef.current = { startW: renderWidth, startH: renderHeight };
+    setIsDragging(true);
+  }, [renderWidth, renderHeight]);
 
-      dragRef.current = {
-        startX: e.clientX,
-        startY: e.clientY,
-        startW: renderWidth,
-        startH: renderHeight,
-        dir,
-      };
-      setIsDragging(true);
+  const handleResize = useCallback(
+    (dir: DragDir, { dx, dy }: ResizeDelta) => {
+      const d = dragRef.current;
+      if (!d) return;
 
-      const onPointerMove = (ev: PointerEvent) => {
-        const d = dragRef.current;
-        if (!d) return;
+      const { maxW: mw, maxH: mh } = boundsRef.current;
 
-        const { maxW: mw, maxH: mh } = boundsRef.current;
+      // The window is anchored bottom-right, so dragging the left/top edges
+      // away from it (negative delta) grows the window.
+      const rawW = dir === "left" || dir === "corner" ? d.startW - dx : d.startW;
+      const rawH = dir === "top" || dir === "corner" ? d.startH - dy : d.startH;
 
-        const rawW =
-          dir === "left" || dir === "corner"
-            ? d.startW - (ev.clientX - d.startX)
-            : d.startW;
-        const rawH =
-          dir === "top" || dir === "corner"
-            ? d.startH - (ev.clientY - d.startY)
-            : d.startH;
-
-        setChatSize(clamp(rawW, CHAT_MIN_W, mw), clamp(rawH, CHAT_MIN_H, mh));
-      };
-
-      const onPointerUp = () => {
-        dragRef.current = null;
-        setIsDragging(false);
-        document.removeEventListener("pointermove", onPointerMove);
-        document.removeEventListener("pointerup", onPointerUp);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-      };
-
-      document.addEventListener("pointermove", onPointerMove);
-      document.addEventListener("pointerup", onPointerUp);
-
-      const cursorMap: Record<DragDir, string> = {
-        left: "col-resize",
-        top: "row-resize",
-        corner: "nw-resize",
-      };
-      document.body.style.cursor = cursorMap[dir];
-      document.body.style.userSelect = "none";
+      setChatSize(clamp(rawW, CHAT_MIN_W, mw), clamp(rawH, CHAT_MIN_H, mh));
     },
-    [renderWidth, renderHeight, setChatSize],
+    [setChatSize],
   );
 
-  return { renderWidth, renderHeight, isAtMax, boundsReady, isDragging, toggleExpand, startDrag };
+  const handleResizeEnd = useCallback(() => {
+    dragRef.current = null;
+    setIsDragging(false);
+  }, []);
+
+  return {
+    renderWidth,
+    renderHeight,
+    isAtMax,
+    boundsReady,
+    isDragging,
+    toggleExpand,
+    handleResizeStart,
+    handleResize,
+    handleResizeEnd,
+  };
 }

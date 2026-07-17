@@ -687,7 +687,17 @@ export function ChatWindow() {
   const isExpanded = useChatStore((s) => s.isExpanded);
 
   const windowRef = useRef<HTMLDivElement>(null);
-  const { renderWidth, renderHeight, isAtMax, boundsReady, isDragging, toggleExpand, startDrag } = useChatResize(windowRef);
+  const {
+    renderWidth,
+    renderHeight,
+    isAtMax,
+    boundsReady,
+    isDragging,
+    toggleExpand,
+    handleResizeStart,
+    handleResize,
+    handleResizeEnd,
+  } = useChatResize(windowRef);
 
   // Show the list (vs empty state) as soon as there's anything to display —
   // a real message, or a pending task whose timeline will stream in.
@@ -722,7 +732,11 @@ export function ChatWindow() {
         scale: { type: "spring", duration: 0.2, bounce: 0 },
       }}
     >
-      <ChatResizeHandles onDragStart={startDrag} />
+      <ChatResizeHandles
+        onResizeStart={handleResizeStart}
+        onResize={handleResize}
+        onResizeEnd={handleResizeEnd}
+      />
       {/* Header — ⊕ new + session dropdown | window tools */}
       <div className="flex items-center justify-between border-b px-4 py-2.5 gap-2">
         <div className="flex items-center gap-1 min-w-0">

@@ -12,7 +12,7 @@ import { renderWithI18n } from "../test/i18n";
 describe("left sidebar resizing", () => {
   beforeEach(() => {
     localStorage.clear();
-    document.documentElement.removeAttribute("data-sidebar-resizing");
+    document.documentElement.removeAttribute("data-resize-axis");
   });
 
   afterEach(() => {
@@ -72,7 +72,7 @@ describe("left sidebar resizing", () => {
     expect(setPointerCapture).toHaveBeenCalledWith(7);
     expect(rail).toHaveClass("cursor-ew-resize");
     expect(wrapper).toHaveAttribute("data-sidebar-resizing", "true");
-    expect(document.documentElement).toHaveAttribute("data-sidebar-resizing", "true");
+    expect(document.documentElement).toHaveAttribute("data-resize-axis", "x");
 
     fireEvent.pointerMove(document, { buttons: 1, clientX: 280, pointerId: 7 });
     fireEvent.pointerMove(document, { buttons: 1, clientX: 300, pointerId: 7 });
@@ -92,7 +92,7 @@ describe("left sidebar resizing", () => {
     expect(setItem).toHaveBeenCalledWith("sidebar_width", "300");
     expect(releasePointerCapture).toHaveBeenCalledWith(7);
     expect(wrapper).not.toHaveAttribute("data-sidebar-resizing");
-    expect(document.documentElement).not.toHaveAttribute("data-sidebar-resizing");
+    expect(document.documentElement).not.toHaveAttribute("data-resize-axis");
     expect(stableConsumerRender).toHaveBeenCalledTimes(1);
 
     fireEvent.click(rail);
@@ -143,6 +143,6 @@ describe("left sidebar resizing", () => {
     expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("256px");
     expect(setItem).not.toHaveBeenCalled();
     expect(wrapper).not.toHaveAttribute("data-sidebar-resizing");
-    expect(document.documentElement).not.toHaveAttribute("data-sidebar-resizing");
+    expect(document.documentElement).not.toHaveAttribute("data-resize-axis");
   });
 });
