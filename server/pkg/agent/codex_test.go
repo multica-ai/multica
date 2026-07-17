@@ -2415,6 +2415,46 @@ func TestFilterCodexCustomConfigOverridesDropsMcpServers(t *testing.T) {
 	}
 }
 
+func TestFilterCodexShellEnvConfigOverrides(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "root policy override",
+			in:   []string{"-c", `shell_environment_policy.include_only=["PATH"]`, "-c", `model="o3"`},
+			want: []string{"-c", `model="o3"`},
+		},
+		{
+			name: "profile policy override",
+			in:   []string{`--config=profiles.work.shell_environment_policy.ignore_default_excludes=false`, "--sandbox", "workspace-write"},
+			want: []string{"--sandbox", "workspace-write"},
+		},
+		{
+			name: "quoted policy key",
+			in:   []string{"--config", `profiles.work."shell_environment_policy".inherit="none"`},
+			want: []string{},
+		},
+		{
+			name: "unrelated override survives",
+			in:   []string{"-c", `model="o3"`, "-c", `profiles.work.model="gpt-5.6"`, "-c", `tools.shell_environment_policy="metadata"`},
+			want: []string{"-c", `model="o3"`, "-c", `profiles.work.model="gpt-5.6"`, "-c", `tools.shell_environment_policy="metadata"`},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := filterCodexShellEnvConfigOverrides(tc.in, slog.Default())
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("filterCodexShellEnvConfigOverrides(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEnsureCodexMcpConfigEmptyClearsBlock(t *testing.T) {
 	t.Parallel()
 
