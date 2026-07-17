@@ -50,7 +50,7 @@ import { useMembersTabCerebroExtras } from "@multica/cerebro-members/views";
 import { useNavigation } from "@multica/views/navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { TasksPage } from "@multica/cerebro-tasks";
-import { RocksPage, StrategyPage, useCerebroOperatingSystemSettingsTabs } from "@multica/cerebro-operating-system/views";
+import { MeetingsPage, OrgChartPage, RocksPage, StrategyPage, useCerebroOperatingSystemSettingsTabs } from "@multica/cerebro-operating-system/views";
 import { ApprovalsPage } from "@multica/cerebro-approvals";
 import { AppBuilderPage, AppDetailPage, AppEditorPage, AppsPage } from "@multica/cerebro-apps";
 import { api } from "@multica/core/api";
@@ -366,6 +366,8 @@ export const appRoutes: RouteObject[] = [
           { path: "tasks", element: <TasksPage />, handle: { title: "Tasks" } },
           { path: "rocks", element: <RocksPage />, handle: { title: "Rocks" } },
           { path: "strategy", element: <StrategyPage />, handle: { title: "Strategy" } },
+          { path: "meetings", element: <MeetingsPage />, handle: { title: "Meetings" } },
+          { path: "org-chart", element: <OrgChartPage />, handle: { title: "Org Chart" } },
           {
             path: "approvals",
             element: <ApprovalsPage />,

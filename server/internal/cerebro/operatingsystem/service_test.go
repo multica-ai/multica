@@ -78,6 +78,45 @@ func TestValidateVisionPlanItemInput(t *testing.T) {
 	}
 }
 
+func TestValidateMeetingInput(t *testing.T) {
+	valid := MeetingConfigInput{
+		CadenceUnit: "week", CadenceCount: 1,
+		Agenda: []MeetingAgendaSectionInput{{ID: "check-in", Name: "Check-in", Binding: "none"}},
+	}
+	if err := ValidateMeetingInput(valid); err != nil {
+		t.Fatalf("valid meeting rejected: %v", err)
+	}
+	invalid := []MeetingConfigInput{
+		{CadenceUnit: "fortnight", CadenceCount: 1},
+		{CadenceUnit: "week", CadenceCount: 0},
+		{CadenceUnit: "week", CadenceCount: 1, Agenda: []MeetingAgendaSectionInput{{Name: "", Binding: "none"}}},
+		{CadenceUnit: "week", CadenceCount: 1, Agenda: []MeetingAgendaSectionInput{{Name: "Review", Binding: "unknown"}}},
+	}
+	for _, input := range invalid {
+		if err := ValidateMeetingInput(input); err == nil {
+			t.Fatalf("invalid meeting accepted: %#v", input)
+		}
+	}
+}
+
+func TestValidateOrgChartSeatInput(t *testing.T) {
+	valid := OrgChartSeatInput{Name: "Operations", Responsibilities: []string{"Run the weekly plan"}}
+	if err := ValidateOrgChartSeatInput(valid); err != nil {
+		t.Fatalf("valid seat rejected: %v", err)
+	}
+	invalid := []OrgChartSeatInput{
+		{Name: ""},
+		{Name: "Operations", OwnerType: "member"},
+		{Name: "Operations", OwnerType: "team", OwnerID: testMemberID},
+		{Name: "Operations", OwnerType: "member", OwnerID: "not-a-uuid"},
+	}
+	for _, input := range invalid {
+		if err := ValidateOrgChartSeatInput(input); err == nil {
+			t.Fatalf("invalid seat accepted: %#v", input)
+		}
+	}
+}
+
 func TestValidateRockInput(t *testing.T) {
 	valid := RockInput{
 		Title:          "Cut fulfilment cost 12%",
@@ -175,8 +214,8 @@ func TestElementRegistryEnablesTodaysElementsByDefault(t *testing.T) {
 	if !byKey["goals"].Enabled || !byKey["vision_plan"].Enabled {
 		t.Fatal("elements with a shipped interface must default to enabled")
 	}
-	if byKey["meetings"].Enabled || byKey["scorecard"].Enabled {
-		t.Fatal("elements without a shipped interface must default to disabled")
+	if !byKey["meetings"].Enabled || !byKey["org_chart"].Enabled || byKey["scorecard"].Enabled {
+		t.Fatal("shipped Stage 4 elements must default to enabled while scorecard remains disabled")
 	}
 }
 

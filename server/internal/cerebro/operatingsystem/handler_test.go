@@ -170,6 +170,34 @@ func TestHandlerListsElements(t *testing.T) {
 	}
 }
 
+func TestHandlerGetsMeeting(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{getMeeting: func(context.Context, pgtype.UUID) (MeetingConfigResponse, error) {
+		return MeetingConfigResponse{CadenceUnit: "week", CadenceCount: 1}, nil
+	}})
+	req := memberRequest(http.MethodGet, "/api/cerebro/meetings", "")
+	rec := httptest.NewRecorder()
+
+	h.GetMeeting(rec, req)
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"cadence_unit":"week"`) {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerCreatesOrgChartSeat(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{createOrgSeat: func(_ context.Context, _ pgtype.UUID, input OrgChartSeatInput) (OrgChartSeatResponse, error) {
+		return OrgChartSeatResponse{ID: "seat-1", Name: input.Name, Vacant: true}, nil
+	}})
+	req := memberRequest(http.MethodPost, "/api/cerebro/org-chart/seats", `{"name":"Operations","responsibilities":["Run the weekly plan"],"position":0}`)
+	rec := httptest.NewRecorder()
+
+	h.CreateOrgChartSeat(rec, req)
+
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), "Operations") {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandlerMapsUnknownElementToBadRequest(t *testing.T) {
 	h := NewHandler(&fakeHandlerService{updateElement: func(_ context.Context, _ pgtype.UUID, key string, _ bool) (OsElementResponse, error) {
 		return OsElementResponse{}, errors.New(`invalid element "` + key + `"`)
@@ -254,6 +282,8 @@ func withURLParam(req *http.Request, key, value string) *http.Request {
 }
 
 type fakeHandlerService struct {
+	getMeeting          func(context.Context, pgtype.UUID) (MeetingConfigResponse, error)
+	createOrgSeat       func(context.Context, pgtype.UUID, OrgChartSeatInput) (OrgChartSeatResponse, error)
 	createStrategy      func(context.Context, pgtype.UUID, StrategyItemInput) (StrategyItemResponse, error)
 	listStrategy        func(context.Context, pgtype.UUID) ([]StrategyItemResponse, error)
 	upsertRock          func(context.Context, pgtype.UUID, RockInput) error
@@ -263,6 +293,31 @@ type fakeHandlerService struct {
 	createPeriod        func(context.Context, pgtype.UUID, OperatingPeriodInput) (OperatingPeriodResponse, error)
 	listVisionPlan      func(context.Context, pgtype.UUID) (VisionPlanResponse, error)
 	createVisionSection func(context.Context, pgtype.UUID, VisionPlanSectionInput) (VisionPlanSectionResponse, error)
+}
+
+func (f *fakeHandlerService) GetMeeting(ctx context.Context, ws pgtype.UUID) (MeetingConfigResponse, error) {
+	if f.getMeeting == nil {
+		return MeetingConfigResponse{}, nil
+	}
+	return f.getMeeting(ctx, ws)
+}
+func (f *fakeHandlerService) UpdateMeeting(context.Context, pgtype.UUID, MeetingConfigInput) (MeetingConfigResponse, error) {
+	return MeetingConfigResponse{}, nil
+}
+func (f *fakeHandlerService) ListOrgChartSeats(context.Context, pgtype.UUID) ([]OrgChartSeatResponse, error) {
+	return []OrgChartSeatResponse{}, nil
+}
+func (f *fakeHandlerService) CreateOrgChartSeat(ctx context.Context, ws pgtype.UUID, input OrgChartSeatInput) (OrgChartSeatResponse, error) {
+	if f.createOrgSeat == nil {
+		return OrgChartSeatResponse{}, nil
+	}
+	return f.createOrgSeat(ctx, ws, input)
+}
+func (f *fakeHandlerService) UpdateOrgChartSeat(context.Context, pgtype.UUID, pgtype.UUID, OrgChartSeatInput) (OrgChartSeatResponse, error) {
+	return OrgChartSeatResponse{}, nil
+}
+func (f *fakeHandlerService) DeleteOrgChartSeat(context.Context, pgtype.UUID, pgtype.UUID) (bool, error) {
+	return true, nil
 }
 
 func (f *fakeHandlerService) ListVisionPlan(ctx context.Context, ws pgtype.UUID) (VisionPlanResponse, error) {

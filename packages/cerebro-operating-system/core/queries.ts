@@ -1,6 +1,6 @@
 import { queryOptions, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { addRockCheckIn, createConnection, createGoalType, createPeriod, createRock, createStrategyItem, createVisionPlanItem, createVisionPlanSection, deleteConnection, deleteGoalType, deletePeriod, deleteVisionPlanItem, deleteVisionPlanSection, fetchConnections, fetchElements, fetchGoalTypes, fetchPeriods, fetchRocks, fetchSettings, fetchStrategy, fetchStrategyHistory, fetchVisionPlan, updateElement, updateGoalType, updatePeriod, updateRock, updateSettings, updateStrategyItem, updateVisionPlanItem, updateVisionPlanSection } from "./api";
-import type { GoalTypeInput, ObjectConnectionInput, OperatingPeriodInput, RockCheckInInput, RockInput, StrategyItemInput, Terminology, VisionPlanItemInput, VisionPlanSectionInput } from "./types";
+import { addRockCheckIn, createConnection, createGoalType, createOrgChartSeat, createPeriod, createRock, createStrategyItem, createVisionPlanItem, createVisionPlanSection, deleteConnection, deleteGoalType, deleteOrgChartSeat, deletePeriod, deleteVisionPlanItem, deleteVisionPlanSection, fetchConnections, fetchElements, fetchGoalTypes, fetchMeeting, fetchOrgChart, fetchPeriods, fetchRocks, fetchSettings, fetchStrategy, fetchStrategyHistory, fetchVisionPlan, updateElement, updateGoalType, updateMeeting, updateOrgChartSeat, updatePeriod, updateRock, updateSettings, updateStrategyItem, updateVisionPlanItem, updateVisionPlanSection } from "./api";
+import type { GoalTypeInput, MeetingConfigInput, ObjectConnectionInput, OperatingPeriodInput, OrgChartSeatInput, RockCheckInInput, RockInput, StrategyItemInput, Terminology, VisionPlanItemInput, VisionPlanSectionInput } from "./types";
 
 export const operatingSystemKeys = {
   all: (wsId: string) => ["cerebro", "operating-system", wsId] as const,
@@ -13,6 +13,8 @@ export const operatingSystemKeys = {
   goalTypes: (wsId: string) => [...operatingSystemKeys.all(wsId), "goal-types"] as const,
   connections: (wsId: string, objectType: string, objectId: string) => [...operatingSystemKeys.all(wsId), "connections", objectType, objectId] as const,
   visionPlan: (wsId: string) => [...operatingSystemKeys.all(wsId), "vision-plan"] as const,
+  meeting: (wsId: string) => [...operatingSystemKeys.all(wsId), "meeting"] as const,
+  orgChart: (wsId: string) => [...operatingSystemKeys.all(wsId), "org-chart"] as const,
 };
 export const settingsOptions = (wsId: string) => queryOptions({ queryKey: operatingSystemKeys.settings(wsId), queryFn: fetchSettings, enabled: !!wsId });
 export const periodsOptions = (wsId: string) => queryOptions({ queryKey: operatingSystemKeys.periods(wsId), queryFn: fetchPeriods, enabled: !!wsId });
@@ -23,6 +25,12 @@ export const elementsOptions = (wsId: string) => queryOptions({ queryKey: operat
 export const goalTypesOptions = (wsId: string) => queryOptions({ queryKey: operatingSystemKeys.goalTypes(wsId), queryFn: fetchGoalTypes, enabled: !!wsId });
 export const connectionsOptions = (wsId: string, objectType: string, objectId: string) => queryOptions({ queryKey: operatingSystemKeys.connections(wsId, objectType, objectId), queryFn: () => fetchConnections(objectType, objectId), enabled: !!wsId && !!objectType && !!objectId });
 export const visionPlanOptions = (wsId: string) => queryOptions({ queryKey: operatingSystemKeys.visionPlan(wsId), queryFn: fetchVisionPlan, enabled: !!wsId });
+export const meetingOptions = (wsId: string) => queryOptions({ queryKey: operatingSystemKeys.meeting(wsId), queryFn: fetchMeeting, enabled: !!wsId });
+export const orgChartOptions = (wsId: string) => queryOptions({ queryKey: operatingSystemKeys.orgChart(wsId), queryFn: fetchOrgChart, enabled: !!wsId });
+export function useUpdateMeeting(wsId: string) { const qc = useQueryClient(); return useMutation({ mutationFn: (input: MeetingConfigInput) => updateMeeting(input), onSettled: () => qc.invalidateQueries({ queryKey: operatingSystemKeys.meeting(wsId) }) }); }
+export function useCreateOrgChartSeat(wsId: string) { const qc = useQueryClient(); return useMutation({ mutationFn: (input: OrgChartSeatInput) => createOrgChartSeat(input), onSettled: () => qc.invalidateQueries({ queryKey: operatingSystemKeys.orgChart(wsId) }) }); }
+export function useUpdateOrgChartSeat(wsId: string) { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, input }: { id: string; input: OrgChartSeatInput }) => updateOrgChartSeat(id, input), onSettled: () => qc.invalidateQueries({ queryKey: operatingSystemKeys.orgChart(wsId) }) }); }
+export function useDeleteOrgChartSeat(wsId: string) { const qc = useQueryClient(); return useMutation({ mutationFn: deleteOrgChartSeat, onSettled: () => qc.invalidateQueries({ queryKey: operatingSystemKeys.orgChart(wsId) }) }); }
 export function useCreateStrategyItem(wsId: string) { const qc = useQueryClient(); return useMutation({ mutationFn: (input: StrategyItemInput) => createStrategyItem(input), onSettled: () => { qc.invalidateQueries({ queryKey: operatingSystemKeys.strategy(wsId) }); qc.invalidateQueries({ queryKey: operatingSystemKeys.strategyHistory(wsId) }); } }) }
 export function useUpdateStrategyItem(wsId: string) { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, input }: { id: string; input: StrategyItemInput }) => updateStrategyItem(id, input), onSettled: () => { qc.invalidateQueries({ queryKey: operatingSystemKeys.strategy(wsId) }); qc.invalidateQueries({ queryKey: operatingSystemKeys.strategyHistory(wsId) }); } }) }
 export function useSaveRock(wsId: string) { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, input }: { id?: string; input: RockInput }) => id ? updateRock(id, input) : createRock(input), onSettled: () => { qc.invalidateQueries({ queryKey: operatingSystemKeys.rocks(wsId) }); qc.invalidateQueries({ queryKey: operatingSystemKeys.strategy(wsId) }); } }); }

@@ -1313,6 +1313,16 @@ type CerebroObjectConnection struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroOperatingMeeting struct {
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	NoteTypeID   pgtype.UUID        `json:"note_type_id"`
+	CadenceUnit  string             `json:"cadence_unit"`
+	CadenceCount int32              `json:"cadence_count"`
+	Agenda       []byte             `json:"agenda"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroOperatingPeriod struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -1329,6 +1339,19 @@ type CerebroOperatingSystemSetting struct {
 	Terminology []byte             `json:"terminology"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroOrgChartSeat struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	ParentID         pgtype.UUID        `json:"parent_id"`
+	Name             string             `json:"name"`
+	Responsibilities []byte             `json:"responsibilities"`
+	OwnerType        pgtype.Text        `json:"owner_type"`
+	OwnerID          pgtype.UUID        `json:"owner_id"`
+	Position         int32              `json:"position"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroOsElementSetting struct {

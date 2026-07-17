@@ -64,6 +64,15 @@ export interface RockCheckInInput { confidence: number; reported_health: Exclude
 export interface ObjectConnectionInput { source_type: string; source_id: string; target_type: string; target_id: string; relationship_type?: string; provenance?: "manual" | "agent" | "system" }
 export interface ObjectConnection extends Required<ObjectConnectionInput> { id: string; workspace_id: string; created_by_type: string; created_by_id: string; created_at: string }
 export interface ObjectConnectionList { connections: ObjectConnection[] }
+export type MeetingCadenceUnit = "manual" | "day" | "week" | "month" | "quarter";
+export type MeetingAgendaBinding = "none" | "scorecard" | "goals" | "issues_list";
+export interface MeetingAgendaSection { id: string; name: string; position: number; binding: MeetingAgendaBinding }
+export interface MeetingNoteType { id: string; name: string; cadence_unit: MeetingCadenceUnit; cadence_count: number; enabled: boolean }
+export interface MeetingConfig { workspace_id: string; note_type_id?: string; note_type_name?: string; cadence_unit: MeetingCadenceUnit; cadence_count: number; agenda: MeetingAgendaSection[]; available_note_types: MeetingNoteType[] }
+export interface MeetingConfigInput { note_type_id?: string; cadence_unit: MeetingCadenceUnit; cadence_count: number; agenda: MeetingAgendaSection[] }
+export interface OrgChartSeat { id: string; workspace_id: string; parent_id?: string; name: string; responsibilities: string[]; owner_type?: "member" | "agent"; owner_id?: string; owner_name?: string; vacant: boolean; position: number }
+export interface OrgChartSeatInput { parent_id?: string; name: string; responsibilities: string[]; owner_type?: "member" | "agent"; owner_id?: string; position: number }
+export interface OrgChartSeatList { seats: OrgChartSeat[] }
 export interface StrategyList { strategy_items: StrategyItem[] }
 export interface StrategyHistoryEntry { id: string; strategy_item_id: string; action: "baseline" | "created" | "updated" | "deleted"; title: string; snapshot: Record<string, unknown>; changed_at: string }
 export interface StrategyHistoryList { history: StrategyHistoryEntry[] }

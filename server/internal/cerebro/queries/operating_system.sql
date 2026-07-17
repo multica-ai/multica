@@ -445,3 +445,62 @@ WHERE workspace_id = $1 AND source_type = $2 AND source_id = $3
 DELETE FROM cerebro_object_connection
 WHERE workspace_id = $1 AND source_type = 'strategy_item'
   AND target_type = 'rock' AND target_id = $2;
+
+-- FIR-3421 Stage 4: Meetings.
+
+-- name: GetOperatingMeeting :one
+SELECT workspace_id, note_type_id, cadence_unit, cadence_count, agenda, created_at, updated_at
+FROM cerebro_operating_meeting
+WHERE workspace_id = $1;
+
+-- name: UpsertOperatingMeeting :one
+INSERT INTO cerebro_operating_meeting (
+    workspace_id, note_type_id, cadence_unit, cadence_count, agenda
+)
+VALUES ($1, sqlc.narg(note_type_id), $2, $3, $4)
+ON CONFLICT (workspace_id) DO UPDATE SET
+    note_type_id = EXCLUDED.note_type_id,
+    cadence_unit = EXCLUDED.cadence_unit,
+    cadence_count = EXCLUDED.cadence_count,
+    agenda = EXCLUDED.agenda,
+    updated_at = now()
+RETURNING workspace_id, note_type_id, cadence_unit, cadence_count, agenda, created_at, updated_at;
+
+-- FIR-3421 Stage 4: Org Chart.
+
+-- name: ListOrgChartSeats :many
+SELECT seat.id, seat.workspace_id, seat.parent_id, seat.name, seat.responsibilities,
+       seat.owner_type, seat.owner_id,
+       COALESCE(u.name, a.name, '') AS owner_name,
+       seat.position, seat.created_at, seat.updated_at
+FROM cerebro_org_chart_seat seat
+LEFT JOIN member m ON seat.owner_type = 'member' AND m.id = seat.owner_id AND m.workspace_id = seat.workspace_id
+LEFT JOIN "user" u ON u.id = m.user_id
+LEFT JOIN agent a ON seat.owner_type = 'agent' AND a.id = seat.owner_id AND a.workspace_id = seat.workspace_id
+WHERE seat.workspace_id = $1
+ORDER BY seat.parent_id NULLS FIRST, seat.position ASC, seat.created_at ASC;
+
+-- name: CreateOrgChartSeat :one
+INSERT INTO cerebro_org_chart_seat (
+    workspace_id, parent_id, name, responsibilities, owner_type, owner_id, position
+)
+VALUES ($1, sqlc.narg(parent_id), $2, $3, sqlc.narg(owner_type), sqlc.narg(owner_id), $4)
+RETURNING id, workspace_id, parent_id, name, responsibilities, owner_type, owner_id,
+          ''::text AS owner_name, position, created_at, updated_at;
+
+-- name: UpdateOrgChartSeat :one
+UPDATE cerebro_org_chart_seat
+SET parent_id = sqlc.narg(parent_id),
+    name = $3,
+    responsibilities = $4,
+    owner_type = sqlc.narg(owner_type),
+    owner_id = sqlc.narg(owner_id),
+    position = $5,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, parent_id, name, responsibilities, owner_type, owner_id,
+          ''::text AS owner_name, position, created_at, updated_at;
+
+-- name: DeleteOrgChartSeat :execrows
+DELETE FROM cerebro_org_chart_seat
+WHERE id = $1 AND workspace_id = $2;

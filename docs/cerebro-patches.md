@@ -1676,3 +1676,11 @@ Approved by Jesper Hvejsel on FIR-3212 ("Vi skal kun lave agent configuration fu
 | `projects-tree-table-mount` | `packages/views/package.json`; `packages/views/projects/components/projects-page.tsx` | Mount the feature-flagged fork-owned project tree and sprint rows while preserving the existing flat table byte-for-byte when the flag is off. Tree state and presentation remain in `packages/cerebro-projects`. |
 
 Approved plan and delivery gate are attached to FIR-3425, 2026-07-17.
+
+## FIR-3421 — Operating System Stage 4
+
+| Patch | Location | Reason |
+|---|---|---|
+| `operating-system-stage4-nav` | `packages/views/layout/cerebro-operating-system-nav.tsx`; `packages/views/layout/cerebro-operating-system-nav.test.tsx` | Show the fork-owned Meetings and Org Chart links only when the workspace enables those elements; the pages and API remain in the Cerebro-owned package and server module. |
+
+Approved plan and delivery gate are attached to FIR-3421, 2026-07-17.

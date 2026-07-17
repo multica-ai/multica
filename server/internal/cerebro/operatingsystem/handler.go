@@ -18,6 +18,12 @@ import (
 type handlerService interface {
 	GetSettings(context.Context, pgtype.UUID) (SettingsResponse, error)
 	UpdateSettings(context.Context, pgtype.UUID, Terminology) (SettingsResponse, error)
+	GetMeeting(context.Context, pgtype.UUID) (MeetingConfigResponse, error)
+	UpdateMeeting(context.Context, pgtype.UUID, MeetingConfigInput) (MeetingConfigResponse, error)
+	ListOrgChartSeats(context.Context, pgtype.UUID) ([]OrgChartSeatResponse, error)
+	CreateOrgChartSeat(context.Context, pgtype.UUID, OrgChartSeatInput) (OrgChartSeatResponse, error)
+	UpdateOrgChartSeat(context.Context, pgtype.UUID, pgtype.UUID, OrgChartSeatInput) (OrgChartSeatResponse, error)
+	DeleteOrgChartSeat(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
 	CreateStrategyItem(context.Context, pgtype.UUID, StrategyItemInput) (StrategyItemResponse, error)
 	ListStrategyItems(context.Context, pgtype.UUID) ([]StrategyItemResponse, error)
 	ListStrategyHistory(context.Context, pgtype.UUID) ([]StrategyHistoryResponse, error)
@@ -63,6 +69,16 @@ func (h *Handler) MountRoutes(r chi.Router) {
 	r.Route("/api/cerebro/operating-system/elements", func(r chi.Router) {
 		r.Get("/", h.ListElements)
 		r.Put("/{key}", h.UpdateElement)
+	})
+	r.Route("/api/cerebro/meetings", func(r chi.Router) {
+		r.Get("/", h.GetMeeting)
+		r.Put("/", h.UpdateMeeting)
+	})
+	r.Route("/api/cerebro/org-chart", func(r chi.Router) {
+		r.Get("/", h.ListOrgChartSeats)
+		r.Post("/seats", h.CreateOrgChartSeat)
+		r.Put("/seats/{id}", h.UpdateOrgChartSeat)
+		r.Delete("/seats/{id}", h.DeleteOrgChartSeat)
 	})
 	r.Route("/api/cerebro/goal-types", func(r chi.Router) {
 		r.Get("/", h.ListGoalTypes)
@@ -137,6 +153,80 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.service.UpdateSettings(r.Context(), ws, input.Terminology)
 	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) GetMeeting(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	out, err := h.service.GetMeeting(r.Context(), ws)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) UpdateMeeting(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	var input MeetingConfigInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.UpdateMeeting(r.Context(), ws, input)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) ListOrgChartSeats(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.service.ListOrgChartSeats(r.Context(), ws)
+	writeResult(w, http.StatusOK, map[string]any{"seats": items}, err)
+}
+
+func (h *Handler) CreateOrgChartSeat(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	var input OrgChartSeatInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.CreateOrgChartSeat(r.Context(), ws, input)
+	writeResult(w, http.StatusCreated, out, err)
+}
+
+func (h *Handler) UpdateOrgChartSeat(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var input OrgChartSeatInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.UpdateOrgChartSeat(r.Context(), ws, id, input)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) DeleteOrgChartSeat(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	deleted, err := h.service.DeleteOrgChartSeat(r.Context(), ws, id)
+	writeDelete(w, deleted, err)
 }
 
 func (h *Handler) ListStrategyItems(w http.ResponseWriter, r *http.Request) {
