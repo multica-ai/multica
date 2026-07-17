@@ -101,3 +101,30 @@ SELECT * FROM hook_execution
 WHERE hook_id = $1
 ORDER BY created_at DESC
 LIMIT $2;
+
+-- name: ListActiveHookIDsForEvent :many
+-- Candidate hooks for a domain event: enabled, non-archived hooks in the
+-- workspace whose ACTIVE revision listens to this event type. Issue scope is
+-- lifecycle ownership only and does NOT restrict the event subject — that is the
+-- job of `when` — so scope is not a filter here. The matcher re-reads each hook
+-- under a row lock to pin the revision authoritatively.
+SELECT h.id
+FROM hook h
+JOIN hook_revision r ON r.id = h.active_revision_id
+WHERE h.workspace_id = $1
+  AND h.enabled = true
+  AND h.archived_at IS NULL
+  AND r.event_type = $2
+ORDER BY h.created_at ASC, h.id ASC;
+
+-- name: CreateHookExecution :one
+-- Persist one matcher decision (queued to fire, or skipped with a reason) with
+-- the evaluator's structured snapshots and the pinned revision. Idempotent per
+-- (hook_id, event_id) via idx_hook_execution_hook_event, so re-processing a
+-- re-leased event never double-creates or double-advances the latch.
+INSERT INTO hook_execution (
+    id, workspace_id, hook_id, hook_revision_id, event_id, correlation_id,
+    status, skip_reason, match_snapshot, condition_snapshot
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (hook_id, event_id) DO NOTHING
+RETURNING *;

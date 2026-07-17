@@ -11,6 +11,84 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimPendingDomainEvents = `-- name: ClaimPendingDomainEvents :many
+
+UPDATE domain_event
+SET dispatch_status = 'dispatching',
+    lease_token = $1,
+    lease_expires_at = $2,
+    attempts = attempts + 1
+WHERE id IN (
+    SELECT id FROM domain_event
+    WHERE available_at <= now()
+      AND (dispatch_status = 'pending'
+           OR (dispatch_status = 'dispatching' AND lease_expires_at < now()))
+    ORDER BY seq ASC
+    LIMIT $3::int
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, seq, workspace_id, type, schema_version, subject_type, subject_id, actor_type, actor_id, payload, correlation_id, causation_execution_id, causation_action_index, hop_count, dispatch_status, attempts, available_at, lease_token, lease_expires_at, dispatched_at, created_at
+`
+
+type ClaimPendingDomainEventsParams struct {
+	LeaseToken     pgtype.UUID        `json:"lease_token"`
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	MaxEvents      int32              `json:"max_events"`
+}
+
+// NOTE: the retention/TTL delete is intentionally NOT defined in PR1. The
+// correct predicate is "dispatched AND older than TTL AND every related
+// hook_execution is terminal" (MUL-4332 §4.1/§9), and hook_execution does not
+// exist until PR3. Shipping a weaker "dispatched + TTL" delete now would risk
+// reclaiming still-executing audit sources the moment PR3 enables dispatching
+// (review point 5). The query lands in PR3 with the full terminal predicate.
+// The durable matcher's claim scan (MUL-4332 PR3): lease a bounded batch of
+// undispatched, now-available events in seq order. Reclaims events left
+// 'dispatching' by a crashed matcher once their lease expires, so processing is
+// at-least-once. FOR UPDATE SKIP LOCKED lets multiple matchers share the queue;
+// the LIMIT bounds the lock hold. Rides idx_domain_event_dispatch.
+func (q *Queries) ClaimPendingDomainEvents(ctx context.Context, arg ClaimPendingDomainEventsParams) ([]DomainEvent, error) {
+	rows, err := q.db.Query(ctx, claimPendingDomainEvents, arg.LeaseToken, arg.LeaseExpiresAt, arg.MaxEvents)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DomainEvent{}
+	for rows.Next() {
+		var i DomainEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.Seq,
+			&i.WorkspaceID,
+			&i.Type,
+			&i.SchemaVersion,
+			&i.SubjectType,
+			&i.SubjectID,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Payload,
+			&i.CorrelationID,
+			&i.CausationExecutionID,
+			&i.CausationActionIndex,
+			&i.HopCount,
+			&i.DispatchStatus,
+			&i.Attempts,
+			&i.AvailableAt,
+			&i.LeaseToken,
+			&i.LeaseExpiresAt,
+			&i.DispatchedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countDomainEventsBySubject = `-- name: CountDomainEventsBySubject :one
 SELECT count(*) FROM domain_event
 WHERE subject_type = $1
@@ -207,4 +285,25 @@ func (q *Queries) ListDomainEventsByCorrelation(ctx context.Context, arg ListDom
 		return nil, err
 	}
 	return items, nil
+}
+
+const markDomainEventDispatched = `-- name: MarkDomainEventDispatched :execrows
+UPDATE domain_event
+SET dispatch_status = 'dispatched', lease_token = NULL, lease_expires_at = NULL
+WHERE id = $1 AND lease_token = $2
+`
+
+type MarkDomainEventDispatchedParams struct {
+	ID         pgtype.UUID `json:"id"`
+	LeaseToken pgtype.UUID `json:"lease_token"`
+}
+
+// Finalize a matched event. CAS on lease_token so only the current lease holder
+// can advance it (a stale/expired matcher whose lease was reclaimed cannot).
+func (q *Queries) MarkDomainEventDispatched(ctx context.Context, arg MarkDomainEventDispatchedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markDomainEventDispatched, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

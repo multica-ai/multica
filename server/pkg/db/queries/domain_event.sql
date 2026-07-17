@@ -50,3 +50,32 @@ WHERE subject_type = $1
 -- exist until PR3. Shipping a weaker "dispatched + TTL" delete now would risk
 -- reclaiming still-executing audit sources the moment PR3 enables dispatching
 -- (review point 5). The query lands in PR3 with the full terminal predicate.
+
+-- name: ClaimPendingDomainEvents :many
+-- The durable matcher's claim scan (MUL-4332 PR3): lease a bounded batch of
+-- undispatched, now-available events in seq order. Reclaims events left
+-- 'dispatching' by a crashed matcher once their lease expires, so processing is
+-- at-least-once. FOR UPDATE SKIP LOCKED lets multiple matchers share the queue;
+-- the LIMIT bounds the lock hold. Rides idx_domain_event_dispatch.
+UPDATE domain_event
+SET dispatch_status = 'dispatching',
+    lease_token = @lease_token,
+    lease_expires_at = @lease_expires_at,
+    attempts = attempts + 1
+WHERE id IN (
+    SELECT id FROM domain_event
+    WHERE available_at <= now()
+      AND (dispatch_status = 'pending'
+           OR (dispatch_status = 'dispatching' AND lease_expires_at < now()))
+    ORDER BY seq ASC
+    LIMIT @max_events::int
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
+-- name: MarkDomainEventDispatched :execrows
+-- Finalize a matched event. CAS on lease_token so only the current lease holder
+-- can advance it (a stale/expired matcher whose lease was reclaimed cannot).
+UPDATE domain_event
+SET dispatch_status = 'dispatched', lease_token = NULL, lease_expires_at = NULL
+WHERE id = $1 AND lease_token = $2;

@@ -125,6 +125,71 @@ func (q *Queries) CreateHook(ctx context.Context, arg CreateHookParams) (Hook, e
 	return i, err
 }
 
+const createHookExecution = `-- name: CreateHookExecution :one
+INSERT INTO hook_execution (
+    id, workspace_id, hook_id, hook_revision_id, event_id, correlation_id,
+    status, skip_reason, match_snapshot, condition_snapshot
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (hook_id, event_id) DO NOTHING
+RETURNING id, workspace_id, hook_id, hook_revision_id, event_id, correlation_id, status, skip_reason, match_snapshot, condition_snapshot, current_action_index, attempts, next_attempt_at, lease_token, lease_expires_at, error_code, error, created_at, started_at, completed_at
+`
+
+type CreateHookExecutionParams struct {
+	ID                pgtype.UUID `json:"id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	HookID            pgtype.UUID `json:"hook_id"`
+	HookRevisionID    pgtype.UUID `json:"hook_revision_id"`
+	EventID           pgtype.UUID `json:"event_id"`
+	CorrelationID     pgtype.UUID `json:"correlation_id"`
+	Status            string      `json:"status"`
+	SkipReason        pgtype.Text `json:"skip_reason"`
+	MatchSnapshot     []byte      `json:"match_snapshot"`
+	ConditionSnapshot []byte      `json:"condition_snapshot"`
+}
+
+// Persist one matcher decision (queued to fire, or skipped with a reason) with
+// the evaluator's structured snapshots and the pinned revision. Idempotent per
+// (hook_id, event_id) via idx_hook_execution_hook_event, so re-processing a
+// re-leased event never double-creates or double-advances the latch.
+func (q *Queries) CreateHookExecution(ctx context.Context, arg CreateHookExecutionParams) (HookExecution, error) {
+	row := q.db.QueryRow(ctx, createHookExecution,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.HookID,
+		arg.HookRevisionID,
+		arg.EventID,
+		arg.CorrelationID,
+		arg.Status,
+		arg.SkipReason,
+		arg.MatchSnapshot,
+		arg.ConditionSnapshot,
+	)
+	var i HookExecution
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.HookID,
+		&i.HookRevisionID,
+		&i.EventID,
+		&i.CorrelationID,
+		&i.Status,
+		&i.SkipReason,
+		&i.MatchSnapshot,
+		&i.ConditionSnapshot,
+		&i.CurrentActionIndex,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.LeaseToken,
+		&i.LeaseExpiresAt,
+		&i.ErrorCode,
+		&i.Error,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const createHookRevision = `-- name: CreateHookRevision :one
 INSERT INTO hook_revision (
     id, hook_id, revision, event_type, match, conditions, fire_mode, actions,
@@ -323,6 +388,47 @@ func (q *Queries) GetMaxHookRevision(ctx context.Context, hookID pgtype.UUID) (i
 	var max_revision int32
 	err := row.Scan(&max_revision)
 	return max_revision, err
+}
+
+const listActiveHookIDsForEvent = `-- name: ListActiveHookIDsForEvent :many
+SELECT h.id
+FROM hook h
+JOIN hook_revision r ON r.id = h.active_revision_id
+WHERE h.workspace_id = $1
+  AND h.enabled = true
+  AND h.archived_at IS NULL
+  AND r.event_type = $2
+ORDER BY h.created_at ASC, h.id ASC
+`
+
+type ListActiveHookIDsForEventParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	EventType   string      `json:"event_type"`
+}
+
+// Candidate hooks for a domain event: enabled, non-archived hooks in the
+// workspace whose ACTIVE revision listens to this event type. Issue scope is
+// lifecycle ownership only and does NOT restrict the event subject — that is the
+// job of `when` — so scope is not a filter here. The matcher re-reads each hook
+// under a row lock to pin the revision authoritatively.
+func (q *Queries) ListActiveHookIDsForEvent(ctx context.Context, arg ListActiveHookIDsForEventParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listActiveHookIDsForEvent, arg.WorkspaceID, arg.EventType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listHookExecutionsByHook = `-- name: ListHookExecutionsByHook :many
