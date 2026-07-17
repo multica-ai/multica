@@ -367,7 +367,18 @@ func lineBelongsToMarkdownContainer(markdown string, start int, container markdo
 	if current.blockquote < container.blockquote {
 		return false
 	}
-	return !container.list || current.list || markdownLineIndent(markdown, start) >= 2
+	return !container.list || current.list || isBlankMarkdownLine(markdown, start) || markdownLineIndent(markdown, start) >= 2
+}
+
+func isBlankMarkdownLine(markdown string, start int) bool {
+	lineEnd := markdownLineEnd(markdown, start)
+	for start < lineEnd {
+		if markdown[start] != ' ' && markdown[start] != '\t' {
+			return false
+		}
+		start++
+	}
+	return true
 }
 
 func markdownLineIndent(markdown string, start int) int {
