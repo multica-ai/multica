@@ -200,6 +200,14 @@ VALUES ($1, $2, 'owner')
 `, wsID, testUserID); err != nil {
 		t.Fatalf("create owner member: %v", err)
 	}
+	var propertyID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO issue_property (workspace_id, name, type)
+VALUES ($1, 'Delete cleanup property', 'text')
+RETURNING id
+`, wsID).Scan(&propertyID); err != nil {
+		t.Fatalf("create issue property: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
@@ -216,6 +224,14 @@ VALUES ($1, $2, 'owner')
 	}
 	if exists {
 		t.Fatal("workspace still exists after owner DELETE")
+	}
+
+	var propertyCount int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM issue_property WHERE id = $1`, propertyID).Scan(&propertyCount); err != nil {
+		t.Fatalf("verify issue property cleanup: %v", err)
+	}
+	if propertyCount != 0 {
+		t.Fatalf("issue properties were not cleaned up for deleted workspace: %d", propertyCount)
 	}
 }
 
