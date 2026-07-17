@@ -216,8 +216,13 @@ func subscribeBody(botID, secret string) map[string]any {
 	return map[string]any{"bot_id": botID, "secret": secret}
 }
 
-// sendMsgTextBody builds an aibot_send_msg body carrying a plain text
-// payload. chatType is 1 for single, 2 for group.
+// sendMsgTextBody builds an aibot_send_msg body carrying plain-text
+// content. aibot_send_msg's supported msgtypes are markdown and
+// template_card only — text is NOT accepted on this cmd (contrast
+// aibot_respond_msg, which does accept text). We therefore ship as
+// markdown; the WeChat client renders plain text through the markdown
+// path without any special escaping. chatType is 1 for single, 2 for
+// group.
 func sendMsgTextBody(chatID string, chatType int, content string) (map[string]any, error) {
 	if chatID == "" {
 		return nil, errors.New("wecom: send_msg requires chat_id")
@@ -228,8 +233,8 @@ func sendMsgTextBody(chatID string, chatType int, content string) (map[string]an
 	return map[string]any{
 		"chatid":    chatID,
 		"chat_type": chatType,
-		"msgtype":   "text",
-		"text":      map[string]string{"content": content},
+		"msgtype":   "markdown",
+		"markdown":  map[string]string{"content": content},
 	}, nil
 }
 
