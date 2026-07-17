@@ -802,6 +802,109 @@ func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
 	}
 }
 
+func TestParseCodexSessionFileSinceResumeEdgeCases(t *testing.T) {
+	t.Parallel()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	tests := []struct {
+		name  string
+		lines []string
+		want  TokenUsage
+	}{
+		{
+			name: "final last usage wins over earlier total",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":20}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":7,"output_tokens":3}}}}`,
+			},
+			want: TokenUsage{InputTokens: 7, OutputTokens: 3},
+		},
+		{
+			name: "final total wins over earlier last usage",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":7,"output_tokens":3}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":20}}}}`,
+			},
+			want: TokenUsage{InputTokens: 60, OutputTokens: 10},
+		},
+		{
+			name: "cache alias changes from cache read to cached input",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cache_read_input_tokens":700}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":1400}}}}`,
+			},
+			want: TokenUsage{InputTokens: 100, CacheReadTokens: 700},
+		},
+		{
+			name: "cache alias changes from cached input to cache read",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":700}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cache_read_input_tokens":1400}}}}`,
+			},
+			want: TokenUsage{InputTokens: 100, CacheReadTokens: 700},
+		},
+		{
+			name: "counter reset accumulates every segment",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":50}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"output_tokens":60}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5}}}}`,
+				`{"timestamp":"2026-07-13T00:00:13Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"output_tokens":70}}}}`,
+			},
+			want: TokenUsage{InputTokens: 170, OutputTokens: 80},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "session.jsonl")
+			content := strings.Join(append(tc.lines, ""), "\n")
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			got := parseCodexSessionFileSince(path, startTime)
+			if got == nil {
+				t.Fatal("expected usage")
+			}
+			if got.usage != tc.want {
+				t.Fatalf("usage = %+v, want %+v", got.usage, tc.want)
+			}
+		})
+	}
+}
+
+func TestScanCodexSessionUsageFindsCrossDayResumeWithCacheOnlyDelta(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	previousDateDir := filepath.Join(taskHome, "sessions", "2026", "07", "12")
+	if err := os.MkdirAll(previousDateDir, 0o755); err != nil {
+		t.Fatalf("mkdir previous date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-12T23:59:59Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":100}}}}`,
+		`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":150}}}}`,
+		"",
+	}, "\n")
+	path := filepath.Join(previousDateDir, "rollout.jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+	if err := os.Chtimes(path, startTime.Add(time.Second), startTime.Add(time.Second)); err != nil {
+		t.Fatalf("set session mtime: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome)
+	if got == nil {
+		t.Fatal("expected cross-day cache-only usage")
+	}
+	want := TokenUsage{CacheReadTokens: 50}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want %+v", got.usage, want)
+	}
+}
+
 func TestCodexRawItemCommandExecution(t *testing.T) {
 	t.Parallel()
 

@@ -2256,42 +2256,57 @@ type codexSessionUsage struct {
 }
 
 // scanCodexSessionUsage scans Codex session JSONL files written after startTime
-// to extract token usage. Codex writes token_count events to
-// $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl. codexHome is the backend's per-task
-// CODEX_HOME; sessions are isolated there rather than in the shared
-// ~/.codex/sessions (MUL-4424), so usage must be read from it.
+// to extract token usage. Codex writes token_count events below
+// $CODEX_HOME/sessions. A resumed rollout keeps its original date directory, so
+// scanning only startTime's date would miss cross-day resumes. codexHome is the
+// backend's per-task CODEX_HOME; sessions are isolated there rather than in the
+// shared ~/.codex/sessions (MUL-4424), so usage must be read from it.
 func scanCodexSessionUsage(startTime time.Time, codexHome string) *codexSessionUsage {
 	root := codexSessionRoot(codexHome)
 	if root == "" {
 		return nil
 	}
 
-	// Look in today's session directory.
-	dateDir := filepath.Join(root,
-		fmt.Sprintf("%04d", startTime.Year()),
-		fmt.Sprintf("%02d", int(startTime.Month())),
-		fmt.Sprintf("%02d", startTime.Day()),
-	)
-
-	files, err := filepath.Glob(filepath.Join(dateDir, "*.jsonl"))
+	type candidate struct {
+		path    string
+		modTime time.Time
+	}
+	var files []candidate
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".jsonl" {
+			return nil
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil || info.ModTime().Before(startTime) {
+			return nil
+		}
+		files = append(files, candidate{path: path, modTime: info.ModTime()})
+		return nil
+	})
 	if err != nil || len(files) == 0 {
 		return nil
 	}
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].modTime.Equal(files[j].modTime) {
+			return files[i].path < files[j].path
+		}
+		return files[i].modTime.Before(files[j].modTime)
+	})
 
-	// Only scan files modified after startTime (this task's session).
+	// Files are ordered by modification time so the latest task rollout wins.
 	var result codexSessionUsage
 	for _, f := range files {
-		info, err := os.Stat(f)
-		if err != nil || info.ModTime().Before(startTime) {
-			continue
-		}
-		if u := parseCodexSessionFileSince(f, startTime); u != nil {
+		if u := parseCodexSessionFileSince(f.path, startTime); u != nil {
 			// Take the last matching file's data (usually there's only one per task).
 			result = *u
 		}
 	}
 
-	if result.usage.InputTokens == 0 && result.usage.OutputTokens == 0 {
+	if result.usage.InputTokens == 0 && result.usage.OutputTokens == 0 &&
+		result.usage.CacheReadTokens == 0 && result.usage.CacheWriteTokens == 0 {
 		return nil
 	}
 	return &result
@@ -2364,8 +2379,9 @@ func parseCodexSessionFileSince(path string, startTime time.Time) *codexSessionU
 	defer f.Close()
 
 	var result codexSessionUsage
-	var baseline, total, last codexRawTokenUsage
-	var totalFound, lastFound bool
+	var previousTotal, accumulated, finalUsage codexRawTokenUsage
+	previousTotalFound := false
+	finalUsageFound := false
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
@@ -2393,15 +2409,23 @@ func parseCodexSessionFileSince(path string, startTime time.Time) *codexSessionU
 		if evt.Payload.Type == "token_count" && evt.Payload.Info != nil {
 			afterStart := startTime.IsZero() || evt.Timestamp.IsZero() || evt.Timestamp.After(startTime)
 			if usage := evt.Payload.Info.TotalTokenUsage; usage != nil {
+				current := normalizeCodexRawTokenUsage(*usage)
 				if afterStart {
-					total = *usage
-					totalFound = true
-				} else {
-					baseline = *usage
+					delta := current
+					if previousTotalFound {
+						delta = subtractCodexRawTokenUsage(current, previousTotal)
+					}
+					accumulated = addCodexRawTokenUsage(accumulated, delta)
+					finalUsage = accumulated
+					finalUsageFound = true
 				}
+				previousTotal = current
+				previousTotalFound = true
 			} else if usage := evt.Payload.Info.LastTokenUsage; usage != nil && afterStart {
-				last = *usage
-				lastFound = true
+				// Preserve event order: a later last_token_usage is the same
+				// fallback the old whole-file parser would have selected.
+				finalUsage = normalizeCodexRawTokenUsage(*usage)
+				finalUsageFound = true
 			}
 			if evt.Payload.Info.Model != "" {
 				result.model = evt.Payload.Info.Model
@@ -2409,33 +2433,43 @@ func parseCodexSessionFileSince(path string, startTime time.Time) *codexSessionU
 		}
 	}
 
-	var usage codexRawTokenUsage
-	if totalFound {
-		usage = subtractCodexRawTokenUsage(total, baseline)
-	} else if lastFound {
-		usage = last
-	} else {
+	if !finalUsageFound {
 		return nil
 	}
-	cachedTokens := usage.CachedInputTokens
-	if cachedTokens == 0 {
-		cachedTokens = usage.CacheReadInputTokens
-	}
+	cachedTokens := finalUsage.CachedInputTokens
 	result.usage = TokenUsage{
-		InputTokens:     codexUncachedInputTokens(usage.InputTokens, cachedTokens),
-		OutputTokens:    usage.OutputTokens + usage.ReasoningOutputTokens,
+		InputTokens:     codexUncachedInputTokens(finalUsage.InputTokens, cachedTokens),
+		OutputTokens:    finalUsage.OutputTokens + finalUsage.ReasoningOutputTokens,
 		CacheReadTokens: cachedTokens,
 	}
 	return &result
 }
 
 func subtractCodexRawTokenUsage(total, baseline codexRawTokenUsage) codexRawTokenUsage {
+	total = normalizeCodexRawTokenUsage(total)
+	baseline = normalizeCodexRawTokenUsage(baseline)
 	return codexRawTokenUsage{
 		InputTokens:           nonNegativeTokenDelta(total.InputTokens, baseline.InputTokens),
 		OutputTokens:          nonNegativeTokenDelta(total.OutputTokens, baseline.OutputTokens),
 		CachedInputTokens:     nonNegativeTokenDelta(total.CachedInputTokens, baseline.CachedInputTokens),
-		CacheReadInputTokens:  nonNegativeTokenDelta(total.CacheReadInputTokens, baseline.CacheReadInputTokens),
 		ReasoningOutputTokens: nonNegativeTokenDelta(total.ReasoningOutputTokens, baseline.ReasoningOutputTokens),
+	}
+}
+
+func normalizeCodexRawTokenUsage(usage codexRawTokenUsage) codexRawTokenUsage {
+	if usage.CachedInputTokens == 0 {
+		usage.CachedInputTokens = usage.CacheReadInputTokens
+	}
+	usage.CacheReadInputTokens = 0
+	return usage
+}
+
+func addCodexRawTokenUsage(a, b codexRawTokenUsage) codexRawTokenUsage {
+	return codexRawTokenUsage{
+		InputTokens:           a.InputTokens + b.InputTokens,
+		OutputTokens:          a.OutputTokens + b.OutputTokens,
+		CachedInputTokens:     a.CachedInputTokens + b.CachedInputTokens,
+		ReasoningOutputTokens: a.ReasoningOutputTokens + b.ReasoningOutputTokens,
 	}
 }
 
