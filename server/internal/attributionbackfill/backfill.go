@@ -106,6 +106,24 @@ WHERE originator_user_id IS NOT NULL
 // captures both the NULL-accountable legacy rows and the both-set-but-differ
 // rows. Reconciled rows stop matching the predicate, so the loop terminates
 // and re-running is a no-op.
+//
+// Concurrency safety (defense in depth — the migrate loop normally runs with
+// the server down, but the hook executes on the pool and a rolling deploy or
+// an operator-run migrate could overlap a live writer). Two guards close the
+// stale-selection race where a row is selected as violating but a concurrent
+// writer flips it to a legitimate originator-NULL fork before it is rewritten:
+//
+//   - FOR UPDATE in the CTE locks each candidate row and, under READ
+//     COMMITTED, re-evaluates the predicate against the latest committed
+//     version once the lock is granted — a row that became originator-NULL is
+//     dropped from the batch instead of being blindly overwritten.
+//   - The outer UPDATE repeats the same predicate on q, so it never writes a
+//     row that no longer needs reconciliation even if it changed underneath
+//     the selection.
+//
+// Without these, `SET accountable_user_id = q.originator_user_id` on a row a
+// writer just turned into (originator NULL, accountable set) would clobber the
+// writer's accountable value with NULL.
 const backfillBatchSQL = `
 WITH batch AS (
     SELECT id
@@ -113,12 +131,15 @@ WITH batch AS (
     WHERE originator_user_id IS NOT NULL
       AND accountable_user_id IS DISTINCT FROM originator_user_id
     LIMIT $1
+    FOR UPDATE
 )
 UPDATE %s q
 SET accountable_user_id = q.originator_user_id,
     originator_source   = COALESCE(q.originator_source, 'backfill')
 FROM batch
-WHERE q.id = batch.id`
+WHERE q.id = batch.id
+  AND q.originator_user_id IS NOT NULL
+  AND q.accountable_user_id IS DISTINCT FROM q.originator_user_id`
 
 // Hook is the migration-time entrypoint invoked before migration 198's
 // VALIDATE. It is idempotent and safe to retry: it reconciles every row
