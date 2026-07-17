@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } from "electron";
 import { homedir } from "os";
 import { join } from "path";
+import { pathToFileURL } from "url";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
@@ -10,6 +11,7 @@ import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
 import { installNavigationGestures } from "./navigation-gestures";
+import { installNavigationGuard } from "./navigation-guard";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -242,10 +244,22 @@ function createRendererWebPreferences(
 }
 
 function loadRenderer(window: BrowserWindow): void {
+  const rendererEntry = join(__dirname, "../renderer/index.html");
+  const rendererURL =
+    is.dev && process.env["ELECTRON_RENDERER_URL"]
+      ? process.env["ELECTRON_RENDERER_URL"]
+      : pathToFileURL(rendererEntry).toString();
+
+  // Installed before the load so the very first navigation is already covered.
+  // Both the main window and every issue window load through here, so guarding
+  // this one site covers both — see navigation-guard.ts for what is and is not
+  // in scope (it is origin hardening; in-app routing never reaches it).
+  installNavigationGuard(window, rendererURL);
+
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
     void window.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
-    void window.loadFile(join(__dirname, "../renderer/index.html"));
+    void window.loadFile(rendererEntry);
   }
 }
 

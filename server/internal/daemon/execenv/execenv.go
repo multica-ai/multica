@@ -119,15 +119,23 @@ type TaskContextForEnv struct {
 	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID                 string                  // non-empty for chat tasks
-	AutopilotRunID                string                  // non-empty for autopilot run_only tasks
-	AutopilotID                   string
-	AutopilotTitle                string
-	AutopilotDescription          string
-	AutopilotSource               string
-	AutopilotTriggerPayload       string
-	QuickCreatePrompt             string // non-empty for quick-create tasks
-	HandoffNote                   string // assignment handoff instruction; rendered into issue_context.md (MUL-3375)
-	IsSquadLeader                 bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
+	// ChatChannelType is the IM platform behind a chat session ("slack",
+	// "feishu"); empty for a web/mobile chat. The brief reads it for DELIVERY
+	// policy only: any non-empty value means the reply leaves Multica for an
+	// external channel, so `multica attachment upload` cannot deliver a file and
+	// the Output section says text-only instead (MUL-4899). The orthogonal
+	// history-command policy is Slack-only and lives in the per-turn chat prompt
+	// (daemon/prompt.go) — the server has no Feishu history reader.
+	ChatChannelType         string
+	AutopilotRunID          string // non-empty for autopilot run_only tasks
+	AutopilotID             string
+	AutopilotTitle          string
+	AutopilotDescription    string
+	AutopilotSource         string
+	AutopilotTriggerPayload string
+	QuickCreatePrompt       string // non-empty for quick-create tasks
+	HandoffNote             string // assignment handoff instruction; rendered into issue_context.md (MUL-3375)
+	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
 	// in the DB). Rendered into the brief as `## Workspace Context` when
 	// non-empty so every agent in the workspace sees the same shared context,

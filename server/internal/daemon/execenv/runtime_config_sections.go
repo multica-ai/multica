@@ -475,7 +475,12 @@ func writeMentions(b *strings.Builder) {
 func writeAttachments(b *strings.Builder) {
 	b.WriteString("## Attachments\n\n")
 	b.WriteString("Issues and comments may include file attachments (images, documents, etc.).\n")
-	b.WriteString("When a task includes attachment IDs and you need the files, inspect `multica attachment --help` and use the authenticated CLI path. Do not open Multica resource URLs directly.\n\n")
+	b.WriteString("When a task includes attachment IDs and you need the files, inspect `multica attachment --help` and use the authenticated CLI path. Do not open Multica resource URLs directly.\n")
+	// Closes the inbound half of the MUL-4899 loop: an attachment the agent
+	// just downloaded is the most tempting local path to echo back, because it
+	// came from the conversation and *feels* shared. It is not — the download
+	// landed in this run's private workdir.
+	b.WriteString("An attachment you download lands in your own workdir: that local path is a private working copy, not something the reader can open. Never echo it back into a deliverable as a link — re-deliver the file itself if it needs to travel (see `## Output`).\n\n")
 }
 
 // writeAlwaysUseCLI emits the "must go through the multica CLI" guardrail
@@ -485,19 +490,54 @@ func writeAlwaysUseCLI(b *strings.Builder) {
 	b.WriteString("Access Multica platform resources (issues, comments, attachments, files) only through the `multica` CLI — never `curl` / `wget`. For any operation the CLI doesn't cover, post a comment mentioning the workspace owner rather than working around it.\n\n")
 }
 
-// writeOutput emits the kind-specific Output section.
+// writeDeliveryInvariant emits the always-on delivery contract, shared by every
+// task kind.
+//
+// MUL-4899: agents were writing runtime-local paths into deliverables as
+// clickable links (`[screenshot](/Users/agent/work/shot.png)`). Two things were
+// wrong with that and the brief stated neither: the link is dead for every
+// reader (the path exists only on the machine that ran the agent), and on
+// macOS/Linux Desktop clicking it opened a tab at that path and hit a router
+// 404. The Desktop side is fixed separately; this is the source fix — the
+// contract the brief never carried.
+//
+// Deliberately emitted OUTSIDE writeOutput's kind switch: the invariant holds on
+// every surface, and the per-kind line inside the switch only answers "how do I
+// deliver a file HERE". Keeping them apart stops a new task kind from silently
+// inheriting no invariant at all.
+func writeDeliveryInvariant(b *strings.Builder) {
+	b.WriteString("**Runtime-local paths are never deliverables.** Your working directory exists only on the machine running you. Readers do not have it, so a local path in a deliverable is dead for everyone but you.\n\n")
+	b.WriteString("- NEVER write an absolute path or a `file://` URL as a clickable link or an embedded image — not `[screenshot](/Users/you/shot.png)`, not `![chart](file:///tmp/chart.png)`. This is wrong on every surface, including when the file really does exist on your machine right now.\n")
+	b.WriteString("- To reference a code location, use inline code and never a link: `path/to/file.ts:42`.\n")
+	b.WriteString("- To deliver a file you produced, use this surface's mechanism (below). If this surface has no file mechanism, say so in words — never link the path and imply the file was delivered.\n\n")
+}
+
+// writeOutput emits the kind-specific Output section: the always-on delivery
+// invariant plus one per-surface file-delivery policy line per kind.
 func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 	b.WriteString("## Output\n\n")
 	switch kind {
 	case kindAutopilotRunOnly:
-		b.WriteString("This is a run-only autopilot task, so there may be no issue comment to post. Your final assistant output is captured automatically as the autopilot run result. Keep it concise and state the outcome.\n")
+		b.WriteString("This is a run-only autopilot task, so there may be no issue comment to post. Your final assistant output is captured automatically as the autopilot run result. Keep it concise and state the outcome.\n\n")
+		b.WriteString("**Delivering files here:** this surface is text-only — the run result carries no attachments. Describe what you produced; do not link its path.\n")
 	case kindQuickCreate:
 		b.WriteString("This is a quick-create task. There is NO existing issue to comment on. Your final stdout is captured automatically and the platform writes the user's success/failure inbox notification based on whether `multica issue create` succeeded.\n\n")
 		b.WriteString("- Do NOT call `multica issue comment add` — the issue you just created has no conversation context for this run.\n")
 		b.WriteString("- Print exactly one final line: `Created <identifier-or-id>: <title>` after a successful `multica issue create`. Use the created issue's `identifier` from JSON output when available; otherwise use its `id`. Do not assume any workspace issue prefix such as `MUL-`; workspaces can use custom prefixes.\n")
-		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n")
+		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n\n")
+		b.WriteString("**Delivering files here:** your stdout is text-only. A file that belongs to the new issue goes on the `multica issue create` call itself via `--attachment <path>`; never put its path in the description or in your stdout line.\n")
 	case kindChat:
-		b.WriteString("This is a chat session. Your reply is delivered directly to the chat window the user is reading.\n")
+		b.WriteString("This is a chat session. Your reply is delivered directly to the chat window the user is reading.\n\n")
+		// Two-layer channel policy (MUL-4899). This is the DELIVERY layer: any
+		// non-empty channel type means the reply leaves Multica for an external
+		// IM platform, where `attachment upload` has nothing to bind to. The
+		// orthogonal HISTORY layer (which read commands exist) is Slack-only and
+		// lives in the per-turn chat prompt — do not collapse the two.
+		if ctx.ChatChannelType != "" {
+			fmt.Fprintf(b, "**Delivering files here:** this %s conversation is text-only — Multica cannot push a file you produced back into it. `multica attachment upload` does NOT apply: it binds to a Multica chat reply, which this is not. Say in words what you produced and where it can be obtained; never upload and then write as though the file arrived, and never link its local path.\n", ChannelDisplayName(ctx.ChatChannelType))
+		} else {
+			b.WriteString("**Delivering files here:** run `multica attachment upload <local-path>` — it binds the file to your reply and it renders as an attachment card. That command is the ONLY way a file reaches the user; a path written into your reply text is not.\n")
+		}
 	default:
 		if ctx.IsSquadLeader {
 			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`** — unless your outcome is `no_action`. When you evaluate a trigger and decide no action is needed, calling `multica squad activity <issue-id> no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment that announces no_action, acknowledges another agent, or says you are exiting silently — such comments are noise. For all other outcomes (`action`, `failed`), a comment is still mandatory.\n\n")
@@ -505,8 +545,11 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
 		}
 		b.WriteString("**Post exactly ONE comment per run — your final result, before this turn exits.** Do NOT post progress updates, plans, or \"here's what I'm about to do next\" as comments while you work; keep all planning and progress in your own reasoning.\n\n")
-		b.WriteString("Keep comments concise and natural — state the outcome, not the process (good: \"Fixed the login redirect. PR: https://...\"; bad: numbered process logs).\n")
+		b.WriteString("Keep comments concise and natural — state the outcome, not the process (good: \"Fixed the login redirect. PR: https://...\"; bad: numbered process logs).\n\n")
+		b.WriteString("**Delivering files here:** pass `--attachment <path>` to `multica issue comment add` (repeatable). The file uploads and renders on the comment; that is the only way a screenshot or artifact reaches the reader.\n")
 	}
+	b.WriteString("\n")
+	writeDeliveryInvariant(b)
 }
 
 // buildMetaSkillContentSlim is the post-MUL-3560 brief assembler.

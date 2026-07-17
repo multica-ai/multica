@@ -2778,6 +2778,11 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	body := util.UnescapeBackslashEscapes(payload.Output)
 	isEmpty := strings.TrimSpace(body) == ""
 
+	// MUL-4899 completion-boundary observation. Measures whether the delivery
+	// contract in the runtime brief is actually landing on the chat surface.
+	// Strictly non-blocking: the reply is written either way.
+	s.observeChatOutputLocalPath(task, body)
+
 	// Attachments the agent uploaded during this task (tagged with task_id, not
 	// yet bound to any owner) are part of this reply. They make an empty-text
 	// turn a real image/file response — NOT a no_response — and need a row to
@@ -2848,6 +2853,39 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 		}
 	}
 	return &row, nil
+}
+
+// observeChatOutputLocalPath records a metric when a chat reply references a
+// runtime-local path (MUL-4899). Observation only — it never mutates the reply,
+// never fails the completion, and makes no claim to have fixed anything.
+//
+// Two hard constraints shape it:
+//
+//  1. Lexical only. The path lives on the daemon's machine, so the server cannot
+//     os.Stat it the way the CLI lint can. That leaves two signals it can be
+//     confident about without guessing: a `file://` URL, and the task's own
+//     recorded work_dir as a prefix. Anything subtler would be a guess, and a
+//     guess is not worth a false signal on a dashboard.
+//  2. No path, no body text, and no fragment of either may reach the metric or
+//     the log — only the classification and the task id.
+func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body string) {
+	if s.Metrics == nil || strings.TrimSpace(body) == "" {
+		return
+	}
+	kind := ""
+	switch {
+	case strings.Contains(strings.ToLower(body), "file://"):
+		kind = "file_url"
+	case task.WorkDir.Valid && task.WorkDir.String != "" && strings.Contains(body, task.WorkDir.String):
+		kind = "workdir_path"
+	default:
+		return
+	}
+	s.Metrics.RecordChatOutputLocalPath(kind)
+	slog.Warn("chat reply references a runtime-local path",
+		"task_id", util.UUIDToString(task.ID),
+		"kind", kind,
+	)
 }
 
 // FailTask marks a task as failed.
