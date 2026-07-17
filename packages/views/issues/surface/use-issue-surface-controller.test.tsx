@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { issueKeys } from "@multica/core/issues/queries";
 import {
   getIssueSurfaceViewStore,
@@ -750,6 +751,67 @@ describe("useIssueSurfaceController", () => {
     });
     expect(idsCalls).toEqual([0]);
     expect(result.current.workingScopeIssues).toBeUndefined();
+  });
+
+  it("presents the scope as unknown while a re-keyed working window is still resolving", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("table");
+    // Running set A resolves to a complete window; then the set changes to B
+    // and B's request stays pending. keepPreviousData leaves A's rows as
+    // PLACEHOLDER under the new key — publishing them (paired with the new
+    // snapshot) would be a precise-looking number for a scope nobody fetched
+    // (round-6 review P2#1). Until B resolves, the scope must be unknown.
+    const issueA = makeIssue({ id: "run-A", status: "in_progress" });
+    let snapshotIssueId = "run-A";
+    listIssues.mockImplementation((params?: ListIssuesParams) => {
+      if (params?.ids?.includes("run-A")) {
+        return Promise.resolve({ issues: [issueA], total: 1 });
+      }
+      if (params?.ids) return never<ListIssuesResponse>();
+      return Promise.resolve({ issues: [], total: 0 });
+    });
+    setApiInstance({
+      listIssues,
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      getAgentTaskSnapshot: vi.fn(() =>
+        Promise.resolve([
+          {
+            id: "task-1",
+            issue_id: snapshotIssueId,
+            status: "running",
+          },
+        ] as unknown as AgentTask[]),
+      ),
+      getChildIssueProgress: vi.fn(() => never()),
+    } as unknown as ApiClient);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["table"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => {
+      expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
+        "run-A",
+      ]);
+    });
+
+    // The running set moves to B; B's ids window never resolves in this test.
+    snapshotIssueId = "run-B";
+    await act(async () => {
+      await qc.invalidateQueries({
+        queryKey: agentTaskSnapshotOptions("ws-1").queryKey,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.workingScopeIssues).toBeUndefined();
+    });
   });
 
   it("treats a cold-load failure as an error state, not an empty workspace", async () => {

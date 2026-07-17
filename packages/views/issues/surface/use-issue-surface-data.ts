@@ -236,6 +236,11 @@ export function useIssueSurfaceData({
       EMPTY_ISSUES,
     [flatIssuesQuery.data?.pages],
   );
+  const { fetchNextPage: fetchNextFlatPage } = flatIssuesQuery;
+  const fetchNextFlatPageNoCancel = useCallback(
+    () => fetchNextFlatPage({ cancelRefetch: false }),
+    [fetchNextFlatPage],
+  );
   // The LATEST page's total, not page 1's: totals drift while concurrent
   // writes land, and the pagination protocol itself advances on the latest
   // page's total — a consumer holding page 1's stale (smaller) total while
@@ -262,10 +267,19 @@ export function useIssueSurfaceData({
   // the gates the loop is bounded: an over-ceiling window stops after page 1
   // (fresh total > ceiling) and presents as UNKNOWN instead of a number; an
   // error stops the loop the same way.
+  //
+  // Ownership: this effect drives the query ONLY while the filter is OFF
+  // (background chip scope). Once the filter is on, the shared query already
+  // has pagination owners — TableView's structure loop and the scroll
+  // sentinel — and a second responder issuing fetchNextPage() from the same
+  // render snapshot cancel/restarts the first one's fetch. The abandoned
+  // HTTP request is not abortable (the queryFn does not thread AbortSignal),
+  // so every offset would be requested twice (round-6 review R1).
   const {
     hasNextPage: workingWindowHasNext,
     isFetchingNextPage: workingWindowFetchingNext,
     isError: workingWindowError,
+    isPlaceholderData: workingWindowIsPlaceholder,
     fetchNextPage: fetchNextWorkingWindowPage,
   } = workingWindowQuery;
   const workingWindowPages = workingWindowQuery.data?.pages;
@@ -280,7 +294,7 @@ export function useIssueSurfaceData({
   useEffect(() => {
     if (
       shouldAutoLoadNextWindowPage({
-        windowWanted: workingWindowEnabled,
+        windowWanted: workingWindowEnabled && !agentRunningFilter,
         total: workingWindowTotal,
         loadedCount: workingWindowLoaded,
         hasNextPage: workingWindowHasNext,
@@ -288,9 +302,12 @@ export function useIssueSurfaceData({
         hasError: workingWindowError,
       })
     ) {
-      void fetchNextWorkingWindowPage();
+      // cancelRefetch: false — if some other observer already has a fetch in
+      // flight for this query, do nothing rather than cancel/restart it.
+      void fetchNextWorkingWindowPage({ cancelRefetch: false });
     }
   }, [
+    agentRunningFilter,
     fetchNextWorkingWindowPage,
     workingWindowEnabled,
     workingWindowError,
@@ -454,15 +471,23 @@ export function useIssueSurfaceData({
     if (usesTable) {
       // The table's loaded pages are only a SLICE of its window, so no
       // fallback to them can honestly claim a precise working set. The scope
-      // is either the COMPLETE ids-facet window (fetched to the end, no
-      // error — keepPreviousData keeps the last complete window on screen
-      // across facet/running-set re-keys), an empty running set (trivially
-      // complete without a request), or UNKNOWN — resolving, failed, or over
-      // the materialization ceiling (round-5 review P2). Consumers render
+      // is either the COMPLETE ids-facet window (fetched to the end for THIS
+      // key, no error), an empty running set (trivially complete without a
+      // request), or UNKNOWN — resolving, failed, or over the
+      // materialization ceiling (round-5 review P2). Consumers render
       // unknown as unknown; they never get a number to mis-present.
+      //
+      // Placeholder data is explicitly EXCLUDED from completeness: on a
+      // re-key (running set or facet change) keepPreviousData shows the OLD
+      // key's window, and pairing those rows with the NEW task snapshot
+      // publishes a precise-looking number for a scope nobody fetched —
+      // including re-publishing a ceiling-capped old window as if it were
+      // complete (round-6 review P2#1). While the new key resolves, the
+      // scope is unknown.
       if (!hasRunningIssues) return EMPTY_ISSUES;
       const workingWindowComplete =
         workingWindowQuery.data !== undefined &&
+        !workingWindowIsPlaceholder &&
         !workingWindowHasNext &&
         !workingWindowError;
       if (!workingWindowComplete) return undefined;
@@ -493,6 +518,7 @@ export function useIssueSurfaceData({
     usesTable,
     workingWindowError,
     workingWindowHasNext,
+    workingWindowIsPlaceholder,
     workingWindowQuery.data,
   ]);
 
@@ -632,7 +658,12 @@ export function useIssueSurfaceData({
     childProgressMap,
     projectMap,
     resolveTableExportLookups,
-    fetchNextFlatPage: flatIssuesQuery.fetchNextPage,
+    // cancelRefetch: false — the structure loop and the scroll sentinel are
+    // independent responders on this query; the default cancel/restart
+    // semantics turn a same-snapshot double call into a duplicated HTTP
+    // request, because the abandoned fetch is not abortable (the queryFn
+    // does not thread AbortSignal) (round-6 review R1).
+    fetchNextFlatPage: fetchNextFlatPageNoCancel,
     hasNextFlatPage: flatIssuesQuery.hasNextPage ?? false,
     isFetchingNextFlatPage: flatIssuesQuery.isFetchingNextPage,
     flatTotal,
