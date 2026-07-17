@@ -182,7 +182,8 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | 任务轮询频率 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 并发任务上限 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 单次任务的绝对墙钟上限；`0` = 不设上限，任务只受看门狗约束（活跃任务不会因为跑得久被杀）。想要硬性成本/资源天花板时再设一个正值 |
-| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 空闲看门狗：backend 持续静默（无消息、消息队列为空、且没有工具在途）这么久就 force-stop。`0` = 关闭整套看门狗 |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 空闲看门狗：backend 持续静默（无消息、消息队列为空、且没有工具在途）这么久就 force-stop。`0` = 关闭整套看门狗，包括 provider 专用阈值 |
+| `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 首 token 未到或流式回复中断时的专用无消息阈值；`0` = 回退到 `MULTICA_AGENT_IDLE_WATCHDOG`，更大的值不能放宽全局阈值 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 工具在途时的静默上限：某个工具调用发出后长时间无任何输出（疑似卡死的子进程）这么久就 force-stop。`0` = 关闭该兜底（在途工具永不被停）|
 | `MULTICA_<PROVIDER>_PATH` | 对应 CLI 名 | 各 AI 编程工具的可执行文件路径（如 `MULTICA_CLAUDE_PATH`）|
 | `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI 编程工具的默认模型 |

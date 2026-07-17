@@ -31,7 +31,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -91,8 +91,6 @@ import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { api } from "@multica/core/api";
 import { useTimeAgo } from "../../i18n";
 import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
@@ -729,7 +727,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     currentUserRole === "owner" || currentUserRole === "admin";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
-  const { uploadWithToast } = useFileUpload(api);
+  // Description autosave is deliberately NOT gated (no explicit submit; the
+  // editor already strips `blob:` before serializing and binds ids on the
+  // later save). It still needs the failure toast, or a failed upload just
+  // erases its own placeholder and the file disappears unexplained.
+  const { uploadWithToast } = useEditorUpload();
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: layoutId,
   });

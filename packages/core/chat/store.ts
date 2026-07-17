@@ -35,18 +35,17 @@ const APPLIED_RESTORES_KEY = "multica:chat:applied-draft-restores";
  * they are refetchable, so dropping one loses nothing.
  */
 const PENDING_SEND_RESTORES_KEY = "multica:chat:pending-send-restores";
-/** Placeholder sessionId for a chat that hasn't been created yet. */
+/**
+ * Draft slot for a chat that hasn't been created yet. There is exactly one per
+ * workspace: the new-chat composer's identity is "the chat I have not created",
+ * not "the chat I have not created with agent X". `selectedAgentId` is the send
+ * target, not draft ownership, so switching agent mid-compose keeps the text
+ * (MUL-4864). Created sessions keep their own slot, keyed by session id.
+ */
 export const DRAFT_NEW_SESSION = "__new__";
 
-/**
- * Draft storage key for an as-yet-uncreated chat with the given agent.
- * Shared by ChatInput (which writes the draft) and ensureSession (which
- * migrates it onto the real session id the moment the session is created),
- * so the two never disagree on the slot name.
- */
-export function newSessionDraftKey(selectedAgentId: string | null): string {
-  return `${DRAFT_NEW_SESSION}:${selectedAgentId ?? ""}`;
-}
+/** Pre-MUL-4864 per-agent new-chat slots, shaped `__new__:<agentId>`. */
+const LEGACY_NEW_SESSION_PREFIX = `${DRAFT_NEW_SESSION}:`;
 const CHAT_WIDTH_KEY = "multica:chat:width";
 const CHAT_HEIGHT_KEY = "multica:chat:height";
 const CHAT_EXPANDED_KEY = "multica:chat:expanded";
@@ -197,6 +196,64 @@ function writeDraftAttachments(
   }
 }
 
+/**
+ * Fold the legacy per-agent new-chat slots into the single DRAFT_NEW_SESSION
+ * slot, then drop them.
+ *
+ * The legacy slots carry no timestamp, so when several exist there is no way to
+ * tell which one the user typed last — and "keep them all" has nowhere to put
+ * the losers now that there is one composer. Adopt the slot belonging to the
+ * persisted `selectedAgentId` (the draft this workspace would have shown on
+ * open, so the only one the user can be expecting) and discard the rest: those
+ * extra slots ARE the invisible multi-draft state this change removes.
+ *
+ * Both write paths prune empty values, so key presence means content.
+ * Idempotent: once the legacy keys are gone this is an allocation-free no-op.
+ */
+function migrateLegacyNewChatSlots<T>(
+  slots: Record<string, T>,
+  selectedAgentId: string | null,
+): { slots: Record<string, T>; changed: boolean } {
+  const legacyKeys = Object.keys(slots).filter((k) => k.startsWith(LEGACY_NEW_SESSION_PREFIX));
+  if (legacyKeys.length === 0) return { slots, changed: false };
+  const next = { ...slots };
+  const adopted = next[`${LEGACY_NEW_SESSION_PREFIX}${selectedAgentId ?? ""}`];
+  // Never clobber the unified slot: whatever is in it was written under the
+  // current scheme and is therefore newer than any legacy leftover.
+  if (!(DRAFT_NEW_SESSION in next) && adopted !== undefined) {
+    next[DRAFT_NEW_SESSION] = adopted;
+  }
+  for (const key of legacyKeys) delete next[key];
+  logger.info("migrating legacy per-agent new-chat drafts", {
+    legacyCount: legacyKeys.length,
+    selectedAgentId,
+    adopted: DRAFT_NEW_SESSION in next,
+  });
+  return { slots: next, changed: true };
+}
+
+/**
+ * Read both draft maps and migrate them together, against the same
+ * `selectedAgentId` — text and attachments must never disagree on which legacy
+ * new-chat draft survived, or the user gets agent A's words with agent B's
+ * files.
+ */
+function loadDraftSlots(
+  storage: StorageAdapter,
+  draftsKey: string,
+  attachmentsKey: string,
+  selectedAgentId: string | null,
+): { inputDrafts: Record<string, string>; inputDraftAttachments: Record<string, Attachment[]> } {
+  const drafts = migrateLegacyNewChatSlots(readDrafts(storage, draftsKey), selectedAgentId);
+  const attachments = migrateLegacyNewChatSlots(
+    readDraftAttachments(storage, attachmentsKey),
+    selectedAgentId,
+  );
+  if (drafts.changed) writeDrafts(storage, draftsKey, drafts.slots);
+  if (attachments.changed) writeDraftAttachments(storage, attachmentsKey, attachments.slots);
+  return { inputDrafts: drafts.slots, inputDraftAttachments: attachments.slots };
+}
+
 export const CHAT_MIN_W = 360;
 export const CHAT_MIN_H = 480;
 export const CHAT_DEFAULT_W = 380;
@@ -294,13 +351,21 @@ export function createChatStore(options: ChatStoreOptions) {
   // (new user) resolves to enabled.
   const initialFloatingEnabled = storage.getItem(FLOATING_KEY) !== "false";
 
+  const initialAgentId = storage.getItem(wsKey(AGENT_STORAGE_KEY));
+  const initialDraftSlots = loadDraftSlots(
+    storage,
+    wsKey(DRAFTS_KEY),
+    wsKey(DRAFT_ATTACHMENTS_KEY),
+    initialAgentId,
+  );
+
   const store = create<ChatState>((set, get) => ({
     isOpen: initialIsOpen,
     floatingChatEnabled: initialFloatingEnabled,
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
-    selectedAgentId: storage.getItem(wsKey(AGENT_STORAGE_KEY)),
-    inputDrafts: readDrafts(storage, wsKey(DRAFTS_KEY)),
-    inputDraftAttachments: readDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY)),
+    selectedAgentId: initialAgentId,
+    inputDrafts: initialDraftSlots.inputDrafts,
+    inputDraftAttachments: initialDraftSlots.inputDraftAttachments,
     appliedDraftRestoreIds: readAppliedRestores(storage, wsKey(APPLIED_RESTORES_KEY)),
     pendingSendRestores: readPendingSendRestores(storage, wsKey(PENDING_SEND_RESTORES_KEY)),
     chatWidth: Number(storage.getItem(CHAT_WIDTH_KEY)) || CHAT_DEFAULT_W,
@@ -456,8 +521,15 @@ export function createChatStore(options: ChatStoreOptions) {
   registerForWorkspaceRehydration(() => {
     const nextSession = storage.getItem(wsKey(SESSION_STORAGE_KEY));
     const nextAgent = storage.getItem(wsKey(AGENT_STORAGE_KEY));
-    const nextDrafts = readDrafts(storage, wsKey(DRAFTS_KEY));
-    const nextDraftAttachments = readDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY));
+    // Drafts are namespaced per workspace, so the workspace being switched TO
+    // has its own legacy slots to fold — migrate against that workspace's own
+    // persisted agent, not the one we are leaving.
+    const { inputDrafts: nextDrafts, inputDraftAttachments: nextDraftAttachments } = loadDraftSlots(
+      storage,
+      wsKey(DRAFTS_KEY),
+      wsKey(DRAFT_ATTACHMENTS_KEY),
+      nextAgent,
+    );
     logger.info("workspace rehydration", {
       prevSession: store.getState().activeSessionId,
       nextSession,

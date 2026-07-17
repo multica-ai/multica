@@ -1,6 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -23,20 +22,21 @@ import {
 
 export function MyIssuesHeader({
   allIssues,
+  workingIssues,
   scope,
   onScopeChange,
   isRefreshing = false,
   facetCountsExact = true,
-  workingScopeIssueIds,
 }: {
   allIssues: Issue[];
+  /** The rows the agents-working filter would leave on screen. Scopes the
+   *  chip: it counts the agents working on these rows. */
+  workingIssues: Issue[];
   scope: MyIssuesScope;
   onScopeChange: (scope: MyIssuesScope) => void;
   isRefreshing?: boolean;
   /** See IssueDisplayControls.facetCountsExact. */
   facetCountsExact?: boolean;
-  /** See IssuesHeader.workingScopeIssueIds — table-mode chip authority. */
-  workingScopeIssueIds?: ReadonlySet<string>;
 }) {
   const { t } = useT("my-issues");
   const { t: tIssues } = useT("issues");
@@ -50,11 +50,6 @@ export function MyIssuesHeader({
   const toggleAgentRunningFilter = useViewStore(
     (s) => s.toggleAgentRunningFilter,
   );
-  const loadedIssueIds = useMemo(
-    () => new Set(allIssues.map((i) => i.id)),
-    [allIssues],
-  );
-  const scopedIssueIds = workingScopeIssueIds ?? loadedIssueIds;
   const scopeLabel = SCOPES.find((s) => s.value === scope)?.label ?? SCOPES[0]?.label;
 
   return (
@@ -120,7 +115,7 @@ export function MyIssuesHeader({
           <WorkspaceAgentWorkingChip
             value={agentRunningFilter}
             onToggle={toggleAgentRunningFilter}
-            scopedIssueIds={scopedIssueIds}
+            workingIssues={workingIssues}
           />
           <IssueDisplayControls
             scopedIssues={allIssues}

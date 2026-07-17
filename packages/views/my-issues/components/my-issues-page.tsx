@@ -38,16 +38,16 @@ export function MyIssuesPage() {
           }}
           modes={["board", "list", "table", "swimlane"]}
           batchToolbar="list"
-          renderHeader={({ controller }) => (
+          renderHeader={({ controller, workingIssues }) => (
             <MyIssuesHeader
               allIssues={controller.surfaceIssues}
+              workingIssues={workingIssues}
               scope={scope}
               onScopeChange={setScope}
               isRefreshing={controller.isRefreshing}
               facetCountsExact={
                 !(controller.viewMode === "table" && controller.hasNextFlatPage)
               }
-              workingScopeIssueIds={controller.workingScopeIssueIds}
             />
           )}
           renderEmpty={() => (

@@ -253,6 +253,8 @@
     "version_unknown": "unknown",
     "managed_by_desktop": "Managed by Desktop",
     "managed_by_desktop_title": "The CLI binary is managed by Multica Desktop — update Desktop to upgrade the CLI.",
+    "read_only": "Read-only",
+    "read_only_title": "Only runtime owners and workspace admins can update the CLI.",
     "latest": "Latest",
     "available": "available",
     "action": "Update",

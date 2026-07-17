@@ -44,6 +44,9 @@ import (
 //     the shared home: Hermes loads and writes back MEMORY.md/USER.md there, and
 //     per-agent memory is a Multica product concern — the host's local Hermes
 //     memory must not bleed into a task, nor task memory back out to the host;
+//   - keeps the state.db SQLite session store and its journal sidecars
+//     overlay-owned too: Hermes creates them lazily, Reuse preserves them for
+//     the task, and host conversation history is never linked or copied;
 //   - disables the external `memory.provider` in the derived config so a
 //     host-configured Supermemory/Hindsight/etc. backend isn't shared across
 //     tasks. This is the on-disk + external-backend memory isolation; a managed,
@@ -54,13 +57,17 @@ import (
 // runtime (e.g. refreshing token state under a mirrored auth/OAuth path) that
 // write does reach the shared home — that propagation is intentional.
 
-// hermesOverriddenEntries are the top-level entries of the shared ~/.hermes/
-// that the overlay supplies its own task-local version of, so they are NOT
-// mirrored from the shared home and are preserved across reuse reconciliation:
+// hermesOverriddenEntries are the fixed top-level entries of the shared
+// ~/.hermes/ that the overlay supplies its own task-local version of, so they
+// are NOT mirrored from the shared home and are preserved across reuse
+// reconciliation:
 //   - skills/       task-local, only the bound skills
 //   - config.yaml   derived config with absolutized external_dirs
 //   - memories/     fresh per-task dir, isolated from the host's memory
+//   - marker below  records that legacy shared SQLite state was detached
 //
+// The state.db SQLite family is classified dynamically by
+// isHermesOverlayOwnedEntry so every journal sidecar stays task-local too.
 // Everything else in the shared home is mirrored generically.
 //
 // active_profile and profiles are also overlay-owned (never mirrored): Hermes
@@ -80,13 +87,32 @@ import (
 // HERMES_HOME to the overlay, and is written even when the source has none so
 // Hermes' project-.env fallback (loaded with override=True only when no user
 // .env loaded) can't relocate the home either.
+const hermesTaskLocalStateMarker = ".multica-task-local-state-v1"
+
 var hermesOverriddenEntries = map[string]struct{}{
-	"skills":         {},
-	"config.yaml":    {},
-	"memories":       {},
-	"active_profile": {},
-	"profiles":       {},
-	".env":           {},
+	"skills":                   {},
+	"config.yaml":              {},
+	"memories":                 {},
+	"active_profile":           {},
+	"profiles":                 {},
+	".env":                     {},
+	hermesTaskLocalStateMarker: {},
+}
+
+// isHermesOverlayOwnedEntry reports whether name belongs to the per-task
+// overlay rather than the shared Hermes home. Hermes' state.db is the canonical
+// session store and uses WAL mode; mirroring its main file and journal sidecars
+// separately can produce an inconsistent snapshot, exposes host conversation
+// history, and fails on Windows when SQLite byte-range-locks state.db-shm.
+func isHermesOverlayOwnedEntry(name string) bool {
+	if _, owned := hermesOverriddenEntries[name]; owned {
+		return true
+	}
+	return isHermesTaskLocalStateEntry(name)
+}
+
+func isHermesTaskLocalStateEntry(name string) bool {
+	return name == "state.db" || strings.HasPrefix(name, "state.db-")
 }
 
 // platformDefaultHermesHome returns Hermes' platform-native default home:
@@ -360,6 +386,9 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	if err := os.Chmod(hermesHome, 0o700); err != nil {
 		return fmt.Errorf("chmod hermes-home dir: %w", err)
 	}
+	if err := prepareHermesTaskLocalState(hermesHome); err != nil {
+		return fmt.Errorf("prepare task-local state: %w", err)
+	}
 	// Fresh, isolated per-task memories dir (idempotent — preserved across reuse
 	// so the task/issue lifecycle keeps its own memory).
 	if err := os.MkdirAll(filepath.Join(hermesHome, "memories"), 0o700); err != nil {
@@ -469,7 +498,7 @@ func mirrorSharedHermesHome(sharedHome, hermesHome string, logger *slog.Logger) 
 	mirrored := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
-		if _, overridden := hermesOverriddenEntries[name]; overridden {
+		if isHermesOverlayOwnedEntry(name) {
 			continue
 		}
 		src := filepath.Join(sharedHome, name)
@@ -492,7 +521,7 @@ func reconcileMirroredEntries(hermesHome string, mirrored map[string]struct{}) e
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if _, owned := hermesOverriddenEntries[name]; owned {
+		if isHermesOverlayOwnedEntry(name) {
 			continue
 		}
 		if _, keep := mirrored[name]; keep {
@@ -503,6 +532,39 @@ func reconcileMirroredEntries(hermesHome string, mirrored map[string]struct{}) e
 		}
 	}
 	return nil
+}
+
+// prepareHermesTaskLocalState migrates an overlay built by an older daemon away
+// from the shared Hermes SQLite session store. Without the marker, state.db and
+// its sidecars may be symlinks or independently copied files; neither is safe to
+// reuse as task-local state. Remove only those entries inside the generated
+// overlay, then record the migration atomically. Hermes lazily creates a fresh
+// database, and later prepares preserve it because the marker is present.
+func prepareHermesTaskLocalState(hermesHome string) error {
+	marker := filepath.Join(hermesHome, hermesTaskLocalStateMarker)
+	if fi, err := os.Lstat(marker); err == nil {
+		if !fi.Mode().IsRegular() {
+			return fmt.Errorf("state marker is not a regular file: %s", marker)
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat state marker: %w", err)
+	}
+
+	entries, err := os.ReadDir(hermesHome)
+	if err != nil {
+		return fmt.Errorf("read overlay home: %w", err)
+	}
+	for _, entry := range entries {
+		if !isHermesTaskLocalStateEntry(entry.Name()) {
+			continue
+		}
+		path := filepath.Join(hermesHome, entry.Name())
+		if err := os.RemoveAll(path); err != nil {
+			return fmt.Errorf("remove legacy task state %s: %w", path, err)
+		}
+	}
+	return writeFileAtomic(marker, []byte("task-local Hermes state\n"), 0o600)
 }
 
 // linkSharedHermesEntry symlinks dst → src, idempotent across Reuse: an existing

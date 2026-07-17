@@ -1282,18 +1282,20 @@ func (q *Queries) UnresolveComment(ctx context.Context, id pgtype.UUID) (Comment
 const updateComment = `-- name: UpdateComment :one
 UPDATE comment SET
     content = $2,
+    source_task_id = $3,
     updated_at = now()
 WHERE id = $1
 RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id
 `
 
 type UpdateCommentParams struct {
-	ID      pgtype.UUID `json:"id"`
-	Content string      `json:"content"`
+	ID           pgtype.UUID `json:"id"`
+	Content      string      `json:"content"`
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
 }
 
 func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (Comment, error) {
-	row := q.db.QueryRow(ctx, updateComment, arg.ID, arg.Content)
+	row := q.db.QueryRow(ctx, updateComment, arg.ID, arg.Content, arg.SourceTaskID)
 	var i Comment
 	err := row.Scan(
 		&i.ID,

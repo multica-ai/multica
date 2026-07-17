@@ -59,6 +59,9 @@ export interface IssueSurfaceController {
   projectIssues: Issue[];
   issues: Issue[];
   swimlaneIssues: Issue[];
+  /** The rows the agents-working filter would leave on screen. Feeds the
+   *  header chip so its count IS the post-click row count (MUL-4884). */
+  workingScopeIssues: Issue[];
   filteredGanttIssues: Issue[];
   assigneeGroups?: IssueAssigneeGroup[];
   assigneeGroupQueryKey?: QueryKey;
@@ -87,9 +90,6 @@ export interface IssueSurfaceController {
   hasNextFlatPage: boolean;
   isFetchingNextFlatPage: boolean;
   flatTotal: number;
-  /** See IssueSurfaceData.workingScopeIssueIds — authoritative in-window
-   *  running set for the working chip in table mode. */
-  workingScopeIssueIds?: ReadonlySet<string>;
   tableSearch: string;
   setTableSearch: (query: string) => void;
   exportTableIssues: () => Promise<Issue[]>;
@@ -169,6 +169,7 @@ export function useIssueSurfaceController({
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
+  const ganttShowCompleted = useViewStore((s) => s.ganttShowCompleted);
   const cardProperties = useViewStore((s) => s.cardProperties);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const tableColumns = useViewStore((s) => s.tableColumns);
@@ -370,6 +371,7 @@ export function useIssueSurfaceController({
     usesAssigneeBoard,
     usesGantt,
     usesTable,
+    ganttShowCompleted,
     sort,
     tableFacets,
     workingFacets,

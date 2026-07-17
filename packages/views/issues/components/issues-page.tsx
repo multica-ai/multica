@@ -11,14 +11,14 @@ import { IssuesHeader } from "./issues-header";
 
 function IssuesSurfaceHeader({
   issues,
+  workingIssues,
   isRefreshing,
   facetCountsExact,
-  workingScopeIssueIds,
 }: {
   issues: Issue[];
+  workingIssues: Issue[];
   isRefreshing: boolean;
   facetCountsExact: boolean;
-  workingScopeIssueIds?: ReadonlySet<string>;
 }) {
   const dateFilter = useViewStore((s) => s.dateFilter);
   const setDateFilter = useViewStore((s) => s.setDateFilter);
@@ -26,11 +26,11 @@ function IssuesSurfaceHeader({
   return (
     <IssuesHeader
       scopedIssues={issues}
+      workingIssues={workingIssues}
       dateFilter={dateFilter}
       onDateFilterChange={setDateFilter}
       isRefreshing={isRefreshing}
       facetCountsExact={facetCountsExact}
-      workingScopeIssueIds={workingScopeIssueIds}
     />
   );
 }
@@ -50,14 +50,14 @@ export function IssuesPage() {
         scope={{ type: "workspace", actorKind: scope }}
         modes={["board", "list", "table", "swimlane"]}
         batchToolbar="list"
-        renderHeader={({ controller }) => (
+        renderHeader={({ controller, workingIssues }) => (
           <IssuesSurfaceHeader
             issues={controller.surfaceIssues}
+            workingIssues={workingIssues}
             isRefreshing={controller.isRefreshing}
             facetCountsExact={
               !(controller.viewMode === "table" && controller.hasNextFlatPage)
             }
-            workingScopeIssueIds={controller.workingScopeIssueIds}
           />
         )}
         renderEmpty={() => (

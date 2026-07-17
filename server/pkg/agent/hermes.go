@@ -1203,8 +1203,8 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 		RawInput   map[string]any    `json:"rawInput"`
 		Input      map[string]any    `json:"input"`
 		Parameters map[string]any    `json:"parameters"`
-		RawOutput  string            `json:"rawOutput"`
-		Output     string            `json:"output"`
+		RawOutput  json.RawMessage   `json:"rawOutput"`
+		Output     json.RawMessage   `json:"output"`
 		Content    []json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -1240,9 +1240,9 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 	pending := c.takePendingTool(msg.ToolCallID)
 	c.emitDeferredToolUse(pending, msg.ToolCallID, title, msg.Kind, rawInput)
 
-	output := msg.RawOutput
+	output := acpRawText(msg.RawOutput)
 	if output == "" {
-		output = msg.Output
+		output = acpRawText(msg.Output)
 	}
 	if output == "" {
 		output = extractACPToolCallText(msg.Content)
@@ -1367,6 +1367,27 @@ func parseToolArgsJSON(argsText string) map[string]any {
 //     as a minimal unified-diff header so the UI distinguishes writes
 //     from reads without needing a diff viewer.
 //
+// acpRawText renders an ACP output field (rawOutput / output) that may arrive
+// as either a JSON string or a structured value. Some model adapters — notably
+// Kiro's GPT-5.6 Sol path — send the completed tool_call_update's rawOutput as
+// an object like {"items":[{"Json":{...}}]} rather than a string. Declaring
+// that field as a Go string made json.Unmarshal fail, which made
+// handleToolCallUpdate return early and silently DROP the entire update —
+// including its status:"completed" — so the completion signal was lost and the
+// task was wrongly marked failed (issue #5509 / MUL-4860). Accept both shapes.
+func acpRawText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	// Non-string (object / array / number): keep the raw JSON as text so the
+	// output is preserved rather than discarded.
+	return string(raw)
+}
+
 // Terminal blocks ({type:"terminal", terminalId}) reference a remote
 // terminal the client would normally subscribe to via terminal/output;
 // we don't advertise terminal capability so we never receive those in

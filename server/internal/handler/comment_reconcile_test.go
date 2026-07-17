@@ -348,7 +348,7 @@ func TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent(t *testing.
 	if err != nil {
 		t.Fatalf("setup: load mention comment: %v", err)
 	}
-	testHandler.triggerTasksForComment(ctx, issue, mentionComment, nil, "agent", agentA, "", nil)
+	testHandler.triggerTasksForComment(ctx, issue, mentionComment, nil, "agent", agentA, "", "", nil)
 
 	// Drop happened: the mention found no queued task to merge into and an
 	// active (dispatched) task exists, so NO fresh queued follow-up was created.
@@ -583,14 +583,14 @@ func TestConsecutiveCommentsDifferentOriginatorsFullEnqueuePath(t *testing.T) {
 
 	// A's comment → creates the queued task (originator A).
 	cA := insertMemberComment(testUserID, "first, from A")
-	testHandler.triggerTasksForComment(ctx, issue, cA, nil, "member", testUserID, testUserID, nil)
+	testHandler.triggerTasksForComment(ctx, issue, cA, nil, "member", testUserID, testUserID, "", nil)
 	if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
 		t.Fatalf("after A's comment expected exactly 1 queued task, got %d", n)
 	}
 
 	// B's comment (different originator) before start → must fold in, NOT drop.
 	cB := insertMemberComment(userB, "second, from B — different user")
-	testHandler.triggerTasksForComment(ctx, issue, cB, nil, "member", userB, userB, nil)
+	testHandler.triggerTasksForComment(ctx, issue, cB, nil, "member", userB, userB, "", nil)
 
 	// Still exactly one task (bounded concurrency, no unique-index collision).
 	if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
