@@ -219,6 +219,22 @@ func (h *Handler) Start(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, row)
 }
 
+func (h *Handler) Pause(w http.ResponseWriter, r *http.Request) {
+	ws, u, ok := parseContext(w, r)
+	if !ok {
+		return
+	}
+	id, ok := parseParam(w, r, "roundId")
+	if !ok {
+		return
+	}
+	if err := h.Service.Pause(r.Context(), ws, u, id); err != nil {
+		handleErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	ws, u, ok := parseContext(w, r)
 	if !ok {

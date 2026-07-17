@@ -193,6 +193,44 @@ func TestReplyHandlesCurrentCycle(t *testing.T) {
 	}
 }
 
+func TestPauseReturnsOnlyUnhandledItemsToNextRound(t *testing.T) {
+	f := newReviewFixture(t)
+	ctx := context.Background()
+	unhandled := f.newIssue(t, "pause unhandled")
+	handled := f.newIssue(t, "pause handled")
+	if _, err := f.svc.Start(ctx, f.wsID, f.ownerID, f.roundID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.MarkHandled(ctx, f.wsID, handled, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO inbox_item (workspace_id,recipient_type,recipient_id,type,issue_id,title) VALUES ($1,'member',$2,'new_comment',$3,'pause arrived after play')`, f.wsID, f.ownerID, unhandled); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE inbox_item SET read=true WHERE workspace_id=$1 AND recipient_id=$2 AND issue_id IN ($3,$4)`, f.wsID, f.ownerID, unhandled, handled); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.svc.Pause(ctx, f.wsID, f.ownerID, f.roundID); err != nil {
+		t.Fatal(err)
+	}
+	status, err := f.svc.Status(ctx, f.wsID, f.ownerID, f.roundID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ActiveCycle != nil {
+		t.Fatalf("active cycle after pause = %+v, want nil", status.ActiveCycle)
+	}
+
+	next, err := f.svc.Start(ctx, f.wsID, f.ownerID, f.roundID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cycleHas(t, next, unhandled) || cycleHas(t, next, handled) {
+		t.Fatalf("next cycle items = %+v, want only the unhandled issue returned", next.Items)
+	}
+}
+
 func TestNextStartSurfacesNewReply(t *testing.T) {
 	f := newReviewFixture(t)
 	ctx := context.Background()

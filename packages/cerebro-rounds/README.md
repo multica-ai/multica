@@ -1,7 +1,7 @@
 # Cerebro Rounds
 
-A Round is a named group of issue conversations. It never pauses, reroutes or
-otherwise changes the normal inbox and trigger flow.
+A Round is a named group of issue conversations. It never reroutes or otherwise
+changes the normal inbox and trigger flow.
 
 Pressing Play creates an answer snapshot from member issues that currently have
 an unread inbox message and no active task. A scheduled wakeup is not an active
@@ -13,3 +13,5 @@ current inbox message do not render a separate issue-title row.
 
 Starting again replaces the active snapshot. Replies continue through their
 ordinary trigger path and only add a handled timestamp to the current snapshot.
+Pausing ends the active snapshot, folds the Round, and returns its unanswered
+items to Ready for the next Play. Handled items stay handled.

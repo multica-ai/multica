@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Pause, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import { Fragment, useState, type ReactNode } from "react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -23,6 +23,7 @@ export function RoundsBlock({
   issueRunStates = new Map(),
   wakeupIssueIds = new Set(),
   onStart,
+  onPause,
   onSelectIssue,
   settings,
   renderIssue,
@@ -36,6 +37,7 @@ export function RoundsBlock({
   issueRunStates?: ReadonlyMap<string, unknown>;
   wakeupIssueIds?: ReadonlySet<string>;
   onStart: (id: string) => void;
+  onPause: (id: string) => void;
   onSelectIssue: (id: string) => void;
   settings?: ReactNode;
   renderIssue?: (issueId: string) => ReactNode;
@@ -92,11 +94,19 @@ export function RoundsBlock({
           <span className="truncate text-sm font-medium">{s.round.name}</span>
           <span className="ml-auto text-xs text-muted-foreground">{summary}</span>
         </button>
-        <Button size="sm" variant="ghost" onClick={() => {
+        {s.active_cycle ? <Button size="sm" variant="ghost" onClick={() => {
+          setViews((current) => ({ ...current, [s.round.id]: "ready" }));
+          setExpandedIds((current) => {
+            const next = new Set(current);
+            next.delete(s.round.id);
+            return next;
+          });
+          onPause(s.round.id);
+        }} aria-label={`Pause ${s.round.name}`}><Pause className="size-3.5" /><span className="sr-only">Pause</span></Button> : <Button size="sm" variant="ghost" onClick={() => {
           setViews((current) => ({ ...current, [s.round.id]: "ready" }));
           setExpandedIds((current) => new Set([...current, s.round.id]));
           onStart(s.round.id);
-        }} aria-label={`Play ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Play</span></Button>
+        }} aria-label={`Play ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Play</span></Button>}
       </div>
       {open && <>
         <div className="flex gap-1 border-t border-border/50 px-3 py-2" role="group" aria-label={`${s.round.name} view`}>

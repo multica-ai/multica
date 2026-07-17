@@ -107,7 +107,7 @@ import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 import { NotesInboxBox, NoteInboxBox, NoteInboxDetail } from "@multica/cerebro-notes/views";
 import { SkillChangeInboxDetail } from "@multica/cerebro-skill-ownership/views";
 import { opensInDynamicInboxPane } from "../notification-routing";
-import { IssueRoundsSection, ConnectedRoundManager, RoundsBlock, roundExcludedIssueIds, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
+import { IssueRoundsSection, ConnectedRoundManager, RoundsBlock, roundExcludedIssueIds, usePauseRound, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -189,6 +189,7 @@ export function DynamicInbox() {
   const roundsEnabled = useFeatureFlag("cerebro_inbox_rounds");
   const { data: roundStatuses = [] } = useRoundStatuses(wsId);
   const startRound = useStartRound(wsId);
+  const pauseRound = usePauseRound(wsId);
   const roundExcludedIds = useMemo(() => roundExcludedIssueIds(roundStatuses), [roundStatuses]);
   const roundIssueIds = useMemo(() => [...roundExcludedIds], [roundExcludedIds]);
   const roundMessageIssueIds = useMemo(
@@ -1199,6 +1200,7 @@ export function DynamicInbox() {
                           defaultCollapsed={section.defaultCollapsed}
                           onRemove={() => removeSection(section.id)}
                           onStart={(roundId) => startRound.mutate(roundId)}
+                          onPause={(roundId) => pauseRound.mutate(roundId)}
                           issueRunStates={filterContext.action.issueRunStates}
                           wakeupIssueIds={filterContext.action.wakeupIssueIds}
                           onSelectIssue={(issueId) => {

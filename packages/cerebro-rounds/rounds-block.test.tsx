@@ -7,12 +7,12 @@ import type { RoundStatus } from "./schemas";
 
 afterEach(cleanup);
 
-const status = (handled = false): RoundStatus => ({
+const status = (handled = false, active = true): RoundStatus => ({
   round: { id: "round-1", workspace_id: "ws", owner_id: "owner", name: "Daily", created_at: "", updated_at: "" },
   members: ["ready", "running", "wakeup", "handled", "orphan"].map((issue_id) => ({
     round_id: "round-1", issue_id, added_by_type: "member", added_by_id: "owner", created_at: "",
   })),
-  active_cycle: {
+  active_cycle: active ? {
     id: "cycle-1", round_id: "round-1", started_at: "2026-07-14T12:00:00Z",
     items: [
       { issue_id: "ready", handled_at: null },
@@ -20,7 +20,7 @@ const status = (handled = false): RoundStatus => ({
       { issue_id: "wakeup", handled_at: null },
       { issue_id: "handled", handled_at: handled ? "2026-07-14T12:01:00Z" : null },
     ],
-  },
+  } : null,
 });
 
 const props = {
@@ -29,6 +29,7 @@ const props = {
   issueRunStates: new Map([["running", "running"]]),
   wakeupIssueIds: new Set(["wakeup"]),
   onStart: vi.fn(),
+  onPause: vi.fn(),
   onSelectIssue: vi.fn(),
   renderIssue: (issueId: string) => issueId === "orphan" ? null : <div data-testid={`row-${issueId}`}>{issueId}</div>,
 };
@@ -64,14 +65,28 @@ describe("RoundsBlock", () => {
 
   it("searches the selected flat view and Play starts a fresh snapshot", () => {
     const onStart = vi.fn();
-    render(<RoundsBlock statuses={[status(true)]} {...props} onStart={onStart} />);
+    const { rerender } = render(<RoundsBlock statuses={[status(true)]} {...props} onStart={onStart} />);
     fireEvent.click(screen.getByRole("button", { name: "Expand Daily" }));
     fireEvent.click(screen.getByRole("button", { name: "All messages" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), { target: { value: "handled" } });
     expect(screen.getByTestId("row-handled")).toBeInTheDocument();
     expect(screen.queryByTestId("row-ready")).not.toBeInTheDocument();
+    rerender(<RoundsBlock statuses={[status(false, false)]} {...props} onStart={onStart} />);
     fireEvent.click(screen.getByRole("button", { name: "Play Daily" }));
     expect(onStart).toHaveBeenCalledWith("round-1");
+  });
+
+  it("offers Pause only for an active snapshot and folds it away", () => {
+    const onPause = vi.fn();
+    const { rerender } = render(<RoundsBlock statuses={[status()]} {...props} onPause={onPause} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand Daily" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause Daily" }));
+    expect(onPause).toHaveBeenCalledWith("round-1");
+    expect(screen.getByRole("button", { name: "Expand Daily" })).toBeInTheDocument();
+
+    rerender(<RoundsBlock statuses={[status(false, false)]} {...props} onPause={onPause} />);
+    expect(screen.queryByRole("button", { name: "Pause Daily" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play Daily" })).toBeInTheDocument();
   });
 });
 

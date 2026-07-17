@@ -225,6 +225,43 @@ func (s *Service) Start(ctx context.Context, workspaceID, ownerID, roundID pgtyp
 	return *cycle, err
 }
 
+func (s *Service) Pause(ctx context.Context, workspaceID, ownerID, roundID pgtype.UUID) error {
+	if _, err := s.Get(ctx, workspaceID, ownerID, roundID); err != nil {
+		return err
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var cycleID pgtype.UUID
+	err = tx.QueryRow(ctx, `SELECT id FROM cerebro_round_cycle WHERE round_id=$1 AND ended_at IS NULL FOR UPDATE`, roundID).Scan(&cycleID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tx.Commit(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE cerebro_round_cycle SET ended_at=now() WHERE id=$1`, cycleID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `WITH latest_unhandled AS (
+		SELECT DISTINCT ON (i.issue_id) i.id
+		FROM inbox_item i
+		JOIN cerebro_round_cycle_item ci ON ci.issue_id=i.issue_id
+		WHERE ci.cycle_id=$1 AND ci.handled_at IS NULL
+		AND i.workspace_id=$2 AND i.recipient_type='member' AND i.recipient_id=$3
+		AND i.route='inbox' AND i.archived=false
+		ORDER BY i.issue_id,i.created_at DESC,i.id DESC
+	)
+	UPDATE inbox_item SET read=false WHERE id IN (SELECT id FROM latest_unhandled)`, cycleID, workspaceID, ownerID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func (s *Service) cycle(ctx context.Context, cycleID pgtype.UUID) (*Cycle, error) {
 	var c Cycle
 	if err := s.Pool.QueryRow(ctx, `SELECT id::text,round_id::text,started_at FROM cerebro_round_cycle WHERE id=$1`, cycleID).Scan(&c.ID, &c.RoundID, &c.StartedAt); err != nil {

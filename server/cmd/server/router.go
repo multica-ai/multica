@@ -1529,6 +1529,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", cerebroRoundsHandler.Delete)
 					r.Get("/status", cerebroRoundsHandler.Status)
 					r.Post("/start", cerebroRoundsHandler.Start)
+					r.Post("/pause", cerebroRoundsHandler.Pause) // CEREBRO-PATCH(rounds-pause): FIR-3429 return unanswered items when pausing a round.
 					r.Post("/members", cerebroRoundsHandler.AddMember)
 					r.Delete("/members/{issueId}", cerebroRoundsHandler.RemoveMember)
 				})
