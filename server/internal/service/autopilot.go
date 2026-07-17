@@ -274,11 +274,20 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 				ID:     run.ID,
 				TaskID: task.ID,
 			})
-			if updateErr != nil {
+			switch {
+			case updateErr == nil:
+				s.TaskSvc.NotifyTaskEnqueued(ctx, task)
+				return &updated, nil
+			case errors.Is(updateErr, pgx.ErrNoRows):
+				// CAS lost: the task already finalized the run. Return the current
+				// (terminal) run rather than resurrecting it.
+				if reloaded, rerr := s.Queries.GetAutopilotRun(ctx, run.ID); rerr == nil {
+					return &reloaded, nil
+				}
+				return run, nil
+			default:
 				return run, fmt.Errorf("dispatch for webhook delivery: repair task linkage: %w", updateErr)
 			}
-			s.TaskSvc.NotifyTaskEnqueued(ctx, task)
-			return &updated, nil
 		case !errors.Is(taskErr, pgx.ErrNoRows):
 			return run, fmt.Errorf("dispatch for webhook delivery: lookup linked task: %w", taskErr)
 		}
@@ -760,10 +769,19 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 			ID:     run.ID,
 			TaskID: dispatchedTask.ID,
 		})
-		if bindErr != nil {
+		switch {
+		case bindErr == nil:
+			*run = updatedRun
+		case errors.Is(bindErr, pgx.ErrNoRows):
+			// CAS lost: the dispatched task already ran to terminal and finalized
+			// the run before this bind landed. Do NOT resurrect it to running —
+			// reload the terminal run and treat dispatch as succeeded.
+			if reloaded, rerr := s.Queries.GetAutopilotRun(ctx, run.ID); rerr == nil {
+				*run = reloaded
+			}
+		default:
 			return fmt.Errorf("bind autopilot run to dispatched task: %w", bindErr)
 		}
-		*run = updatedRun
 	}
 
 	slog.Info("autopilot dispatched (create_issue)",
@@ -1078,6 +1096,9 @@ func (s *AutopilotService) SyncRunFromCreateIssueTask(ctx context.Context, task 
 			Result: task.Result,
 		})
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return // CAS lost: the run was already finalized by another path
+			}
 			slog.Warn("failed to complete autopilot run from create_issue task",
 				"run_id", util.UUIDToString(run.ID), "error", err)
 			return
@@ -1091,6 +1112,9 @@ func (s *AutopilotService) SyncRunFromCreateIssueTask(ctx context.Context, task 
 			FailureReason: pgtype.Text{String: reason, Valid: reason != ""},
 		})
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return // CAS lost: the run was already finalized by another path
+			}
 			slog.Warn("failed to fail autopilot run from create_issue task",
 				"run_id", util.UUIDToString(run.ID), "error", err)
 			return
@@ -1124,6 +1148,9 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 			Result: task.Result,
 		})
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return // CAS lost: the run was already finalized by another path
+			}
 			slog.Warn("failed to complete autopilot run from task", "run_id", util.UUIDToString(run.ID), "error", err)
 			return
 		}
@@ -1139,6 +1166,9 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 			FailureReason: pgtype.Text{String: reason, Valid: true},
 		})
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return // CAS lost: the run was already finalized by another path
+			}
 			slog.Warn("failed to fail autopilot run from task", "run_id", util.UUIDToString(run.ID), "error", err)
 			return
 		}
@@ -1202,7 +1232,8 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 	if _, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
 		ID:            runID,
 		FailureReason: pgtype.Text{String: reason, Valid: true},
-	}); err != nil {
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		// ErrNoRows = CAS lost: the run already reached a terminal state; nothing to do.
 		slog.Warn("failed to mark autopilot run as failed", "run_id", util.UUIDToString(runID), "error", err)
 	}
 }

@@ -1730,7 +1730,7 @@ func (q *Queries) UpdateAutopilotLastRunAt(ctx context.Context, id pgtype.UUID) 
 const updateAutopilotRunCompleted = `-- name: UpdateAutopilotRunCompleted :one
 UPDATE autopilot_run
 SET status = 'completed', completed_at = now(), result = $2
-WHERE id = $1
+WHERE id = $1 AND status IN ('issue_created', 'running')
 RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id
 `
 
@@ -1739,6 +1739,10 @@ type UpdateAutopilotRunCompletedParams struct {
 	Result []byte      `json:"result"`
 }
 
+// Compare-and-set terminal transition (MUL-4809 §4.1): only an in-flight run may
+// be completed. Zero rows means another path (a racing task/issue listener, or a
+// rolling-deploy old pod) already wrote a terminal state — first writer wins;
+// the caller no-ops instead of overwriting the terminal state or re-publishing.
 func (q *Queries) UpdateAutopilotRunCompleted(ctx context.Context, arg UpdateAutopilotRunCompletedParams) (AutopilotRun, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotRunCompleted, arg.ID, arg.Result)
 	var i AutopilotRun
@@ -1766,7 +1770,7 @@ func (q *Queries) UpdateAutopilotRunCompleted(ctx context.Context, arg UpdateAut
 const updateAutopilotRunFailed = `-- name: UpdateAutopilotRunFailed :one
 UPDATE autopilot_run
 SET status = 'failed', completed_at = now(), failure_reason = $2
-WHERE id = $1
+WHERE id = $1 AND status IN ('issue_created', 'running')
 RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id
 `
 
@@ -1775,6 +1779,7 @@ type UpdateAutopilotRunFailedParams struct {
 	FailureReason pgtype.Text `json:"failure_reason"`
 }
 
+// Compare-and-set terminal transition (MUL-4809 §4.1); see UpdateAutopilotRunCompleted.
 func (q *Queries) UpdateAutopilotRunFailed(ctx context.Context, arg UpdateAutopilotRunFailedParams) (AutopilotRun, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotRunFailed, arg.ID, arg.FailureReason)
 	var i AutopilotRun
@@ -1838,7 +1843,7 @@ func (q *Queries) UpdateAutopilotRunIssueCreated(ctx context.Context, arg Update
 const updateAutopilotRunRunning = `-- name: UpdateAutopilotRunRunning :one
 UPDATE autopilot_run
 SET status = 'running', task_id = $2
-WHERE id = $1
+WHERE id = $1 AND status IN ('pending', 'issue_created', 'running')
 RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id
 `
 
@@ -1847,6 +1852,11 @@ type UpdateAutopilotRunRunningParams struct {
 	TaskID pgtype.UUID `json:"task_id"`
 }
 
+// Compare-and-set bind (MUL-4809 §4.1): only advance a run that is NOT already
+// terminal. If the dispatched task finished and finalized the run before the
+// bind lands, this matches zero rows (pgx.ErrNoRows) instead of resurrecting a
+// completed/failed run back to running. Callers treat zero rows as "already
+// finalized" and reload rather than error.
 func (q *Queries) UpdateAutopilotRunRunning(ctx context.Context, arg UpdateAutopilotRunRunningParams) (AutopilotRun, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotRunRunning, arg.ID, arg.TaskID)
 	var i AutopilotRun

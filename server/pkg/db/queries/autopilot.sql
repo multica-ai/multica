@@ -309,21 +309,31 @@ WHERE id = $1
 RETURNING *;
 
 -- name: UpdateAutopilotRunRunning :one
+-- Compare-and-set bind (MUL-4809 §4.1): only advance a run that is NOT already
+-- terminal. If the dispatched task finished and finalized the run before the
+-- bind lands, this matches zero rows (pgx.ErrNoRows) instead of resurrecting a
+-- completed/failed run back to running. Callers treat zero rows as "already
+-- finalized" and reload rather than error.
 UPDATE autopilot_run
 SET status = 'running', task_id = $2
-WHERE id = $1
+WHERE id = $1 AND status IN ('pending', 'issue_created', 'running')
 RETURNING *;
 
 -- name: UpdateAutopilotRunCompleted :one
+-- Compare-and-set terminal transition (MUL-4809 §4.1): only an in-flight run may
+-- be completed. Zero rows means another path (a racing task/issue listener, or a
+-- rolling-deploy old pod) already wrote a terminal state — first writer wins;
+-- the caller no-ops instead of overwriting the terminal state or re-publishing.
 UPDATE autopilot_run
 SET status = 'completed', completed_at = now(), result = sqlc.narg('result')
-WHERE id = $1
+WHERE id = $1 AND status IN ('issue_created', 'running')
 RETURNING *;
 
 -- name: UpdateAutopilotRunFailed :one
+-- Compare-and-set terminal transition (MUL-4809 §4.1); see UpdateAutopilotRunCompleted.
 UPDATE autopilot_run
 SET status = 'failed', completed_at = now(), failure_reason = $2
-WHERE id = $1
+WHERE id = $1 AND status IN ('issue_created', 'running')
 RETURNING *;
 
 -- name: UpdateAutopilotRunSkipped :one

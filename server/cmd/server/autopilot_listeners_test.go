@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -642,5 +644,78 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 	}
 	if run.Status != "skipped" {
 		t.Fatalf("expected run status 'skipped', got %q", run.Status)
+	}
+}
+
+// TestAutopilotRunTerminalTransitionsAreCAS locks in the compare-and-set
+// contract (MUL-4809 §4.1 P0-1): once a run is terminal, neither a racing
+// terminal write nor a late bind may overwrite or resurrect it. Concurrent
+// finalizers become first-writer-wins (the loser gets pgx.ErrNoRows), which is
+// what keeps a rolling deploy / task-vs-listener race from producing a wrong
+// terminal state or a "running + completed_at" row.
+func TestAutopilotRunTerminalTransitionsAreCAS(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "CAS transition test",
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "create_issue",
+		IssueTitleTemplate: pgtype.Text{String: "x", Valid: true},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID) })
+
+	run, err := queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+		AutopilotID: ap.ID,
+		Source:      "manual",
+		Status:      "issue_created",
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilotRun: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM autopilot_run WHERE id = $1`, run.ID) })
+
+	// A terminal transition from an active run succeeds.
+	completed, err := queries.UpdateAutopilotRunCompleted(ctx, db.UpdateAutopilotRunCompletedParams{ID: run.ID})
+	if err != nil || completed.Status != "completed" {
+		t.Fatalf("first complete: status=%q err=%v", completed.Status, err)
+	}
+
+	// A racing FAIL on the already-completed run must be rejected (CAS lost).
+	if _, err := queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
+		ID: run.ID, FailureReason: pgtype.Text{String: "late failure", Valid: true},
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("fail on completed run: want pgx.ErrNoRows, got %v", err)
+	}
+
+	// A late BIND must not resurrect the completed run back to running.
+	if _, err := queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
+		ID: run.ID, TaskID: parseUUID("22222222-2222-2222-2222-222222222222"),
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("bind on completed run: want pgx.ErrNoRows, got %v", err)
+	}
+
+	// The run is unchanged: still completed, and never bound to the late task.
+	final, err := queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("reload run: %v", err)
+	}
+	if final.Status != "completed" || final.TaskID.Valid {
+		t.Fatalf("run mutated after CAS-lost writes: status=%q task_id_valid=%v", final.Status, final.TaskID.Valid)
 	}
 }
