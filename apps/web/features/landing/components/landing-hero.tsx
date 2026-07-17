@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowRight, Download } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useLocale } from "../i18n";
+import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import {
   ClaudeCodeLogo,
   CodexLogo,
@@ -17,6 +18,7 @@ import {
 export function LandingHero() {
   const { t } = useLocale();
   const user = useAuthStore((s) => s.user);
+  const ctaHref = useDashboardCtaHref();
 
   return (
     <div className="relative min-h-full overflow-hidden bg-[#05070b] text-white">
@@ -39,7 +41,7 @@ export function LandingHero() {
             </p>
 
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-              <Link href={user ? "/" : "/login"} className={heroButtonClassName("solid")}>
+              <Link href={ctaHref} className={heroButtonClassName("solid")}>
                 {user ? t.header.dashboard : t.hero.cta}
               </Link>
               <Link

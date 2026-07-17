@@ -199,6 +199,7 @@ func TestIssueLabelAttachDetach(t *testing.T) {
 }
 
 func TestIssueLabelRejectsNonIssueScope(t *testing.T) {
+	withResourceLabelsFlag(t, testHandler, true)
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":    "Issue rejects agent label",
@@ -498,6 +499,7 @@ func TestLabelNameAllowsEmoji(t *testing.T) {
 }
 
 func TestLabelResourceTypesHaveIndependentNamespaces(t *testing.T) {
+	withResourceLabelsFlag(t, testHandler, true)
 	name := "shared-scope-label-" + uuid.NewString()[:8]
 	for _, resourceType := range []string{"issue", "agent", "skill"} {
 		w := httptest.NewRecorder()
@@ -524,6 +526,84 @@ func TestLabelResourceTypesHaveIndependentNamespaces(t *testing.T) {
 			req = withURLParam(req, "id", created.ID)
 			testHandler.DeleteLabel(w, req)
 		})
+	}
+}
+
+func TestResourceLabelWritesRequireReleaseFlag(t *testing.T) {
+	withResourceLabelsFlag(t, testHandler, false)
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/labels", map[string]any{
+		"resource_type": "agent",
+		"name":          "blocked-resource-label-" + uuid.NewString()[:8],
+		"color":         "#3b82f6",
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("CreateLabel without release flag: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDeleteResourceLabelCleansAssignments(t *testing.T) {
+	withResourceLabelsFlag(t, testHandler, true)
+	agentID := createHandlerTestAgent(t, "Resource Label Cleanup", nil)
+	skillID := insertHandlerTestSkill(t, "resource-label-cleanup", "# cleanup")
+
+	create := func(resourceType string) LabelResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.CreateLabel(w, newRequest("POST", "/api/labels", map[string]any{
+			"resource_type": resourceType,
+			"name":          resourceType + "-cleanup-" + uuid.NewString()[:8],
+			"color":         "#3b82f6",
+		}))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create %s label: expected 201, got %d: %s", resourceType, w.Code, w.Body.String())
+		}
+		var label LabelResponse
+		if err := json.NewDecoder(w.Body).Decode(&label); err != nil {
+			t.Fatalf("decode %s label: %v", resourceType, err)
+		}
+		return label
+	}
+
+	agentLabel := create("agent")
+	skillLabel := create("skill")
+	for _, link := range []struct {
+		query string
+		id    string
+		label string
+	}{
+		{`INSERT INTO agent_to_label (agent_id, label_id) VALUES ($1, $2)`, agentID, agentLabel.ID},
+		{`INSERT INTO skill_to_label (skill_id, label_id) VALUES ($1, $2)`, skillID, skillLabel.ID},
+	} {
+		if _, err := testPool.Exec(context.Background(), link.query, link.id, link.label); err != nil {
+			t.Fatalf("seed resource label assignment: %v", err)
+		}
+	}
+
+	for _, labelID := range []string{agentLabel.ID, skillLabel.ID} {
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest("DELETE", "/api/labels/"+labelID, nil), "id", labelID)
+		testHandler.DeleteLabel(w, req)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("delete resource label: expected 204, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	for _, check := range []struct {
+		query string
+		id    string
+	}{
+		{`SELECT COUNT(*) FROM agent_to_label WHERE agent_id = $1`, agentID},
+		{`SELECT COUNT(*) FROM skill_to_label WHERE skill_id = $1`, skillID},
+	} {
+		var count int
+		if err := testPool.QueryRow(context.Background(), check.query, check.id).Scan(&count); err != nil {
+			t.Fatalf("count remaining resource assignments: %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("resource label assignments remain after label deletion: %d", count)
+		}
 	}
 }
 

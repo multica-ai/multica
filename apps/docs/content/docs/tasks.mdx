@@ -81,7 +81,9 @@ Behavior:
 - The execution-log retry button on a specific row sends that row's task ID alongside, so the rerun targets **the agent that ran that exact task** — not the current assignee. This makes per-row retry meaningful for squad workers, parallel @-mention agents, or rows whose agent has since been displaced by a reassignment.
 - **Cancels** the target agent's queued or running task on this issue (if any). Tasks owned by other agents on the same issue (e.g. parallel @-mention runs) are left alone.
 - Creates a **brand-new** task — attempt count resets to 1, even if the original task hit the attempt ceiling.
-- Starts a **fresh agent session** — the prior session ID is **not** inherited. A manual rerun means you've judged the previous output bad, so resuming the same conversation would replay the same poisoned state. (Automatic retry, by contrast, does inherit the session — that path is for infrastructure failures, not bad output.)
+- **Reuses the workdir; the session is resumed conditionally — and this depends on how you triggered the rerun:**
+  - **Execution-log per-row retry** (carries a task ID): reuses that exact run's working directory, so files already written to disk are preserved. It resumes that run's agent session too — *unless* the failure poisoned the conversation (context overflow, iteration limit, invalid request, Codex semantic inactivity, agent fallback), in which case it starts a fresh session on top of the reused workdir. If the original directory is gone (garbage-collected, on a different runtime, or never recorded before the failure), it falls back to a fresh workdir. So a transient failure — a network blip, a provider 5xx / rate-limit, a runtime that briefly went offline, or an auth/quota/config error you've since fixed — continues from where it left off instead of starting over.
+  - **CLI / API rerun without a task ID**: there is no specific run to continue, so it starts a **fresh agent session in a fresh workdir**.
 
 Comparison:
 
@@ -91,7 +93,8 @@ Comparison:
 | Ceiling | 2 attempts | No limit |
 | Applicable sources | Issues, chat | Issues with an agent assignee |
 | Agent picked | Same agent as the failed task | Source task's agent (UI per-row retry) or issue's current assignee (CLI / no task_id) |
-| Session inheritance | Yes (resumes prior session) | No (fresh session) |
+| Workdir | Reused (continues from prior files) | Per-row retry: reused when it still exists; CLI / no task_id: fresh |
+| Session inheritance | Yes (resumes prior session) | Per-row retry: resumes unless the failure poisoned the conversation; CLI / no task_id: fresh |
 
 ## How a failed task affects issue status
 
@@ -101,7 +104,7 @@ If an issue-triggered task fails (and no automatic retry succeeds) because the i
 
 Yes — as long as the AI coding tool supports session resumption.
 
-Multica pins the session ID **twice** during a task: once at the start (when the AI tool returns its first system message), and once at the end (on completion or failure). The first lets the daemon recover if it crashes mid-run; the second is reserved for the next **automatic retry**, where that ID is passed back so the agent can pick up the previous conversation and file state. **Manual rerun deliberately skips this** and starts a fresh session — see [Manual rerun vs. automatic retry](#manual-rerun-vs-automatic-retry).
+Multica pins the session ID **twice** during a task: once at the start (when the AI tool returns its first system message), and once at the end (on completion or failure). The first lets the daemon recover if it crashes mid-run; the second is passed back to the next **automatic retry** and to an **execution-log per-row retry**, so the agent picks up the previous conversation and file state — unless the failure poisoned the conversation, in which case only the workdir is reused and a fresh session starts. A **CLI / API rerun without a task ID** starts a fresh session in a fresh workdir — see [Manual rerun vs. automatic retry](#manual-rerun-vs-automatic-retry).
 
 But **which AI coding tools actually support this** varies a lot:
 
@@ -112,5 +115,5 @@ See [Providers Matrix → Session resumption](/providers#session-resumption-who-
 
 ## Next
 
-- [Providers Matrix](/providers) — capability differences across the 14 AI coding tools (including the exact session-resumption status)
+- [Providers Matrix](/providers) — capability differences across the 16 AI coding tools (including the exact session-resumption status)
 - [Assigning issues to agents](/assigning-issues) / [@-mentioning agents in comments](/mentioning-agents) / [Chat](/chat) / [Autopilots](/autopilots) — the four ways to trigger a task

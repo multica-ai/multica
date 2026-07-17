@@ -70,7 +70,8 @@
     "last_active": "最近活跃",
     "model": "模型",
     "created": "创建时间",
-    "owner": "Owner"
+    "owner": "Owner",
+    "access": "访问范围"
   },
   "row": {
     "you": "你",
@@ -94,6 +95,12 @@
     "duplicate": "复制",
     "restore": "恢复",
     "archive": "归档",
+    "set_access": "设置访问范围",
+    "set_access_dialog_title": "设置访问范围",
+    "set_access_applies_to": "将应用于 {{count}} 个 agent。",
+    "set_access_skipped": "{{count}} 个已跳过(不是你所有)。",
+    "set_access_dialog_confirm": "应用",
+    "set_access_bulk_partial": "已应用 {{succeeded}} 个;{{failed}} 个失败(保持当前状态)。",
     "agent_archived_toast": "已归档智能体",
     "archive_failed_toast": "归档智能体失败",
     "agent_restored_toast": "已恢复智能体",
@@ -266,9 +273,18 @@
     "step_configure": "检查并配置",
     "step_ai": "通过对话创建",
     "modes": {
-      "blank": { "title": "从空白开始", "description": "自己配置每个字段。适合已经明确知道智能体应该如何工作的用户。" },
-      "template": { "title": "使用模板", "description": "从整理好的指令和 skill 开始，再根据工作区需要修改每个细节。" },
-      "ai": { "title": "通过 AI 创建", "description": "描述你想要的结果。Agent Builder 会提出关键问题并实时生成草稿。" }
+      "blank": {
+        "title": "从空白开始",
+        "description": "自己配置每个字段。适合已经明确知道智能体应该如何工作的用户。"
+      },
+      "template": {
+        "title": "使用模板",
+        "description": "从整理好的指令和 skill 开始，再根据工作区需要修改每个细节。"
+      },
+      "ai": {
+        "title": "通过 AI 创建",
+        "description": "描述你想要的结果。Agent Builder 会提出关键问题并实时生成草稿。"
+      }
     },
     "templates": {
       "search": "搜索模板…",
@@ -290,9 +306,19 @@
       "access_hint": "控制谁可以运行此智能体，创建后仍可修改。"
     },
     "access": {
-      "private": { "title": "只有我", "description": "只有你可以运行此智能体。" },
-      "workspace": { "title": "整个工作区", "description": "工作区中的所有成员都可以运行。" },
-      "members": { "title": "指定成员", "description": "只有选中的成员可以运行。", "required": "请至少选择一位成员。" }
+      "private": {
+        "title": "只有我",
+        "description": "只有你可以运行此智能体。"
+      },
+      "workspace": {
+        "title": "整个工作区",
+        "description": "工作区中的所有成员都可以运行。"
+      },
+      "members": {
+        "title": "指定成员",
+        "description": "只有选中的成员可以运行。",
+        "required": "请至少选择一位成员。"
+      }
     },
     "builder": {
       "setup_title": "为 Agent Builder 选择运行时",
@@ -664,6 +690,11 @@
     "tooltip": "访问权限 · 谁可以运行该智能体",
     "trigger_private": "仅自己",
     "trigger_workspace": "工作区",
+    "scope_labels": {
+      "workspace": "工作区",
+      "specific_people": "指定成员",
+      "owner_only": "仅所有者"
+    },
     "trigger_members_count": "{{count}} 人",
     "trigger_members_empty": "指定成员",
     "trigger_team": "团队",
@@ -716,6 +747,7 @@
     "copy_filtered": "复制筛选结果",
     "copied": "已复制",
     "waiting_events": "等待事件中...",
+    "antigravity_live_unavailable": "Antigravity 暂不提供实时执行事件。task 完成后即可查看执行记录。",
     "no_data": "未记录执行数据。",
     "sort_label": "排序",
     "sort_chronological": "时间顺序",
@@ -743,6 +775,7 @@
     "filter_active_count_other": "{{count}} 项筛选",
     "clear_filters": "清除筛选",
     "section_availability": "可用性",
+    "section_access": "访问范围",
     "section_runtime": "运行时",
     "display": "显示",
     "sort_by": "排序",

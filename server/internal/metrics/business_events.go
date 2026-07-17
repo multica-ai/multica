@@ -54,6 +54,7 @@ type businessEventMetrics struct {
 	autopilotRunTerminal            *prometheus.CounterVec
 	autopilotRunSkipped             *prometheus.CounterVec
 	webhookDelivery                 *prometheus.CounterVec
+	webhookRateLimited              *prometheus.CounterVec
 	githubEventReceived             *prometheus.CounterVec
 	githubPRReview                  *prometheus.CounterVec
 	githubPRMergeSeconds            prometheus.Histogram
@@ -61,6 +62,7 @@ type businessEventMetrics struct {
 	cloudRuntimeRequestDurationSecs *prometheus.HistogramVec
 	feedbackSubmitted               *prometheus.CounterVec
 	contactSalesSubmitted           *prometheus.CounterVec
+	chatOutputLocalPath             *prometheus.CounterVec
 }
 
 func newBusinessEventMetrics() *businessEventMetrics {
@@ -162,6 +164,10 @@ func newBusinessEventMetrics() *businessEventMetrics {
 			Name: "multica_webhook_delivery_total",
 			Help: "Total inbound webhook deliveries by provider and outcome.",
 		}, metricLabels("multica_webhook_delivery_total")),
+		webhookRateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "multica_webhook_rate_limited_total",
+			Help: "Total webhook admissions or worker dispatches delayed by a bounded safety gate.",
+		}, metricLabels("multica_webhook_rate_limited_total")),
 		githubEventReceived: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "multica_github_event_received_total",
 			Help: "Total GitHub webhook events received by event kind and action.",
@@ -192,6 +198,10 @@ func newBusinessEventMetrics() *businessEventMetrics {
 			Name: "multica_contact_sales_submitted_total",
 			Help: "Total contact-sales inquiries submitted.",
 		}, metricLabels("multica_contact_sales_submitted_total")),
+		chatOutputLocalPath: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "multica_chat_output_local_path_total",
+			Help: "Total agent chat replies that referenced a runtime-local path, by evidence kind. Observation only — the reply is still delivered.",
+		}, metricLabels("multica_chat_output_local_path_total")),
 	}
 }
 
@@ -224,6 +234,7 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 		e.autopilotRunTerminal,
 		e.autopilotRunSkipped,
 		e.webhookDelivery,
+		e.webhookRateLimited,
 		e.githubEventReceived,
 		e.githubPRReview,
 		e.githubPRMergeSeconds,
@@ -231,6 +242,7 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 		e.cloudRuntimeRequestDurationSecs,
 		e.feedbackSubmitted,
 		e.contactSalesSubmitted,
+		e.chatOutputLocalPath,
 	}
 }
 
@@ -381,6 +393,13 @@ func (m *BusinessMetrics) RecordWebhookDelivery(provider, status string) {
 	).Inc()
 }
 
+func (m *BusinessMetrics) RecordWebhookRateLimited(gate string) {
+	if m == nil || m.events == nil {
+		return
+	}
+	m.events.webhookRateLimited.WithLabelValues(NormalizeWebhookRateLimitGate(gate)).Inc()
+}
+
 // RecordGithubEventReceived counts a GitHub webhook event by event kind / action.
 func (m *BusinessMetrics) RecordGithubEventReceived(eventKind, action string) {
 	if m == nil || m.events == nil {
@@ -421,6 +440,22 @@ func (m *BusinessMetrics) RecordCloudRuntimeRequest(op, status string, durationS
 	if durationSeconds >= 0 {
 		m.events.cloudRuntimeRequestDurationSecs.WithLabelValues(op).Observe(durationSeconds)
 	}
+}
+
+// RecordChatOutputLocalPath counts a chat reply that referenced a runtime-local
+// path, by evidence kind ("file_url" / "workdir_path").
+//
+// Observation only: the reply is delivered either way. The server cannot judge
+// these paths the way the CLI lint can — it has no access to the daemon's
+// filesystem to stat them — so this measures whether the MUL-4899 prompt
+// contract is landing, and must never gate delivery on a lexical guess. The
+// label is a closed enum precisely so no fragment of the path or reply body can
+// reach Prometheus.
+func (m *BusinessMetrics) RecordChatOutputLocalPath(kind string) {
+	if m == nil || m.events == nil {
+		return
+	}
+	m.events.chatOutputLocalPath.WithLabelValues(NormalizeChatOutputLocalPathKind(kind)).Inc()
 }
 
 // RecordDaemonWSMessageReceived counts an inbound daemon WS message by handler kind.

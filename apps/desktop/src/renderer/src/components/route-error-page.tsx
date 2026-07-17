@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { useLocation, useNavigate, useRouteError } from "react-router-dom";
-import { AlertTriangle, RotateCw, Send, X } from "lucide-react";
+import { isRouteErrorResponse, useLocation, useRouteError } from "react-router-dom";
+import { AlertTriangle, Compass, RotateCw, Send, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { useModalStore } from "@multica/core/modals";
 import { useTabStore } from "@/stores/tab-store";
@@ -42,12 +42,94 @@ export function formatRouteErrorReport({
   ].join("\n");
 }
 
+/**
+ * Resolve the workspace the user is actually in, for a recovery entry point.
+ *
+ * Reads the tab store's `activeWorkspaceSlug` — the real session context —
+ * rather than the failed URL. This is load-bearing, not stylistic: the routes
+ * that land here most often are the ones whose first segment is not a workspace
+ * at all. Deriving a slug from `/Users/me/shot.png` yields "Users" and a
+ * "recovery" button pointing at `/Users/issues`, i.e. a second 404 (MUL-4899).
+ * A pathname we already failed to route cannot be a source of truth about where
+ * the user belongs.
+ *
+ * Returns null when there is no active workspace, in which case the caller
+ * offers only unconditionally-safe actions (close the tab).
+ */
+function useRecoveryRoute(): string | null {
+  const activeWorkspaceSlug = useTabStore((state) => state.activeWorkspaceSlug);
+  return activeWorkspaceSlug ? `/${activeWorkspaceSlug}/issues` : null;
+}
+
 export function DesktopRouteErrorPage() {
   const error = useRouteError();
+
+  // A 404 is not a crash — it is a route that does not exist, which is a normal
+  // and fully recoverable product state. It reaches this boundary because React
+  // Router routes "no route matched" to the nearest errorElement, the same place
+  // a thrown render error lands. Splitting them here is the whole point of
+  // MUL-4899: 8 of 18 desktop_route_error reports were users clicking an agent's
+  // `/Users/...` link and being told the app broke and to report a bug.
+  if (isRouteErrorResponse(error) && error.status === 404) {
+    return <DesktopNotFoundPage />;
+  }
+  return <DesktopUnexpectedErrorPage error={error} />;
+}
+
+function DesktopNotFoundPage() {
   const location = useLocation();
-  const navigate = useNavigate();
-  const workspaceSlug = location.pathname.split("/").filter(Boolean)[0];
-  const safeRoute = workspaceSlug ? `/${workspaceSlug}/issues` : null;
+  const recoveryRoute = useRecoveryRoute();
+
+  return (
+    <div
+      role="alert"
+      className="flex h-full min-h-[20rem] flex-col items-center justify-center gap-4 p-8 text-center"
+    >
+      <div className="rounded-full bg-muted p-3 text-muted-foreground">
+        <Compass className="h-6 w-6" aria-hidden="true" />
+      </div>
+      <div className="space-y-2">
+        <h2 className="text-lg font-semibold">This page doesn&apos;t exist</h2>
+        <p className="max-w-lg text-sm text-muted-foreground">
+          Nothing in Multica matches this address. If you got here from a link,
+          it probably points at a file on someone else&apos;s computer rather
+          than a page.
+        </p>
+        <p className="max-w-lg truncate font-mono text-xs text-muted-foreground">
+          {location.pathname}
+        </p>
+      </div>
+      <div className="flex gap-2">
+        {recoveryRoute ? (
+          <Button
+            type="button"
+            variant="outline"
+            // Session mutation, not a router call: the Coordinator projects
+            // the new session URL into the router (MUL-4741 invariant 1).
+            onClick={() =>
+              useTabStore
+                .getState()
+                .navigateActiveSession(recoveryRoute, { replace: true })
+            }
+          >
+            Go to issues
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          onClick={() => useTabStore.getState().closeActiveTab()}
+        >
+          <X className="mr-2 h-4 w-4" aria-hidden="true" />
+          Close tab
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function DesktopUnexpectedErrorPage({ error }: { error: unknown }) {
+  const location = useLocation();
+  const recoveryRoute = useRecoveryRoute();
   const report = useMemo(
     () =>
       formatRouteErrorReport({
@@ -88,8 +170,18 @@ export function DesktopRouteErrorPage() {
           <RotateCw className="mr-2 h-4 w-4" aria-hidden="true" />
           Reload tab
         </Button>
-        {safeRoute ? (
-          <Button type="button" variant="outline" onClick={() => navigate(safeRoute, { replace: true })}>
+        {recoveryRoute ? (
+          <Button
+            type="button"
+            variant="outline"
+            // Session mutation, not a router call: the Coordinator projects
+            // the new session URL into the router (MUL-4741 invariant 1).
+            onClick={() =>
+              useTabStore
+                .getState()
+                .navigateActiveSession(recoveryRoute, { replace: true })
+            }
+          >
             Go to issues
           </Button>
         ) : null}

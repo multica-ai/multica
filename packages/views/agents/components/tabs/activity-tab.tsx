@@ -17,6 +17,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { NumberFlow } from "@multica/ui/components/ui/number-flow";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import type {
   Agent,
@@ -37,6 +38,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
+import { AttributionBadge } from "../../../issues/components/attribution-badge";
 import { taskStatusConfig } from "../../config";
 import { failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
@@ -49,6 +51,10 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 // "more" is a pure state flip — zero extra fetches.
 const RECENT_INITIAL = 10;
 const RECENT_PAGE = 20;
+// Placeholder rows shown while the lazily-loaded per-agent task list is
+// still in flight, so first paint of the tab is a skeleton rather than the
+// "nothing finished yet" empty state (which reads as a wrong answer).
+const RECENT_SKELETON_ROWS = 4;
 
 interface ActivityTabProps {
   agent: Agent;
@@ -72,7 +78,12 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
   const wsId = useWorkspaceId();
 
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
-  const { data: agentTasks = [] } = useQuery(agentTasksOptions(wsId, agent.id));
+  // `isLoading` (pending + fetching, no cached data) is true only on the
+  // very first fetch. Once the page has hydrated this cache elsewhere the
+  // tab opens straight into data with no skeleton flash.
+  const { data: agentTasks = [], isLoading: isLoadingRecent } = useQuery(
+    agentTasksOptions(wsId, agent.id),
+  );
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
   const activity = activityMap.get(agent.id);
 
@@ -175,6 +186,7 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
         tasks={recentTasks}
         totalCount={recentTasksAll.length}
         hasMore={hasMoreRecent}
+        loading={isLoadingRecent}
         onShowMore={() =>
           setRecentDisplayLimit((n) => n + RECENT_PAGE)
         }
@@ -381,6 +393,7 @@ function RecentWorkSection({
   tasks,
   totalCount,
   hasMore,
+  loading,
   onShowMore,
   issueMap,
   agent,
@@ -388,20 +401,26 @@ function RecentWorkSection({
   tasks: AgentTask[];
   totalCount: number;
   hasMore: boolean;
+  loading: boolean;
   onShowMore: () => void;
   issueMap: Map<string, Issue>;
   agent: Agent;
 }) {
   const { t } = useT("agents");
-  const subtitle =
-    tasks.length === 0
+  // While the first fetch is in flight we have no counts to summarise, so
+  // the subtitle stays blank rather than claiming "nothing finished yet".
+  const subtitle = loading
+    ? ""
+    : tasks.length === 0
       ? t(($) => $.tab_body.activity.subtitle_no_recent)
       : totalCount > tasks.length
         ? t(($) => $.tab_body.activity.subtitle_recent_progress, { shown: tasks.length, total: totalCount })
         : t(($) => $.tab_body.activity.subtitle_recent_latest, { count: tasks.length });
   return (
     <Section title={t(($) => $.tab_body.activity.section_recent)} subtitle={subtitle}>
-      {tasks.length === 0 ? (
+      {loading ? (
+        <RecentWorkSkeleton />
+      ) : tasks.length === 0 ? (
         <EmptyText>{t(($) => $.tab_body.activity.empty_recent)}</EmptyText>
       ) : (
         <>
@@ -423,6 +442,34 @@ function RecentWorkSection({
         </>
       )}
     </Section>
+  );
+}
+
+/**
+ * Loading placeholder for the Recent work list. Mirrors the completed-mode
+ * TaskList shell (bordered, divided rows) and the two-line TaskRow rhythm —
+ * a status glyph plus title and meta line — so the skeleton settles into the
+ * real rows without a layout jump. Widths are staggered per row so it reads
+ * as content rather than a solid block.
+ */
+function RecentWorkSkeleton() {
+  const titleWidths = ["w-3/5", "w-4/5", "w-1/2", "w-2/3"];
+  const metaWidths = ["w-2/5", "w-1/3", "w-2/5", "w-1/4"];
+  return (
+    <div
+      className="overflow-hidden rounded-lg border divide-y"
+      aria-hidden="true"
+    >
+      {Array.from({ length: RECENT_SKELETON_ROWS }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 px-3 py-3">
+          <Skeleton className="h-4 w-4 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className={`h-3.5 ${titleWidths[i % titleWidths.length]}`} />
+            <Skeleton className={`h-3 ${metaWidths[i % metaWidths.length]}`} />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -637,6 +684,21 @@ function TaskRow({
             <>
               <Sep />
               <span className="text-destructive">{failureLabel}</span>
+            </>
+          )}
+          {/* Accountable member (MUL-4302 §9): whose behalf this run is on.
+              A leading separator keeps the avatar on the same middot rhythm as
+              the rest of the meta line instead of glued to the duration. The
+              guard mirrors the badge's own render condition (avatar-only needs
+              an initiator) so no dangling separator is left for an
+              unattributed run. */}
+          {task.attribution?.initiator && (
+            <>
+              <Sep />
+              <AttributionBadge
+                attribution={task.attribution}
+                variant="avatar"
+              />
             </>
           )}
         </div>

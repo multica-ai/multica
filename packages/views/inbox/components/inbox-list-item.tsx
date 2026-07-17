@@ -2,8 +2,9 @@
 
 import { StatusIcon } from "../../issues/components";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { Archive } from "lucide-react";
+import { Archive, ArchiveRestore } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
+import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useT } from "../../i18n";
@@ -27,18 +28,31 @@ export function useTimeAgo() {
 
 export function InboxListItem({
   item,
+  view,
   isSelected,
   onClick,
-  onArchive,
+  onAction,
 }: {
   item: InboxItem;
+  view: InboxView;
   isSelected: boolean;
   onClick: () => void;
-  onArchive: () => void;
+  // Archive in the main list, unarchive in the archived one — the row action is
+  // always the reversal of the current view, so the two lists share this row.
+  onAction: () => void;
 }) {
   const { t } = useT("inbox");
   const timeAgo = useTimeAgo();
   const displayTitle = getInboxDisplayTitle(item);
+  const isArchivedView = view === "archived";
+  // Archiving deliberately leaves `read` untouched so unarchiving restores the
+  // real unread state, so archived rows would otherwise keep an unread marker
+  // the user cannot clear from this view. Suppress the affordance here only.
+  const showUnread = item.read !== true && !isArchivedView;
+  const ActionIcon = isArchivedView ? ArchiveRestore : Archive;
+  const actionLabel = isArchivedView
+    ? t(($) => $.list.unarchive_tooltip)
+    : t(($) => $.list.archive_tooltip);
 
   return (
     <button
@@ -57,11 +71,11 @@ export function InboxListItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">
-            {!item.read && (
+            {showUnread && (
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
             )}
             <span
-              className={`truncate text-sm ${!item.read ? "font-medium" : "text-muted-foreground"}`}
+              className={`truncate text-sm ${showUnread ? "font-medium" : "text-muted-foreground"}`}
             >
               {displayTitle}
             </span>
@@ -70,20 +84,21 @@ export function InboxListItem({
             <span
               role="button"
               tabIndex={-1}
-              title={t(($) => $.list.archive_tooltip)}
+              title={actionLabel}
+              aria-label={actionLabel}
               onClick={(e) => {
                 e.stopPropagation();
-                onArchive();
+                onAction();
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.stopPropagation();
-                  onArchive();
+                  onAction();
                 }
               }}
               className="hidden rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground group-hover:inline-flex"
             >
-              <Archive className="h-3.5 w-3.5" />
+              <ActionIcon className="h-3.5 w-3.5" />
             </span>
             {item.issue_status && (
               <StatusIcon status={item.issue_status} className="h-3.5 w-3.5 shrink-0" />
@@ -91,10 +106,10 @@ export function InboxListItem({
           </div>
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${item.read ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
+          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
             <InboxDetailLabel item={item} />
           </p>
-          <span className={`shrink-0 text-xs ${item.read ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
+          <span className={`shrink-0 text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
             {timeAgo(item.created_at)}
           </span>
         </div>

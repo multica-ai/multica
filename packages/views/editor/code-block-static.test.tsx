@@ -16,6 +16,16 @@ describe("CodeBlockStatic", () => {
     expect(code?.textContent).toBe("uv run --extra dev pytest -q");
   });
 
+  it("renders unlabelled code without auto-detected highlight spans", () => {
+    const { container } = render(
+      <CodeBlockStatic language={undefined} body="const answer = 42;" />,
+    );
+
+    const code = container.querySelector("pre.rich-text-editor code");
+    expect(code?.textContent).toBe("const answer = 42;");
+    expect(code?.querySelector("span")).toBeNull();
+  });
+
   it("keeps standalone static code blocks under the block-code CSS selectors", () => {
     const codeCss = readFileSync("editor/styles/code.css", "utf8");
 

@@ -9,10 +9,23 @@ import (
 	"testing"
 )
 
+func TestAgentBuilderInstructionsConstrainModelsToRuntimeCatalog(t *testing.T) {
+	for _, requirement := range []string{
+		"AVAILABLE RUNTIME MODELS",
+		"Never use a model label as the id",
+		"never invent a model id",
+	} {
+		if !strings.Contains(agentBuilderInstructions, requirement) {
+			t.Fatalf("agent builder instructions missing model constraint %q", requirement)
+		}
+	}
+}
+
 func TestCreateAgentBuilderSessionCreatesIsolatedHiddenBuilder(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
+	withAgentBuilderFlag(t, testHandler, true)
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `
 			DELETE FROM agent
@@ -100,6 +113,17 @@ func TestCreateAgentBuilderSessionCreatesIsolatedHiddenBuilder(t *testing.T) {
 	}
 	if remaining != 0 {
 		t.Fatalf("builder agent survived chat deletion")
+	}
+}
+
+func TestCreateAgentBuilderSessionRequiresReleaseFlag(t *testing.T) {
+	withAgentBuilderFlag(t, testHandler, false)
+	w := httptest.NewRecorder()
+	testHandler.CreateAgentBuilderSession(w, newRequest(http.MethodPost, "/api/agent-builder/sessions", map[string]any{
+		"runtime_id": testRuntimeID,
+	}))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("CreateAgentBuilderSession without flag: expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

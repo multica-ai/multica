@@ -136,12 +136,17 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		startTime := time.Now()
-		var output strings.Builder
+		var lastAssistantText string
+		var finalResultText string
+		sawResult := false
+		resultIsError := false
 		var sessionID string
-		finalStatus := "completed"
-		var finalError string
 		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
+		eventCount := 0
+		invalidEventCount := 0
+		assistantEventCount := 0
+		toolUseCount := 0
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
@@ -161,12 +166,23 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			var msg claudeSDKMessage
 			if err := json.Unmarshal([]byte(line), &msg); err != nil {
+				invalidEventCount++
 				continue
 			}
+			eventCount++
 
 			switch msg.Type {
 			case "assistant":
-				b.handleAssistant(msg, msgCh, &output, usage)
+				assistantEventCount++
+				assistantText, tools := b.handleAssistant(msg, msgCh, usage)
+				toolUseCount += tools
+				if tools == 0 {
+					lastAssistantText = assistantText
+				} else {
+					// A turn that invokes a tool is intermediate even when it also
+					// contains narration. Do not use it as an empty-result fallback.
+					lastAssistantText = ""
+				}
 			case "user":
 				if b.handleUser(msg, msgCh) {
 					sawAsyncLaunch = true
@@ -177,17 +193,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
+				sawResult = true
+				finalResultText = msg.ResultText
+				resultIsError = msg.IsError
 				sessionID = msg.SessionID
-				if msg.ResultText != "" {
-					output.Reset()
-					output.WriteString(msg.ResultText)
-				}
 				if resultUsage := claudeResultUsage(msg, opts.Model); len(resultUsage) > 0 {
 					usage = resultUsage
-				}
-				if msg.IsError {
-					finalStatus = "failed"
-					finalError = msg.ResultText
 				}
 				closeStdin()
 			case "log":
@@ -202,6 +213,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				b.handleControlRequest(msg, stdin)
 			}
 		}
+		scanErr := scanner.Err()
+		if scanErr != nil {
+			// Scanner stopped consuming stdout. Close the pipe before Wait so a
+			// child still writing a malformed/oversized event cannot deadlock on
+			// the full OS pipe; the scanner error remains the primary failure.
+			_ = stdout.Close()
+		}
 
 		closeStdin()
 
@@ -213,27 +231,26 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// broken pipe, or been unblocked by the kill that ended cmd.
 		writeErr := <-writeDone
 
-		switch {
-		case runCtx.Err() == context.DeadlineExceeded:
-			finalStatus = "timeout"
-			finalError = fmt.Sprintf("claude timed out after %s", timeout)
-		case runCtx.Err() == context.Canceled:
-			finalStatus = "aborted"
-			finalError = "execution cancelled"
-		case writeErr != nil && finalStatus == "completed" && sessionID == "":
-			// No result event landed and the prompt write failed — claude
-			// died before reading the prompt. Surface the write error; the
-			// stderr tail attached below carries the real reason.
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("write claude input: %v", writeErr)
-		case exitErr != nil && finalStatus == "completed":
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
+		completionGuardError := ""
+		if sawAsyncLaunch {
+			completionGuardError = "claude launched an async background task; Multica-managed runs require foreground execution"
 		}
-		if finalStatus == "completed" && sawAsyncLaunch {
-			finalStatus = "failed"
-			finalError = "claude launched an async background task; Multica-managed runs require foreground execution"
-		}
+		finalStatus, finalOutput, finalError := finalizeStreamResult(
+			"claude",
+			timeout,
+			runCtx.Err(),
+			writeErr,
+			exitErr,
+			sessionID,
+			streamTerminalState{
+				lastAssistantText: lastAssistantText,
+				finalResultText:   finalResultText,
+				sawResult:         sawResult,
+				resultIsError:     resultIsError,
+				scanErr:           scanErr,
+			},
+			completionGuardError,
+		)
 
 		// cmd.Wait() has returned — os/exec's stderr copy goroutine has
 		// observed every byte claude wrote to stderr before exiting, so
@@ -244,6 +261,22 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		if finalError != "" {
 			finalError = withAgentStderr(finalError, "claude", stderrTail)
 		}
+		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
+			provider:                   "claude",
+			cliVersion:                 b.cfg.CLIVersion,
+			model:                      opts.Model,
+			exitCode:                   streamProcessExitCode(exitErr),
+			eventCount:                 eventCount,
+			invalidEventCount:          invalidEventCount,
+			assistantEventCount:        assistantEventCount,
+			toolUseCount:               toolUseCount,
+			sawResult:                  sawResult,
+			resultIsError:              resultIsError,
+			resultBytes:                len(finalResultText),
+			lastAssistantBytes:         len(lastAssistantText),
+			scannerError:               scanErr != nil,
+			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
+		})
 
 		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
@@ -257,7 +290,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		resCh <- Result{
 			Status:     finalStatus,
-			Output:     output.String(),
+			Output:     finalOutput,
 			Error:      finalError,
 			DurationMs: duration.Milliseconds(),
 			SessionID:  reportedSessionID,
@@ -268,11 +301,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage) {
+func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage) (string, int) {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
-		return
+		return "", 0
 	}
+	var assistantText strings.Builder
+	toolUseCount := 0
 
 	// Accumulate token usage per model.
 	if content.Usage != nil && content.Model != "" {
@@ -288,7 +323,7 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 		switch block.Type {
 		case "text":
 			if block.Text != "" {
-				output.WriteString(block.Text)
+				assistantText.WriteString(block.Text)
 				trySend(ch, Message{Type: MessageText, Content: block.Text})
 			}
 		case "thinking":
@@ -296,6 +331,7 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 				trySend(ch, Message{Type: MessageThinking, Content: block.Text})
 			}
 		case "tool_use":
+			toolUseCount++
 			var input map[string]any
 			if block.Input != nil {
 				_ = json.Unmarshal(block.Input, &input)
@@ -308,6 +344,7 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 			})
 		}
 	}
+	return assistantText.String(), toolUseCount
 }
 
 func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool {
@@ -542,8 +579,8 @@ func trySend(ch chan<- Message, msg Message) {
 	select {
 	case ch <- msg:
 	default:
-		// Channel full — drop message. Final output is accumulated separately
-		// in Result.Output, so only streaming consumers are affected.
+		// Channel full — drop message. Result.Output is finalized independently,
+		// so only live transcript consumers are affected.
 	}
 }
 
@@ -712,7 +749,10 @@ func mergeEnv(base []string, extra map[string]string) []string {
 	env := make([]string, 0, len(base)+len(extra))
 	for _, entry := range base {
 		key, _, _ := strings.Cut(entry, "=")
-		if isFilteredChildEnvKey(key) {
+		// MULTICA_* in the daemon's own environment is not task context. Drop
+		// the inherited namespace for every backend and append only the values
+		// daemon.go explicitly assembled for this task below.
+		if isFilteredChildEnvKey(key) || strings.HasPrefix(strings.ToUpper(key), "MULTICA_") {
 			continue
 		}
 		env = append(env, entry)
@@ -759,8 +799,9 @@ func isFilteredChildEnvKey(key string) bool {
 type blockedArgMode int
 
 const (
-	blockedWithValue  blockedArgMode = iota // flag takes a value (next arg or =value)
-	blockedStandalone                       // flag is boolean, no value
+	blockedWithValue     blockedArgMode = iota // flag takes a value (next arg or =value)
+	blockedStandalone                          // flag is boolean, no value
+	blockedOptionalValue                       // flag may take the next non-flag arg or =value
 )
 
 // filterCustomArgs removes protocol-critical flags from user-configured custom
@@ -780,12 +821,8 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *
 		return args
 	}
 	filtered := make([]string, 0, len(args))
-	skip := false
-	for _, raw := range args {
-		if skip {
-			skip = false
-			continue
-		}
+	for i := 0; i < len(args); i++ {
+		raw := args[i]
 		arg := unshellQuoteArg(raw)
 		flag := arg
 		hasInlineValue := false
@@ -798,7 +835,13 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *
 			logger.Warn("custom_args: blocked protocol-critical flag, skipping", "flag", flag)
 			if mode == blockedWithValue && !hasInlineValue {
 				// The next arg is the value for this flag — skip it too.
-				skip = true
+				i++
+			} else if mode == blockedOptionalValue && !hasInlineValue && i+1 < len(args) &&
+				!strings.HasPrefix(unshellQuoteArg(args[i+1]), "-") {
+				// Optional values are consumed only when the next token is not
+				// another flag, so a boolean form cannot swallow an unrelated
+				// option.
+				i++
 			}
 			continue
 		}

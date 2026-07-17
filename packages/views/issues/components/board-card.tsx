@@ -5,10 +5,15 @@ import { AppLink } from "../../navigation";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { Issue, Project, UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, IssueProperty, Project, UpdateIssueRequest } from "@multica/core/types";
+import { useQuery } from "@tanstack/react-query";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { propertyListOptions } from "@multica/core/properties";
+import { CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { CalendarClock, CalendarDays } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PropertyIcon } from "../../common/property-icon";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
@@ -66,6 +71,14 @@ export const BoardCardContent = memo(function BoardCardContent({
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const storeProperties = useViewStore((s) => s.cardProperties);
+  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
+  const cardWsId = useWorkspaceId();
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(cardWsId));
+  // Custom properties toggled on in Display options, in toggle order, only
+  // when this issue actually carries a value.
+  const cardCustomProperties = cardPropertyIds
+    .map((id) => workspaceProperties.find((p) => p.id === id))
+    .filter((p): p is IssueProperty => !!p && issue.properties?.[p.id] !== undefined);
   const labels = issue.labels ?? [];
 
   const surfaceActions = useIssueSurfaceActionsOptional();
@@ -189,8 +202,8 @@ export const BoardCardContent = memo(function BoardCardContent({
         );
       })()}
 
-      {/* Chip row: project + labels */}
-      {(showProject || showLabels) && (
+      {/* Chip row: project + labels + custom property values */}
+      {(showProject || showLabels || cardCustomProperties.length > 0) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           {showProject && (
             <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground max-w-[160px]">
@@ -200,6 +213,15 @@ export const BoardCardContent = memo(function BoardCardContent({
           )}
           {showLabels && labels.map((label) => (
             <LabelChip key={label.id} label={label} />
+          ))}
+          {cardCustomProperties.map((property) => (
+            <span
+              key={property.id}
+              className="inline-flex max-w-[160px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+            >
+              <PropertyIcon property={property} className="size-3 text-[11px]" />
+              <CustomPropertyValueDisplay property={property} value={issue.properties?.[property.id]} />
+            </span>
           ))}
         </div>
       )}

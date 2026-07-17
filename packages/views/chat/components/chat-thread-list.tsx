@@ -28,7 +28,7 @@ import { useChatStore } from "@multica/core/chat";
 import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { createLogger } from "@multica/core/logger";
-import { removeChatMessageFromCaches } from "./use-chat-controller";
+import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useT } from "../../i18n";
 
 const apiLogger = createLogger("chat.api");

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Search, Tag, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useFeatureEnabled } from "@multica/core/config";
+import { RESOURCE_LABELS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   labelListOptions,
@@ -41,22 +43,12 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
+import { ColorPicker, COLOR_PICKER_PRESETS } from "../../common/color-picker";
 import { useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
 
 const RESOURCE_TYPES: LabelResourceType[] = ["issue", "agent", "skill"];
-const LABEL_COLORS = [
-  "#6b7280",
-  "#ef4444",
-  "#f97316",
-  "#eab308",
-  "#22c55e",
-  "#14b8a6",
-  "#3b82f6",
-  "#6366f1",
-  "#a855f7",
-  "#ec4899",
-] as const;
+const ISSUE_RESOURCE_TYPES: LabelResourceType[] = ["issue"];
 
 interface LabelDraft {
   name: string;
@@ -67,18 +59,28 @@ interface LabelDraft {
 const EMPTY_DRAFT: LabelDraft = {
   name: "",
   description: "",
-  color: LABEL_COLORS[6],
+  color: COLOR_PICKER_PRESETS[6],
 };
 
 export function LabelsTab() {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
+  const resourceLabelsEnabled = useFeatureEnabled(RESOURCE_LABELS_FLAG, false);
 
   const [resourceType, setResourceType] = useState<LabelResourceType>("issue");
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Label | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Label | null>(null);
+
+  const resourceTypes = resourceLabelsEnabled ? RESOURCE_TYPES : ISSUE_RESOURCE_TYPES;
+
+  useEffect(() => {
+    if (!resourceLabelsEnabled && resourceType !== "issue") {
+      setResourceType("issue");
+      setQuery("");
+    }
+  }, [resourceLabelsEnabled, resourceType]);
 
   const { data: labels = [], isLoading } = useQuery(
     labelListOptions(wsId, resourceType),
@@ -102,7 +104,7 @@ export function LabelsTab() {
     >
       <div className="space-y-5">
         <div className="flex flex-wrap items-center gap-2 border-b border-surface-border pb-3">
-          {RESOURCE_TYPES.map((type) => (
+          {resourceTypes.map((type) => (
             <Button
               key={type}
               type="button"
@@ -347,37 +349,25 @@ function LabelEditorDialog({
           </div>
           <div className="space-y-2">
             <FieldLabel>{t(($) => $.labels.editor.color)}</FieldLabel>
-            <div className="flex flex-wrap items-center gap-2">
-              {LABEL_COLORS.map((color) => (
+            <ColorPicker
+              value={draft.color}
+              onChange={(color) => setDraft((current) => ({ ...current, color }))}
+              trigger={
                 <button
-                  key={color}
                   type="button"
-                  aria-label={color}
-                  aria-pressed={draft.color === color}
-                  onClick={() => setDraft((current) => ({ ...current, color }))}
-                  className={cn(
-                    "size-7 rounded-full border-2 border-background ring-offset-2 transition-transform hover:scale-110",
-                    draft.color === color && "ring-2 ring-ring",
-                  )}
-                  style={{ backgroundColor: color }}
-                />
-              ))}
-              <label
-                className="relative size-7 cursor-pointer overflow-hidden rounded-full border border-surface-border"
-                title={t(($) => $.labels.editor.custom_color)}
-                style={{ backgroundColor: draft.color }}
-              >
-                <input
-                  type="color"
-                  value={draft.color}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, color: event.target.value }))
-                  }
-                  className="absolute inset-0 cursor-pointer opacity-0"
-                  aria-label={t(($) => $.labels.editor.custom_color)}
-                />
-              </label>
-            </div>
+                  aria-label={t(($) => $.labels.editor.color)}
+                  className="flex h-9 items-center gap-2.5 rounded-md border border-surface-border px-2.5 transition-colors hover:bg-surface-hover"
+                >
+                  <span
+                    className="size-5 rounded-full"
+                    style={{ backgroundColor: draft.color }}
+                  />
+                  <span className="font-mono text-xs uppercase text-muted-foreground">
+                    {draft.color}
+                  </span>
+                </button>
+              }
+            />
           </div>
         </div>
         <DialogFooter>

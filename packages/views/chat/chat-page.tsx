@@ -251,7 +251,7 @@ export function ChatPage() {
       <ChatInput
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
-        onRestoreDraftConsumed={c.handleRestoreDraftConsumed}
+        onRestoreDraftApplied={c.handleRestoreDraftApplied}
         onUploadFile={c.handleUploadFile}
         onStop={c.handleStop}
         isRunning={!!c.pendingTaskId}

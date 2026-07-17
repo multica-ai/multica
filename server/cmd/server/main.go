@@ -389,6 +389,9 @@ func main() {
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+	if h.WebhookDeliveryWorker != nil {
+		go h.WebhookDeliveryWorker.Run(sweepCtx)
+	}
 
 	// Channel inbound supervisor (MUL-3620): holds the §4.4 WS lease per
 	// installation and drives each channel.Channel. It is built
@@ -472,6 +475,9 @@ func main() {
 	// final batch of queued heartbeat bumps.
 	sweepCancel()
 	heartbeatScheduler.Stop()
+	if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
+		slog.Warn("webhook delivery worker did not exit within shutdown timeout")
+	}
 
 	// Join the channel supervisor's per-installation goroutines so the
 	// lease renewer can issue a final release before process exit;
