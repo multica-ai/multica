@@ -61,7 +61,8 @@ export interface IssueSurfaceController {
   swimlaneIssues: Issue[];
   /** The rows the agents-working filter would leave on screen. Feeds the
    *  header chip so its count IS the post-click row count (MUL-4884). */
-  workingScopeIssues: Issue[];
+  /** See IssueSurfaceData.workingScopeIssues — undefined means UNKNOWN. */
+  workingScopeIssues: Issue[] | undefined;
   filteredGanttIssues: Issue[];
   assigneeGroups?: IssueAssigneeGroup[];
   assigneeGroupQueryKey?: QueryKey;
@@ -92,6 +93,10 @@ export interface IssueSurfaceController {
   flatTotal: number;
   /** See IssueSurfaceData.flatWindowError. */
   flatWindowError: boolean;
+  /** See IssueSurfaceData.flatWindowColdError. */
+  flatWindowColdError: boolean;
+  /** See IssueSurfaceData.refetchFlatWindow. */
+  refetchFlatWindow: () => Promise<unknown>;
   tableSearch: string;
   setTableSearch: (query: string) => void;
   exportTableIssues: () => Promise<Issue[]>;

@@ -123,6 +123,8 @@
     "search_clear": "검색 지우기",
     "loaded_count": "{{total}}개 중 {{count}}개 불러옴",
     "structure_paused": "그룹화와 계층이 일시 중지되었습니다 — 이슈 {{total}}개가 상한 {{limit}}개를 초과했습니다. 필터로 좁히면 다시 활성화됩니다.",
+    "load_failed": "이슈를 불러오지 못했습니다.",
+    "load_failed_retry": "다시 시도",
     "load_more_failed_retry": "추가 항목을 불러오지 못했습니다 — 다시 시도",
     "hierarchy": "계층",
     "hierarchy_description": "하위 이슈를 상위 이슈 아래에 중첩해 표시",
@@ -410,7 +412,8 @@
     "filter_active_label": "에이전트가 작업 중인 issue만 보는 중",
     "tasks_count_other": "task {{count}}개",
     "chip_agents_working_other": "작업 중인 에이전트 {{count}}개",
-    "issues_count_other": "issue {{count}}개"
+    "issues_count_other": "issue {{count}}개",
+    "chip_agents_working_unknown": "작업 중인 에이전트: —"
   },
   "agent_live": {
     "is_working": "{{name}} 작업 중",

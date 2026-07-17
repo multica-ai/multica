@@ -111,7 +111,7 @@ import {
   buildIssueTableRows,
   getIssueTableSelectionRange,
   isTableStructureSuspended,
-  shouldAutoLoadNextStructurePage,
+  shouldAutoLoadNextWindowPage,
   type IssueTableDisplayRow,
 } from "./table-view-model";
 import type { ChildProgress } from "./list-row";
@@ -713,7 +713,7 @@ export function TableView({
   // P1#2). Above the ceiling both features suspend and the toolbar notice
   // explains why; the window keeps the one-page-per-scroll sentinel.
   // Advancement gates (error stop, hard loaded-count ceiling, fresh total)
-  // live in shouldAutoLoadNextStructurePage — see its doc for the failure
+  // live in shouldAutoLoadNextWindowPage — see its doc for the failure
   // modes each gate closes (round-4 review P1#1/P1#2).
   const structureSuspended = isTableStructureSuspended(total);
   const structureWanted = effectiveTableGrouping !== "none" || tableHierarchy;
@@ -722,8 +722,8 @@ export function TableView({
   const loadedCount = issues.length;
   useEffect(() => {
     if (
-      shouldAutoLoadNextStructurePage({
-        structureWanted,
+      shouldAutoLoadNextWindowPage({
+        windowWanted: structureWanted,
         total,
         loadedCount,
         hasNextPage,

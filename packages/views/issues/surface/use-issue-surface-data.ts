@@ -30,6 +30,7 @@ import {
   type IssueFilterState,
   type IssueFilters,
 } from "../utils/filter";
+import { shouldAutoLoadNextWindowPage } from "../components/table-view-model";
 import type { ChildProgress } from "../components/list-row";
 import type { IssueSurfaceActivity } from "./activity";
 
@@ -64,10 +65,14 @@ export interface IssueSurfaceData {
   projectIssues: Issue[];
   issues: Issue[];
   swimlaneIssues: Issue[];
-  /** The rows the agents-working filter would leave on screen. See the
-   *  `workingScopeIssues` memo for why this is a projection of the render
-   *  pipeline rather than a second derivation from the task snapshot. */
-  workingScopeIssues: Issue[];
+  /** The rows the agents-working filter would leave on screen — or
+   *  `undefined` when that set is genuinely UNKNOWN (table mode while the
+   *  ids-facet window is still resolving, failed, or too large to
+   *  materialize). Consumers must present unknown as unknown; substituting
+   *  another incomplete window would publish a precise-looking wrong number
+   *  (round-5 review P2). See the `workingScopeIssues` memo for why the known
+   *  case is a projection of the render pipeline. */
+  workingScopeIssues: Issue[] | undefined;
   filteredGanttIssues: Issue[];
   assigneeGroups?: IssueAssigneeGroup[];
   assigneeGroupQueryKey?: QueryKey;
@@ -98,6 +103,13 @@ export interface IssueSurfaceData {
    *  after every failed attempt is a request storm — and surface an explicit
    *  Retry instead. */
   flatWindowError: boolean;
+  /** The flat window failed before producing ANY data (cold load, retries
+   *  exhausted). This is NOT an empty workspace: isEmpty stays false and the
+   *  surface must render an error state with a Retry instead of the
+   *  create-issue empty state (round-5 review P2). */
+  flatWindowColdError: boolean;
+  /** Explicit recovery for flatWindowColdError — refetches the flat window. */
+  refetchFlatWindow: () => Promise<unknown>;
   filterIssuesForExport: (issues: Issue[]) => Issue[];
   isLoading: boolean;
   /** The window's data is being revalidated while the previous snapshot is
@@ -242,23 +254,40 @@ export function useIssueSurfaceData({
     ...issueSurfaceFlatOptions(wsId, queryPlan, sort, workingFacets),
     enabled: workingWindowEnabled,
   });
-  // Materialize the running window to completion — it is inherently bounded
-  // by the running set (the ids facet), so this is a handful of pages at
-  // worst, and the chip must not present a single 100-row page as the whole
-  // scope (round-4 review P2#3). An error stops the loop (the projection
-  // then falls back to loaded rows); while the filter is ON this query is
-  // ALSO the main window, and the structure loop / sentinel drive it — this
-  // effect is idempotent alongside them (both no-op while a fetch is in
-  // flight).
+  // Materialize the running window ONLY under the same hard gates as the
+  // structure loop — while the agents-working filter is on this query IS the
+  // main table window (shared key), so an ungated chip-driven loop would
+  // stuff the main cache past the very ceiling TableView just enforced, and
+  // the running set has no server-side size bound (round-5 review P1). Under
+  // the gates the loop is bounded: an over-ceiling window stops after page 1
+  // (fresh total > ceiling) and presents as UNKNOWN instead of a number; an
+  // error stops the loop the same way.
   const {
     hasNextPage: workingWindowHasNext,
     isFetchingNextPage: workingWindowFetchingNext,
     isError: workingWindowError,
     fetchNextPage: fetchNextWorkingWindowPage,
   } = workingWindowQuery;
+  const workingWindowPages = workingWindowQuery.data?.pages;
+  const workingWindowTotal =
+    workingWindowPages?.[workingWindowPages.length - 1]?.total ?? 0;
+  const workingWindowLoaded = useMemo(
+    () =>
+      workingWindowPages?.reduce((count, page) => count + page.issues.length, 0) ??
+      0,
+    [workingWindowPages],
+  );
   useEffect(() => {
-    if (!workingWindowEnabled || workingWindowError) return;
-    if (workingWindowHasNext && !workingWindowFetchingNext) {
+    if (
+      shouldAutoLoadNextWindowPage({
+        windowWanted: workingWindowEnabled,
+        total: workingWindowTotal,
+        loadedCount: workingWindowLoaded,
+        hasNextPage: workingWindowHasNext,
+        isFetchingNextPage: workingWindowFetchingNext,
+        hasError: workingWindowError,
+      })
+    ) {
       void fetchNextWorkingWindowPage();
     }
   }, [
@@ -267,6 +296,8 @@ export function useIssueSurfaceData({
     workingWindowError,
     workingWindowFetchingNext,
     workingWindowHasNext,
+    workingWindowLoaded,
+    workingWindowTotal,
   ]);
   const bucketedIssues = useMemo(() => {
     return usesAssigneeBoard
@@ -421,22 +452,25 @@ export function useIssueSurfaceData({
       ).flatMap((group) => group.issues);
     }
     if (usesTable) {
-      // Authoritative ONLY when complete: presenting a single 100-row page
-      // as the whole scope makes the chip under-count the moment more than
-      // one page of issues is running (round-4 review P2#3). The bounded
-      // effect above drives the window to completion; until then — and on
-      // error — fall back to the loaded-rows projection.
+      // The table's loaded pages are only a SLICE of its window, so no
+      // fallback to them can honestly claim a precise working set. The scope
+      // is either the COMPLETE ids-facet window (fetched to the end, no
+      // error — keepPreviousData keeps the last complete window on screen
+      // across facet/running-set re-keys), an empty running set (trivially
+      // complete without a request), or UNKNOWN — resolving, failed, or over
+      // the materialization ceiling (round-5 review P2). Consumers render
+      // unknown as unknown; they never get a number to mis-present.
+      if (!hasRunningIssues) return EMPTY_ISSUES;
       const workingWindowComplete =
         workingWindowQuery.data !== undefined &&
         !workingWindowHasNext &&
         !workingWindowError;
-      if (workingWindowComplete) {
-        return applyIssueFilters(
-          workingWindowQuery.data.pages.flatMap((page) => page.issues),
-          { ...baseFilterState, workingOnly: true },
-          filterContext,
-        );
-      }
+      if (!workingWindowComplete) return undefined;
+      return applyIssueFilters(
+        workingWindowQuery.data.pages.flatMap((page) => page.issues),
+        { ...baseFilterState, workingOnly: true },
+        filterContext,
+      );
     }
     return applyIssueFilters(
       surfaceIssues,
@@ -450,6 +484,7 @@ export function useIssueSurfaceData({
     filterContext,
     ganttIssues,
     ganttShowCompleted,
+    hasRunningIssues,
     propertyFilters,
     showSubIssues,
     surfaceIssues,
@@ -602,6 +637,8 @@ export function useIssueSurfaceData({
     isFetchingNextFlatPage: flatIssuesQuery.isFetchingNextPage,
     flatTotal,
     flatWindowError: flatIssuesQuery.isError,
+    flatWindowColdError: flatIssuesQuery.isError && flatIssuesQuery.data === undefined,
+    refetchFlatWindow: flatIssuesQuery.refetch,
     filterIssuesForExport,
     isLoading,
     isRefreshing,
@@ -611,10 +648,15 @@ export function useIssueSurfaceData({
     // window is empty, so never claim it (same "uncertain → don't assert"
     // rule as surface membership). GanttView renders its own accurate
     // "no scheduled issues" empty state instead of the generic create-issue
-    // one.
+    // one. A FAILED table fetch proves nothing either: total defaults to 0
+    // after a cold-load error, and claiming empty there swaps a 5xx/offline
+    // for a "create your first issue" screen with no recovery path (round-5
+    // review P2) — only a successful zero-result window is empty.
     isEmpty:
       !isLoading &&
       !usesGantt &&
-      (usesTable ? flatTotal === 0 : surfaceIssues.length === 0),
+      (usesTable
+        ? !flatIssuesQuery.isError && flatTotal === 0
+        : surfaceIssues.length === 0),
   };
 }

@@ -29,9 +29,10 @@ export function MyIssuesHeader({
   facetCountsExact = true,
 }: {
   allIssues: Issue[];
-  /** The rows the agents-working filter would leave on screen. Scopes the
-   *  chip: it counts the agents working on these rows. */
-  workingIssues: Issue[];
+  /** The rows the agents-working filter would leave on screen — undefined
+   *  when the set is unknown (chip renders indeterminate). Scopes the chip:
+   *  it counts the agents working on these rows. */
+  workingIssues: Issue[] | undefined;
   scope: MyIssuesScope;
   onScopeChange: (scope: MyIssuesScope) => void;
   isRefreshing?: boolean;

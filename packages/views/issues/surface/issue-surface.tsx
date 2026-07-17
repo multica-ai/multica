@@ -32,8 +32,10 @@ export interface IssueSurfaceRenderContext {
   issues: Issue[];
   /** The rows the agents-working filter would leave on screen, with this
    *  surface's `clientFilter` applied — headers feed it to the working chip
-   *  so the chip's count is the post-click row count (MUL-4884). */
-  workingIssues: Issue[];
+   *  so the chip's count is the post-click row count (MUL-4884). Undefined
+   *  means the set is UNKNOWN (table window resolving / failed / too large);
+   *  the chip renders an indeterminate state instead of a number. */
+  workingIssues: Issue[] | undefined;
 }
 
 interface IssueSurfaceComponentProps extends IssueSurfaceProps {
@@ -122,6 +124,7 @@ function IssueSurfaceContent({
   contentClassName,
 }: Omit<IssueSurfaceComponentProps, "surfaceKey">) {
   const { t } = useT("projects");
+  const { t: tIssues } = useT("issues");
   const controller = useIssueSurfaceController({
     scope,
     modes,
@@ -143,9 +146,11 @@ function IssueSurfaceContent({
   );
   // Same clientFilter the rendered rows go through, so the chip's promise
   // survives on surfaces that narrow the list locally (e.g. a search box).
+  // An UNKNOWN scope (undefined) passes through untouched — there is nothing
+  // to filter and the chip must see it as unknown.
   const workingIssues = useMemo(
     () =>
-      clientFilter
+      clientFilter && controller.workingScopeIssues
         ? controller.workingScopeIssues.filter((issue) => clientFilter(issue))
         : controller.workingScopeIssues,
     [clientFilter, controller.workingScopeIssues],
@@ -206,6 +211,21 @@ function IssueSurfaceContent({
           ) : (
             <IssueSurfaceSkeleton mode={controller.viewMode} />
           )
+        ) : controller.viewMode === "table" && controller.flatWindowColdError ? (
+          // A cold-load failure is NOT an empty workspace: rendering the
+          // create-issue empty state here misreports a 5xx/offline as "no
+          // issues" and leaves no recovery path, since TableView (and its
+          // load-more Retry) never mounts without data (round-5 review P2).
+          <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
+            <p className="text-sm">{tIssues(($) => $.table.load_failed)}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void controller.refetchFlatWindow()}
+            >
+              {tIssues(($) => $.table.load_failed_retry)}
+            </Button>
+          </div>
         ) : controller.isEmpty || shouldShowClientEmpty ? (
           renderEmpty ? (
             renderEmpty(renderContext)

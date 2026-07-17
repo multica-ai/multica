@@ -604,7 +604,7 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => {
       expect(
-        result.current.workingScopeIssues.map((issue) => issue.id),
+        result.current.workingScopeIssues?.map((issue) => issue.id),
       ).toEqual(["issue-running"]);
     });
     // The main table window itself stayed unrestricted — the filter is off.
@@ -697,6 +697,81 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => {
       expect(result.current.workingScopeIssues).toHaveLength(101);
     });
+  });
+
+  it("never materializes an over-ceiling working window and presents its scope as unknown", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("table");
+    // The working window shares the MAIN table cache key while the filter is
+    // on, so an uncapped chip-driven loop would re-open the very ceiling the
+    // structure loop enforces (round-5 review P1). An over-ceiling window
+    // must stop after page 1 — and the chip must see UNKNOWN, not a number
+    // built from one page.
+    const runningIssues = Array.from({ length: 100 }, (_, index) =>
+      makeIssue({ id: `run-${index}`, status: "in_progress" }),
+    );
+    const idsCalls: Array<number | undefined> = [];
+    listIssues.mockImplementation((params?: ListIssuesParams) => {
+      if (params?.ids) {
+        idsCalls.push(params.offset);
+        return Promise.resolve({ issues: runningIssues, total: 5_000 });
+      }
+      return Promise.resolve({ issues: [], total: 0 });
+    });
+    setApiInstance({
+      listIssues,
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      getAgentTaskSnapshot: vi.fn(() =>
+        Promise.resolve(
+          runningIssues.map((issue, index) => ({
+            id: `task-${index}`,
+            issue_id: issue.id,
+            status: "running",
+          })) as unknown as AgentTask[],
+        ),
+      ),
+      getChildIssueProgress: vi.fn(() => never()),
+    } as unknown as ApiClient);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["table"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(idsCalls.length).toBeGreaterThan(0));
+    // Give any (buggy) auto-loop a chance to fire before asserting.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(idsCalls).toEqual([0]);
+    expect(result.current.workingScopeIssues).toBeUndefined();
+  });
+
+  it("treats a cold-load failure as an error state, not an empty workspace", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("table");
+    listIssues.mockRejectedValue(new Error("boom"));
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["table"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.flatWindowColdError).toBe(true));
+    // A failed fetch proves nothing about the window: claiming empty here
+    // swaps a 5xx/offline for a "create your first issue" screen (round-5
+    // review P2).
+    expect(result.current.isEmpty).toBe(false);
+    expect(result.current.flatWindowError).toBe(true);
   });
 
   it("clears surface selection when the membership window changes (filters, search)", async () => {
@@ -896,13 +971,13 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     await waitFor(() =>
-      expect(result.current.workingScopeIssues.length).toBe(2),
+      expect(result.current.workingScopeIssues?.length).toBe(2),
     );
 
     // The scope the chip counts agents within must be the rendered list
     // itself — that identity is what keeps the chip in step with the filter
     // (the chip's own number counts agents, not these rows).
-    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual(
+    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual(
       result.current.issues.map((i) => i.id),
     );
     expect(result.current.issues.map((i) => i.id).sort()).toEqual([
@@ -933,13 +1008,13 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     await waitFor(() =>
-      expect(result.current.workingScopeIssues.length).toBe(1),
+      expect(result.current.workingScopeIssues?.length).toBe(1),
     );
 
     // Filter off: the list still shows both rows, but the chip already
     // reports the one row a click would leave.
     expect(result.current.issues).toHaveLength(2);
-    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual([
+    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
       "todo-1",
     ]);
   });
@@ -970,12 +1045,12 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     await waitFor(() =>
-      expect(result.current.workingScopeIssues.length).toBe(1),
+      expect(result.current.workingScopeIssues?.length).toBe(1),
     );
 
     // The regression: the chip used to say 2 here (both issues have running
     // agents) while clicking it produced a single row.
-    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual([
+    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
       "todo-1",
     ]);
   });
@@ -1033,10 +1108,10 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     await waitFor(() =>
-      expect(result.current.workingScopeIssues.length).toBe(1),
+      expect(result.current.workingScopeIssues?.length).toBe(1),
     );
 
-    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual([
+    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
       "todo-1",
     ]);
   });
@@ -1071,10 +1146,10 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     await waitFor(() =>
-      expect(result.current.workingScopeIssues.length).toBe(1),
+      expect(result.current.workingScopeIssues?.length).toBe(1),
     );
 
-    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual([
+    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
       "todo-1",
     ]);
     expect(result.current.issues.map((i) => i.id)).toEqual(["todo-1"]);
@@ -1146,10 +1221,10 @@ describe("useIssueSurfaceController", () => {
 
     // ganttShowCompleted defaults to false, so the done row and the undated
     // row are not drawn — the chip must not count them either.
-    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual([
+    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
       "gantt-open",
     ]);
-    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual(
+    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual(
       result.current.filteredGanttIssues.map((i) => i.id),
     );
   });
@@ -1183,11 +1258,11 @@ describe("useIssueSurfaceController", () => {
 
     // The done row is drawn now, so it counts. The undated one still cannot
     // be placed, so it still does not.
-    expect(result.current.workingScopeIssues.map((i) => i.id).sort()).toEqual([
+    expect(result.current.workingScopeIssues?.map((i) => i.id).sort()).toEqual([
       "gantt-done",
       "gantt-open",
     ]);
-    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual(
+    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual(
       result.current.filteredGanttIssues.map((i) => i.id),
     );
   });

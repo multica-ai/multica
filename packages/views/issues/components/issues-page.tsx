@@ -16,7 +16,7 @@ function IssuesSurfaceHeader({
   facetCountsExact,
 }: {
   issues: Issue[];
-  workingIssues: Issue[];
+  workingIssues: Issue[] | undefined;
   isRefreshing: boolean;
   facetCountsExact: boolean;
 }) {

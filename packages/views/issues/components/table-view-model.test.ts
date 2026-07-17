@@ -7,7 +7,7 @@ import {
   calculateIssueTableColumn,
   getIssueTableSelectionRange,
   isTableStructureSuspended,
-  shouldAutoLoadNextStructurePage,
+  shouldAutoLoadNextWindowPage,
 } from "./table-view-model";
 
 function makeIssue(id: string, overrides: Partial<Issue> = {}): Issue {
@@ -81,9 +81,9 @@ describe("isTableStructureSuspended", () => {
   });
 });
 
-describe("shouldAutoLoadNextStructurePage", () => {
+describe("shouldAutoLoadNextWindowPage", () => {
   const base = {
-    structureWanted: true,
+    windowWanted: true,
     total: 500,
     loadedCount: 100,
     hasNextPage: true,
@@ -92,15 +92,15 @@ describe("shouldAutoLoadNextStructurePage", () => {
   };
 
   it("advances only while structure is wanted, healthy, and under the ceiling", () => {
-    expect(shouldAutoLoadNextStructurePage(base)).toBe(true);
+    expect(shouldAutoLoadNextWindowPage(base)).toBe(true);
     expect(
-      shouldAutoLoadNextStructurePage({ ...base, structureWanted: false }),
+      shouldAutoLoadNextWindowPage({ ...base, windowWanted: false }),
     ).toBe(false);
-    expect(shouldAutoLoadNextStructurePage({ ...base, hasNextPage: false })).toBe(
+    expect(shouldAutoLoadNextWindowPage({ ...base, hasNextPage: false })).toBe(
       false,
     );
     expect(
-      shouldAutoLoadNextStructurePage({ ...base, isFetchingNextPage: true }),
+      shouldAutoLoadNextWindowPage({ ...base, isFetchingNextPage: true }),
     ).toBe(false);
   });
 
@@ -108,7 +108,7 @@ describe("shouldAutoLoadNextStructurePage", () => {
     // After a failed page fetch, hasNextPage stays true and
     // isFetchingNextPage returns to false — exactly the state that used to
     // re-trigger the loop forever.
-    expect(shouldAutoLoadNextStructurePage({ ...base, hasError: true })).toBe(
+    expect(shouldAutoLoadNextWindowPage({ ...base, hasError: true })).toBe(
       false,
     );
   });
@@ -117,13 +117,13 @@ describe("shouldAutoLoadNextStructurePage", () => {
     // page 1 reported total=900 (under the ceiling) but the window has since
     // grown to 50,000: the fresh total suspends...
     expect(
-      shouldAutoLoadNextStructurePage({ ...base, total: 50_000 }),
+      shouldAutoLoadNextWindowPage({ ...base, total: 50_000 }),
     ).toBe(false);
     // ...and independently of ANY reported total, the loaded count is an
     // absolute stop at the ceiling — page 3 must never be requested once
     // 1,000 rows are in memory.
     expect(
-      shouldAutoLoadNextStructurePage({
+      shouldAutoLoadNextWindowPage({
         ...base,
         total: 900,
         loadedCount: TABLE_STRUCTURE_MAX_WINDOW,

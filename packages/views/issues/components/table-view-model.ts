@@ -32,8 +32,12 @@ export function isTableStructureSuspended(total: number): boolean {
 }
 
 /**
- * Single decision point for the structure materialization loop. Every gate
- * here exists because its absence was a concrete failure mode:
+ * Single decision point for EVERY auto-pagination loop over a table window —
+ * the structure materialization loop and the working (ids-facet) window
+ * loop. The two share the main table's query cache when the agents-working
+ * filter is on, so a loop that skipped these gates would re-open the very
+ * ceiling the other just enforced (round-5 review P1). Every gate exists
+ * because its absence was a concrete failure mode:
  *
  * - `hasError`: a page that keeps failing leaves `hasNextPage` true and
  *   `isFetchingNextPage` false after each attempt, so an ungated effect
@@ -48,15 +52,15 @@ export function isTableStructureSuspended(total: number): boolean {
  * - `total` must be the FRESHEST page's total (pagination itself advances on
  *   the latest page), for the same reason.
  */
-export function shouldAutoLoadNextStructurePage(input: {
-  structureWanted: boolean;
+export function shouldAutoLoadNextWindowPage(input: {
+  windowWanted: boolean;
   total: number;
   loadedCount: number;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   hasError: boolean;
 }): boolean {
-  if (!input.structureWanted || input.hasError) return false;
+  if (!input.windowWanted || input.hasError) return false;
   if (isTableStructureSuspended(input.total)) return false;
   if (input.loadedCount >= TABLE_STRUCTURE_MAX_WINDOW) return false;
   return input.hasNextPage && !input.isFetchingNextPage;
