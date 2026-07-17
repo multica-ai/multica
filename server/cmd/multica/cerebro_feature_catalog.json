@@ -645,6 +645,13 @@
       "default": false
     },
     {
+      "key": "cerebro_projects_tree",
+      "label": "Projects tree table",
+      "description": "Show nested projects and inline sprint progress in the Projects table. Search remains flat with parent paths, while filters retain dimmed ancestors for context. Off keeps the current flat table unchanged. FIR-3425.",
+      "group": "workspace",
+      "default": false
+    },
+    {
       "key": "cerebro_operating_system",
       "label": "Operating System",
       "description": "Plan strategy horizons and treat existing Projects as Rocks with transparent Issue rollups. Off hides the Strategy and Rocks routes and navigation. FIR-2816.",

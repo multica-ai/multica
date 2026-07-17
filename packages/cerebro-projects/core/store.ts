@@ -16,6 +16,17 @@ const serverStorage: StateStorage = {
   removeItem: () => undefined,
 };
 
+function resolveStorage(): StateStorage {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      return window.localStorage;
+    }
+  } catch {
+    // Some test and privacy-mode browser environments expose localStorage but deny access.
+  }
+  return serverStorage;
+}
+
 export const useProjectsTreeStore = create<ProjectsTreeState>()(
   persist(
     (set) => ({
@@ -46,9 +57,7 @@ export const useProjectsTreeStore = create<ProjectsTreeState>()(
     }),
     {
       name: "multica_projects_tree",
-      storage: createJSONStorage(() =>
-        typeof window === "undefined" ? serverStorage : window.localStorage,
-      ),
+      storage: createJSONStorage(resolveStorage),
       partialize: ({ expandedProjectsByWorkspace, showCompletedSprintsByWorkspace }) => ({
         expandedProjectsByWorkspace,
         showCompletedSprintsByWorkspace,
