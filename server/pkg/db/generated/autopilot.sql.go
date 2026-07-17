@@ -645,6 +645,9 @@ LIMIT 1
 // =====================
 // Run lookup by linked entities
 // =====================
+// The in-flight run linked to an issue. Used by the task-outcome sync to find a
+// run that is still finalizable (MUL-4809 §4.1); already-terminal runs are
+// excluded, which also makes finalization idempotent under a rolling deploy.
 func (q *Queries) GetAutopilotRunByIssue(ctx context.Context, issueID pgtype.UUID) (AutopilotRun, error) {
 	row := q.db.QueryRow(ctx, getAutopilotRunByIssue, issueID)
 	var i AutopilotRun
@@ -837,6 +840,41 @@ func (q *Queries) GetAutopilotTrigger(ctx context.Context, id pgtype.UUID) (Auto
 	return i, err
 }
 
+const getLatestAutopilotRunByIssue = `-- name: GetLatestAutopilotRunByIssue :one
+SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id FROM autopilot_run
+WHERE issue_id = $1
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+// The most recent run linked to an issue, in ANY status. Attribution needs the
+// firing trigger's owner even after the run has already finalized (MUL-4809
+// §4.1: runs now complete on task outcome, so a later issue task can outlive the
+// active run) — GetAutopilotRunByIssue would return nothing once the run is done.
+func (q *Queries) GetLatestAutopilotRunByIssue(ctx context.Context, issueID pgtype.UUID) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, getLatestAutopilotRunByIssue, issueID)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+		&i.PlannedAt,
+		&i.WebhookDeliveryID,
+	)
+	return i, err
+}
+
 const getWebhookTriggerByToken = `-- name: GetWebhookTriggerByToken :one
 SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, t.published_by_type, t.published_by_id, a.workspace_id AS autopilot_workspace_id
 FROM autopilot_trigger t
@@ -895,6 +933,23 @@ func (q *Queries) GetWebhookTriggerByToken(ctx context.Context, webhookToken pgt
 		&i.AutopilotWorkspaceID,
 	)
 	return i, err
+}
+
+const hasPendingRetryForTask = `-- name: HasPendingRetryForTask :one
+SELECT count(*) > 0 AS has_pending FROM agent_task_queue
+WHERE retry_of_task_id = $1
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+`
+
+// True when a task has a non-terminal system-retry successor (retry_of_task_id).
+// The create_issue run-finalization waits on this: FailTask enqueues the retry
+// BEFORE broadcasting the failure event, so an active successor here means
+// another attempt is in flight and the run must stay open (MUL-4809 §4.1).
+func (q *Queries) HasPendingRetryForTask(ctx context.Context, retryOfTaskID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPendingRetryForTask, retryOfTaskID)
+	var has_pending bool
+	err := row.Scan(&has_pending)
+	return has_pending, err
 }
 
 const isAutopilotCollaborator = `-- name: IsAutopilotCollaborator :one

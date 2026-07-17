@@ -190,8 +190,8 @@ func TestDispatchAutopilotSuppressesRecentDuplicateIssue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first DispatchAutopilot: %v", err)
 	}
-	if first == nil || first.Status != "issue_created" || !first.IssueID.Valid {
-		t.Fatalf("first dispatch = %+v, want issue_created with issue_id", first)
+	if first == nil || first.Status != "running" || !first.IssueID.Valid || !first.TaskID.Valid {
+		t.Fatalf("first dispatch = %+v, want running with issue_id + task_id (MUL-4809 §4.1)", first)
 	}
 
 	second, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)

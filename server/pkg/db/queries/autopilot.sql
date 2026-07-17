@@ -427,9 +427,31 @@ LIMIT 1;
 -- =====================
 
 -- name: GetAutopilotRunByIssue :one
+-- The in-flight run linked to an issue. Used by the task-outcome sync to find a
+-- run that is still finalizable (MUL-4809 §4.1); already-terminal runs are
+-- excluded, which also makes finalization idempotent under a rolling deploy.
 SELECT * FROM autopilot_run
 WHERE issue_id = $1 AND status IN ('issue_created', 'running')
 LIMIT 1;
+
+-- name: GetLatestAutopilotRunByIssue :one
+-- The most recent run linked to an issue, in ANY status. Attribution needs the
+-- firing trigger's owner even after the run has already finalized (MUL-4809
+-- §4.1: runs now complete on task outcome, so a later issue task can outlive the
+-- active run) — GetAutopilotRunByIssue would return nothing once the run is done.
+SELECT * FROM autopilot_run
+WHERE issue_id = $1
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: HasPendingRetryForTask :one
+-- True when a task has a non-terminal system-retry successor (retry_of_task_id).
+-- The create_issue run-finalization waits on this: FailTask enqueues the retry
+-- BEFORE broadcasting the failure event, so an active successor here means
+-- another attempt is in flight and the run must stay open (MUL-4809 §4.1).
+SELECT count(*) > 0 AS has_pending FROM agent_task_queue
+WHERE retry_of_task_id = $1
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
 
 -- name: FailAutopilotRunsByIssue :exec
 -- Fails active autopilot runs linked to a given issue.

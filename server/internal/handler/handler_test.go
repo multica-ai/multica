@@ -1091,8 +1091,8 @@ func TestTriggerAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&run); err != nil {
 		t.Fatalf("decode autopilot run: %v", err)
 	}
-	if run.Status != "issue_created" {
-		t.Fatalf("run status = %q, want issue_created", run.Status)
+	if run.Status != "running" {
+		t.Fatalf("run status = %q, want running (task-bound, MUL-4809 §4.1)", run.Status)
 	}
 	if run.IssueID == nil {
 		t.Fatal("run issue_id is nil, want newly created issue")
@@ -1169,8 +1169,8 @@ func TestScheduledAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DispatchAutopilot schedule duplicate: %v", err)
 	}
-	if run == nil || run.Status != "issue_created" {
-		t.Fatalf("dispatch result = %+v, want status issue_created", run)
+	if run == nil || run.Status != "running" {
+		t.Fatalf("dispatch result = %+v, want status running (task-bound, MUL-4809 §4.1)", run)
 	}
 	newIssueID := uuidToString(run.IssueID)
 	if newIssueID == "" {
@@ -1252,8 +1252,8 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DispatchAutopilot: %v", err)
 	}
-	if run == nil || run.Status != "issue_created" {
-		t.Fatalf("dispatch result = %+v, want status issue_created", run)
+	if run == nil || run.Status != "running" {
+		t.Fatalf("dispatch result = %+v, want status running (task-bound, MUL-4809 §4.1)", run)
 	}
 
 	var creatorType, creatorID string

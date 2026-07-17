@@ -128,6 +128,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 // (so it must be reached via the issue_id lookup, not SyncRunFromTask).
 type linkedIssueAutopilotFixture struct {
 	taskSvc *service.TaskService
+	svc     *service.AutopilotService
 	queries *db.Queries
 	run     *db.AutopilotRun
 	taskID  pgtype.UUID
@@ -193,13 +194,19 @@ func dispatchCreateIssueAutopilot(t *testing.T, title string) linkedIssueAutopil
 		t.Fatalf("expected one issue task, got %d", len(tasks))
 	}
 	if tasks[0].AutopilotRunID.Valid {
-		t.Fatal("create_issue issue task unexpectedly has autopilot_run_id; test must exercise linked issue lookup")
+		t.Fatal("create_issue issue task unexpectedly has autopilot_run_id; the run owns the pointer via run.task_id instead")
 	}
-	if run.Status != "issue_created" {
-		t.Fatalf("expected pre-failure run status issue_created, got %q", run.Status)
+	// MUL-4809 §4.1: dispatch now binds the run to its dispatched task and advances
+	// to running. The run finalizes on that task's terminal state (matched by
+	// run.task_id + retry lineage), not on the issue status.
+	if run.Status != "running" {
+		t.Fatalf("expected post-dispatch run status running, got %q", run.Status)
+	}
+	if run.TaskID.Bytes != tasks[0].ID.Bytes {
+		t.Fatalf("run.task_id not bound to the dispatched task: run=%x task=%x", run.TaskID.Bytes, tasks[0].ID.Bytes)
 	}
 
-	return linkedIssueAutopilotFixture{taskSvc: taskSvc, queries: queries, run: run, taskID: tasks[0].ID}
+	return linkedIssueAutopilotFixture{taskSvc: taskSvc, svc: autopilotSvc, queries: queries, run: run, taskID: tasks[0].ID}
 }
 
 // runTaskWithBudget marks the issue task dispatched with the given attempt
@@ -303,8 +310,64 @@ func TestAutopilotCreateIssueTaskRetryPendingKeepsRunOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAutopilotRun: %v", err)
 	}
-	if updatedRun.Status != "issue_created" {
-		t.Fatalf("expected run to stay issue_created while a retry is pending, got %q", updatedRun.Status)
+	if updatedRun.Status != "running" {
+		t.Fatalf("expected run to stay running (open) while a retry is pending, got %q", updatedRun.Status)
+	}
+}
+
+// TestAutopilotCreateIssueTaskCompletionUpdatesRun is the core §4.1 decoupling:
+// a create_issue run now COMPLETES on its dispatched task's terminal success —
+// no issue status change involved.
+func TestAutopilotCreateIssueTaskCompletionUpdatesRun(t *testing.T) {
+	ctx := context.Background()
+	f := dispatchCreateIssueAutopilot(t, "Create-issue completion listener")
+
+	runTaskWithBudget(t, f.queries, f.taskID, 1)
+
+	if _, err := f.taskSvc.CompleteTask(ctx, f.taskID, []byte(`{"output":"done"}`), "", ""); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+
+	updatedRun, err := f.queries.GetAutopilotRun(ctx, f.run.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotRun: %v", err)
+	}
+	if updatedRun.Status != "completed" {
+		t.Fatalf("expected run status completed after the dispatched task completed, got %q", updatedRun.Status)
+	}
+	if !updatedRun.CompletedAt.Valid {
+		t.Fatal("expected completed_at to be set")
+	}
+}
+
+// TestAutopilotCreateIssueCommentTaskDoesNotFinalizeRun locks in the precise
+// lineage match: a LATER task on the same issue that is NOT the run's dispatched
+// task (nor a retry of it) — e.g. a comment-triggered task — must never finalize
+// the run. This is why the run binds to a specific task_id instead of matching
+// by issue alone.
+func TestAutopilotCreateIssueCommentTaskDoesNotFinalizeRun(t *testing.T) {
+	ctx := context.Background()
+	f := dispatchCreateIssueAutopilot(t, "Create-issue comment-task listener")
+
+	// A fabricated terminal task on the same issue with no retry_of lineage to the
+	// run's dispatched task and no autopilot_run_id — its retry-root is itself, so
+	// it can't match run.task_id.
+	commentTask := db.AgentTaskQueue{
+		ID:      parseUUID("11111111-1111-1111-1111-111111111111"),
+		IssueID: f.run.IssueID,
+		Status:  "completed",
+	}
+	if commentTask.ID.Bytes == f.run.TaskID.Bytes {
+		t.Fatal("fabricated comment task id collided with the run's dispatched task id")
+	}
+	f.svc.SyncRunFromCreateIssueTask(ctx, commentTask)
+
+	updatedRun, err := f.queries.GetAutopilotRun(ctx, f.run.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotRun: %v", err)
+	}
+	if updatedRun.Status != "running" {
+		t.Fatalf("a non-lineage comment task finalized the run (status %q); it must stay running", updatedRun.Status)
 	}
 }
 
@@ -465,8 +528,8 @@ func TestAutopilotCreateIssueDispatchCreatesIssueWhenRuntimeOffline(t *testing.T
 	if run == nil {
 		t.Fatal("expected a run, got nil")
 	}
-	if run.Status != "issue_created" {
-		t.Fatalf("expected run status 'issue_created', got %q", run.Status)
+	if run.Status != "running" {
+		t.Fatalf("expected run status 'running' after task-bound dispatch, got %q", run.Status)
 	}
 	if !run.IssueID.Valid {
 		t.Fatal("create_issue dispatch did not link an issue")

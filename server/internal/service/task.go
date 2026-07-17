@@ -463,8 +463,11 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 	// autopilot id, so bridge issue → active run → trigger_id to find the trigger.
 	if s != nil && s.Queries != nil && issue.OriginType.Valid &&
 		issue.OriginType.String == "autopilot" && issue.OriginID.Valid {
+		// Latest run in ANY status: runs now finalize on task outcome (MUL-4809
+		// §4.1), so a follow-up issue task can outlive the active run — the active
+		// GetAutopilotRunByIssue would miss the provenance once the run is done.
 		var triggerID pgtype.UUID
-		if run, err := s.Queries.GetAutopilotRunByIssue(ctx, issue.ID); err == nil {
+		if run, err := s.Queries.GetLatestAutopilotRunByIssue(ctx, issue.ID); err == nil {
 			triggerID = run.TriggerID
 		}
 		return triggerOwnerAttribution(ctx, s.Queries, triggerID, issue.WorkspaceID, issue.OriginID, attribution.EvidenceIssueAssignment, issue.ID)

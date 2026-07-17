@@ -717,7 +717,9 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// webhook dispatch has no actor and takes the plain entry points, where the
 	// autopilot-origin issue resolves to rule_owner. The *WithHandoff variants are
 	// the existing actor-carrying enqueue methods; the handoff note is empty here.
-	if ap.AssigneeType == "squad" {
+	var dispatchedTask db.AgentTaskQueue
+	switch {
+	case ap.AssigneeType == "squad":
 		// Fail-closed invocation gate: verify the admission principal (manual
 		// clicker, else creator — see autopilotAdmitInvoke) may still invoke the
 		// leader. Catches configs that predate the save-time gate, and configs
@@ -726,18 +728,42 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 			return fmt.Errorf("not allowed to invoke private squad leader")
 		}
 		if actorUserID.Valid {
-			if _, err := s.TaskSvc.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, leader.ID, ap.AssigneeID, "", actorUserID); err != nil {
-				return fmt.Errorf("enqueue squad leader task: %w", err)
-			}
-		} else if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}); err != nil {
+			dispatchedTask, err = s.TaskSvc.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, leader.ID, ap.AssigneeID, "", actorUserID)
+		} else {
+			dispatchedTask, err = s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{})
+		}
+		if err != nil {
 			return fmt.Errorf("enqueue squad leader task: %w", err)
 		}
-	} else if actorUserID.Valid {
-		if _, err := s.TaskSvc.EnqueueTaskForIssueWithHandoff(ctx, issue, "", actorUserID); err != nil {
+	case actorUserID.Valid:
+		dispatchedTask, err = s.TaskSvc.EnqueueTaskForIssueWithHandoff(ctx, issue, "", actorUserID)
+		if err != nil {
 			return fmt.Errorf("enqueue task for issue: %w", err)
 		}
-	} else if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
-		return fmt.Errorf("enqueue task for issue: %w", err)
+	default:
+		dispatchedTask, err = s.TaskSvc.EnqueueTaskForIssue(ctx, issue)
+		if err != nil {
+			return fmt.Errorf("enqueue task for issue: %w", err)
+		}
+	}
+
+	// Bind the run to its dispatched task and advance issue_created -> running
+	// (MUL-4809 §4.1). The run now finalizes on THIS task's terminal state (and
+	// its retry lineage), not on the issue status. The task itself keeps no
+	// autopilot_run_id, so it stays an ordinary issue task for context /
+	// classification; the run owns the pointer instead. A crash between the
+	// enqueue above and this bind leaves the run in issue_created (task_id NULL) —
+	// the same pre-existing hang class as a crash before enqueue, and the sync's
+	// issue-scoped fallback still finalizes such a run.
+	if dispatchedTask.ID.Valid {
+		updatedRun, bindErr := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
+			ID:     run.ID,
+			TaskID: dispatchedTask.ID,
+		})
+		if bindErr != nil {
+			return fmt.Errorf("bind autopilot run to dispatched task: %w", bindErr)
+		}
+		*run = updatedRun
 	}
 
 	slog.Info("autopilot dispatched (create_issue)",
@@ -746,6 +772,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		"issue_id", util.UUIDToString(issue.ID),
 		"leader_id", util.UUIDToString(leader.ID),
 		"run_id", util.UUIDToString(run.ID),
+		"task_id", util.UUIDToString(dispatchedTask.ID),
 	)
 	return nil
 }
@@ -955,42 +982,117 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	return nil
 }
 
-// SyncRunFromIssue updates the autopilot run when its linked issue reaches a terminal status.
-func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue) {
-	if !issue.OriginType.Valid || issue.OriginType.String != "autopilot" {
+// isAutopilotTaskTerminal reports whether an agent task has reached a terminal
+// state that finalizes an autopilot run.
+func isAutopilotTaskTerminal(status string) bool {
+	return status == "completed" || status == "failed" || status == "cancelled"
+}
+
+// retryRootTaskID walks the retry_of_task_id chain up from task to the first
+// attempt (the root). System retries form a short linear chain bounded by
+// max_attempts, so this is a handful of point lookups.
+func (s *AutopilotService) retryRootTaskID(ctx context.Context, task db.AgentTaskQueue) (pgtype.UUID, error) {
+	root := task
+	for root.RetryOfTaskID.Valid {
+		parent, err := s.Queries.GetAgentTask(ctx, root.RetryOfTaskID)
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
+		root = parent
+	}
+	return root.ID, nil
+}
+
+// SyncRunFromCreateIssueTask finalizes a create_issue autopilot run from the
+// terminal state of the task the autopilot dispatched (MUL-4809 §4.1) — the run
+// is driven purely by task outcome, never by the issue status.
+//
+// create_issue tasks carry issue_id (not autopilot_run_id — that stays free so
+// they remain ordinary issue tasks), so the run is found by issue_id and the
+// terminal task is matched to the run's dispatched-task lineage via run.task_id
+// plus the retry_of_task_id chain. That match is what keeps a LATER
+// comment-triggered task on the same issue from finalizing the run.
+//
+// When run.task_id was never bound (a crash between enqueue and bind, or a run
+// dispatched by a pre-§4.1 pod mid-rolling-deploy) it falls back to the
+// issue-scoped "no task still active" check so the run still finalizes rather
+// than hanging.
+func (s *AutopilotService) SyncRunFromCreateIssueTask(ctx context.Context, task db.AgentTaskQueue) {
+	// run_only tasks carry autopilot_run_id and are handled by SyncRunFromTask.
+	if task.AutopilotRunID.Valid || !task.IssueID.Valid || !isAutopilotTaskTerminal(task.Status) {
 		return
 	}
-
-	run, err := s.Queries.GetAutopilotRunByIssue(ctx, issue.ID)
+	run, err := s.Queries.GetAutopilotRunByIssue(ctx, task.IssueID)
 	if err != nil {
-		return // no active run linked to this issue
+		return // no in-flight run linked to this issue (covers ordinary issue/chat tasks)
 	}
+
+	if run.TaskID.Valid {
+		root, rerr := s.retryRootTaskID(ctx, task)
+		if rerr != nil {
+			slog.Warn("autopilot: failed to resolve task retry root",
+				"task_id", util.UUIDToString(task.ID), "error", rerr)
+			return
+		}
+		if root.Bytes != run.TaskID.Bytes {
+			return // not this run's dispatched-task lineage (e.g. a comment task)
+		}
+		// A still-queued system retry means another attempt is already in flight
+		// (FailTask enqueues it before broadcasting the failure) — wait for it.
+		if task.Status != "completed" {
+			pending, perr := s.Queries.HasPendingRetryForTask(ctx, task.ID)
+			if perr != nil {
+				slog.Warn("autopilot: failed to check pending retry",
+					"task_id", util.UUIDToString(task.ID), "error", perr)
+				return
+			}
+			if pending {
+				return
+			}
+		}
+	} else {
+		// Crash/rolling-deploy fallback: the run's task_id was never bound. Finalize
+		// only when no task is still active for the issue, mirroring the previous
+		// issue-scoped behavior so the run doesn't hang.
+		hasActive, herr := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
+		if herr != nil {
+			slog.Warn("autopilot: failed to check active tasks for unbound run",
+				"issue_id", util.UUIDToString(task.IssueID), "error", herr)
+			return
+		}
+		if hasActive {
+			return
+		}
+	}
+
 	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
 	if err != nil {
 		return
 	}
+	wsID := util.UUIDToString(autopilot.WorkspaceID)
 
-	wsID := util.UUIDToString(issue.WorkspaceID)
-
-	switch issue.Status {
-	case "done", "in_review":
+	switch task.Status {
+	case "completed":
 		updatedRun, err := s.Queries.UpdateAutopilotRunCompleted(ctx, db.UpdateAutopilotRunCompletedParams{
-			ID: run.ID,
+			ID:     run.ID,
+			Result: task.Result,
 		})
 		if err != nil {
-			slog.Warn("failed to complete autopilot run", "run_id", util.UUIDToString(run.ID), "error", err)
+			slog.Warn("failed to complete autopilot run from create_issue task",
+				"run_id", util.UUIDToString(run.ID), "error", err)
 			return
 		}
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
-	case "cancelled", "blocked":
-		reason := "issue " + issue.Status
+	case "failed", "cancelled":
+		reason := taskFailureReasonForAutopilotRun(task)
 		updatedRun, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
 			ID:            run.ID,
-			FailureReason: pgtype.Text{String: reason, Valid: true},
+			FailureReason: pgtype.Text{String: reason, Valid: reason != ""},
 		})
 		if err != nil {
-			slog.Warn("failed to fail autopilot run", "run_id", util.UUIDToString(run.ID), "error", err)
+			slog.Warn("failed to fail autopilot run from create_issue task",
+				"run_id", util.UUIDToString(run.ID), "error", err)
 			return
 		}
 		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
@@ -1043,69 +1145,6 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 		s.publishRunDone(wsID, updatedRun, "failed")
 	}
-}
-
-// SyncRunFromLinkedIssueTask fails a create_issue autopilot run when its
-// linked issue task fails terminally before the issue itself reaches a
-// terminal status. create_issue tasks are linked through issue_id rather than
-// autopilot_run_id, so SyncRunFromTask cannot see them directly. Without this
-// the run would hang in `issue_created` forever — and because the failure-rate
-// auto-pause monitor excludes issue_created/running runs, a consistently
-// failing autopilot would never trip the auto-pause either.
-//
-// "Terminal" means no task is still active for the issue. FailTask enqueues an
-// auto-retry for infra-shaped failures (timeout, runtime offline/recovery,
-// codex no-progress) BEFORE it broadcasts the failure event, so an active task
-// here means another attempt is already in flight — we wait for it instead of
-// failing the run prematurely. Once retries are exhausted (or the failure was
-// never retryable in the first place), the run fails carrying the task's reason.
-func (s *AutopilotService) SyncRunFromLinkedIssueTask(ctx context.Context, task db.AgentTaskQueue) {
-	if task.AutopilotRunID.Valid || !task.IssueID.Valid || task.Status != "failed" {
-		return
-	}
-	// Only create_issue runs link through issue_id (and their linked issue is
-	// always origin_type=autopilot by construction), so a hit here both
-	// identifies an in-flight create_issue run and bails the common case of
-	// ordinary issue/chat task failures after a single query.
-	run, err := s.Queries.GetAutopilotRunByIssue(ctx, task.IssueID)
-	if err != nil {
-		return // no active run linked to this issue
-	}
-	// A still-active task — typically the auto-retry FailTask just enqueued —
-	// means the dispatch isn't terminal yet; wait for the final attempt.
-	hasActive, err := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
-	if err != nil {
-		slog.Warn("failed to check active tasks for autopilot issue failure",
-			"issue_id", util.UUIDToString(task.IssueID),
-			"task_id", util.UUIDToString(task.ID),
-			"error", err,
-		)
-		return
-	}
-	if hasActive {
-		return
-	}
-	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
-	if err != nil {
-		return
-	}
-
-	reason := taskFailureReasonForAutopilotRun(task)
-	updatedRun, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
-		ID:            run.ID,
-		FailureReason: pgtype.Text{String: reason, Valid: reason != ""},
-	})
-	if err != nil {
-		slog.Warn("failed to fail autopilot run from linked issue task",
-			"run_id", util.UUIDToString(run.ID),
-			"issue_id", util.UUIDToString(task.IssueID),
-			"task_id", util.UUIDToString(task.ID),
-			"error", err,
-		)
-		return
-	}
-	s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
-	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), updatedRun, "failed")
 }
 
 func taskFailureReasonForAutopilotRun(task db.AgentTaskQueue) string {

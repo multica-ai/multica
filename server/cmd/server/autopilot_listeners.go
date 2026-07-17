@@ -2,48 +2,19 @@ package main
 
 import (
 	"context"
-	"log/slog"
 
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// registerAutopilotListeners hooks into issue and task events to keep
-// autopilot runs in sync with their linked issues and tasks.
+// registerAutopilotListeners hooks into task terminal events to keep autopilot
+// runs in sync with the task each run dispatched. Runs are finalized purely by
+// task outcome (MUL-4809 §4.1) — issue status no longer ends or fails a run, so
+// there is no EventIssueUpdated subscription here anymore.
 func registerAutopilotListeners(bus *events.Bus, svc *service.AutopilotService) {
 	ctx := context.Background()
 
-	// When an issue with origin_type='autopilot' reaches a terminal status,
-	// update the corresponding autopilot run.
-	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
-		payload, ok := e.Payload.(map[string]any)
-		if !ok {
-			return
-		}
-		statusChanged, _ := payload["status_changed"].(bool)
-		if !statusChanged {
-			return
-		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
-		if !ok {
-			return
-		}
-		// Only handle statuses that finalize an autopilot run.
-		if issue.Status != "done" && issue.Status != "in_review" && issue.Status != "cancelled" && issue.Status != "blocked" {
-			return
-		}
-		// Load the full issue from DB to check origin_type.
-		dbIssue, err := svc.Queries.GetIssue(ctx, parseUUID(issue.ID))
-		if err != nil {
-			slog.Debug("autopilot listener: failed to load issue", "issue_id", issue.ID, "error", err)
-			return
-		}
-		svc.SyncRunFromIssue(ctx, dbIssue)
-	})
-
-	// When a task completes or fails, check if it's an autopilot run_only task.
 	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
 		syncRunFromTaskEvent(ctx, svc, e)
 	})
@@ -68,11 +39,11 @@ func syncRunFromTaskEvent(ctx context.Context, svc *service.AutopilotService, e 
 	if err != nil {
 		return
 	}
+	// run_only tasks carry autopilot_run_id; create_issue tasks carry only
+	// issue_id and are matched to their run via run.task_id + retry lineage.
 	if task.AutopilotRunID.Valid {
 		svc.SyncRunFromTask(ctx, task)
 		return
 	}
-	if e.Type == protocol.EventTaskFailed {
-		svc.SyncRunFromLinkedIssueTask(ctx, task)
-	}
+	svc.SyncRunFromCreateIssueTask(ctx, task)
 }

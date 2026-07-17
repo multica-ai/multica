@@ -208,8 +208,8 @@ func TestTriggerAutopilot_SquadPrivateLeader_OwnerCanDispatch(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&run); err != nil {
 		t.Fatalf("decode run: %v", err)
 	}
-	if run.Status != "issue_created" {
-		t.Fatalf("run status = %q, want issue_created", run.Status)
+	if run.Status != "running" {
+		t.Fatalf("run status = %q, want running (task-bound, MUL-4809 §4.1)", run.Status)
 	}
 }
 

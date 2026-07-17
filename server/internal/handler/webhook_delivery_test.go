@@ -826,6 +826,15 @@ func TestWebhookDeliveryWorker_RepairsCreateIssueTaskCrashWindow(t *testing.T) {
 	if _, err := testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID); err != nil {
 		t.Fatalf("remove issue task: %v", err)
 	}
+	// Binding run.task_id + advancing to running is the LAST step of create_issue
+	// dispatch (MUL-4809 §4.1), so a crash before it leaves the run in
+	// issue_created with a NULL task_id. Model exactly that state so the repair
+	// path (issue exists, task missing) is exercised.
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE autopilot_run SET status = 'issue_created', task_id = NULL WHERE id = $1`,
+		first.AutopilotRunID); err != nil {
+		t.Fatalf("reset run to pre-bind crash state: %v", err)
+	}
 	if _, err := testPool.Exec(context.Background(), `
 		UPDATE webhook_delivery
 		SET status = 'queued', autopilot_run_id = NULL, available_at = now(),
