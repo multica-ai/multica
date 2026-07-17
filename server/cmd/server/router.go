@@ -618,6 +618,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				channelRouter.Register(wecom.TypeWecom, wecom.NewResolverSet(
 					wecomStore, wecomSession, wecomReplier,
 				))
+
+				// EventChatDone subscriber: pushes the agent's chat reply
+				// back over the same aibot WebSocket the inbound loop owns.
+				// Mirrors slack.NewOutbound(...).Register(bus). Without it
+				// the agent's reply lands only in Multica's web UI — the
+				// user in WeChat Work sees no response.
+				wecom.NewOutbound(queries, wecomSenders, slog.Default()).Register(bus)
+
 				slog.Info("wecom integration enabled (smart bot, long connection)")
 			}
 		}
