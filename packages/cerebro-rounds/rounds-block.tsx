@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, ChevronRight, Pause, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@multica/ui/components/ui/dropdown-menu";
@@ -50,6 +50,24 @@ export function RoundsBlock({
   const [query, setQuery] = useState("");
   const [views, setViews] = useState<Record<string, RoundView>>({});
   const needle = query.trim().toLocaleLowerCase();
+  const messageSet = messageIssueIds ? new Set(messageIssueIds) : null;
+  const matchesNeedle = (issueId: string) =>
+    (issueTitles[issueId] ?? issueId).toLocaleLowerCase().includes(needle);
+  const matchingRoundIds = needle
+    ? statuses
+        .filter((status) => status.members.some((member) =>
+          (!messageSet || messageSet.has(member.issue_id)) && matchesNeedle(member.issue_id)))
+        .map((status) => status.round.id)
+        .join(",")
+    : "";
+
+  useEffect(() => {
+    if (!matchingRoundIds) return;
+    const ids = matchingRoundIds.split(",");
+    setExpandedIds((current) =>
+      ids.every((id) => current.has(id)) ? current : new Set([...current, ...ids]),
+    );
+  }, [matchingRoundIds]);
 
   const renderMember = (issueId: string) => {
     if (renderIssue) return <Fragment key={issueId}>{renderIssue(issueId)}</Fragment>;
@@ -80,8 +98,14 @@ export function RoundsBlock({
     );
     const readyIds = orderedIds.filter((issueId) => readySet.has(issueId));
     const handledIds = orderedIds.filter((issueId) => handledSet.has(issueId));
-    const ids = (view === "ready" ? readyIds : view === "handled" ? handledIds : orderedIds)
-      .filter((issueId) => !needle || (issueTitles[issueId] ?? issueId).toLocaleLowerCase().includes(needle));
+    const ids = (needle
+      ? orderedIds
+      : view === "ready"
+        ? readyIds
+        : view === "handled"
+          ? handledIds
+          : orderedIds
+    ).filter((issueId) => !needle || matchesNeedle(issueId));
     const summary = s.active_cycle ? `${readyIds.length} ready` : "Ready to start";
     return <div key={s.round.id}>
       <div className="flex items-center gap-2 px-3 py-2">
