@@ -632,6 +632,9 @@
     "connected_as": "{{namespace}} として接続済み",
     "disconnect": "接続解除",
     "not_configured": "このサーバーには GitLab 統合が設定されていません。",
+    "webhook_url_label": "プロジェクトウェブフックURL",
+    "webhook_url_description": "このワークスペースに接続したい各GitLabプロジェクトに、このURLをウェブフックとして追加してください。サーバーに設定されているのと同じシークレットを使用してください。",
+    "webhook_url_copied": "ウェブフックURLをコピーしました",
     "toast_failed": "GitLab 設定の更新に失敗しました",
     "toast_disconnected": "GitLab を切断しました",
     "toast_disconnect_failed": "GitLab の切断に失敗しました"

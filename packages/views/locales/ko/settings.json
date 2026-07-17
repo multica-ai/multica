@@ -484,6 +484,9 @@
     "connected_as": "{{namespace}}(으)로 연결됨",
     "disconnect": "연결 해제",
     "not_configured": "이 서버에는 GitLab 통합이 구성되어 있지 않습니다.",
+    "webhook_url_label": "프로젝트 웹훅 URL",
+    "webhook_url_description": "이 워크스페이스에 연결하려는 각 GitLab 프로젝트에 이 URL을 웹훅으로 추가하세요. 서버에 구성된 것과 동일한 시크릿을 사용하세요.",
+    "webhook_url_copied": "웹훅 URL 복사됨",
     "toast_failed": "GitLab 설정 업데이트에 실패했습니다",
     "toast_disconnected": "GitLab 연결이 해제되었습니다",
     "toast_disconnect_failed": "GitLab 연결 해제에 실패했습니다"

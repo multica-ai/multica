@@ -1,18 +1,32 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { GitLabIssueBadge } from "./gitlab-issue-badge";
 
 const mockIssueGitLabIssueOptions = vi.hoisted(() => vi.fn());
+const mockUseLinkGitLabIssue = vi.hoisted(() => vi.fn());
+const mockUseUnlinkGitLabIssue = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/gitlab", () => ({
   issueGitLabIssueOptions: mockIssueGitLabIssueOptions,
+  useLinkGitLabIssue: mockUseLinkGitLabIssue,
+  useUnlinkGitLabIssue: mockUseUnlinkGitLabIssue,
 }));
 
 vi.mock("../../i18n", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   useT: () => ({
-    t: (fn: (keys: { gitlab_issue: { title: string; assignee_label: string } }) => string) =>
-      fn({ gitlab_issue: { title: "GitLab Issue", assignee_label: "GitLab" } }),
+    t: (fn: (keys: any) => string) =>
+      fn({
+        gitlab_issue: {
+          title: "GitLab Issue",
+          assignee_label: "GitLab",
+          unlink_button: "Unlink",
+          link_placeholder: "group/project#123",
+          link_button: "Link",
+          link_error: "Invalid format",
+        },
+      }),
   }),
 }));
 
@@ -21,7 +35,14 @@ function wrapper({ children }: { children: React.ReactNode }) {
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 }
 
+const noopMutation = { mutate: vi.fn(), isPending: false };
+
 describe("GitLabIssueBadge", () => {
+  beforeEach(() => {
+    mockUseLinkGitLabIssue.mockReturnValue(noopMutation);
+    mockUseUnlinkGitLabIssue.mockReturnValue(noopMutation);
+  });
+
   it("renders the badge with project path and issue number", async () => {
     mockIssueGitLabIssueOptions.mockReturnValue({
       queryKey: ["gitlab", "issue", "abc"],
@@ -56,16 +77,15 @@ describe("GitLabIssueBadge", () => {
     expect(await screen.findByText("GitLab: alice")).toBeInTheDocument();
   });
 
-  it("renders nothing when no linked issue", async () => {
+  it("renders link form when no linked issue", async () => {
     mockIssueGitLabIssueOptions.mockReturnValue({
       queryKey: ["gitlab", "issue", "xyz"],
       queryFn: async () => null,
       enabled: true,
     });
 
-    const { container } = render(<GitLabIssueBadge issueId="xyz" />, { wrapper });
-    // Wait a tick for query to settle
+    render(<GitLabIssueBadge issueId="xyz" />, { wrapper });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(container.innerHTML).toBe("");
+    expect(screen.getByPlaceholderText("group/project#123")).toBeInTheDocument();
   });
 });
