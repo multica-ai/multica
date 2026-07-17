@@ -384,6 +384,16 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			usageMap = map[string]TokenUsage{model: u}
 		}
 
+		// The stderr sniffer above cannot see Kimi's failures: unlike
+		// hermes/grok, Kimi's ACP adapter writes upstream-LLM errors to
+		// its own session log, and resolves session/prompt with
+		// stopReason=end_turn even when the turn failed (e.g. a
+		// non-retryable HTTP 400). Such a turn reaches here as
+		// completed with no output and no token usage, which would be
+		// reported to the user as a misleading success. Promote that
+		// specific shape to failed so the task surfaces the problem.
+		finalStatus, finalError = promoteKimiSilentFailure(finalStatus, finalError, finalOutput, usageMap)
+
 		resCh <- Result{
 			Status:     finalStatus,
 			Output:     finalOutput,
@@ -395,6 +405,29 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// promoteKimiSilentFailure flips a Kimi turn that "completed" with no
+// output and no token usage to failed.
+//
+// Kimi's ACP adapter resolves session/prompt with stopReason=end_turn
+// even when the underlying turn failed upstream, and writes the actual
+// error (expired token, rate limit, non-retryable HTTP 400, …) to its
+// own session log rather than stderr — so the stderr-based provider
+// sniffer used by promoteACPResultOnProviderError captures nothing for
+// Kimi. The one signal that survives to the daemon is the shape of the
+// result: a genuinely completed turn always emits assistant text or
+// tool output and consumes tokens, so completed + empty output + no
+// usage uniquely identifies a swallowed failure. Only that exact shape
+// is promoted; any output or any usage leaves the status untouched.
+func promoteKimiSilentFailure(finalStatus, finalError, finalOutput string, usageMap map[string]TokenUsage) (string, string) {
+	if finalStatus != "completed" {
+		return finalStatus, finalError
+	}
+	if finalOutput != "" || usageMap != nil {
+		return finalStatus, finalError
+	}
+	return "failed", "kimi returned no output and no token usage; the upstream turn likely failed (see the kimi session log for the provider error)"
 }
 
 // kimiToolNameFromTitle normalises tool names emitted by Kimi's ACP

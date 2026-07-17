@@ -22,6 +22,67 @@ func TestNewReturnsKimiBackend(t *testing.T) {
 	}
 }
 
+func TestPromoteKimiSilentFailure(t *testing.T) {
+	t.Parallel()
+
+	usage := map[string]TokenUsage{"k3": {InputTokens: 10, OutputTokens: 5}}
+
+	tests := []struct {
+		name       string
+		status     string
+		errStr     string
+		output     string
+		usage      map[string]TokenUsage
+		wantStatus string
+		wantErrHas string
+	}{
+		{
+			name:       "swallowed failure: completed with no output and no usage",
+			status:     "completed",
+			output:     "",
+			usage:      nil,
+			wantStatus: "failed",
+			wantErrHas: "no output and no token usage",
+		},
+		{
+			name:       "real completion with output stays completed",
+			status:     "completed",
+			output:     "here is the answer",
+			usage:      nil,
+			wantStatus: "completed",
+		},
+		{
+			name:       "empty output but usage present stays completed",
+			status:     "completed",
+			output:     "",
+			usage:      usage,
+			wantStatus: "completed",
+		},
+		{
+			name:       "non-completed status is never touched",
+			status:     "aborted",
+			errStr:     "execution cancelled",
+			output:     "",
+			usage:      nil,
+			wantStatus: "aborted",
+			wantErrHas: "execution cancelled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			gotStatus, gotErr := promoteKimiSilentFailure(tt.status, tt.errStr, tt.output, tt.usage)
+			if gotStatus != tt.wantStatus {
+				t.Errorf("status = %q, want %q", gotStatus, tt.wantStatus)
+			}
+			if tt.wantErrHas != "" && !strings.Contains(gotErr, tt.wantErrHas) {
+				t.Errorf("error = %q, want it to contain %q", gotErr, tt.wantErrHas)
+			}
+		})
+	}
+}
+
 func TestKimiToolNameFromTitle(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -66,7 +127,7 @@ func fakeKimiACPScript() string {
 #
 # Writes the full argv (one arg per line) to $KIMI_ARGS_FILE if that env
 # var is set, so tests can assert that the daemon invokes us with the
-# right flags (`+"`--yolo acp`"+`, not bare `+"`acp`"+`).
+# right flags (` + "`--yolo acp`" + `, not bare ` + "`acp`" + `).
 #
 # Then reads one JSON-RPC request per line from stdin, matches on the
 # method name, and writes back a canned response. Exits after set_model
