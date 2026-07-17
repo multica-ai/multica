@@ -1,4 +1,4 @@
-CREATE TABLE gitlab_issue (
+CREATE TABLE IF NOT EXISTS gitlab_issue (
     id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id         UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     connection_id        UUID NOT NULL REFERENCES gitlab_connection(id) ON DELETE CASCADE,
@@ -12,8 +12,8 @@ CREATE TABLE gitlab_issue (
     UNIQUE (workspace_id, project_path, gl_issue_iid)
 );
 
-CREATE INDEX idx_gitlab_issue_workspace ON gitlab_issue(workspace_id);
-CREATE INDEX idx_gitlab_issue_issue ON gitlab_issue(issue_id);
+CREATE INDEX IF NOT EXISTS idx_gitlab_issue_workspace ON gitlab_issue(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_gitlab_issue_issue ON gitlab_issue(issue_id);
 
-ALTER TABLE comment ADD COLUMN gitlab_note_id BIGINT;
-CREATE UNIQUE INDEX idx_comment_gitlab_note ON comment(gitlab_note_id) WHERE gitlab_note_id IS NOT NULL;
+ALTER TABLE comment ADD COLUMN IF NOT EXISTS gitlab_note_id BIGINT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_comment_gitlab_note ON comment(gitlab_note_id) WHERE gitlab_note_id IS NOT NULL;

@@ -1,4 +1,4 @@
-CREATE TABLE gitlab_connection (
+CREATE TABLE IF NOT EXISTS gitlab_connection (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id     UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     namespace        TEXT NOT NULL,
@@ -12,9 +12,9 @@ CREATE TABLE gitlab_connection (
     UNIQUE (workspace_id, namespace)
 );
 
-CREATE INDEX idx_gitlab_connection_workspace ON gitlab_connection(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_gitlab_connection_workspace ON gitlab_connection(workspace_id);
 
-CREATE TABLE gitlab_merge_request (
+CREATE TABLE IF NOT EXISTS gitlab_merge_request (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id      UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     connection_id     UUID NOT NULL REFERENCES gitlab_connection(id) ON DELETE CASCADE,
@@ -35,10 +35,10 @@ CREATE TABLE gitlab_merge_request (
     UNIQUE (workspace_id, project_path, mr_iid)
 );
 
-CREATE INDEX idx_gitlab_merge_request_workspace ON gitlab_merge_request(workspace_id);
-CREATE INDEX idx_gitlab_merge_request_connection ON gitlab_merge_request(connection_id);
+CREATE INDEX IF NOT EXISTS idx_gitlab_merge_request_workspace ON gitlab_merge_request(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_gitlab_merge_request_connection ON gitlab_merge_request(connection_id);
 
-CREATE TABLE issue_merge_request (
+CREATE TABLE IF NOT EXISTS issue_merge_request (
     issue_id         UUID NOT NULL REFERENCES issue(id) ON DELETE CASCADE,
     merge_request_id UUID NOT NULL REFERENCES gitlab_merge_request(id) ON DELETE CASCADE,
     close_intent     BOOLEAN NOT NULL DEFAULT false,
@@ -46,4 +46,4 @@ CREATE TABLE issue_merge_request (
     PRIMARY KEY (issue_id, merge_request_id)
 );
 
-CREATE INDEX idx_issue_merge_request_mr ON issue_merge_request(merge_request_id);
+CREATE INDEX IF NOT EXISTS idx_issue_merge_request_mr ON issue_merge_request(merge_request_id);
