@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1286,6 +1287,29 @@ const QuickCreateContextType = "quick_create"
 // parentIssueID is optional (zero-valued pgtype.UUID when the user didn't
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
+// pendingQuickCreateDuplicate returns a still-pending quick-create task from
+// `pending` that represents the same request as (agentID, requesterID,
+// contextJSON), or nil if none matches.
+//
+// Two identical quick-create submissions — a double-click or a client retry —
+// marshal to byte-identical context, so an exact context match against a task
+// from the same requester to the same agent that has not finished yet uniquely
+// identifies an accidental duplicate. `pending` is expected to be the
+// queued/dispatched set for the agent's runtime (ListPendingTasksByRuntime), so
+// a task that already completed and created its issue no longer appears here and
+// does not suppress a deliberate re-submission.
+func pendingQuickCreateDuplicate(pending []db.AgentTaskQueue, agentID, requesterID pgtype.UUID, contextJSON []byte) *db.AgentTaskQueue {
+	for i := range pending {
+		t := &pending[i]
+		if util.UUIDToString(t.AgentID) == util.UUIDToString(agentID) &&
+			util.UUIDToString(t.OriginatorUserID) == util.UUIDToString(requesterID) &&
+			bytes.Equal(t.Context, contextJSON) {
+			return t
+		}
+	}
+	return nil
+}
+
 func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
@@ -1326,6 +1350,27 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	contextJSON, err := json.Marshal(payload)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("marshal quick-create context: %w", err)
+	}
+
+	// Dedup an accidental double-submit: if the same requester already has a
+	// byte-identical quick-create for this agent still pending (queued or
+	// dispatched), return that task instead of enqueuing a second one — a single
+	// request must not fan out into two tasks that each create a duplicate issue.
+	// Best-effort: a lookup error falls through to create so a transient DB hiccup
+	// can never block a real submission. This mirrors the existing pending-task
+	// dedup (HasPendingTaskForIssueAndAgent) and, like it, is a check-then-insert:
+	// it closes the observed double-click / client-retry window but is not atomic
+	// against two truly simultaneous requests. A unique index would harden that.
+	if pending, listErr := s.Queries.ListPendingTasksByRuntime(ctx, agent.RuntimeID); listErr == nil {
+		if dup := pendingQuickCreateDuplicate(pending, agentID, requesterID, contextJSON); dup != nil {
+			slog.Info("quick-create dedup: returning existing pending task",
+				"task_id", util.UUIDToString(dup.ID),
+				"agent_id", util.UUIDToString(agentID),
+				"requester_id", util.UUIDToString(requesterID),
+				"workspace_id", util.UUIDToString(workspaceID),
+			)
+			return *dup, nil
+		}
 	}
 
 	// The requester who submitted the quick-create modal is the direct_human
