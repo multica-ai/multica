@@ -82,6 +82,36 @@ func (f taskRunnerFunc) run(ctx context.Context, task Task, provider string, slo
 	return f(ctx, task, provider, slot, log)
 }
 
+type terminalTaskReportKind uint8
+
+const (
+	terminalTaskReportComplete terminalTaskReportKind = iota + 1
+	terminalTaskReportFail
+
+	// CompleteTask and FailTask can make six 30-second HTTP attempts around
+	// the five backoffs in defaultTerminalRetrySchedule (124 seconds total).
+	// Keep the detached callback's own deadline above that worst-case budget
+	// so it does not silently shorten the client's existing retry contract.
+	// During daemon restart pollLoop still imposes its separate 30-second
+	// process drain boundary.
+	terminalTaskReportTimeout = 6 * time.Minute
+)
+
+// terminalTaskReport is the single daemon-side representation of a terminal
+// callback. Keeping every complete/fail path behind this value and
+// reportTerminalTask gives the durable outbox one insertion point without
+// revisiting every task exit when it is added.
+type terminalTaskReport struct {
+	kind          terminalTaskReportKind
+	taskID        string
+	output        string
+	branchName    string
+	errorMessage  string
+	sessionID     string
+	workDir       string
+	failureReason string
+}
+
 var (
 	isBrewInstall         = cli.IsBrewInstall
 	getBrewPrefix         = cli.GetBrewPrefix
@@ -3191,7 +3221,12 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		// classifier so the failure_reason column reflects the actual
 		// shape of the failure (provider 5xx, network, process crash,
 		// …) rather than the coarse legacy "agent_error" bucket.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", taskfailure.Classify(err.Error()).String()); failErr != nil {
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  err.Error(),
+			failureReason: taskfailure.Classify(err.Error()).String(),
+		}); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 		return
@@ -3262,7 +3297,12 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	assignment, err := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
 	if err != nil {
 		taskLog.Error("local_directory: resolve resource failed", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  err.Error(),
+			failureReason: "local_directory_error",
+		}); failErr != nil {
 			taskLog.Error("fail task after local_directory resolve error", "error", failErr)
 		}
 		return nil, true
@@ -3273,7 +3313,12 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	taskLog = taskLog.With("local_directory", assignment.AbsPath)
 	if err := validateLocalPath(assignment.AbsPath); err != nil {
 		taskLog.Error("local_directory: path validation failed", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  err.Error(),
+			failureReason: "local_directory_error",
+		}); failErr != nil {
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}
 		return nil, true
@@ -3355,7 +3400,12 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			failureReason = "cancelled"
 		}
-		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("local_directory wait cancelled: %s", err.Error()), "", "", failureReason); failErr != nil {
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  fmt.Sprintf("local_directory wait cancelled: %s", err.Error()),
+			failureReason: failureReason,
+		}); failErr != nil {
 			taskLog.Error("fail task after local_directory lock cancel", "error", failErr)
 		}
 		return nil, true
@@ -3378,7 +3428,14 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
-		err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir)
+		err := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:       terminalTaskReportComplete,
+			taskID:     taskID,
+			output:     result.Comment,
+			branchName: result.BranchName,
+			sessionID:  result.SessionID,
+			workDir:    result.WorkDir,
+		})
 		if err == nil {
 			return
 		}
@@ -3407,7 +3464,14 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		// which is the canonical replacement for the legacy
 		// "agent_error" coarse bucket.
 		fallbackErrMsg := fmt.Sprintf("complete task failed: %s", err.Error())
-		if failErr := d.client.FailTask(ctx, taskID, fallbackErrMsg, result.SessionID, result.WorkDir, taskfailure.Classify(fallbackErrMsg).String()); failErr != nil {
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        taskID,
+			errorMessage:  fallbackErrMsg,
+			sessionID:     result.SessionID,
+			workDir:       result.WorkDir,
+			failureReason: taskfailure.Classify(fallbackErrMsg).String(),
+		}); failErr != nil {
 			taskLog.Error("fail task fallback also failed", "error", failErr)
 		}
 	default:
@@ -3430,9 +3494,35 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			}
 		}
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
-		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
+		if err := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        taskID,
+			errorMessage:  result.Comment,
+			sessionID:     result.SessionID,
+			workDir:       result.WorkDir,
+			failureReason: failureReason,
+		}); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
 		}
+	}
+}
+
+// reportTerminalTask is the only path that sends complete/fail callbacks.
+// It deliberately preserves context values while discarding cancellation and
+// parent deadlines: daemon shutdown cancels the root context before pollLoop's
+// 30-second drain, but terminal callbacks must still use that remaining window.
+// The explicit timeout keeps this detached work bounded during normal runs.
+func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTaskReport) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), terminalTaskReportTimeout)
+	defer cancel()
+
+	switch report.kind {
+	case terminalTaskReportComplete:
+		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir)
+	case terminalTaskReportFail:
+		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.failureReason)
+	default:
+		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
 	}
 }
 
