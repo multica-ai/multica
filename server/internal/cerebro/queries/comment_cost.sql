@@ -38,5 +38,5 @@ FROM (
     WHERE cct.issue_id = $1
     ORDER BY cct.task_id, cct.created_at DESC, cct.comment_id DESC
 ) AS last_comment
-JOIN task_usage tu ON tu.task_id = last_comment.task_id
+JOIN model_usage_task_rollup tu ON tu.task_id = last_comment.task_id
 GROUP BY last_comment.task_id, last_comment.comment_id, tu.model;

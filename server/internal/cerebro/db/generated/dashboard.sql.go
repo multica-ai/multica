@@ -1161,7 +1161,7 @@ SELECT tu.model,
        COALESCE(SUM(tu.output_tokens), 0)::bigint AS output_tokens,
        COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS cache_read_tokens,
        COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS cache_write_tokens
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE cs.workspace_id = $1
@@ -1284,11 +1284,12 @@ func (q *Queries) DashboardSessionMessages(ctx context.Context, arg DashboardSes
 
 const dashboardSpendCentsInPeriod = `-- name: DashboardSpendCentsInPeriod :one
 SELECT COALESCE(SUM(tu.cost_cents), 0)::bigint AS cents
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
-  AND tu.created_at >= $2 AND tu.created_at < $3
+  AND tu.created_at >= $2::timestamptz
+  AND tu.created_at < $3::timestamptz
   AND (
     $4::text IS NULL
     OR ($4::text = 'agent' AND ($5::uuid IS NULL OR atq.agent_id = $5::uuid))
@@ -1299,7 +1300,7 @@ WHERE a.workspace_id = $1
 type DashboardSpendCentsInPeriodParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	CreatedAt2  pgtype.Timestamptz `json:"created_at_2"`
 	ActorType   pgtype.Text        `json:"actor_type"`
 	ActorID     pgtype.UUID        `json:"actor_id"`
 }
@@ -1319,7 +1320,7 @@ func (q *Queries) DashboardSpendCentsInPeriod(ctx context.Context, arg Dashboard
 	row := q.db.QueryRow(ctx, dashboardSpendCentsInPeriod,
 		arg.WorkspaceID,
 		arg.CreatedAt,
-		arg.CreatedAt_2,
+		arg.CreatedAt2,
 		arg.ActorType,
 		arg.ActorID,
 	)
@@ -1537,11 +1538,12 @@ FROM (
 JOIN "user" u ON u.id = sub.user_id
 LEFT JOIN (
   SELECT atq.original_user_id, SUM(tu.cost_cents)::bigint AS spend_cents
-  FROM task_usage tu
+  FROM model_usage_task_rollup tu
   JOIN agent_task_queue atq ON atq.id = tu.task_id
   JOIN agent a ON a.id = atq.agent_id
   WHERE a.workspace_id = $1
-    AND tu.created_at >= $2 AND tu.created_at < $3
+    AND tu.created_at >= $2::timestamptz
+    AND tu.created_at < $3::timestamptz
     AND atq.original_user_id IS NOT NULL
     AND (
       $4::text IS NULL

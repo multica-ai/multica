@@ -131,7 +131,7 @@ func (b *firtalLocalBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 		start := time.Now()
 		cfg := b.config(opts)
-		output, usage, err := b.runLoop(runCtx, cfg, prompt, opts, msgCh)
+		output, usage, usageEvents, err := b.runLoop(runCtx, cfg, prompt, opts, msgCh)
 		if err != nil {
 			resCh <- Result{Status: "failed", Error: err.Error(), DurationMs: time.Since(start).Milliseconds()}
 			return
@@ -140,10 +140,11 @@ func (b *firtalLocalBackend) Execute(ctx context.Context, prompt string, opts Ex
 			trySend(msgCh, Message{Type: MessageText, Content: output})
 		}
 		resCh <- Result{
-			Status:     "completed",
-			Output:     output,
-			DurationMs: time.Since(start).Milliseconds(),
-			Usage:      map[string]TokenUsage{cfg.Model: usage},
+			Status:      "completed",
+			Output:      output,
+			DurationMs:  time.Since(start).Milliseconds(),
+			Usage:       map[string]TokenUsage{cfg.Model: usage},
+			UsageEvents: usageEvents,
 		}
 	}()
 
@@ -198,7 +199,7 @@ func (b *firtalLocalBackend) config(opts ExecOptions) firtalLocalConfig {
 // mirrors the proven server-runtime loop (firtal_gateway_executor.go): call
 // with tools until the model stops emitting tool_calls, then make one final
 // tool-free call to force a text answer if the round budget is exhausted.
-func (b *firtalLocalBackend) runLoop(ctx context.Context, cfg firtalLocalConfig, prompt string, opts ExecOptions, msgCh chan<- Message) (string, TokenUsage, error) {
+func (b *firtalLocalBackend) runLoop(ctx context.Context, cfg firtalLocalConfig, prompt string, opts ExecOptions, msgCh chan<- Message) (string, TokenUsage, []ModelUsageEvent, error) {
 	tools := b.buildToolList(ctx)
 
 	history := []firtalLocalMessage{
@@ -207,7 +208,9 @@ func (b *firtalLocalBackend) runLoop(ctx context.Context, cfg firtalLocalConfig,
 	}
 
 	var usage TokenUsage
+	var usageEvents []ModelUsageEvent // CEREBRO-PATCH(agent-firtal-local-call-usage-events): FIR-3337 one event per HTTP model round.
 	accumulate := func(r firtalLocalResponse) {
+		usageEvents = appendFirtalLocalCallUsageEvent(usageEvents, r, cfg.Model, firstEnv(b.cfg.Env, "MULTICA_TASK_ID"), time.Now())
 		if r.Usage != nil {
 			usage.InputTokens += r.Usage.PromptTokens
 			usage.OutputTokens += r.Usage.CompletionTokens
@@ -224,7 +227,7 @@ func (b *firtalLocalBackend) runLoop(ctx context.Context, cfg firtalLocalConfig,
 	for round := 0; round < cfg.MaxToolRound; round++ {
 		resp, err := b.complete(ctx, cfg, history, tools)
 		if err != nil {
-			return "", usage, err
+			return "", usage, usageEvents, err
 		}
 		accumulate(resp)
 		content, calls := firtalLocalExtract(resp)
@@ -234,9 +237,9 @@ func (b *firtalLocalBackend) runLoop(ctx context.Context, cfg firtalLocalConfig,
 			// If the model already posted via add_comment, suppress the final
 			// text so the daemon does not create a duplicate comment.
 			if addCommentUsed {
-				return "", usage, nil
+				return "", usage, usageEvents, nil
 			}
-			return output, usage, nil
+			return output, usage, usageEvents, nil
 		}
 
 		history = append(history, firtalLocalMessage{Role: "assistant", Content: content, ToolCalls: calls})
@@ -262,14 +265,14 @@ func (b *firtalLocalBackend) runLoop(ctx context.Context, cfg firtalLocalConfig,
 	})
 	resp, err := b.complete(ctx, cfg, history, nil)
 	if err != nil {
-		return "", usage, err
+		return "", usage, usageEvents, err
 	}
 	accumulate(resp)
 	content, _ := firtalLocalExtract(resp)
 	if addCommentUsed {
-		return "", usage, nil
+		return "", usage, usageEvents, nil
 	}
-	return strings.TrimSpace(content), usage, nil
+	return strings.TrimSpace(content), usage, usageEvents, nil
 }
 
 // buildToolList determines which tools to expose to the model for this task.

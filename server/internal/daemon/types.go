@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // AgentEntry describes a single available agent CLI.
@@ -273,17 +274,23 @@ type TaskUsageEntry struct {
 	ContextCacheReadTokens int64 `json:"context_cache_read_tokens,omitempty"`
 }
 
+// ModelUsageEventEntry is the runtime-neutral, call-level measurement contract.
+// CEREBRO-PATCH(daemon-model-usage-event-contract): FIR-3337 keeps the daemon
+// transport byte-for-byte aligned with the runtime adapter contract.
+type ModelUsageEventEntry = agent.ModelUsageEvent
+
 // TaskResult is the outcome of executing a task.
 type TaskResult struct {
-	Status        string           `json:"status"`
-	Comment       string           `json:"comment"`
-	BranchName    string           `json:"branch_name,omitempty"`
-	EnvType       string           `json:"env_type,omitempty"`
-	SessionID     string           `json:"session_id,omitempty"` // Claude session ID for future resumption
-	WorkDir       string           `json:"work_dir,omitempty"`   // working directory used during execution
-	EnvRoot       string           `json:"-"`                    // env root dir for writing GC metadata (not sent to server)
-	FailureReason string           `json:"-"`                    // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
-	Usage         []TaskUsageEntry `json:"usage,omitempty"`      // per-model token usage
+	Status        string                 `json:"status"`
+	Comment       string                 `json:"comment"`
+	BranchName    string                 `json:"branch_name,omitempty"`
+	EnvType       string                 `json:"env_type,omitempty"`
+	SessionID     string                 `json:"session_id,omitempty"`   // Claude session ID for future resumption
+	WorkDir       string                 `json:"work_dir,omitempty"`     // working directory used during execution
+	EnvRoot       string                 `json:"-"`                      // env root dir for writing GC metadata (not sent to server)
+	FailureReason string                 `json:"-"`                      // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
+	UsageEvents   []ModelUsageEventEntry `json:"usage_events,omitempty"` // CEREBRO-PATCH(daemon-model-usage-events): FIR-3337 native call events; aggregate fallback is added at report time.
+	Usage         []TaskUsageEntry       `json:"usage,omitempty"`        // per-model token usage
 	// CEREBRO-PATCH(daemon-task-result-logs): JEH-1365 — verbose log content
 	// accumulated during the run (not sent to server; used for quota-signal parsing).
 	Logs string `json:"-"`

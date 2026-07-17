@@ -99,6 +99,17 @@ func TestFirtalGatewayExecuteCallsChatCompletions(t *testing.T) {
 	if usage.ContextInputTokens != 10 || usage.ContextCacheReadTokens != 2 {
 		t.Fatalf("footprint = %d/%d, want 10/2", usage.ContextInputTokens, usage.ContextCacheReadTokens)
 	}
+	// CEREBRO-PATCH(agent-firtal-gateway-call-usage-events-test): FIR-3337 verifies native single-call usage.
+	if len(result.UsageEvents) != 1 {
+		t.Fatalf("UsageEvents = %+v, want one gateway call event", result.UsageEvents)
+	}
+	event := result.UsageEvents[0]
+	if event.Provider != firtalGatewayProvider || event.Model != "claude-sonnet-4-6" || event.InputTokens != 10 || event.OutputTokens != 4 || event.CacheReadTokens != 2 || event.CostCents != 7 {
+		t.Fatalf("usage event = %+v", event)
+	}
+	if event.ContextTokens != 10 || event.Source != ModelUsageSourceFinalResponse || event.Completeness != ModelUsageTokensOnly || event.CounterSemantics != ModelUsageCounterDelta {
+		t.Fatalf("usage event semantics = %+v", event)
+	}
 }
 
 func TestFirtalGatewayExecuteRequiresConfig(t *testing.T) {

@@ -133,6 +133,225 @@ func TestReportTaskUsage_RollsUpBudgetState(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(model-usage-event-idempotent-budget-test): FIR-3337 proves a
+// daemon retry cannot charge the same canonical model call twice.
+func TestReportTaskUsage_DuplicateModelUsageEventDoesNotDoubleBudgetOrCost(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = 'Handler Test Agent'`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, position)
+		VALUES ($1, 'idempotent usage budget test', 'todo', 'none', 'member', $2, 99009, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'running', 0)
+		RETURNING id
+	`, agentID, testRuntimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM budget_state WHERE workspace_id = $1 AND scope_id IN ($2, $1)`, testWorkspaceID, agentID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	body := map[string]any{
+		"usage": []map[string]any{{
+			"provider":             "claude",
+			"model":                "claude-sonnet-4-6",
+			"input_tokens":         1_000_000,
+			"output_tokens":        1_000_000,
+			"cost_cents":           1800,
+			"context_input_tokens": 200_000,
+		}},
+		"events": []map[string]any{{
+			"schema_version":    "1",
+			"event_id":          "provider-call-1",
+			"call_id":           "call-1",
+			"sequence":          1,
+			"observed_at":       "2026-07-16T10:00:00Z",
+			"provider":          "claude",
+			"model":             "claude-sonnet-4-6",
+			"input_tokens":      1_000_000,
+			"output_tokens":     1_000_000,
+			"cost_cents":        1800,
+			"context_tokens":    200_000,
+			"source":            "final_response",
+			"completeness":      "complete",
+			"counter_semantics": "delta",
+		}},
+	}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		req := newRequest("POST", "/api/daemon/tasks/"+taskID+"/usage", body)
+		req = req.WithContext(middleware.WithDaemonContext(req.Context(), testWorkspaceID, "idempotent-budget-test-daemon"))
+		req = withURLParam(req, "taskId", taskID)
+		w := httptest.NewRecorder()
+		testHandler.ReportTaskUsage(w, req)
+		if w.Code != 200 {
+			t.Fatalf("ReportTaskUsage attempt %d: got %d: %s", attempt, w.Code, w.Body.String())
+		}
+	}
+
+	var eventCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM model_usage_event WHERE task_id = $1 AND event_id = 'provider-call-1'`,
+		taskID,
+	).Scan(&eventCount); err != nil {
+		t.Fatalf("count model usage events: %v", err)
+	}
+	if eventCount != 1 {
+		t.Fatalf("model usage event count = %d, want 1", eventCount)
+	}
+	var footprintCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM cerebro_task_context_footprint_history WHERE task_id = $1`,
+		taskID,
+	).Scan(&footprintCount); err != nil {
+		t.Fatalf("count legacy context projections: %v", err)
+	}
+	if footprintCount != 1 {
+		t.Fatalf("legacy context projection count = %d, want 1", footprintCount)
+	}
+
+	var storedCost int64
+	if err := testPool.QueryRow(ctx,
+		`SELECT cost_cents FROM task_usage WHERE task_id = $1 AND provider = 'claude' AND model = 'claude-sonnet-4-6'`,
+		taskID,
+	).Scan(&storedCost); err != nil {
+		t.Fatalf("read task usage cost: %v", err)
+	}
+	if storedCost != 1800 {
+		t.Fatalf("task usage cost = %d, want 1800", storedCost)
+	}
+
+	now := time.Now().UTC()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	var budgetCost int64
+	if err := testPool.QueryRow(ctx, `
+		SELECT cents_spent FROM budget_state
+		WHERE workspace_id = $1 AND scope_type = 'agent' AND scope_id = $2
+		  AND window_type = 'day' AND window_start = $3
+	`, testWorkspaceID, agentID, dayStart).Scan(&budgetCost); err != nil {
+		t.Fatalf("read budget state: %v", err)
+	}
+	if budgetCost != 1800 {
+		t.Fatalf("budget cost after duplicate delivery = %d, want 1800", budgetCost)
+	}
+
+	shadow, err := testHandler.Queries.GetModelUsageEventTaskReconciliation(ctx, parseUUID(taskID))
+	if err != nil {
+		t.Fatalf("read model usage shadow reconciliation: %v", err)
+	}
+	if shadow.EventCount != 1 {
+		t.Fatalf("shadow event count = %d, want 1", shadow.EventCount)
+	}
+	if shadow.InputTokenDrift != 0 || shadow.OutputTokenDrift != 0 ||
+		shadow.CacheReadTokenDrift != 0 || shadow.CacheWriteTokenDrift != 0 ||
+		shadow.CostCentsDrift != 0 || shadow.ContextTokenDrift != 0 {
+		t.Fatalf("shadow reconciliation drifted after duplicate delivery: %+v", shadow)
+	}
+}
+
+// CEREBRO-PATCH(handler-model-usage-model-budget): FIR-3337 charges usage
+// models that are not covered by a canonical event in the same request.
+func TestReportTaskUsage_ChargesOnlyUsageModelsMissingCanonicalEvents(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = 'Handler Test Agent'`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, position)
+		VALUES ($1, 'partial event budget test', 'todo', 'none', 'member', $2, 99012, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'running', 0)
+		RETURNING id
+	`, agentID, testRuntimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	_, _ = testPool.Exec(ctx, `DELETE FROM budget_state WHERE workspace_id = $1 AND scope_id IN ($2, $1)`, testWorkspaceID, agentID)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM budget_state WHERE workspace_id = $1 AND scope_id IN ($2, $1)`, testWorkspaceID, agentID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	body := map[string]any{
+		"usage": []map[string]any{
+			{
+				"provider": "openai", "model": "gpt-5.6-sol",
+				"input_tokens": 1_000, "output_tokens": 100,
+			},
+			{
+				"provider": "claude", "model": "claude-sonnet-4-6",
+				"input_tokens": 1_000_000, "output_tokens": 1_000_000,
+			},
+		},
+		"events": []map[string]any{{
+			"schema_version": "1", "event_id": "covered-model-call", "sequence": 1,
+			"observed_at": "2026-07-17T10:00:00Z", "provider": "openai", "model": "gpt-5.6-sol",
+			"input_tokens": 1_000, "output_tokens": 100, "cost_cents": 111,
+			"source": "final_response", "completeness": "complete", "counter_semantics": "delta",
+		}},
+	}
+	req := newRequest("POST", "/api/daemon/tasks/"+taskID+"/usage", body)
+	req = req.WithContext(middleware.WithDaemonContext(req.Context(), testWorkspaceID, "partial-event-budget-test-daemon"))
+	req = withURLParam(req, "taskId", taskID)
+	w := httptest.NewRecorder()
+	testHandler.ReportTaskUsage(w, req)
+	if w.Code != 200 {
+		t.Fatalf("ReportTaskUsage: got %d: %s", w.Code, w.Body.String())
+	}
+
+	now := time.Now().UTC()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	var budgetCost int64
+	if err := testPool.QueryRow(ctx, `
+		SELECT cents_spent FROM budget_state
+		WHERE workspace_id = $1 AND scope_type = 'agent' AND scope_id = $2
+		  AND window_type = 'day' AND window_start = $3
+	`, testWorkspaceID, agentID, dayStart).Scan(&budgetCost); err != nil {
+		t.Fatalf("read budget state: %v", err)
+	}
+	if budgetCost != 1911 {
+		t.Fatalf("budget cost = %d, want 1911 (111 event cents + 1800 uncovered legacy cents)", budgetCost)
+	}
+}
+
 func TestReportTaskUsage_RecordsCerebroAccountTokens(t *testing.T) { // CEREBRO-PATCH(handler-daemon-account-token-usage): regression for JEH-1365 prod QA failure.
 	if testHandler == nil {
 		t.Skip("database not available")

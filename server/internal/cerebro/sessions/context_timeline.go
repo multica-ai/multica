@@ -1,16 +1,12 @@
 package sessions
 
 // FIR-1931: the development curve over a session. The session sheet draws how the
-// context window filled up across a session's runs (one point per agent run, from
-// cerebro_task_context_footprint_history) and marks where it dropped — a fresh
-// turn or a compaction.
+// context window filled across calls in a session from model_usage_event and
+// marks provider-explicit or inferred drops. Legacy per-run footprint history
+// remains the fallback for tasks that predate canonical events.
 //
-// Honest scope: the footprint is recorded once per run (at completion), so each
-// point is one run. A session is many runs, so plotting them over time is the
-// development curve over the session. True per-turn-within-a-run granularity would
-// require emitting every turn from each runtime backend — a larger, separate
-// change. The curve is forward-only: history is collected from this deploy on, so
-// sessions that ran before it have no points (the sheet shows an empty state).
+// Canonical points are call-level where the adapter exposes that granularity.
+// Aggregate-only adapters and historical tasks remain explicitly coarser.
 
 import (
 	"context"
@@ -99,14 +95,38 @@ func (h *Handler) sessionContextTimeline(ctx context.Context, issueID, rootID pg
 			SELECT $2::uuid
 			UNION ALL
 			SELECT c.id FROM comment c JOIN thread ON c.parent_id = thread.id
+		), canonical AS (
+			SELECT m.model, m.context_tokens, m.cache_read_tokens, m.context_window_tokens,
+			       m.observed_at, m.compaction_kind <> '' AS explicit_compaction,
+			       m.sequence, m.created_at
+			FROM agent_task_queue t
+			JOIN model_usage_event m ON m.task_id = t.id
+			WHERE t.issue_id = $1
+			  AND m.context_tokens > 0
+			  AND ( t.trigger_comment_id IN (SELECT id FROM thread)
+			        OR ($3::bool AND t.trigger_comment_id IS NULL) )
+		), legacy AS (
+			SELECT h.model, h.input_tokens AS context_tokens, h.cache_read_tokens,
+			       0::bigint AS context_window_tokens, h.observed_at,
+			       false AS explicit_compaction, 0::bigint AS sequence, h.observed_at AS created_at
+			FROM agent_task_queue t
+			JOIN cerebro_task_context_footprint_history h ON h.task_id = t.id
+			WHERE t.issue_id = $1
+			  AND ( t.trigger_comment_id IN (SELECT id FROM thread)
+			        OR ($3::bool AND t.trigger_comment_id IS NULL) )
+			  AND NOT EXISTS (
+				SELECT 1 FROM model_usage_event m
+				WHERE m.task_id = t.id AND m.context_tokens > 0
+			  )
 		)
-		SELECT h.model, h.input_tokens, h.cache_read_tokens, h.observed_at
-		FROM agent_task_queue t
-		JOIN cerebro_task_context_footprint_history h ON h.task_id = t.id
-		WHERE t.issue_id = $1
-		  AND ( t.trigger_comment_id IN (SELECT id FROM thread)
-		        OR ($3::bool AND t.trigger_comment_id IS NULL) )
-		ORDER BY h.observed_at ASC, h.id ASC`
+		SELECT model, context_tokens, cache_read_tokens, context_window_tokens,
+		       observed_at, explicit_compaction
+		FROM (
+			SELECT * FROM canonical
+			UNION ALL
+			SELECT * FROM legacy
+		) points
+		ORDER BY observed_at ASC, sequence ASC, created_at ASC`
 
 	rows, err := h.pool.Query(ctx, q, issueID, rootID, isFirst)
 	if err != nil {
@@ -118,18 +138,23 @@ func (h *Handler) sessionContextTimeline(ctx context.Context, issueID, rootID pg
 	var prevTokens, prevMax int64
 	for rows.Next() {
 		var model pgtype.Text
-		var input, cacheRead int64
+		var input, cacheRead, reportedWindow int64
 		var observedAt pgtype.Timestamptz
-		if err := rows.Scan(&model, &input, &cacheRead, &observedAt); err != nil {
+		var explicitCompaction bool
+		if err := rows.Scan(&model, &input, &cacheRead, &reportedWindow, &observedAt, &explicitCompaction); err != nil {
 			return nil, err
 		}
 		// The footprint input is already the whole prompt the model read (includes
 		// the cached subset), so it IS the window occupancy — same as
 		// computeContextFootprint.
-		maxCtx := contextWindowForModel(model.String)
+		maxCtx := reportedWindow
+		if maxCtx <= 0 {
+			maxCtx = contextWindowForModel(model.String)
+		}
 		p := contextTimelinePoint{
 			ContextTokens:    input,
 			MaxContextTokens: maxCtx,
+			IsCompaction:     explicitCompaction,
 		}
 		if observedAt.Valid {
 			p.ObservedAt = observedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
@@ -142,7 +167,7 @@ func (h *Handler) sessionContextTimeline(ctx context.Context, issueID, rootID pg
 		}
 
 		// Compaction: a sharp drop from the previous run that was itself fairly full.
-		if prevTokens > 0 && prevMax > 0 {
+		if !p.IsCompaction && prevTokens > 0 && prevMax > 0 {
 			prevUsed := clampPercent(int(prevTokens * 100 / prevMax))
 			if float64(input) < compactionDropToFraction*float64(prevTokens) &&
 				prevUsed > compactionPrevFullPercent {

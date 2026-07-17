@@ -343,11 +343,12 @@ FROM (
 JOIN "user" u ON u.id = sub.user_id
 LEFT JOIN (
   SELECT atq.original_user_id, SUM(tu.cost_cents)::bigint AS spend_cents
-  FROM task_usage tu
+  FROM model_usage_task_rollup tu
   JOIN agent_task_queue atq ON atq.id = tu.task_id
   JOIN agent a ON a.id = atq.agent_id
   WHERE a.workspace_id = $1
-    AND tu.created_at >= $2 AND tu.created_at < $3
+    AND tu.created_at >= $2::timestamptz
+    AND tu.created_at < $3::timestamptz
     AND atq.original_user_id IS NOT NULL
     AND (
       sqlc.narg('actor_type')::text IS NULL
@@ -510,7 +511,7 @@ SELECT tu.model,
        COALESCE(SUM(tu.output_tokens), 0)::bigint AS output_tokens,
        COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS cache_read_tokens,
        COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS cache_write_tokens
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE cs.workspace_id = $1
@@ -530,11 +531,12 @@ GROUP BY tu.model;
 --   - 'member'           → spend attributed to the human that originated the
 --                          task via agent_task_queue.original_user_id
 SELECT COALESCE(SUM(tu.cost_cents), 0)::bigint AS cents
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
-  AND tu.created_at >= $2 AND tu.created_at < $3
+  AND tu.created_at >= sqlc.arg(created_at)::timestamptz
+  AND tu.created_at < sqlc.arg(created_at_2)::timestamptz
   AND (
     sqlc.narg('actor_type')::text IS NULL
     OR (sqlc.narg('actor_type')::text = 'agent' AND (sqlc.narg('actor_id')::uuid IS NULL OR atq.agent_id = sqlc.narg('actor_id')::uuid))

@@ -20,7 +20,7 @@ SELECT
     COALESCE(SUM(tu.cache_read_tokens), 0)::bigint  AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
     COALESCE(SUM(tu.cost_cents), 0)::bigint          AS total_cost_cents
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.chat_session_id = $1
 GROUP BY tu.task_id, tu.model

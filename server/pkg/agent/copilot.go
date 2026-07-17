@@ -34,6 +34,7 @@ type copilotEventState struct {
 	finalStatus string
 	finalError  string
 	usage       map[string]TokenUsage
+	usageEvents []ModelUsageEvent // CEREBRO-PATCH(agent-copilot-call-usage-events): FIR-3337 native assistant-call usage.
 }
 
 func newCopilotEventState(seedModel string) *copilotEventState {
@@ -102,6 +103,7 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 			u.OutputTokens += msg.OutputTokens
 			st.usage[st.activeModel] = u
 		}
+		st.usageEvents = appendCopilotCallUsageEvent(st.usageEvents, msg, st.activeModel, st.sessionID, evt.Timestamp)
 		for _, tr := range msg.ToolRequests {
 			var input map[string]any
 			if tr.Arguments != nil {
@@ -312,12 +314,13 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		b.cfg.Logger.Info("copilot finished", "pid", cmd.Process.Pid, "status", st.finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		resCh <- Result{
-			Status:     st.finalStatus,
-			Output:     st.output.String(),
-			Error:      st.finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  st.sessionID,
-			Usage:      st.usage,
+			Status:      st.finalStatus,
+			Output:      st.output.String(),
+			Error:       st.finalError,
+			DurationMs:  duration.Milliseconds(),
+			SessionID:   st.sessionID,
+			Usage:       st.usage,
+			UsageEvents: st.usageEvents,
 		}
 	}()
 

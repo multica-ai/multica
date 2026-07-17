@@ -34,6 +34,14 @@ func TestDaemonUsageCerebroWiringPresent(t *testing.T) {
 		why      string
 	}{
 		{
+			fragment: "h.ingestModelUsageEvent(r.Context(), task, event)",
+			why:      "ReportTaskUsage must append canonical events before legacy projections, or call/session/issue attribution goes dark (FIR-3337).",
+		},
+		{
+			fragment: "h.logModelUsageEventShadowReconciliation(r.Context(), task.ID)",
+			why:      "ReportTaskUsage must compare the ledger with legacy totals before any consumer cutover (FIR-3337).",
+		},
+		{
 			fragment: "h.recordCerebroTaskContextFootprint(r.Context(), taskID, u)",
 			why:      "ReportTaskUsage must persist the last-turn footprint, or session context-window measurement reads no data (FIR-1856).",
 		},

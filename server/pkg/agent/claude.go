@@ -170,6 +170,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		finalStatus := "completed"
 		var finalError string
 		usage := make(map[string]TokenUsage)
+		var usageEvents []ModelUsageEvent // CEREBRO-PATCH(agent-claude-call-usage-events): FIR-3337 retain native per-call stream usage.
 		// CEREBRO-PATCH(agent-claude-context-footprint): FIR-1870 track the last turn's prompt footprint for the context-window indicator (cumulative usage over-counts the cached prefix).
 		var lastTurn lastTurnFootprint
 		// Diagnostics for the empty-output fail mode (JEH-405): count how
@@ -211,6 +212,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			switch msg.Type {
 			case "assistant":
 				b.handleAssistant(msg, msgCh, &output, usage, &lastTurn)
+				usageEvents = appendClaudeCallUsageEvent(usageEvents, msg, sessionID, time.Now())
 			case "user":
 				b.handleUser(msg, msgCh)
 			case "system":
@@ -334,13 +336,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     output.String(),
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  reportedSessionID,
-			Usage:      usage,
-			Logs:       logs.String(), // CEREBRO-PATCH(agent-claude-logs): JEH-1365
+			Status:      finalStatus,
+			Output:      output.String(),
+			Error:       finalError,
+			DurationMs:  duration.Milliseconds(),
+			SessionID:   reportedSessionID,
+			Usage:       usage,
+			UsageEvents: usageEvents,
+			Logs:        logs.String(), // CEREBRO-PATCH(agent-claude-logs): JEH-1365
 		}
 	}()
 
