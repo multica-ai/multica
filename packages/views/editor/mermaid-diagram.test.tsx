@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 
 vi.mock("../i18n", async () => {
   const editor = (await import("../locales/en/editor.json")).default;
@@ -80,6 +81,51 @@ async function openViewer() {
   await screen.findByRole("application");
 }
 
+async function findScroller(): Promise<HTMLElement> {
+  return waitFor(() => {
+    const found = document.querySelector<HTMLElement>(".mermaid-diagram-scroll");
+    expect(found).not.toBeNull();
+    return found!;
+  });
+}
+
+/**
+ * A press and release with no movement — the gesture that should open the viewer.
+ *
+ * Fires the trailing `click` too. jsdom does not synthesize it from pointer
+ * events, but a real browser always does, and that click is exactly what used
+ * to reopen the viewer at the end of a drag — so a gesture helper that omits it
+ * cannot see the bug at all.
+ */
+function tap(element: HTMLElement, { x, y }: { x: number; y: number }) {
+  fireEvent.pointerDown(element, { pointerId: 1, clientX: x, clientY: y });
+  fireEvent.pointerUp(element, { pointerId: 1, clientX: x, clientY: y });
+  fireEvent.click(element, { clientX: x, clientY: y });
+}
+
+/** A press, drag and release, in the event order a real browser produces. */
+function drag(
+  element: HTMLElement,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  { pointerType = "mouse", button = 0 }: { pointerType?: string; button?: number } = {},
+) {
+  const id = { pointerId: 1, pointerType, button };
+  fireEvent.pointerDown(element, { ...id, clientX: from.x, clientY: from.y });
+  fireEvent.pointerMove(element, { ...id, clientX: to.x, clientY: to.y });
+  fireEvent.pointerUp(element, { ...id, clientX: to.x, clientY: to.y });
+  fireEvent.click(element, { clientX: to.x, clientY: to.y });
+}
+
+async function expectViewerStaysClosed() {
+  // The viewer mounts asynchronously through the Dialog's portal, so assert
+  // after a flush — a synchronous check would pass even if it were opening.
+  await waitFor(() => {
+    expect(mermaidRenderMock).toHaveBeenCalled();
+  });
+  expect(screen.queryByRole("application")).toBeNull();
+}
+
 describe("MermaidDiagram theme changes", () => {
   it("keeps the viewer open and preserves zoom when the theme flips", async () => {
     render(<MermaidDiagram chart={CHART} />);
@@ -145,6 +191,30 @@ describe("MermaidDiagram theme changes", () => {
   });
 });
 
+// Verified in Chromium: dragging a diagram starts a native text selection that
+// paints the whole iframe box with the selection highlight (it is a replaced
+// element) and runs on into the surrounding comment text. Asserted against the
+// stylesheet because jsdom has no layout and cannot reproduce a real selection.
+// Deliberately NOT solved by preventDefault-ing pointerdown: that also drops
+// the default focus, which silently kills the viewer's keyboard controls.
+describe("Mermaid selection suppression", () => {
+  const mermaidCss = readFileSync("editor/styles/mermaid.css", "utf8");
+
+  function blockFor(selector: string): string {
+    const start = mermaidCss.indexOf(selector);
+    expect(start, `${selector} missing from mermaid.css`).toBeGreaterThan(-1);
+    return mermaidCss.slice(start, mermaidCss.indexOf("}", start));
+  }
+
+  it("stops a drag on the inline diagram from selecting text", () => {
+    expect(blockFor(".mermaid-diagram-scroll {")).toContain("user-select: none");
+  });
+
+  it("stops a pan that leaves the viewer canvas from selecting text", () => {
+    expect(blockFor(".mermaid-viewer-canvas {")).toContain("user-select: none");
+  });
+});
+
 describe("MermaidDiagram rendering config", () => {
   it("renders labels as SVG text, without which PNG export silently produces nothing", async () => {
     render(<MermaidDiagram chart={CHART} />);
@@ -193,13 +263,138 @@ describe("MermaidDiagram inline presentation", () => {
     });
   });
 
-  it("opens the viewer when the diagram itself is clicked, not just the button", async () => {
+  it("opens the viewer when the diagram itself is tapped, not just the button", async () => {
     render(<MermaidDiagram chart={CHART} />);
-    await waitFor(() => {
-      expect(document.querySelector(".mermaid-diagram-scroll")).not.toBeNull();
-    });
+    const scroll = await findScroller();
 
-    fireEvent.click(document.querySelector(".mermaid-diagram-scroll")!);
+    tap(scroll, { x: 100, y: 100 });
+
+    expect(await screen.findByRole("application")).toBeInTheDocument();
+  });
+});
+
+// Kim's acceptance (MUL-4908): a still click opens, a horizontal drag moves a
+// wide diagram, and no gesture past the threshold may open the viewer on
+// release. Before this, every attempt to drag a wide diagram ended in a click
+// and the viewer opened on top of the user.
+describe("MermaidDiagram inline tap vs drag", () => {
+  async function setupScroller({ scrollable = true }: { scrollable?: boolean } = {}) {
+    render(<MermaidDiagram chart={CHART} />);
+    const scroll = await findScroller();
+    // jsdom has no layout: scrollLeft would clamp to 0 and scrollWidth is
+    // always 0, so back them with real values to observe the pan.
+    let scrollLeft = 0;
+    Object.defineProperty(scroll, "scrollLeft", {
+      configurable: true,
+      get: () => scrollLeft,
+      set: (value: number) => {
+        // Mirror the browser's clamping, which is what makes an unscrollable
+        // diagram stay put while still counting as a drag.
+        const max = scrollable ? 2000 : 0;
+        scrollLeft = Math.min(Math.max(value, 0), max);
+      },
+    });
+    return scroll;
+  }
+
+  it("opens the viewer on a still click", async () => {
+    const scroll = await setupScroller();
+
+    tap(scroll, { x: 100, y: 100 });
+
+    expect(await screen.findByRole("application")).toBeInTheDocument();
+  });
+
+  it("still opens the viewer when a click jitters below the threshold", async () => {
+    const scroll = await setupScroller();
+
+    // ~3px of shake is a click with an unsteady hand, not a drag. The threshold
+    // has to sit above this or trackpad users could never open the viewer.
+    drag(scroll, { x: 100, y: 100 }, { x: 102, y: 102 });
+
+    expect(await screen.findByRole("application")).toBeInTheDocument();
+  });
+
+  it("does not open the viewer after a horizontal drag", async () => {
+    const scroll = await setupScroller();
+
+    drag(scroll, { x: 300, y: 100 }, { x: 200, y: 100 });
+
+    await expectViewerStaysClosed();
+  });
+
+  it("pans the scroll container while dragging horizontally", async () => {
+    const scroll = await setupScroller();
+
+    fireEvent.pointerDown(scroll, { pointerId: 1, clientX: 300, clientY: 100 });
+    fireEvent.pointerMove(scroll, { pointerId: 1, clientX: 200, clientY: 100 });
+
+    // Dragging left by 100px reveals 100px further right.
+    expect(scroll.scrollLeft).toBe(100);
+
+    fireEvent.pointerMove(scroll, { pointerId: 1, clientX: 260, clientY: 100 });
+    // Tracks the pointer from the gesture's origin, not incrementally.
+    expect(scroll.scrollLeft).toBe(40);
+  });
+
+  it("does not open the viewer after dragging a diagram that cannot scroll", async () => {
+    // Nothing to pan, so the drag has no visible effect — releasing must still
+    // not open the viewer, or the gesture reads as an accidental jump.
+    const scroll = await setupScroller({ scrollable: false });
+
+    drag(scroll, { x: 300, y: 100 }, { x: 200, y: 100 });
+
+    expect(scroll.scrollLeft).toBe(0);
+    await expectViewerStaysClosed();
+  });
+
+  it("does not open the viewer when the browser takes over the gesture", async () => {
+    // Touch scrolling (horizontal pan or vertical page scroll) is handed to the
+    // browser, which signals the takeover with pointercancel.
+    const scroll = await setupScroller();
+
+    fireEvent.pointerDown(scroll, { pointerId: 1, pointerType: "touch", clientX: 100, clientY: 300 });
+    fireEvent.pointerCancel(scroll, { pointerId: 1, pointerType: "touch" });
+
+    await expectViewerStaysClosed();
+  });
+
+  it("leaves touch panning to the browser instead of driving scrollLeft itself", async () => {
+    // The container is `overflow-x: auto`, so touch already pans natively and
+    // vertical drags belong to the page. Driving scrollLeft here as well would
+    // move the diagram at double speed.
+    const scroll = await setupScroller();
+
+    fireEvent.pointerDown(scroll, { pointerId: 1, pointerType: "touch", clientX: 300, clientY: 100 });
+    fireEvent.pointerMove(scroll, { pointerId: 1, pointerType: "touch", clientX: 200, clientY: 100 });
+
+    expect(scroll.scrollLeft).toBe(0);
+  });
+
+  it("pans for a pen drag, which has no native drag-to-scroll either", async () => {
+    // Only touch is left to the browser. Keying the pan on `=== "mouse"` would
+    // silently leave pen users unable to pan at all.
+    const scroll = await setupScroller();
+
+    fireEvent.pointerDown(scroll, { pointerId: 1, pointerType: "pen", clientX: 300, clientY: 100 });
+    fireEvent.pointerMove(scroll, { pointerId: 1, pointerType: "pen", clientX: 200, clientY: 100 });
+
+    expect(scroll.scrollLeft).toBe(100);
+  });
+
+  it("ignores right-button drags", async () => {
+    const scroll = await setupScroller();
+
+    drag(scroll, { x: 300, y: 100 }, { x: 200, y: 100 }, { button: 2 });
+
+    expect(scroll.scrollLeft).toBe(0);
+    await expectViewerStaysClosed();
+  });
+
+  it("keeps the expand button opening the viewer regardless of the gesture rule", async () => {
+    await setupScroller();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open diagram viewer" }));
 
     expect(await screen.findByRole("application")).toBeInTheDocument();
   });

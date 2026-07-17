@@ -31,6 +31,7 @@ import {
 import { Check, Copy, Maximize2 } from "lucide-react";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../i18n";
+import { useDragToScroll } from "./hooks/use-drag-to-scroll";
 import { MermaidViewer } from "./mermaid-viewer";
 import type { Size } from "./utils/diagram-transform";
 
@@ -405,6 +406,8 @@ export function MermaidDiagram({ chart }: { chart: string }) {
   }, [chart, diagramId, themeVersion]);
 
   const overflow = useHorizontalOverflow(scrollRef, [rendered?.inlineDocument]);
+  const openViewer = useCallback(() => setViewerOpen(true), []);
+  const dragToScroll = useDragToScroll({ onTap: openViewer });
 
   const handleCopySource = useCallback(async () => {
     if (await copyText(chart)) {
@@ -459,10 +462,14 @@ export function MermaidDiagram({ chart }: { chart: string }) {
           {/* The scroll container is a sibling of the toolbar, not its parent:
               as an absolutely-positioned child of the scroller the toolbar used
               to slide out of view with the diagram on wide charts. */}
+          {/* Tap opens the viewer, but a drag must not — see useDragToScroll.
+              The gesture drives this instead of `onClick`, because a click
+              fires at the end of a drag too and would reopen the viewer over
+              a user who was only trying to look at the rest of a wide chart. */}
           <div
             ref={scrollRef}
             className="mermaid-diagram-scroll"
-            onClick={() => setViewerOpen(true)}
+            {...dragToScroll}
           >
             <iframe
               className="mermaid-diagram-frame"

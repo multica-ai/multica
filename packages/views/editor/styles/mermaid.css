@@ -22,6 +22,12 @@
   overflow-x: auto;
   overflow-y: hidden;
   cursor: zoom-in;
+  /* Dragging a diagram would otherwise start a native text selection: the
+     iframe is a replaced element, so the whole diagram box gets painted with
+     the selection highlight, and the drag runs on into the surrounding
+     comment text. Selecting prose *through* the diagram still works — this
+     only stops a selection from starting on the diagram itself. */
+  user-select: none;
 }
 
 .rich-text-editor .mermaid-diagram-frame {
@@ -175,6 +181,11 @@
   /* Claim every touch gesture: browser pan/pinch would otherwise scroll or
      zoom the page underneath instead of moving the diagram. */
   touch-action: none;
+  /* A pan that leaves the canvas would otherwise start a native text selection
+     and highlight the toolbar text plus the whole iframe box. Done in CSS
+     rather than by preventDefault-ing pointerdown, which would also suppress
+     the default focus and silently kill the keyboard controls. */
+  user-select: none;
   outline: none;
 }
 
