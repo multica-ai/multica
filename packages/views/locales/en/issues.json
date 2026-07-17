@@ -549,7 +549,11 @@
   },
   "gitlab_issue": {
     "title": "GitLab Issue",
-    "assignee_label": "GitLab"
+    "assignee_label": "GitLab",
+    "link_placeholder": "group/project#123",
+    "link_button": "Link",
+    "unlink_button": "Unlink",
+    "link_error": "Failed to link GitLab issue"
   },
   "backlog_hint": {
     "title": "Agent is paused in Backlog",

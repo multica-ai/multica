@@ -3,6 +3,7 @@ import type { Workspace } from "../types";
 import { api } from "../api";
 import { gitlabKeys } from "./queries";
 
+
 export interface GitLabSettings {
   enabled: boolean;
   mrSidebar: boolean;
@@ -21,6 +22,27 @@ export function deriveGitLabSettings(
     issueSync: enabled && s.gitlab_issue_sync_enabled !== false,
     commentSync: enabled && s.gitlab_comment_sync_enabled !== false,
   };
+}
+
+export function useLinkGitLabIssue(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectPath, glIssueIid }: { projectPath: string; glIssueIid: number }) =>
+      api.linkGitLabIssue(issueId, projectPath, glIssueIid),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: gitlabKeys.gitlabIssue(issueId) });
+    },
+  });
+}
+
+export function useUnlinkGitLabIssue(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.unlinkGitLabIssue(issueId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: gitlabKeys.gitlabIssue(issueId) });
+    },
+  });
 }
 
 export function useDeleteGitLabConnection(wsId: string) {

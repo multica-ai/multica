@@ -541,11 +541,11 @@ type GitlabConnection struct {
 	NamespaceType  string             `json:"namespace_type"`
 	AvatarUrl      pgtype.Text        `json:"avatar_url"`
 	AccessToken    string             `json:"access_token"`
-	RefreshToken   pgtype.Text        `json:"refresh_token"`
 	TokenExpiresAt pgtype.Timestamptz `json:"token_expires_at"`
 	ConnectedByID  pgtype.UUID        `json:"connected_by_id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	RefreshToken   pgtype.Text        `json:"refresh_token"`
 }
 
 type GitlabIssue struct {
@@ -646,6 +646,13 @@ type IssueLabel struct {
 	Description  string             `json:"description"`
 }
 
+type IssueMergeRequest struct {
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	MergeRequestID pgtype.UUID        `json:"merge_request_id"`
+	CloseIntent    bool               `json:"close_intent"`
+	LinkedAt       pgtype.Timestamptz `json:"linked_at"`
+}
+
 type IssueProperty struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -658,13 +665,6 @@ type IssueProperty struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Icon        string             `json:"icon"`
-}
-
-type IssueMergeRequest struct {
-	IssueID        pgtype.UUID        `json:"issue_id"`
-	MergeRequestID pgtype.UUID        `json:"merge_request_id"`
-	CloseIntent    bool               `json:"close_intent"`
-	LinkedAt       pgtype.Timestamptz `json:"linked_at"`
 }
 
 type IssuePullRequest struct {

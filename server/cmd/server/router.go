@@ -755,6 +755,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// GitLab webhook (no Multica auth — authenticated via X-Gitlab-Token
 	// shared secret) and OAuth callback.
 	r.Post("/api/webhooks/gitlab", h.HandleGitLabWebhook)
+	r.Post("/api/webhooks/gitlab/{workspaceId}", h.HandleGitLabWebhookForWorkspace)
 	r.Get("/api/gitlab/setup", h.GitLabSetupCallback)
 	// Slack OAuth callback (no Multica auth in the path — it is hit by Slack's
 	// browser redirect; the workspace/agent/initiator are recovered from the
@@ -1101,6 +1102,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
 					r.Get("/merge-requests", h.ListMergeRequestsForIssue)
 					r.Get("/gitlab-issue", h.GetGitLabIssueForIssue)
+					r.Put("/gitlab-issue", h.LinkGitLabIssueForIssue)
+					r.Delete("/gitlab-issue", h.UnlinkGitLabIssueForIssue)
 				})
 			})
 

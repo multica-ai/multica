@@ -122,3 +122,6 @@ RETURNING *;
 -- name: UpdateGitLabIssueAssignee :exec
 UPDATE gitlab_issue SET gl_assignee_username = sqlc.narg('gl_assignee_username'), updated_at = now()
 WHERE id = $1;
+
+-- name: DeleteGitLabIssueByIssueID :exec
+DELETE FROM gitlab_issue WHERE issue_id = $1 AND workspace_id = $2;

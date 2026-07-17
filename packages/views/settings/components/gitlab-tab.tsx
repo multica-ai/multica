@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { GitMerge, Tag } from "lucide-react";
+import { GitMerge, Tag, Copy } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Input } from "@multica/ui/components/ui/input";
@@ -167,6 +167,36 @@ export function GitLabTab() {
           </CardContent>
         </Card>
       </section>
+
+      {configured && connections.length > 0 && wsId && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold">{t(($) => $.gitlab.webhook_url_label)}</h2>
+          <Card>
+            <CardContent className="space-y-2">
+              <p className="text-sm text-muted-foreground">{t(($) => $.gitlab.webhook_url_description)}</p>
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={`${typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/gitlab/${wsId}`}
+                  className="font-mono text-xs"
+                />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => {
+                    navigator.clipboard.writeText(
+                      `${window.location.origin}/api/webhooks/gitlab/${wsId}`,
+                    );
+                    toast.success(t(($) => $.gitlab.webhook_url_copied));
+                  }}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+      )}
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">{t(($) => $.gitlab.section_features)}</h2>

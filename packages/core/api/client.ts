@@ -2597,6 +2597,21 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/gitlab-issue`);
   }
 
+  async linkGitLabIssue(
+    issueId: string,
+    projectPath: string,
+    glIssueIid: number,
+  ): Promise<GitLabIssue> {
+    return this.fetch(`/api/issues/${issueId}/gitlab-issue`, {
+      method: "PUT",
+      body: JSON.stringify({ project_path: projectPath, gl_issue_iid: glIssueIid }),
+    });
+  }
+
+  async unlinkGitLabIssue(issueId: string): Promise<void> {
+    return this.fetch(`/api/issues/${issueId}/gitlab-issue`, { method: "DELETE" });
+  }
+
   // Lark integration
   async listLarkInstallations(workspaceId: string): Promise<ListLarkInstallationsResponse> {
     return this.fetch(`/api/workspaces/${workspaceId}/lark/installations`);

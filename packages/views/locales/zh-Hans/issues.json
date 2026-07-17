@@ -535,6 +535,10 @@
   },
   "gitlab_issue": {
     "title": "GitLab Issue",
-    "assignee_label": "GitLab"
+    "assignee_label": "GitLab",
+    "link_placeholder": "组/项目#123",
+    "link_button": "关联",
+    "unlink_button": "取消关联",
+    "link_error": "关联 GitLab Issue 失败"
   }
 }

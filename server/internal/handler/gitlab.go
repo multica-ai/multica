@@ -168,32 +168,89 @@ func gitlabMRToResponse(mr db.GitlabMergeRequest) GitLabMergeRequestResponse {
 
 // ── Webhook ──────────────────────────────────────────────────────────────────
 
-// HandleGitLabWebhook (POST /api/webhooks/gitlab) verifies X-Gitlab-Token and
-// routes Merge Request / Issue / Note Hook events to the corresponding handlers.
-func (h *Handler) HandleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
+// peekGitLabNamespace extracts the project namespace from a raw webhook body
+// without fully parsing the event, used for the global namespace-based routing path.
+func peekGitLabNamespace(body []byte) string {
+	var peek struct {
+		Project struct {
+			Namespace string `json:"namespace"`
+		} `json:"project"`
+	}
+	_ = json.Unmarshal(body, &peek)
+	return peek.Project.Namespace
+}
+
+// verifyGitLabWebhookSecret reads the body and validates X-Gitlab-Token.
+// Returns the body on success so callers don't need to re-read it.
+func verifyGitLabWebhookSecret(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "cannot read body")
-		return
+		return nil, false
 	}
 	secret := gitlabWebhookSecret()
 	if secret == "" {
 		writeError(w, http.StatusServiceUnavailable, "gitlab integration not configured")
-		return
+		return nil, false
 	}
 	if r.Header.Get("X-Gitlab-Token") != secret {
 		writeError(w, http.StatusUnauthorized, "invalid webhook token")
+		return nil, false
+	}
+	return body, true
+}
+
+// HandleGitLabWebhook (POST /api/webhooks/gitlab) verifies X-Gitlab-Token and
+// routes events to the correct workspace by matching the project namespace.
+// Kept for backwards compatibility with already-registered project webhooks.
+func (h *Handler) HandleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
+	body, ok := verifyGitLabWebhookSecret(w, r)
+	if !ok {
 		return
 	}
-	switch r.Header.Get("X-Gitlab-Event") {
-	case "Merge Request Hook":
-		h.handleGitLabMergeRequestEvent(r.Context(), body)
-	case "Issue Hook":
-		h.handleGitLabIssueEvent(r.Context(), body)
-	case "Note Hook":
-		h.handleGitLabNoteEvent(r.Context(), body)
+	namespace := peekGitLabNamespace(body)
+	conn, err := h.resolveGitLabConnectionByNamespace(r.Context(), namespace)
+	if err != nil {
+		slog.Warn("gitlab: no connection for namespace", "namespace", namespace)
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
+	h.dispatchGitLabWebhookEvent(r.Context(), r.Header.Get("X-Gitlab-Event"), conn, body)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// HandleGitLabWebhookForWorkspace (POST /api/webhooks/gitlab/{workspaceId}) verifies
+// X-Gitlab-Token and routes the event to the specific workspace without a namespace
+// lookup. Use this URL in GitLab project webhook settings so multiple projects across
+// different workspaces each get their own endpoint.
+func (h *Handler) HandleGitLabWebhookForWorkspace(w http.ResponseWriter, r *http.Request) {
+	body, ok := verifyGitLabWebhookSecret(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "workspaceId"), "workspace id")
+	if !ok {
+		return
+	}
+	conn, err := h.Queries.GetFirstGitLabConnectionByWorkspace(r.Context(), wsUUID)
+	if err != nil {
+		slog.Warn("gitlab: no connection for workspace", "workspace_id", uuidToString(wsUUID))
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	h.dispatchGitLabWebhookEvent(r.Context(), r.Header.Get("X-Gitlab-Event"), conn, body)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) dispatchGitLabWebhookEvent(ctx context.Context, event string, conn db.GitlabConnection, body []byte) {
+	switch event {
+	case "Merge Request Hook":
+		h.handleGitLabMergeRequestEvent(ctx, conn, body)
+	case "Issue Hook":
+		h.handleGitLabIssueEvent(ctx, conn, body)
+	case "Note Hook":
+		h.handleGitLabNoteEvent(ctx, conn, body)
+	}
 }
 
 // gitlabIssuePayload is the subset of GitLab's Issue Hook webhook we consume.
@@ -239,7 +296,7 @@ type gitlabNotePayload struct {
 	} `json:"user"`
 }
 
-func (h *Handler) handleGitLabNoteEvent(ctx context.Context, body []byte) {
+func (h *Handler) handleGitLabNoteEvent(ctx context.Context, conn db.GitlabConnection, body []byte) {
 	var p gitlabNotePayload
 	if err := json.Unmarshal(body, &p); err != nil {
 		slog.Error("gitlab: failed to parse note payload", "err", err)
@@ -255,14 +312,7 @@ func (h *Handler) handleGitLabNoteEvent(ctx context.Context, body []byte) {
 		return
 	}
 
-	namespace := p.Project.Namespace
 	projectPath := p.Project.PathWithNamespace
-
-	conn, err := h.resolveGitLabConnectionByNamespace(ctx, namespace)
-	if err != nil {
-		slog.Warn("gitlab: no connection for namespace", "namespace", namespace)
-		return
-	}
 
 	if ws, err := h.Queries.GetWorkspace(ctx, conn.WorkspaceID); err == nil && !workspaceGitLabCommentSyncEnabled(ws.Settings) {
 		return
@@ -467,22 +517,15 @@ func containsLabel(labels []struct{ Title string `json:"title"` }, title string)
 	return false
 }
 
-func (h *Handler) handleGitLabIssueEvent(ctx context.Context, body []byte) {
+func (h *Handler) handleGitLabIssueEvent(ctx context.Context, conn db.GitlabConnection, body []byte) {
 	var p gitlabIssuePayload
 	if err := json.Unmarshal(body, &p); err != nil {
 		slog.Error("gitlab: failed to parse issue payload", "err", err)
 		return
 	}
 
-	namespace := p.Project.Namespace
 	projectPath := p.Project.PathWithNamespace
 	action := p.ObjectAttributes.Action
-
-	conn, err := h.resolveGitLabConnectionByNamespace(ctx, namespace)
-	if err != nil {
-		slog.Warn("gitlab: no connection for namespace", "namespace", namespace)
-		return
-	}
 	workspaceID := uuidToString(conn.WorkspaceID)
 
 	hasAgent := containsLabel(p.Labels, "agent")
@@ -643,22 +686,14 @@ type gitlabMRPayload struct {
 	} `json:"user"`
 }
 
-func (h *Handler) handleGitLabMergeRequestEvent(ctx context.Context, body []byte) {
+func (h *Handler) handleGitLabMergeRequestEvent(ctx context.Context, conn db.GitlabConnection, body []byte) {
 	var p gitlabMRPayload
 	if err := json.Unmarshal(body, &p); err != nil {
 		slog.Error("gitlab: failed to parse MR payload", "err", err)
 		return
 	}
 
-	namespace := p.Project.Namespace
 	projectPath := p.Project.PathWithNamespace
-
-	// Resolve workspace via connection namespace.
-	conn, err := h.resolveGitLabConnectionByNamespace(ctx, namespace)
-	if err != nil {
-		slog.Warn("gitlab: no connection for namespace", "namespace", namespace)
-		return
-	}
 	workspaceID := uuidToString(conn.WorkspaceID)
 
 	// Parse timestamps.
@@ -1038,6 +1073,120 @@ func gitlabFetchUser(ctx context.Context, token string) (gitlabUserInfo, error) 
 		NamespaceType: "user",
 		AvatarURL:     body.AvatarURL,
 	}, nil
+}
+
+// LinkGitLabIssueForIssue (PUT /api/issues/{id}/gitlab-issue) manually links a
+// GitLab issue to a Multica issue by fetching the GitLab project ID from the API.
+func (h *Handler) LinkGitLabIssueForIssue(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+
+	var body struct {
+		ProjectPath string `json:"project_path"`
+		GlIssueIID  int32  `json:"gl_issue_iid"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ProjectPath == "" || body.GlIssueIID == 0 {
+		writeError(w, http.StatusBadRequest, "project_path and gl_issue_iid are required")
+		return
+	}
+
+	conn, err := h.Queries.GetFirstGitLabConnectionByWorkspace(r.Context(), issue.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no gitlab connection for workspace")
+		return
+	}
+
+	// Decrypt access token, refreshing if expired.
+	var plainToken string
+	if conn.TokenExpiresAt.Valid && conn.TokenExpiresAt.Time.Before(time.Now()) {
+		plainToken, err = h.refreshGitLabToken(r.Context(), conn)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "gitlab token refresh failed")
+			return
+		}
+	} else {
+		tokenBytes, decErr := base64.StdEncoding.DecodeString(conn.AccessToken)
+		if decErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to decode token")
+			return
+		}
+		plain, openErr := h.GitLabBox.Open(tokenBytes)
+		if openErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to decrypt token")
+			return
+		}
+		plainToken = string(plain)
+	}
+
+	// Fetch gl_project_id from GitLab.
+	encodedPath := url.PathEscape(body.ProjectPath)
+	glAPIURL := gitlabAPIURL() + fmt.Sprintf("/projects/%s/issues/%d", encodedPath, body.GlIssueIID)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, glAPIURL, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build gitlab request")
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+plainToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "gitlab api request failed")
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		writeError(w, http.StatusNotFound, "gitlab issue not found")
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		writeError(w, http.StatusBadGateway, "gitlab api returned error")
+		return
+	}
+	var glIssue struct {
+		ProjectID int64 `json:"project_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&glIssue); err != nil || glIssue.ProjectID == 0 {
+		writeError(w, http.StatusBadGateway, "failed to parse gitlab issue")
+		return
+	}
+
+	row, err := h.Queries.InsertGitLabIssue(r.Context(), db.InsertGitLabIssueParams{
+		WorkspaceID: issue.WorkspaceID,
+		ConnectionID: conn.ID,
+		ProjectPath:  body.ProjectPath,
+		GlIssueIid:   body.GlIssueIID,
+		GlProjectID:  glIssue.ProjectID,
+		IssueID:      issue.ID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to link gitlab issue")
+		return
+	}
+
+	issueURL := gitlabBaseURL() + "/" + row.ProjectPath + "/-/issues/" + strconv.Itoa(int(row.GlIssueIid))
+	writeJSON(w, http.StatusOK, GitLabIssueResponse{
+		GlIssueIID:  row.GlIssueIid,
+		ProjectPath: row.ProjectPath,
+		URL:         issueURL,
+	})
+}
+
+// UnlinkGitLabIssueForIssue (DELETE /api/issues/{id}/gitlab-issue) removes the
+// manual or auto-created link between a Multica issue and a GitLab issue.
+func (h *Handler) UnlinkGitLabIssueForIssue(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	if err := h.Queries.DeleteGitLabIssueByIssueID(r.Context(), db.DeleteGitLabIssueByIssueIDParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to unlink gitlab issue")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ListMergeRequestsForIssue (GET /api/issues/{id}/merge-requests)

@@ -535,6 +535,10 @@
   },
   "gitlab_issue": {
     "title": "GitLab Issue",
-    "assignee_label": "GitLab"
+    "assignee_label": "GitLab",
+    "link_placeholder": "グループ/プロジェクト#123",
+    "link_button": "リンク",
+    "unlink_button": "リンク解除",
+    "link_error": "GitLab Issue のリンクに失敗しました"
   }
 }

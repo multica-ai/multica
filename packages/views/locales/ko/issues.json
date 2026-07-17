@@ -535,6 +535,10 @@
   },
   "gitlab_issue": {
     "title": "GitLab Issue",
-    "assignee_label": "GitLab"
+    "assignee_label": "GitLab",
+    "link_placeholder": "그룹/프로젝트#123",
+    "link_button": "연결",
+    "unlink_button": "연결 해제",
+    "link_error": "GitLab Issue 연결 실패"
   }
 }
