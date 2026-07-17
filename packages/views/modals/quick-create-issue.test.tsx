@@ -6,13 +6,14 @@ import userEvent from "@testing-library/user-event";
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetLastActor = vi.hoisted(() => vi.fn());
 const mockSetLastProjectId = vi.hoisted(() => vi.fn());
-const mockSetVisibleFields = vi.hoisted(() => vi.fn());
+const mockSetQuickCreateFieldVisible = vi.hoisted(() => vi.fn());
 const mockSetPrompt = vi.hoisted(() => vi.fn());
 const mockClearPrompt = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const mockUploadWithToast = vi.hoisted(() => vi.fn());
+const mockNavigationPush = vi.hoisted(() => vi.fn());
 
 const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
@@ -20,13 +21,16 @@ const mockQuickCreateStore = {
   setLastActor: mockSetLastActor,
   lastProjectId: null as string | null,
   setLastProjectId: mockSetLastProjectId,
-  visibleFields: ["project"] as Array<"project" | "priority" | "due_date">,
-  setVisibleFields: mockSetVisibleFields,
   prompt: "Persisted draft prompt",
   setPrompt: mockSetPrompt,
   clearPrompt: mockClearPrompt,
   keepOpen: false,
   setKeepOpen: mockSetKeepOpen,
+};
+
+const mockCreateSettingsStore = {
+  quickCreateFields: ["project"] as Array<"project" | "priority" | "due_date">,
+  setQuickCreateFieldVisible: mockSetQuickCreateFieldVisible,
 };
 
 // Per-test override for the projects query, so tests can swap between
@@ -83,6 +87,13 @@ vi.mock("@multica/core/hooks", () => ({
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ name: "Test Workspace" }),
+  useWorkspacePaths: () => ({
+    settings: () => "/ws-test/settings",
+  }),
+}));
+
+vi.mock("../navigation", () => ({
+  useNavigation: () => ({ push: mockNavigationPush }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -100,6 +111,12 @@ vi.mock("@multica/core/projects/queries", () => ({
 vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
   useQuickCreateStore: (selector?: (state: typeof mockQuickCreateStore) => unknown) =>
     (selector ? selector(mockQuickCreateStore) : mockQuickCreateStore),
+}));
+
+vi.mock("@multica/core/issues/stores/issue-create-settings-store", () => ({
+  useIssueCreateSettingsStore: (
+    selector?: (state: typeof mockCreateSettingsStore) => unknown,
+  ) => (selector ? selector(mockCreateSettingsStore) : mockCreateSettingsStore),
 }));
 
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
@@ -350,7 +367,7 @@ describe("AgentCreatePanel", () => {
     mockQuickCreateStore.lastActorType = null;
     mockQuickCreateStore.lastActorId = null;
     mockQuickCreateStore.lastProjectId = null;
-    mockQuickCreateStore.visibleFields = ["project"];
+    mockCreateSettingsStore.quickCreateFields = ["project"];
     mockQuickCreateStore.prompt = "Persisted draft prompt";
     mockQuickCreateStore.keepOpen = false;
     mockProjectsQuery.data = [];
@@ -377,11 +394,6 @@ describe("AgentCreatePanel", () => {
     mockSetKeepOpen.mockImplementation((value: boolean) => {
       mockQuickCreateStore.keepOpen = value;
     });
-    mockSetVisibleFields.mockImplementation(
-      (fields: Array<"project" | "priority" | "due_date">) => {
-        mockQuickCreateStore.visibleFields = fields;
-      },
-    );
   });
 
   it("loads the persisted prompt draft when no transient prompt is provided", () => {
@@ -447,16 +459,31 @@ describe("AgentCreatePanel", () => {
     });
   });
 
-  it("lets users choose which quick-create fields stay exposed", async () => {
+  it("routes Customize fields to Settings → Issue, keeping the typed prompt", async () => {
     const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+    );
+    fireEvent.change(editor, { target: { value: "Half-typed request" } });
+    await user.click(screen.getByRole("button", { name: "Customize fields..." }));
+
+    expect(mockSetPrompt).toHaveBeenLastCalledWith("Half-typed request");
+    expect(onClose).toHaveBeenCalled();
+    expect(mockNavigationPush).toHaveBeenCalledWith("/ws-test/settings?tab=issue");
+  });
+
+  it("respects fields enabled in Settings → Issue by rendering them inline", () => {
+    mockCreateSettingsStore.quickCreateFields = ["project", "priority", "due_date"];
 
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
-    await user.click(screen.getByRole("button", { name: "Customize fields..." }));
-    expect(screen.getByText("Quick create fields")).toBeInTheDocument();
-    await user.click(screen.getAllByRole("checkbox")[1]!);
-
-    expect(mockSetVisibleFields).toHaveBeenCalledWith(["project", "priority"]);
+    expect(screen.getByTestId("project-picker")).toBeInTheDocument();
+    expect(screen.getByTestId("priority-picker")).toBeInTheDocument();
+    expect(screen.getByTestId("due-date-picker")).toBeInTheDocument();
   });
 
   it("submits seeded priority and due date as authoritative quick-create fields", async () => {

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft,
   ArrowLeftRight,
   CalendarDays,
   Check,
@@ -16,7 +15,6 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { cn } from "@multica/ui/lib/utils";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
 import {
   DropdownMenu,
@@ -29,14 +27,18 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useNavigation } from "../navigation";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
   useQuickCreateStore,
   type QuickCreateActorType,
-  type QuickCreateField,
 } from "@multica/core/issues/stores/quick-create-store";
+import {
+  useIssueCreateSettingsStore,
+  type QuickCreateField,
+} from "@multica/core/issues/stores/issue-create-settings-store";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import {
@@ -114,6 +116,8 @@ export function AgentCreatePanel({
   const { t } = useT("modals");
   const sendShortcut = useShortcut("send");
   const workspaceName = useCurrentWorkspace()?.name;
+  const workspacePaths = useWorkspacePaths();
+  const navigation = useNavigation();
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -159,8 +163,7 @@ export function AgentCreatePanel({
   const setLastActor = useQuickCreateStore((s) => s.setLastActor);
   const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
   const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
-  const visibleFields = useQuickCreateStore((s) => s.visibleFields);
-  const setVisibleFields = useQuickCreateStore((s) => s.setVisibleFields);
+  const visibleFields = useIssueCreateSettingsStore((s) => s.quickCreateFields);
   const promptDraft = useQuickCreateStore((s) => s.prompt);
   const setPrompt = useQuickCreateStore((s) => s.setPrompt);
   const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
@@ -240,7 +243,6 @@ export function AgentCreatePanel({
     (data?.due_date as string | undefined) ?? null,
   );
   const [fieldPickerOpen, setFieldPickerOpen] = useState<QuickCreateField | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Parent-issue context — seeded by `openCreateSubIssue` when the modal is
   // opened from the "Add sub issue" entry on an existing issue. We carry it
@@ -459,18 +461,13 @@ export function AgentCreatePanel({
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 
-  const toggleVisibleField = (field: QuickCreateField, visible: boolean) => {
-    setVisibleFields(
-      visible
-        ? [...visibleFields.filter((item) => item !== field), field]
-        : visibleFields.filter((item) => item !== field),
-    );
-  };
-
+  // Field visibility lives in Settings → Issue. Persist the prompt draft
+  // before leaving so what the user typed survives the round-trip, then
+  // close — the dialog would otherwise linger over the settings page.
   const openFieldSettings = () => {
     setPrompt(editorRef.current?.getMarkdown() ?? "");
-    setFieldPickerOpen(null);
-    setSettingsOpen(true);
+    onClose();
+    navigation.push(`${workspacePaths.settings()}?tab=issue`);
   };
 
   return (
@@ -479,22 +476,11 @@ export function AgentCreatePanel({
 
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-          {settingsOpen ? (
-            <button
-              type="button"
-              onClick={() => setSettingsOpen(false)}
-              className="flex items-center gap-1.5 rounded-sm px-1 py-0.5 text-xs font-medium hover:bg-accent/60"
-            >
-              <ArrowLeft className="size-3.5" />
-              {t(($) => $.create_issue.agent.field_settings_title)}
-            </button>
-          ) : (
-            <div className="flex items-center gap-1.5 text-xs">
-              <span className="text-muted-foreground">{workspaceName}</span>
-              <ChevronRight className="size-3 text-muted-foreground/50" />
-              <span className="font-medium">{t(($) => $.create_issue.agent_breadcrumb)}</span>
-            </div>
-          )}
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground">{workspaceName}</span>
+            <ChevronRight className="size-3 text-muted-foreground/50" />
+            <span className="font-medium">{t(($) => $.create_issue.agent_breadcrumb)}</span>
+          </div>
           {/* Native `title` instead of Base UI Tooltip — Tooltip opens on
               keyboard focus, and the dialog's focus trap briefly lands focus
               on the first focusable element on mount, causing the tooltip to
@@ -520,47 +506,6 @@ export function AgentCreatePanel({
             </button>
           </div>
         </div>
-
-        {settingsOpen ? (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex-1 overflow-y-auto px-5 py-3">
-              <p className="mb-3 text-xs text-muted-foreground">
-                {t(($) => $.create_issue.agent.field_settings_description)}
-              </p>
-              <div className="overflow-hidden rounded-lg border">
-                {([
-                  ["project", <FolderKanban key="project" className="size-4 text-muted-foreground" />],
-                  ["priority", <PriorityIcon key="priority" priority="none" className="size-4" />],
-                  ["due_date", <CalendarDays key="due-date" className="size-4 text-muted-foreground" />],
-                ] as const).map(([field, icon], index) => (
-                  <label
-                    key={field}
-                    className={cn(
-                      "flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm",
-                      index > 0 && "border-t",
-                    )}
-                  >
-                    {icon}
-                    <span className="flex-1">
-                      {t(($) => $.create_issue.agent.fields[field])}
-                    </span>
-                    <Switch
-                      size="sm"
-                      checked={visibleFields.includes(field)}
-                      onCheckedChange={(checked) => toggleVisibleField(field, checked)}
-                    />
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div className="flex justify-end border-t px-4 py-3">
-              <Button size="sm" onClick={() => setSettingsOpen(false)}>
-                {t(($) => $.create_issue.agent.field_settings_done)}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <>
 
         {/* Actor picker — agents and squads in one searchable list. Squads
             route to their leader agent on the backend; the leader runs the
@@ -794,8 +739,6 @@ export function AgentCreatePanel({
             </Button>
           </div>
         </div>
-          </>
-        )}
     </>
   );
 }

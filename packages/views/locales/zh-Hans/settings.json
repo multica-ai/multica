@@ -99,6 +99,22 @@
     "floating_label": "悬浮聊天窗",
     "floating_hint": "在每个页面右下角显示悬浮聊天按钮。默认关闭——打开后可随处召唤聊天；关闭时，聊天只在此标签页中可用。"
   },
+  "issue": {
+    "description": "选择各创建方式的工具栏中常驻显示的字段。隐藏的字段仍可从 ⋯ 菜单使用，有值时会自动显示。",
+    "quick_create_title": "通过智能体创建",
+    "quick_create_description": "快速创建工具栏中显示的字段。",
+    "manual_create_title": "手动创建",
+    "manual_create_description": "手动创建工具栏中显示的字段。",
+    "fields": {
+      "status": "状态",
+      "priority": "优先级",
+      "assignee": "负责人",
+      "labels": "标签",
+      "project": "项目",
+      "due_date": "截止日期",
+      "start_date": "开始日期"
+    }
+  },
   "page": {
     "title": "设置",
     "my_account": "我的账号",
@@ -107,6 +123,7 @@
       "profile": "个人资料",
       "preferences": "偏好设置",
       "shortcuts": "快捷键",
+      "issue": "Issue",
       "chat": "聊天",
       "notifications": "通知",
       "tokens": "API Token",

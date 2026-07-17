@@ -177,6 +177,12 @@
     "set_start_date": "시작일 설정...",
     "set_parent": "상위 이슈 설정...",
     "add_subissue": "하위 이슈 추가...",
+    "set_status": "상태 설정...",
+    "set_priority": "우선순위 설정...",
+    "set_assignee": "담당자 설정...",
+    "set_labels": "레이블 설정...",
+    "set_project": "프로젝트 설정...",
+    "customize_fields": "필드 사용자 지정...",
     "custom_properties": "사용자 지정 속성",
     "remove_parent": "상위 이슈 제거",
     "set_parent_picker": {
@@ -203,14 +209,6 @@
       "set_priority": "우선순위 설정...",
       "set_due_date": "마감일 설정...",
       "customize_fields": "필드 사용자 지정...",
-      "field_settings_title": "빠른 만들기 필드",
-      "field_settings_description": "빠른 만들기 도구 모음에 항상 표시할 필드를 선택하세요.",
-      "field_settings_done": "완료",
-      "fields": {
-        "project": "프로젝트",
-        "priority": "우선순위",
-        "due_date": "마감일"
-      },
       "submit": "만들기",
       "sending": "보내는 중...",
       "uploading": "업로드 중...",

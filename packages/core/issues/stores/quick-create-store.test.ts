@@ -1,14 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  DEFAULT_QUICK_CREATE_FIELDS,
-  useQuickCreateStore,
-} from "./quick-create-store";
+import { useQuickCreateStore } from "./quick-create-store";
 
 const RESET_STATE = {
   lastActorType: null,
   lastActorId: null,
   lastProjectId: null,
-  visibleFields: DEFAULT_QUICK_CREATE_FIELDS,
   prompt: "",
   keepOpen: false,
 };
@@ -54,17 +50,5 @@ describe("quick create store", () => {
     setLastActor(null, null);
     expect(useQuickCreateStore.getState().lastActorType).toBeNull();
     expect(useQuickCreateStore.getState().lastActorId).toBeNull();
-  });
-
-  it("persists the fields exposed in the quick create toolbar", () => {
-    const { setVisibleFields } = useQuickCreateStore.getState();
-
-    setVisibleFields(["project", "priority", "due_date"]);
-
-    expect(useQuickCreateStore.getState().visibleFields).toEqual([
-      "project",
-      "priority",
-      "due_date",
-    ]);
   });
 });

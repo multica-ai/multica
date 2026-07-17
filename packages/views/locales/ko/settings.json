@@ -96,6 +96,22 @@
     "floating_label": "플로팅 채팅 창",
     "floating_hint": "모든 페이지 모서리에 플로팅 채팅 버튼을 표시합니다. 기본값은 꺼짐 — 켜면 어디서나 채팅을 불러올 수 있고, 꺼면 채팅은 이 탭에서만 사용할 수 있습니다."
   },
+  "issue": {
+    "description": "각 생성 방식의 툴바에 항상 표시할 필드를 선택합니다. 숨긴 필드는 ⋯ 메뉴에서 계속 사용할 수 있으며, 값이 있는 동안에는 자동으로 표시됩니다.",
+    "quick_create_title": "에이전트로 만들기",
+    "quick_create_description": "빠른 생성 툴바에 표시할 필드입니다.",
+    "manual_create_title": "직접 만들기",
+    "manual_create_description": "직접 만들기 툴바에 표시할 필드입니다.",
+    "fields": {
+      "status": "상태",
+      "priority": "우선순위",
+      "assignee": "담당자",
+      "labels": "레이블",
+      "project": "프로젝트",
+      "due_date": "마감일",
+      "start_date": "시작일"
+    }
+  },
   "page": {
     "title": "설정",
     "my_account": "내 계정",
@@ -104,6 +120,7 @@
       "profile": "프로필",
       "preferences": "환경설정",
       "shortcuts": "단축키",
+      "issue": "이슈",
       "chat": "채팅",
       "notifications": "알림",
       "tokens": "API 토큰",

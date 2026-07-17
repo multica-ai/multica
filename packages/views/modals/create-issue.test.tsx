@@ -77,6 +77,27 @@ const mockQuickCreateStore = {
   setKeepOpen: mockSetKeepOpen,
 };
 
+type ManualCreateField =
+  | "status"
+  | "priority"
+  | "assignee"
+  | "labels"
+  | "project"
+  | "due_date"
+  | "start_date";
+
+const DEFAULT_MANUAL_FIELDS: ManualCreateField[] = [
+  "status",
+  "priority",
+  "assignee",
+  "labels",
+  "project",
+];
+
+const mockCreateSettingsStore = {
+  manualCreateFields: DEFAULT_MANUAL_FIELDS as ManualCreateField[],
+};
+
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: mockPush }),
 }));
@@ -85,6 +106,7 @@ vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ name: "Test Workspace" }),
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/ws-test/issues/${id}`,
+    settings: () => "/ws-test/settings",
   }),
 }));
 
@@ -137,6 +159,12 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
 vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
   useQuickCreateStore: (selector?: (state: typeof mockQuickCreateStore) => unknown) =>
     (selector ? selector(mockQuickCreateStore) : mockQuickCreateStore),
+}));
+
+vi.mock("@multica/core/issues/stores/issue-create-settings-store", () => ({
+  useIssueCreateSettingsStore: (
+    selector?: (state: typeof mockCreateSettingsStore) => unknown,
+  ) => (selector ? selector(mockCreateSettingsStore) : mockCreateSettingsStore),
 }));
 
 vi.mock("@multica/core/issues/mutations", () => ({
@@ -310,7 +338,15 @@ vi.mock("../issues/components", () => ({
       onClick={() => onOpenChange?.(false)}
     />
   ),
-  LabelPicker: () => <div data-testid="label-picker" />,
+  // Labels can now be hidden via Settings → Issue and revealed from the
+  // overflow, so surface open/onOpenChange like the date pickers.
+  LabelPicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
+    <div
+      data-testid="label-picker"
+      data-open={open ? "true" : "false"}
+      onClick={() => onOpenChange?.(false)}
+    />
+  ),
 }));
 
 vi.mock("../issues/components/pickers/custom-property-picker", () => ({
@@ -440,6 +476,7 @@ describe("CreateIssueModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuickCreateStore.keepOpen = false;
+    mockCreateSettingsStore.manualCreateFields = DEFAULT_MANUAL_FIELDS;
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
     });
@@ -1048,6 +1085,55 @@ describe("CreateIssueModal", () => {
     await user.click(picker);
 
     expect(screen.queryByTestId("due-date-picker")).not.toBeInTheDocument();
+  });
+
+  it("hides toolbar fields turned off in Settings → Issue and re-reveals them from the overflow", async () => {
+    const user = userEvent.setup();
+    mockCreateSettingsStore.manualCreateFields = ["status", "priority", "assignee", "project"];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.queryByTestId("label-picker")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Set labels/i }));
+
+    const picker = await screen.findByTestId("label-picker");
+    expect(picker).toHaveAttribute("data-open", "true");
+
+    await user.click(picker);
+
+    expect(screen.queryByTestId("label-picker")).not.toBeInTheDocument();
+  });
+
+  it("keeps a hidden field on the toolbar while it holds a value", () => {
+    mockCreateSettingsStore.manualCreateFields = ["status", "priority", "assignee", "project"];
+    mockDraftStore.draft.labelIds = ["label-1"];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.getByTestId("label-picker")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Set labels/i })).not.toBeInTheDocument();
+  });
+
+  it("renders due date inline when enabled in Settings → Issue", () => {
+    mockCreateSettingsStore.manualCreateFields = [...DEFAULT_MANUAL_FIELDS, "due_date"];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.getByTestId("due-date-picker")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Set due date/i })).not.toBeInTheDocument();
+  });
+
+  it("routes Customize fields to Settings → Issue and closes the dialog", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    renderModal(<CreateIssueModal onClose={onClose} />);
+
+    await user.click(screen.getByRole("button", { name: /Customize fields/i }));
+
+    expect(onClose).toHaveBeenCalled();
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/settings?tab=issue");
   });
 
   // Title + description are packed into the agent prompt on switch; if we

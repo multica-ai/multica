@@ -179,6 +179,12 @@
     "set_start_date": "Set start date...",
     "set_parent": "Set parent issue...",
     "add_subissue": "Add sub-issue...",
+    "set_status": "Set status...",
+    "set_priority": "Set priority...",
+    "set_assignee": "Set assignee...",
+    "set_labels": "Set labels...",
+    "set_project": "Set project...",
+    "customize_fields": "Customize fields...",
     "custom_properties": "Custom properties",
     "remove_parent": "Remove parent",
     "set_parent_picker": {
@@ -205,14 +211,6 @@
       "set_priority": "Set priority...",
       "set_due_date": "Set due date...",
       "customize_fields": "Customize fields...",
-      "field_settings_title": "Quick create fields",
-      "field_settings_description": "Choose which fields stay visible in the quick create toolbar.",
-      "field_settings_done": "Done",
-      "fields": {
-        "project": "Project",
-        "priority": "Priority",
-        "due_date": "Due date"
-      },
       "submit": "Create",
       "sending": "Sending…",
       "uploading": "Uploading…",

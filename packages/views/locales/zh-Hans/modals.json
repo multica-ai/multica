@@ -177,6 +177,12 @@
     "set_start_date": "设置开始日期...",
     "set_parent": "设置父 issue...",
     "add_subissue": "添加子 issue...",
+    "set_status": "设置状态...",
+    "set_priority": "设置优先级...",
+    "set_assignee": "设置负责人...",
+    "set_labels": "设置标签...",
+    "set_project": "设置项目...",
+    "customize_fields": "自定义字段...",
     "custom_properties": "自定义属性",
     "remove_parent": "移除父级",
     "set_parent_picker": {
@@ -203,14 +209,6 @@
       "set_priority": "设置优先级...",
       "set_due_date": "设置截止日期...",
       "customize_fields": "自定义字段...",
-      "field_settings_title": "快速创建字段",
-      "field_settings_description": "选择快速创建工具栏中常驻显示的字段。",
-      "field_settings_done": "完成",
-      "fields": {
-        "project": "项目",
-        "priority": "优先级",
-        "due_date": "截止日期"
-      },
       "submit": "创建",
       "sending": "发送中...",
       "uploading": "上传中...",

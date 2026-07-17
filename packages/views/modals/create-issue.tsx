@@ -12,10 +12,14 @@ import {
   CalendarDays,
   Check,
   ChevronRight,
+  CircleUser,
+  FolderKanban,
   Maximize2,
   Minimize2,
   MoreHorizontal,
+  Settings2,
   Shapes,
+  Tag,
   X as XIcon,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -47,7 +51,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multi
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, useUploadGate, useEditorUpload } from "../editor";
-import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
+import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
@@ -57,6 +61,10 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
+import {
+  useIssueCreateSettingsStore,
+  type ManualCreateField,
+} from "@multica/core/issues/stores/issue-create-settings-store";
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useAttachLabelToIssue } from "@multica/core/labels";
@@ -220,6 +228,7 @@ export function ManualCreatePanel({
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
+  const manualFields = useIssueCreateSettingsStore((s) => s.manualCreateFields);
 
   const [title, setTitle] = useState(draft.title);
   const [formResetKey, setFormResetKey] = useState(0);
@@ -263,6 +272,15 @@ export function ManualCreatePanel({
     typeof data?.stage === "number" ? (data.stage as number) : null,
   );
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
+  // Toolbar fields hidden via Settings → Issue reuse the overflow reveal
+  // pattern: the ⋯ menu item flips this open, which mounts the inline pill
+  // (the popover's anchor) AND opens the picker. Closing without a value
+  // unmounts the pill again; a field holding a non-default value always
+  // renders regardless of the setting so nothing applied is ever invisible.
+  const [fieldPickerOpen, setFieldPickerOpen] = useState<Exclude<
+    ManualCreateField,
+    "due_date" | "start_date"
+  > | null>(null);
   // Start date is a low-frequency field — by default it lives in the
   // overflow ⋯ menu. Clicking the menu item flips this open, which both
   // mounts the inline pill (the popover's anchor) AND opens the calendar.
@@ -344,6 +362,28 @@ export function ManualCreatePanel({
     else next[propertyId] = value;
     setPropertyValues(next);
     setDraft({ propertyValues: next });
+  };
+
+  // Inline pill reveal per toolbar field: kept by Settings → Issue, holding a
+  // non-default value (a hidden field with a value must stay visible — the
+  // draft or a mode-switch carry may have set it), or just opened from the ⋯
+  // overflow (the picker popover needs the inline pill as its anchor).
+  const showField = {
+    status: manualFields.includes("status") || status !== "todo" || fieldPickerOpen === "status",
+    priority: manualFields.includes("priority") || priority !== "none" || fieldPickerOpen === "priority",
+    assignee: manualFields.includes("assignee") || assigneeId != null || fieldPickerOpen === "assignee",
+    labels: manualFields.includes("labels") || labelIds.length > 0 || fieldPickerOpen === "labels",
+    project: manualFields.includes("project") || projectId != null || fieldPickerOpen === "project",
+    due_date: manualFields.includes("due_date") || dueDate !== null || dueDatePickerOpen,
+    start_date: manualFields.includes("start_date") || startDate !== null || startDatePickerOpen,
+  };
+
+  // Field visibility lives in Settings → Issue; the modal closes first so the
+  // dialog doesn't linger over the settings page. The draft store already
+  // holds everything typed, so nothing is lost across the round-trip.
+  const openFieldSettings = () => {
+    onClose();
+    router.push(`${p.settings()}?tab=issue`);
   };
 
   const createIssueMutation = useCreateIssue();
@@ -720,54 +760,75 @@ export function ManualCreatePanel({
                 when an agent assignee will pick the issue up. */}
             <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={status} />
 
-            {/* Property toolbar */}
+            {/* Property toolbar — each field renders per the Settings → Issue
+                selection (see showField above). */}
             <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
               {/* Status */}
-              <StatusPicker
-                status={status}
-                onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.status && (
+                <StatusPicker
+                  status={status}
+                  onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "status" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "status" : null)}
+                />
+              )}
 
               {/* Priority */}
-              <PriorityPicker
-                priority={priority}
-                onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.priority && (
+                <PriorityPicker
+                  priority={priority}
+                  onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "priority" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "priority" : null)}
+                />
+              )}
 
               {/* Assignee */}
-              <AssigneePicker
-                assigneeType={assigneeType ?? null}
-                assigneeId={assigneeId ?? null}
-                onUpdate={(u) => updateAssignee(
-                  u.assignee_type ?? undefined,
-                  u.assignee_id ?? undefined,
-                )}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.assignee && (
+                <AssigneePicker
+                  assigneeType={assigneeType ?? null}
+                  assigneeId={assigneeId ?? null}
+                  onUpdate={(u) => updateAssignee(
+                    u.assignee_type ?? undefined,
+                    u.assignee_id ?? undefined,
+                  )}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "assignee" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "assignee" : null)}
+                />
+              )}
 
               {/* Labels — occupies the slot that used to hold Due date so the
                   add-label entry is exposed directly on the dialog. Draft mode:
                   selection is local until the issue is created (handleSubmit
                   attaches the labels afterward). */}
-              <LabelPicker
-                selectedIds={labelIds}
-                onSelectedIdsChange={updateLabelIds}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.labels && (
+                <LabelPicker
+                  selectedIds={labelIds}
+                  onSelectedIdsChange={updateLabelIds}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "labels" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "labels" : null)}
+                />
+              )}
 
               {/* Project */}
-              <ProjectPicker
-                projectId={projectId ?? null}
-                onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.project && (
+                <ProjectPicker
+                  projectId={projectId ?? null}
+                  onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "project" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
+                />
+              )}
 
               {/* Stage — only relevant when creating a sub-issue under a parent */}
               {parentIssueId && (
@@ -781,11 +842,12 @@ export function ManualCreatePanel({
               )}
 
               {/* Start date — collapsed into the ⋯ menu by default since it's
-                  a low-frequency field. Renders inline only when the field
-                  has a value OR the user just opened it from the overflow
+                  a low-frequency field (exposable via Settings → Issue).
+                  Renders inline when configured visible, when the field has a
+                  value, OR when the user just opened it from the overflow
                   menu (the picker's calendar popover needs the inline pill
                   as its anchor). */}
-              {(startDate || startDatePickerOpen) && (
+              {showField.start_date && (
                 <StartDatePicker
                   startDate={startDate}
                   onUpdate={(u) => updateStartDate(u.start_date ?? null)}
@@ -798,9 +860,8 @@ export function ManualCreatePanel({
 
               {/* Due date — collapsed into the ⋯ menu by default (moved off
                   the toolbar to make room for Labels). Same reveal rule as
-                  start date: inline only when it has a value or the user just
-                  opened it from the overflow menu. */}
-              {(dueDate || dueDatePickerOpen) && (
+                  start date. */}
+              {showField.due_date && (
                 <DueDatePicker
                   dueDate={dueDate}
                   onUpdate={(u) => updateDueDate(u.due_date ?? null)}
@@ -908,13 +969,46 @@ export function ManualCreatePanel({
                   }
                 />
                 <DropdownMenuContent align="start" className="w-auto">
-                  {!dueDate && (
+                  {/* Re-entry points for toolbar fields hidden via
+                      Settings → Issue. Listed in toolbar order; each opens
+                      the picker inline (mounting the pill as its anchor). */}
+                  {!showField.status && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("status")}>
+                      <StatusIcon status={status} className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_status)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.priority && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("priority")}>
+                      <PriorityIcon priority="none" className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_priority)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.assignee && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("assignee")}>
+                      <CircleUser className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_assignee)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.labels && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("labels")}>
+                      <Tag className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_labels)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.project && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("project")}>
+                      <FolderKanban className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_project)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.due_date && (
                     <DropdownMenuItem onClick={() => setDueDatePickerOpen(true)}>
                       <CalendarDays className="h-3.5 w-3.5" />
                       {t(($) => $.create_issue.set_due_date)}
                     </DropdownMenuItem>
                   )}
-                  {!startDate && (
+                  {!showField.start_date && (
                     <DropdownMenuItem onClick={() => setStartDatePickerOpen(true)}>
                       <CalendarClock className="h-3.5 w-3.5" />
                       {t(($) => $.create_issue.set_start_date)}
@@ -962,6 +1056,11 @@ export function ManualCreatePanel({
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
                   )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={openFieldSettings}>
+                    <Settings2 className="h-3.5 w-3.5" />
+                    {t(($) => $.create_issue.customize_fields)}
+                  </DropdownMenuItem>
                   {parentIssueId && parentIssue && (
                     <>
                       <DropdownMenuSeparator />

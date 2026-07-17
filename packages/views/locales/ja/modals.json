@@ -177,6 +177,12 @@
     "set_start_date": "開始日を設定...",
     "set_parent": "親イシューを設定...",
     "add_subissue": "サブイシューを追加...",
+    "set_status": "ステータスを設定...",
+    "set_priority": "優先度を設定...",
+    "set_assignee": "担当者を設定...",
+    "set_labels": "ラベルを設定...",
+    "set_project": "プロジェクトを設定...",
+    "customize_fields": "フィールドをカスタマイズ...",
     "custom_properties": "カスタムプロパティ",
     "remove_parent": "親を削除",
     "set_parent_picker": {
@@ -203,14 +209,6 @@
       "set_priority": "優先度を設定...",
       "set_due_date": "期限を設定...",
       "customize_fields": "フィールドをカスタマイズ...",
-      "field_settings_title": "クイック作成フィールド",
-      "field_settings_description": "クイック作成ツールバーに常に表示するフィールドを選択します。",
-      "field_settings_done": "完了",
-      "fields": {
-        "project": "プロジェクト",
-        "priority": "優先度",
-        "due_date": "期限"
-      },
       "submit": "作成",
       "sending": "送信中…",
       "uploading": "アップロード中…",
