@@ -39,7 +39,7 @@ export class SliplaneProvider extends AppProvider {
       if (!service?.id || service.serverId && service.serverId !== this.serverId) throw new Error("invalid Sliplane service");
       const internalDomain = service.network?.internalDomain ?? service.internalDomain;
       if (!internalDomain || !internalDomain.endsWith(".internal")) throw new Error("missing internal domain");
-      await this.#request(`/projects/${this.projectId}/services/${service.id}/deploy`, { method: "POST", body: "{}" }, [200, 202]);
+      await this.#request(`/projects/${this.projectId}/services/${service.id}/deploy`, { method: "POST", body: "{}" }, [200, 202, 204]);
       await this.#waitUntilHealthy(internalDomain);
       return { serviceId: service.id, internalDomain };
     } catch (error) {

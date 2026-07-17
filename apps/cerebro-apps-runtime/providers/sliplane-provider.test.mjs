@@ -76,6 +76,28 @@ test("creates a private service on the runtime server and explicitly deploys it"
   assert.equal(healthChecks, 2);
 });
 
+test("treats Sliplane's empty 204 deploy response as success", async () => {
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    workerBranch: "main",
+    workerCommit,
+    healthPollMs: 1,
+    healthTimeoutMs: 100,
+    fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/services") && init.method === "POST") {
+        return Response.json({ id: "service-1", network: { internalDomain: "ready.internal" } }, { status: 201 });
+      }
+      if (String(url).endsWith("/services/service-1/deploy")) return new Response(null, { status: 204 });
+      if (String(url) === "http://ready.internal:4311/healthz") return Response.json({ status: "ok", commit: workerCommit });
+      throw new Error(`unexpected request ${init.method} ${url}`);
+    },
+  });
+
+  assert.deepEqual(await provider.createOrDeploy(deployment), { serviceId: "service-1", internalDomain: "ready.internal" });
+});
+
 test("reuses a deterministic service after a create conflict", async () => {
   let creates = 0;
   const provider = new SliplaneProvider({
