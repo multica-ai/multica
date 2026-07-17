@@ -45,11 +45,11 @@ type tomlByteRange struct {
 // Inherited process variables keep Codex's documented default filtering for
 // names containing KEY, SECRET, or TOKEN. Inherited MULTICA_* variables are
 // always dropped because they belong to the daemon process, not necessarily to
-// this task. Explicit MULTICA_* values are safe to include because daemon.go
-// blocklists that namespace from agent custom_env and constructs those values
-// from the current task. Non-secret explicit custom_env values keep their
-// existing shell visibility; secret-looking custom_env remains filtered just
-// as it was under Codex's default policy.
+// this task. Every explicitly configured variable is included, because it is
+// either a daemon-constructed task value or a key the agent owner deliberately
+// set in custom_env; this covers credential-looking names (KEY/SECRET/TOKEN)
+// the owner authorized for this task. Only names enter the allowlist — values
+// are never written to config.toml or logs.
 func CodexShellEnvAllowlist(inherited []string, explicit map[string]string) []string {
 	// Codex's glob matching is case-insensitive. De-duplicate on the same basis
 	// so Windows Path/PATH aliases cannot create ambiguous policy entries.
@@ -59,12 +59,12 @@ func CodexShellEnvAllowlist(inherited []string, explicit map[string]string) []st
 			return
 		}
 		upper := strings.ToUpper(key)
-		if strings.HasPrefix(upper, "MULTICA_") {
-			if !isExplicit {
+		// Explicit keys are always authorized for this task, so they bypass the
+		// inherited-secret guard even when named like a credential.
+		if !isExplicit {
+			if strings.HasPrefix(upper, "MULTICA_") || codexDefaultExcludesEnvKey(upper) {
 				return
 			}
-		} else if codexDefaultExcludesEnvKey(upper) {
-			return
 		}
 		allowed[upper] = key
 	}

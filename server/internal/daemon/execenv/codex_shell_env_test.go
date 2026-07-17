@@ -53,11 +53,14 @@ func TestCodexShellEnvAllowlistUsesExactTaskAndSafeInheritedNames(t *testing.T) 
 		"MULTICA_TOKEN":      "mat_task",
 		"MULTICA_SERVER_URL": "https://task.example",
 		"CUSTOM_FLAG":        "enabled",
-		"ANTHROPIC_API_KEY":  "agent-secret",
+		// Explicit custom_env, credential-named: authorized for this task, so it
+		// must be allowlisted even though inherited OPENAI_API_KEY/GH_TOKEN are not.
+		"ANTHROPIC_API_KEY": "agent-secret",
 	}
 
 	got := CodexShellEnvAllowlist(inherited, explicit)
 	want := []string{
+		"ANTHROPIC_API_KEY",
 		"APPDATA",
 		"COMSPEC",
 		"CUSTOM_FLAG",
@@ -75,6 +78,79 @@ func TestCodexShellEnvAllowlistUsesExactTaskAndSafeInheritedNames(t *testing.T) 
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("CodexShellEnvAllowlist() = %#v, want %#v", got, want)
+	}
+}
+
+// Regression for #5601: an agent's explicitly configured custom_env credential
+// (a KEY/SECRET/TOKEN-named value) was dropped from the Codex shell allowlist,
+// so the task shell saw CUSTOM_ENDPOINT but not CUSTOM_ACCESS_TOKEN. Explicit
+// keys must be included regardless of their name; only inherited daemon-process
+// secrets keep Codex's default KEY/SECRET/TOKEN filtering.
+func TestCodexShellEnvAllowlistIncludesExplicitCredentialNames(t *testing.T) {
+	t.Parallel()
+
+	inherited := []string{
+		"PATH=/usr/bin",
+		// Same-shaped names but inherited from the daemon process: stay filtered.
+		"HOST_API_KEY=daemon-secret",
+		"HOST_SECRET=daemon-secret",
+		"HOST_ACCESS_TOKEN=daemon-secret",
+	}
+	explicit := map[string]string{
+		"CUSTOM_ENDPOINT":     "https://example.com",
+		"CUSTOM_ACCESS_TOKEN": "agent-secret",
+		"CUSTOM_API_KEY":      "agent-secret",
+		"CUSTOM_SECRET":       "agent-secret",
+	}
+
+	got := CodexShellEnvAllowlist(inherited, explicit)
+	want := []string{
+		"CUSTOM_ACCESS_TOKEN",
+		"CUSTOM_API_KEY",
+		"CUSTOM_ENDPOINT",
+		"CUSTOM_SECRET",
+		"PATH",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CodexShellEnvAllowlist() = %#v, want %#v", got, want)
+	}
+}
+
+// Regression for #5601 at the config layer: the credential-named explicit key
+// must land in the managed include_only that nested shell/worker subprocesses
+// read, while its value never touches config.toml.
+func TestEnsureCodexShellEnvPolicyConfigAllowsExplicitCredentialNameWithoutValue(t *testing.T) {
+	t.Parallel()
+
+	includeOnly := CodexShellEnvAllowlist(
+		[]string{"PATH=/usr/bin"},
+		map[string]string{"CUSTOM_ACCESS_TOKEN": "super-secret-value"},
+	)
+
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := EnsureCodexShellEnvPolicyConfig(configPath, includeOnly, testLogger()); err != nil {
+		t.Fatalf("EnsureCodexShellEnvPolicyConfig: %v", err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config.toml: %v", err)
+	}
+	s := string(data)
+	assertValidToml(t, s)
+
+	policy := parsedShellEnvPolicy(t, s)
+	found := false
+	for _, k := range policy.IncludeOnly {
+		if k == "CUSTOM_ACCESS_TOKEN" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("include_only missing CUSTOM_ACCESS_TOKEN: %#v", policy.IncludeOnly)
+	}
+	if strings.Contains(s, "super-secret-value") {
+		t.Fatalf("secret value leaked into config.toml:\n%s", s)
 	}
 }
 
