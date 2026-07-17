@@ -61,13 +61,13 @@ ORDER BY changed_at DESC, id DESC
 LIMIT 100;
 
 -- name: ListOperatingPeriods :many
-SELECT id, workspace_id, name, starts_on, ends_on, created_at, updated_at
+SELECT id, workspace_id, name, unit, starts_on, ends_on, created_at, updated_at
 FROM cerebro_operating_period
 WHERE workspace_id = $1
 ORDER BY starts_on DESC;
 
 -- name: GetOperatingPeriod :one
-SELECT id, workspace_id, name, starts_on, ends_on, created_at, updated_at
+SELECT id, workspace_id, name, unit, starts_on, ends_on, created_at, updated_at
 FROM cerebro_operating_period
 WHERE id = $1 AND workspace_id = $2;
 
@@ -76,18 +76,74 @@ INSERT INTO cerebro_operating_period (workspace_id, name, starts_on, ends_on)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (workspace_id, starts_on, ends_on) DO UPDATE
 SET name = EXCLUDED.name, updated_at = now()
-RETURNING id, workspace_id, name, starts_on, ends_on, created_at, updated_at;
+RETURNING id, workspace_id, name, unit, starts_on, ends_on, created_at, updated_at;
+
+-- name: CreateOperatingPeriod :one
+INSERT INTO cerebro_operating_period (workspace_id, name, unit, starts_on, ends_on)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (workspace_id, starts_on, ends_on) DO UPDATE
+SET name = EXCLUDED.name, unit = EXCLUDED.unit, updated_at = now()
+RETURNING id, workspace_id, name, unit, starts_on, ends_on, created_at, updated_at;
+
+-- name: UpdateOperatingPeriod :one
+UPDATE cerebro_operating_period
+SET name = $3, unit = $4, starts_on = $5, ends_on = $6, updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, name, unit, starts_on, ends_on, created_at, updated_at;
+
+-- name: DeleteOperatingPeriod :execrows
+DELETE FROM cerebro_operating_period
+WHERE id = $1 AND workspace_id = $2;
+
+-- name: ListOsElementSettings :many
+SELECT workspace_id, element_key, enabled, created_at, updated_at
+FROM cerebro_os_element_setting
+WHERE workspace_id = $1
+ORDER BY element_key;
+
+-- name: UpsertOsElementSetting :one
+INSERT INTO cerebro_os_element_setting (workspace_id, element_key, enabled)
+VALUES ($1, $2, $3)
+ON CONFLICT (workspace_id, element_key) DO UPDATE
+SET enabled = EXCLUDED.enabled, updated_at = now()
+RETURNING workspace_id, element_key, enabled, created_at, updated_at;
+
+-- name: CreateGoalType :one
+INSERT INTO cerebro_goal_type (workspace_id, name, color, scope_label, position)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, workspace_id, name, color, scope_label, position, created_at, updated_at;
+
+-- name: ListGoalTypes :many
+SELECT id, workspace_id, name, color, scope_label, position, created_at, updated_at
+FROM cerebro_goal_type
+WHERE workspace_id = $1
+ORDER BY position ASC, created_at ASC;
+
+-- name: GetGoalType :one
+SELECT id, workspace_id, name, color, scope_label, position, created_at, updated_at
+FROM cerebro_goal_type
+WHERE id = $1 AND workspace_id = $2;
+
+-- name: UpdateGoalType :one
+UPDATE cerebro_goal_type
+SET name = $3, color = $4, scope_label = $5, position = $6, updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, name, color, scope_label, position, created_at, updated_at;
+
+-- name: DeleteGoalType :execrows
+DELETE FROM cerebro_goal_type
+WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateRock :one
 INSERT INTO cerebro_rock (
     workspace_id, title, description, owner_type, owner_id, period_id,
-    period_start, period_end, confidence, reported_health
+    period_start, period_end, confidence, reported_health, goal_type_id
 )
-SELECT sqlc.arg(workspace_id), sqlc.arg(title), sqlc.arg(description), sqlc.arg(owner_type), sqlc.arg(owner_id), op.id, op.starts_on, op.ends_on, sqlc.arg(confidence), sqlc.arg(reported_health)
+SELECT sqlc.arg(workspace_id), sqlc.arg(title), sqlc.arg(description), sqlc.arg(owner_type), sqlc.arg(owner_id), op.id, op.starts_on, op.ends_on, sqlc.arg(confidence), sqlc.arg(reported_health), sqlc.narg(goal_type_id)
 FROM cerebro_operating_period op
 WHERE op.id = sqlc.arg(period_id) AND op.workspace_id = sqlc.arg(workspace_id)
 RETURNING id, project_id, workspace_id, title, description, owner_type, owner_id,
-          period_id, period_start, period_end, confidence, reported_health, created_at, updated_at;
+          period_id, period_start, period_end, confidence, reported_health, goal_type_id, created_at, updated_at;
 
 -- name: UpdateRock :one
 UPDATE cerebro_rock r
@@ -100,12 +156,13 @@ SET title = $3,
     period_end = op.ends_on,
     confidence = $8,
     reported_health = $9,
+    goal_type_id = $10,
     updated_at = now()
 FROM cerebro_operating_period op
 WHERE r.id = $1 AND r.workspace_id = $2
   AND op.id = $7 AND op.workspace_id = $2
 RETURNING r.id, r.project_id, r.workspace_id, r.title, r.description, r.owner_type, r.owner_id,
-          r.period_id, r.period_start, r.period_end, r.confidence, r.reported_health, r.created_at, r.updated_at;
+          r.period_id, r.period_start, r.period_end, r.confidence, r.reported_health, r.goal_type_id, r.created_at, r.updated_at;
 
 -- name: UpsertLegacyRock :one
 INSERT INTO cerebro_rock (
@@ -162,7 +219,11 @@ WITH rock_issue AS (
 SELECT r.id, r.project_id, r.workspace_id, r.title, r.description, r.owner_type, r.owner_id,
        COALESCE(u.name, a.name, '') AS owner_name,
        r.period_id, op.name AS period_name, r.period_start, r.period_end, r.confidence,
-       r.reported_health, r.created_at, r.updated_at,
+       r.reported_health, r.goal_type_id,
+       COALESCE(gt.name, '') AS goal_type_name,
+       COALESCE(gt.color, '') AS goal_type_color,
+       COALESCE(gt.scope_label, '') AS goal_type_scope_label,
+       r.created_at, r.updated_at,
        COALESCE(p.title, '') AS project_title, COALESCE(p.description, '') AS project_description,
        COALESCE(p.status, '') AS project_status,
        COALESCE(rollup.issue_count, 0)::integer AS issue_count,
@@ -175,6 +236,7 @@ SELECT r.id, r.project_id, r.workspace_id, r.title, r.description, r.owner_type,
        COALESCE(si.title, '') AS strategy_item_title
 FROM cerebro_rock r
 JOIN cerebro_operating_period op ON op.id = r.period_id AND op.workspace_id = r.workspace_id
+LEFT JOIN cerebro_goal_type gt ON gt.id = r.goal_type_id AND gt.workspace_id = r.workspace_id
 LEFT JOIN project p ON p.id = r.project_id AND p.workspace_id = r.workspace_id
 LEFT JOIN member m ON r.owner_type = 'member' AND m.id = r.owner_id AND m.workspace_id = r.workspace_id
 LEFT JOIN "user" u ON u.id = m.user_id

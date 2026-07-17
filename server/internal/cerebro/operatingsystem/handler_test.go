@@ -101,6 +101,90 @@ func TestHandlerRejectsMalformedConnectionQuery(t *testing.T) {
 	}
 }
 
+func TestHandlerListsElements(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{listElements: func(context.Context, pgtype.UUID) ([]OsElementResponse, error) {
+		return []OsElementResponse{{Key: "goals", Enabled: true, DefaultEnabled: true}}, nil
+	}})
+	req := memberRequest(http.MethodGet, "/api/cerebro/operating-system/elements", "")
+	rec := httptest.NewRecorder()
+
+	h.ListElements(rec, req)
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"goals"`) {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerMapsUnknownElementToBadRequest(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{updateElement: func(_ context.Context, _ pgtype.UUID, key string, _ bool) (OsElementResponse, error) {
+		return OsElementResponse{}, errors.New(`invalid element "` + key + `"`)
+	}})
+	req := memberRequest(http.MethodPut, "/api/cerebro/operating-system/elements/nope", `{"enabled":true}`)
+	req = withURLParam(req, "key", "nope")
+	rec := httptest.NewRecorder()
+
+	h.UpdateElement(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerCreatesGoalType(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{createGoalType: func(_ context.Context, _ pgtype.UUID, input GoalTypeInput) (GoalTypeResponse, error) {
+		return GoalTypeResponse{ID: "goal-type-1", Name: input.Name}, nil
+	}})
+	req := memberRequest(http.MethodPost, "/api/cerebro/goal-types", `{"name":"Company","color":"#22C55E","scope_label":"company-wide"}`)
+	rec := httptest.NewRecorder()
+
+	h.CreateGoalType(rec, req)
+
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), "Company") {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerMapsDuplicateGoalTypeToConflict(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{createGoalType: func(context.Context, pgtype.UUID, GoalTypeInput) (GoalTypeResponse, error) {
+		return GoalTypeResponse{}, errors.New("a goal type with this name already exists")
+	}})
+	req := memberRequest(http.MethodPost, "/api/cerebro/goal-types", `{"name":"Company"}`)
+	rec := httptest.NewRecorder()
+
+	h.CreateGoalType(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerCreatesPeriod(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{createPeriod: func(_ context.Context, _ pgtype.UUID, input OperatingPeriodInput) (OperatingPeriodResponse, error) {
+		return OperatingPeriodResponse{ID: "period-1", Name: "August 2026", Unit: input.Unit}, nil
+	}})
+	req := memberRequest(http.MethodPost, "/api/cerebro/operating-periods", `{"unit":"month","starts_on":"2026-08-01"}`)
+	rec := httptest.NewRecorder()
+
+	h.CreatePeriod(rec, req)
+
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), "August 2026") {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerRejectsInvalidPeriodUUIDOnDelete(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{})
+	req := memberRequest(http.MethodDelete, "/api/cerebro/operating-periods/not-a-uuid", "")
+	req = withURLParam(req, "id", "not-a-uuid")
+	rec := httptest.NewRecorder()
+
+	h.DeletePeriod(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
 func memberRequest(method, target, body string) *http.Request {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
 	memberID := pgtype.UUID{Bytes: [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, Valid: true}
@@ -118,6 +202,50 @@ type fakeHandlerService struct {
 	createStrategy func(context.Context, pgtype.UUID, StrategyItemInput) (StrategyItemResponse, error)
 	listStrategy   func(context.Context, pgtype.UUID) ([]StrategyItemResponse, error)
 	upsertRock     func(context.Context, pgtype.UUID, RockInput) error
+	listElements   func(context.Context, pgtype.UUID) ([]OsElementResponse, error)
+	updateElement  func(context.Context, pgtype.UUID, string, bool) (OsElementResponse, error)
+	createGoalType func(context.Context, pgtype.UUID, GoalTypeInput) (GoalTypeResponse, error)
+	createPeriod   func(context.Context, pgtype.UUID, OperatingPeriodInput) (OperatingPeriodResponse, error)
+}
+
+func (f *fakeHandlerService) ListElements(ctx context.Context, ws pgtype.UUID) ([]OsElementResponse, error) {
+	if f.listElements == nil {
+		return []OsElementResponse{}, nil
+	}
+	return f.listElements(ctx, ws)
+}
+func (f *fakeHandlerService) UpdateElement(ctx context.Context, ws pgtype.UUID, key string, enabled bool) (OsElementResponse, error) {
+	if f.updateElement == nil {
+		return OsElementResponse{}, nil
+	}
+	return f.updateElement(ctx, ws, key, enabled)
+}
+func (f *fakeHandlerService) CreateGoalType(ctx context.Context, ws pgtype.UUID, input GoalTypeInput) (GoalTypeResponse, error) {
+	if f.createGoalType == nil {
+		return GoalTypeResponse{}, nil
+	}
+	return f.createGoalType(ctx, ws, input)
+}
+func (f *fakeHandlerService) ListGoalTypes(context.Context, pgtype.UUID) ([]GoalTypeResponse, error) {
+	return []GoalTypeResponse{}, nil
+}
+func (f *fakeHandlerService) UpdateGoalType(context.Context, pgtype.UUID, pgtype.UUID, GoalTypeInput) (GoalTypeResponse, error) {
+	return GoalTypeResponse{}, nil
+}
+func (f *fakeHandlerService) DeleteGoalType(context.Context, pgtype.UUID, pgtype.UUID) (bool, error) {
+	return true, nil
+}
+func (f *fakeHandlerService) CreatePeriod(ctx context.Context, ws pgtype.UUID, input OperatingPeriodInput) (OperatingPeriodResponse, error) {
+	if f.createPeriod == nil {
+		return OperatingPeriodResponse{}, nil
+	}
+	return f.createPeriod(ctx, ws, input)
+}
+func (f *fakeHandlerService) UpdatePeriod(context.Context, pgtype.UUID, pgtype.UUID, OperatingPeriodInput) (OperatingPeriodResponse, error) {
+	return OperatingPeriodResponse{}, nil
+}
+func (f *fakeHandlerService) DeletePeriod(context.Context, pgtype.UUID, pgtype.UUID) (bool, error) {
+	return true, nil
 }
 
 func (f *fakeHandlerService) GetSettings(context.Context, pgtype.UUID) (SettingsResponse, error) {

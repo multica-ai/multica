@@ -4,7 +4,7 @@ import { issueListOptions } from "@multica/core/issues/queries";
 import { projectListOptions } from "@multica/core/projects";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import type { OperatingPeriod, Rock, StrategyItem, Terminology } from "../core/types";
-import { useSaveRock } from "../core/queries";
+import { goalTypesOptions, useSaveRock } from "../core/queries";
 
 interface RockFormProps {
   wsId: string;
@@ -25,10 +25,12 @@ export function RockForm({ wsId, terminology, periods, strategyItems, rock, onSa
   const issues = useQuery(issueListOptions(wsId));
   const members = useQuery(memberListOptions(wsId));
   const agents = useQuery(agentListOptions(wsId));
+  const goalTypes = useQuery(goalTypesOptions(wsId));
   const save = useSaveRock(wsId);
   const [title, setTitle] = useState(rock?.title ?? "");
   const [description, setDescription] = useState(rock?.description ?? "");
   const [periodId, setPeriodId] = useState(rock?.period_id ?? "");
+  const [goalTypeId, setGoalTypeId] = useState(rock?.goal_type_id ?? "");
   const [owner, setOwner] = useState(rock?.owner_id ? `${rock.owner_type}:${rock.owner_id}` : "");
   const [confidence, setConfidence] = useState(rock?.confidence ?? 50);
   const [reportedHealth, setReportedHealth] = useState(rock?.reported_health === "unknown" ? "unset" : rock?.reported_health ?? "unset");
@@ -49,6 +51,7 @@ export function RockForm({ wsId, terminology, periods, strategyItems, rock, onSa
         title: title.trim(),
         description: description.trim(),
         period_id: periodId,
+        goal_type_id: goalTypeId || undefined,
         confidence,
         reported_health: reportedHealth,
         owner_type: ownerId ? ownerType as "member" | "agent" : undefined,
@@ -76,6 +79,12 @@ export function RockForm({ wsId, terminology, periods, strategyItems, rock, onSa
         <select aria-label="Period" required value={periodId} onChange={(event) => setPeriodId(event.target.value)} className="h-10 rounded-md border bg-background px-3">
           <option value="">Select period</option>
           {periods.map((period) => <option key={period.id} value={period.id}>{period.name}</option>)}
+        </select>
+      </label>
+      <label className="grid gap-1 text-sm">Type
+        <select aria-label="Type" value={goalTypeId} onChange={(event) => setGoalTypeId(event.target.value)} className="h-10 rounded-md border bg-background px-3">
+          <option value="">No type</option>
+          {(goalTypes.data?.goal_types ?? []).map((goalType) => <option key={goalType.id} value={goalType.id}>{goalType.name}</option>)}
         </select>
       </label>
       <label className="grid gap-1 text-sm">Owner

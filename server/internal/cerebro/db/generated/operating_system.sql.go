@@ -37,6 +37,42 @@ func (q *Queries) ApplyRockCheckIn(ctx context.Context, arg ApplyRockCheckInPara
 	return id, err
 }
 
+const createGoalType = `-- name: CreateGoalType :one
+INSERT INTO cerebro_goal_type (workspace_id, name, color, scope_label, position)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, workspace_id, name, color, scope_label, position, created_at, updated_at
+`
+
+type CreateGoalTypeParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+	Color       string      `json:"color"`
+	ScopeLabel  string      `json:"scope_label"`
+	Position    int32       `json:"position"`
+}
+
+func (q *Queries) CreateGoalType(ctx context.Context, arg CreateGoalTypeParams) (CerebroGoalType, error) {
+	row := q.db.QueryRow(ctx, createGoalType,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Color,
+		arg.ScopeLabel,
+		arg.Position,
+	)
+	var i CerebroGoalType
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Color,
+		&i.ScopeLabel,
+		&i.Position,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createObjectConnection = `-- name: CreateObjectConnection :one
 INSERT INTO cerebro_object_connection (
     workspace_id, source_type, source_id, target_type, target_id,
@@ -88,16 +124,65 @@ func (q *Queries) CreateObjectConnection(ctx context.Context, arg CreateObjectCo
 	return i, err
 }
 
+const createOperatingPeriod = `-- name: CreateOperatingPeriod :one
+INSERT INTO cerebro_operating_period (workspace_id, name, unit, starts_on, ends_on)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (workspace_id, starts_on, ends_on) DO UPDATE
+SET name = EXCLUDED.name, unit = EXCLUDED.unit, updated_at = now()
+RETURNING id, workspace_id, name, unit, starts_on, ends_on, created_at, updated_at
+`
+
+type CreateOperatingPeriodParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+	Unit        string      `json:"unit"`
+	StartsOn    pgtype.Date `json:"starts_on"`
+	EndsOn      pgtype.Date `json:"ends_on"`
+}
+
+type CreateOperatingPeriodRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Unit        string             `json:"unit"`
+	StartsOn    pgtype.Date        `json:"starts_on"`
+	EndsOn      pgtype.Date        `json:"ends_on"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) CreateOperatingPeriod(ctx context.Context, arg CreateOperatingPeriodParams) (CreateOperatingPeriodRow, error) {
+	row := q.db.QueryRow(ctx, createOperatingPeriod,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Unit,
+		arg.StartsOn,
+		arg.EndsOn,
+	)
+	var i CreateOperatingPeriodRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Unit,
+		&i.StartsOn,
+		&i.EndsOn,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createRock = `-- name: CreateRock :one
 INSERT INTO cerebro_rock (
     workspace_id, title, description, owner_type, owner_id, period_id,
-    period_start, period_end, confidence, reported_health
+    period_start, period_end, confidence, reported_health, goal_type_id
 )
-SELECT $1, $2, $3, $4, $5, op.id, op.starts_on, op.ends_on, $6, $7
+SELECT $1, $2, $3, $4, $5, op.id, op.starts_on, op.ends_on, $6, $7, $8
 FROM cerebro_operating_period op
-WHERE op.id = $8 AND op.workspace_id = $1
+WHERE op.id = $9 AND op.workspace_id = $1
 RETURNING id, project_id, workspace_id, title, description, owner_type, owner_id,
-          period_id, period_start, period_end, confidence, reported_health, created_at, updated_at
+          period_id, period_start, period_end, confidence, reported_health, goal_type_id, created_at, updated_at
 `
 
 type CreateRockParams struct {
@@ -108,6 +193,7 @@ type CreateRockParams struct {
 	OwnerID        pgtype.UUID `json:"owner_id"`
 	Confidence     int32       `json:"confidence"`
 	ReportedHealth string      `json:"reported_health"`
+	GoalTypeID     pgtype.UUID `json:"goal_type_id"`
 	PeriodID       pgtype.UUID `json:"period_id"`
 }
 
@@ -124,6 +210,7 @@ type CreateRockRow struct {
 	PeriodEnd      pgtype.Date        `json:"period_end"`
 	Confidence     int32              `json:"confidence"`
 	ReportedHealth string             `json:"reported_health"`
+	GoalTypeID     pgtype.UUID        `json:"goal_type_id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
@@ -137,6 +224,7 @@ func (q *Queries) CreateRock(ctx context.Context, arg CreateRockParams) (CreateR
 		arg.OwnerID,
 		arg.Confidence,
 		arg.ReportedHealth,
+		arg.GoalTypeID,
 		arg.PeriodID,
 	)
 	var i CreateRockRow
@@ -153,6 +241,7 @@ func (q *Queries) CreateRock(ctx context.Context, arg CreateRockParams) (CreateR
 		&i.PeriodEnd,
 		&i.Confidence,
 		&i.ReportedHealth,
+		&i.GoalTypeID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -271,6 +360,24 @@ func (q *Queries) CreateStrategyItem(ctx context.Context, arg CreateStrategyItem
 	return i, err
 }
 
+const deleteGoalType = `-- name: DeleteGoalType :execrows
+DELETE FROM cerebro_goal_type
+WHERE id = $1 AND workspace_id = $2
+`
+
+type DeleteGoalTypeParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteGoalType(ctx context.Context, arg DeleteGoalTypeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteGoalType, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteObjectConnection = `-- name: DeleteObjectConnection :execrows
 DELETE FROM cerebro_object_connection
 WHERE id = $1 AND workspace_id = $2
@@ -310,6 +417,24 @@ func (q *Queries) DeleteObjectConnectionsForSource(ctx context.Context, arg Dele
 		arg.TargetTypes,
 	)
 	return err
+}
+
+const deleteOperatingPeriod = `-- name: DeleteOperatingPeriod :execrows
+DELETE FROM cerebro_operating_period
+WHERE id = $1 AND workspace_id = $2
+`
+
+type DeleteOperatingPeriodParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteOperatingPeriod(ctx context.Context, arg DeleteOperatingPeriodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOperatingPeriod, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteRock = `-- name: DeleteRock :execrows
@@ -364,8 +489,35 @@ func (q *Queries) DeleteStrategyItem(ctx context.Context, arg DeleteStrategyItem
 	return result.RowsAffected(), nil
 }
 
+const getGoalType = `-- name: GetGoalType :one
+SELECT id, workspace_id, name, color, scope_label, position, created_at, updated_at
+FROM cerebro_goal_type
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetGoalTypeParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetGoalType(ctx context.Context, arg GetGoalTypeParams) (CerebroGoalType, error) {
+	row := q.db.QueryRow(ctx, getGoalType, arg.ID, arg.WorkspaceID)
+	var i CerebroGoalType
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Color,
+		&i.ScopeLabel,
+		&i.Position,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getOperatingPeriod = `-- name: GetOperatingPeriod :one
-SELECT id, workspace_id, name, starts_on, ends_on, created_at, updated_at
+SELECT id, workspace_id, name, unit, starts_on, ends_on, created_at, updated_at
 FROM cerebro_operating_period
 WHERE id = $1 AND workspace_id = $2
 `
@@ -375,13 +527,25 @@ type GetOperatingPeriodParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetOperatingPeriod(ctx context.Context, arg GetOperatingPeriodParams) (CerebroOperatingPeriod, error) {
+type GetOperatingPeriodRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Unit        string             `json:"unit"`
+	StartsOn    pgtype.Date        `json:"starts_on"`
+	EndsOn      pgtype.Date        `json:"ends_on"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetOperatingPeriod(ctx context.Context, arg GetOperatingPeriodParams) (GetOperatingPeriodRow, error) {
 	row := q.db.QueryRow(ctx, getOperatingPeriod, arg.ID, arg.WorkspaceID)
-	var i CerebroOperatingPeriod
+	var i GetOperatingPeriodRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
 		&i.Name,
+		&i.Unit,
 		&i.StartsOn,
 		&i.EndsOn,
 		&i.CreatedAt,
@@ -508,6 +672,42 @@ func (q *Queries) GetStrategyItem(ctx context.Context, arg GetStrategyItemParams
 	return i, err
 }
 
+const listGoalTypes = `-- name: ListGoalTypes :many
+SELECT id, workspace_id, name, color, scope_label, position, created_at, updated_at
+FROM cerebro_goal_type
+WHERE workspace_id = $1
+ORDER BY position ASC, created_at ASC
+`
+
+func (q *Queries) ListGoalTypes(ctx context.Context, workspaceID pgtype.UUID) ([]CerebroGoalType, error) {
+	rows, err := q.db.Query(ctx, listGoalTypes, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CerebroGoalType{}
+	for rows.Next() {
+		var i CerebroGoalType
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Color,
+			&i.ScopeLabel,
+			&i.Position,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listObjectConnections = `-- name: ListObjectConnections :many
 SELECT id, workspace_id, source_type, source_id, target_type, target_id,
        relationship_type, provenance, created_by_type, created_by_id, created_at
@@ -559,27 +759,72 @@ func (q *Queries) ListObjectConnections(ctx context.Context, arg ListObjectConne
 }
 
 const listOperatingPeriods = `-- name: ListOperatingPeriods :many
-SELECT id, workspace_id, name, starts_on, ends_on, created_at, updated_at
+SELECT id, workspace_id, name, unit, starts_on, ends_on, created_at, updated_at
 FROM cerebro_operating_period
 WHERE workspace_id = $1
 ORDER BY starts_on DESC
 `
 
-func (q *Queries) ListOperatingPeriods(ctx context.Context, workspaceID pgtype.UUID) ([]CerebroOperatingPeriod, error) {
+type ListOperatingPeriodsRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Unit        string             `json:"unit"`
+	StartsOn    pgtype.Date        `json:"starts_on"`
+	EndsOn      pgtype.Date        `json:"ends_on"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListOperatingPeriods(ctx context.Context, workspaceID pgtype.UUID) ([]ListOperatingPeriodsRow, error) {
 	rows, err := q.db.Query(ctx, listOperatingPeriods, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CerebroOperatingPeriod{}
+	items := []ListOperatingPeriodsRow{}
 	for rows.Next() {
-		var i CerebroOperatingPeriod
+		var i ListOperatingPeriodsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
 			&i.Name,
+			&i.Unit,
 			&i.StartsOn,
 			&i.EndsOn,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOsElementSettings = `-- name: ListOsElementSettings :many
+SELECT workspace_id, element_key, enabled, created_at, updated_at
+FROM cerebro_os_element_setting
+WHERE workspace_id = $1
+ORDER BY element_key
+`
+
+func (q *Queries) ListOsElementSettings(ctx context.Context, workspaceID pgtype.UUID) ([]CerebroOsElementSetting, error) {
+	rows, err := q.db.Query(ctx, listOsElementSettings, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CerebroOsElementSetting{}
+	for rows.Next() {
+		var i CerebroOsElementSetting
+		if err := rows.Scan(
+			&i.WorkspaceID,
+			&i.ElementKey,
+			&i.Enabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -767,7 +1012,11 @@ WITH rock_issue AS (
 SELECT r.id, r.project_id, r.workspace_id, r.title, r.description, r.owner_type, r.owner_id,
        COALESCE(u.name, a.name, '') AS owner_name,
        r.period_id, op.name AS period_name, r.period_start, r.period_end, r.confidence,
-       r.reported_health, r.created_at, r.updated_at,
+       r.reported_health, r.goal_type_id,
+       COALESCE(gt.name, '') AS goal_type_name,
+       COALESCE(gt.color, '') AS goal_type_color,
+       COALESCE(gt.scope_label, '') AS goal_type_scope_label,
+       r.created_at, r.updated_at,
        COALESCE(p.title, '') AS project_title, COALESCE(p.description, '') AS project_description,
        COALESCE(p.status, '') AS project_status,
        COALESCE(rollup.issue_count, 0)::integer AS issue_count,
@@ -780,6 +1029,7 @@ SELECT r.id, r.project_id, r.workspace_id, r.title, r.description, r.owner_type,
        COALESCE(si.title, '') AS strategy_item_title
 FROM cerebro_rock r
 JOIN cerebro_operating_period op ON op.id = r.period_id AND op.workspace_id = r.workspace_id
+LEFT JOIN cerebro_goal_type gt ON gt.id = r.goal_type_id AND gt.workspace_id = r.workspace_id
 LEFT JOIN project p ON p.id = r.project_id AND p.workspace_id = r.workspace_id
 LEFT JOIN member m ON r.owner_type = 'member' AND m.id = r.owner_id AND m.workspace_id = r.workspace_id
 LEFT JOIN "user" u ON u.id = m.user_id
@@ -807,6 +1057,10 @@ type ListRockRollupsRow struct {
 	PeriodEnd          pgtype.Date        `json:"period_end"`
 	Confidence         int32              `json:"confidence"`
 	ReportedHealth     string             `json:"reported_health"`
+	GoalTypeID         pgtype.UUID        `json:"goal_type_id"`
+	GoalTypeName       string             `json:"goal_type_name"`
+	GoalTypeColor      string             `json:"goal_type_color"`
+	GoalTypeScopeLabel string             `json:"goal_type_scope_label"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	ProjectTitle       string             `json:"project_title"`
@@ -844,6 +1098,10 @@ func (q *Queries) ListRockRollups(ctx context.Context, workspaceID pgtype.UUID) 
 			&i.PeriodEnd,
 			&i.Confidence,
 			&i.ReportedHealth,
+			&i.GoalTypeID,
+			&i.GoalTypeName,
+			&i.GoalTypeColor,
+			&i.GoalTypeScopeLabel,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ProjectTitle,
@@ -966,6 +1224,95 @@ func (q *Queries) ListStrategyItems(ctx context.Context, workspaceID pgtype.UUID
 	return items, nil
 }
 
+const updateGoalType = `-- name: UpdateGoalType :one
+UPDATE cerebro_goal_type
+SET name = $3, color = $4, scope_label = $5, position = $6, updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, name, color, scope_label, position, created_at, updated_at
+`
+
+type UpdateGoalTypeParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+	Color       string      `json:"color"`
+	ScopeLabel  string      `json:"scope_label"`
+	Position    int32       `json:"position"`
+}
+
+func (q *Queries) UpdateGoalType(ctx context.Context, arg UpdateGoalTypeParams) (CerebroGoalType, error) {
+	row := q.db.QueryRow(ctx, updateGoalType,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Color,
+		arg.ScopeLabel,
+		arg.Position,
+	)
+	var i CerebroGoalType
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Color,
+		&i.ScopeLabel,
+		&i.Position,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateOperatingPeriod = `-- name: UpdateOperatingPeriod :one
+UPDATE cerebro_operating_period
+SET name = $3, unit = $4, starts_on = $5, ends_on = $6, updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, name, unit, starts_on, ends_on, created_at, updated_at
+`
+
+type UpdateOperatingPeriodParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+	Unit        string      `json:"unit"`
+	StartsOn    pgtype.Date `json:"starts_on"`
+	EndsOn      pgtype.Date `json:"ends_on"`
+}
+
+type UpdateOperatingPeriodRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Unit        string             `json:"unit"`
+	StartsOn    pgtype.Date        `json:"starts_on"`
+	EndsOn      pgtype.Date        `json:"ends_on"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpdateOperatingPeriod(ctx context.Context, arg UpdateOperatingPeriodParams) (UpdateOperatingPeriodRow, error) {
+	row := q.db.QueryRow(ctx, updateOperatingPeriod,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Unit,
+		arg.StartsOn,
+		arg.EndsOn,
+	)
+	var i UpdateOperatingPeriodRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Unit,
+		&i.StartsOn,
+		&i.EndsOn,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateRock = `-- name: UpdateRock :one
 UPDATE cerebro_rock r
 SET title = $3,
@@ -977,12 +1324,13 @@ SET title = $3,
     period_end = op.ends_on,
     confidence = $8,
     reported_health = $9,
+    goal_type_id = $10,
     updated_at = now()
 FROM cerebro_operating_period op
 WHERE r.id = $1 AND r.workspace_id = $2
   AND op.id = $7 AND op.workspace_id = $2
 RETURNING r.id, r.project_id, r.workspace_id, r.title, r.description, r.owner_type, r.owner_id,
-          r.period_id, r.period_start, r.period_end, r.confidence, r.reported_health, r.created_at, r.updated_at
+          r.period_id, r.period_start, r.period_end, r.confidence, r.reported_health, r.goal_type_id, r.created_at, r.updated_at
 `
 
 type UpdateRockParams struct {
@@ -995,6 +1343,7 @@ type UpdateRockParams struct {
 	PeriodID       pgtype.UUID `json:"period_id"`
 	Confidence     int32       `json:"confidence"`
 	ReportedHealth string      `json:"reported_health"`
+	GoalTypeID     pgtype.UUID `json:"goal_type_id"`
 }
 
 type UpdateRockRow struct {
@@ -1010,6 +1359,7 @@ type UpdateRockRow struct {
 	PeriodEnd      pgtype.Date        `json:"period_end"`
 	Confidence     int32              `json:"confidence"`
 	ReportedHealth string             `json:"reported_health"`
+	GoalTypeID     pgtype.UUID        `json:"goal_type_id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
@@ -1025,6 +1375,7 @@ func (q *Queries) UpdateRock(ctx context.Context, arg UpdateRockParams) (UpdateR
 		arg.PeriodID,
 		arg.Confidence,
 		arg.ReportedHealth,
+		arg.GoalTypeID,
 	)
 	var i UpdateRockRow
 	err := row.Scan(
@@ -1040,6 +1391,7 @@ func (q *Queries) UpdateRock(ctx context.Context, arg UpdateRockParams) (UpdateR
 		&i.PeriodEnd,
 		&i.Confidence,
 		&i.ReportedHealth,
+		&i.GoalTypeID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1204,7 +1556,7 @@ INSERT INTO cerebro_operating_period (workspace_id, name, starts_on, ends_on)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (workspace_id, starts_on, ends_on) DO UPDATE
 SET name = EXCLUDED.name, updated_at = now()
-RETURNING id, workspace_id, name, starts_on, ends_on, created_at, updated_at
+RETURNING id, workspace_id, name, unit, starts_on, ends_on, created_at, updated_at
 `
 
 type UpsertOperatingPeriodParams struct {
@@ -1214,18 +1566,30 @@ type UpsertOperatingPeriodParams struct {
 	EndsOn      pgtype.Date `json:"ends_on"`
 }
 
-func (q *Queries) UpsertOperatingPeriod(ctx context.Context, arg UpsertOperatingPeriodParams) (CerebroOperatingPeriod, error) {
+type UpsertOperatingPeriodRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Unit        string             `json:"unit"`
+	StartsOn    pgtype.Date        `json:"starts_on"`
+	EndsOn      pgtype.Date        `json:"ends_on"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertOperatingPeriod(ctx context.Context, arg UpsertOperatingPeriodParams) (UpsertOperatingPeriodRow, error) {
 	row := q.db.QueryRow(ctx, upsertOperatingPeriod,
 		arg.WorkspaceID,
 		arg.Name,
 		arg.StartsOn,
 		arg.EndsOn,
 	)
-	var i CerebroOperatingPeriod
+	var i UpsertOperatingPeriodRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
 		&i.Name,
+		&i.Unit,
 		&i.StartsOn,
 		&i.EndsOn,
 		&i.CreatedAt,
@@ -1254,6 +1618,33 @@ func (q *Queries) UpsertOperatingSystemSettings(ctx context.Context, arg UpsertO
 	err := row.Scan(
 		&i.WorkspaceID,
 		&i.Terminology,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertOsElementSetting = `-- name: UpsertOsElementSetting :one
+INSERT INTO cerebro_os_element_setting (workspace_id, element_key, enabled)
+VALUES ($1, $2, $3)
+ON CONFLICT (workspace_id, element_key) DO UPDATE
+SET enabled = EXCLUDED.enabled, updated_at = now()
+RETURNING workspace_id, element_key, enabled, created_at, updated_at
+`
+
+type UpsertOsElementSettingParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ElementKey  string      `json:"element_key"`
+	Enabled     bool        `json:"enabled"`
+}
+
+func (q *Queries) UpsertOsElementSetting(ctx context.Context, arg UpsertOsElementSettingParams) (CerebroOsElementSetting, error) {
+	row := q.db.QueryRow(ctx, upsertOsElementSetting, arg.WorkspaceID, arg.ElementKey, arg.Enabled)
+	var i CerebroOsElementSetting
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.ElementKey,
+		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

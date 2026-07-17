@@ -24,6 +24,15 @@ type handlerService interface {
 	UpdateStrategyItem(context.Context, pgtype.UUID, pgtype.UUID, StrategyItemInput) (StrategyItemResponse, error)
 	DeleteStrategyItem(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
 	ListPeriods(context.Context, pgtype.UUID) ([]OperatingPeriodResponse, error)
+	CreatePeriod(context.Context, pgtype.UUID, OperatingPeriodInput) (OperatingPeriodResponse, error)
+	UpdatePeriod(context.Context, pgtype.UUID, pgtype.UUID, OperatingPeriodInput) (OperatingPeriodResponse, error)
+	DeletePeriod(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
+	ListElements(context.Context, pgtype.UUID) ([]OsElementResponse, error)
+	UpdateElement(context.Context, pgtype.UUID, string, bool) (OsElementResponse, error)
+	CreateGoalType(context.Context, pgtype.UUID, GoalTypeInput) (GoalTypeResponse, error)
+	ListGoalTypes(context.Context, pgtype.UUID) ([]GoalTypeResponse, error)
+	UpdateGoalType(context.Context, pgtype.UUID, pgtype.UUID, GoalTypeInput) (GoalTypeResponse, error)
+	DeleteGoalType(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
 	UpsertRock(context.Context, pgtype.UUID, RockInput) error
 	SaveRock(context.Context, pgtype.UUID, string, pgtype.UUID, *pgtype.UUID, RockInput) (RockResponse, error)
 	AddRockCheckIn(context.Context, pgtype.UUID, pgtype.UUID, string, pgtype.UUID, RockCheckInInput) (RockCheckIn, error)
@@ -44,6 +53,16 @@ func NewHandler(service handlerService) *Handler {
 
 func (h *Handler) MountRoutes(r chi.Router) {
 	r.Route("/api/cerebro/operating-system/settings", func(r chi.Router) { r.Get("/", h.GetSettings); r.Put("/", h.UpdateSettings) })
+	r.Route("/api/cerebro/operating-system/elements", func(r chi.Router) {
+		r.Get("/", h.ListElements)
+		r.Put("/{key}", h.UpdateElement)
+	})
+	r.Route("/api/cerebro/goal-types", func(r chi.Router) {
+		r.Get("/", h.ListGoalTypes)
+		r.Post("/", h.CreateGoalType)
+		r.Put("/{id}", h.UpdateGoalType)
+		r.Delete("/{id}", h.DeleteGoalType)
+	})
 	r.Route("/api/cerebro/strategy-items", func(r chi.Router) {
 		r.Get("/", h.ListStrategyItems)
 		r.Post("/", h.CreateStrategyItem)
@@ -58,7 +77,12 @@ func (h *Handler) MountRoutes(r chi.Router) {
 		r.Delete("/{id}", h.DeleteRock)
 		r.Post("/{id}/check-ins", h.AddRockCheckIn)
 	})
-	r.Get("/api/cerebro/operating-periods", h.ListPeriods)
+	r.Route("/api/cerebro/operating-periods", func(r chi.Router) {
+		r.Get("/", h.ListPeriods)
+		r.Post("/", h.CreatePeriod)
+		r.Put("/{id}", h.UpdatePeriod)
+		r.Delete("/{id}", h.DeletePeriod)
+	})
 	r.Route("/api/cerebro/object-connections", func(r chi.Router) {
 		r.Get("/", h.ListConnections)
 		r.Post("/", h.CreateConnection)
@@ -167,6 +191,130 @@ func (h *Handler) ListPeriods(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.service.ListPeriods(r.Context(), ws)
 	writeResult(w, http.StatusOK, map[string]any{"periods": items}, err)
+}
+
+func (h *Handler) ListElements(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.service.ListElements(r.Context(), ws)
+	writeResult(w, http.StatusOK, map[string]any{"elements": items}, err)
+}
+
+func (h *Handler) UpdateElement(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	key := strings.TrimSpace(chi.URLParam(r, "key"))
+	if key == "" {
+		writeError(w, http.StatusBadRequest, "element key is required")
+		return
+	}
+	var input struct {
+		Enabled bool `json:"enabled"`
+	}
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.UpdateElement(r.Context(), ws, key, input.Enabled)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) ListGoalTypes(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.service.ListGoalTypes(r.Context(), ws)
+	writeResult(w, http.StatusOK, map[string]any{"goal_types": items}, err)
+}
+
+func (h *Handler) CreateGoalType(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	var input GoalTypeInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.CreateGoalType(r.Context(), ws, input)
+	writeResult(w, http.StatusCreated, out, err)
+}
+
+func (h *Handler) UpdateGoalType(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var input GoalTypeInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.UpdateGoalType(r.Context(), ws, id, input)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) DeleteGoalType(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	deleted, err := h.service.DeleteGoalType(r.Context(), ws, id)
+	writeDelete(w, deleted, err)
+}
+
+func (h *Handler) CreatePeriod(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	var input OperatingPeriodInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.CreatePeriod(r.Context(), ws, input)
+	writeResult(w, http.StatusCreated, out, err)
+}
+
+func (h *Handler) UpdatePeriod(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var input OperatingPeriodInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.UpdatePeriod(r.Context(), ws, id, input)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) DeletePeriod(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	deleted, err := h.service.DeletePeriod(r.Context(), ws, id)
+	writeDelete(w, deleted, err)
 }
 
 func (h *Handler) UpsertRock(w http.ResponseWriter, r *http.Request) {
@@ -343,6 +491,8 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, err.Error())
 	case strings.Contains(err.Error(), "duplicate connection"):
 		writeError(w, http.StatusConflict, "connection already exists")
+	case strings.Contains(err.Error(), "already exists"):
+		writeError(w, http.StatusConflict, err.Error())
 	case isInputError(err):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
@@ -352,7 +502,7 @@ func writeServiceError(w http.ResponseWriter, err error) {
 
 func isInputError(err error) bool {
 	message := err.Error()
-	for _, fragment := range []string{"invalid", "required", "must", "only", "horizon", "confidence", "period_"} {
+	for _, fragment := range []string{"invalid", "required", "must", "only", "horizon", "confidence", "period_", "period is", "starts_on", "ends_on"} {
 		if strings.Contains(message, fragment) {
 			return true
 		}

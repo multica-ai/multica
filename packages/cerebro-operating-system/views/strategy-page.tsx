@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { DEFAULT_TERMINOLOGY } from "../core/api-schemas";
 import { rocksOptions, settingsOptions, strategyHistoryOptions, strategyOptions } from "../core/queries";
 import type { Rock, StrategyItem } from "../core/types";
 import { HealthBadge } from "./health-score";
@@ -37,7 +38,7 @@ export function StrategyPage() {
   const strategyHistory = useQuery({ ...strategyHistoryOptions(wsId), enabled: history && !!wsId });
   if (!enabled) return null;
 
-  const terminology = settings.data?.terminology ?? { strategy: "Strategy", rock: "Rock", rocks: "Rocks" };
+  const terminology = settings.data?.terminology ?? DEFAULT_TERMINOLOGY;
   const items = (strategy.data?.strategy_items ?? []).filter((item) => item.state === "active").sort((a, b) => a.position - b.position);
   const values = items.filter((item) => item.kind === "core_value");
   const focus = items.filter((item) => item.kind === "core_focus");
@@ -56,7 +57,7 @@ export function StrategyPage() {
   return (
     <main className="h-full min-w-0 overflow-y-auto bg-muted/20">
       <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-5 p-4 sm:p-6">
-        <header className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="text-3xl font-semibold tracking-tight">{terminology.strategy}</h1><p className="mt-1 text-sm text-muted-foreground">Vision / Traction Organizer · from long-term direction to weekly execution</p></div><div className="flex gap-2"><button type="button" onClick={() => setHistory((value) => !value)} className="h-10 rounded-md border bg-background px-4 text-sm font-medium">History</button><button type="button" onClick={() => setEditing((value) => !value)} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Edit map</button></div></header>
+        <header className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="text-3xl font-semibold tracking-tight">{terminology.strategy}</h1><p className="mt-1 text-sm text-muted-foreground">From long-term direction to weekly execution</p></div><div className="flex gap-2"><button type="button" onClick={() => setHistory((value) => !value)} className="h-10 rounded-md border bg-background px-4 text-sm font-medium">History</button><button type="button" onClick={() => setEditing((value) => !value)} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Edit map</button></div></header>
 
         {history && <section className="rounded-xl border bg-card p-5"><h2 className="font-semibold">Strategy history</h2><p className="mt-1 text-sm text-muted-foreground">Every saved map change is retained, including deleted items.</p><div className="mt-4 grid gap-2">{strategyHistory.isLoading ? <p className="text-sm text-muted-foreground">Loading history…</p> : (strategyHistory.data?.history ?? []).length === 0 ? <p className="text-sm text-muted-foreground">No saved changes yet.</p> : strategyHistory.data?.history.map((entry) => <div key={entry.id} className="flex flex-wrap justify-between gap-2 rounded-lg bg-muted/50 p-3 text-sm"><span><span className="mr-2 rounded-full border px-2 py-0.5 text-xs capitalize">{entry.action}</span>{entry.title}</span><time className="text-muted-foreground">{new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(entry.changed_at))}</time></div>)}</div></section>}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -50,7 +51,125 @@ func NewService(queries *cerebrodb.Queries, projects ProjectReader) *Service {
 }
 
 func DefaultTerminology() Terminology {
-	return Terminology{Strategy: "Strategy", Rock: "Rock", Rocks: "Rocks"}
+	return Terminology{
+		Strategy: "Strategy", Rock: "Goal", Rocks: "Goals",
+		VisionPlan: "Vision Plan", Meetings: "Meetings", OrgChart: "Org Chart",
+		Scorecard: "Scorecard", IssuesList: "Issues List", StrategyMap: "Strategy Map",
+	}
+}
+
+// OsElement is one entry in the code-owned element registry. The database
+// stores per-workspace overrides only; defaults live here so new elements do
+// not need a migration.
+type OsElement struct {
+	Key            string
+	DefaultEnabled bool
+}
+
+// ElementRegistry lists every Operating System element a workspace can turn
+// on or off. Elements whose interface has shipped default to enabled.
+func ElementRegistry() []OsElement {
+	return []OsElement{
+		{Key: "vision_plan", DefaultEnabled: true},
+		{Key: "goals", DefaultEnabled: true},
+		{Key: "meetings", DefaultEnabled: false},
+		{Key: "org_chart", DefaultEnabled: false},
+		{Key: "scorecard", DefaultEnabled: false},
+		{Key: "issues_list", DefaultEnabled: false},
+		{Key: "strategy_map", DefaultEnabled: false},
+	}
+}
+
+func IsRegisteredElement(key string) bool {
+	for _, element := range ElementRegistry() {
+		if element.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// MergeElementSettings applies workspace overrides on top of the registry
+// defaults, preserving registry order.
+func MergeElementSettings(overrides map[string]bool) []OsElementResponse {
+	registry := ElementRegistry()
+	out := make([]OsElementResponse, 0, len(registry))
+	for _, element := range registry {
+		enabled := element.DefaultEnabled
+		if override, ok := overrides[element.Key]; ok {
+			enabled = override
+		}
+		out = append(out, OsElementResponse{Key: element.Key, Enabled: enabled, DefaultEnabled: element.DefaultEnabled})
+	}
+	return out
+}
+
+var goalTypeColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+const defaultGoalTypeColor = "#6366F1"
+
+func ValidateGoalTypeInput(input GoalTypeInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return errors.New("name is required")
+	}
+	if input.Color != "" && !goalTypeColorPattern.MatchString(input.Color) {
+		return errors.New("color must be a #RRGGBB hex value")
+	}
+	return nil
+}
+
+// ResolvedPeriod is a validated OperatingPeriodInput with calendar bounds and
+// a display name filled in.
+type ResolvedPeriod struct {
+	Name     string
+	Unit     string
+	StartsOn pgtype.Date
+	EndsOn   pgtype.Date
+}
+
+// ResolvePeriodInput validates a period and computes bounds and name. Month
+// and quarter periods snap to the calendar boundary containing starts_on and
+// derive ends_on; custom periods require an explicit name and ends_on.
+func ResolvePeriodInput(input OperatingPeriodInput) (ResolvedPeriod, error) {
+	start, err := time.Parse("2006-01-02", input.StartsOn)
+	if err != nil {
+		return ResolvedPeriod{}, errors.New("starts_on must be YYYY-MM-DD")
+	}
+	name := strings.TrimSpace(input.Name)
+	var end time.Time
+	switch input.Unit {
+	case "month":
+		start = time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, time.UTC)
+		end = start.AddDate(0, 1, -1)
+		if name == "" {
+			name = fmt.Sprintf("%s %d", start.Month().String(), start.Year())
+		}
+	case "quarter":
+		quarter := (int(start.Month()) - 1) / 3
+		start = time.Date(start.Year(), time.Month(quarter*3+1), 1, 0, 0, 0, 0, time.UTC)
+		end = start.AddDate(0, 3, -1)
+		if name == "" {
+			name = fmt.Sprintf("Q%d %d", quarter+1, start.Year())
+		}
+	case "custom":
+		if name == "" {
+			return ResolvedPeriod{}, errors.New("custom periods require a name")
+		}
+		end, err = time.Parse("2006-01-02", input.EndsOn)
+		if err != nil {
+			return ResolvedPeriod{}, errors.New("ends_on must be YYYY-MM-DD")
+		}
+		if end.Before(start) {
+			return ResolvedPeriod{}, errors.New("ends_on must not precede starts_on")
+		}
+	default:
+		return ResolvedPeriod{}, errors.New("unit must be month, quarter, or custom")
+	}
+	return ResolvedPeriod{
+		Name: name, Unit: input.Unit,
+		StartsOn: pgtype.Date{Time: start, Valid: true},
+		EndsOn:   pgtype.Date{Time: end, Valid: true},
+	}, nil
 }
 
 func NormalizeTerminology(raw []byte) Terminology {
@@ -67,9 +186,15 @@ func NormalizeTerminology(raw []byte) Terminology {
 		return strings.TrimSpace(value)
 	}
 	return Terminology{
-		Strategy: read("strategy", defaults.Strategy),
-		Rock:     read("rock", defaults.Rock),
-		Rocks:    read("rocks", defaults.Rocks),
+		Strategy:    read("strategy", defaults.Strategy),
+		Rock:        read("rock", defaults.Rock),
+		Rocks:       read("rocks", defaults.Rocks),
+		VisionPlan:  read("vision_plan", defaults.VisionPlan),
+		Meetings:    read("meetings", defaults.Meetings),
+		OrgChart:    read("org_chart", defaults.OrgChart),
+		Scorecard:   read("scorecard", defaults.Scorecard),
+		IssuesList:  read("issues_list", defaults.IssuesList),
+		StrategyMap: read("strategy_map", defaults.StrategyMap),
 	}
 }
 
@@ -150,6 +275,11 @@ func ValidateRockInput(input RockInput) error {
 	if input.StrategyItemID != "" {
 		if _, err := util.ParseUUID(input.StrategyItemID); err != nil {
 			return errors.New("strategy_item_id must be a UUID")
+		}
+	}
+	if input.GoalTypeID != "" {
+		if _, err := util.ParseUUID(input.GoalTypeID); err != nil {
+			return errors.New("goal_type_id must be a UUID")
 		}
 	}
 	return nil
@@ -335,27 +465,143 @@ func (s *Service) ListPeriods(ctx context.Context, workspaceID pgtype.UUID) ([]O
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 {
+	out := make([]OperatingPeriodResponse, 0, len(rows)+1)
+	for _, row := range rows {
+		out = append(out, periodResponse(row.ID, row.WorkspaceID, row.Name, row.Unit, row.StartsOn, row.EndsOn))
+	}
+	if len(out) == 0 {
 		name, start, end := quarterPeriod(s.now().UTC())
-		row, createErr := s.queries.UpsertOperatingPeriod(ctx, cerebrodb.UpsertOperatingPeriodParams{
+		row, createErr := s.queries.CreateOperatingPeriod(ctx, cerebrodb.CreateOperatingPeriodParams{
 			WorkspaceID: workspaceID,
 			Name:        name,
+			Unit:        "quarter",
 			StartsOn:    pgtype.Date{Time: start, Valid: true},
 			EndsOn:      pgtype.Date{Time: end, Valid: true},
 		})
 		if createErr != nil {
 			return nil, createErr
 		}
-		rows = append(rows, row)
-	}
-	out := make([]OperatingPeriodResponse, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, OperatingPeriodResponse{
-			ID: util.UUIDToString(row.ID), WorkspaceID: util.UUIDToString(row.WorkspaceID),
-			Name: row.Name, StartsOn: date(row.StartsOn), EndsOn: date(row.EndsOn),
-		})
+		out = append(out, periodResponse(row.ID, row.WorkspaceID, row.Name, row.Unit, row.StartsOn, row.EndsOn))
 	}
 	return out, nil
+}
+
+func (s *Service) CreatePeriod(ctx context.Context, workspaceID pgtype.UUID, input OperatingPeriodInput) (OperatingPeriodResponse, error) {
+	resolved, err := ResolvePeriodInput(input)
+	if err != nil {
+		return OperatingPeriodResponse{}, err
+	}
+	row, err := s.queries.CreateOperatingPeriod(ctx, cerebrodb.CreateOperatingPeriodParams{
+		WorkspaceID: workspaceID, Name: resolved.Name, Unit: resolved.Unit,
+		StartsOn: resolved.StartsOn, EndsOn: resolved.EndsOn,
+	})
+	if err != nil {
+		return OperatingPeriodResponse{}, err
+	}
+	return periodResponse(row.ID, row.WorkspaceID, row.Name, row.Unit, row.StartsOn, row.EndsOn), nil
+}
+
+func (s *Service) UpdatePeriod(ctx context.Context, workspaceID, id pgtype.UUID, input OperatingPeriodInput) (OperatingPeriodResponse, error) {
+	resolved, err := ResolvePeriodInput(input)
+	if err != nil {
+		return OperatingPeriodResponse{}, err
+	}
+	row, err := s.queries.UpdateOperatingPeriod(ctx, cerebrodb.UpdateOperatingPeriodParams{
+		ID: id, WorkspaceID: workspaceID, Name: resolved.Name, Unit: resolved.Unit,
+		StartsOn: resolved.StartsOn, EndsOn: resolved.EndsOn,
+	})
+	if err != nil {
+		return OperatingPeriodResponse{}, err
+	}
+	return periodResponse(row.ID, row.WorkspaceID, row.Name, row.Unit, row.StartsOn, row.EndsOn), nil
+}
+
+func (s *Service) DeletePeriod(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
+	count, err := s.queries.DeleteOperatingPeriod(ctx, cerebrodb.DeleteOperatingPeriodParams{ID: id, WorkspaceID: workspaceID})
+	if isForeignKeyViolation(err) {
+		return false, errors.New("period is still referenced and must be emptied first")
+	}
+	return count > 0, err
+}
+
+func (s *Service) ListElements(ctx context.Context, workspaceID pgtype.UUID) ([]OsElementResponse, error) {
+	rows, err := s.queries.ListOsElementSettings(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	overrides := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		overrides[row.ElementKey] = row.Enabled
+	}
+	return MergeElementSettings(overrides), nil
+}
+
+func (s *Service) UpdateElement(ctx context.Context, workspaceID pgtype.UUID, key string, enabled bool) (OsElementResponse, error) {
+	if !IsRegisteredElement(key) {
+		return OsElementResponse{}, fmt.Errorf("invalid element %q", key)
+	}
+	row, err := s.queries.UpsertOsElementSetting(ctx, cerebrodb.UpsertOsElementSettingParams{
+		WorkspaceID: workspaceID, ElementKey: key, Enabled: enabled,
+	})
+	if err != nil {
+		return OsElementResponse{}, err
+	}
+	defaultEnabled := false
+	for _, element := range ElementRegistry() {
+		if element.Key == key {
+			defaultEnabled = element.DefaultEnabled
+		}
+	}
+	return OsElementResponse{Key: row.ElementKey, Enabled: row.Enabled, DefaultEnabled: defaultEnabled}, nil
+}
+
+func (s *Service) CreateGoalType(ctx context.Context, workspaceID pgtype.UUID, input GoalTypeInput) (GoalTypeResponse, error) {
+	if err := ValidateGoalTypeInput(input); err != nil {
+		return GoalTypeResponse{}, err
+	}
+	row, err := s.queries.CreateGoalType(ctx, goalTypeParams(workspaceID, input))
+	if IsDuplicateConnection(err) {
+		return GoalTypeResponse{}, errors.New("a goal type with this name already exists")
+	}
+	if err != nil {
+		return GoalTypeResponse{}, err
+	}
+	return goalTypeResponse(row), nil
+}
+
+func (s *Service) ListGoalTypes(ctx context.Context, workspaceID pgtype.UUID) ([]GoalTypeResponse, error) {
+	rows, err := s.queries.ListGoalTypes(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GoalTypeResponse, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, goalTypeResponse(row))
+	}
+	return out, nil
+}
+
+func (s *Service) UpdateGoalType(ctx context.Context, workspaceID, id pgtype.UUID, input GoalTypeInput) (GoalTypeResponse, error) {
+	if err := ValidateGoalTypeInput(input); err != nil {
+		return GoalTypeResponse{}, err
+	}
+	params := goalTypeParams(workspaceID, input)
+	row, err := s.queries.UpdateGoalType(ctx, cerebrodb.UpdateGoalTypeParams{
+		ID: id, WorkspaceID: workspaceID, Name: params.Name, Color: params.Color,
+		ScopeLabel: params.ScopeLabel, Position: params.Position,
+	})
+	if IsDuplicateConnection(err) {
+		return GoalTypeResponse{}, errors.New("a goal type with this name already exists")
+	}
+	if err != nil {
+		return GoalTypeResponse{}, err
+	}
+	return goalTypeResponse(row), nil
+}
+
+func (s *Service) DeleteGoalType(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
+	count, err := s.queries.DeleteGoalType(ctx, cerebrodb.DeleteGoalTypeParams{ID: id, WorkspaceID: workspaceID})
+	return count > 0, err
 }
 
 func quarterPeriod(now time.Time) (string, time.Time, time.Time) {
@@ -381,12 +627,19 @@ func (s *Service) SaveRock(ctx context.Context, workspaceID pgtype.UUID, actorTy
 			return RockResponse{}, err
 		}
 	}
+	goalTypeID := pgtype.UUID{}
+	if input.GoalTypeID != "" {
+		goalTypeID, _ = util.ParseUUID(input.GoalTypeID)
+		if _, err := s.queries.GetGoalType(ctx, cerebrodb.GetGoalTypeParams{ID: goalTypeID, WorkspaceID: workspaceID}); err != nil {
+			return RockResponse{}, err
+		}
+	}
 	var id pgtype.UUID
 	if rockID == nil {
 		row, err := s.queries.CreateRock(ctx, cerebrodb.CreateRockParams{
 			WorkspaceID: workspaceID, Title: strings.TrimSpace(input.Title), Description: strings.TrimSpace(input.Description),
 			OwnerType: text(input.OwnerType), OwnerID: ownerID, PeriodID: periodID,
-			Confidence: input.Confidence, ReportedHealth: input.ReportedHealth,
+			Confidence: input.Confidence, ReportedHealth: input.ReportedHealth, GoalTypeID: goalTypeID,
 		})
 		if err != nil {
 			return RockResponse{}, err
@@ -396,7 +649,7 @@ func (s *Service) SaveRock(ctx context.Context, workspaceID pgtype.UUID, actorTy
 		row, err := s.queries.UpdateRock(ctx, cerebrodb.UpdateRockParams{
 			ID: *rockID, WorkspaceID: workspaceID, Title: strings.TrimSpace(input.Title), Description: strings.TrimSpace(input.Description),
 			OwnerType: text(input.OwnerType), OwnerID: ownerID, PeriodID: periodID,
-			Confidence: input.Confidence, ReportedHealth: input.ReportedHealth,
+			Confidence: input.Confidence, ReportedHealth: input.ReportedHealth, GoalTypeID: goalTypeID,
 		})
 		if err != nil {
 			return RockResponse{}, err
@@ -601,6 +854,37 @@ func quarterName(start time.Time) string {
 	return fmt.Sprintf("Q%d %d", (int(start.Month())-1)/3+1, start.Year())
 }
 
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503"
+}
+
+func goalTypeParams(workspaceID pgtype.UUID, input GoalTypeInput) cerebrodb.CreateGoalTypeParams {
+	color := input.Color
+	if color == "" {
+		color = defaultGoalTypeColor
+	}
+	return cerebrodb.CreateGoalTypeParams{
+		WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), Color: color,
+		ScopeLabel: strings.TrimSpace(input.ScopeLabel), Position: input.Position,
+	}
+}
+
+func goalTypeResponse(row cerebrodb.CerebroGoalType) GoalTypeResponse {
+	return GoalTypeResponse{
+		ID: util.UUIDToString(row.ID), WorkspaceID: util.UUIDToString(row.WorkspaceID),
+		Name: row.Name, Color: row.Color, ScopeLabel: row.ScopeLabel, Position: row.Position,
+		CreatedAt: timestamp(row.CreatedAt), UpdatedAt: timestamp(row.UpdatedAt),
+	}
+}
+
+func periodResponse(id, workspaceID pgtype.UUID, name, unit string, startsOn, endsOn pgtype.Date) OperatingPeriodResponse {
+	return OperatingPeriodResponse{
+		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID),
+		Name: name, Unit: unit, StartsOn: date(startsOn), EndsOn: date(endsOn),
+	}
+}
+
 func strategyParams(workspaceID pgtype.UUID, input StrategyItemInput) cerebrodb.CreateStrategyItemParams {
 	return cerebrodb.CreateStrategyItemParams{
 		WorkspaceID: workspaceID, Kind: input.Kind, Title: strings.TrimSpace(input.Title),
@@ -623,6 +907,8 @@ func rockResponse(row cerebrodb.ListRockRollupsRow, now time.Time) RockResponse 
 		ID: util.UUIDToString(row.ID), Title: row.Title, Description: row.Description,
 		OwnerType: row.OwnerType.String, OwnerID: util.UUIDToString(row.OwnerID), OwnerName: row.OwnerName,
 		PeriodID: util.UUIDToString(row.PeriodID), PeriodName: row.PeriodName,
+		GoalTypeID: util.UUIDToString(row.GoalTypeID), GoalTypeName: row.GoalTypeName,
+		GoalTypeColor: row.GoalTypeColor, GoalTypeScopeLabel: row.GoalTypeScopeLabel,
 		ProjectID: util.UUIDToString(row.ProjectID), WorkspaceID: util.UUIDToString(row.WorkspaceID),
 		ProjectTitle: row.ProjectTitle, ProjectDescription: row.ProjectDescription,
 		ProjectStatus: row.ProjectStatus, LeadType: row.OwnerType.String, LeadID: util.UUIDToString(row.OwnerID),

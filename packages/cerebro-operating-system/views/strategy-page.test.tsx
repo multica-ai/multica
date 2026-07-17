@@ -59,7 +59,7 @@ describe("StrategyPage", () => {
   it("renders the v4 Strategy shell without mixing in Settings", () => {
     render(<StrategyPage />);
     expect(screen.getByRole("heading", { name: "Strategy" })).toBeInTheDocument();
-    expect(screen.getByText(/Vision \/ Traction Organizer/)).toBeInTheDocument();
+    expect(screen.getByText(/From long-term direction to weekly execution/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "History" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit map" })).toBeInTheDocument();
     expect(screen.queryByText("Customize labels")).not.toBeInTheDocument();

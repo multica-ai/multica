@@ -9,7 +9,8 @@ import { RocksPage } from "./rocks-page";
 const state = vi.hoisted(() => ({
   enabled: true,
   rocks: [] as Rock[],
-  terminology: { strategy: "Strategy", rock: "Rock", rocks: "Rocks" },
+  terminology: { strategy: "Strategy", rock: "Rock", rocks: "Rocks", vision_plan: "Vision Plan", meetings: "Meetings", org_chart: "Org Chart", scorecard: "Scorecard", issues_list: "Issues List", strategy_map: "Strategy Map" },
+  goalTypes: [] as Array<{ id: string; workspace_id: string; name: string; color: string; scope_label: string; position: number; created_at: string; updated_at: string }>,
   rocksLoading: false,
   rocksError: false,
   periods: [{ id: "period-1", workspace_id: "workspace-1", name: "Q3 2026", starts_on: "2026-07-01", ends_on: "2026-09-30" }],
@@ -39,6 +40,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
       if (options.queryKey.includes("settings")) return { data: { terminology: state.terminology } };
       if (options.queryKey.includes("rocks")) return { data: { rocks: state.rocks }, isLoading: state.rocksLoading, isError: state.rocksError };
       if (options.queryKey.includes("periods")) return { data: { periods: state.periods } };
+      if (options.queryKey.includes("goal-types")) return { data: { goal_types: state.goalTypes } };
       if (options.queryKey.includes("strategy")) return { data: { strategy_items: state.strategy } };
       if (options.queryKey.includes("projects")) return { data: state.projects };
       if (options.queryKey.includes("issues")) return { data: state.issues };
@@ -71,7 +73,7 @@ const rock: Rock = {
 };
 
 describe("RocksPage", () => {
-  beforeEach(() => { state.enabled = true; state.rocks = []; state.rocksLoading = false; state.rocksError = false; state.mutate.mockReset(); state.checkIn.mockReset(); });
+  beforeEach(() => { state.enabled = true; state.rocks = []; state.goalTypes = []; state.rocksLoading = false; state.rocksError = false; state.mutate.mockReset(); state.checkIn.mockReset(); });
 
   it("stays hidden when the feature flag is off", () => {
     state.enabled = false;
@@ -82,7 +84,7 @@ describe("RocksPage", () => {
     render(<RocksPage />);
     expect(screen.getByRole("heading", { name: "Rocks" })).toBeInTheDocument();
     expect(screen.getByText(/Quarterly priorities · Q3 2026/)).toBeInTheDocument();
-    expect(screen.getByText("COMPANY HEALTH")).toBeInTheDocument();
+    expect(screen.getByText("OVERALL HEALTH")).toBeInTheDocument();
     expect(screen.getByText("ON TRACK")).toBeInTheDocument();
     expect(screen.getByText("NEED ATTENTION")).toBeInTheDocument();
     expect(screen.getByText("DAYS LEFT IN Q3")).toBeInTheDocument();
@@ -120,6 +122,32 @@ describe("RocksPage", () => {
     fireEvent.change(screen.getByLabelText("Period"), { target: { value: "period-1" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Rock" }));
     expect(state.mutate).toHaveBeenCalledWith(expect.objectContaining({ input: expect.objectContaining({ title: "Independent Rock", project_ids: [], issue_ids: [] }) }), expect.any(Object));
+  });
+
+  it("badges and filters Rocks by their configurable type", () => {
+    state.goalTypes = [
+      { id: "type-1", workspace_id: "workspace-1", name: "Company", color: "#22C55E", scope_label: "company-wide", position: 0, created_at: "", updated_at: "" },
+      { id: "type-2", workspace_id: "workspace-1", name: "Team", color: "#6366F1", scope_label: "", position: 1, created_at: "", updated_at: "" },
+    ];
+    state.rocks = [{ ...rock, goal_type_id: "type-1", goal_type_name: "Company", goal_type_color: "#22C55E" }, { ...rock, id: "rock-2", title: "Untyped goal", strategy_item_id: undefined, strategy_item_title: undefined }];
+    render(<RocksPage />);
+    expect(screen.getByRole("group", { name: "Filter by rock type" })).toBeInTheDocument();
+    expect(screen.getByText("Untyped goal")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Company/ }));
+    expect(screen.queryByText("Untyped goal")).not.toBeInTheDocument();
+    expect(screen.getByText("Cut fulfilment cost 12%")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(screen.getByText("Untyped goal")).toBeInTheDocument();
+  });
+
+  it("submits the selected type when saving a Rock", () => {
+    state.goalTypes = [{ id: "type-1", workspace_id: "workspace-1", name: "Company", color: "#22C55E", scope_label: "", position: 0, created_at: "", updated_at: "" }];
+    render(<RocksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "+ New Rock" }));
+    fireEvent.change(screen.getByLabelText("Rock title"), { target: { value: "Typed goal" } });
+    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "type-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Rock" }));
+    expect(state.mutate).toHaveBeenCalledWith(expect.objectContaining({ input: expect.objectContaining({ title: "Typed goal", goal_type_id: "type-1" }) }), expect.any(Object));
   });
 
   it("records a weekly check-in directly from the selected Rock", () => {

@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_TERMINOLOGY,
   EMPTY_ROCKS,
   EMPTY_CONNECTIONS,
   EMPTY_STRATEGY,
+  goalTypeListSchema,
   operatingSystemSettingsSchema,
   operatingPeriodListSchema,
   objectConnectionListSchema,
+  osElementListSchema,
   rocksListSchema,
   strategyListSchema,
   strategyHistoryListSchema,
@@ -20,12 +23,35 @@ describe("operating system API schemas", () => {
     expect(EMPTY_ROCKS).toEqual({ rocks: [] });
   });
 
-  it("defaults malformed terminology fields independently", () => {
+  it("defaults malformed terminology fields independently to neutral labels", () => {
     const parsed = operatingSystemSettingsSchema.parse({
       workspace_id: "ws-1",
       terminology: { strategy: "Direction", rock: null, rocks: "" },
     });
-    expect(parsed.terminology).toEqual({ strategy: "Direction", rock: "Rock", rocks: "Rocks" });
+    expect(parsed.terminology).toEqual({ ...DEFAULT_TERMINOLOGY, strategy: "Direction" });
+    expect(parsed.terminology.rock).toBe("Goal");
+  });
+
+  it("keeps stored legacy labels while filling missing element labels", () => {
+    const parsed = operatingSystemSettingsSchema.parse({
+      workspace_id: "ws-1",
+      terminology: { strategy: "Strategy", rock: "Rock", rocks: "Rocks" },
+    });
+    expect(parsed.terminology).toMatchObject({ rock: "Rock", rocks: "Rocks", vision_plan: "Vision Plan", strategy_map: "Strategy Map" });
+  });
+
+  it("parses element settings and downgrades missing defaults", () => {
+    const parsed = osElementListSchema.parse({ elements: [{ key: "goals", enabled: true, default_enabled: true }, { key: "scorecard", enabled: false }] });
+    expect(parsed.elements).toEqual([
+      { key: "goals", enabled: true, default_enabled: true },
+      { key: "scorecard", enabled: false, default_enabled: false },
+    ]);
+  });
+
+  it("parses goal types and rejects malformed entries", () => {
+    const parsed = goalTypeListSchema.parse({ goal_types: [{ id: "t1", workspace_id: "w1", name: "Company", color: "#22C55E", scope_label: "company-wide", position: 0, created_at: "", updated_at: "" }] });
+    expect(parsed.goal_types[0]).toMatchObject({ name: "Company", color: "#22C55E" });
+    expect(goalTypeListSchema.safeParse({ goal_types: [{ id: 1 }] }).success).toBe(false);
   });
 
   it("downgrades unknown strategy and health enum values", () => {
@@ -57,8 +83,11 @@ describe("operating system API schemas", () => {
     expect(parsed.rocks[0]).toMatchObject({ id: "r1", title: "Independent Rock", projects: [], check_ins: [{ note: "Blocked" }] });
   });
 
-  it("parses shared operating periods", () => {
-    expect(operatingPeriodListSchema.parse({ periods: [{ id: "q1", workspace_id: "w1", name: "Q3 2026", starts_on: "2026-07-01", ends_on: "2026-09-30" }] }).periods[0]?.name).toBe("Q3 2026");
+  it("parses shared operating periods and defaults missing units", () => {
+    const parsed = operatingPeriodListSchema.parse({ periods: [{ id: "q1", workspace_id: "w1", name: "Q3 2026", starts_on: "2026-07-01", ends_on: "2026-09-30" }] });
+    expect(parsed.periods[0]).toMatchObject({ name: "Q3 2026", unit: "quarter" });
+    const monthly = operatingPeriodListSchema.parse({ periods: [{ id: "m1", workspace_id: "w1", name: "August 2026", unit: "month", starts_on: "2026-08-01", ends_on: "2026-08-31" }] });
+    expect(monthly.periods[0]?.unit).toBe("month");
   });
 
   it("parses durable Strategy history", () => {

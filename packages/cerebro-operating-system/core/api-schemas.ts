@@ -2,19 +2,39 @@ import { z } from "zod";
 
 const fallbackEnum = <T extends string>(values: readonly T[], fallback: T) =>
   z.string().transform((value): T => values.includes(value as T) ? value as T : fallback);
-const label = (fallback: string) => z.unknown().transform((value) =>
+const label = (fallback: string) => z.unknown().optional().transform((value) =>
   typeof value === "string" && value.trim() ? value.trim() : fallback,
 );
 
-const terminologySchema = z.object({ strategy: label("Strategy"), rock: label("Rock"), rocks: label("Rocks") })
-  .catch({ strategy: "Strategy", rock: "Rock", rocks: "Rocks" });
+export const DEFAULT_TERMINOLOGY = {
+  strategy: "Strategy", rock: "Goal", rocks: "Goals",
+  vision_plan: "Vision Plan", meetings: "Meetings", org_chart: "Org Chart",
+  scorecard: "Scorecard", issues_list: "Issues List", strategy_map: "Strategy Map",
+} as const;
+const terminologySchema = z.object({
+  strategy: label(DEFAULT_TERMINOLOGY.strategy), rock: label(DEFAULT_TERMINOLOGY.rock), rocks: label(DEFAULT_TERMINOLOGY.rocks),
+  vision_plan: label(DEFAULT_TERMINOLOGY.vision_plan), meetings: label(DEFAULT_TERMINOLOGY.meetings), org_chart: label(DEFAULT_TERMINOLOGY.org_chart),
+  scorecard: label(DEFAULT_TERMINOLOGY.scorecard), issues_list: label(DEFAULT_TERMINOLOGY.issues_list), strategy_map: label(DEFAULT_TERMINOLOGY.strategy_map),
+}).catch({ ...DEFAULT_TERMINOLOGY });
 export const operatingSystemSettingsSchema = z.object({
   workspace_id: z.string(), terminology: terminologySchema,
   created_at: z.string().optional(), updated_at: z.string().optional(),
 });
 export const operatingPeriodSchema = z.object({
-  id: z.string(), workspace_id: z.string(), name: z.string(), starts_on: z.string(), ends_on: z.string(),
+  id: z.string(), workspace_id: z.string(), name: z.string(),
+  unit: fallbackEnum(["month", "quarter", "custom"] as const, "quarter").catch("quarter"),
+  starts_on: z.string(), ends_on: z.string(),
 });
+export const osElementSchema = z.object({
+  key: z.string(), enabled: z.boolean(), default_enabled: z.boolean().default(false),
+});
+export const osElementListSchema = z.object({ elements: z.array(osElementSchema) });
+export const goalTypeSchema = z.object({
+  id: z.string(), workspace_id: z.string(), name: z.string(), color: z.string().default(""),
+  scope_label: z.string().default(""), position: z.number().int().default(0),
+  created_at: z.string().default(""), updated_at: z.string().default(""),
+});
+export const goalTypeListSchema = z.object({ goal_types: z.array(goalTypeSchema) });
 export const operatingPeriodListSchema = z.object({ periods: z.array(operatingPeriodSchema) });
 export const strategyItemSchema = z.object({
   id: z.string(), workspace_id: z.string(),
@@ -37,6 +57,8 @@ export const rockSchema = z.object({
   id: z.string().optional(), workspace_id: z.string(), title: z.string().optional(), description: z.string().optional(),
   owner_type: z.string().optional(), owner_id: z.string().optional(), owner_name: z.string().optional(),
   period_id: z.string().default(""), period_name: z.string().default(""),
+  goal_type_id: z.string().optional(), goal_type_name: z.string().optional(),
+  goal_type_color: z.string().optional(), goal_type_scope_label: z.string().optional(),
   period_start: z.string(), period_end: z.string(), confidence: z.number().min(0).max(100),
   reported_health: reportedHealth,
   derived_health: z.object({ state: health, reason: z.string(), calculated_at: z.string() }),
@@ -68,5 +90,7 @@ export const EMPTY_STRATEGY = { strategy_items: [] };
 export const EMPTY_STRATEGY_HISTORY = { history: [] };
 export const EMPTY_ROCKS = { rocks: [] };
 export const EMPTY_PERIODS = { periods: [] };
+export const EMPTY_ELEMENTS = { elements: [] };
+export const EMPTY_GOAL_TYPES = { goal_types: [] };
 export const EMPTY_CONNECTIONS = { connections: [] };
-export const DEFAULT_SETTINGS = { workspace_id: "", terminology: { strategy: "Strategy", rock: "Rock", rocks: "Rocks" } };
+export const DEFAULT_SETTINGS = { workspace_id: "", terminology: { ...DEFAULT_TERMINOLOGY } };

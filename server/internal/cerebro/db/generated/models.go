@@ -1017,6 +1017,17 @@ type CerebroFolderGrant struct {
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 }
 
+type CerebroGoalType struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Color       string             `json:"color"`
+	ScopeLabel  string             `json:"scope_label"`
+	Position    int32              `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroGroup struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
@@ -1340,11 +1351,20 @@ type CerebroOperatingPeriod struct {
 	EndsOn      pgtype.Date        `json:"ends_on"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Unit        string             `json:"unit"`
 }
 
 type CerebroOperatingSystemSetting struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Terminology []byte             `json:"terminology"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroOsElementSetting struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ElementKey  string             `json:"element_key"`
+	Enabled     bool               `json:"enabled"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
@@ -1413,6 +1433,7 @@ type CerebroRock struct {
 	OwnerType      pgtype.Text        `json:"owner_type"`
 	OwnerID        pgtype.UUID        `json:"owner_id"`
 	PeriodID       pgtype.UUID        `json:"period_id"`
+	GoalTypeID     pgtype.UUID        `json:"goal_type_id"`
 }
 
 type CerebroRockCheckIn struct {

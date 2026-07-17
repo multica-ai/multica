@@ -1,11 +1,54 @@
 package operatingsystem
 
 // Terminology keeps customer-facing labels configurable without changing the
-// canonical API and database names.
+// canonical API and database names. Defaults stay vendor-neutral; profiles
+// with branded methodology names are user data, never code.
 type Terminology struct {
-	Strategy string `json:"strategy"`
-	Rock     string `json:"rock"`
-	Rocks    string `json:"rocks"`
+	Strategy    string `json:"strategy"`
+	Rock        string `json:"rock"`
+	Rocks       string `json:"rocks"`
+	VisionPlan  string `json:"vision_plan"`
+	Meetings    string `json:"meetings"`
+	OrgChart    string `json:"org_chart"`
+	Scorecard   string `json:"scorecard"`
+	IssuesList  string `json:"issues_list"`
+	StrategyMap string `json:"strategy_map"`
+}
+
+// OsElementResponse reports one Operating System element with the workspace
+// toggle applied and the registry default alongside it.
+type OsElementResponse struct {
+	Key            string `json:"key"`
+	Enabled        bool   `json:"enabled"`
+	DefaultEnabled bool   `json:"default_enabled"`
+}
+
+type GoalTypeInput struct {
+	Name       string `json:"name"`
+	Color      string `json:"color,omitempty"`
+	ScopeLabel string `json:"scope_label,omitempty"`
+	Position   int32  `json:"position"`
+}
+
+type GoalTypeResponse struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Color       string `json:"color"`
+	ScopeLabel  string `json:"scope_label"`
+	Position    int32  `json:"position"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+// OperatingPeriodInput creates or updates a period. Month and quarter periods
+// snap to calendar boundaries and may omit name and ends_on; custom periods
+// provide all three.
+type OperatingPeriodInput struct {
+	Name     string `json:"name,omitempty"`
+	Unit     string `json:"unit"`
+	StartsOn string `json:"starts_on"`
+	EndsOn   string `json:"ends_on,omitempty"`
 }
 
 type StrategyItemInput struct {
@@ -25,6 +68,7 @@ type RockInput struct {
 	OwnerType      string   `json:"owner_type,omitempty"`
 	OwnerID        string   `json:"owner_id,omitempty"`
 	PeriodID       string   `json:"period_id,omitempty"`
+	GoalTypeID     string   `json:"goal_type_id,omitempty"`
 	Confidence     int32    `json:"confidence"`
 	ReportedHealth string   `json:"reported_health"`
 	ProjectIDs     []string `json:"project_ids,omitempty"`
@@ -82,6 +126,10 @@ type RockResponse struct {
 	OwnerName          string        `json:"owner_name,omitempty"`
 	PeriodID           string        `json:"period_id"`
 	PeriodName         string        `json:"period_name"`
+	GoalTypeID         string        `json:"goal_type_id,omitempty"`
+	GoalTypeName       string        `json:"goal_type_name,omitempty"`
+	GoalTypeColor      string        `json:"goal_type_color,omitempty"`
+	GoalTypeScopeLabel string        `json:"goal_type_scope_label,omitempty"`
 	ProjectID          string        `json:"project_id"`
 	WorkspaceID        string        `json:"workspace_id"`
 	ProjectTitle       string        `json:"project_title"`
@@ -112,6 +160,7 @@ type OperatingPeriodResponse struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
 	Name        string `json:"name"`
+	Unit        string `json:"unit"`
 	StartsOn    string `json:"starts_on"`
 	EndsOn      string `json:"ends_on"`
 }

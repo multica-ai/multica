@@ -1963,6 +1963,34 @@
     {
       "id": "POST /api/cerebro/connection-tools/call",
       "gate": "connection_endpoint_policy — agent-only (X-Actor-Source=task_token); per-agent default-deny via toolpolicy.ConnectionEndpointEffective; behind feature flag cerebro_api_connection_tools (FIR-2273)"
+    },
+    {
+      "id": "DELETE /api/cerebro/goal-types/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/cerebro/operating-periods/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/goal-types/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/operating-periods/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/goal-types/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/operating-periods/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/operating-system/elements/{key}",
+      "gate": "workspace_member"
     }
   ],
   "mcp": [

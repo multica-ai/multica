@@ -3,9 +3,21 @@ export type StrategyState = "active" | "archived" | "unknown";
 export type HealthState = "on_track" | "at_risk" | "off_track" | "unset" | "unknown";
 export type HorizonUnit = "day" | "week" | "month" | "year";
 
-export interface Terminology { strategy: string; rock: string; rocks: string }
+export interface Terminology {
+  strategy: string; rock: string; rocks: string;
+  vision_plan: string; meetings: string; org_chart: string;
+  scorecard: string; issues_list: string; strategy_map: string;
+}
+export type OsElementKey = "vision_plan" | "goals" | "meetings" | "org_chart" | "scorecard" | "issues_list" | "strategy_map";
+export interface OsElement { key: string; enabled: boolean; default_enabled: boolean }
+export interface OsElementList { elements: OsElement[] }
+export type PeriodUnit = "month" | "quarter" | "custom";
+export interface GoalType { id: string; workspace_id: string; name: string; color: string; scope_label: string; position: number; created_at: string; updated_at: string }
+export interface GoalTypeList { goal_types: GoalType[] }
+export interface GoalTypeInput { name: string; color?: string; scope_label?: string; position?: number }
+export interface OperatingPeriodInput { name?: string; unit: PeriodUnit; starts_on: string; ends_on?: string }
 export interface OperatingSystemSettings { workspace_id: string; terminology: Terminology; created_at?: string; updated_at?: string }
-export interface OperatingPeriod { id: string; workspace_id: string; name: string; starts_on: string; ends_on: string }
+export interface OperatingPeriod { id: string; workspace_id: string; name: string; unit: PeriodUnit; starts_on: string; ends_on: string }
 export interface OperatingPeriodList { periods: OperatingPeriod[] }
 export interface StrategyItem { id: string; workspace_id: string; kind: StrategyKind; title: string; description: string; horizon_unit?: HorizonUnit; horizon_count?: number; horizon_label?: string; position: number; state: StrategyState; created_at: string; updated_at: string }
 export interface StrategyItemInput { kind: Exclude<StrategyKind, "unknown">; title: string; description?: string; horizon_unit?: HorizonUnit; horizon_count?: number; horizon_label?: string; position: number; state?: Exclude<StrategyState, "unknown"> }
@@ -17,6 +29,7 @@ export interface Rock {
   id: string; workspace_id: string; title: string; description?: string;
   owner_type?: string; owner_id?: string; owner_name?: string;
   period_id: string; period_name: string; period_start: string; period_end: string;
+  goal_type_id?: string; goal_type_name?: string; goal_type_color?: string; goal_type_scope_label?: string;
   confidence: number; reported_health: HealthState; derived_health: DerivedHealth; health_score: number;
   issue_count: number; done_issue_count: number; blocked_issue_count: number; project_count: number;
   projects: RockProject[]; issues: RockIssue[]; check_ins: RockCheckIn[];
@@ -26,7 +39,7 @@ export interface Rock {
 }
 export interface RockInput {
   title: string; description?: string; owner_type?: "member" | "agent"; owner_id?: string;
-  period_id: string; confidence: number; reported_health: Exclude<HealthState, "unknown">;
+  period_id: string; goal_type_id?: string; confidence: number; reported_health: Exclude<HealthState, "unknown">;
   project_ids: string[]; issue_ids: string[]; strategy_item_id?: string;
 }
 export interface RockCheckInInput { confidence: number; reported_health: Exclude<HealthState, "unknown">; note?: string }

@@ -883,6 +883,13 @@ var catalog = []Capability{
 		DescriptionZh: "创建、编辑或删除 Rocks 与 Strategy 项目，将其连接到其他对象，并自定义 operating-system 术语。",
 		Ops: []string{
 			"PUT /api/cerebro/operating-system/settings/",
+			"PUT /api/cerebro/operating-system/elements/{key}",
+			"POST /api/cerebro/goal-types/",
+			"PUT /api/cerebro/goal-types/{id}",
+			"DELETE /api/cerebro/goal-types/{id}",
+			"POST /api/cerebro/operating-periods/",
+			"PUT /api/cerebro/operating-periods/{id}",
+			"DELETE /api/cerebro/operating-periods/{id}",
 			"POST /api/cerebro/strategy-items/",
 			"PUT /api/cerebro/strategy-items/{id}",
 			"DELETE /api/cerebro/strategy-items/{id}",

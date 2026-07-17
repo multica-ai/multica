@@ -90,12 +90,150 @@ func TestValidateRockInputAcceptsOptionalConnections(t *testing.T) {
 
 func TestNormalizeTerminologyFallsBackPerField(t *testing.T) {
 	got := NormalizeTerminology([]byte(`{"strategy":"Direction","rock":12,"rocks":""}`))
-	if got.Strategy != "Direction" || got.Rock != "Rock" || got.Rocks != "Rocks" {
+	if got.Strategy != "Direction" || got.Rock != "Goal" || got.Rocks != "Goals" {
 		t.Fatalf("unexpected terminology: %#v", got)
 	}
 
 	if got := NormalizeTerminology([]byte(`not-json`)); got != DefaultTerminology() {
 		t.Fatalf("malformed JSON fallback = %#v", got)
+	}
+}
+
+func TestDefaultTerminologyUsesNeutralNamesForEveryElement(t *testing.T) {
+	got := DefaultTerminology()
+	want := Terminology{
+		Strategy: "Strategy", Rock: "Goal", Rocks: "Goals",
+		VisionPlan: "Vision Plan", Meetings: "Meetings", OrgChart: "Org Chart",
+		Scorecard: "Scorecard", IssuesList: "Issues List", StrategyMap: "Strategy Map",
+	}
+	if got != want {
+		t.Fatalf("DefaultTerminology() = %#v", got)
+	}
+}
+
+func TestNormalizeTerminologyPreservesStoredLegacyLabels(t *testing.T) {
+	got := NormalizeTerminology([]byte(`{"strategy":"Strategy","rock":"Rock","rocks":"Rocks"}`))
+	if got.Rock != "Rock" || got.Rocks != "Rocks" {
+		t.Fatalf("stored labels must win over neutral defaults: %#v", got)
+	}
+	if got.VisionPlan != "Vision Plan" || got.StrategyMap != "Strategy Map" {
+		t.Fatalf("missing element labels must fall back to neutral defaults: %#v", got)
+	}
+}
+
+func TestElementRegistryEnablesTodaysElementsByDefault(t *testing.T) {
+	elements := MergeElementSettings(nil)
+	byKey := make(map[string]OsElementResponse, len(elements))
+	for _, element := range elements {
+		byKey[element.Key] = element
+	}
+	for _, key := range []string{"vision_plan", "goals", "meetings", "org_chart", "scorecard", "issues_list", "strategy_map"} {
+		if _, ok := byKey[key]; !ok {
+			t.Fatalf("element registry missing %q", key)
+		}
+	}
+	if !byKey["goals"].Enabled || !byKey["vision_plan"].Enabled {
+		t.Fatal("elements with a shipped interface must default to enabled")
+	}
+	if byKey["meetings"].Enabled || byKey["scorecard"].Enabled {
+		t.Fatal("elements without a shipped interface must default to disabled")
+	}
+}
+
+func TestMergeElementSettingsAppliesWorkspaceOverrides(t *testing.T) {
+	elements := MergeElementSettings(map[string]bool{"goals": false, "scorecard": true})
+	byKey := make(map[string]OsElementResponse, len(elements))
+	for _, element := range elements {
+		byKey[element.Key] = element
+	}
+	if byKey["goals"].Enabled || !byKey["scorecard"].Enabled {
+		t.Fatalf("overrides not applied: %#v", byKey)
+	}
+	if !byKey["goals"].DefaultEnabled || byKey["scorecard"].DefaultEnabled {
+		t.Fatal("default_enabled must keep reporting the registry default")
+	}
+}
+
+func TestIsRegisteredElementRejectsUnknownKeys(t *testing.T) {
+	if !IsRegisteredElement("goals") {
+		t.Fatal("goals must be a registered element")
+	}
+	if IsRegisteredElement("people_analyzer") {
+		t.Fatal("unknown keys must be rejected")
+	}
+}
+
+func TestValidateGoalTypeInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   GoalTypeInput
+		wantErr bool
+	}{
+		{name: "valid", input: GoalTypeInput{Name: "Company", Color: "#6366F1", ScopeLabel: "company-wide"}},
+		{name: "color and scope optional", input: GoalTypeInput{Name: "Team"}},
+		{name: "blank name", input: GoalTypeInput{Name: "  "}, wantErr: true},
+		{name: "malformed color", input: GoalTypeInput{Name: "Team", Color: "blue"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateGoalTypeInput(tt.input); (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateGoalTypeInput(%#v) error = %v", tt.input, err)
+			}
+		})
+	}
+}
+
+func TestResolvePeriodInputComputesBoundsAndNames(t *testing.T) {
+	month, err := ResolvePeriodInput(OperatingPeriodInput{Unit: "month", StartsOn: "2026-08-01"})
+	if err != nil || month.Name != "August 2026" || date(month.EndsOn) != "2026-08-31" {
+		t.Fatalf("month period = %#v, err %v", month, err)
+	}
+
+	quarter, err := ResolvePeriodInput(OperatingPeriodInput{Unit: "quarter", StartsOn: "2026-10-01"})
+	if err != nil || quarter.Name != "Q4 2026" || date(quarter.EndsOn) != "2026-12-31" {
+		t.Fatalf("quarter period = %#v, err %v", quarter, err)
+	}
+
+	custom, err := ResolvePeriodInput(OperatingPeriodInput{Unit: "custom", Name: "H1 2027", StartsOn: "2027-01-01", EndsOn: "2027-06-30"})
+	if err != nil || custom.Name != "H1 2027" || date(custom.EndsOn) != "2027-06-30" {
+		t.Fatalf("custom period = %#v, err %v", custom, err)
+	}
+
+	if _, err := ResolvePeriodInput(OperatingPeriodInput{Unit: "custom", StartsOn: "2027-01-01", EndsOn: "2027-06-30"}); err == nil {
+		t.Fatal("custom periods must require a name")
+	}
+	if _, err := ResolvePeriodInput(OperatingPeriodInput{Unit: "custom", Name: "Broken", StartsOn: "2027-06-30", EndsOn: "2027-01-01"}); err == nil {
+		t.Fatal("period end must not precede start")
+	}
+	if _, err := ResolvePeriodInput(OperatingPeriodInput{Unit: "sprint", StartsOn: "2026-08-01"}); err == nil {
+		t.Fatal("unknown units must be rejected")
+	}
+	if _, err := ResolvePeriodInput(OperatingPeriodInput{Unit: "month", StartsOn: "not-a-date"}); err == nil {
+		t.Fatal("malformed starts_on must be rejected")
+	}
+
+	midMonth, err := ResolvePeriodInput(OperatingPeriodInput{Unit: "month", StartsOn: "2026-08-17"})
+	if err != nil || date(midMonth.StartsOn) != "2026-08-01" {
+		t.Fatalf("month periods must snap to calendar boundaries: %#v, err %v", midMonth, err)
+	}
+
+	named, err := ResolvePeriodInput(OperatingPeriodInput{Unit: "month", Name: "Sprint August", StartsOn: "2026-08-01"})
+	if err != nil || named.Name != "Sprint August" {
+		t.Fatalf("explicit names must win over generated ones: %#v, err %v", named, err)
+	}
+}
+
+func TestValidateRockInputAcceptsGoalType(t *testing.T) {
+	input := RockInput{
+		Title: "Typed goal", PeriodID: "550e8400-e29b-41d4-a716-446655440010",
+		Confidence: 50, ReportedHealth: "unset", GoalTypeID: "550e8400-e29b-41d4-a716-446655440020",
+	}
+	if err := ValidateRockInput(input); err != nil {
+		t.Fatalf("goal-typed input rejected: %v", err)
+	}
+	input.GoalTypeID = "not-a-uuid"
+	if err := ValidateRockInput(input); err == nil {
+		t.Fatal("malformed goal_type_id must be rejected")
 	}
 }
 

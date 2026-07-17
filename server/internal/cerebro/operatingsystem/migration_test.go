@@ -107,3 +107,54 @@ func readMigration(t *testing.T, name string) string {
 	}
 	return string(contents)
 }
+
+func TestConfigMigrationDefinesConfigurationFoundation(t *testing.T) {
+	up := readMigration(t, "9144_cerebro_operating_system_config.up.sql")
+
+	for _, fragment := range []string{
+		"CREATE TABLE IF NOT EXISTS cerebro_os_element_setting",
+		"PRIMARY KEY (workspace_id, element_key)",
+		"CREATE TABLE IF NOT EXISTS cerebro_goal_type",
+		"UNIQUE (workspace_id, name)",
+		"btrim(name) <> ''",
+		"ADD COLUMN IF NOT EXISTS goal_type_id UUID REFERENCES cerebro_goal_type(id) ON DELETE SET NULL",
+		"ADD COLUMN IF NOT EXISTS unit TEXT",
+		"unit IN ('month', 'quarter', 'custom')",
+	} {
+		if !strings.Contains(up, fragment) {
+			t.Errorf("config migration missing %q", fragment)
+		}
+	}
+}
+
+func TestConfigMigrationFreezesLegacyTerminologyForExistingWorkspaces(t *testing.T) {
+	up := readMigration(t, "9144_cerebro_operating_system_config.up.sql")
+
+	for _, fragment := range []string{
+		"INSERT INTO cerebro_operating_system_settings (workspace_id, terminology)",
+		`{"strategy":"Strategy","rock":"Rock","rocks":"Rocks"}`,
+		"ON CONFLICT (workspace_id) DO NOTHING",
+	} {
+		if !strings.Contains(up, fragment) {
+			t.Errorf("config migration missing terminology freeze %q", fragment)
+		}
+	}
+}
+
+func TestConfigDownMigrationRemovesConfigurationFoundation(t *testing.T) {
+	down := readMigration(t, "9144_cerebro_operating_system_config.down.sql")
+	want := []string{
+		"DROP COLUMN IF EXISTS goal_type_id",
+		"DROP TABLE IF EXISTS cerebro_goal_type;",
+		"DROP TABLE IF EXISTS cerebro_os_element_setting;",
+		"DROP COLUMN IF EXISTS unit",
+	}
+	position := -1
+	for _, fragment := range want {
+		next := strings.Index(down, fragment)
+		if next <= position {
+			t.Fatalf("config down migration must remove dependents first; missing or misplaced %q", fragment)
+		}
+		position = next
+	}
+}
