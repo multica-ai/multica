@@ -309,7 +309,19 @@ func (c *wecomChannel) dispatchFrame(ctx context.Context, env frameEnvelope, sen
 		// Ack for our client-initiated ping — no-op.
 		return nil
 	default:
-		// Includes anonymous ack frames (empty cmd) for our writes.
+		// Anonymous ack frames (empty cmd) for our writes. Most are
+		// errcode=0 no-ops, but aibot_send_msg / aibot_respond_msg /
+		// aibot_upload_media_* can reject with a non-zero errcode
+		// (e.g. wrong msgtype, rate limit, chat not writable). Log the
+		// error so a failed outbound is visible without having to
+		// packet-capture the socket.
+		if env.ErrCode != 0 {
+			log.Warn("wecom: server ack error",
+				"errcode", env.ErrCode,
+				"errmsg", env.ErrMsg,
+				"req_id", env.Headers.ReqID,
+			)
+		}
 		return nil
 	}
 }
