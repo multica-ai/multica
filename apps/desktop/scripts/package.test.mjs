@@ -404,9 +404,9 @@ describe("electron-builder fuses", () => {
   it("ignores inherited Node runtime env in packaged desktop builds", () => {
     const config = readFileSync(resolve("electron-builder.yml"), "utf-8");
     expect(config).toMatch(
-      /electronFuses:\n(?:  .+\n)*  enableNodeOptionsEnvironmentVariable: false\n/,
+      /electronFuses:\n(?: {2}.+\n)* {2}enableNodeOptionsEnvironmentVariable: false\n/,
     );
-    expect(config).toMatch(/electronFuses:\n(?:  .+\n)*  runAsNode: false\n/);
+    expect(config).toMatch(/electronFuses:\n(?: {2}.+\n)* {2}runAsNode: false\n/);
   });
 });
 
