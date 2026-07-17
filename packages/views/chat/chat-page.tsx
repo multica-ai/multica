@@ -314,7 +314,7 @@ export function ChatPage() {
         maxSize={480}
         groupResizeBehavior="preserve-pixel-size"
       >
-        <div className="flex flex-col border-r h-full">
+        <div className="flex flex-col h-full">
           {listHeader}
           <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
         </div>

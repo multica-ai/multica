@@ -96,7 +96,7 @@ export function AnimatedRightSidebar({
     <motion.div
       animate={{ opacity: open ? 1 : 0, x: open ? 0 : 12 }}
       className={cn(
-        "h-full overflow-x-hidden overflow-y-auto border-l",
+        "h-full overflow-x-hidden overflow-y-auto",
         !open && "pointer-events-none",
         className,
       )}

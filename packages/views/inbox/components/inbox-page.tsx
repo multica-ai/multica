@@ -578,7 +578,7 @@ export function InboxPage() {
     return (
       <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
         <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
-          <div className="flex flex-col border-r h-full">
+          <div className="flex flex-col h-full">
             <div className="flex h-12 shrink-0 items-center border-b px-4">
               <Skeleton className="h-5 w-16" />
             </div>
@@ -609,7 +609,7 @@ export function InboxPage() {
   return (
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
-      <div className="flex flex-col border-r h-full">
+      <div className="flex flex-col h-full">
         {listPanel}
       </div>
       </ResizablePanel>

@@ -2503,7 +2503,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <ResizablePanel id="content" minSize="50%">
         {detailContent}
       </ResizablePanel>
-      <ResizableHandle />
+      {/* No resting rule while the sidebar is collapsed — there is no panel
+          on the far side to divide from. Hover still reveals the grab hint. */}
+      <ResizableHandle
+        className={cn(!desktopSidebarVisualOpen && "before:bg-transparent")}
+      />
       <ResizablePanel
         id="sidebar"
         {...rightSidebarPanelMotionProps}
