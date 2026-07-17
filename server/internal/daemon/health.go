@@ -133,12 +133,29 @@ func (d *Daemon) shutdownHandler() http.HandlerFunc {
 	}
 }
 
+// restartHandler asks the running daemon to hand off to a successor using its
+// own executable, start flags, and environment. Keeping restart ownership in
+// the daemon prevents a CLI caller with a different environment from silently
+// dropping daemon-only configuration.
+func (d *Daemon) restartHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "restarting"})
+		go d.triggerRestart()
+	}
+}
+
 // serveHealth runs the health HTTP server on the given listener.
 // Blocks until ctx is cancelled.
 func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
+	mux.HandleFunc("/restart", d.restartHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 
 	srv := &http.Server{Handler: mux}

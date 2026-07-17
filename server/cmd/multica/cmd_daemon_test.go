@@ -76,6 +76,57 @@ func TestBuildDaemonStartArgsForwardsCodexHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestDaemonRestartUsesSelfHandoff(t *testing.T) {
+	newCommand := func() *cobra.Command {
+		cmd := &cobra.Command{}
+		cmd.Flags().Bool("foreground", false, "")
+		cmd.Flags().String("daemon-id", "", "")
+		cmd.Flags().String("device-name", "", "")
+		cmd.Flags().String("runtime-name", "", "")
+		cmd.Flags().Duration("poll-interval", 0, "")
+		cmd.Flags().Duration("heartbeat-interval", 0, "")
+		cmd.Flags().Duration("agent-timeout", 0, "")
+		cmd.Flags().Duration("codex-semantic-inactivity-timeout", 0, "")
+		cmd.Flags().Duration("codex-handshake-timeout", 0, "")
+		cmd.Flags().Int("max-concurrent-tasks", 0, "")
+		cmd.Flags().Bool("no-auto-update", false, "")
+		cmd.Flags().Duration("auto-update-interval", 0, "")
+		cmd.Flags().String("server-url", "", "")
+		cmd.Flags().String("profile", "", "")
+		return cmd
+	}
+
+	tests := []struct {
+		name  string
+		flag  string
+		value string
+		want  bool
+	}{
+		{name: "plain restart", want: true},
+		{name: "target profile keeps daemon-owned config", flag: "profile", value: "desktop", want: true},
+		{name: "foreground override", flag: "foreground", value: "true", want: false},
+		{name: "identity override", flag: "daemon-id", value: "replacement", want: false},
+		{name: "timing override", flag: "poll-interval", value: "5s", want: false},
+		{name: "capacity override", flag: "max-concurrent-tasks", value: "4", want: false},
+		{name: "auto update override", flag: "no-auto-update", value: "true", want: false},
+		{name: "server override", flag: "server-url", value: "https://example.test", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newCommand()
+			if tt.flag != "" {
+				if err := cmd.Flags().Set(tt.flag, tt.value); err != nil {
+					t.Fatalf("set %s: %v", tt.flag, err)
+				}
+			}
+			if got := daemonRestartUsesSelfHandoff(cmd); got != tt.want {
+				t.Fatalf("daemonRestartUsesSelfHandoff() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestPrintDaemonStatusOmitsVersionWhenMissing pins the back-compat contract:
 // when the daemon doesn't report cli_version (older daemon paired with a newer
 // CLI) or reports an empty string, the CLI must skip the line entirely instead
