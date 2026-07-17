@@ -37,8 +37,8 @@ export interface HandoffActionInput {
 }
 
 // The truthful context-window measurement for a session's active context, read
-// from real per-run token usage (task_usage) — across runtimes and models, not
-// a char-count guess. has_data is false until a run with recorded usage has
+// from canonical model-call usage — across runtimes and models, not a char-count
+// guess. Legacy per-run usage remains the historical fallback. has_data is false until a run with recorded usage has
 // happened in the active session. max_context_tokens is the active run's model
 // window, so used_percent stays meaningful when the model changes between runs.
 export interface ContextUsage {
@@ -56,7 +56,7 @@ export interface ContextUsage {
   max_context_tokens: number;
   used_percent: number;
   cache_share_percent: number;
-  // True when the server fell back to the cumulative task_usage sum (no last-turn
+  // True when the server fell back to a cumulative run sum (no call footprint
   // footprint). The figure is then clamped to the window and the bar prefixes "~"
   // (FIR-1931): a heavy issue must never display an impossible 6986k / 1000k.
   approximate: boolean;
@@ -77,7 +77,7 @@ export interface ContextUsage {
 
 // FIR-1931: one row of the per-session usage breakdown the context bar opens in a
 // sheet — summed cost/tokens/cache for a session (= a thread) plus its current
-// context fullness. Built from data we already have (task_usage + footprint).
+// context fullness. Built from canonical calls with legacy fallback.
 export interface SessionUsageRow {
   session_id: string;
   title: string;

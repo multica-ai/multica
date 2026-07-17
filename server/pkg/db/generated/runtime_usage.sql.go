@@ -64,7 +64,7 @@ SELECT
     -- CEREBRO-PATCH(task-usage-gateway-cost): real gateway spend per (hour, model).
     SUM(tu.cost_cents)::bigint AS cost_cents,
     COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.runtime_id = $1
   AND tu.created_at >= $3::timestamptz
@@ -211,7 +211,7 @@ SELECT
     -- CEREBRO-PATCH(task-usage-gateway-cost): real gateway spend per (agent, model).
     SUM(tu.cost_cents)::bigint AS cost_cents,
     COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.runtime_id = $1
   AND tu.created_at >= $2::timestamptz
@@ -244,6 +244,7 @@ type ListRuntimeUsageByAgentRow struct {
 //
 // This view doesn't bucket by date, so it doesn't need @tz; only the
 // @since cutoff is provided in runtime-local terms (computed in Go).
+// CEREBRO-PATCH(model-usage-task-rollup): FIR-3337 read the canonical/legacy compatibility view.
 func (q *Queries) ListRuntimeUsageByAgent(ctx context.Context, arg ListRuntimeUsageByAgentParams) ([]ListRuntimeUsageByAgentRow, error) {
 	rows, err := q.db.Query(ctx, listRuntimeUsageByAgent, arg.RuntimeID, arg.Since)
 	if err != nil {

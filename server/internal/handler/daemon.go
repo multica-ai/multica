@@ -27,6 +27,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/pricing"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -2429,7 +2430,8 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Usage []TaskUsagePayload `json:"usage"`
+		Usage  []TaskUsagePayload      `json:"usage"`
+		Events []agent.ModelUsageEvent `json:"events"` // CEREBRO-PATCH(handler-model-usage-events): FIR-3337 canonical call-level measurements.
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -2442,19 +2444,62 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	// resolve to a provider instead of landing as '' and pricing $0.
 	var runtimeProvider string
 	runtimeProviderLoaded := false
+	loadRuntimeProvider := func() string {
+		if !runtimeProviderLoaded {
+			if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
+				runtimeProvider = normalizeProvider(rt.Provider)
+			} else {
+				slog.Warn("load runtime provider for usage backfill failed",
+					"task_id", taskID, "runtime_id", uuidToString(task.RuntimeID), "error", err)
+			}
+			runtimeProviderLoaded = true
+		}
+		return runtimeProvider
+	}
+
+	// Validate every runtime event before writing either the canonical ledger
+	// or its temporary legacy projections. Core owns this boundary; attribution
+	// is derived by InsertModelUsageEvent from the authenticated task.
+	normalizedEvents := make([]agent.ModelUsageEvent, 0, len(req.Events))
+	for _, event := range req.Events {
+		fallbackProvider := ""
+		if normalizeProvider(event.Provider) == "" {
+			fallbackProvider = loadRuntimeProvider()
+		}
+		normalized, err := normalizeAndValidateModelUsageEvent(event, fallbackProvider)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid model usage event")
+			return
+		}
+		normalizedEvents = append(normalizedEvents, normalized)
+	}
+	// CEREBRO-PATCH(handler-model-usage-model-budget): FIR-3337 retains legacy
+	// charging only for provider/model pairs not represented by canonical events.
+	eventCoverage := modelUsageEventCoverage(normalizedEvents)
+
+	newEventInserted := false
+	for _, event := range normalizedEvents {
+		// CEREBRO-PATCH(handler-model-usage-event-ingestion): FIR-3337 append the
+		// canonical event and its financial projections in one transaction.
+		inserted, err := h.ingestModelUsageEvent(r.Context(), task, event)
+		if err != nil {
+			slog.Error("insert model usage event failed", "task_id", taskID, "event_id", event.EventID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to record model usage")
+			return
+		}
+		newEventInserted = newEventInserted || inserted
+	}
+
+	if len(normalizedEvents) > 0 && !newEventInserted {
+		h.logModelUsageEventShadowReconciliation(r.Context(), task.ID)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+
 	for _, u := range req.Usage {
 		provider := normalizeProvider(u.Provider)
 		if provider == "" {
-			if !runtimeProviderLoaded {
-				if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
-					runtimeProvider = normalizeProvider(rt.Provider)
-				} else {
-					slog.Warn("load runtime provider for usage backfill failed",
-						"task_id", taskID, "runtime_id", uuidToString(task.RuntimeID), "error", err)
-				}
-				runtimeProviderLoaded = true
-			}
-			provider = runtimeProvider
+			provider = loadRuntimeProvider()
 		}
 		if err := h.Queries.UpsertTaskUsage(r.Context(), db.UpsertTaskUsageParams{
 			TaskID:           parseUUID(taskID),
@@ -2470,9 +2515,14 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
-		h.recordUsageBudgetAndAccount(r.Context(), task, u)
+		if !modelUsageCovered(eventCoverage, provider, u.Model) {
+			h.recordUsageBudgetAndAccount(r.Context(), task, u)
+		}
 		h.recordCerebroTaskContextFootprint(r.Context(), taskID, u) // CEREBRO-PATCH(handler-daemon-context-footprint): FIR-1856 persist last-turn footprint for the window indicator.
 		h.projectAnalyticsRun(r.Context(), taskID)                  // CEREBRO-PATCH(analytics-projection): FIR-2996 refresh canonical usage after cost writes.
+	}
+	if len(normalizedEvents) > 0 {
+		h.logModelUsageEventShadowReconciliation(r.Context(), task.ID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

@@ -101,3 +101,34 @@ func TestContextTimeline_EmptyWhenNoHistory(t *testing.T) {
 		t.Errorf("points = nil, want empty slice (never null)")
 	}
 }
+
+// CEREBRO-PATCH(model-usage-timeline-consumer-test): FIR-3337 the development
+// curve must use call-level context and provider-explicit compaction events.
+func TestContextTimeline_ReadsCanonicalCallEvents(t *testing.T) {
+	if sessTestPool == nil {
+		t.Skip("no test DB")
+	}
+	issueID, workspaceID := seedIssue(t)
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
+	rootID := seedRootComment(t, issueID, workspaceID)
+	taskID := seedTaskWithUsage(t, issueID, workspaceID, rootID, "gpt-5.6-sol", 999_000, 0)
+	if _, err := sessTestPool.Exec(context.Background(), `DELETE FROM task_usage WHERE task_id = $1::uuid`, taskID); err != nil {
+		t.Fatalf("delete legacy usage: %v", err)
+	}
+	seedCanonicalModelUsageEvent(t, taskID, rootID, "call-1", "gpt-5.6-sol", 1, 100_000, 500, 600_000, 700_000, 1_050_000, "", 20)
+	seedCanonicalModelUsageEvent(t, taskID, rootID, "call-2", "gpt-5.6-sol", 2, 10_000, 100, 20_000, 30_000, 1_050_000, "provider_explicit", 10)
+
+	var resp contextTimelineResponse
+	if err := json.Unmarshal(callContextTimeline(h, issueID, workspaceID, rootID).Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.HasData || len(resp.Points) != 2 {
+		t.Fatalf("points = %+v, want two canonical call points", resp.Points)
+	}
+	if resp.Points[0].ContextTokens != 700_000 || resp.Points[0].MaxContextTokens != 1_050_000 || resp.Points[0].UsedPercent != 66 {
+		t.Fatalf("first canonical point = %+v", resp.Points[0])
+	}
+	if !resp.Points[1].IsCompaction || resp.Points[1].ContextTokens != 30_000 {
+		t.Fatalf("explicit compaction point = %+v", resp.Points[1])
+	}
+}

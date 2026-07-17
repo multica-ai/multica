@@ -130,6 +130,9 @@ type Result struct {
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	// CEREBRO-PATCH(agent-model-usage-events): FIR-3337 call-level canonical
+	// measurements when a runtime exposes them; empty triggers an explicit aggregate fallback.
+	UsageEvents []ModelUsageEvent
 	// CEREBRO-PATCH(agent-result-logs): JEH-1365 — accumulated verbose log content
 	// from the run stream (level="debug"/"info"/"warn"). Used by maybeReportAccountUsage
 	// to find rate-limit/quota signals that appear in log messages rather than the

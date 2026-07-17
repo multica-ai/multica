@@ -85,7 +85,10 @@ func TestFirtalLocalToolLoop(t *testing.T) {
 	var gotName string
 	var gotArgs map[string]any
 	b := &firtalLocalBackend{
-		cfg:        Config{Env: map[string]string{"FIRTAL_LOCAL_OLLAMA_URL": srv.URL}},
+		cfg: Config{Env: map[string]string{
+			"FIRTAL_LOCAL_OLLAMA_URL": srv.URL,
+			"MULTICA_TASK_ID":         "local-task",
+		}},
 		httpClient: srv.Client(),
 		runTool: func(ctx context.Context, name string, args map[string]any) (string, error) {
 			gotName = name
@@ -117,6 +120,23 @@ func TestFirtalLocalToolLoop(t *testing.T) {
 	}
 	if got := res.Usage["gemma4:12b-it-qat"].InputTokens; got != 22 {
 		t.Fatalf("accumulated input tokens = %d, want 22", got)
+	}
+	// CEREBRO-PATCH(agent-firtal-local-call-usage-events-test): FIR-3337 verifies one event per local model round.
+	if len(res.UsageEvents) != 2 {
+		t.Fatalf("UsageEvents = %+v, want one event per local model call", res.UsageEvents)
+	}
+	first, second := res.UsageEvents[0], res.UsageEvents[1]
+	if first.EventID != "firtal-local:local-task:call:1" || second.EventID != "firtal-local:local-task:call:2" {
+		t.Fatalf("usage event IDs = %q, %q", first.EventID, second.EventID)
+	}
+	if first.Sequence != 1 || first.InputTokens != 10 || first.OutputTokens != 5 || first.ContextTokens != 10 {
+		t.Fatalf("first usage event = %+v", first)
+	}
+	if second.Sequence != 2 || second.InputTokens != 12 || second.OutputTokens != 8 || second.ContextTokens != 12 {
+		t.Fatalf("second usage event = %+v", second)
+	}
+	if first.Provider != firtalLocalProvider || first.Model != "gemma4:12b-it-qat" || first.Source != ModelUsageSourceFinalResponse || first.Completeness != ModelUsageTokensOnly || first.CounterSemantics != ModelUsageCounterDelta {
+		t.Fatalf("usage event semantics = %+v", first)
 	}
 }
 

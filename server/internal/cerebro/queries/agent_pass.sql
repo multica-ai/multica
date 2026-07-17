@@ -180,7 +180,7 @@ SELECT
     SUM(tu.output_tokens)::bigint       AS output_tokens,
     SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id IN (SELECT t2.issue_id FROM issue_tree t2)
 GROUP BY tu.provider, tu.model;

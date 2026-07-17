@@ -6,7 +6,8 @@ package sessions
 // (issue_context_session_scope in the handler package) makes a run in a thread
 // receive only that thread's slice. This file answers the question the quiet
 // indicator needs: "how full is this session's context window right now, and how
-// much of it was cache?" — from ground truth (task_usage), never a guess.
+// much of it was cache?" — from the canonical call ledger, with legacy usage
+// as a fallback for runs recorded before FIR-3337.
 //
 // Definition: the fullness of a session's context window is the WHOLE prompt
 // footprint of the most recent agent run TRIGGERED INSIDE that thread (its
@@ -146,11 +147,13 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// runUsage holds one run's token components: the cumulative task_usage sums plus
-// the last-turn footprint (zero when the runtime reported none).
+// runUsage holds one run's token components and latest call footprint. Canonical
+// events win; legacy cumulative usage/footprint rows are the historical fallback.
 type runUsage struct {
 	input, cacheRead, cacheWrite, output int64
 	footprintInput, footprintCacheRead   int64
+	contextWindow                        int64
+	contextReset                         bool
 	model                                string
 	// FIR-2279: when the latest run in the session finished (completed_at, else
 	// started_at, else created_at) — the anchor for the prompt-cache countdown.
@@ -161,17 +164,19 @@ type runUsage struct {
 // exact last-turn footprint, else fall back to the cumulative sum (approximate,
 // clamped to the window — FIR-1931 Fix C).
 func (u runUsage) derive() (contextTokens, maxContext int64, usedPercent, cacheSharePercent int, approximate bool) {
+	if u.contextReset {
+		return computeContextFootprintWithWindow(0, 0, 0, u.model)
+	}
 	if u.footprintInput > 0 {
-		return computeContextFootprint(u.footprintInput, u.footprintCacheRead, u.model)
+		return computeContextFootprintWithWindow(u.footprintInput, u.footprintCacheRead, u.contextWindow, u.model)
 	}
 	return computeContextUsage(u.input, u.cacheRead, u.cacheWrite, u.model)
 }
 
 // latestRunUsage returns the most recent run with recorded usage that belongs to
 // the session rooted at rootID (its trigger comment is the root or any reply
-// beneath it, at any depth). cf.* is the last-turn footprint (the size of the
-// prompt the model last read); when present it is the authoritative numerator,
-// and the task_usage SUMs are the fallback for runtimes that report no footprint.
+// beneath it, at any depth). Call events are authoritative when present; the
+// legacy usage and footprint tables remain a per-task historical fallback.
 //
 // Thread membership is depth-independent: a session is the root thread and EVERY
 // comment beneath it, at any nesting. An earlier check only matched the root +
@@ -192,29 +197,75 @@ func (h *Handler) latestRunUsage(ctx context.Context, issueID, rootID pgtype.UUI
 			SELECT $2::uuid
 			UNION ALL
 			SELECT c.id FROM comment c JOIN thread ON c.parent_id = thread.id
+		), latest_task AS (
+			SELECT t.*
+			FROM agent_task_queue t
+			WHERE t.issue_id = $1
+			  AND ( t.trigger_comment_id IN (SELECT id FROM thread)
+			        OR ($3::bool AND t.trigger_comment_id IS NULL) )
+			  AND EXISTS (SELECT 1 FROM model_usage_task_rollup usage WHERE usage.task_id = t.id)
+			ORDER BY t.created_at DESC
+			LIMIT 1
 		)
-		SELECT COALESCE(SUM(tu.input_tokens), 0),
-		       COALESCE(SUM(tu.cache_read_tokens), 0),
-		       COALESCE(SUM(tu.cache_write_tokens), 0),
-		       COALESCE(SUM(tu.output_tokens), 0),
-		       MAX(tu.model),
-		       COALESCE(MAX(cf.input_tokens), 0),
-		       COALESCE(MAX(cf.cache_read_tokens), 0),
-		       COALESCE(t.completed_at, t.started_at, t.created_at)
-		FROM agent_task_queue t
-		JOIN task_usage tu ON tu.task_id = t.id
-		LEFT JOIN cerebro_task_context_footprint cf ON cf.task_id = t.id
-		WHERE t.issue_id = $1
-		  AND ( t.trigger_comment_id IN (SELECT id FROM thread)
-		        OR ($3::bool AND t.trigger_comment_id IS NULL) )
-		GROUP BY t.id, t.created_at
-		ORDER BY t.created_at DESC
-		LIMIT 1`
+		SELECT usage.input_tokens,
+		       usage.cache_read_tokens,
+		       usage.cache_write_tokens,
+		       usage.output_tokens,
+		       CASE WHEN event_presence.event_count > 0 THEN COALESCE(event_context.model, usage.model) ELSE usage.model END,
+		       CASE WHEN event_presence.event_count > 0 THEN COALESCE(event_context.context_tokens, 0) ELSE legacy_context.footprint_input END,
+		       CASE WHEN event_presence.event_count > 0 THEN COALESCE(event_context.cache_read_tokens, 0) ELSE legacy_context.footprint_cache_read END,
+		       CASE WHEN event_presence.event_count > 0 THEN COALESCE(event_context.context_window_tokens, 0) ELSE 0 END,
+		       COALESCE(t.completed_at, t.started_at, t.created_at),
+		       event_presence.event_count > 0
+		         AND context_state.compacted
+		         AND event_context.context_tokens IS NULL
+		FROM latest_task t
+		CROSS JOIN LATERAL (
+			SELECT COUNT(*)::bigint AS event_count
+			FROM model_usage_event WHERE task_id = t.id
+		) event_presence
+		CROSS JOIN LATERAL (
+			SELECT COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+			       COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+			       COALESCE(SUM(cache_read_tokens), 0)::bigint AS cache_read_tokens,
+			       COALESCE(SUM(cache_write_tokens), 0)::bigint AS cache_write_tokens,
+			       (ARRAY_AGG(model ORDER BY input_tokens DESC, updated_at DESC))[1] AS model
+			FROM model_usage_task_rollup WHERE task_id = t.id
+		) usage
+		LEFT JOIN LATERAL (
+			SELECT model, context_tokens, context_window_tokens, cache_read_tokens
+			FROM model_usage_event context_event
+			WHERE task_id = t.id
+			  AND context_tokens > 0
+			  AND compaction_kind = ''
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM model_usage_event compaction
+				WHERE compaction.task_id = context_event.task_id
+				  AND compaction.compaction_kind <> ''
+				  AND (compaction.observed_at, compaction.sequence, compaction.created_at) >=
+				      (context_event.observed_at, context_event.sequence, context_event.created_at)
+			  )
+			ORDER BY observed_at DESC, sequence DESC, created_at DESC
+			LIMIT 1
+		) event_context ON true
+		CROSS JOIN LATERAL (
+			SELECT EXISTS (
+				SELECT 1 FROM model_usage_event
+				WHERE task_id = t.id AND compaction_kind <> ''
+			) AS compacted
+		) context_state
+		CROSS JOIN LATERAL (
+			SELECT COALESCE(MAX(cf.input_tokens), 0)::bigint AS footprint_input,
+			       COALESCE(MAX(cf.cache_read_tokens), 0)::bigint AS footprint_cache_read
+			FROM cerebro_task_context_footprint cf
+			WHERE cf.task_id = t.id
+		) legacy_context`
 
 	var u runUsage
 	var model pgtype.Text
 	err := h.pool.QueryRow(ctx, q, issueID, rootID, isFirst).
-		Scan(&u.input, &u.cacheRead, &u.cacheWrite, &u.output, &model, &u.footprintInput, &u.footprintCacheRead, &u.lastActivityAt)
+		Scan(&u.input, &u.cacheRead, &u.cacheWrite, &u.output, &model, &u.footprintInput, &u.footprintCacheRead, &u.contextWindow, &u.lastActivityAt, &u.contextReset)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return runUsage{}, false, nil
@@ -231,8 +282,15 @@ func (h *Handler) latestRunUsage(ctx context.Context, issueID, rootID pgtype.UUI
 // tokens, so it IS the window occupancy and must not have cacheRead added on
 // top. `footprintCacheRead` is the cached subset, used only for the display.
 func computeContextFootprint(footprintInput, footprintCacheRead int64, model string) (contextTokens, maxContext int64, usedPercent, cacheSharePercent int, approximate bool) {
+	return computeContextFootprintWithWindow(footprintInput, footprintCacheRead, 0, model)
+}
+
+func computeContextFootprintWithWindow(footprintInput, footprintCacheRead, reportedWindow int64, model string) (contextTokens, maxContext int64, usedPercent, cacheSharePercent int, approximate bool) {
 	contextTokens = footprintInput
-	maxContext = contextWindowForModel(model)
+	maxContext = reportedWindow
+	if maxContext <= 0 {
+		maxContext = contextWindowForModel(model)
+	}
 	if maxContext > 0 {
 		usedPercent = clampPercent(int(contextTokens * 100 / maxContext))
 	}

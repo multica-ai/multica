@@ -20,7 +20,7 @@ SELECT
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
     COALESCE(SUM(tu.cost_cents), 0)::bigint AS total_cost_cents,
     COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.chat_session_id = $1
 GROUP BY tu.model
@@ -82,7 +82,7 @@ SELECT
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
     COALESCE(SUM(tu.cost_cents), 0)::bigint AS total_cost_cents,
     COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id IN (SELECT id FROM subtree)
 GROUP BY tu.model
@@ -141,7 +141,7 @@ SELECT
     -- prefers this over the token estimate when it is > 0.
     COALESCE(SUM(tu.cost_cents), 0)::bigint AS total_cost_cents,
     COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1
 GROUP BY tu.model
@@ -196,7 +196,7 @@ SELECT
     COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
     COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1
 `
@@ -223,22 +223,22 @@ func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID)
 }
 
 const getTaskUsage = `-- name: GetTaskUsage :many
-SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at, cost_cents FROM task_usage
+SELECT task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_cents, created_at, updated_at FROM model_usage_task_rollup
 WHERE task_id = $1
 ORDER BY model
 `
 
-func (q *Queries) GetTaskUsage(ctx context.Context, taskID pgtype.UUID) ([]TaskUsage, error) {
+// CEREBRO-PATCH(model-usage-task-rollup): FIR-3337 read the canonical/legacy compatibility view.
+func (q *Queries) GetTaskUsage(ctx context.Context, taskID pgtype.UUID) ([]ModelUsageTaskRollup, error) {
 	rows, err := q.db.Query(ctx, getTaskUsage, taskID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []TaskUsage{}
+	items := []ModelUsageTaskRollup{}
 	for rows.Next() {
-		var i TaskUsage
+		var i ModelUsageTaskRollup
 		if err := rows.Scan(
-			&i.ID,
 			&i.TaskID,
 			&i.Provider,
 			&i.Model,
@@ -246,9 +246,9 @@ func (q *Queries) GetTaskUsage(ctx context.Context, taskID pgtype.UUID) ([]TaskU
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+			&i.CostCents,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.CostCents,
 		); err != nil {
 			return nil, err
 		}
@@ -267,11 +267,11 @@ SELECT
     COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
     COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN issue i ON i.id = atq.issue_id
 WHERE i.workspace_id = $1
-  AND tu.created_at >= $2
+  AND tu.created_at >= $2::timestamptz
 GROUP BY tu.model
 `
 

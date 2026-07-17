@@ -99,6 +99,8 @@ func (b *firtalGatewayBackend) Execute(ctx context.Context, prompt string, opts 
 			Output:     output,
 			DurationMs: time.Since(start).Milliseconds(),
 			Usage:      map[string]TokenUsage{cfg.Model: usage},
+			// CEREBRO-PATCH(agent-firtal-gateway-call-usage-events): FIR-3337 one HTTP response equals one native model call.
+			UsageEvents: singleHTTPCallUsageEvent(firtalGatewayProvider, cfg.Model, firstEnv(b.cfg.Env, "MULTICA_TASK_ID"), usage, time.Now()),
 		}
 	}()
 
