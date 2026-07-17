@@ -25,6 +25,7 @@ import (
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -232,6 +233,13 @@ type Handler struct {
 	// unless Slack is configured; GetChatChannelHistory then reports "no channel
 	// integration". A future platform satisfies the same reader interface.
 	SlackHistory ChatChannelHistoryReader
+	// WecomStore is the read/write handle over channel_installation rows scoped
+	// to channel_type='wecom'. Nil disables the wecom Web-UI endpoints (they
+	// return 503) and prevents boot from wiring the smart-bot supervisor.
+	WecomStore *wecom.Store
+	// WecomCredentials unseals a wecom installation's smart-bot secret for the
+	// WebSocket subscribe frame. Nil disables the wecom integration.
+	WecomCredentials wecom.CredentialsResolver
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in

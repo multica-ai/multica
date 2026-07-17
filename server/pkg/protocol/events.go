@@ -167,4 +167,13 @@ const (
 	// invalidate the Slack installations query on either.
 	EventSlackInstallationCreated = "slack_installation:created"
 	EventSlackInstallationRevoked = "slack_installation:revoked"
+
+	// WeCom smart-bot installation lifecycle. Same semantics as Lark /
+	// Slack: `created` covers both first install and re-install via
+	// UpsertChannelInstallation (the UNIQUE on (workspace_id, agent_id,
+	// channel_type) means at most one row per agent); `revoked` flips
+	// status without deleting the row. Front-ends invalidate the wecom
+	// installations query on either.
+	EventWecomInstallationCreated = "wecom_installation:created"
+	EventWecomInstallationRevoked = "wecom_installation:revoked"
 )

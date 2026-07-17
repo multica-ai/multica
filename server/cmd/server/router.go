@@ -29,6 +29,7 @@ import (
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -552,6 +553,53 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
 	}
 
+	// WeCom smart-bot integration ("智能机器人" / aibot). Per-installation
+	// WebSocket long connection to wss://openws.work.weixin.qq.com; the
+	// Supervisor drives one connection per active wecom installation, gated
+	// by the shared ws_lease_token so multi-replica deployments still hold
+	// at most one active socket per bot (WeChat itself only permits one).
+	//
+	// Gated by MULTICA_WECOM_SECRET_KEY. Without it, the whole block is
+	// skipped and the wecom Web-UI endpoints return 503; existing deployments
+	// are unaffected. The smart-bot flow does NOT require any public HTTP
+	// callback, so nothing else needs to be exposed to the internet.
+	if wecomKey, err := secretbox.LoadKey("MULTICA_WECOM_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(wecomKey)
+		if err != nil {
+			slog.Error("wecom: secretbox.New failed; wecom integration disabled", "error", err)
+		} else {
+			credsResolver, err := wecom.NewSecretboxCredentialsResolver(box)
+			if err != nil {
+				slog.Error("wecom: credentials resolver init failed; wecom integration disabled", "error", err)
+			} else {
+				wecomStore := wecom.NewStore(queries)
+				h.WecomStore = wecomStore
+				h.WecomCredentials = credsResolver
+
+				// Wecom shares the engine.ChatSession (channel_type-keyed) so
+				// /issue, dedup, and run-triggering behave identically across
+				// platforms. Session titles use the wecom-flavored wording
+				// (Chinese product voice — wecom deployments are China-only).
+				wecomSession := engine.NewChatSession(queries, pool, wecom.TypeWecom, engine.SessionTitles{
+					Group:    "企业微信群聊",
+					Direct:   "企业微信单聊",
+					Fallback: "企业微信会话",
+				})
+
+				wecom.RegisterWecom(channelRegistry, wecom.ChannelDeps{
+					Credentials: credsResolver,
+					Logger:      slog.Default(),
+				})
+				channelRouter.Register(wecom.TypeWecom, wecom.NewResolverSet(
+					wecomStore, wecomSession, nil,
+				))
+				slog.Info("wecom integration enabled (smart bot, long connection)")
+			}
+		}
+	} else {
+		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -970,11 +1018,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/slack/installations", h.ListSlackInstallations)
+					r.Get("/wecom/installations", h.ListWecomInstallations)
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Delete("/slack/installations/{installationId}", h.RevokeSlackInstallation)
 					r.Post("/slack/install/byo", h.RegisterSlackBYO)
+					r.Delete("/wecom/installations/{installationId}", h.RevokeWecomInstallation)
+					r.Post("/wecom/install/byo", h.RegisterWecomBYO)
 				})
 			})
 		})
