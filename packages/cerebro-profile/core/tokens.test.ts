@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { compileProfile } from "./compile";
 import { buildDefaultProfile } from "./presets";
 import { COMPILED_PROMPT_TOKEN_CAP } from "./schema";
-import { estimateTokens, formatContextPercent } from "./tokens";
+import {
+  estimateTokens,
+  estimateTokensFromLength,
+  formatContextPercent,
+} from "./tokens";
 
 describe("estimateTokens", () => {
   it("always marks results as approximate", () => {
@@ -26,6 +30,27 @@ describe("estimateTokens", () => {
       const { tokens } = estimateTokens(compiled, profile.language);
       expect(tokens, `persona ${persona}`).toBeLessThan(COMPILED_PROMPT_TOKEN_CAP);
     }
+  });
+});
+
+describe("estimateTokensFromLength", () => {
+  // FIR-3212: the prompt snapshot header knows the recorded prompt's size as a
+  // byte count, never as text — the stored view is redacted, so its length is
+  // not the length that was actually sent. Estimating from the recorded length
+  // keeps the token figure consistent with the byte figure beside it.
+  it("agrees with estimateTokens for text of the same length", () => {
+    const text = "x".repeat(380);
+    expect(estimateTokensFromLength(text.length, "en").tokens).toBe(
+      estimateTokens(text, "en").tokens,
+    );
+  });
+
+  it("always marks results as approximate", () => {
+    expect(estimateTokensFromLength(1000, "en").approximate).toBe(true);
+  });
+
+  it("reports zero tokens for an empty prompt rather than inventing one", () => {
+    expect(estimateTokensFromLength(0, "en").tokens).toBe(0);
   });
 });
 

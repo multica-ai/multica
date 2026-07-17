@@ -126,6 +126,26 @@ describe("CerebroAgentPromptSnapshotTab", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows the run the snapshot was captured from", async () => {
+    mockHappyPath();
+    renderTab();
+
+    // Provenance is only checkable if the reader can tell WHICH run produced
+    // this prompt. Without the run id the header describes an anonymous blob.
+    await screen.findByText(/claude 2\.1\.209/);
+    expect(screen.getAllByText(/task-1/).length).toBeGreaterThan(0);
+  });
+
+  it("shows prompt size in tokens alongside bytes", async () => {
+    mockHappyPath();
+    renderTab();
+
+    await screen.findByText(/claude 2\.1\.209/);
+    // 93153 recorded bytes / 3.8 chars-per-token ≈ 24514 tokens, always
+    // presented as an approximation — never as an exact count.
+    expect(screen.getByText(/~24,514 tokens/)).toBeInTheDocument();
+  });
+
   it("lists layers with byte sizes and shows layer content with line numbers", async () => {
     mockHappyPath();
     renderTab();

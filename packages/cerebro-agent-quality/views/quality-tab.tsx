@@ -180,7 +180,14 @@ function QualityVersionRow({ version }: { version: AgentQualityVersion }) {
       </td>
       <td className="py-2 pr-4">
         {typeof sol.avg_confidence === "number" ? (
-          <span>{sol.avg_confidence.toFixed(2)}</span>
+          <div className="space-y-0.5">
+            <span>{sol.avg_confidence.toFixed(2)}</span>
+            {/* `confident` is the server's own denominator for this average
+                (confidence_sum / confident), so it is the honest sample size. */}
+            <p className="text-xs text-muted-foreground">
+              across {sol.confident} measurement{sol.confident === 1 ? "" : "s"}
+            </p>
+          </div>
         ) : (
           <span>—</span>
         )}

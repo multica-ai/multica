@@ -19,8 +19,18 @@ export interface TokenEstimate {
 }
 
 export function estimateTokens(text: string, language: "da" | "en" = "da"): TokenEstimate {
+  return estimateTokensFromLength(text.length, language);
+}
+
+// Same heuristic for callers that only know how long the prompt was, not what
+// it said — the prompt snapshot records a byte count and stores a redacted
+// view, so the text on hand is not the text that was sent (FIR-3212).
+export function estimateTokensFromLength(
+  length: number,
+  language: "da" | "en" = "da",
+): TokenEstimate {
   const charsPerToken = language === "da" ? CHARS_PER_TOKEN_DA : CHARS_PER_TOKEN_EN;
-  const tokens = Math.max(1, Math.round(text.length / charsPerToken));
+  const tokens = length <= 0 ? 0 : Math.max(1, Math.round(length / charsPerToken));
   return {
     tokens,
     contextPercent: tokens / CONTEXT_WINDOW_TOKENS,

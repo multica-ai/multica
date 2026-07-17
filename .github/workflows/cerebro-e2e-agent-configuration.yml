@@ -1,0 +1,147 @@
+# FIR-3212: the Playwright suite had no CI job at all — `pnpm exec playwright test`
+# ran only from a developer's local `make check` (scripts/check.sh step 5), so an
+# e2e spec could rot on main without any run turning red. This workflow is the
+# automated gate for the agent configuration specs.
+#
+# Scoped to SPECS below rather than the whole suite on purpose:
+# e2e/fir-2670-agent-page-actions.spec.ts fails on clean main today, so a
+# run-everything job would land permanently red and teach everyone to ignore it.
+# Add specs here as they are confirmed green.
+#
+# Mirrors scripts/check.sh's E2E stage: Postgres → migrate → backend on :8080 →
+# frontend on :3000 → wait for the real /login render → Playwright. The one
+# deliberate difference is a production `next build` + `next start` instead of
+# `pnpm dev:web`; a cold Turbopack dev route can take ~10 minutes to compile on
+# first hit, which is a timeout in CI.
+name: Cerebro E2E (agent configuration)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: multica
+          POSTGRES_USER: multica
+          POSTGRES_PASSWORD: multica
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U multica -d multica"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      SPECS: e2e/fir-3212-agent-configuration.spec.ts
+      DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
+      # 64 bytes — satisfies the >= 32-byte requirement enforced by auth.JWTSecret().
+      JWT_SECRET: ci-jwt-secret-padding-padding-padding-padding-padding-padding-pad
+      PORT: 8080
+      FRONTEND_PORT: 3000
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+      PLAYWRIGHT_BASE_URL: http://localhost:3000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
+      - name: Enable corepack (pnpm@10.28.2 from packageManager)
+        run: corepack enable
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.26.1"
+          cache-dependency-path: server/go.sum
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Restore Turbo cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: .turbo/cache
+          key: turbo-e2e-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-e2e-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            turbo-e2e-${{ runner.os }}-
+
+      - name: Install Playwright chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run migrations
+        run: cd server && go run ./cmd/migrate up
+        env:
+          GONOSUMDB: github.com/hvejsel/firtal-persona
+
+      - name: Build frontend
+        run: pnpm exec turbo build --filter=@multica/web
+
+      - name: Build backend
+        run: cd server && go build -o /tmp/cerebro-server ./cmd/server
+        env:
+          GONOSUMDB: github.com/hvejsel/firtal-persona
+
+      - name: Start backend
+        run: |
+          /tmp/cerebro-server > /tmp/e2e-backend.log 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -sf "http://localhost:${PORT}/health" > /dev/null 2>&1; then
+              echo "Backend ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Backend did not start within 90s"
+          cat /tmp/e2e-backend.log
+          exit 1
+        env:
+          GONOSUMDB: github.com/hvejsel/firtal-persona
+
+      - name: Start frontend
+        # Gate on the real login markup, not just a listening socket — the same
+        # guard scripts/frontend-readiness.sh applies locally.
+        run: |
+          pnpm -C apps/web exec next start -p "${FRONTEND_PORT}" > /tmp/e2e-frontend.log 2>&1 &
+          for i in $(seq 1 120); do
+            if curl -sf --max-time 10 "http://localhost:${FRONTEND_PORT}/login" | grep -Fq 'Sign in to Multica'; then
+              echo "Frontend ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Frontend /login did not render the sign-in page within 120s"
+          cat /tmp/e2e-frontend.log
+          exit 1
+
+      - name: Run Playwright specs
+        run: pnpm exec playwright test ${SPECS} --project=chromium
+
+      - name: Upload Playwright evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: cerebro-e2e-agent-configuration
+          path: |
+            playwright-report/
+            test-results/
+            /tmp/e2e-backend.log
+            /tmp/e2e-frontend.log
+          if-no-files-found: warn
+          retention-days: 14
