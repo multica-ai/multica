@@ -178,6 +178,14 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 		Type:           channelMsgType(mc.MsgType),
 		Text:           mc.Text.Content,
 		AddressedToBot: true,
+		// A pure /issue command in WeChat Work should NOT trigger the
+		// agent — the engine already creates the issue and the
+		// OutboundReplier already sends "✅ 已创建 #N". Letting the agent
+		// see "/issue foo" then produces a "I don't recognize this slash
+		// command" reply that just clutters the conversation. wecom is
+		// alone on this — Slack/Lark keep the historical "let the agent
+		// see /issue and respond too" behaviour.
+		SkipAgentRun: isIssueCommand(mc.Text.Content),
 		Source: channel.Source{
 			ChannelType: TypeWecom,
 			ChatID:      chatID,
@@ -186,6 +194,27 @@ func channelMessageFromCallback(botID string, mc aibotMsgCallback, reqID string)
 		},
 		Raw: raw,
 	}
+}
+
+// isIssueCommand mirrors engine.ParseIssueCommand's front-of-body detection
+// without materializing the parsed struct — we only need the yes/no. A pure
+// /issue command starts at the first non-empty line, "/issue" as a whole
+// token, optionally followed by whitespace and the title.
+func isIssueCommand(body string) bool {
+	for _, raw := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if line == "/issue" {
+			return true
+		}
+		if strings.HasPrefix(line, "/issue ") || strings.HasPrefix(line, "/issue\t") {
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 // channelMsgType maps the raw aibot msg_type onto the normalized enum.
