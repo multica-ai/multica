@@ -484,7 +484,9 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		// directly. Inlining the full runtime brief duplicates that context and
 		// can trip upstream provider safety filters on otherwise harmless tasks.
 		{provider: "hermes", want: false},
-		{provider: "kiro", want: true},
+		// Kiro CLI loads a root AGENTS.md in ACP sessions. Inlining the same
+		// runtime brief duplicates it at the start of every user turn.
+		{provider: "kiro", want: false},
 		{provider: "kimi", want: true},
 		{provider: "traecli", want: true},
 		{provider: "codex", want: false},
