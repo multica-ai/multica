@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Pause, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Pause, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -98,6 +98,7 @@ export function RoundsBlock({
     );
     const readyIds = orderedIds.filter((issueId) => readySet.has(issueId));
     const handledIds = orderedIds.filter((issueId) => handledSet.has(issueId));
+    const complete = s.active_cycle != null && readyIds.length === 0;
     const ids = (needle
       ? orderedIds
       : view === "ready"
@@ -106,7 +107,7 @@ export function RoundsBlock({
           ? handledIds
           : orderedIds
     ).filter((issueId) => !needle || matchesNeedle(issueId));
-    const summary = s.active_cycle ? `${readyIds.length} ready` : "Ready to start";
+    const summary = complete ? "Complete" : s.active_cycle ? `${readyIds.length} ready` : "Ready to start";
     return <div key={s.round.id}>
       <div className="flex items-center gap-2 px-3 py-2">
         <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${s.round.name}`} className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setExpandedIds((prev) => {
@@ -118,7 +119,7 @@ export function RoundsBlock({
           <span className="truncate text-sm font-medium">{s.round.name}</span>
           <span className="ml-auto text-xs text-muted-foreground">{summary}</span>
         </button>
-        {s.active_cycle ? <Button size="sm" variant="ghost" onClick={() => {
+        {s.active_cycle && !complete ? <Button size="sm" variant="ghost" onClick={() => {
           setViews((current) => ({ ...current, [s.round.id]: "ready" }));
           setExpandedIds((current) => {
             const next = new Set(current);
@@ -130,7 +131,7 @@ export function RoundsBlock({
           setViews((current) => ({ ...current, [s.round.id]: "ready" }));
           setExpandedIds((current) => new Set([...current, s.round.id]));
           onStart(s.round.id);
-        }} aria-label={`Play ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Play</span></Button>}
+        }} className={complete ? "bg-success text-success-foreground hover:bg-success/90 hover:text-success-foreground" : undefined} aria-label={`Play ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Play</span></Button>}
       </div>
       {open && <>
         <div className="flex gap-1 border-t border-border/50 px-3 py-2" role="group" aria-label={`${s.round.name} view`}>
@@ -138,9 +139,13 @@ export function RoundsBlock({
             {value === "ready" ? "Ready" : value === "handled" ? "Handled this round" : "All messages"}
           </Button>)}
         </div>
+        {complete && <div role="alert" className="mx-3 mb-2 flex items-center gap-2 rounded-lg border border-success/40 bg-success/10 px-3 py-2 text-success">
+          <CheckCircle2 className="size-4 shrink-0" />
+          <p className="text-xs font-medium">All ready messages handled.</p>
+        </div>}
         <div className="divide-y divide-border/60 border-t border-border/50">
           {ids.map(renderMember)}
-          {ids.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>}
+          {ids.length === 0 && !(complete && view === "ready") && <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>}
         </div>
       </>}
     </div>;

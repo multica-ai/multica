@@ -140,6 +140,27 @@ describe("RoundsBlock", () => {
     expect(screen.queryByRole("button", { name: "Pause Daily" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Play Daily" })).toBeInTheDocument();
   });
+
+  it("turns a completed active Round into green Play and shows a success alert", () => {
+    const onStart = vi.fn();
+    const completed = status(true);
+    completed.active_cycle!.items = completed.active_cycle!.items.map((item) => ({
+      ...item,
+      handled_at: "2026-07-14T12:01:00Z",
+    }));
+
+    render(<RoundsBlock statuses={[completed]} {...props} onStart={onStart} />);
+
+    expect(screen.getByText("Complete")).toBeInTheDocument();
+    const play = screen.getByRole("button", { name: "Play Daily" });
+    expect(play).toHaveClass("bg-success");
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Daily" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("All ready messages handled.");
+
+    fireEvent.click(play);
+    expect(onStart).toHaveBeenCalledWith("round-1");
+  });
 });
 
 describe("IssueRoundsSectionView", () => {
