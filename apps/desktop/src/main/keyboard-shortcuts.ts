@@ -57,6 +57,15 @@ export function handleAppShortcut(
     return true;
   }
 
+  // Windows: Chromium internally maps bare F3 to its "Find Next" accelerator.
+  // Even with no active find bar, Chromium consumes F3 before the renderer JS
+  // sees it, which can prevent third-party global-hotkey apps (e.g. voice
+  // recognition) from receiving the key. Multica uses Ctrl+F for its own find
+  // bar and has no other F3 binding, so suppress Chromium's default handling.
+  if (platform === "win32" && input.key === "F3" && !input.control && !input.meta) {
+    return true;
+  }
+
   if (!cmdOrCtrl) return false;
 
   // Cmd/Ctrl + "=" (unshifted) or "+" (Shift+=) → zoom in.

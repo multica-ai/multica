@@ -144,6 +144,28 @@ describe("handleAppShortcut — reset zoom", () => {
   });
 });
 
+describe("handleAppShortcut — Windows F3 passthrough for global hotkeys", () => {
+  it("swallows bare F3 on Windows", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("F3"), wc, "win32")).toBe(true);
+  });
+
+  it("does not swallow F3 on macOS", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("F3"), wc, "darwin")).toBe(false);
+  });
+
+  it("does not swallow F3 on Linux", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("F3"), wc, "linux")).toBe(false);
+  });
+
+  it("does not swallow Ctrl+F3 on Windows", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("F3", { control: true }), wc, "win32")).toBe(false);
+  });
+});
+
 describe("handleAppShortcut — unrelated keys pass through", () => {
   it("does not capture plain letters", () => {
     const wc = makeWc();
