@@ -61,10 +61,9 @@ const (
 	// message before this one can append and mark it processed.
 	defaultResourceDownloadTimeout = 45 * time.Second
 
-	// Keep inbound Feishu media small enough for the synchronous ACK path.
-	// Larger resources degrade to a visible placeholder instead of blocking ACKs
-	// or letting large videos consume storage and bandwidth unexpectedly.
-	maxMessageResourceBytes = 20 << 20
+	// Feishu caps message resources at 100 MiB. Keep the local transport guard
+	// aligned with that contract while the Router bounds ACK-path latency.
+	maxMessageResourceBytes = 100 << 20
 
 	// Lark's "invalid tenant_access_token" / "tenant_access_token
 	// expired" error codes. When we see either, drop the cached token

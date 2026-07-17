@@ -351,6 +351,55 @@ func TestHTTPClient_DownloadMessageResourceRejectsDeclaredOversize(t *testing.T)
 	}
 }
 
+func TestHTTPClient_DownloadMessageResourceAllowsDeclaredFeishuLimit(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_limit/resources/file_limit", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Length", strconv.FormatInt(maxMessageResourceBytes, 10))
+		w.WriteHeader(http.StatusOK)
+	})
+	c := newTestClient(fake, time.Now)
+
+	got, err := c.DownloadMessageResourceStream(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_limit",
+		FileKey:   "file_limit",
+		Type:      "file",
+	})
+	if err != nil {
+		t.Fatalf("declared Feishu-limit resource should be accepted: %v", err)
+	}
+	got.Body.Close()
+	if got.SizeBytes != maxMessageResourceBytes {
+		t.Fatalf("SizeBytes = %d, want %d", got.SizeBytes, maxMessageResourceBytes)
+	}
+}
+
+func TestHTTPClient_DownloadMessageResourceAllowsAbovePreviousLocalLimit(t *testing.T) {
+	const previousLocalLimit = 20 << 20
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_above_previous/resources/file_above_previous", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Length", strconv.FormatInt(previousLocalLimit+1, 10))
+		w.WriteHeader(http.StatusOK)
+	})
+	c := newTestClient(fake, time.Now)
+
+	got, err := c.DownloadMessageResourceStream(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_above_previous",
+		FileKey:   "file_above_previous",
+		Type:      "file",
+	})
+	if err != nil {
+		t.Fatalf("resource above previous 20MiB local limit should be accepted: %v", err)
+	}
+	got.Body.Close()
+	if got.SizeBytes != previousLocalLimit+1 {
+		t.Fatalf("SizeBytes = %d, want %d", got.SizeBytes, previousLocalLimit+1)
+	}
+}
+
 func TestMaxBytesReadCloserEnforcesUnknownLengthBoundary(t *testing.T) {
 	t.Run("exact limit", func(t *testing.T) {
 		body := &maxBytesReadCloser{r: io.NopCloser(strings.NewReader("abc")), remaining: 3}

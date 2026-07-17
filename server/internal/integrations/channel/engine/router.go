@@ -39,6 +39,7 @@ type Router struct {
 	batcher *pendingBatcher
 
 	replyTimeout time.Duration
+	mediaTimeout time.Duration
 	replyWg      sync.WaitGroup
 
 	logger *slog.Logger
@@ -53,6 +54,10 @@ type RouterConfig struct {
 	// call. It runs off the connector ACK path, so it must stay strictly
 	// under the platform ACK deadline (Lark: 3s). Defaults to 2.5s.
 	ReplyTimeout time.Duration
+	// MediaTimeout caps best-effort media resolution on the connector ACK
+	// path. On timeout, the original message is appended without MediaRefs.
+	// Defaults to 2.5s.
+	MediaTimeout time.Duration
 	Logger       *slog.Logger
 }
 
@@ -64,6 +69,9 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 	if cfg.ReplyTimeout == 0 {
 		cfg.ReplyTimeout = 2500 * time.Millisecond
 	}
+	if cfg.MediaTimeout == 0 {
+		cfg.MediaTimeout = 2500 * time.Millisecond
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -73,6 +81,7 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 		tasks:        tasks,
 		reader:       reader,
 		replyTimeout: cfg.ReplyTimeout,
+		mediaTimeout: cfg.MediaTimeout,
 		logger:       cfg.Logger,
 		pendingFresh: make(map[string]bool),
 	}
@@ -259,7 +268,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		return Result{}, finalizeRelease, fmt.Errorf("ensure chat session: %w", err)
 	}
 	if set.Media != nil {
-		msg = set.Media.ResolveMedia(ctx, inst, identity, sessionID, msg)
+		msg = r.resolveMedia(ctx, set, inst, identity, sessionID, msg)
 	}
 
 	// 6. Append message + in-tx dedup Mark — the durable transition point.
@@ -317,6 +326,29 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    in a window wins (MUL-2645).
 	r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
 	return res, postAppendFinalize, nil
+}
+
+func (r *Router) resolveMedia(ctx context.Context, set ResolverSet, inst ResolvedInstallation, identity ResolvedIdentity, sessionID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage {
+	if r.mediaTimeout <= 0 {
+		return set.Media.ResolveMedia(ctx, inst, identity, sessionID, msg)
+	}
+	mctx, cancel := context.WithTimeout(ctx, r.mediaTimeout)
+	defer cancel()
+	done := make(chan channel.InboundMessage, 1)
+	go func() {
+		done <- set.Media.ResolveMedia(mctx, inst, identity, sessionID, msg)
+	}()
+	select {
+	case resolved := <-done:
+		return resolved
+	case <-mctx.Done():
+		r.logger.Warn("channel router: media resolution timed out",
+			"channel_type", string(msg.Source.ChannelType),
+			"event_id", msg.EventID,
+			"message_id", msg.MessageID,
+			"timeout", r.mediaTimeout.String())
+		return msg
+	}
 }
 
 // scheduleRun hands the per-session run trigger to the debouncer (or fires it

@@ -141,14 +141,20 @@ func (f *fakeTyping) calls() int        { f.mu.Lock(); defer f.mu.Unlock(); retu
 func (f *fakeTyping) settledCalls() int { f.mu.Lock(); defer f.mu.Unlock(); return f.settled }
 
 type fakeMedia struct {
-	mu    sync.Mutex
-	count int
+	mu            sync.Mutex
+	count         int
+	waitForCancel bool
 }
 
-func (f *fakeMedia) ResolveMedia(_ context.Context, _ ResolvedInstallation, _ ResolvedIdentity, _ pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage {
+func (f *fakeMedia) ResolveMedia(ctx context.Context, _ ResolvedInstallation, _ ResolvedIdentity, _ pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage {
 	f.mu.Lock()
 	f.count++
+	waitForCancel := f.waitForCancel
 	f.mu.Unlock()
+	if waitForCancel {
+		<-ctx.Done()
+		return msg
+	}
 	msg.MediaRefs = append(msg.MediaRefs, channel.MediaRef{
 		Type:       channel.MsgTypeImage,
 		StorageKey: "workspaces/ws/lark/image",
@@ -449,6 +455,39 @@ func TestRouter_Ingested_InTxMark_FinalizeNone(t *testing.T) {
 	}
 	if len(h.binder.lastAppend.Message.MediaRefs) != 1 {
 		t.Fatalf("resolved media not passed to append: %+v", h.binder.lastAppend.Message.MediaRefs)
+	}
+}
+
+func TestRouter_MediaResolverTimeoutAppendsOriginalMessage(t *testing.T) {
+	h := newHarness(t)
+	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{MediaTimeout: 10 * time.Millisecond, Logger: discardLogger()})
+	h.media.waitForCancel = true
+	h.router.Register(channel.TypeFeishu, ResolverSet{
+		Installation: h.inst,
+		Identity:     h.ident,
+		Dedup:        h.dedup,
+		Session:      h.binder,
+		Audit:        h.audit,
+		Replier:      h.replier,
+		Typing:       h.typing,
+		Media:        h.media,
+		OriginType:   "lark_chat",
+	})
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if h.media.calls() != 1 {
+		t.Fatalf("media resolver calls = %d, want 1", h.media.calls())
+	}
+	if len(h.binder.lastAppend.Message.MediaRefs) != 0 {
+		t.Fatalf("timed-out media refs must not block or attach: %+v", h.binder.lastAppend.Message.MediaRefs)
+	}
+	if !h.tasks.wasCalled() {
+		t.Fatalf("message should still be ingested and trigger a chat run")
+	}
+	if h.dedup.releases() != 0 {
+		t.Fatalf("media timeout must not release a durably appended message, got %d", h.dedup.releases())
 	}
 }
 
