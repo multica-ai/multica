@@ -207,6 +207,46 @@ func TestShouldReusePriorWorkdirSquadLeaderRejectsRegularFile(t *testing.T) {
 	}
 }
 
+func TestShouldReusePriorWorkdirSquadLeaderRejectsEmptyAgentID(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
+	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
+	writeLeaderManagedEnvProvenance(t, workDir, "ws-leader", "issue-leader", "agent-leader")
+
+	task := leaderReuseTestTask("task-empty-agent")
+	task.AgentID = ""
+	task.PriorWorkDir = workDir
+	if shouldReusePriorWorkdir(task, nil, root) {
+		t.Fatal("leader with an empty AgentID must not reuse a prior workdir")
+	}
+}
+
+func TestShouldReusePriorWorkdirSquadLeaderRejectsSymlinkEscape(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	external := t.TempDir()
+	parent := filepath.Join(root, "ws-leader", "12345678")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	// A managed-shape path whose final segment is a symlink escaping the root.
+	// EvalSymlinks + IsLocal must reject it so a symlink can't smuggle a user
+	// directory past the containment check.
+	workDir := filepath.Join(parent, "workdir")
+	if err := os.Symlink(external, workDir); err != nil {
+		t.Fatalf("symlink workdir -> external: %v", err)
+	}
+
+	task := leaderReuseTestTask("task-symlink-escape")
+	task.PriorWorkDir = workDir
+	if shouldReusePriorWorkdir(task, nil, root) {
+		t.Fatalf("leader reused a workdir symlinked outside WorkspacesRoot (%q -> %q)", workDir, external)
+	}
+}
+
 func newLeaderReuseTestDaemon(t *testing.T) (*Daemon, string, func()) {
 	t.Helper()
 
