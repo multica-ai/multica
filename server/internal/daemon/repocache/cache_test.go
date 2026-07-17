@@ -626,6 +626,19 @@ func TestCreateWorktreeReusesIsolatedGitMetadata(t *testing.T) {
 	if got := gitHead(t, second.Path); got != wantHead {
 		t.Fatalf("reused checkout HEAD = %s, want refreshed upstream %s", got, wantHead)
 	}
+
+	// Reuse must not accumulate earlier tasks' agent/* branches: the prior
+	// branch is pruned and only the freshly checked-out one remains locally.
+	if err := runGit("-C", second.Path, "show-ref", "--verify", "refs/heads/"+first.BranchName); err == nil {
+		t.Fatalf("stale branch %s survived reuse", first.BranchName)
+	}
+	heads, err := runGitOutput("-C", second.Path, "for-each-ref", "--format=%(refname)", "refs/heads/")
+	if err != nil {
+		t.Fatalf("list local heads: %v", err)
+	}
+	if got := strings.TrimSpace(string(heads)); got != "refs/heads/"+second.BranchName {
+		t.Fatalf("reused checkout local heads = %q, want only refs/heads/%s", got, second.BranchName)
+	}
 }
 
 func TestCreateWorktreeMigratesLinkedWorktreeToIsolatedMetadata(t *testing.T) {

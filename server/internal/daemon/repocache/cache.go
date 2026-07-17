@@ -647,7 +647,17 @@ func (c *Cache) createOrUpdateIsolatedCheckout(barePath, repoURL, checkoutPath, 
 		if err := syncIsolatedCheckoutRefs(barePath, checkoutPath, baseRef); err != nil {
 			return "", err
 		}
-		return updateExistingWorktree(checkoutPath, branchName, baseCommit)
+		actualBranch, err := updateExistingWorktree(checkoutPath, branchName, baseCommit)
+		if err != nil {
+			return "", err
+		}
+		// Drop earlier tasks' agent/* heads so a reused workdir doesn't grow a
+		// new local branch on every checkout. Non-fatal: leftover branches are
+		// harmless clutter and must never fail the checkout.
+		if err := deleteLocalBranches(checkoutPath, actualBranch); err != nil {
+			c.logger.Warn("repo checkout: prune stale branches failed (non-fatal)", "error", err)
+		}
+		return actualBranch, nil
 	}
 	// A daemon upgrade can resume a pre-fix Linux Codex workdir that still has
 	// a linked worktree. Remove it through Git (so the shared admin record is
@@ -675,7 +685,7 @@ func removeLinkedWorktree(barePath, checkoutPath string) error {
 	if !filepath.IsAbs(commonDir) {
 		commonDir = filepath.Join(checkoutPath, commonDir)
 	}
-	if !sameFilesystemPath(commonDir, barePath) {
+	if !sameResolvedPath(commonDir, barePath) {
 		return fmt.Errorf("linked worktree common dir %s does not match cache %s", commonDir, barePath)
 	}
 	if out, err := runGitCombinedOutput("-C", barePath, "worktree", "remove", "--force", checkoutPath); err != nil {
@@ -684,7 +694,12 @@ func removeLinkedWorktree(barePath, checkoutPath string) error {
 	return nil
 }
 
-func sameFilesystemPath(a, b string) bool {
+// sameResolvedPath reports whether a and b denote the same location after
+// resolving to absolute, symlink-free, cleaned form. It is a path-equality
+// check (not a same-device check): the migration guard uses it to confirm a
+// linked worktree's git-common-dir really points at this cache bare repo
+// before removing the worktree.
+func sameResolvedPath(a, b string) bool {
 	clean := func(path string) string {
 		abs, err := filepath.Abs(path)
 		if err == nil {
@@ -722,7 +737,7 @@ func createIsolatedCheckout(barePath, repoURL, checkoutPath, branchName, baseRef
 	if out, err := runGitCombinedOutput("-C", checkoutPath, "remote", "remove", isolatedCacheRemoteName); err != nil {
 		return "", fmt.Errorf("remove cache remote: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	if err := deleteLocalBranches(checkoutPath); err != nil {
+	if err := deleteLocalBranches(checkoutPath, ""); err != nil {
 		return "", err
 	}
 	if out, err := runGitCombinedOutput("-C", checkoutPath, "remote", "add", "origin", repoURL); err != nil {
@@ -792,18 +807,29 @@ func syncIsolatedCheckoutRefs(barePath, checkoutPath, baseRef string) error {
 	return nil
 }
 
-func deleteLocalBranches(repoPath string) error {
+// deleteLocalBranches removes local refs/heads/* from the isolated checkout.
+// A non-empty keepBranch is preserved: the reuse path passes the branch it just
+// checked out so a long-lived reused workdir drops earlier tasks' agent/*
+// heads instead of accumulating one per checkout (git also refuses to delete
+// the ref HEAD points at). An empty keepBranch removes every local head, which
+// the fresh-clone path needs before it creates the task branch from a detached
+// HEAD.
+func deleteLocalBranches(repoPath, keepBranch string) error {
 	out, err := runGitOutput("-C", repoPath, "for-each-ref", "--format=%(refname)", "refs/heads/")
 	if err != nil {
 		return fmt.Errorf("list local branches: %w", err)
 	}
+	var keepRef string
+	if keepBranch != "" {
+		keepRef = "refs/heads/" + keepBranch
+	}
 	for _, ref := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		ref = strings.TrimSpace(ref)
-		if ref == "" {
+		if ref == "" || ref == keepRef {
 			continue
 		}
 		if out, err := runGitCombinedOutput("-C", repoPath, "update-ref", "-d", ref); err != nil {
-			return fmt.Errorf("delete cloned branch %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
+			return fmt.Errorf("delete local branch %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
 		}
 	}
 	return nil
