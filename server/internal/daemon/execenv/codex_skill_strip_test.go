@@ -252,6 +252,32 @@ model = "o3"
 `,
 		},
 		{
+			name: "inline skills table preserves four-quote multiline basic string",
+			original: `skills = { discovery_path = """
+Closing with four quotes
+"""", config = [{ path = "/tmp/SKILL.md" }] }
+model = "o3"
+`,
+			want: `skills = { discovery_path = """
+Closing with four quotes
+"""" }
+model = "o3"
+`,
+		},
+		{
+			name: "inline skills table preserves four-quote multiline literal string",
+			original: `skills = { discovery_path = '''
+Closing with four apostrophes
+'''', config = [{ path = '/tmp/SKILL.md' }] }
+model = "o3"
+`,
+			want: `skills = { discovery_path = '''
+Closing with four apostrophes
+'''' }
+model = "o3"
+`,
+		},
+		{
 			name: "inline skills table with only config is dropped",
 			original: `model = "o3"
 skills = { config = [{ path = "/tmp/SKILL.md" }] }
