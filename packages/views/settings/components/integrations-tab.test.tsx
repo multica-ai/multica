@@ -48,6 +48,10 @@ vi.mock("./vcs-tab", () => ({
   VCSTab: () => <div data-testid="vcs-tab" />,
 }));
 
+vi.mock("./wecom-tab", () => ({
+  WecomTab: () => <div data-testid="wecom-tab" />,
+}));
+
 import { IntegrationsTab } from "./integrations-tab";
 
 function renderTab() {
