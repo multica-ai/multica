@@ -67,7 +67,7 @@
       "createIssue": { "label": "Issue 만들기", "description": "선호하는 issue 만들기 흐름을 엽니다." },
       "toggleSidebar": { "label": "사이드바 전환", "description": "기본 사이드바를 표시하거나 숨깁니다." },
       "findInIssue": { "label": "Issue에서 찾기", "description": "열린 issue 상세 내용에서 검색합니다." },
-      "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보냅니다." },
+      "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보내고, 생성 대화상자에서 이슈를 만듭니다." },
       "goInbox": { "label": "받은 편지함으로 이동", "description": "워크스페이스 받은 편지함을 엽니다." },
       "goChat": { "label": "채팅으로 이동", "description": "워크스페이스 채팅을 엽니다." },
       "goMyIssues": { "label": "내 Issues로 이동", "description": "나에게 할당된 issue를 엽니다." },
