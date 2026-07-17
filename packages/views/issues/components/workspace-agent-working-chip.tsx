@@ -35,15 +35,12 @@ interface WorkspaceAgentWorkingChipProps {
 export interface WorkingChipView {
   /** Running tasks on `workingIssues`, keyed by issue id. */
   tasksByIssueId: Map<string, AgentTask[]>;
-  /** Distinct agents behind the counted work — the avatar stack. */
+  /** Distinct agents behind the counted work. This IS the chip's number,
+   *  and the avatar stack renders the same list. */
   agentIds: string[];
-  /** Total running tasks across the counted issues. */
+  /** Total running tasks across the counted issues — the hover card's
+   *  second figure. */
   taskCount: number;
-  /** Running tasks with no linked issue (chat / autopilot). */
-  unlinkedCount: number;
-  /** Running tasks whose issue isn't on screen (filtered out, or past the
-   *  50-per-status page the list loads). */
-  outOfScopeCount: number;
 }
 
 /**
@@ -51,15 +48,17 @@ export interface WorkingChipView {
  * show. Exported for tests: the counting rule is the entire point of this
  * component, so it is a pure function rather than a hook-bound useMemo.
  *
- * Every running task lands in exactly one bucket:
- *   - no `issue_id`      → unlinked (chat/autopilot; never counted)
- *   - issue on screen    → counted, grouped under that issue
- *   - issue not on screen → out of scope (filtered out or past the page)
+ * A running task only counts when its issue is on screen. Two kinds are
+ * skipped, both silently — they have no visual presence on this page, so
+ * announcing them would explain an absence the user never noticed:
+ *   - no `issue_id` — chat/autopilot runs, which are not issue work at all
+ *   - issue not on screen — filtered out, or past the page the list loaded
  *
  * `issue_id` is an EMPTY STRING for chat/autopilot tasks, not null — see
- * packages/core/types/agent.ts. Without the guard those tasks all collapse
- * into one `""` bucket and read as a phantom issue, inflating the count by
- * exactly one (MUL-4884). Mirrors `deriveIssueSurfaceActivity`.
+ * packages/core/types/agent.ts. The guard is data correctness, not
+ * presentation: without it those tasks collapse into one `""` bucket and
+ * their agents would join the count for work that isn't on any issue
+ * (MUL-4884). Mirrors `deriveIssueSurfaceActivity`.
  */
 export function deriveWorkingChipView(
   snapshot: readonly AgentTask[],
@@ -70,19 +69,11 @@ export function deriveWorkingChipView(
   const agentIds: string[] = [];
   const seenAgents = new Set<string>();
   let taskCount = 0;
-  let unlinkedCount = 0;
-  let outOfScopeCount = 0;
 
   for (const task of snapshot) {
     if (task.status !== "running") continue;
-    if (!task.issue_id) {
-      unlinkedCount += 1;
-      continue;
-    }
-    if (!onScreen.has(task.issue_id)) {
-      outOfScopeCount += 1;
-      continue;
-    }
+    if (!task.issue_id) continue;
+    if (!onScreen.has(task.issue_id)) continue;
     const bucket = tasksByIssueId.get(task.issue_id);
     if (bucket) bucket.push(task);
     else tasksByIssueId.set(task.issue_id, [task]);
@@ -93,7 +84,7 @@ export function deriveWorkingChipView(
     }
   }
 
-  return { tasksByIssueId, agentIds, taskCount, unlinkedCount, outOfScopeCount };
+  return { tasksByIssueId, agentIds, taskCount };
 }
 
 /**
@@ -102,18 +93,25 @@ export function deriveWorkingChipView(
  * mid-flight (a previous design hid the chip when no agents were running,
  * which trapped users in an active-but-invisible filter state).
  *
- * It says one thing: "N issues in progress" — N being exactly the rows you
- * get when you click it. One number, one unit, self-verifiable.
+ * It says one thing: "N agents working". The number counts agents, which is
+ * exactly what the avatar stack next to it shows — one control, one unit.
+ * Earlier versions counted issues (or tasks) beside a stack of agent heads,
+ * and two units sitting side by side is what made the chip read as broken
+ * no matter which one was "right" (MUL-4884).
  *
- * The avatar stack is ambience ("who's on it"), not a second statistic: it
- * carries no `+N`, because a rival number next to the main one is what made
- * this chip read as broken (it counted issues while the stack counted
- * agents). The precise roster, the task count, and everything the number
- * excludes live in the hover card.
+ * Counting agents also settles the subject: only agents produce a runtime
+ * signal, so "N agents working" cannot be misread as "N issues someone is
+ * working on" — human work has no signal here and is not being claimed.
  *
- * Colour is two-step on purpose: idle activity is a whisper of brand, and
- * the loud filled state is reserved for "this filter is ON" — the chip
- * should read as a quiet tool, not an alert.
+ * Accepted trade-off: the number no longer predicts the row count of the
+ * click. One agent on two issues reads "1 agent working" and opens two
+ * rows. The chip answers WHO, the list answers WHERE — different questions,
+ * so the two numbers do not compete; the hover card's issue grouping shows
+ * the mapping on the spot.
+ *
+ * Colour is three-tier and each tier is its own Button variant rather than
+ * classes layered over `outline` — see the `brand` / `brandSubtle` variants
+ * for why layering silently loses in dark mode.
  */
 export function WorkspaceAgentWorkingChip({
   value,
@@ -129,27 +127,13 @@ export function WorkspaceAgentWorkingChip({
     [snapshot, workingIssues],
   );
 
-  // The number. Not a re-derivation of "what's running" — the length of the
-  // list the click produces.
-  const issueCount = workingIssues.length;
-  const hasAgents = issueCount > 0;
+  // The number and the avatar stack are the same list, so they cannot
+  // disagree.
+  const agentCount = view.agentIds.length;
+  const hasAgents = agentCount > 0;
 
-  // Active (brand-filled) class — must explicitly re-pin text and bg in
-  // every interactive state. Button's `outline` variant ships
-  // `hover:text-foreground` + `aria-expanded:bg-muted aria-expanded:text-foreground`,
-  // which would otherwise repaint the brand chip back to neutral on hover
-  // and while the HoverCard is open.
-  const activeClass = value
-    ? "border-brand bg-brand text-brand-foreground hover:bg-brand/90 hover:text-brand-foreground aria-expanded:bg-brand aria-expanded:text-brand-foreground"
-    : hasAgents
-      ? // Idle-with-activity: a brand tint, not a fill. Enough to read as
-        // "something is happening here" while scanning, quiet enough that
-        // the filled state still means something.
-        "border-brand/30 bg-brand/5 text-foreground"
-      : "text-muted-foreground";
-
-  const label = t(($) => $.agent_activity.issues_in_progress, {
-    count: issueCount,
+  const label = t(($) => $.agent_activity.chip_agents_working, {
+    count: agentCount,
   });
 
   return (
@@ -157,9 +141,13 @@ export function WorkspaceAgentWorkingChip({
       <HoverCardTrigger
         render={
           <Button
-            variant="outline"
+            // Three tiers: filter ON is the loud filled state, activity
+            // without the filter is a tint, nothing running is a plain
+            // control. Each is a self-contained variant — no colour classes
+            // in `className`.
+            variant={value ? "brand" : hasAgents ? "brandSubtle" : "outline"}
             size="sm"
-            className={`h-8 px-2 md:h-7 md:px-2.5 ${activeClass}`}
+            className={`h-8 px-2 md:h-7 md:px-2.5 ${hasAgents ? "" : "text-muted-foreground"}`}
             onClick={onToggle}
             aria-pressed={value}
             // The narrow layout shows the bare number, so pin the full
@@ -167,15 +155,9 @@ export function WorkspaceAgentWorkingChip({
             aria-label={label}
           >
             {hasAgents && (
-              <AgentAvatarStack
-                agentIds={view.agentIds}
-                size="sm"
-                max={3}
-                opacity="full"
-                overflow="fade"
-              />
+              <AgentAvatarStack agentIds={view.agentIds} size="sm" max={3} />
             )}
-            <span className="tabular-nums md:hidden">{issueCount}</span>
+            <span className="tabular-nums md:hidden">{agentCount}</span>
             <span className="hidden tabular-nums md:inline">{label}</span>
           </Button>
         }
@@ -185,8 +167,6 @@ export function WorkspaceAgentWorkingChip({
           issues={workingIssues}
           tasksByIssueId={view.tasksByIssueId}
           taskCount={view.taskCount}
-          unlinkedCount={view.unlinkedCount}
-          outOfScopeCount={view.outOfScopeCount}
         />
       </HoverCardContent>
     </HoverCard>

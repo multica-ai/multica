@@ -7,17 +7,14 @@ import { renderWithI18n } from "../../test/i18n";
 
 const mockState = vi.hoisted(() => ({
   snapshot: [] as unknown[],
-  // Captures what the chip hands its two children so a test can assert the
-  // avatar stack and the hover card without reaching into their internals.
+  // Captures what the chip hands its children so a test can assert the
+  // avatar stack, the hover card and the colour tier without reaching into
+  // their internals.
   avatarAgentIds: undefined as string[] | undefined,
   avatarOverflow: undefined as string | undefined,
+  buttonVariant: undefined as string | undefined,
   hoverProps: undefined as
-    | {
-        issues: readonly Issue[];
-        taskCount: number;
-        unlinkedCount: number;
-        outOfScopeCount: number;
-      }
+    | { issues: readonly Issue[]; taskCount: number }
     | undefined,
 }));
 
@@ -49,13 +46,27 @@ vi.mock("../../agents/components/agent-activity-hover-content", () => ({
   WorkspaceAgentActivityHoverContent: (props: {
     issues: readonly Issue[];
     taskCount: number;
-    unlinkedCount: number;
-    outOfScopeCount: number;
   }) => {
     mockState.hoverProps = props;
     return <div data-testid="activity-hover">{props.taskCount}</div>;
   },
 }));
+
+// Record the variant the chip picks. The colour tier lives entirely in the
+// Button variant now, so this is the assertable surface.
+vi.mock("@multica/ui/components/ui/button", async () => {
+  const actual =
+    await vi.importActual<typeof import("@multica/ui/components/ui/button")>(
+      "@multica/ui/components/ui/button",
+    );
+  return {
+    ...actual,
+    Button: (props: React.ComponentProps<typeof actual.Button>) => {
+      mockState.buttonVariant = props.variant ?? undefined;
+      return <actual.Button {...props} />;
+    },
+  };
+});
 
 vi.mock("@tanstack/react-query", async () => {
   const actual =
@@ -129,14 +140,15 @@ beforeEach(() => {
   mockState.snapshot = [];
   mockState.avatarAgentIds = undefined;
   mockState.avatarOverflow = undefined;
+  mockState.buttonVariant = undefined;
   mockState.hoverProps = undefined;
 });
 
 describe("WorkspaceAgentWorkingChip", () => {
-  it("shows the row count the filter produces, not a snapshot re-derivation", () => {
+  it("counts agents — the same list the avatar stack shows", () => {
     // The screenshot case from MUL-4884: 4 running tasks, 4 distinct agents,
-    // 3 issues on screen. The chip says 3 — the number of rows a click
-    // leaves — and says it with a unit.
+    // 3 issues on screen. The chip counts the agents, so its number and the
+    // heads beside it are one unit and cannot contradict each other.
     mockState.snapshot = [
       makeTask({ id: "t-1", agent_id: "agent-1", issue_id: "issue-1" }),
       makeTask({ id: "t-2", agent_id: "agent-2", issue_id: "issue-2" }),
@@ -153,27 +165,27 @@ describe("WorkspaceAgentWorkingChip", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: "3 issues in progress" }),
+      screen.getByRole("button", { name: "4 agents working" }),
     ).toBeTruthy();
-    // The stack still shows every distinct agent behind that work...
     expect(mockState.avatarAgentIds).toEqual([
       "agent-1",
       "agent-2",
       "agent-3",
       "agent-4",
     ]);
-    // ...but never as a rival "+N" number next to the issue count. The task
-    // and agent units are explained in the hover card, which Base UI mounts
-    // only on open — see agent-activity-hover-content.test.tsx.
-    expect(mockState.avatarOverflow).toBe("fade");
+    // Overflow is the component's standard +N badge again: with an
+    // agent-anchored number, "3 shown + 1 = 4" corroborates the text instead
+    // of competing with it.
+    expect(mockState.avatarOverflow).toBeUndefined();
   });
 
-  it("counts exactly workingIssues.length even when the filter is on", () => {
-    // With the filter on, workingIssues IS the rendered list. The chip must
-    // agree with it and nothing else.
+  it("counts one agent once, however many issues it is working", () => {
+    // The accepted trade-off: the number no longer predicts the row count.
+    // One agent across two issues reads "1 agent working" and opens 2 rows —
+    // WHO vs WHERE, different questions.
     mockState.snapshot = [
       makeTask({ id: "t-1", agent_id: "agent-1", issue_id: "issue-1" }),
-      makeTask({ id: "t-2", agent_id: "agent-2", issue_id: "issue-2" }),
+      makeTask({ id: "t-2", agent_id: "agent-1", issue_id: "issue-2" }),
     ];
 
     renderWithI18n(
@@ -185,27 +197,11 @@ describe("WorkspaceAgentWorkingChip", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: "2 issues in progress" }),
+      screen.getByRole("button", { name: "1 agent working" }),
     ).toBeTruthy();
   });
 
-  it("uses the singular unit for one issue", () => {
-    mockState.snapshot = [makeTask({ id: "t-1", issue_id: "issue-1" })];
-
-    renderWithI18n(
-      <WorkspaceAgentWorkingChip
-        value={false}
-        onToggle={() => {}}
-        workingIssues={[makeIssue("issue-1")]}
-      />,
-    );
-
-    expect(
-      screen.getByRole("button", { name: "1 issue in progress" }),
-    ).toBeTruthy();
-  });
-
-  it("shows 0 when nothing is in progress", () => {
+  it("shows 0 when nothing is running", () => {
     mockState.snapshot = [];
 
     renderWithI18n(
@@ -217,16 +213,18 @@ describe("WorkspaceAgentWorkingChip", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: "0 issues in progress" }),
+      screen.getByRole("button", { name: "0 agents working" }),
     ).toBeTruthy();
-    // No heads to show when nothing is running.
     expect(screen.queryByTestId("agent-avatar-stack")).toBeNull();
   });
 
-  // Colour is two-step on purpose: the loud filled state is reserved for
-  // "this filter is ON". Idle activity is a tint, so the chip reads as a
-  // quiet tool rather than an alert.
-  it("keeps the filled brand state for the active filter, not for mere activity", () => {
+  // Colour is carried by three self-contained Button variants, never by
+  // brand classes layered over `outline` — layering silently loses to
+  // outline's `dark:` chain in dark mode (MUL-4884). Asserting the variant
+  // is what pins that: a className check would pass even when the colour
+  // never wins the cascade, which is exactly the false confidence that let
+  // the dark-mode bug through.
+  it("uses the filled brand variant only while the filter is on", () => {
     mockState.snapshot = [makeTask({ id: "t-1", issue_id: "issue-1" })];
 
     const { rerender } = renderWithI18n(
@@ -237,10 +235,8 @@ describe("WorkspaceAgentWorkingChip", () => {
       />,
     );
 
-    // Activity, filter off → a tint, never the fill.
-    const idle = screen.getByRole("button").className;
-    expect(idle).toContain("bg-brand/5");
-    expect(idle).not.toContain("bg-brand ");
+    // Activity, filter off → the tint variant.
+    expect(mockState.buttonVariant).toBe("brandSubtle");
 
     rerender(
       <WorkspaceAgentWorkingChip
@@ -250,11 +246,10 @@ describe("WorkspaceAgentWorkingChip", () => {
       />,
     );
 
-    // Filter on → filled.
-    expect(screen.getByRole("button").className).toContain("bg-brand ");
+    expect(mockState.buttonVariant).toBe("brand");
   });
 
-  it("stays muted when there is no activity at all", () => {
+  it("stays a plain control when nothing is running", () => {
     mockState.snapshot = [];
 
     renderWithI18n(
@@ -265,15 +260,13 @@ describe("WorkspaceAgentWorkingChip", () => {
       />,
     );
 
-    const className = screen.getByRole("button").className;
-    expect(className).toContain("text-muted-foreground");
-    expect(className).not.toContain("bg-brand");
+    expect(mockState.buttonVariant).toBe("outline");
   });
 
-  it("reports issue-less tasks to the hover card instead of counting them", () => {
+  it("keeps issue-less tasks out of the agent count", () => {
     // Chat / autopilot tasks carry issue_id === "" (core/types/agent.ts).
-    // They used to collapse into one phantom "" issue and inflate the count
-    // by exactly 1 (MUL-4884).
+    // Their agents are not working on any issue, so they must not join the
+    // count or the stack.
     mockState.snapshot = [
       makeTask({ id: "t-1", agent_id: "agent-1", issue_id: "issue-1" }),
       makeTask({ id: "t-2", agent_id: "agent-2", issue_id: "" }),
@@ -289,22 +282,21 @@ describe("WorkspaceAgentWorkingChip", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: "1 issue in progress" }),
+      screen.getByRole("button", { name: "1 agent working" }),
     ).toBeTruthy();
-    // Their agents are not in the stack either: the stack explains the count.
-    // (They are not dropped — deriveWorkingChipView routes them to the hover
-    // card's "not counted" note; see the bucket tests below.)
     expect(mockState.avatarAgentIds).toEqual(["agent-1"]);
   });
 });
 
 describe("deriveWorkingChipView", () => {
-  it("buckets every running task exactly once", () => {
+  it("counts only running tasks whose issue is on screen", () => {
     const view = deriveWorkingChipView(
       [
         makeTask({ id: "t-1", agent_id: "a1", issue_id: "issue-1" }),
         makeTask({ id: "t-2", agent_id: "a2", issue_id: "issue-1" }),
+        // chat/autopilot run — no linked issue
         makeTask({ id: "t-3", agent_id: "a3", issue_id: "" }),
+        // running, but its issue is filtered out / past the loaded page
         makeTask({ id: "t-4", agent_id: "a4", issue_id: "issue-offscreen" }),
         makeTask({
           id: "t-5",
@@ -316,13 +308,8 @@ describe("deriveWorkingChipView", () => {
       [makeIssue("issue-1")],
     );
 
-    expect(view.taskCount).toBe(2);
-    expect(view.unlinkedCount).toBe(1);
-    // Running work on an issue the list isn't showing (filtered out, or past
-    // the 50-per-status page) is disclosed rather than dropped.
-    expect(view.outOfScopeCount).toBe(1);
-    // Queued tasks are not "in progress" and land in no bucket.
     expect(view.agentIds).toEqual(["a1", "a2"]);
+    expect(view.taskCount).toBe(2);
     expect(view.tasksByIssueId.get("issue-1")?.map((t) => t.id)).toEqual([
       "t-1",
       "t-2",
@@ -338,6 +325,8 @@ describe("deriveWorkingChipView", () => {
       [makeIssue("issue-1"), makeIssue("issue-2")],
     );
 
+    // Two issues, two tasks, but one agent — this is the number the chip
+    // shows.
     expect(view.agentIds).toEqual(["a1"]);
     expect(view.taskCount).toBe(2);
   });

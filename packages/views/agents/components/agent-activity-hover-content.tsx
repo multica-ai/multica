@@ -164,79 +164,51 @@ export function AgentActivityHoverContent({
 
 interface WorkspaceAgentActivityHoverContentProps {
   /** Issues the working filter leaves on screen, in list order. Each has at
-   *  least one running task. `issues.length` IS the chip's number. */
+   *  least one running task. */
   issues: readonly Issue[];
   /** Running tasks for those issues, keyed by issue id. */
   tasksByIssueId: ReadonlyMap<string, readonly AgentTask[]>;
   /** Total running tasks across `issues` — the second header figure. */
   taskCount: number;
-  /** Running tasks with no linked issue (chat / autopilot). */
-  unlinkedCount: number;
-  /** Running tasks whose issue is outside the current filters / loaded page. */
-  outOfScopeCount: number;
 }
 
 /**
  * Hover-card body for the workspace working chip (MUL-4884).
  *
- * The chip can only carry one number, and the honest one is the issue count —
- * it equals the rows you get when you click it. This card is where the other
- * two units get explained instead of contradicting it:
+ * The chip says WHO is working ("N agents working"); this card says WHERE.
+ * The header carries the two figures the chip does not — how many issues
+ * that work lands on, and how many tasks it takes — and the rows group by
+ * issue, mirroring what clicking the chip does to the list.
  *
- *   - the header states both counted units side by side ("3 issues · 4
- *     tasks"), so "4 heads but the chip says 3" resolves instead of nagging;
- *   - rows group under their issue, mirroring what the filter does;
- *   - anything the number deliberately excludes is stated rather than
- *     dropped — issue-less chat/autopilot tasks, and tasks on issues outside
- *     the current filters or the loaded page (the list is fetched a page per
- *     status, so running work can exist past the window).
+ * It says nothing about work it excludes. Chat/autopilot runs have no
+ * linked issue and leave no trace anywhere on this page: no row, no head,
+ * no indicator. A footnote about them would explain an absence the user
+ * never perceived — inventing a discrepancy rather than resolving one.
+ * Same for tasks on issues the current filters or the loaded page exclude.
  *
- * Deliberately not a dashboard: two figures in the header, grouped rows, and
- * at most two footnotes that only render when non-zero.
+ * Deliberately not a dashboard: two figures and grouped rows.
  */
 export function WorkspaceAgentActivityHoverContent({
   issues,
   tasksByIssueId,
   taskCount,
-  unlinkedCount,
-  outOfScopeCount,
 }: WorkspaceAgentActivityHoverContentProps) {
   const { t } = useT("issues");
   const now = useActivityNow();
   const { agentById, runtimeById } = useActivityLookups();
 
-  const notes = (
-    <>
-      {unlinkedCount > 0 && (
-        <p className="text-[11px] leading-snug text-muted-foreground">
-          {t(($) => $.agent_activity.unlinked_note, { count: unlinkedCount })}
-        </p>
-      )}
-      {outOfScopeCount > 0 && (
-        <p className="text-[11px] leading-snug text-muted-foreground">
-          {t(($) => $.agent_activity.out_of_scope_note, {
-            count: outOfScopeCount,
-          })}
-        </p>
-      )}
-    </>
-  );
-
   if (issues.length === 0) {
     return (
-      <div className="flex flex-col gap-1.5">
-        <p className="text-xs text-muted-foreground">
-          {t(($) => $.agent_activity.empty_hover)}
-        </p>
-        {notes}
-      </div>
+      <p className="text-xs text-muted-foreground">
+        {t(($) => $.agent_activity.empty_hover)}
+      </p>
     );
   }
 
   return (
     <div className="flex flex-col gap-2.5">
       <div className="text-xs font-medium text-muted-foreground">
-        {`${t(($) => $.agent_activity.issues_in_progress, {
+        {`${t(($) => $.agent_activity.issues_count, {
           count: issues.length,
         })} · ${t(($) => $.agent_activity.tasks_count, { count: taskCount })}`}
       </div>
@@ -263,11 +235,6 @@ export function WorkspaceAgentActivityHoverContent({
           </div>
         ))}
       </div>
-      {(unlinkedCount > 0 || outOfScopeCount > 0) && (
-        <div className="flex flex-col gap-1 border-t border-border pt-2">
-          {notes}
-        </div>
-      )}
     </div>
   );
 }

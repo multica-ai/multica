@@ -141,14 +141,12 @@ describe("AgentActivityHoverContent", () => {
   });
 });
 
-// The workspace chip can only carry one number (issues — the rows a click
-// produces). This card is where the other units get stated instead of
-// silently contradicting it, and where everything the number excludes is
-// disclosed rather than dropped. MUL-4884.
+// The workspace chip says WHO is working ("N agents working"). This card
+// says WHERE: the two figures the chip does not carry, and the rows grouped
+// by issue. It stays silent about work it excludes — see the component doc.
+// MUL-4884.
 describe("WorkspaceAgentActivityHoverContent", () => {
-  it("names both counted units so the chip's number stops looking wrong", () => {
-    // The MUL-4884 screenshot: chip says 3 while 4 agent heads show. Naming
-    // both units is what resolves that, rather than hiding one.
+  it("carries the two figures the chip does not, and groups rows by issue", () => {
     renderWithI18n(
       <WorkspaceAgentActivityHoverContent
         issues={[
@@ -170,19 +168,20 @@ describe("WorkspaceAgentActivityHoverContent", () => {
           ])
         }
         taskCount={4}
-        unlinkedCount={0}
-        outOfScopeCount={0}
-      />,
+        />,
     );
 
-    expect(screen.getByText("3 issues in progress · 4 tasks")).toBeInTheDocument();
-    // Rows group under their issue, mirroring what the filter does.
+    expect(screen.getByText("3 issues · 4 tasks")).toBeInTheDocument();
+    // Rows group under their issue, mirroring what clicking the chip does.
     expect(screen.getByText("MUL-4879")).toBeInTheDocument();
     expect(screen.getByText("Counting logic looks wrong")).toBeInTheDocument();
     expect(screen.getAllByTestId("actor-avatar")).toHaveLength(4);
   });
 
-  it("states what the number excludes rather than dropping it", () => {
+  it("says nothing about work it excludes", () => {
+    // Chat/autopilot runs and out-of-scope tasks leave no trace on this page,
+    // so a "not counted" footnote would explain an absence the user never
+    // perceived. The card only ever describes what IS counted.
     renderWithI18n(
       <WorkspaceAgentActivityHoverContent
         issues={[makeIssue("i-1", "MUL-1", "One")]}
@@ -190,62 +189,24 @@ describe("WorkspaceAgentActivityHoverContent", () => {
           new Map([["i-1", [makeTask({ id: "t1", issue_id: "i-1" })]]])
         }
         taskCount={1}
-        unlinkedCount={1}
-        outOfScopeCount={2}
-      />,
-    );
-
-    expect(
-      screen.getByText(
-        "1 more task has no linked issue (chat/autopilot) — not counted",
-      ),
-    ).toBeInTheDocument();
-    // The list loads one page per status, so running work can sit past the
-    // window. Say so instead of silently under-counting.
-    expect(
-      screen.getByText(
-        "2 more tasks are outside the current filters or loaded range — not counted",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("stays quiet when there is nothing to disclose", () => {
-    renderWithI18n(
-      <WorkspaceAgentActivityHoverContent
-        issues={[makeIssue("i-1", "MUL-1", "One")]}
-        tasksByIssueId={
-          new Map([["i-1", [makeTask({ id: "t1", issue_id: "i-1" })]]])
-        }
-        taskCount={1}
-        unlinkedCount={0}
-        outOfScopeCount={0}
       />,
     );
 
     expect(screen.queryByText(/not counted/)).not.toBeInTheDocument();
+    expect(screen.getByText("1 issue · 1 task")).toBeInTheDocument();
   });
 
-  it("still discloses excluded work when nothing is counted", () => {
-    // Only running work is a chat task: the chip reads 0, and the card has to
-    // explain why rather than look broken.
+  it("falls back to the agent-worded empty copy when nothing is counted", () => {
     renderWithI18n(
       <WorkspaceAgentActivityHoverContent
         issues={[]}
         tasksByIssueId={new Map()}
         taskCount={0}
-        unlinkedCount={1}
-        outOfScopeCount={0}
       />,
     );
 
-    expect(
-      screen.getByText("No issues in progress right now"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "1 more task has no linked issue (chat/autopilot) — not counted",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText("No agents working right now")).toBeInTheDocument();
+    expect(screen.queryByText(/not counted/)).not.toBeInTheDocument();
   });
 
   it("renders the Chinese copy for the counted units", () => {
@@ -256,12 +217,11 @@ describe("WorkspaceAgentActivityHoverContent", () => {
           new Map([["i-1", [makeTask({ id: "t1", issue_id: "i-1" })]]])
         }
         taskCount={2}
-        unlinkedCount={0}
-        outOfScopeCount={0}
       />,
       { locale: "zh-Hans" },
     );
 
-    expect(screen.getByText("1 个 issue 进行中 · 2 个 task")).toBeInTheDocument();
+    // task / issue stay lowercase English in UI strings (conventions.zh.mdx).
+    expect(screen.getByText("1 个 issue · 2 个 task")).toBeInTheDocument();
   });
 });

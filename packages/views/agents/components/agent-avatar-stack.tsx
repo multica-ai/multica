@@ -20,14 +20,6 @@ interface AgentAvatarStackProps {
   // signal a queued-only state (no running task) — same heads, weakened
   // visual.
   opacity?: "full" | "half";
-  // How the tail beyond `max` is signalled.
-  //   - `count` (default): a `+N` chip. Precise, but it reads as a second
-  //     number — next to a count of something else (the working chip counts
-  //     issues, these heads are agents) that lands as a contradiction.
-  //   - `fade`: the last visible head dims instead. Says "there are more"
-  //     without putting a rival number on screen; the exact roster lives in
-  //     the hover card (MUL-4884).
-  overflow?: "count" | "fade";
   className?: string;
 }
 
@@ -46,7 +38,6 @@ export function AgentAvatarStack({
   size = "sm",
   max = 3,
   opacity = "full",
-  overflow: overflowMode = "count",
   className,
 }: AgentAvatarStackProps) {
   const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
@@ -54,7 +45,6 @@ export function AgentAvatarStack({
 
   const visible = agentIds.slice(0, max);
   const overflow = agentIds.length - visible.length;
-  const fadeTail = overflowMode === "fade" && overflow > 0;
   const px = AVATAR_SIZE_PX[size];
   // 30% overlap reads as "stacked" without obscuring the next avatar's icon.
   const overlap = Math.round(px * 0.3);
@@ -74,12 +64,7 @@ export function AgentAvatarStack({
           // Each subsequent head sits negative-margin over the previous so
           // the stack collapses horizontally instead of growing linearly.
           style={{ marginLeft: i === 0 ? 0 : -overlap }}
-          className={cn(
-            "ring-2 ring-background rounded-full inline-flex",
-            // Dim the last head when the tail is hidden — the "there are
-            // more" cue in `fade` mode.
-            fadeTail && i === visible.length - 1 && "opacity-40",
-          )}
+          className="ring-2 ring-background rounded-full inline-flex"
         >
           <ActorAvatarBase
             name={getActorName("agent", id)}
@@ -90,7 +75,7 @@ export function AgentAvatarStack({
           />
         </span>
       ))}
-      {overflowMode === "count" && overflow > 0 && (
+      {overflow > 0 && (
         <span
           style={{
             marginLeft: -overlap,
