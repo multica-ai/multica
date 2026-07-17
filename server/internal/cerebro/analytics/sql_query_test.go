@@ -209,3 +209,15 @@ func TestBuildSQLJoinsOnlyMetricDependencies(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildSQLFunctionAndOperatingLoopDimensions(t *testing.T) {
+	plan, err := BuildSQL(Query{Population: PopulationAll, Metrics: []Metric{MetricRuns}, Dimensions: []Dimension{DimensionFunction, DimensionOperatingLoop}, Page: Page{Limit: 50}}, "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"cerebro_ai_impact_project_binding", "cerebro_ai_impact_operating_loop", "cerebro_ai_impact_function"} {
+		if !strings.Contains(plan.SQL, fragment) {
+			t.Errorf("SQL missing %s: %s", fragment, plan.SQL)
+		}
+	}
+}
