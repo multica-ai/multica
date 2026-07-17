@@ -123,6 +123,14 @@ func TestSanitizeCopiedCodexConfig(t *testing.T) {
 	configPath := filepath.Join(dir, "config.toml")
 	original := `model = "o3"
 
+[marketplaces.claude-plugins-official]
+last_updated = "2026-07-17T03:11:33Z"
+source_type = "git"
+source = "https://github.com/anthropics/claude-plugins-official.git"
+
+[plugins."superpowers@claude-plugins-official"]
+enabled = true
+
 [[skills.config]]
 name = "superpowers:brainstorming"
 enabled = false
@@ -133,6 +141,9 @@ enabled = true
 
 [profiles.default]
 model = "o3"
+
+[mcp_servers.foo]
+command = "foo"
 `
 	if err := os.WriteFile(configPath, []byte(original), 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)
@@ -150,8 +161,17 @@ model = "o3"
 	if strings.Contains(got, "[[skills.config]]") {
 		t.Errorf("expected all [[skills.config]] entries to be removed, got:\n%s", got)
 	}
+	if strings.Contains(got, "[marketplaces.") {
+		t.Errorf("expected user-level marketplace entries to be removed, got:\n%s", got)
+	}
+	if strings.Contains(got, "[plugins.") {
+		t.Errorf("expected user-level plugin entries to be removed, got:\n%s", got)
+	}
 	if !strings.Contains(got, `[profiles.default]`) {
 		t.Errorf("unrelated tables should be preserved, got:\n%s", got)
+	}
+	if !strings.Contains(got, `[mcp_servers.foo]`) {
+		t.Errorf("unrelated MCP configuration should be preserved, got:\n%s", got)
 	}
 	if !strings.Contains(got, `model = "o3"`) {
 		t.Errorf("top-level keys should be preserved, got:\n%s", got)

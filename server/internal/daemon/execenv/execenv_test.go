@@ -2161,11 +2161,19 @@ func TestPrepareCodexHomeReportsMissingModelCatalogPath(t *testing.T) {
 // parser rejects them with `missing field path`. prepareCodexHome must drop
 // every `[[skills.config]]` entry while copying the user's config.toml so
 // the per-task home stays parseable.
-func TestPrepareCodexHomeStripsSkillsConfigEntries(t *testing.T) {
+func TestPrepareCodexHomeSanitizesUserPluginConfig(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
 	sharedConfig := `model = "o3"
+
+[marketplaces.claude-plugins-official]
+last_updated = "2026-07-17T03:11:33Z"
+source_type = "git"
+source = "https://github.com/anthropics/claude-plugins-official.git"
+
+[plugins."superpowers@claude-plugins-official"]
+enabled = true
 
 [[skills.config]]
 path = "/Users/x/SKILL.md"
@@ -2198,6 +2206,12 @@ model = "o3"
 	}
 	if strings.Contains(tomlStr, "superpowers:brainstorming") {
 		t.Errorf("per-task config.toml should not retain plugin skill names, got:\n%s", tomlStr)
+	}
+	if strings.Contains(tomlStr, "[marketplaces.") {
+		t.Errorf("per-task config.toml should not inherit marketplace entries, got:\n%s", tomlStr)
+	}
+	if strings.Contains(tomlStr, "[plugins.") {
+		t.Errorf("per-task config.toml should not inherit plugin registry entries, got:\n%s", tomlStr)
 	}
 	if !strings.Contains(tomlStr, `model = "o3"`) {
 		t.Errorf("top-level keys should be preserved, got:\n%s", tomlStr)

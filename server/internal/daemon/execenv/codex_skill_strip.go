@@ -65,9 +65,52 @@ func stripSkillsConfigEntries(content string) string {
 	return stripped
 }
 
+// stripUserPluginRegistryEntries removes the user-level marketplace and
+// plugin registry tables from a copied config.toml. Multica materializes the
+// agent's assigned skills directly under the per-task CODEX_HOME/skills, so
+// these registries are redundant inside an isolated task. Keeping them makes
+// Codex refresh git-backed marketplaces on every fresh task home, even though
+// the downloaded plugin code is not part of the task's assigned capability
+// set.
+func stripUserPluginRegistryEntries(content string) string {
+	if !strings.Contains(content, "[marketplaces") && !strings.Contains(content, "[plugins") {
+		return content
+	}
+
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	inRegistryTable := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") {
+			header := strings.TrimLeft(trimmed, "[")
+			inRegistryTable = strings.HasPrefix(header, "marketplaces.") ||
+				strings.HasPrefix(header, "marketplaces]") ||
+				strings.HasPrefix(header, "plugins.") ||
+				strings.HasPrefix(header, "plugins]")
+			if inRegistryTable {
+				continue
+			}
+		}
+
+		if inRegistryTable {
+			continue
+		}
+		out = append(out, line)
+	}
+
+	stripped := strings.Join(out, "\n")
+	stripped = strings.TrimRight(stripped, "\n") + "\n"
+	if strings.TrimSpace(stripped) == "" {
+		return ""
+	}
+	return stripped
+}
+
 // sanitizeCopiedCodexConfig rewrites the per-task config.toml in place,
-// dropping `[[skills.config]]` entries inherited from the shared
-// `~/.codex/config.toml`. No-op if the file doesn't exist or doesn't change.
+// dropping user-level skill, plugin, and marketplace registries inherited
+// from the shared `~/.codex/config.toml`. No-op if the file doesn't exist or
+// doesn't change.
 func sanitizeCopiedCodexConfig(configPath string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -77,6 +120,7 @@ func sanitizeCopiedCodexConfig(configPath string) error {
 		return fmt.Errorf("read config.toml: %w", err)
 	}
 	stripped := stripSkillsConfigEntries(string(data))
+	stripped = stripUserPluginRegistryEntries(stripped)
 	if stripped == string(data) {
 		return nil
 	}
