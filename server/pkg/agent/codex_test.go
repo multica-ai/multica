@@ -751,8 +751,8 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 		t.Fatalf("mkdir date dir: %v", err)
 	}
 	content := strings.Join([]string{
-		`{"timestamp":"2026-07-13T00:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`,
-		`{"timestamp":"2026-07-13T00:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":20},"model":"gpt-5.6-sol"}}}`,
+		fmt.Sprintf(`{"timestamp":%q,"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`, startTime.Add(time.Second).UTC().Format(time.RFC3339Nano)),
+		fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":20},"model":"gpt-5.6-sol"}}}`, startTime.Add(2*time.Second).UTC().Format(time.RFC3339Nano)),
 		"",
 	}, "\n")
 	if err := os.WriteFile(filepath.Join(dateDir, "rollout.jsonl"), []byte(content), 0o644); err != nil {
@@ -768,6 +768,37 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 	}
 	if got.model != "gpt-5.6-sol" {
 		t.Errorf("model = %q, want gpt-5.6-sol", got.model)
+	}
+}
+
+func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-13T00:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`,
+		`{"timestamp":"2026-07-13T00:00:05.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":700,"output_tokens":50,"reasoning_output_tokens":10},"model":"gpt-5.6-sol"}}}`,
+		`{"timestamp":"2026-07-13T00:00:11.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1300,"cached_input_tokens":900,"output_tokens":70,"reasoning_output_tokens":15},"model":"gpt-5.6-sol"}}}`,
+		`{"timestamp":"2026-07-13T00:00:12.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":1400,"output_tokens":100,"reasoning_output_tokens":25},"model":"gpt-5.6-sol"}}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout.jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome)
+	if got == nil {
+		t.Fatal("expected usage")
+	}
+	// total_token_usage is cumulative for the resumed Codex session. This task
+	// should report only the delta after startTime, not the whole session total.
+	want := TokenUsage{InputTokens: 100, OutputTokens: 65, CacheReadTokens: 700}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want resumed-task delta %+v", got.usage, want)
 	}
 }
 
