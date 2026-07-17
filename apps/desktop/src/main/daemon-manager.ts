@@ -30,6 +30,7 @@ import {
   isAuthStatusError,
   type AuthProbeResult,
 } from "./daemon-auth-probe";
+import { legacyDaemonConflict } from "./daemon-start-conflict";
 
 const DEFAULT_HEALTH_PORT = 19514;
 const POLL_INTERVAL_MS = 5_000;
@@ -114,6 +115,19 @@ function profileLogPath(profile: string): string {
 // fresh PAT instead of reusing a token that belongs to a previous user.
 function profileUserIdPath(profile: string): string {
   return join(profileDir(profile), ".desktop-user-id");
+}
+
+function machineDaemonIdPath(): string {
+  return join(homedir(), ".multica", "daemon.id");
+}
+
+async function readMachineDaemonId(): Promise<string | null> {
+  try {
+    const value = (await readFile(machineDaemonIdPath(), "utf-8")).trim();
+    return value || null;
+  } catch {
+    return null;
+  }
 }
 
 async function readProfileUserId(profile: string): Promise<string | null> {
@@ -831,6 +845,34 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
     // Let polling track it through to "running".
     pollOnce();
     return { success: true };
+  }
+
+  // Migration guard: Desktop moved from the default CLI profile to a named
+  // Desktop-owned profile, which changed the health port and PID file but not
+  // the machine-wide daemon.id. An old default-profile process can therefore
+  // survive an app update and claim the same runtime tasks in parallel. Before
+  // spawning on the new port, confirm whether the default port belongs to this
+  // machine and backend. Refuse startup instead of killing it: the legacy
+  // process may still own active agent work, and automatic termination would
+  // violate the drain guarantee.
+  if (active.name) {
+    const legacyHealth = await fetchHealthAtPort(DEFAULT_HEALTH_PORT);
+    const conflict = legacyDaemonConflict(
+      await readMachineDaemonId(),
+      targetApiBaseUrl,
+      legacyHealth,
+    );
+    if (conflict) {
+      const pid = conflict.pid ? ` (pid ${conflict.pid})` : "";
+      const tasks = conflict.activeTaskCount;
+      return {
+        success: false,
+        error:
+          `Legacy Multica daemon${pid} is still running on port ${DEFAULT_HEALTH_PORT} ` +
+          `for this machine and server (${tasks} active task(s)). ` +
+          "Wait for active tasks to finish, then stop the legacy daemon before retrying.",
+      };
+    }
   }
 
   currentState = "starting";
