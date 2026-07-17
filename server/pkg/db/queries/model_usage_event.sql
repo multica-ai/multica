@@ -25,7 +25,7 @@ INSERT INTO model_usage_event (
 )
 SELECT
     sqlc.arg(schema_version), sqlc.arg(event_id),
-    atq.id, i.workspace_id, atq.issue_id, atq.agent_id, atq.runtime_id,
+    atq.id, COALESCE(i.workspace_id, cs.workspace_id, ap.workspace_id, a.workspace_id), atq.issue_id, atq.agent_id, atq.runtime_id,
     (SELECT id FROM ancestors WHERE parent_id IS NULL LIMIT 1),
     atq.chat_session_id, atq.autopilot_run_id, atq.parent_task_id,
     NULLIF(sqlc.arg(provider_session_id)::text, ''),
@@ -36,8 +36,14 @@ SELECT
     sqlc.arg(context_tokens), sqlc.arg(context_window_tokens), sqlc.arg(compaction_kind),
     sqlc.arg(source), sqlc.arg(completeness), sqlc.arg(counter_semantics)
 FROM agent_task_queue atq
-JOIN issue i ON i.id = atq.issue_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+-- CEREBRO-PATCH(model-usage-event-optional-issue-scope): FIR-3337 keeps non-issue chat/autopilot usage.
+LEFT JOIN chat_session cs ON cs.id = atq.chat_session_id
+LEFT JOIN autopilot_run ar ON ar.id = atq.autopilot_run_id
+LEFT JOIN autopilot ap ON ap.id = ar.autopilot_id
 WHERE atq.id = sqlc.arg(task_id)
+  AND COALESCE(i.workspace_id, cs.workspace_id, ap.workspace_id, a.workspace_id) IS NOT NULL
 ON CONFLICT DO NOTHING
 RETURNING 1
 )

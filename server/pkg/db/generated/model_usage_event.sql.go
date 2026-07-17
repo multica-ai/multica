@@ -441,7 +441,7 @@ INSERT INTO model_usage_event (
 )
 SELECT
     $2, $3,
-    atq.id, i.workspace_id, atq.issue_id, atq.agent_id, atq.runtime_id,
+    atq.id, COALESCE(i.workspace_id, cs.workspace_id, ap.workspace_id, a.workspace_id), atq.issue_id, atq.agent_id, atq.runtime_id,
     (SELECT id FROM ancestors WHERE parent_id IS NULL LIMIT 1),
     atq.chat_session_id, atq.autopilot_run_id, atq.parent_task_id,
     NULLIF($4::text, ''),
@@ -452,8 +452,13 @@ SELECT
     $16, $17, $18,
     $19, $20, $21
 FROM agent_task_queue atq
-JOIN issue i ON i.id = atq.issue_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+LEFT JOIN chat_session cs ON cs.id = atq.chat_session_id
+LEFT JOIN autopilot_run ar ON ar.id = atq.autopilot_run_id
+LEFT JOIN autopilot ap ON ap.id = ar.autopilot_id
 WHERE atq.id = $1
+  AND COALESCE(i.workspace_id, cs.workspace_id, ap.workspace_id, a.workspace_id) IS NOT NULL
 ON CONFLICT DO NOTHING
 RETURNING 1
 )
@@ -487,6 +492,7 @@ type InsertModelUsageEventParams struct {
 // CEREBRO-PATCH(model-usage-event-ingestion): FIR-3337 appends one canonical
 // measurement while deriving immutable workspace/issue/agent/session lineage
 // from the daemon-owned task instead of trusting runtime-supplied attribution.
+// CEREBRO-PATCH(model-usage-event-optional-issue-scope): FIR-3337 keeps non-issue chat/autopilot usage.
 func (q *Queries) InsertModelUsageEvent(ctx context.Context, arg InsertModelUsageEventParams) (bool, error) {
 	row := q.db.QueryRow(ctx, insertModelUsageEvent,
 		arg.TaskID,

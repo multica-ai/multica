@@ -160,6 +160,103 @@ func TestModelUsageEventScopeReconciliationPreservesDimensions(t *testing.T) {
 	})
 }
 
+// CEREBRO-PATCH(model-usage-event-non-issue-scope-test): FIR-3337 protects
+// canonical usage for chat and run-only Autopilot tasks that have no issue.
+func TestModelUsageEventIngestionPreservesNonIssueScopes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = 'Handler Test Agent'`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var chatSessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
+		VALUES ($1, $2, $3, 'model usage chat scope')
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("create chat session: %v", err)
+	}
+
+	var chatTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority)
+		VALUES ($1, $2, $3, 'running', 0)
+		RETURNING id
+	`, agentID, testRuntimeID, chatSessionID).Scan(&chatTaskID); err != nil {
+		t.Fatalf("create chat task: %v", err)
+	}
+	if err := insertScopeReconciliationEvent(ctx, chatTaskID, "non-issue-chat", 1,
+		"openai", "gpt-non-issue", "delta", 10, 2, 0, 1, 0, 3, 12); err != nil {
+		t.Fatalf("insert chat usage event: %v", err)
+	}
+
+	var autopilotID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot (
+			workspace_id, title, assignee_id, execution_mode, created_by_type, created_by_id
+		)
+		VALUES ($1, 'model usage run-only scope', $2, 'run_only', 'member', $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
+		t.Fatalf("create autopilot: %v", err)
+	}
+	var autopilotRunID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot_run (autopilot_id, source, status)
+		VALUES ($1, 'manual', 'running')
+		RETURNING id
+	`, autopilotID).Scan(&autopilotRunID); err != nil {
+		t.Fatalf("create autopilot run: %v", err)
+	}
+	var autopilotTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, autopilot_run_id, status, priority)
+		VALUES ($1, $2, $3, 'running', 0)
+		RETURNING id
+	`, agentID, testRuntimeID, autopilotRunID).Scan(&autopilotTaskID); err != nil {
+		t.Fatalf("create autopilot task: %v", err)
+	}
+	if err := insertScopeReconciliationEvent(ctx, autopilotTaskID, "non-issue-autopilot", 1,
+		"anthropic", "claude-non-issue", "delta", 20, 4, 0, 2, 0, 5, 24); err != nil {
+		t.Fatalf("insert autopilot usage event: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id IN ($1, $2)`, chatTaskID, autopilotTaskID)
+		testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID)
+		testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+	})
+
+	assertScopedEvent := func(taskID, scopeColumn, scopeID string) {
+		t.Helper()
+		var count int
+		query := fmt.Sprintf(`
+			SELECT COUNT(*)
+			FROM model_usage_event
+			WHERE task_id = $1
+			  AND workspace_id = $2
+			  AND issue_id IS NULL
+			  AND %s = $3
+		`, scopeColumn)
+		if err := testPool.QueryRow(ctx, query, taskID, testWorkspaceID, scopeID).Scan(&count); err != nil {
+			t.Fatalf("count %s usage event: %v", scopeColumn, err)
+		}
+		if count != 1 {
+			t.Fatalf("%s scoped event count = %d, want 1", scopeColumn, count)
+		}
+	}
+	assertScopedEvent(chatTaskID, "chat_session_id", chatSessionID)
+	assertScopedEvent(autopilotTaskID, "autopilot_run_id", autopilotRunID)
+}
+
 func insertScopeReconciliationEvent(
 	ctx context.Context,
 	taskID, eventID string,

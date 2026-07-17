@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS model_usage_event (
     -- Immutable attribution copied from the owning task when the event lands.
     task_id UUID NOT NULL REFERENCES agent_task_queue(id) ON DELETE CASCADE,
     workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-    issue_id UUID NOT NULL REFERENCES issue(id) ON DELETE CASCADE,
+    issue_id UUID REFERENCES issue(id) ON DELETE CASCADE,
     agent_id UUID NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
     runtime_id UUID REFERENCES agent_runtime(id) ON DELETE SET NULL,
     session_root_comment_id UUID REFERENCES comment(id) ON DELETE SET NULL,
