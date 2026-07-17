@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -79,6 +82,7 @@ func TestAgentBrowserAuthSaveArgsExcludePassword(t *testing.T) {
 }
 
 func TestVerifyInternalAgentBrowserPrintsOnlySanitizedResult(t *testing.T) {
+	screenshot := []byte("\x89PNG\r\n\x1a\nverified-registry-dashboard")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path != "/api/cerebro/agent-browser/internal-verify" {
 			t.Fatalf("path = %q", req.URL.Path)
@@ -90,13 +94,18 @@ func TestVerifyInternalAgentBrowserPrintsOnlySanitizedResult(t *testing.T) {
 		if body.App != "registry" {
 			t.Fatalf("app = %q", body.App)
 		}
-		_, _ = w.Write([]byte(`{"app":"registry","internal_host":"firtal-data-registry-private.internal:3000","final_url":"http://firtal-data-registry-private.internal:3000/","markers":["Dashboard"],"errors":[]}`))
+		_ = json.NewEncoder(w).Encode(internalBrowserVerifyResponse{
+			App: "registry", InternalHost: "firtal-data-registry-private.internal:3000",
+			FinalURL: "http://firtal-data-registry-private.internal:3000/", Markers: []string{"Dashboard"},
+			Errors: []string{}, ScreenshotPNG: screenshot,
+		})
 	}))
 	defer server.Close()
 
 	client := cli.NewAPIClient(server.URL, "workspace-id", "task-token")
 	var out bytes.Buffer
-	if err := verifyInternalAgentBrowser(context.Background(), client, &out, "registry"); err != nil {
+	screenshotPath := filepath.Join(t.TempDir(), "registry.png")
+	if err := verifyInternalAgentBrowser(context.Background(), client, &out, "registry", screenshotPath); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Contains(out.Bytes(), []byte(`"app":"registry"`)) {
@@ -104,6 +113,43 @@ func TestVerifyInternalAgentBrowserPrintsOnlySanitizedResult(t *testing.T) {
 	}
 	if bytes.Contains(out.Bytes(), []byte("password")) || bytes.Contains(out.Bytes(), []byte("username")) {
 		t.Fatalf("credential field leaked to output: %s", out.String())
+	}
+	if bytes.Contains(out.Bytes(), screenshot) || bytes.Contains(out.Bytes(), []byte("ScreenshotPNG")) {
+		t.Fatalf("screenshot bytes leaked to output: %s", out.String())
+	}
+	written, err := os.ReadFile(screenshotPath)
+	if err != nil {
+		t.Fatalf("read screenshot: %v", err)
+	}
+	if !bytes.Equal(written, screenshot) {
+		t.Fatalf("screenshot bytes = %q, want %q", written, screenshot)
+	}
+	info, err := os.Stat(screenshotPath)
+	if err != nil {
+		t.Fatalf("stat screenshot: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("screenshot mode = %o, want 600", info.Mode().Perm())
+	}
+	if !bytes.Contains(out.Bytes(), []byte(screenshotPath)) {
+		t.Fatalf("output does not name screenshot path: %s", out.String())
+	}
+}
+
+func TestVerifyInternalAgentBrowserRejectsInvalidScreenshot(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(internalBrowserVerifyResponse{ScreenshotPNG: []byte("not-a-png")})
+	}))
+	defer server.Close()
+
+	client := cli.NewAPIClient(server.URL, "workspace-id", "task-token")
+	screenshotPath := filepath.Join(t.TempDir(), "registry.png")
+	err := verifyInternalAgentBrowser(context.Background(), client, io.Discard, "registry", screenshotPath)
+	if err == nil || err.Error() != "internal browser verification returned an invalid screenshot" {
+		t.Fatalf("error = %v", err)
+	}
+	if _, err := os.Stat(screenshotPath); !os.IsNotExist(err) {
+		t.Fatalf("invalid screenshot was written: %v", err)
 	}
 }
 
