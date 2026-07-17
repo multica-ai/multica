@@ -175,12 +175,23 @@ func TestFailTask_AlreadyFinalized(t *testing.T) {
 func TestProviderNetworkRetrySchedule(t *testing.T) {
 	const provNet = "agent_error.provider_network"
 
-	// Attempt ceiling: provider_network is raised to 3; others keep the column.
-	if got := retryAttemptCeiling(provNet, 2); got != providerNetworkMaxAttempts {
-		t.Errorf("ceiling(provider_network, 2) = %d, want %d", got, providerNetworkMaxAttempts)
+	// Attempt ceiling: provider_network is raised to 3, but only ever WIDENS the
+	// budget and never overrides the max_attempts<=1 "retry disabled" contract.
+	ceilingCases := []struct {
+		reason string
+		max    int32
+		want   int32
+	}{
+		{provNet, 2, providerNetworkMaxAttempts}, // default budget → raised to 3
+		{provNet, 1, 1},                          // disabled → stays disabled, not revived
+		{provNet, 5, 5},                          // higher configured budget → kept (widen-only)
+		{"timeout", 2, 2},                        // unrelated reason → column value untouched
+		{"timeout", 1, 1},                        // unrelated + disabled → untouched
 	}
-	if got := retryAttemptCeiling("timeout", 2); got != 2 {
-		t.Errorf("ceiling(timeout, 2) = %d, want 2", got)
+	for _, tc := range ceilingCases {
+		if got := retryAttemptCeiling(tc.reason, tc.max); got != tc.want {
+			t.Errorf("ceiling(%q, %d) = %d, want %d", tc.reason, tc.max, got, tc.want)
+		}
 	}
 
 	// Backoff: only provider_network's final attempt (after the 2nd failure) is
@@ -219,6 +230,7 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 		{"provider_network first run retries", provNet, 1, 2, true},
 		{"provider_network second run still retries (deferred tier)", provNet, 2, 2, true},
 		{"provider_network third run is the ceiling", provNet, 3, 2, false},
+		{"provider_network with retry disabled (max_attempts=1) never retries", provNet, 1, 1, false},
 		{"timeout keeps single immediate retry", "timeout", 1, 2, true},
 		{"timeout exhausts at attempt 2", "timeout", 2, 2, false},
 		{"non-retryable reason never retries", "agent_error.unknown", 1, 2, false},

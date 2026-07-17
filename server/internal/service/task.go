@@ -2924,9 +2924,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// here — before the transaction — and only for retryable failures, so the
 	// common agent_error path skips this work entirely.
 	var (
-		wantRetry    bool
-		retryOverlay runtimeMCPOverlayData
-		retryFireAt  pgtype.Timestamptz
+		wantRetry        bool
+		retryOverlay     runtimeMCPOverlayData
+		retryFireAt      pgtype.Timestamptz
+		retryMaxAttempts pgtype.Int4
 	)
 	if retryableReasons[failureReason] {
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
@@ -2934,6 +2935,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				"task_id", util.UUIDToString(taskID), "error", perr)
 		} else if retryEligible(failureReason, parent) {
 			wantRetry = true
+			// Persist the reason-aware effective budget into the child so the
+			// retry chain self-describes (e.g. provider_network → max_attempts=3),
+			// rather than leaking a contradictory attempt=N/max_attempts=2 row.
+			retryMaxAttempts = pgtype.Int4{Int32: retryAttemptCeiling(failureReason, parent.MaxAttempts), Valid: true}
 			// Defer this attempt when the reason's schedule calls for a backoff
 			// (provider_network's final attempt waits ~5s); a zero delay leaves
 			// fire_at NULL so the child is created immediately-claimable.
@@ -2995,6 +3000,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			child, cerr := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 				ID:                   taskID,
 				FireAt:               retryFireAt,
+				MaxAttempts:          retryMaxAttempts,
 				RuntimeMcpOverlay:    retryOverlay.Overlay,
 				RuntimeConnectedApps: retryOverlay.ConnectedApps,
 			})
@@ -3134,11 +3140,21 @@ const (
 )
 
 // retryAttemptCeiling reports how many attempts the auto-retry path allows for
-// a failure reason. It overrides the task's generic max_attempts only for
-// reasons with a bespoke schedule; everything else keeps the column's value
-// (default 2 = first run + one retry).
+// a failure reason. It only ever WIDENS the task's generic max_attempts, and
+// only for reasons with a bespoke schedule; everything else keeps the column's
+// value (default 2 = first run + one retry).
+//
+// max_attempts <= 1 explicitly disables auto-retry (055_task_lease_and_retry.up
+// .sql: "1 disables retry"), so it is never overridden — a disabled task must
+// not be revived by a raised ceiling. Callers persist this value into the retry
+// child (CreateRetryTask's max_attempts) so the row stays self-consistent:
+// provider_network's chain records attempt=3, max_attempts=3, not a
+// contradictory attempt=3, max_attempts=2 (MUL-4910).
 func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
-	if reason == string(taskfailure.ReasonAgentProviderNetwork) {
+	if taskMaxAttempts <= 1 {
+		return taskMaxAttempts
+	}
+	if reason == string(taskfailure.ReasonAgentProviderNetwork) && taskMaxAttempts < providerNetworkMaxAttempts {
 		return providerNetworkMaxAttempts
 	}
 	return taskMaxAttempts
@@ -3261,8 +3277,10 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	} else {
 		runtimeMCPOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
 	}
-	// Mirror FailTask's in-tx backoff: defer the final provider_network attempt
-	// ~5s via fire_at; a zero delay leaves fire_at NULL for an immediate child.
+	// Mirror FailTask's in-tx backoff + effective-budget persistence: defer the
+	// final provider_network attempt ~5s via fire_at (zero delay leaves fire_at
+	// NULL for an immediate child), and write the reason-aware ceiling into the
+	// child's max_attempts so the retry chain stays self-consistent.
 	var retryFireAt pgtype.Timestamptz
 	if delay := retryDelayForAttempt(reason, parent.Attempt); delay > 0 {
 		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
@@ -3270,6 +3288,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	child, err := s.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 		ID:                   parent.ID,
 		FireAt:               retryFireAt,
+		MaxAttempts:          pgtype.Int4{Int32: retryAttemptCeiling(reason, parent.MaxAttempts), Valid: true},
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 	})

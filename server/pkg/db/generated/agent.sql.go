@@ -1797,14 +1797,14 @@ SELECT
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
-    p.attempt + 1, p.max_attempts, p.id,
+    p.attempt + 1, COALESCE($3::int, p.max_attempts), p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
     p.squad_id,
     p.originator_user_id,
     p.accountable_user_id,
-    $3,
     $4,
+    $5,
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, $2
@@ -1816,6 +1816,7 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 type CreateRetryTaskParams struct {
 	ID                   pgtype.UUID        `json:"id"`
 	FireAt               pgtype.Timestamptz `json:"fire_at"`
+	MaxAttempts          pgtype.Int4        `json:"max_attempts"`
 	RuntimeMcpOverlay    []byte             `json:"runtime_mcp_overlay"`
 	RuntimeConnectedApps []byte             `json:"runtime_connected_apps"`
 }
@@ -1865,10 +1866,18 @@ type CreateRetryTaskParams struct {
 // poll) flips it to 'queued'. Used for provider_network's final attempt so it
 // waits ~5s instead of firing back-to-back with the immediate retry (MUL-4910).
 // NULL keeps the historical behaviour: an immediately-claimable 'queued' child.
+//
+// max_attempts overrides the inherited budget when non-NULL (NULL inherits
+// p.max_attempts unchanged). Callers persist the reason-aware effective ceiling
+// here so the row stays self-consistent — e.g. provider_network's chain records
+// attempt=3, max_attempts=3 rather than leaking attempt=3, max_attempts=2 to the
+// task API (MUL-4910). The Go retryAttemptCeiling already refuses to raise a
+// disabled (max_attempts<=1) task, so this only ever widens, never revives.
 func (q *Queries) CreateRetryTask(ctx context.Context, arg CreateRetryTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createRetryTask,
 		arg.ID,
 		arg.FireAt,
+		arg.MaxAttempts,
 		arg.RuntimeMcpOverlay,
 		arg.RuntimeConnectedApps,
 	)
