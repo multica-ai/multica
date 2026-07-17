@@ -749,9 +749,18 @@ func (q *Queries) ListCerebroSprintsByProject(ctx context.Context, projectID pgt
 const listCerebroSprintsByWorkspace = `-- name: ListCerebroSprintsByWorkspace :many
 SELECT s.id, s.workspace_id, s.project_id, s.name, s.sequence_no, s.status,
        s.start_date, s.end_date, s.goal, s.created_at, s.updated_at,
-       p.title AS project_title
+       p.title AS project_title,
+       progress.issue_count,
+       progress.done_count
 FROM cerebro_sprint s
 JOIN project p ON p.id = s.project_id
+LEFT JOIN LATERAL (
+    SELECT COUNT(*) AS issue_count,
+           COUNT(*) FILTER (WHERE i.status IN ('done', 'cancelled')) AS done_count
+    FROM cerebro_sprint_issue si
+    JOIN issue i ON i.id = si.issue_id
+    WHERE si.sprint_id = s.id
+) progress ON true
 WHERE s.workspace_id = $1
   AND ($2::text IS NULL OR s.status = $2::text)
 ORDER BY (s.status = 'active') DESC, p.title ASC, s.sequence_no DESC
@@ -775,6 +784,8 @@ type ListCerebroSprintsByWorkspaceRow struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	ProjectTitle string             `json:"project_title"`
+	IssueCount   int64              `json:"issue_count"`
+	DoneCount    int64              `json:"done_count"`
 }
 
 // FIR-2500: workspace-wide sprint listing so the CLI can find sprints (for
@@ -802,6 +813,8 @@ func (q *Queries) ListCerebroSprintsByWorkspace(ctx context.Context, arg ListCer
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ProjectTitle,
+			&i.IssueCount,
+			&i.DoneCount,
 		); err != nil {
 			return nil, err
 		}

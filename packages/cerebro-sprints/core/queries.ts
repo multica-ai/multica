@@ -15,6 +15,7 @@ import {
   fetchSprintIssues,
   fetchSprintSettings,
   fetchSprints,
+  fetchWorkspaceSprints,
   removeIssueFromSprint,
   updateRecurringTask,
   updateSprint,
@@ -37,6 +38,7 @@ export const sprintsKeys = {
     [...sprintsKeys.all(wsId), "settings", projectId] as const,
   projectSprints: (wsId: string, projectId: string) =>
     [...sprintsKeys.all(wsId), "list", projectId] as const,
+  workspaceSprints: (wsId: string) => [...sprintsKeys.all(wsId), "workspace-list"] as const,
   sprint: (wsId: string, sprintId: string) =>
     [...sprintsKeys.all(wsId), "sprint", sprintId] as const,
   sprintIssues: (wsId: string, sprintId: string) =>
@@ -67,6 +69,15 @@ export function projectSprintsOptions(wsId: string, projectId: string) {
     queryKey: sprintsKeys.projectSprints(wsId, projectId),
     queryFn: () => fetchSprints(projectId),
     enabled: !!wsId && !!projectId,
+    staleTime: 15 * 1000,
+  });
+}
+
+export function workspaceSprintsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: sprintsKeys.workspaceSprints(wsId),
+    queryFn: fetchWorkspaceSprints,
+    enabled: !!wsId,
     staleTime: 15 * 1000,
   });
 }
