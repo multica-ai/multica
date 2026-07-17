@@ -2318,7 +2318,7 @@ func (d *Daemon) modelDiscoveryExecutable(rt Runtime) (string, bool) {
 func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID string) {
 	d.logger.Info("model list requested", "runtime_id", rt.ID, "request_id", requestID, "provider", rt.Provider)
 
-	executablePath, ok := d.modelDiscoveryExecutable(rt)
+	entry, ok := d.cfg.Agents[rt.Provider]
 	if !ok {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
@@ -2326,8 +2326,14 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		})
 		return
 	}
-	// Self-heal a pinned executable path an in-place upgrade deleted (MUL-4486).
-	entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
+	executablePath := entry.Path
+	if spec, ok := d.customProfileLaunchForRuntime(rt.ID); ok {
+		executablePath = spec.path
+	} else {
+		// Self-heal a pinned executable path an in-place upgrade deleted (MUL-4486).
+		entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
+		executablePath = entry.Path
+	}
 
 	models, err := agent.ListModels(ctx, rt.Provider, executablePath)
 	if err != nil {
