@@ -284,32 +284,43 @@ func parseMarkdownReferenceDefinitions(markdown string) map[string]markdownRefer
 }
 
 type markdownReferenceDefinitionScanState struct {
-	inFence  bool
-	fence    byte
-	fenceLen int
+	inFence   bool
+	fence     byte
+	fenceLen  int
+	container markdownLineContainer
+}
+
+type markdownLineContainer struct {
+	blockquote int
+	list       bool
 }
 
 func (s *markdownReferenceDefinitionScanState) skipLine(markdown string, start int) bool {
 	if s.inFence {
-		if parseMarkdownFenceCloseLine(markdown, start, s.fence, s.fenceLen) {
+		if !lineBelongsToMarkdownContainer(markdown, start, s.container) {
 			s.inFence = false
+		} else {
+			if parseMarkdownFenceCloseLine(markdown, start, s.fence, s.fenceLen) {
+				s.inFence = false
+			}
+			return true
 		}
-		return true
 	}
-	if fence, fenceLen, ok := parseMarkdownFenceOpenLine(markdown, start); ok {
+	if fence, fenceLen, container, ok := parseMarkdownFenceOpenLine(markdown, start); ok {
 		s.inFence = true
 		s.fence = fence
 		s.fenceLen = fenceLen
+		s.container = container
 		return true
 	}
 	return isIndentedMarkdownCodeLine(markdown, start)
 }
 
-func parseMarkdownFenceOpenLine(markdown string, start int) (byte, int, bool) {
+func parseMarkdownFenceOpenLine(markdown string, start int) (byte, int, markdownLineContainer, bool) {
 	lineEnd := markdownLineEnd(markdown, start)
 	i, ok := skipMarkdownReferenceDefinitionLinePrefix(markdown, start)
 	if !ok || i >= lineEnd || (markdown[i] != '`' && markdown[i] != '~') {
-		return 0, 0, false
+		return 0, 0, markdownLineContainer{}, false
 	}
 	fence := markdown[i]
 	j := i
@@ -317,16 +328,55 @@ func parseMarkdownFenceOpenLine(markdown string, start int) (byte, int, bool) {
 		j++
 	}
 	if j-i < 3 {
-		return 0, 0, false
+		return 0, 0, markdownLineContainer{}, false
 	}
 	if fence == '`' {
 		for k := j; k < lineEnd; k++ {
 			if markdown[k] == '`' {
-				return 0, 0, false
+				return 0, 0, markdownLineContainer{}, false
 			}
 		}
 	}
-	return fence, j - i, true
+	return fence, j - i, markdownLineContainerForLine(markdown, start), true
+}
+
+func markdownLineContainerForLine(markdown string, start int) markdownLineContainer {
+	var container markdownLineContainer
+	i := start
+	for {
+		j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
+		if !ok || j >= len(markdown) || markdown[j] != '>' {
+			break
+		}
+		container.blockquote++
+		j++
+		if j < len(markdown) && (markdown[j] == ' ' || markdown[j] == '	') {
+			j++
+		}
+		i = j
+	}
+	j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
+	if ok {
+		_, container.list = skipMarkdownListMarker(markdown, j)
+	}
+	return container
+}
+
+func lineBelongsToMarkdownContainer(markdown string, start int, container markdownLineContainer) bool {
+	current := markdownLineContainerForLine(markdown, start)
+	if current.blockquote < container.blockquote {
+		return false
+	}
+	return !container.list || current.list || markdownLineIndent(markdown, start) >= 2
+}
+
+func markdownLineIndent(markdown string, start int) int {
+	lineEnd := markdownLineEnd(markdown, start)
+	indent := 0
+	for start+indent < lineEnd && markdown[start+indent] == ' ' {
+		indent++
+	}
+	return indent
 }
 
 func parseMarkdownFenceCloseLine(markdown string, start int, fence byte, fenceLen int) bool {
