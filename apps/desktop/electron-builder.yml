@@ -14,6 +14,15 @@ protocols:
       - multica
 asarUnpack:
   - resources/**
+electronFuses:
+  # Packaged Electron apps read NODE_OPTIONS before our main process can run.
+  # Disable inherited Node runtime env so user shell/debugger options cannot
+  # abort launch before renderer startup (github.com/multica-ai/multica/issues/5520).
+  enableNodeOptionsEnvironmentVariable: false
+  # Keep ELECTRON_RUN_AS_NODE from turning the app binary into a Node runtime
+  # when inherited from a parent process. The desktop main process does not use
+  # child_process.fork, so this is safe for the packaged app bootstrap path.
+  runAsNode: false
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   target:

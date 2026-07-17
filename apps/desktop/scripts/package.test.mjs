@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { afterEach, describe, it, expect } from "vitest";
@@ -397,6 +397,16 @@ describe("builderArgsForTarget", () => {
       "--publish",
       "never",
     ]);
+  });
+});
+
+describe("electron-builder fuses", () => {
+  it("ignores inherited Node runtime env in packaged desktop builds", () => {
+    const config = readFileSync(resolve("electron-builder.yml"), "utf-8");
+    expect(config).toMatch(
+      /electronFuses:\n(?:  .+\n)*  enableNodeOptionsEnvironmentVariable: false\n/,
+    );
+    expect(config).toMatch(/electronFuses:\n(?:  .+\n)*  runAsNode: false\n/);
   });
 });
 
