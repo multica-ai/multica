@@ -178,6 +178,62 @@ func TestShutdownHandlerRejectsNonPost(t *testing.T) {
 	}
 }
 
+func TestRestartHandlerPostSchedulesDaemonSelfHandoff(t *testing.T) {
+	originalResolveSelfExecutable := resolveSelfExecutable
+	originalIsBrewInstall := isBrewInstall
+	t.Cleanup(func() {
+		resolveSelfExecutable = originalResolveSelfExecutable
+		isBrewInstall = originalIsBrewInstall
+	})
+
+	wantBinary := t.TempDir() + "/multica"
+	resolveSelfExecutable = func() (string, error) { return wantBinary, nil }
+	isBrewInstall = func() bool { return false }
+
+	cancelled := make(chan struct{})
+	d := &Daemon{
+		cancelFunc: func() { close(cancelled) },
+		logger:     slog.Default(),
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/restart", nil)
+	d.restartHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != `{"status":"restarting"}` {
+		t.Fatalf("response body = %q, want restarting status", got)
+	}
+
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("daemon context was not cancelled after POST /restart")
+	}
+	if got := d.RestartBinary(); got != wantBinary {
+		t.Fatalf("restart binary = %q, want %q", got, wantBinary)
+	}
+}
+
+func TestRestartHandlerRejectsNonPost(t *testing.T) {
+	cancelled := false
+	d := &Daemon{cancelFunc: func() { cancelled = true }}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/restart", nil)
+	d.restartHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+	time.Sleep(10 * time.Millisecond)
+	if cancelled {
+		t.Fatal("GET request should not schedule a restart")
+	}
+}
+
 func TestHealthHandlerRespondsWhileTaskRepoLookupWaits(t *testing.T) {
 	const workspaceID = "ws-health"
 	const repoURL = "https://github.com/org/repo.git"

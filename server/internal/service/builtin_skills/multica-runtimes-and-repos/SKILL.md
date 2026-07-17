@@ -19,6 +19,13 @@ multica repo checkout <repo-url>
 
 Runtime and repo commands affect active agent execution. Do not restart daemons, update runtimes, or check out arbitrary repos just to test.
 
+A plain background `multica daemon restart` is owned by the running daemon: it
+hands off using its current executable, flags, profile, and environment. Restart
+flags such as `--foreground`, `--no-auto-update`, identity/timing overrides, or
+`--server-url` deliberately select the older caller-owned stop/start path. A
+`--profile` flag only selects which daemon to restart and does not replace that
+daemon's configuration.
+
 ## Core model
 
 A runtime is the execution target behind an agent. A daemon owns local runtime processes and claims queued tasks from the server.
@@ -41,11 +48,17 @@ multica runtime usage <runtime-id> --output json
 multica runtime activity <runtime-id> --output json
 multica runtime update <runtime-id> --target-version <version> --output json
 multica runtime delete <runtime-id>
+multica daemon restart
 multica repo checkout <url>
 multica repo checkout <url> --ref <branch-or-sha>
 ```
 
 `runtime update` and `runtime delete` are writes. Starting a runtime update is limited to its owner or a workspace owner/admin; the original initiator may keep polling that specific in-flight request if their admin role changes. `runtime delete` removes a runtime registration; if active agents are still bound, it refuses unless the user explicitly passes `--cascade`, which archives those agents and cancels their queued/running tasks before deleting the runtime. `repo checkout` creates a git worktree in the task working directory.
+
+`daemon restart` interrupts daemon availability and can affect in-flight tasks;
+use it only when the task explicitly requires a restart. The plain form asks the
+daemon to self-handoff so daemon-only environment does not get replaced by the
+caller's environment.
 
 `repo checkout` requires `MULTICA_DAEMON_PORT`; it is intended to run inside a daemon task. If absent, you are not in the normal agent checkout path. When a project `github_repo` resource has `resource_ref.ref`, `repo checkout <url>` uses that ref by default for the current task; an explicit `repo checkout <url> --ref <branch-or-sha>` overrides it.
 

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -598,6 +599,14 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPort)
+	if daemonAlive(health) && daemonRestartUsesSelfHandoff(cmd) {
+		oldPID, _ := health["pid"].(float64)
+		fmt.Fprintf(os.Stderr, "Restarting daemon (pid %d) with its current configuration...\n", int(oldPID))
+		if err := requestDaemonRestart(healthPort); err != nil {
+			return fmt.Errorf("request daemon self-restart: %w", err)
+		}
+		return waitForDaemonRestart(healthPort, int(oldPID), profile)
+	}
 	if daemonAlive(health) {
 		pid, _ := health["pid"].(float64)
 		if pid > 0 {
@@ -623,6 +632,64 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 
 	// Start fresh.
 	return runDaemonStart(cmd, args)
+}
+
+func daemonRestartUsesSelfHandoff(cmd *cobra.Command) bool {
+	foreground, _ := cmd.Flags().GetBool("foreground")
+	if foreground {
+		return false
+	}
+
+	for _, name := range []string{
+		"daemon-id",
+		"device-name",
+		"runtime-name",
+		"poll-interval",
+		"heartbeat-interval",
+		"agent-timeout",
+		"codex-semantic-inactivity-timeout",
+		"codex-handshake-timeout",
+		"max-concurrent-tasks",
+		"no-auto-update",
+		"auto-update-interval",
+		"server-url",
+	} {
+		if commandFlagChanged(cmd, name) {
+			return false
+		}
+	}
+	return true
+}
+
+func commandFlagChanged(cmd *cobra.Command, name string) bool {
+	for _, flags := range []*pflag.FlagSet{cmd.Flags(), cmd.InheritedFlags(), cmd.PersistentFlags()} {
+		if flag := flags.Lookup(name); flag != nil && flag.Changed {
+			return true
+		}
+	}
+	return false
+}
+
+func waitForDaemonRestart(healthPort, oldPID int, profile string) error {
+	const restartTimeout = 90 * time.Second
+	deadline := time.Now().Add(restartTimeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		health := checkDaemonHealthOnPort(ctx, healthPort)
+		cancel()
+		pid, _ := health["pid"].(float64)
+		status, _ := health["status"].(string)
+		if status == "running" && int(pid) > 0 && int(pid) != oldPID {
+			label := "Daemon"
+			if profile != "" {
+				label = fmt.Sprintf("Daemon [%s]", profile)
+			}
+			fmt.Fprintf(os.Stderr, "%s restarted (pid %d, version %v)\n", label, int(pid), health["cli_version"])
+			return nil
+		}
+	}
+	return fmt.Errorf("daemon did not return with a new ready process within %s", restartTimeout)
 }
 
 // --- daemon stop ---
@@ -691,6 +758,24 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 // (network error, non-2xx status, or the endpoint predates this change).
 func requestDaemonShutdown(healthPort int) error {
 	url := fmt.Sprintf("http://127.0.0.1:%d/shutdown", healthPort)
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func requestDaemonRestart(healthPort int) error {
+	url := fmt.Sprintf("http://127.0.0.1:%d/restart", healthPort)
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
 		return err

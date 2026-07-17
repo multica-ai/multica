@@ -5,6 +5,13 @@
 - `runtime update` posts to `/api/runtimes/{runtime-id}/update`; with `--wait` it polls update status. Initiation enforces runtime-owner or workspace-owner/admin access through `canEditRuntime`; status polling additionally permits that request's immutable initiator so an in-flight poll survives an admin-role change (`server/internal/handler/runtime_update.go` and `runtime.go`).
 - `runtime delete` deletes `/api/runtimes/{runtime-id}`; with `--cascade`, it first reads the `runtime_has_active_agents` conflict payload and posts those ids to `/api/runtimes/{runtime-id}/archive-agents-and-delete`.
 - `server/cmd/multica/cmd_repo.go` registers `repo checkout <url> [--ref]`.
+- `server/cmd/multica/cmd_daemon.go` routes a plain background `daemon restart`
+  through the running daemon's local `/restart` endpoint, then waits for a new
+  ready PID. Explicit restart configuration flags retain caller-owned stop/start
+  semantics; `--profile` only selects the target daemon.
+- `server/internal/daemon/health.go` registers localhost-only `POST /restart`;
+  the handler reuses `triggerRestart`, so the successor inherits the running
+  daemon's executable, flags, profile, and full environment.
 - `repo checkout` requires `MULTICA_DAEMON_PORT`, sends `workspace_id`, `workdir`, `ref`, `agent_name`, and `task_id` to local daemon `/repo/checkout`, then prints the checked-out path.
 - `server/internal/daemon/health.go` resolves the checkout ref: request `ref` wins; otherwise it asks `server/internal/daemon/daemon.go` for the current task's project repo default ref.
 - `server/cmd/server/router.go` registers daemon APIs under `/api/daemon`, including workspace repos and task claim.
