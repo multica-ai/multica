@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/taskskill"
 )
 
 // TestBuildQuickCreatePromptRules locks in the rules that govern how the
@@ -451,11 +452,9 @@ func TestBuildChatPromptAgentIntro(t *testing.T) {
 func TestBuildChatPromptSlashSkills(t *testing.T) {
 	t.Run("injects selected skills block", func(t *testing.T) {
 		task := Task{
-			ChatSessionID: "sess-1",
-			ChatMessage:   "please [/deploy](slash://skill/abc-123) this",
-			Agent: &AgentData{
-				Skills: []SkillData{{ID: "abc-123", Name: "deploy"}},
-			},
+			ChatSessionID:  "sess-1",
+			ChatMessage:    "please [/deploy](slash://skill/abc-123) this",
+			SelectedSkills: []taskskill.SelectedSkill{{ID: "abc-123", Name: "deploy", NativeName: "deploy"}},
 		}
 		out := buildChatPrompt(task)
 		if !strings.Contains(out, "Explicitly selected skills:\n- deploy\n") {
@@ -466,41 +465,11 @@ func TestBuildChatPromptSlashSkills(t *testing.T) {
 		}
 	})
 
-	t.Run("ignores skills not belonging to agent", func(t *testing.T) {
+	t.Run("uses validated canonical name not raw label", func(t *testing.T) {
 		task := Task{
-			ChatSessionID: "sess-1",
-			ChatMessage:   "[/hacker-skill](slash://skill/evil-id)",
-			Agent: &AgentData{
-				Skills: []SkillData{{ID: "good-id", Name: "deploy"}},
-			},
-		}
-		out := buildChatPrompt(task)
-		if strings.Contains(out, "Explicitly selected skills") {
-			t.Fatalf("should not inject block for unknown skill ID, got:\n%s", out)
-		}
-	})
-
-	t.Run("validates by ID not label", func(t *testing.T) {
-		task := Task{
-			ChatSessionID: "sess-1",
-			ChatMessage:   "[/deploy](slash://skill/wrong-id)",
-			Agent: &AgentData{
-				Skills: []SkillData{{ID: "real-id", Name: "deploy"}},
-			},
-		}
-		out := buildChatPrompt(task)
-		if strings.Contains(out, "Explicitly selected skills") {
-			t.Fatalf("matching label with wrong ID must not pass, got:\n%s", out)
-		}
-	})
-
-	t.Run("uses canonical name not label", func(t *testing.T) {
-		task := Task{
-			ChatSessionID: "sess-1",
-			ChatMessage:   "[/spoofed-name](slash://skill/real-id)",
-			Agent: &AgentData{
-				Skills: []SkillData{{ID: "real-id", Name: "deploy"}},
-			},
+			ChatSessionID:  "sess-1",
+			ChatMessage:    "[/spoofed-name](slash://skill/real-id)",
+			SelectedSkills: []taskskill.SelectedSkill{{ID: "real-id", Name: "deploy", NativeName: "deploy"}},
 		}
 		out := buildChatPrompt(task)
 		if !strings.Contains(out, "- deploy\n") {
@@ -516,11 +485,9 @@ func TestBuildChatPromptSlashSkills(t *testing.T) {
 
 	t.Run("deduplicates skills", func(t *testing.T) {
 		task := Task{
-			ChatSessionID: "sess-1",
-			ChatMessage:   "[/deploy](slash://skill/a) and [/deploy](slash://skill/a) again",
-			Agent: &AgentData{
-				Skills: []SkillData{{ID: "a", Name: "deploy"}},
-			},
+			ChatSessionID:  "sess-1",
+			ChatMessage:    "[/deploy](slash://skill/a) and [/deploy](slash://skill/a) again",
+			SelectedSkills: []taskskill.SelectedSkill{{ID: "a", Name: "deploy", NativeName: "deploy"}},
 		}
 		out := buildChatPrompt(task)
 		if strings.Count(out, "- deploy") != 1 {
@@ -532,7 +499,6 @@ func TestBuildChatPromptSlashSkills(t *testing.T) {
 		task := Task{
 			ChatSessionID: "sess-1",
 			ChatMessage:   "just a normal message",
-			Agent:         &AgentData{Skills: []SkillData{{ID: "a", Name: "deploy"}}},
 		}
 		out := buildChatPrompt(task)
 		if strings.Contains(out, "Explicitly selected skills") {
@@ -544,7 +510,6 @@ func TestBuildChatPromptSlashSkills(t *testing.T) {
 		task := Task{
 			ChatSessionID: "sess-1",
 			ChatMessage:   "[/deploy](slash://skill/abc-123)",
-			Agent:         &AgentData{},
 		}
 		out := buildChatPrompt(task)
 		if strings.Contains(out, "Explicitly selected skills") {
