@@ -425,11 +425,15 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       onPointerDown={onPointerDown}
       title={toggleLabel}
       className={cn(
-        resizeHandleVariants({ axis: "x", indicator: "line" }),
-        "absolute inset-y-0 z-20 hidden w-4 transition-[transform,background-color] ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
+        // `hitArea: "self"` sizes the rail to the shared 8px grab zone. The
+        // offsets below are half that width, so the rail straddles the sidebar
+        // edge; they have to move with it or the rail lands beside the edge
+        // instead of on it.
+        resizeHandleVariants({ axis: "x", indicator: "line", hitArea: "self" }),
+        "absolute inset-y-0 z-20 hidden transition-[transform,background-color] ease-linear group-data-[side=left]:-right-2 group-data-[side=right]:left-0 sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
         "group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full hover:group-data-[collapsible=offcanvas]:bg-sidebar",
-        "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
-        "[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",
+        "[[data-side=left][data-collapsible=offcanvas]_&]:-right-1",
+        "[[data-side=right][data-collapsible=offcanvas]_&]:-left-1",
         className
       )}
       {...props}

@@ -3,6 +3,7 @@
 import * as ResizablePrimitive from "react-resizable-panels"
 
 import { cn } from "@multica/ui/lib/utils"
+import { resizeHandleVariants } from "@multica/ui/components/ui/resize-handle"
 
 function ResizablePanelGroup({
   className,
@@ -25,10 +26,15 @@ function ResizablePanel({ ...props }: ResizablePrimitive.PanelProps) {
 }
 
 // The separator owns the divider line between two panels: it renders the
-// resting rule itself (`before:bg-border`) rather than sitting on top of a
-// border the panels draw. Two elements painting the same 1px meant the
-// hover/active states were invisible — they were tinting a line that was
-// already there. Panels either side must not add their own edge border.
+// resting rule itself rather than sitting on top of a border the panels draw.
+// Two elements painting the same 1px meant the hover/active states were
+// invisible — they were tinting a line that was already there. Panels either
+// side must not add their own edge border.
+//
+// Cursor and the drag-time cursor lock stay with the library, which injects
+// `*, *:hover { cursor: … !important }` document-wide — hence `cursor: "none"`.
+// Everything visual comes from the shared variants, so a panel divider and the
+// sidebar rail cannot drift apart.
 function ResizableHandle({
   withHandle,
   className,
@@ -40,7 +46,18 @@ function ResizableHandle({
     <ResizablePrimitive.Separator
       data-slot="resizable-handle"
       className={cn(
-        "relative flex w-0 items-center justify-center before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-border before:transition-colors hover:before:bg-foreground/15 data-[separator=active]:before:bg-foreground/25 after:absolute after:inset-y-0 after:left-1/2 after:w-2 after:-translate-x-1/2 focus-visible:outline-hidden aria-[orientation=horizontal]:h-0 aria-[orientation=horizontal]:w-full aria-[orientation=horizontal]:before:inset-x-0 aria-[orientation=horizontal]:before:inset-y-auto aria-[orientation=horizontal]:before:h-px aria-[orientation=horizontal]:before:w-full aria-[orientation=horizontal]:before:translate-x-0 aria-[orientation=horizontal]:after:left-0 aria-[orientation=horizontal]:after:h-2 aria-[orientation=horizontal]:after:w-full aria-[orientation=horizontal]:after:translate-x-0 aria-[orientation=horizontal]:after:-translate-y-1/2",
+        resizeHandleVariants({
+          axis: "x",
+          cursor: "none",
+          indicator: "rule",
+          hitArea: "overlay",
+        }),
+        "relative flex w-0 items-center justify-center focus-visible:outline-hidden",
+        // The library decides orientation at runtime, so the rule and the grab
+        // zone are flipped here rather than through the `axis` variant.
+        "aria-[orientation=horizontal]:h-0 aria-[orientation=horizontal]:w-full",
+        "aria-[orientation=horizontal]:after:inset-x-0 aria-[orientation=horizontal]:after:inset-y-auto aria-[orientation=horizontal]:after:top-1/2 aria-[orientation=horizontal]:after:h-px aria-[orientation=horizontal]:after:w-full aria-[orientation=horizontal]:after:translate-x-0 aria-[orientation=horizontal]:after:-translate-y-1/2",
+        "aria-[orientation=horizontal]:before:inset-x-0 aria-[orientation=horizontal]:before:inset-y-auto aria-[orientation=horizontal]:before:top-1/2 aria-[orientation=horizontal]:before:h-2 aria-[orientation=horizontal]:before:w-full aria-[orientation=horizontal]:before:translate-x-0 aria-[orientation=horizontal]:before:-translate-y-1/2",
         className
       )}
       {...props}

@@ -24,15 +24,17 @@ const HANDLES: {
   axis: ResizeAxis;
   className: string;
 }[] = [
+  // Width/height come from the shared 8px grab zone; only the placement is
+  // ours. The corner is the one hit area that is deliberately square.
   {
     dir: "left",
     axis: "x",
-    className: "left-0 top-4 bottom-0 w-2 z-10 after:start-0",
+    className: "left-0 top-4 bottom-0 z-10 after:start-0",
   },
   {
     dir: "top",
     axis: "y",
-    className: "top-0 left-4 right-0 h-2 z-10 after:top-0",
+    className: "top-0 left-4 right-0 z-10 after:top-0",
   },
   { dir: "corner", axis: "xy", className: "top-0 left-0 size-4 z-20" },
 ];
