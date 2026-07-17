@@ -46,6 +46,7 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { formatInTimeZone } from "../../common/format-in-time-zone";
 import {
   CollectionPageHeader,
   CollectionPageHeaderAction,
@@ -57,7 +58,7 @@ import {
   AutopilotBatchToolbar,
   AutopilotRowActions,
 } from "./autopilot-list-actions";
-import type { TriggerFrequency } from "./trigger-config";
+import type { ScheduleConfig } from "./schedule-editor/model";
 import { useT, useTimeAgo } from "../../i18n";
 
 // Column template — single source of truth for header, rows, and skeletons.
@@ -135,9 +136,11 @@ interface AutopilotTemplate {
   id: TemplateId;
   prompt: string;
   icon: typeof Zap;
-  frequency: TriggerFrequency;
-  time: string;
+  schedule: Pick<ScheduleConfig, "time" | "days">;
 }
+
+const WEEKDAYS: ScheduleConfig["days"] = { kind: "weekly", daysOfWeek: [1, 2, 3, 4, 5] };
+const MONDAY: ScheduleConfig["days"] = { kind: "weekly", daysOfWeek: [1] };
 
 const TEMPLATES: AutopilotTemplate[] = [
   {
@@ -148,8 +151,7 @@ const TEMPLATES: AutopilotTemplate[] = [
 4. Compile everything into a single digest post
 5. Post the digest as a comment on this issue and @mention all workspace members`,
     icon: Newspaper,
-    frequency: "daily",
-    time: "09:00",
+    schedule: { time: { kind: "at", time: "09:00" }, days: { kind: "every" } },
   },
   {
     id: "pr_review",
@@ -159,8 +161,7 @@ const TEMPLATES: AutopilotTemplate[] = [
 4. Post a comment on this issue listing all stale PRs with links
 5. @mention the team to remind them to review`,
     icon: GitPullRequest,
-    frequency: "weekdays",
-    time: "10:00",
+    schedule: { time: { kind: "at", time: "10:00" }, days: WEEKDAYS },
   },
   {
     id: "bug_triage",
@@ -170,8 +171,7 @@ const TEMPLATES: AutopilotTemplate[] = [
 4. Set the priority field on the issue accordingly
 5. Add a comment explaining your assessment and suggested next steps`,
     icon: Bug,
-    frequency: "weekdays",
-    time: "09:00",
+    schedule: { time: { kind: "at", time: "09:00" }, days: WEEKDAYS },
   },
   {
     id: "weekly_progress",
@@ -182,8 +182,7 @@ const TEMPLATES: AutopilotTemplate[] = [
 5. Write a structured weekly report with sections: Completed, In Progress, Blocked, Metrics
 6. Post the report as a comment on this issue`,
     icon: BarChart3,
-    frequency: "weekly",
-    time: "17:00",
+    schedule: { time: { kind: "at", time: "17:00" }, days: MONDAY },
   },
   {
     id: "dependency_audit",
@@ -193,8 +192,7 @@ const TEMPLATES: AutopilotTemplate[] = [
 4. For each finding, note the severity, affected package, and recommended fix
 5. Post a summary report as a comment with actionable items`,
     icon: Shield,
-    frequency: "weekly",
-    time: "08:00",
+    schedule: { time: { kind: "at", time: "08:00" }, days: MONDAY },
   },
   {
     id: "documentation_check",
@@ -204,8 +202,7 @@ const TEMPLATES: AutopilotTemplate[] = [
 4. Create a list of documentation gaps with file paths and suggested content
 5. Post the findings as a comment on this issue`,
     icon: FileSearch,
-    frequency: "weekly",
-    time: "14:00",
+    schedule: { time: { kind: "at", time: "14:00" }, days: MONDAY },
   },
 ];
 
@@ -372,17 +369,13 @@ function LastRunCell({ autopilot }: { autopilot: Autopilot }) {
 }
 
 function NextRunCell({ autopilot }: { autopilot: Autopilot }) {
+  const { i18n } = useT("autopilots");
   const next = autopilot.next_run_at;
   return (
     <ListGridCell className="hidden @2xl:flex">
       {next ? (
         <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-          {new Date(next).toLocaleString(undefined, {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
+          {formatInTimeZone(next, undefined, i18n.language)}
         </span>
       ) : (
         <span className="text-xs text-muted-foreground/40">—</span>
@@ -978,14 +971,7 @@ export function AutopilotsPage() {
                 }
               : undefined
           }
-          initialTriggerConfig={
-            selectedTemplate
-              ? {
-                  frequency: selectedTemplate.frequency,
-                  time: selectedTemplate.time,
-                }
-              : undefined
-          }
+          initialSchedule={selectedTemplate ? selectedTemplate.schedule : undefined}
         />
       )}
     </div>

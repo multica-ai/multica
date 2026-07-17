@@ -240,6 +240,26 @@ func TestLayerCustomEnvAndHermesHome(t *testing.T) {
 	}
 }
 
+func TestRepoCheckoutModeFor(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, provider, goos, want string
+	}{
+		{name: "Linux Codex isolates Git metadata", provider: "codex", goos: "linux", want: repoCheckoutModeIsolated},
+		{name: "macOS Codex keeps worktree", provider: "codex", goos: "darwin"},
+		{name: "Windows Codex keeps worktree", provider: "codex", goos: "windows"},
+		{name: "Linux Claude keeps worktree", provider: "claude", goos: "linux"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := repoCheckoutModeFor(tt.provider, tt.goos); got != tt.want {
+				t.Fatalf("repoCheckoutModeFor(%q, %q) = %q, want %q", tt.provider, tt.goos, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 	t.Parallel()
 

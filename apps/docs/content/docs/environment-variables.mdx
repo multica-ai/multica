@@ -178,10 +178,16 @@ The daemon runs on the user's local machine, and its config is read from local e
 | Variable | Default | Description |
 |---|---|---|
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Server address (self-host: replace with your domain) |
+| `MULTICA_DAEMON_DEVICE_NAME` | hostname | Human-readable device label shown in the Runtimes UI |
+| `MULTICA_AGENT_RUNTIME_NAME` | built-in default | Runtime display name |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat interval |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | Task polling interval |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Max concurrent tasks |
-| `MULTICA_AGENT_TIMEOUT` | `0` | Absolute wall-clock limit for one task. `0` leaves long active runs uncapped and relies on the inactivity watchdogs |
+| `MULTICA_AGENT_TIMEOUT` | `0` | Absolute wall-clock cap per agent run. `0` disables the cap and lets the inactivity watchdogs alone bound long runs. Set a positive Go duration when you want a hard resource/cost ceiling |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex-specific inactivity watchdog window |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex `app-server` startup RPC timeout |
+| `MULTICA_DAEMON_AUTO_UPDATE` | cloud: `true`, self-host: `false` | Set to `false`/`0`/`no`/`off` to turn off the daemon's periodic CLI self-update; `true`/`1`/`yes`/`on` opts a self-host daemon into upstream updates |
+| `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | How often the daemon polls GitHub for a newer CLI release |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | Global no-message watchdog for runs with no tool in flight. `0` disables the whole watchdog, including provider-specific overrides |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode-specific no-message window for missing first tokens or stalled streams. `0` falls back to `MULTICA_AGENT_IDLE_WATCHDOG`; larger values cannot extend that global bound |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | Silence budget while a tool call is in flight. `0` disables the stuck-tool backstop |
@@ -190,6 +196,31 @@ The daemon runs on the user's local machine, and its config is read from local e
 | `MULTICA_<PROVIDER>_ARGS` | empty | Daemon-wide default CLI arguments for a backend, applied to every task before each agent's own `custom_args`. Supported for `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, and `MULTICA_CODEBUDDY_ARGS` |
 
 For a full explanation of how each parameter affects daemon behavior, see [Daemon and runtimes](/daemon-runtimes).
+
+### Persisting daemon settings in `config.json`
+
+Every daemon knob in the table above — `device_name`, `runtime_name`, `max_concurrent_tasks`, `poll_interval`, `heartbeat_interval`, `agent_timeout`, `codex_semantic_inactivity_timeout`, `codex_handshake_timeout`, `disable_auto_update`, `auto_update_check_interval` — can also be persisted in the profile's `~/.multica/config.json` (or `~/.multica/profiles/<name>/config.json`) so you don't have to re-pass flags or export env vars on every `daemon start`. Set them with:
+
+```bash
+multica config set device_name my-vm-custom-name
+multica config set runtime_name worker-a
+multica config set max_concurrent_tasks 8
+multica config set poll_interval 10s          # Go duration, must be > 0
+multica config set heartbeat_interval 30s
+multica config set agent_timeout 1h           # or 0s to explicitly disable the cap
+multica config set codex_semantic_inactivity_timeout 15m
+multica config set codex_handshake_timeout 45s
+multica config set disable_auto_update true   # single-direction: only turns auto-update off
+multica config set auto_update_check_interval 12h
+```
+
+Duration keys accept any positive Go duration (`500ms`, `10s`, `1m30s`, ...). Values ≤ 0 (`0s`, `-5s`) and un-parseable strings are rejected at `config set` time — **except `agent_timeout`, where `0s` is a meaningful "disable the wall-clock cap" sentinel** (negative values are still rejected). To clear a persisted value and fall back to the env / built-in default, pass an empty string: `multica config set poll_interval ""`.
+
+`disable_auto_update` is a single-direction bool: setting it to `true` turns off the daemon's periodic CLI self-update, and setting it to `false` (or clearing with `""`) hands the decision back to `MULTICA_DAEMON_AUTO_UPDATE` / the cloud-vs-self-host default. It cannot be used to *force* auto-update on from the config file.
+
+Precedence, highest first: `--flag` on `daemon start` > `MULTICA_…` env var > `config.json` value > built-in default. A live env override (typical for systemd units) always wins over the file, and an explicit CLI flag wins over both.
+
+This is especially useful when running multiple daemons on one host via `--profile <name>`: each profile can pin its own `device_name` so the Runtimes UI shows distinct rows instead of collapsing them under the shared hostname.
 
 ### Default agent arguments (`MULTICA_<PROVIDER>_ARGS`)
 

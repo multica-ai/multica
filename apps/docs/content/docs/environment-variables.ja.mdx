@@ -178,12 +178,44 @@ S3 の前段に CloudFront を置く場合、3 つの変数が適用されます
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | サーバーアドレス（セルフホスト: 自身のドメインに置き換えてください） |
+| `MULTICA_DAEMON_DEVICE_NAME` | ホスト名 | Runtimes 画面に表示されるデバイス名 |
+| `MULTICA_AGENT_RUNTIME_NAME` | 組み込みデフォルト | ランタイムの表示名 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | ハートビート間隔 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | タスクのポーリング間隔 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 最大同時タスク数 |
+| `MULTICA_AGENT_TIMEOUT` | `0` | エージェント実行あたりの絶対壁時計上限。`0` は上限なしを意味し、実行時間は inactivity watchdog のみで抑えられます。ハードなリソース／コスト上限が欲しい場合は正の Go 期間を設定してください |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex 固有の inactivity watchdog の待ち時間 |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex `app-server` 起動 RPC のタイムアウト |
+| `MULTICA_DAEMON_AUTO_UPDATE` | cloud: `true`, self-host: `false` | `false`/`0`/`no`/`off` でデーモンの CLI 自動アップデートを無効化。`true`/`1`/`yes`/`on` はセルフホストのデーモンにアップストリーム更新を購読させます |
+| `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | デーモンが CLI の新リリースを GitHub でチェックする間隔 |
 | `MULTICA_<PROVIDER>_PATH` | CLI 名に一致 | 各 AI コーディングツールの実行ファイルへのパス（例: `MULTICA_CLAUDE_PATH`） |
 | `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI コーディングツールのデフォルトモデル |
 | `MULTICA_<PROVIDER>_ARGS` | 空 | バックエンドごとのデーモン全体のデフォルト CLI 引数。各タスクに対し、各エージェント自身の `custom_args` より前に適用される。`MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS` をサポート |
+
+### デーモン設定を `config.json` に永続化する
+
+上表の各デーモンキー — `device_name`、`runtime_name`、`max_concurrent_tasks`、`poll_interval`、`heartbeat_interval`、`agent_timeout`、`codex_semantic_inactivity_timeout`、`codex_handshake_timeout`、`disable_auto_update`、`auto_update_check_interval` — は、プロファイルの `~/.multica/config.json`（もしくは `~/.multica/profiles/<name>/config.json`）に永続化することもできます。これにより、`daemon start` のたびにフラグを再指定したり環境変数を export したりする必要がなくなります。
+
+```bash
+multica config set device_name my-vm-custom-name
+multica config set runtime_name worker-a
+multica config set max_concurrent_tasks 8
+multica config set poll_interval 10s          # Go の期間、必ず > 0
+multica config set heartbeat_interval 30s
+multica config set agent_timeout 1h           # 0s を渡すと壁時計上限を明示的に無効化
+multica config set codex_semantic_inactivity_timeout 15m
+multica config set codex_handshake_timeout 45s
+multica config set disable_auto_update true   # 単方向: 自動アップデートを無効化する用途のみ
+multica config set auto_update_check_interval 12h
+```
+
+期間系キーは正の Go 期間（`500ms`、`10s`、`1m30s` など）のみを受け付けます。`0s`、負値、パース不能な文字列は `config set` の時点で拒否されます。**ただし `agent_timeout` は例外で、ここでは `0s` は「壁時計上限を明示的に無効化する」意味を持つ有効値**です（負値はやはり拒否されます）。永続化した値をクリアして環境変数 / 組み込みデフォルトに戻すには空文字を渡してください: `multica config set poll_interval ""`。
+
+`disable_auto_update` は単方向のブール値です。`true` にするとデーモンの CLI 自動アップデートを無効化し、`false`（もしくは `""` でクリア）にすると判定を `MULTICA_DAEMON_AUTO_UPDATE` / cloud-vs-self-host のデフォルトに委ねます。config ファイルから自動アップデートを *強制的に有効化* することはできません。
+
+優先順位は上から順に: `daemon start` の `--flag` > `MULTICA_…` 環境変数 > `config.json` > 組み込みデフォルト。systemd unit などで環境変数を設定するとファイルより優先され、明示的な CLI フラグは両者よりさらに優先されます。
+
+`--profile <name>` で同一ホスト上に複数のデーモンを走らせるときに特に有用です。プロファイルごとに `device_name` を独立して設定すれば、Runtimes 画面でも共有ホスト名で潰れることなく別々の行として区別できます。
 
 各パラメータがデーモンの動作にどう影響するかの完全な説明は、[デーモンとランタイム](/daemon-runtimes)を参照してください。
 

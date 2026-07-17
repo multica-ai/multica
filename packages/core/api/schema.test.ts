@@ -485,6 +485,55 @@ describe("ApiClient schema fallback", () => {
       expect(resp.reused_skill_ids).toEqual([]);
     });
   });
+
+  describe("cronPreview", () => {
+    it("returns the parsed next runs", async () => {
+      stubFetchJson({
+        next_runs: ["2026-07-14T01:00:00Z", "2026-07-14T03:00:00Z"],
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.cronPreview({
+        expr: "0 9-21/2 * * *",
+        tz: "Asia/Shanghai",
+      });
+      expect(res).toEqual({
+        next_runs: ["2026-07-14T01:00:00Z", "2026-07-14T03:00:00Z"],
+      });
+    });
+
+    it("URL-encodes the expression and timezone", async () => {
+      stubFetchJson({ next_runs: [] });
+      const client = new ApiClient("https://api.example.test");
+      await client.cronPreview({ expr: "0 9-21/2 * * 2-4", tz: "Asia/Shanghai" });
+      const url = String(vi.mocked(fetch).mock.calls[0]?.[0]);
+      expect(url).toContain("/api/autopilots/cron-preview?");
+      expect(url).toContain("expr=0+9-21%2F2+*+*+2-4");
+      expect(url).toContain("tz=Asia%2FShanghai");
+    });
+
+    it("returns an empty list verbatim when the expression never fires", async () => {
+      stubFetchJson({ next_runs: [] });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.cronPreview({ expr: "0 0 30 2 *", tz: "UTC" });
+      expect(res).toEqual({ next_runs: [] });
+    });
+
+    it("falls back to null when the response is malformed", async () => {
+      // null, not [] — the caller must be able to tell "unreadable response"
+      // apart from "this expression never fires".
+      stubFetchJson({ next_runs: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.cronPreview({ expr: "0 9 * * *", tz: "UTC" });
+      expect(res).toEqual({ next_runs: null });
+    });
+
+    it("falls back to null when the field is missing entirely", async () => {
+      stubFetchJson({ runs: ["2026-07-14T01:00:00Z"] });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.cronPreview({ expr: "0 9 * * *", tz: "UTC" });
+      expect(res).toEqual({ next_runs: null });
+    });
+  });
 });
 
 // Direct tests for the helper, decoupled from any specific endpoint —

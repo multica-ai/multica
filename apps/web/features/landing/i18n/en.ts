@@ -294,6 +294,36 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.4",
+        date: "2026-07-17",
+        title: "A new autopilot scheduler and interactive diagrams",
+        changes: [],
+        features: [
+          "Set up autopilot schedules in a clearer editor that previews the next run times.",
+          "Diagrams now open in a viewer you can pan and zoom, and save as an image.",
+        ],
+        improvements: [
+          "Long agent tasks no longer fail on a brief network drop — they retry and keep going.",
+          "Choose which fields appear when you create an issue, now from Settings.",
+          "The issues page now clearly shows how many agents are working right now.",
+          "Your machine's agent service now remembers the startup options you set.",
+          "Squad leader follow-ups on the same issue pick up where they left off.",
+          "Starting your machine's agent service without signing in now tells you what to do instead of hanging.",
+        ],
+        fixes: [
+          "Switching chat sessions now always lands on the newest message.",
+          "Agents no longer leave local file links you cannot open in their results.",
+          "The desktop app now shows a proper page for a missing link instead of a crash screen.",
+          "Archived inbox items no longer show as unread.",
+          "Pasting into a numbered list now keeps the correct numbering.",
+          "Keyboard shortcuts no longer misfire from certain key events.",
+          "Self-hosted upgrades no longer get stuck partway through.",
+          "Codex agent tasks now run with the right credentials.",
+          "Cursor agents handle terminal errors more reliably.",
+          "Updating an autopilot no longer drops its assigned agent.",
+        ],
+      },
+      {
         version: "0.4.3",
         date: "2026-07-16",
         title: "Dedicated issue windows, an archived inbox, and steadier agent runs",

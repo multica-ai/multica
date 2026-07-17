@@ -1038,6 +1038,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/children", h.ListChildrenByParents)
 				r.Get("/grouped", h.ListGroupedIssues)
 				r.Get("/", h.ListIssues)
+				// POST twin of GET /api/issues for oversized filter sets
+				// (agents-working ids facet) — see QueryIssues.
+				r.Post("/query", h.QueryIssues)
 				r.Post("/", h.CreateIssue)
 				r.Post("/quick-create", h.QuickCreateIssue)
 				r.Post("/preview-trigger", h.PreviewIssueTrigger)
@@ -1138,6 +1141,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/autopilots", func(r chi.Router) {
 				r.Get("/", h.ListAutopilots)
 				r.Post("/", h.CreateAutopilot)
+				r.Get("/cron-preview", h.CronPreview)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAutopilot)
 					r.Patch("/", h.UpdateAutopilot)

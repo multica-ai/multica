@@ -29,7 +29,13 @@ interface WorkspaceAgentWorkingChipProps {
   // an issue this filter would hide is not part of the number. Taking scope
   // from the render pipeline instead of re-deriving it from the task snapshot
   // is what keeps that judgement in step with the list (MUL-4884).
-  workingIssues: readonly Issue[];
+  //
+  // `undefined` means the scope is UNKNOWN — the table's ids-facet window is
+  // still resolving, failed, or is too large to materialize. The chip then
+  // shows an indeterminate "—" instead of a number: publishing a count from
+  // some other, incomplete window would be a precise-looking wrong answer
+  // (round-5 review P2). The toggle keeps working in that state.
+  workingIssues: readonly Issue[] | undefined;
 }
 
 export interface WorkingChipView {
@@ -147,46 +153,55 @@ export function WorkspaceAgentWorkingChip({
   const wsId = useWorkspaceId();
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
 
+  const scopeKnown = workingIssues !== undefined;
   const view = useMemo(
-    () => deriveWorkingChipView(snapshot, workingIssues),
+    () => deriveWorkingChipView(snapshot, workingIssues ?? []),
     [snapshot, workingIssues],
   );
 
   // The number and the avatar stack are the same list, so they cannot
   // disagree.
   const agentCount = view.agentIds.length;
-  const hasAgents = agentCount > 0;
+  const hasAgents = scopeKnown && agentCount > 0;
 
-  const label = t(($) => $.agent_activity.chip_agents_working, {
-    count: agentCount,
-  });
+  const label = scopeKnown
+    ? t(($) => $.agent_activity.chip_agents_working, { count: agentCount })
+    : t(($) => $.agent_activity.chip_agents_working_unknown);
 
   // Three tiers: filter ON is the loud filled state, activity without the
-  // filter is a tint, nothing running is a plain control.
+  // filter is a tint, nothing running is a plain control. An unknown scope
+  // uses the plain tier — it makes no activity claim to colour by.
   const appearance = chipAppearance(value, hasAgents);
+
+  const trigger = (
+    <Button
+      variant={appearance.variant}
+      size="sm"
+      className={appearance.className}
+      onClick={onToggle}
+      aria-pressed={value}
+      // The narrow layout shows the bare number, so pin the full
+      // sentence as the accessible name in every layout.
+      aria-label={label}
+    >
+      {hasAgents && (
+        <AgentAvatarStack agentIds={view.agentIds} size="sm" max={3} />
+      )}
+      <span className="tabular-nums md:hidden">
+        {scopeKnown ? agentCount : "—"}
+      </span>
+      <span className="hidden tabular-nums md:inline">{label}</span>
+    </Button>
+  );
+
+  // No hover card while the scope is unknown: there is no issue list to
+  // show, and an empty card would read as "nothing running" — the exact
+  // claim the unknown state exists to avoid.
+  if (!scopeKnown) return trigger;
 
   return (
     <HoverCard>
-      <HoverCardTrigger
-        render={
-          <Button
-            variant={appearance.variant}
-            size="sm"
-            className={appearance.className}
-            onClick={onToggle}
-            aria-pressed={value}
-            // The narrow layout shows the bare number, so pin the full
-            // sentence as the accessible name in every layout.
-            aria-label={label}
-          >
-            {hasAgents && (
-              <AgentAvatarStack agentIds={view.agentIds} size="sm" max={3} />
-            )}
-            <span className="tabular-nums md:hidden">{agentCount}</span>
-            <span className="hidden tabular-nums md:inline">{label}</span>
-          </Button>
-        }
-      />
+      <HoverCardTrigger render={trigger} />
       <HoverCardContent align="end" className="w-80">
         <WorkspaceAgentActivityHoverContent
           issues={workingIssues}

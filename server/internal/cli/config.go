@@ -17,6 +17,100 @@ type CLIConfig struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	Token       string `json:"token,omitempty"`
 
+	// DeviceName is the human-readable label shown in the server's Runtimes
+	// UI for the daemon started with this profile. When multiple daemons run
+	// on the same host under different profiles (typical for shared servers
+	// where one Linux user hosts one profile), os.Hostname() collapses them
+	// all onto one indistinguishable "VM-…" row. Setting device_name per
+	// profile — usually to "<host>-<profile>" or the operator's real name —
+	// makes the runtimes list navigable.
+	//
+	// Resolution precedence (highest wins): --device-name flag,
+	// MULTICA_DAEMON_DEVICE_NAME env, this field, os.Hostname().
+	DeviceName string `json:"device_name,omitempty"`
+
+	// RuntimeName is the daemon's own runtime label ("Runtime display name"
+	// in the UI). Same shape as DeviceName but scopes to the runtime row
+	// rather than the host: users who run several distinct daemons per
+	// profile (rare, but supported) can pin different runtime names for
+	// each. Resolution precedence (highest wins): --runtime-name flag,
+	// MULTICA_AGENT_RUNTIME_NAME env, this field, the built-in
+	// DefaultRuntimeName.
+	RuntimeName string `json:"runtime_name,omitempty"`
+
+	// MaxConcurrentTasks caps the number of task executions the daemon
+	// processes in parallel. Persist here to avoid re-passing
+	// --max-concurrent-tasks on every daemon start / auto-restart. 0 means
+	// "not set — use env / built-in default". Resolution precedence
+	// (highest wins): --max-concurrent-tasks flag,
+	// MULTICA_DAEMON_MAX_CONCURRENT_TASKS env, this field, default.
+	MaxConcurrentTasks int `json:"max_concurrent_tasks,omitempty"`
+
+	// PollInterval is how often the daemon polls the server for new tasks
+	// (Go duration string, e.g. "10s", "500ms"). Same persist-once
+	// motivation as MaxConcurrentTasks. Empty ("") means "not set — use
+	// env / built-in default". Only strictly positive durations are
+	// meaningful here: `config set poll_interval` rejects non-positive
+	// values (including "0s") and un-parseable durations at write time,
+	// so a value that reaches this field is always well-formed. Use
+	// `config set poll_interval ""` to clear a previously persisted
+	// value. Resolution precedence (highest wins): --poll-interval flag,
+	// MULTICA_DAEMON_POLL_INTERVAL env, this field, DefaultPollInterval.
+	PollInterval string `json:"poll_interval,omitempty"`
+
+	// HeartbeatInterval is how often the daemon sends heartbeat pings to
+	// the server (Go duration string). Same persist-once motivation as
+	// PollInterval. Empty ("") means "not set — use env / built-in
+	// default"; `config set heartbeat_interval` rejects zero and
+	// negative durations. Resolution precedence: --heartbeat-interval
+	// flag, MULTICA_DAEMON_HEARTBEAT_INTERVAL env, this field,
+	// DefaultHeartbeatInterval.
+	HeartbeatInterval string `json:"heartbeat_interval,omitempty"`
+
+	// AgentTimeout is the absolute wall-clock cap per agent run (Go
+	// duration string). Unlike the other duration knobs, "0s" is a
+	// meaningful, non-default value here: it explicitly disables the cap
+	// so a run is bounded only by the inactivity watchdogs (see
+	// DefaultAgentTimeout). To distinguish "not persisted" from
+	// "persisted as disabled", we use a pointer: nil = not set, non-nil
+	// = use this string (which may be "0s"). `config set agent_timeout`
+	// accepts any non-negative Go duration; "" clears the persisted
+	// value. Resolution precedence: --agent-timeout flag (including
+	// explicit 0), MULTICA_AGENT_TIMEOUT env, this field,
+	// DefaultAgentTimeout.
+	AgentTimeout *string `json:"agent_timeout,omitempty"`
+
+	// CodexSemanticInactivityTimeout is the Codex-specific inactivity
+	// watchdog window (Go duration string). Persist-once semantics match
+	// PollInterval: empty = not set, positive = use this value.
+	// Resolution precedence: --codex-semantic-inactivity-timeout flag,
+	// MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT env, this field,
+	// DefaultCodexSemanticInactivityTimeout.
+	CodexSemanticInactivityTimeout string `json:"codex_semantic_inactivity_timeout,omitempty"`
+
+	// CodexHandshakeTimeout caps the Codex app-server startup RPCs (Go
+	// duration string). Persist-once semantics match PollInterval.
+	// Resolution precedence: --codex-handshake-timeout flag,
+	// MULTICA_CODEX_HANDSHAKE_TIMEOUT env, this field,
+	// DefaultCodexHandshakeTimeout.
+	CodexHandshakeTimeout string `json:"codex_handshake_timeout,omitempty"`
+
+	// DisableAutoUpdate, when true, turns off the daemon's periodic CLI
+	// self-update poll. Only a single direction is persistable — the
+	// --no-auto-update flag is likewise one-way — because the env/default
+	// already resolves to enabled on Multica Cloud. Absent / false means
+	// "let env/default decide". Resolution precedence:
+	// --no-auto-update flag, MULTICA_DAEMON_AUTO_UPDATE=false env, this
+	// field, cloud/self-host default.
+	DisableAutoUpdate bool `json:"disable_auto_update,omitempty"`
+
+	// AutoUpdateCheckInterval is how often the daemon polls GitHub for a
+	// newer CLI release (Go duration string). Persist-once semantics
+	// match PollInterval. Resolution precedence:
+	// --auto-update-interval flag, MULTICA_DAEMON_AUTO_UPDATE_INTERVAL
+	// env, this field, DefaultAutoUpdateCheckInterval.
+	AutoUpdateCheckInterval string `json:"auto_update_check_interval,omitempty"`
+
 	// Backends contains per-backend overrides for users who want to point
 	// the daemon at non-default tool installations (e.g. an OpenClaw bundled
 	// inside another desktop app, or multiple isolated profiles on the same

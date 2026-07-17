@@ -178,6 +178,8 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | server 地址（self-host 换成你的域名）|
+| `MULTICA_DAEMON_DEVICE_NAME` | 主机名 | 运行时页面显示的设备名 |
+| `MULTICA_AGENT_RUNTIME_NAME` | 内置默认 | 运行时显示名 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 心跳频率 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | 任务轮询频率 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 并发任务上限 |
@@ -185,11 +187,40 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 空闲看门狗：backend 持续静默（无消息、消息队列为空、且没有工具在途）这么久就 force-stop。`0` = 关闭整套看门狗，包括 provider 专用阈值 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 首 token 未到或流式回复中断时的专用无消息阈值；`0` = 回退到 `MULTICA_AGENT_IDLE_WATCHDOG`，更大的值不能放宽全局阈值 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 工具在途时的静默上限：某个工具调用发出后长时间无任何输出（疑似卡死的子进程）这么久就 force-stop。`0` = 关闭该兜底（在途工具永不被停）|
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex 专用的静默看门狗窗口 |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex `app-server` 启动 RPC 超时 |
+| `MULTICA_DAEMON_AUTO_UPDATE` | cloud：`true`，self-host：`false` | 设为 `false`/`0`/`no`/`off` 关闭守护进程的 CLI 自动更新轮询；`true`/`1`/`yes`/`on` 让 self-host 守护进程订阅上游更新 |
+| `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 守护进程轮询 GitHub 检查 CLI 新版本的间隔 |
 | `MULTICA_<PROVIDER>_PATH` | 对应 CLI 名 | 各 AI 编程工具的可执行文件路径（如 `MULTICA_CLAUDE_PATH`）|
 | `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI 编程工具的默认模型 |
 | `MULTICA_<PROVIDER>_ARGS` | 空 | 守护进程级的默认 CLI 参数，作用于该后端的每个任务，并排在各智能体自身的 `custom_args` 之前。支持 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS` |
 
 完整解释每个参数对守护进程行为的影响，见 [守护进程与运行时](/daemon-runtimes)。
+
+### 把守护进程参数持久化到 `config.json`
+
+上面表格里的每个守护进程键 —— `device_name`、`runtime_name`、`max_concurrent_tasks`、`poll_interval`、`heartbeat_interval`、`agent_timeout`、`codex_semantic_inactivity_timeout`、`codex_handshake_timeout`、`disable_auto_update`、`auto_update_check_interval` —— 都可以持久化到 profile 对应的 `~/.multica/config.json`（或 `~/.multica/profiles/<name>/config.json`），这样就不用每次 `daemon start` 都重传 flag 或 export 环境变量。写入方式：
+
+```bash
+multica config set device_name my-vm-custom-name
+multica config set runtime_name worker-a
+multica config set max_concurrent_tasks 8
+multica config set poll_interval 10s          # Go 时长格式，必须 > 0
+multica config set heartbeat_interval 30s
+multica config set agent_timeout 1h           # 或 0s 显式关闭墙钟上限
+multica config set codex_semantic_inactivity_timeout 15m
+multica config set codex_handshake_timeout 45s
+multica config set disable_auto_update true   # 单向：只能关闭自动更新
+multica config set auto_update_check_interval 12h
+```
+
+时长类键只接受**正的** Go 时长（`500ms`、`10s`、`1m30s` 等）。`0s`、负值以及无法解析的字符串在 `config set` 阶段就会被拒绝——**唯一例外是 `agent_timeout`：这里 `0s` 是有意义的"显式关闭墙钟上限"哨兵**（负值仍然被拒）。若要清除已持久化的值、退回到环境变量 / 内置默认，传空串：`multica config set poll_interval ""`。
+
+`disable_auto_update` 是单向布尔：设为 `true` 会关闭守护进程的 CLI 自动更新轮询；设为 `false`（或用 `""` 清除）会把决策交回 `MULTICA_DAEMON_AUTO_UPDATE` / cloud-vs-self-host 默认。它不能从 config 文件强制开启自动更新。
+
+优先级从高到低：`--flag`（`daemon start` 命令行）> `MULTICA_…` 环境变量 > `config.json` > 内置默认。运行时环境变量（如 systemd unit 里设的）优先级高于 config 文件；显式命令行 flag 又高于两者。
+
+当你在同一台机器上用 `--profile <name>` 起多个 daemon 时，尤为好用：给每个 profile 独立设置 `device_name`，运行时页面就能看到独立的机器，而不是全部挤在同一个主机名下。
 
 ### 默认智能体参数（`MULTICA_<PROVIDER>_ARGS`）
 

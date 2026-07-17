@@ -17,6 +17,7 @@ import type {
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
+  CronPreviewResponse,
   GroupedIssuesResponse,
   InboxItem,
   InboxWorkspaceUnread,
@@ -1228,6 +1229,18 @@ export const FALLBACK_AUTOPILOT_RUN: AutopilotRun = {
   trigger_payload: null,
   result: null,
   created_at: "",
+};
+
+// Cron preview: the server is the authority on the next occurrences. No
+// `.default([])` here — a missing or reshaped field must fail validation so it
+// degrades to the `next_runs: null` fallback ("preview unreadable") instead of
+// masquerading as a valid empty list ("this expression never fires").
+export const CronPreviewResponseSchema = z.object({
+  next_runs: z.array(z.string()),
+}).loose();
+
+export const UNREADABLE_CRON_PREVIEW_RESPONSE: CronPreviewResponse = {
+  next_runs: null,
 };
 
 export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {

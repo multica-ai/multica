@@ -81,7 +81,23 @@
   },
   "mermaid": {
     "render_error": "Mermaid 다이어그램을 렌더링할 수 없습니다.",
-    "rendering": "다이어그램 렌더링 중..."
+    "rendering": "다이어그램 렌더링 중...",
+    "viewer_title": "다이어그램",
+    "canvas_label": "다이어그램 캔버스. 드래그하여 이동, 스크롤하여 확대/축소할 수 있습니다.",
+    "open_viewer": "다이어그램 뷰어 열기",
+    "close_viewer": "닫기",
+    "copy_source": "다이어그램 소스 복사",
+    "show_source": "소스 표시",
+    "show_diagram": "다이어그램 표시",
+    "zoom_in": "확대",
+    "zoom_out": "축소",
+    "zoom_fit": "화면에 맞추기",
+    "zoom_actual": "실제 크기",
+    "reset_view": "보기 초기화",
+    "export": "내보내기",
+    "export_png": "PNG 다운로드",
+    "export_svg": "SVG 다운로드",
+    "export_source": ".mmd 다운로드"
   },
   "slash_command": {
     "no_skills_configured": "구성된 스킬 없음",

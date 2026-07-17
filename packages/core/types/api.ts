@@ -80,8 +80,14 @@ export interface ListIssuesParams {
   limit?: number;
   offset?: number;
   workspace_id?: string;
+  /** Flat-table quick search. Matches issue title words or an exact issue number. */
+  q?: string;
   status?: IssueStatus;
+  /** Multi-value table facet. OR within the field. */
+  statuses?: IssueStatus[];
   priority?: IssuePriority;
+  /** Multi-value table facet. OR within the field. */
+  priorities?: IssuePriority[];
   assignee_id?: string;
   assignee_ids?: string[];
   /**
@@ -92,6 +98,22 @@ export interface ListIssuesParams {
   assignee_types?: IssueAssigneeType[];
   creator_id?: string;
   project_id?: string;
+  /** Actor-aware table facets. OR within each field. */
+  assignee_filters?: IssueActorRef[];
+  include_no_assignee?: boolean;
+  creator_filters?: IssueActorRef[];
+  project_ids?: string[];
+  include_no_project?: boolean;
+  label_ids?: string[];
+  /** Restrict the window to root issues instead of filtering loaded pages. */
+  top_level_only?: boolean;
+  /**
+   * Hard restriction of the window to the given issue ids (the table's
+   * agents-working facet sends the live running-issue set). An EMPTY array is
+   * meaningful and yields an EMPTY window — omit the field entirely for "no
+   * restriction".
+   */
+  ids?: string[];
   /**
    * Widen the assignee filter to issues where the user is the *indirect*
    * assignee — assignee is one of the user's owned agents, or a squad that
@@ -117,7 +139,16 @@ export interface ListIssuesParams {
   date_field?: "created_at" | "updated_at";
   date_start?: string;
   date_end?: string;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date" | `property:${string}`;
+  sort_by?:
+    | "position"
+    | "status"
+    | "priority"
+    | "title"
+    | "created_at"
+    | "updated_at"
+    | "start_date"
+    | "due_date"
+    | `property:${string}`;
   sort_direction?: "asc" | "desc";
 }
 
@@ -156,7 +187,16 @@ export interface ListGroupedIssuesParams {
   date_field?: "created_at" | "updated_at";
   date_start?: string;
   date_end?: string;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date" | `property:${string}`;
+  sort_by?:
+    | "position"
+    | "status"
+    | "priority"
+    | "title"
+    | "created_at"
+    | "updated_at"
+    | "start_date"
+    | "due_date"
+    | `property:${string}`;
   sort_direction?: "asc" | "desc";
 }
 

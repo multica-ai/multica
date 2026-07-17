@@ -17,6 +17,7 @@ import {
   SlidersHorizontal,
   X,
   Tag,
+  Table2,
   User,
   UserMinus,
   UserPen,
@@ -68,12 +69,14 @@ import {
   GROUPING_OPTIONS,
   SWIMLANE_GROUPINGS,
   CARD_PROPERTY_OPTIONS,
+  TABLE_SYSTEM_COLUMNS,
   type ActorFilterValue,
   type IssueDateField,
   type IssueDateFilter,
   type SortField,
   type IssueGrouping,
   type SwimlaneGrouping,
+  type TableGrouping,
   type ViewMode,
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
@@ -136,6 +139,10 @@ const DATE_FIELD_LABEL_KEY: Record<IssueDateField, "date_field_created" | "date_
   created_at: "date_field_created",
   updated_at: "date_field_updated",
 };
+
+/** Feeding this to useIssueCounts hides every per-option badge (badges only
+ *  render at count > 0) without touching the option lists themselves. */
+const NO_COUNT_ISSUES: Issue[] = [];
 
 function useIssueCounts(allIssues: Issue[]) {
   return useMemo(() => {
@@ -748,15 +755,19 @@ export function IssuesHeader({
   dateFilter = null,
   onDateFilterChange,
   isRefreshing = false,
+  facetCountsExact = true,
 }: {
   scopedIssues: Issue[];
-  /** The rows the agents-working filter would leave on screen. Scopes the
-   *  chip: it counts the agents working on these rows. */
-  workingIssues: Issue[];
+  /** The rows the agents-working filter would leave on screen — undefined
+   *  when the set is unknown (chip renders indeterminate). Scopes the chip:
+   *  it counts the agents working on these rows. */
+  workingIssues: Issue[] | undefined;
   allowGantt?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
   isRefreshing?: boolean;
+  /** See IssueDisplayControls.facetCountsExact. */
+  facetCountsExact?: boolean;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -850,6 +861,7 @@ export function IssuesHeader({
             allowGantt={allowGantt}
             dateFilter={dateFilter}
             onDateFilterChange={onDateFilterChange}
+            facetCountsExact={facetCountsExact}
           />
           <ViewRefreshIndicator active={isRefreshing} />
         </div>
@@ -864,6 +876,7 @@ export function IssueDisplayControls({
   allowGantt = false,
   dateFilter = null,
   onDateFilterChange,
+  facetCountsExact = true,
 }: {
   scopedIssues: Issue[];
   hideViewToggle?: boolean;
@@ -873,6 +886,15 @@ export function IssueDisplayControls({
   // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
   // fall back to List if the option were exposed there. Keep Gantt opt-in.
   allowGantt?: boolean;
+  /**
+   * Whether `scopedIssues` covers the surface's full window. The table's
+   * offset pagination hands us only the loaded pages — presenting counts
+   * derived from a partial window as per-option totals under-reports
+   * (round-2 review P2#3), so the badges are suppressed until the window is
+   * complete. Filter OPTIONS are unaffected; they come from the
+   * member/agent/project/label directories.
+   */
+  facetCountsExact?: boolean;
 }) {
   const { t } = useT("issues");
   const viewMode = useViewStore((s) => s.viewMode);
@@ -891,6 +913,9 @@ export function IssueDisplayControls({
   const grouping = useViewStore((s) => s.grouping);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const cardProperties = useViewStore((s) => s.cardProperties);
+  const tableColumns = useViewStore((s) => s.tableColumns);
+  const tableGrouping = useViewStore((s) => s.tableGrouping ?? "none");
+  const tableHierarchy = useViewStore((s) => s.tableHierarchy ?? true);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
   const act = useViewStoreApi().getState();
   const headerWsId = useWorkspaceId();
@@ -916,8 +941,21 @@ export function IssueDisplayControls({
     () => workspaceProperties.filter((p) => p.type === "select"),
     [workspaceProperties],
   );
+  const tableGroupableProperties = useMemo(
+    () =>
+      workspaceProperties.filter((p) =>
+        ["select", "multi_select", "checkbox"].includes(p.type),
+      ),
+    [workspaceProperties],
+  );
+  const visibleTableColumns = useMemo(
+    () => new Set(tableColumns.map((column) => column.key)),
+    [tableColumns],
+  );
 
-  const counts = useIssueCounts(scopedIssues);
+  const counts = useIssueCounts(
+    facetCountsExact ? scopedIssues : NO_COUNT_ISSUES,
+  );
   const showDateFilter = !!onDateFilterChange;
 
   // Only count filters whose definition is still active — a filter pinned to
@@ -944,12 +982,14 @@ export function IssueDisplayControls({
   });
   const hasActiveFilters = activeFilterCount > 0;
 
-  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_title"> = {
+  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_status" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_updated" | "sort_title"> = {
     position: "sort_manual",
+    status: "sort_status",
     priority: "sort_priority",
     start_date: "sort_start_date",
     due_date: "sort_due_date",
     created_at: "sort_created",
+    updated_at: "sort_updated",
     title: "sort_title",
   };
   const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee"> = {
@@ -980,6 +1020,7 @@ export function IssueDisplayControls({
     : null;
   const sortPropertyId = propertyIdFromViewKey(sortBy);
   const groupingPropertyId = propertyIdFromViewKey(grouping);
+  const tableGroupingPropertyId = propertyIdFromViewKey(tableGrouping);
   // Property-backed sort/grouping label straight from the definition name;
   // a stale persisted id (archived/deleted definition) falls back to the
   // manual/status default label.
@@ -990,6 +1031,18 @@ export function IssueDisplayControls({
     ? propertyById.get(groupingPropertyId)?.name ?? t(($) => $.display.group_status)
     : t(($) => $.display[GROUPING_LABEL_KEY[grouping as keyof typeof GROUPING_LABEL_KEY]]);
   const swimlaneGroupingLabel = t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[swimlaneGrouping]]);
+  const effectiveTableGrouping =
+    tableGroupingPropertyId && !propertyById.has(tableGroupingPropertyId)
+      ? "none"
+      : tableGrouping;
+  const tableGroupingLabel = tableGroupingPropertyId
+    ? propertyById.get(tableGroupingPropertyId)?.name ??
+      t(($) => $.table.group_none)
+    : effectiveTableGrouping === "status"
+      ? t(($) => $.table.columns.status)
+      : effectiveTableGrouping === "assignee"
+        ? t(($) => $.table.columns.assignee)
+        : t(($) => $.table.group_none);
   const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
 
   return (
@@ -1369,6 +1422,75 @@ export function IssueDisplayControls({
               </div>
             )}
 
+            {viewMode === "table" && (
+              <div className="border-b px-3 py-2.5">
+                <label className="flex cursor-pointer items-center justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block text-sm">
+                      {t(($) => $.table.hierarchy)}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {t(($) => $.table.hierarchy_description)}
+                    </span>
+                  </span>
+                  <Switch
+                    size="sm"
+                    checked={tableHierarchy}
+                    onCheckedChange={() => act.toggleTableHierarchy()}
+                  />
+                </label>
+                <div className="mt-3">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {t(($) => $.table.group_label)}
+                  </span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-1.5 w-full justify-between text-xs"
+                        >
+                          {tableGroupingLabel}
+                          <ChevronDown className="size-3 text-muted-foreground" />
+                        </Button>
+                      }
+                    />
+                    <DropdownMenuContent align="start" className="w-auto min-w-48">
+                      <DropdownMenuRadioGroup
+                        value={effectiveTableGrouping}
+                        onValueChange={(value) =>
+                          act.setTableGrouping(value as TableGrouping)
+                        }
+                      >
+                        <DropdownMenuRadioItem value="none">
+                          {t(($) => $.table.group_none)}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="status">
+                          {t(($) => $.table.columns.status)}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="assignee">
+                          {t(($) => $.table.columns.assignee)}
+                        </DropdownMenuRadioItem>
+                        {tableGroupableProperties.map((property) => (
+                          <DropdownMenuRadioItem
+                            key={property.id}
+                            value={`property:${property.id}`}
+                          >
+                            <PropertyIcon
+                              property={property}
+                              className="size-3.5 text-xs"
+                            />
+                            <span>{property.name}</span>
+                          </DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            )}
+
             <div className="border-b px-3 py-2.5">
               <span className="text-xs font-medium text-muted-foreground">
                 {t(($) => $.display.ordering_section)}
@@ -1431,42 +1553,111 @@ export function IssueDisplayControls({
               />
             </label>
 
-            <div className="px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                {t(($) => $.display.card_properties_section)}
-              </span>
-              <div className="mt-2 space-y-2">
-                {CARD_PROPERTY_OPTIONS.map((opt) => (
-                  <label
-                    key={opt.key}
-                    className="flex cursor-pointer items-center justify-between"
-                  >
-                    <span className="text-sm">{t(($) => $.display[CARD_PROPERTY_LABEL_KEY[opt.key]])}</span>
-                    <Switch
-                      size="sm"
-                      checked={cardProperties[opt.key]}
-                      onCheckedChange={() => act.toggleCardProperty(opt.key)}
-                    />
-                  </label>
-                ))}
-                {workspaceProperties.map((property) => (
-                  <label
-                    key={property.id}
-                    className="flex cursor-pointer items-center justify-between"
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
-                      <PropertyIcon property={property} className="size-3.5 text-xs" />
-                      <span className="truncate">{property.name}</span>
-                    </span>
-                    <Switch
-                      size="sm"
-                      checked={cardPropertyIds.includes(property.id)}
-                      onCheckedChange={() => act.toggleCardPropertyId(property.id)}
-                    />
-                  </label>
-                ))}
+            {viewMode === "table" ? (
+              <div className="max-h-80 overflow-y-auto px-3 py-2.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t(($) => $.table.columns.section)}
+                </span>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {t(($) => $.table.columns.system_section)}
+                </p>
+                <div className="mt-1.5 space-y-2">
+                  {TABLE_SYSTEM_COLUMNS.map((key) => (
+                    <label
+                      key={key}
+                      className={
+                        key === "title"
+                          ? "flex items-center justify-between"
+                          : "flex cursor-pointer items-center justify-between"
+                      }
+                    >
+                      <span className="text-sm">
+                        {t(($) => $.table.columns[key])}
+                      </span>
+                      <Switch
+                        size="sm"
+                        checked={visibleTableColumns.has(key)}
+                        disabled={key === "title"}
+                        onCheckedChange={() => act.toggleTableColumn(key)}
+                      />
+                    </label>
+                  ))}
+                </div>
+                {workspaceProperties.length > 0 && (
+                  <>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      {t(($) => $.table.columns.property_section)}
+                    </p>
+                    <div className="mt-1.5 space-y-2">
+                      {workspaceProperties.map((property) => {
+                        const key = `property:${property.id}` as const;
+                        return (
+                          <label
+                            key={property.id}
+                            className="flex cursor-pointer items-center justify-between gap-3"
+                          >
+                            <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
+                              <PropertyIcon
+                                property={property}
+                                className="size-3.5 text-xs"
+                              />
+                              <span className="truncate">{property.name}</span>
+                            </span>
+                            <Switch
+                              size="sm"
+                              checked={visibleTableColumns.has(key)}
+                              onCheckedChange={() =>
+                                act.toggleTableColumn(key)
+                              }
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
               </div>
-            </div>
+            ) : (
+              <div className="px-3 py-2.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t(($) => $.display.card_properties_section)}
+                </span>
+                <div className="mt-2 space-y-2">
+                  {CARD_PROPERTY_OPTIONS.map((opt) => (
+                    <label
+                      key={opt.key}
+                      className="flex cursor-pointer items-center justify-between"
+                    >
+                      <span className="text-sm">{t(($) => $.display[CARD_PROPERTY_LABEL_KEY[opt.key]])}</span>
+                      <Switch
+                        size="sm"
+                        checked={cardProperties[opt.key]}
+                        onCheckedChange={() => act.toggleCardProperty(opt.key)}
+                      />
+                    </label>
+                  ))}
+                  {workspaceProperties.map((property) => (
+                    <label
+                      key={property.id}
+                      className="flex cursor-pointer items-center justify-between"
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
+                        <PropertyIcon
+                          property={property}
+                          className="size-3.5 text-xs"
+                        />
+                        <span className="truncate">{property.name}</span>
+                      </span>
+                      <Switch
+                        size="sm"
+                        checked={cardPropertyIds.includes(property.id)}
+                        onCheckedChange={() => act.toggleCardPropertyId(property.id)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </PopoverContent>
         </Popover>
 
@@ -1483,6 +1674,8 @@ export function IssueDisplayControls({
                       <Button variant="outline" size="sm" className={controlButtonClass}>
                         {viewMode === "board" ? (
                           <Columns3 className="size-3.5" />
+                        ) : viewMode === "table" ? (
+                          <Table2 className="size-3.5" />
                         ) : viewMode === "swimlane" ? (
                           <Waves className="size-3.5" />
                         ) : viewMode === "gantt" && allowGantt ? (
@@ -1493,6 +1686,8 @@ export function IssueDisplayControls({
                         <span className="hidden md:inline">
                           {viewMode === "board"
                             ? t(($) => $.view.board)
+                            : viewMode === "table"
+                            ? t(($) => $.view.table)
                             : viewMode === "swimlane"
                             ? t(($) => $.view.swimlane)
                             : viewMode === "gantt" && allowGantt
@@ -1507,6 +1702,8 @@ export function IssueDisplayControls({
               <TooltipContent side="bottom">
                 {viewMode === "board"
                   ? t(($) => $.view.tooltip_board)
+                  : viewMode === "table"
+                  ? t(($) => $.view.tooltip_table)
                   : viewMode === "swimlane"
                   ? t(($) => $.view.tooltip_swimlane)
                   : viewMode === "gantt" && allowGantt
@@ -1526,6 +1723,10 @@ export function IssueDisplayControls({
                 <DropdownMenuRadioItem value="list">
                   <List />
                   {t(($) => $.view.list)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="table">
+                  <Table2 />
+                  {t(($) => $.view.table)}
                 </DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="swimlane">
                   <Waves />
