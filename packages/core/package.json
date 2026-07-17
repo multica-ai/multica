@@ -107,6 +107,8 @@
     "./slack/queries": "./slack/queries.ts",
     "./dingtalk": "./dingtalk/index.ts",
     "./dingtalk/queries": "./dingtalk/queries.ts",
+    "./wecom": "./wecom/index.ts",
+    "./wecom/queries": "./wecom/queries.ts",
     "./feedback": "./feedback/index.ts",
     "./feedback/mutations": "./feedback/mutations.ts",
     "./realtime": "./realtime/index.ts",

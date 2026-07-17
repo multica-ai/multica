@@ -165,6 +165,9 @@ import type {
   ListDingTalkInstallationsResponse,
   RegisterDingTalkBYORequest,
   RedeemDingTalkBindingTokenResponse,
+  WecomInstallation,
+  ListWecomInstallationsResponse,
+  RegisterWecomBYORequest,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -3521,5 +3524,35 @@ export class ApiClient {
       EMPTY_REDEEM_DINGTALK_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/dingtalk/binding/redeem" },
     );
+  }
+  // WeChat Work smart-bot ("智能机器人" / aibot) integration. The bot dials a
+  // WebSocket long connection to wss://openws.work.weixin.qq.com and stays
+  // authenticated with (bot_id, secret); no public callback URL is required.
+  // These three methods drive the Settings-page BYO Connect dialog + list +
+  // disconnect only — the inbound WebSocket loop runs entirely server-side.
+  async listWecomInstallations(workspaceId: string): Promise<ListWecomInstallationsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/wecom/installations`);
+  }
+
+  // registerWecomBYO performs a bring-your-own-app install: the admin pastes
+  // the bot id and long-connection secret from the WeChat Work admin console,
+  // and the backend seals the secret with MULTICA_WECOM_SECRET_KEY before
+  // persisting, returning the new installation.
+  async registerWecomBYO(
+    workspaceId: string,
+    agentId: string,
+    body: RegisterWecomBYORequest,
+  ): Promise<WecomInstallation> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    return this.fetch(`/api/workspaces/${workspaceId}/wecom/install/byo?${search.toString()}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteWecomInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/wecom/installations/${installationId}`, {
+      method: "DELETE",
+    });
   }
 }
