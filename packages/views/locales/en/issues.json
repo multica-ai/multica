@@ -359,9 +359,14 @@
     "hover_header_queued_other": "{{count}} agents queued",
     "status_running": "Working",
     "status_queued": "Queued",
-    "chip_label": "working",
-    "empty_hover": "No agents currently working",
-    "filter_active_label": "Viewing only working agents"
+    "empty_hover": "No agents working right now",
+    "filter_active_label": "Viewing issues with agents working",
+    "tasks_count_one": "{{count}} task",
+    "tasks_count_other": "{{count}} tasks",
+    "chip_agents_working_one": "{{count}} agent working",
+    "chip_agents_working_other": "{{count}} agents working",
+    "issues_count_one": "{{count}} issue",
+    "issues_count_other": "{{count}} issues"
   },
   "agent_live": {
     "is_working": "{{name}} is working",

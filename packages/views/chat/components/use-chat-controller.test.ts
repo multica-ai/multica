@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { chatKeys } from "@multica/core/chat/queries";
 import type { ChatMessage, ChatMessagesPage, ChatPendingTask } from "@multica/core/types";
-import { hasOptimisticInFlight } from "./use-chat-controller";
+import { hasOptimisticInFlight, isStillOnComposeTarget } from "./use-chat-controller";
 
 // hasOptimisticInFlight is the discriminator the stale-session self-heal uses
 // to EXEMPT a just-created session (awaiting the list refetch) from being
@@ -63,5 +63,29 @@ describe("hasOptimisticInFlight", () => {
       pageParams: [null],
     });
     expect(hasOptimisticInFlight(qc, sid)).toBe(true);
+  });
+});
+
+// The post-send "scrub the composer?" rule, shared by BOTH send chains (the
+// chat tab's controller and the floating ChatWindow) so they cannot drift.
+// MUL-4864: the new-chat composer is one box per workspace, so the selected
+// agent is NOT part of compose-target identity — only the session is.
+describe("isStillOnComposeTarget", () => {
+  it("is true when the user never left the session they sent from", () => {
+    expect(isStillOnComposeTarget(sid, sid)).toBe(true);
+  });
+
+  it("is true for a new chat the user is still sitting in", () => {
+    // Both null: ensureSession creates the row but does not publish it as
+    // active, so a user who stayed put is still looking at the new-chat box.
+    expect(isStillOnComposeTarget(null, null)).toBe(true);
+  });
+
+  it("is false once the user opens a different session mid-send", () => {
+    expect(isStillOnComposeTarget("session-2", sid)).toBe(false);
+  });
+
+  it("is false when the user starts a new chat mid-send from a session", () => {
+    expect(isStillOnComposeTarget(null, sid)).toBe(false);
   });
 });

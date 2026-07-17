@@ -6,12 +6,14 @@ import userEvent from "@testing-library/user-event";
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetLastActor = vi.hoisted(() => vi.fn());
 const mockSetLastProjectId = vi.hoisted(() => vi.fn());
+const mockSetQuickCreateFieldVisible = vi.hoisted(() => vi.fn());
 const mockSetPrompt = vi.hoisted(() => vi.fn());
 const mockClearPrompt = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const mockUploadWithToast = vi.hoisted(() => vi.fn());
+const mockNavigationPush = vi.hoisted(() => vi.fn());
 
 const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
@@ -24,6 +26,11 @@ const mockQuickCreateStore = {
   clearPrompt: mockClearPrompt,
   keepOpen: false,
   setKeepOpen: mockSetKeepOpen,
+};
+
+const mockCreateSettingsStore = {
+  quickCreateFields: ["project"] as Array<"project" | "priority" | "due_date">,
+  setQuickCreateFieldVisible: mockSetQuickCreateFieldVisible,
 };
 
 // Per-test override for the projects query, so tests can swap between
@@ -80,6 +87,13 @@ vi.mock("@multica/core/hooks", () => ({
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ name: "Test Workspace" }),
+  useWorkspacePaths: () => ({
+    settings: () => "/ws-test/settings",
+  }),
+}));
+
+vi.mock("../navigation", () => ({
+  useNavigation: () => ({ push: mockNavigationPush }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -99,6 +113,12 @@ vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
     (selector ? selector(mockQuickCreateStore) : mockQuickCreateStore),
 }));
 
+vi.mock("@multica/core/issues/stores/issue-create-settings-store", () => ({
+  useIssueCreateSettingsStore: (
+    selector?: (state: typeof mockCreateSettingsStore) => unknown,
+  ) => (selector ? selector(mockCreateSettingsStore) : mockCreateSettingsStore),
+}));
+
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
   useCreateModeStore: (selector?: (state: { setLastMode: typeof mockSetLastMode }) => unknown) =>
     (selector ? selector({ setLastMode: mockSetLastMode }) : { setLastMode: mockSetLastMode }),
@@ -112,6 +132,7 @@ vi.mock("@multica/core/auth", () => ({
 vi.mock("@multica/core/runtimes", () => ({
   runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
   checkQuickCreateCliVersion: () => ({ state: "ok", min: "1.0.0" }),
+  checkQuickCreateFieldsCliVersion: () => ({ state: "ok", min: "1.0.0" }),
   readRuntimeCliVersion: () => "1.2.3",
   MIN_QUICK_CREATE_CLI_VERSION: "1.0.0",
 }));
@@ -129,16 +150,43 @@ vi.mock("../common/actor-avatar", () => ({
 }));
 
 vi.mock("../issues/components", () => ({
-  PriorityPicker: () => <div data-testid="priority-picker" />,
-  DueDatePicker: () => <div data-testid="due-date-picker" />,
+  PriorityIcon: ({ priority }: { priority: string }) => <span>{priority}</span>,
+  PriorityPicker: ({ onUpdate }: any) => (
+    <button type="button" data-testid="priority-picker" onClick={() => onUpdate({ priority: "high" })}>
+      Priority
+    </button>
+  ),
+  DueDatePicker: ({ onUpdate }: any) => (
+    <button type="button" data-testid="due-date-picker" onClick={() => onUpdate({ due_date: "2026-08-01" })}>
+      Due date
+    </button>
+  ),
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
-  ProjectPicker: () => <div data-testid="project-picker" />,
+  ProjectPicker: ({ onUpdate }: any) => (
+    <button type="button" data-testid="project-picker" onClick={() => onUpdate({ project_id: "proj-1" })}>
+      Project
+    </button>
+  ),
 }));
 
 vi.mock("../common/pill-button", () => ({
-  PillButton: () => <div data-testid="pill-button" />,
+  PillButton: ({ children, ...props }: any) => <button type="button" {...props}>{children}</button>,
+}));
+
+vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
+  DropdownMenuTrigger: ({ render }: { render: ReactNode }) => <>{render}</>,
+  DropdownMenuContent: ({ children }: { children: ReactNode }) => <>{children}</>,
+  DropdownMenuItem: ({ children, onClick }: any) => (
+    <button type="button" onClick={onClick}>{children}</button>
+  ),
+  DropdownMenuSeparator: () => null,
+}));
+
+vi.mock("@multica/ui/lib/utils", () => ({
+  cn: (...values: Array<string | false | null | undefined>) => values.filter(Boolean).join(" "),
 }));
 
 vi.mock("../editor", async () => {
@@ -277,7 +325,6 @@ vi.mock("@multica/ui/components/ui/button", () => ({
 vi.mock("@multica/ui/components/ui/switch", () => ({
   Switch: ({ checked, onCheckedChange }: { checked: boolean; onCheckedChange: (v: boolean) => void }) => (
     <input
-      aria-label="Create another"
       type="checkbox"
       checked={checked}
       onChange={(e) => onCheckedChange(e.target.checked)}
@@ -320,6 +367,7 @@ describe("AgentCreatePanel", () => {
     mockQuickCreateStore.lastActorType = null;
     mockQuickCreateStore.lastActorId = null;
     mockQuickCreateStore.lastProjectId = null;
+    mockCreateSettingsStore.quickCreateFields = ["project"];
     mockQuickCreateStore.prompt = "Persisted draft prompt";
     mockQuickCreateStore.keepOpen = false;
     mockProjectsQuery.data = [];
@@ -389,6 +437,75 @@ describe("AgentCreatePanel", () => {
     expect(mockClearPrompt).toHaveBeenCalled();
     expect(mockSetLastMode).toHaveBeenCalledWith("agent");
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("reveals optional fields from the overflow and submits their values", async () => {
+    const user = userEvent.setup();
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.queryByTestId("priority-picker")).not.toBeInTheDocument();
+    await user.click(screen.getByText("Set priority..."));
+    await user.click(screen.getByTestId("priority-picker"));
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agent_id: "agent-1",
+          priority: "high",
+        }),
+      );
+    });
+  });
+
+  it("routes Customize fields to Settings → Issue, keeping the typed prompt", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+    );
+    fireEvent.change(editor, { target: { value: "Half-typed request" } });
+    await user.click(screen.getByRole("button", { name: "Customize fields..." }));
+
+    expect(mockSetPrompt).toHaveBeenLastCalledWith("Half-typed request");
+    expect(onClose).toHaveBeenCalled();
+    expect(mockNavigationPush).toHaveBeenCalledWith("/ws-test/settings?tab=issue");
+  });
+
+  it("respects fields enabled in Settings → Issue by rendering them inline", () => {
+    mockCreateSettingsStore.quickCreateFields = ["project", "priority", "due_date"];
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.getByTestId("project-picker")).toBeInTheDocument();
+    expect(screen.getByTestId("priority-picker")).toBeInTheDocument();
+    expect(screen.getByTestId("due-date-picker")).toBeInTheDocument();
+  });
+
+  it("submits seeded priority and due date as authoritative quick-create fields", async () => {
+    const user = userEvent.setup();
+
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: { priority: "urgent", due_date: "2026-08-01" },
+    });
+
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          priority: "urgent",
+          due_date: "2026-08-01",
+        }),
+      );
+    });
   });
 
   it("passes referenced upload attachment ids to quick-create", async () => {

@@ -343,9 +343,11 @@
     "hover_header_queued_other": "{{count}} 个智能体排队中",
     "status_running": "正在工作",
     "status_queued": "排队中",
-    "chip_label": "工作中",
     "empty_hover": "当前没有智能体在工作",
-    "filter_active_label": "正在查看工作中的智能体"
+    "filter_active_label": "正在查看有智能体在工作的 issue",
+    "tasks_count_other": "{{count}} 个 task",
+    "chip_agents_working_other": "{{count}} 个智能体工作中",
+    "issues_count_other": "{{count}} 个 issue"
   },
   "agent_live": {
     "is_working": "{{name}} 在工作",

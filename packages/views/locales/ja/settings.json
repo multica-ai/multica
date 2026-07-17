@@ -96,6 +96,22 @@
     "floating_label": "フローティングチャット",
     "floating_hint": "すべてのページの隅にフローティングチャットボタンを表示します。デフォルトはオフ——オンにするとどこからでもチャットを呼び出せます。オフのときは専用タブでのみ利用できます。"
   },
+  "issue": {
+    "description": "各作成ダイアログのツールバーに常時表示するフィールドを選択します。非表示のフィールドは ⋯ メニューから引き続き使用でき、値がある間は自動的に表示されます。",
+    "quick_create_title": "エージェントで作成",
+    "quick_create_description": "クイック作成ツールバーに表示するフィールド。",
+    "manual_create_title": "手動で作成",
+    "manual_create_description": "手動作成ツールバーに表示するフィールド。",
+    "fields": {
+      "status": "ステータス",
+      "priority": "優先度",
+      "assignee": "担当者",
+      "labels": "ラベル",
+      "project": "プロジェクト",
+      "due_date": "期限",
+      "start_date": "開始日"
+    }
+  },
   "page": {
     "title": "設定",
     "my_account": "マイアカウント",
@@ -104,6 +120,7 @@
       "profile": "プロフィール",
       "preferences": "環境設定",
       "shortcuts": "ショートカット",
+      "issue": "イシュー",
       "chat": "チャット",
       "notifications": "通知",
       "tokens": "API トークン",

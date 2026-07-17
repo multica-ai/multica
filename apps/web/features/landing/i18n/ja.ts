@@ -270,6 +270,37 @@ export function createJaDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
+          version: "0.4.3",
+          date: "2026-07-16",
+          title: "Issue 専用ウィンドウ、受信トレイのアーカイブ、より安定したエージェント実行",
+          changes: [],
+          features: [
+            "デスクトップ アプリで、任意の Issue を専用ウィンドウで開けるようになりました。",
+            "受信トレイにアーカイブ ビューが加わり、ワンクリックで元に戻せます。",
+            "カスタム フィールドごとにアイコンを設定でき、ひと目で見分けられます。",
+            "セルフホスト環境で、各部分をどのマシンで動かすか選べるようになりました。",
+          ],
+          improvements: [
+            "失敗したエージェント タスクを再実行しても、すでに進んだ作業を保ったまま続けられます。",
+            "メッセージの送信や Issue の作成が添付の完了を待つようになり、ファイルが失われません。",
+            "Antigravity の実行では、ライブ表示ができないときに空白ではなく説明が出ます。",
+            "ダウンロード ページから Intel 版 Mac アプリを直接入手できるようになりました。",
+            "ダウンロードした添付ファイルが、元の英語以外の名前を保つようになりました。",
+          ],
+          fixes: [
+            "新しいチャットの作成中にエージェントを切り替えても、入力した内容が消えなくなりました。",
+            "自動運転の実行中に、エージェント同士が @ で作業を引き継げるようになりました。",
+            "自動運転の実行が、最新のプロジェクト設定を使うようになりました。",
+            "長いエージェント タスクが、黙って終わったり、終わる前に完了扱いになったりしなくなりました。",
+            "新しい Codex gpt-5.6 Sol モデルで、完了したタスクが失敗に覆されなくなりました。",
+            "Codex エージェントが、起動の遅れや Linux でのファイル書き込みで失敗しなくなりました。",
+            "Issue の作成時に選んだラベルが、毎回 Issue と一緒に保存されます。",
+            "書式付きのテキストをコメントに貼り付けても、余計な ++ が残らなくなりました。",
+            "アバターの上をただ通り過ぎただけで、ホバー カードが出なくなりました。",
+            "Linux 版デスクトップ アプリが multica-desktop という名前でインストールされます。",
+          ],
+        },
+        {
           version: "0.4.2",
           date: "2026-07-15",
           title: "カスタム Issue フィールド、担当者の表示、Grok エージェント",
@@ -1773,10 +1804,9 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         },
         macIntel: {
           title: "macOS 版 Multica",
-          sub: "Apple Silicon が必要です。Intel Mac はまだ対応していません。",
-          disabledCta: "Apple Silicon が必要",
-          intelHint:
-            "Intel Mac をお使いですか? 下の CLI をご利用ください。同じデーモンが動きます。",
+          sub: "Intel · デーモン同梱、設定不要",
+          primary: "ダウンロード(.dmg)",
+          altZip: "または .zip をダウンロード",
         },
         winX64: {
           title: "Windows 版 Multica",
@@ -1798,12 +1828,13 @@ export function createJaDict(allowSignup: boolean): LandingDict {
           title: "プラットフォームを選択",
           sub: "すべてのインストーラーは下にまとまっています。",
         },
-        safariMacHint: "Intel Mac をお使いですか? 下の CLI をご利用ください。",
+        safariMacHint: "Intel Mac をお使いですか? 下の Intel 版を選択してください。",
         archFallbackHint: "アーキテクチャが合いませんか? 下ですべての形式を確認してください。",
       },
       allPlatforms: {
         title: "すべてのプラットフォーム",
-        macLabel: "macOS · Apple Silicon",
+        macArm64Label: "macOS · Apple Silicon",
+        macX64Label: "macOS · Intel",
         winX64Label: "Windows · x64",
         winArm64Label: "Windows · ARM64",
         linuxX64Label: "Linux · x64",
@@ -1814,8 +1845,6 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         formatAppImage: ".AppImage",
         formatDeb: ".deb",
         formatRpm: ".rpm",
-        intelNote:
-          "Apple Silicon のみ対応です。このリリースでは Intel Mac には対応していません。",
         unavailable: "利用できません",
       },
       cli: {

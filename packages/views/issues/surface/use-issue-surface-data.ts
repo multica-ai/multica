@@ -34,11 +34,37 @@ const EMPTY_ISSUES: Issue[] = [];
 const EMPTY_CHILD_PROGRESS = new Map<string, ChildProgress>();
 const EMPTY_PROJECTS: Project[] = [];
 
+/**
+ * The rows the gantt canvas actually draws, on top of the shared filters.
+ *
+ * The canvas adds two rules of its own: a row needs a date to be placed, and
+ * completed work is hidden unless the user asks for it. The data source only
+ * delivers scheduled issues (server-side `scheduled=true`), but a row can
+ * still arrive without a date — e.g. a WS-driven optimistic patch that just
+ * cleared start_date / due_date and is waiting for the cache to refetch — so
+ * the date check stays defensive.
+ *
+ * These rules live HERE rather than privately inside GanttView so the header
+ * chip can narrow the same set the canvas draws. A view that filters its own
+ * rows in secret is exactly how the chip's count drifted from the list in the
+ * first place (MUL-4884); duplicating the rules in both places would just
+ * reintroduce the drift with extra steps.
+ */
+function ganttCanvasRows(issues: Issue[], showCompleted: boolean): Issue[] {
+  const dated = issues.filter((i) => i.start_date || i.due_date);
+  if (showCompleted) return dated;
+  return dated.filter((i) => i.status !== "done" && i.status !== "cancelled");
+}
+
 export interface IssueSurfaceData {
   surfaceIssues: Issue[];
   projectIssues: Issue[];
   issues: Issue[];
   swimlaneIssues: Issue[];
+  /** The rows the agents-working filter would leave on screen. See the
+   *  `workingScopeIssues` memo for why this is a projection of the render
+   *  pipeline rather than a second derivation from the task snapshot. */
+  workingScopeIssues: Issue[];
   filteredGanttIssues: Issue[];
   assigneeGroups?: IssueAssigneeGroup[];
   assigneeGroupQueryKey?: QueryKey;
@@ -68,6 +94,7 @@ export function useIssueSurfaceData({
   projectId,
   usesAssigneeBoard,
   usesGantt,
+  ganttShowCompleted,
   sort,
   statusFilters,
   priorityFilters,
@@ -87,6 +114,9 @@ export function useIssueSurfaceData({
   projectId?: string;
   usesAssigneeBoard: boolean;
   usesGantt: boolean;
+  /** Gantt's "show completed" display toggle. The canvas hides done/cancelled
+   *  rows without it, so the working scope has to honour it too. */
+  ganttShowCompleted: boolean;
   sort: IssueSortParam;
   statusFilters: IssueStatus[];
   priorityFilters: IssueFilterState["priorityFilters"];
@@ -214,8 +244,12 @@ export function useIssueSurfaceData({
   );
 
   const filteredGanttIssues = useMemo(
-    () => applyIssueFilters(ganttIssues, baseFilterState, filterContext),
-    [baseFilterState, filterContext, ganttIssues],
+    () =>
+      ganttCanvasRows(
+        applyIssueFilters(ganttIssues, baseFilterState, filterContext),
+        ganttShowCompleted,
+      ),
+    [baseFilterState, filterContext, ganttIssues, ganttShowCompleted],
   );
 
   // The assignee-grouped board renders straight from `groups`, bypassing the
@@ -237,6 +271,74 @@ export function useIssueSurfaceData({
       showSubIssues,
     ],
   );
+
+  // The rows the agents-working filter leaves on screen — i.e. exactly what
+  // you get when you click the header chip.
+  //
+  // This is deliberately a PROJECTION OF THE RENDER PIPELINE, not a second
+  // pass over the task snapshot: it reuses the same predicates, the same
+  // filter state and the same per-mode source as the rows below, with
+  // `workingOnly` forced on. Turning the filter on only adds `workingOnly` to
+  // this same pipeline, so the set is the post-click list whether the filter
+  // is currently on or off.
+  //
+  // The chip counts AGENTS, not this list's length, so these are not equal
+  // (one agent can hold two of these rows). What this set does decide is
+  // WHICH agents the chip counts — only those working on rows that survive
+  // the filters. Re-deriving that scope from the snapshot instead is what
+  // made the chip disagree with the list it was filtering: any active
+  // status/assignee/label filter, or a sub-issue hidden by the display
+  // toggle, moved the list but not the chip (MUL-4884).
+  //
+  // Each branch below must take the SAME source the matching branch of
+  // IssueSurface renders:
+  //   - gantt          → the canvas set (scheduled + dated + showCompleted)
+  //   - assignee board → the grouped response, not the flat list
+  //   - board / list / swimlane → the flat filtered list
+  //
+  // Swimlane deliberately has no branch: SwimLaneView draws its cards from
+  // `issues` (status filter applied) and only uses the statusless
+  // `swimlaneIssues` for LANE DISCOVERY, so scoping the chip to the
+  // statusless set would count rows the canvas never draws.
+  const workingScopeIssues = useMemo(() => {
+    if (usesGantt) {
+      return ganttCanvasRows(
+        applyIssueFilters(
+          ganttIssues,
+          { ...baseFilterState, workingOnly: true },
+          filterContext,
+        ),
+        ganttShowCompleted,
+      );
+    }
+    if (usesAssigneeBoard) {
+      return (
+        filterAssigneeGroups(assigneeGroupsQuery.data?.groups, {
+          showSubIssues,
+          agentRunningFilter: true,
+          runningIssueIds: activity.runningIssueIds,
+          propertyFilters,
+        }) ?? []
+      ).flatMap((group) => group.issues);
+    }
+    return applyIssueFilters(
+      surfaceIssues,
+      { ...baseFilterState, workingOnly: true },
+      filterContext,
+    );
+  }, [
+    activity.runningIssueIds,
+    assigneeGroupsQuery.data?.groups,
+    baseFilterState,
+    filterContext,
+    ganttIssues,
+    ganttShowCompleted,
+    propertyFilters,
+    showSubIssues,
+    surfaceIssues,
+    usesAssigneeBoard,
+    usesGantt,
+  ]);
 
   const { data: childProgressMap = EMPTY_CHILD_PROGRESS } = useQuery(
     childIssueProgressOptions(wsId),
@@ -315,6 +417,7 @@ export function useIssueSurfaceData({
     projectIssues: surfaceIssues,
     issues,
     swimlaneIssues,
+    workingScopeIssues,
     filteredGanttIssues,
     assigneeGroups: usesAssigneeBoard ? filteredAssigneeGroups : undefined,
     assigneeGroupQueryKey: usesAssigneeBoard

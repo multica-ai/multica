@@ -96,20 +96,41 @@ function never<T>() {
   return new Promise<T>(() => {});
 }
 
+function makeRunningTask(id: string, agentId: string, issueId: string): AgentTask {
+  return {
+    id,
+    agent_id: agentId,
+    runtime_id: "runtime-1",
+    issue_id: issueId,
+    status: "running",
+    priority: 0,
+    dispatched_at: null,
+    started_at: "2026-01-01T00:00:00Z",
+    completed_at: null,
+    result: null,
+    error: null,
+    created_at: "2026-01-01T00:00:00Z",
+  };
+}
+
 describe("useIssueSurfaceController", () => {
   let qc: QueryClient;
   let listIssues: ReturnType<
     typeof vi.fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>
   >;
+  let getAgentTaskSnapshot: ReturnType<
+    typeof vi.fn<() => Promise<AgentTask[]>>
+  >;
 
   beforeEach(() => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     listIssues = vi.fn(() => never<ListIssuesResponse>());
+    getAgentTaskSnapshot = vi.fn(() => never<AgentTask[]>());
     setApiInstance({
       listIssues,
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
-      getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
+      getAgentTaskSnapshot,
       getChildIssueProgress: vi.fn(() => never()),
     } as unknown as ApiClient);
     pruneIssueSurfaceViewStates([]);
@@ -594,6 +615,337 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.issues.map((i) => i.id)).toEqual(["cancelled-1"]);
     expect(result.current.surfaceIssues.map((i) => i.id)).toContain(
       "cancelled-1",
+    );
+  });
+
+  // --- working-chip scope (MUL-4884) ------------------------------------
+  // The header chip promises "N issues in progress" where N is the number of
+  // rows clicking it leaves. That only holds if the count comes out of the
+  // same filter pipeline the rows do. It used to be re-derived from the task
+  // snapshot against the PRE-filter issue set, so any active filter made the
+  // chip disagree with the list it was filtering.
+
+  it("keeps the working scope identical to the rendered rows when the filter is on", async () => {
+    mockListByStatus({
+      todo: [
+        makeIssue({ id: "todo-1", status: "todo" }),
+        makeIssue({ id: "todo-2", status: "todo" }),
+      ],
+      in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
+    });
+    // Running work on todo-1 and prog-1; todo-2 is idle.
+    getAgentTaskSnapshot.mockResolvedValue([
+      makeRunningTask("t-1", "agent-1", "todo-1"),
+      makeRunningTask("t-2", "agent-2", "prog-1"),
+    ]);
+
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => store.getState().toggleAgentRunningFilter());
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["list"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() =>
+      expect(result.current.workingScopeIssues.length).toBe(2),
+    );
+
+    // The scope the chip counts agents within must be the rendered list
+    // itself — that identity is what keeps the chip in step with the filter
+    // (the chip's own number counts agents, not these rows).
+    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual(
+      result.current.issues.map((i) => i.id),
+    );
+    expect(result.current.issues.map((i) => i.id).sort()).toEqual([
+      "prog-1",
+      "todo-1",
+    ]);
+  });
+
+  it("predicts the post-click rows while the filter is still off", async () => {
+    mockListByStatus({
+      todo: [
+        makeIssue({ id: "todo-1", status: "todo" }),
+        makeIssue({ id: "todo-2", status: "todo" }),
+      ],
+    });
+    getAgentTaskSnapshot.mockResolvedValue([
+      makeRunningTask("t-1", "agent-1", "todo-1"),
+    ]);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["list"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() =>
+      expect(result.current.workingScopeIssues.length).toBe(1),
+    );
+
+    // Filter off: the list still shows both rows, but the chip already
+    // reports the one row a click would leave.
+    expect(result.current.issues).toHaveLength(2);
+    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual([
+      "todo-1",
+    ]);
+  });
+
+  it("narrows the working scope with the status filter, exactly like the list", async () => {
+    mockListByStatus({
+      todo: [makeIssue({ id: "todo-1", status: "todo" })],
+      in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
+    });
+    // Both issues have running agents...
+    getAgentTaskSnapshot.mockResolvedValue([
+      makeRunningTask("t-1", "agent-1", "todo-1"),
+      makeRunningTask("t-2", "agent-2", "prog-1"),
+    ]);
+
+    // ...but the user is only looking at `todo`.
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => store.getState().toggleStatusFilter("todo"));
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["list"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() =>
+      expect(result.current.workingScopeIssues.length).toBe(1),
+    );
+
+    // The regression: the chip used to say 2 here (both issues have running
+    // agents) while clicking it produced a single row.
+    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual([
+      "todo-1",
+    ]);
+  });
+
+  it("hides sub-issues from the working scope when the list hides them", async () => {
+    mockListByStatus({
+      todo: [
+        makeIssue({ id: "parent-1", status: "todo" }),
+        makeIssue({ id: "child-1", status: "todo", parent_issue_id: "parent-1" }),
+      ],
+    });
+    getAgentTaskSnapshot.mockResolvedValue([
+      makeRunningTask("t-1", "agent-1", "child-1"),
+    ]);
+
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => store.getState().toggleShowSubIssues());
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["list"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    // The only running work sits on a sub-issue the display toggle hides, so
+    // clicking the filter would leave zero rows — the chip must say 0, not 1.
+    expect(result.current.workingScopeIssues).toEqual([]);
+  });
+
+  it("keeps issue-less chat/autopilot tasks out of the working scope", async () => {
+    mockListByStatus({
+      todo: [makeIssue({ id: "todo-1", status: "todo" })],
+    });
+    // issue_id "" is how the API models a chat/autopilot task — it must not
+    // become a phantom row (it used to inflate the count by exactly 1).
+    getAgentTaskSnapshot.mockResolvedValue([
+      makeRunningTask("t-1", "agent-1", "todo-1"),
+      makeRunningTask("t-2", "agent-2", ""),
+      makeRunningTask("t-3", "agent-3", ""),
+    ]);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["list"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() =>
+      expect(result.current.workingScopeIssues.length).toBe(1),
+    );
+
+    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual([
+      "todo-1",
+    ]);
+  });
+
+  it("scopes swimlane to the cards it draws, not its statusless lane source", async () => {
+    // SwimLaneView draws cards from `issues` (status filter applied) and uses
+    // the statusless `swimlaneIssues` only for LANE DISCOVERY. Scoping the
+    // chip to the statusless set counted rows the canvas never draws.
+    mockListByStatus({
+      todo: [makeIssue({ id: "todo-1", status: "todo" })],
+      in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
+    });
+    getAgentTaskSnapshot.mockResolvedValue([
+      makeRunningTask("t-1", "agent-1", "todo-1"),
+      makeRunningTask("t-2", "agent-2", "prog-1"),
+    ]);
+
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => {
+      store.getState().setViewMode("swimlane");
+      store.getState().toggleStatusFilter("todo");
+    });
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["board", "list", "swimlane"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() =>
+      expect(result.current.workingScopeIssues.length).toBe(1),
+    );
+
+    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual([
+      "todo-1",
+    ]);
+    expect(result.current.issues.map((i) => i.id)).toEqual(["todo-1"]);
+    // The statusless lane source still carries both — so a regression back to
+    // it would make the assertion above fail rather than pass by accident.
+    expect(result.current.swimlaneIssues.map((i) => i.id).sort()).toEqual([
+      "prog-1",
+      "todo-1",
+    ]);
+  });
+
+  // --- gantt canvas scope ------------------------------------------------
+  // The gantt canvas draws fewer rows than the shared filters leave: a row
+  // needs a date, and done/cancelled hide unless `ganttShowCompleted` is on.
+  // Those rules live in the surface (`ganttCanvasRows`) so the chip narrows
+  // the same set the canvas draws.
+
+  function mockGanttIssues(issues: Issue[]) {
+    listIssues.mockImplementation((params?: ListIssuesParams) => {
+      if (params?.scheduled === true) {
+        return Promise.resolve({ issues, total: issues.length });
+      }
+      return Promise.resolve({ issues: [], total: 0 });
+    });
+  }
+
+  const ganttFixture = [
+    makeIssue({
+      id: "gantt-open",
+      status: "in_progress",
+      start_date: "2026-01-01",
+      due_date: "2026-01-05",
+    }),
+    makeIssue({
+      id: "gantt-done",
+      status: "done",
+      start_date: "2026-01-01",
+      due_date: "2026-01-05",
+    }),
+    // Scheduled server-side but momentarily dateless (e.g. a WS patch that
+    // just cleared both dates) — the canvas cannot place it.
+    makeIssue({ id: "gantt-undated", status: "in_progress" }),
+  ];
+
+  it("keeps rows the gantt canvas hides out of the working scope", async () => {
+    mockGanttIssues(ganttFixture);
+    // Every one of them has a running agent.
+    getAgentTaskSnapshot.mockResolvedValue([
+      makeRunningTask("t-1", "agent-1", "gantt-open"),
+      makeRunningTask("t-2", "agent-2", "gantt-done"),
+      makeRunningTask("t-3", "agent-3", "gantt-undated"),
+    ]);
+
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => store.getState().setViewMode("gantt"));
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["board", "list", "swimlane", "gantt"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() =>
+      expect(result.current.filteredGanttIssues.length).toBe(1),
+    );
+
+    // ganttShowCompleted defaults to false, so the done row and the undated
+    // row are not drawn — the chip must not count them either.
+    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual([
+      "gantt-open",
+    ]);
+    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual(
+      result.current.filteredGanttIssues.map((i) => i.id),
+    );
+  });
+
+  it("widens the gantt working scope when show-completed is turned on", async () => {
+    mockGanttIssues(ganttFixture);
+    getAgentTaskSnapshot.mockResolvedValue([
+      makeRunningTask("t-1", "agent-1", "gantt-open"),
+      makeRunningTask("t-2", "agent-2", "gantt-done"),
+      makeRunningTask("t-3", "agent-3", "gantt-undated"),
+    ]);
+
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => {
+      store.getState().setViewMode("gantt");
+      store.getState().toggleGanttShowCompleted();
+    });
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["board", "list", "swimlane", "gantt"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() =>
+      expect(result.current.filteredGanttIssues.length).toBe(2),
+    );
+
+    // The done row is drawn now, so it counts. The undated one still cannot
+    // be placed, so it still does not.
+    expect(result.current.workingScopeIssues.map((i) => i.id).sort()).toEqual([
+      "gantt-done",
+      "gantt-open",
+    ]);
+    expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual(
+      result.current.filteredGanttIssues.map((i) => i.id),
     );
   });
 });

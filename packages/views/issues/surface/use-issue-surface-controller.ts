@@ -57,6 +57,9 @@ export interface IssueSurfaceController {
   projectIssues: Issue[];
   issues: Issue[];
   swimlaneIssues: Issue[];
+  /** The rows the agents-working filter would leave on screen. Feeds the
+   *  header chip so its count IS the post-click row count (MUL-4884). */
+  workingScopeIssues: Issue[];
   filteredGanttIssues: Issue[];
   assigneeGroups?: IssueAssigneeGroup[];
   assigneeGroupQueryKey?: QueryKey;
@@ -135,6 +138,7 @@ export function useIssueSurfaceController({
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
+  const ganttShowCompleted = useViewStore((s) => s.ganttShowCompleted);
   const cardProperties = useViewStore((s) => s.cardProperties);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
 
@@ -233,6 +237,7 @@ export function useIssueSurfaceController({
     projectId,
     usesAssigneeBoard,
     usesGantt,
+    ganttShowCompleted,
     sort,
     statusFilters,
     priorityFilters,

@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -1965,24 +1966,49 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.TriggerCommentContent = "The newest triggering comment is no longer available. Address every earlier comment included below."
 		}
 
-		// Look up the prior session for this (agent, issue) pair so the daemon
-		// can resume the Claude Code conversation context.
-		//
-		// Skip all prior state when the task was flagged as a manual rerun:
-		// the user just judged the prior output bad, so the daemon must start a
-		// fresh agent session in a fresh workdir instead of resuming anything
-		// from the same conversation that produced that output.
-		if !task.ForceFreshSession {
+		// Resolve the prior agent session / workdir to resume.
+		if task.RerunOfTaskID.Valid {
+			// Manual retry: resume precisely from the source task the user
+			// clicked, NOT the most-recent (agent, issue) row — a parallel task
+			// on the same issue must never hijack the resume (MUL-4869). The
+			// workdir is ALWAYS reused when it still exists; the session is
+			// resumed only when the source failure did not poison the
+			// conversation AND the source ran on this runtime.
+			//
+			// Resume-safety is computed HERE from the source task, not read off
+			// task.ForceFreshSession: RerunIssue pins that flag to true so an OLD
+			// claim handler mid rolling-deploy degrades to a clean start instead
+			// of resuming a different execution via the (agent, issue) lookup.
+			// service.ResumeUnsafeFailure mirrors GetLastTaskSession, including
+			// its 400/invalid_request_error text defense for legacy /
+			// mis-classified rows that the exact-source path would otherwise miss.
+			//
+			// When the source workdir is gone (GC'd), absent on this runtime, or
+			// was never recorded (failed too early), execenv.Reuse falls back to a
+			// fresh Prepare and gateResumeToReusedWorkdir drops the now-unusable
+			// session — reuse is best-effort, never a silent swap onto a stale
+			// directory. PriorWorkDir is offered regardless of runtime (a shared
+			// mount may still resolve it); only the per-cwd session is
+			// runtime-gated.
+			if src, err := h.Queries.GetAgentTask(r.Context(), task.RerunOfTaskID); err == nil {
+				if src.WorkDir.Valid {
+					resp.PriorWorkDir = src.WorkDir.String
+				}
+				if !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) &&
+					src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
+					resp.PriorSessionID = src.SessionID.String
+				}
+			}
+		} else if !task.ForceFreshSession {
+			// Non-rerun follow-up on the same issue: resume the most recent
+			// (agent, issue) session so the agent keeps the issue's conversation
+			// context across turns. The "Focus on THIS comment" guard in
+			// prompt.go defends against inheriting the prior turn's "Done."
+			// marker, and GetLastTaskSession already excludes poisoned sessions.
 			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				// Resume the prior session when it ran on the same runtime —
-				// including comment-triggered follow-ups, so the agent keeps the
-				// issue's conversation context across turns. The "Focus on THIS
-				// comment" guard in prompt.go defends against inheriting the prior
-				// turn's "Done." marker, and GetLastTaskSession already excludes
-				// poisoned sessions.
 				if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 				}
@@ -2015,21 +2041,39 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					resp.ChatIntro = !hasUser
 				}
 			}
-			// Flag a channel-backed session so the daemon makes the agent aware
-			// it is operating inside Slack — read this conversation's history
-			// from the channel via `multica chat history` / `multica chat thread`,
-			// not from Multica (MUL-3871). Empty for a web-only chat session.
-			// ChatInThread tells the agent which command to start with: the
-			// latest trigger was a thread reply iff its reply-target thread
-			// (last_thread_id) differs from its own message id (a top-level
-			// @mention records its own ts as both).
-			if binding, berr := h.Queries.GetChannelChatSessionBindingBySession(r.Context(), db.GetChannelChatSessionBindingBySessionParams{
-				ChatSessionID: cs.ID,
-				ChannelType:   string(slack.TypeSlack),
-			}); berr == nil {
-				resp.ChatChannelType = string(slack.TypeSlack)
-				resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
-					binding.LastThreadID.String != binding.LastMessageID.String
+			// Flag a channel-backed session so the daemon makes the agent aware it
+			// is operating inside an IM conversation and not the Multica web app
+			// (MUL-3871). Empty for a web-only chat session.
+			//
+			// Every registered channel type is probed, not just Slack: a Feishu
+			// session writes the same channel_chat_session_binding row under
+			// channel_type='feishu' (lark/channel_store.go), so the Slack-only
+			// lookup used to report a Feishu chat as web-backed. Downstream that
+			// mis-flag made the brief inject `multica attachment upload` guidance
+			// into a conversation that cannot carry attachments at all (MUL-4899).
+			//
+			// ChatInThread stays Slack-only on purpose. It selects between
+			// `multica chat history` and `multica chat thread`, and those two
+			// endpoints are hardwired to h.SlackHistory (chat_history.go) — there
+			// is no Feishu history reader, so the flag has nothing to select
+			// between on any other channel and must not imply one exists.
+			for _, channelType := range []channel.Type{slack.TypeSlack, channel.TypeFeishu} {
+				binding, berr := h.Queries.GetChannelChatSessionBindingBySession(r.Context(), db.GetChannelChatSessionBindingBySessionParams{
+					ChatSessionID: cs.ID,
+					ChannelType:   string(channelType),
+				})
+				if berr != nil {
+					continue
+				}
+				resp.ChatChannelType = string(channelType)
+				if channelType == slack.TypeSlack {
+					// The latest trigger was a thread reply iff its reply-target
+					// thread (last_thread_id) differs from its own message id (a
+					// top-level @mention records its own ts as both).
+					resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
+						binding.LastThreadID.String != binding.LastMessageID.String
+				}
+				break
 			}
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
@@ -2190,6 +2234,8 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
 			hasQuickCreate = true
 			resp.QuickCreatePrompt = qc.Prompt
+			resp.QuickCreatePriority = qc.Priority
+			resp.QuickCreateDueDate = qc.DueDate
 			resp.QuickCreateAttachmentIDs = append([]string(nil), qc.AttachmentIDs...)
 			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
@@ -2986,12 +3032,21 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		actorType := c.AuthorType
 		actorID := uuidToString(c.AuthorID)
 		originatorUserID := actorID
+		var delegationAuthority string
 		if actorType != "member" {
 			originatorUserID = uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, issue.WorkspaceID, c.ID))
+			// MUL-4857: this is the deferred replay of an already-accepted delegation
+			// (e.g. the mentioned target was busy at create time). Restore the SAME
+			// verified authorization context from the comment's stored source_task_id,
+			// so an unattributed autopilot delegation's follow-up still fires once the
+			// busy target frees up. The source_task_id is re-stamped on edit, so this
+			// tracks the current content's authoring action, not a stale one.
+			delegationAuthority = h.autopilotDelegationAuthorityFromComment(ctx, issue, c)
 		}
 		triggers, _ := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
-			ExcludeTriggerCommentID: c.ID,
-			OriginatorUserID:        originatorUserID,
+			ExcludeTriggerCommentID:            c.ID,
+			OriginatorUserID:                   originatorUserID,
+			AutopilotDelegationAuthorityUserID: delegationAuthority,
 		})
 		// For an AGENT author, compensate ONLY explicit @agent/@squad mentions.
 		// computeCommentAgentTriggers can also return the assigned-squad-leader
@@ -3727,7 +3782,91 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetIssueGCCheck returns minimal issue info needed by the daemon GC loop.
+const (
+	maxIssueGCBatchSize      = 500
+	maxIssueGCBatchBodyBytes = 64 << 10
+)
+
+type batchIssueGCCheckRequest struct {
+	IssueIDs []string `json:"issue_ids"`
+}
+
+type batchIssueGCCheckItem struct {
+	ID        string     `json:"id"`
+	Found     bool       `json:"found"`
+	Status    string     `json:"status,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// BatchIssueGCCheck returns one explicit result for every requested issue ID.
+// The query is workspace-scoped at the SQL layer; missing rows and IDs owned by
+// another workspace both become found=false so the endpoint is not an
+// enumeration oracle. Requests are capped because installed daemons run this
+// endpoint periodically and must not be able to produce unbounded DB work.
+func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "workspaceId")
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxIssueGCBatchBodyBytes)
+	var req batchIssueGCCheckRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.IssueIDs) > maxIssueGCBatchSize {
+		writeError(w, http.StatusBadRequest, "too many issue_ids")
+		return
+	}
+
+	parsedIDs := make([]pgtype.UUID, 0, len(req.IssueIDs))
+	canonicalIDs := make([]string, 0, len(req.IssueIDs))
+	for _, issueID := range req.IssueIDs {
+		parsedID, err := util.ParseUUID(issueID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid issue_id")
+			return
+		}
+		parsedIDs = append(parsedIDs, parsedID)
+		canonicalIDs = append(canonicalIDs, uuidToString(parsedID))
+	}
+
+	rows := make(map[string]db.ListIssueGCStatusesRow, len(parsedIDs))
+	if len(parsedIDs) > 0 {
+		result, err := h.Queries.ListIssueGCStatuses(r.Context(), db.ListIssueGCStatusesParams{
+			WorkspaceID: workspaceUUID,
+			IssueIds:    parsedIDs,
+		})
+		if err != nil {
+			slog.Warn("list issue GC statuses failed", "workspace_id", workspaceID, "count", len(parsedIDs), "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to check issues")
+			return
+		}
+		for _, row := range result {
+			rows[uuidToString(row.ID)] = row
+		}
+	}
+
+	items := make([]batchIssueGCCheckItem, 0, len(req.IssueIDs))
+	for i, issueID := range req.IssueIDs {
+		row, found := rows[canonicalIDs[i]]
+		item := batchIssueGCCheckItem{ID: issueID, Found: found}
+		if found {
+			item.Status = row.Status
+			updatedAt := row.UpdatedAt.Time
+			item.UpdatedAt = &updatedAt
+		}
+		items = append(items, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"issues": items})
+}
+
+// GetIssueGCCheck returns minimal issue info needed by older daemon GC loops.
 // Gated on workspace access so a daemon token scoped to workspace A cannot
 // read issue metadata from workspace B via UUID enumeration.
 func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
@@ -3736,7 +3875,7 @@ func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issue, err := h.Queries.GetIssue(r.Context(), issueUUID)
+	issue, err := h.Queries.GetIssueGCStatus(r.Context(), issueUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
 		return

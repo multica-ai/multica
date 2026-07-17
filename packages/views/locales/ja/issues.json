@@ -343,9 +343,11 @@
     "hover_header_queued_other": "待機中のエージェント {{count}} 件",
     "status_running": "作業中",
     "status_queued": "待機中",
-    "chip_label": "作業中",
     "empty_hover": "現在作業中のエージェントはありません",
-    "filter_active_label": "作業中のエージェントのみ表示中"
+    "filter_active_label": "エージェントが作業中の issue を表示中",
+    "tasks_count_other": "task {{count}} 件",
+    "chip_agents_working_other": "作業中のエージェント {{count}} 件",
+    "issues_count_other": "issue {{count}} 件"
   },
   "agent_live": {
     "is_working": "{{name}} が作業中",

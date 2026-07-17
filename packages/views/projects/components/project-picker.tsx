@@ -21,6 +21,8 @@ export function ProjectPicker({
   triggerRender,
   align = "start",
   defaultOpen = false,
+  open,
+  onOpenChange,
 }: {
   projectId: string | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
@@ -29,6 +31,8 @@ export function ProjectPicker({
   /** Open the dropdown on first mount. Used by progressive-disclosure
    *  sidebars so a newly-added field immediately enters edit state. */
   defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -36,18 +40,34 @@ export function ProjectPicker({
   const current = projects.find((p) => p.id === projectId);
 
   return (
-    <DropdownMenu defaultOpen={defaultOpen}>
-      <DropdownMenuTrigger
-        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
-        render={triggerRender}
-      >
-        {current ? (
-          <ProjectIcon project={current} size="sm" />
-        ) : (
-          <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+    <DropdownMenu defaultOpen={defaultOpen} open={open} onOpenChange={onOpenChange}>
+      <div className="group/project relative inline-flex min-w-0">
+        <DropdownMenuTrigger
+          className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+          render={triggerRender}
+        >
+          {current ? (
+            <ProjectIcon project={current} size="sm" />
+          ) : (
+            <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          )}
+          <span className="truncate">{current ? current.title : t(($) => $.picker.no_project)}</span>
+        </DropdownMenuTrigger>
+        {current && (
+          <button
+            type="button"
+            aria-label={t(($) => $.picker.remove)}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onUpdate({ project_id: null });
+            }}
+            className="pointer-events-none absolute inset-y-0 right-0 flex w-7 items-center justify-center rounded-r-full bg-background/95 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/project:pointer-events-auto group-hover/project:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+          >
+            <X className="size-3" />
+          </button>
         )}
-        <span className="truncate">{current ? current.title : t(($) => $.picker.no_project)}</span>
-      </DropdownMenuTrigger>
+      </div>
       <DropdownMenuContent align={align} className="w-52">
         {projects.map((p) => (
           <DropdownMenuItem key={p.id} onClick={() => onUpdate({ project_id: p.id })}>

@@ -89,6 +89,7 @@ describe("MachineCliSection", () => {
       <MachineCliSection
         machine={machine([offlineOwned, onlineOwned, otherUsers])}
         currentUserId="user-1"
+        canManageAnyRuntime={false}
       />,
     );
 
@@ -99,6 +100,34 @@ describe("MachineCliSection", () => {
       currentVersion: "0.3.17",
       isOnline: true,
       launchedBy: "desktop",
+    });
+  });
+
+  it("lets a workspace admin update through an online teammate-owned runtime", () => {
+    const offline = runtime({
+      id: "offline-other-user",
+      owner_id: "user-2",
+      status: "offline",
+    });
+    const online = runtime({
+      id: "online-other-user",
+      owner_id: "user-2",
+    });
+
+    render(
+      <MachineCliSection
+        machine={machine([offline, online])}
+        currentUserId="user-1"
+        canManageAnyRuntime
+      />,
+    );
+
+    expect(screen.getAllByRole("button", { name: "Update" })).toHaveLength(1);
+    expect(mockUpdateSection).toHaveBeenCalledWith({
+      runtimeId: "online-other-user",
+      currentVersion: "0.3.17",
+      isOnline: true,
+      launchedBy: null,
     });
   });
 
@@ -115,6 +144,7 @@ describe("MachineCliSection", () => {
           }),
         ])}
         currentUserId="user-1"
+        canManageAnyRuntime={false}
       />,
     );
 

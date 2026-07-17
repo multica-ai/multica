@@ -79,6 +79,18 @@ func TestCheckMinCLIVersion(t *testing.T) {
 	}
 }
 
+func TestCheckMinCLIVersionForQuickCreateFields(t *testing.T) {
+	if err := CheckMinCLIVersionFor("0.4.2", MinQuickCreateFieldsCLIVersion); !errors.Is(err, ErrCLIVersionTooOld) {
+		t.Fatalf("0.4.2 error = %v, want ErrCLIVersionTooOld", err)
+	}
+	if err := CheckMinCLIVersionFor("0.4.3", MinQuickCreateFieldsCLIVersion); err != nil {
+		t.Fatalf("0.4.3 error = %v, want nil", err)
+	}
+	if err := CheckMinCLIVersionFor("v0.4.2-7-gabc1234", MinQuickCreateFieldsCLIVersion); err != nil {
+		t.Fatalf("dev build error = %v, want nil", err)
+	}
+}
+
 func TestExtractVersionLine(t *testing.T) {
 	tests := []struct {
 		name string

@@ -11,9 +11,11 @@ import { IssuesHeader } from "./issues-header";
 
 function IssuesSurfaceHeader({
   issues,
+  workingIssues,
   isRefreshing,
 }: {
   issues: Issue[];
+  workingIssues: Issue[];
   isRefreshing: boolean;
 }) {
   const dateFilter = useViewStore((s) => s.dateFilter);
@@ -22,6 +24,7 @@ function IssuesSurfaceHeader({
   return (
     <IssuesHeader
       scopedIssues={issues}
+      workingIssues={workingIssues}
       dateFilter={dateFilter}
       onDateFilterChange={setDateFilter}
       isRefreshing={isRefreshing}
@@ -44,9 +47,10 @@ export function IssuesPage() {
         scope={{ type: "workspace", actorKind: scope }}
         modes={["board", "list", "swimlane"]}
         batchToolbar="list"
-        renderHeader={({ controller }) => (
+        renderHeader={({ controller, workingIssues }) => (
           <IssuesSurfaceHeader
             issues={controller.surfaceIssues}
+            workingIssues={workingIssues}
             isRefreshing={controller.isRefreshing}
           />
         )}
