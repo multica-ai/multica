@@ -72,6 +72,16 @@ func match(c Condition, ctx map[string]any) bool {
 			}
 		}
 		return false
+	case "not_in":
+		if !ok || len(c.Values) == 0 {
+			return false
+		}
+		for _, v := range c.Values {
+			if fmt.Sprint(got) == fmt.Sprint(v) {
+				return false
+			}
+		}
+		return true
 	case "is_null":
 		return !ok || got == nil
 	case "is_not_null":
@@ -80,6 +90,8 @@ func match(c Condition, ctx map[string]any) bool {
 		return ok && strings.HasPrefix(fmt.Sprint(got), fmt.Sprint(c.Value))
 	case "exists":
 		return ok && got != nil
+	case "not_exists":
+		return !ok || got == nil
 	case "gte":
 		left, leftOK := numericValue(got)
 		right, rightOK := numericValue(c.Value)

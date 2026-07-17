@@ -3,6 +3,19 @@ import { createHookDraft } from "./hook-types";
 import { parseHookListResponse, parseHookResponse, parseHookRunsResponse, toHookTransport } from "./hook-api";
 
 describe("workflow hook API compatibility", () => {
+  it("serializes list filters as trimmed values instead of one comma string", () => {
+    const transport = toHookTransport({
+      ...createHookDraft(),
+      conditions: [{ field: "issue.status", operator: "not_in", value: "done, cancelled,  in_review  " }],
+    });
+
+    expect(transport.conditions).toEqual([{
+      field: "issue.status",
+      op: "not_in",
+      values: ["done", "cancelled", "in_review"],
+    }]);
+  });
+
   it("keeps an incomplete draft editable after save and reload", () => {
     const parsed = parseHookResponse({
       id: "draft-1", version: 1, name: "", description: "", mode: "dry_run", fail_mode: "warn",
