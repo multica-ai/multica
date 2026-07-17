@@ -760,7 +760,7 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 		t.Fatalf("write session file: %v", err)
 	}
 
-	got := scanCodexSessionUsage(startTime, taskHome, threadID)
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, false)
 	if got == nil {
 		t.Fatal("expected usage scanned from the per-task home")
 	}
@@ -792,7 +792,7 @@ func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
 		t.Fatalf("write session file: %v", err)
 	}
 
-	got := scanCodexSessionUsage(startTime, taskHome, threadID)
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
 	if got == nil {
 		t.Fatal("expected usage")
 	}
@@ -856,6 +856,31 @@ func TestParseCodexSessionFileSinceResumeEdgeCases(t *testing.T) {
 			},
 			want: TokenUsage{InputTokens: 170, OutputTokens: 80},
 		},
+		{
+			name: "one counter reset does not reset monotonic fields",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":50}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"output_tokens":5}}}}`,
+			},
+			want: TokenUsage{InputTokens: 20, OutputTokens: 5},
+		},
+		{
+			name: "missing timestamp before boundary is baseline only",
+			lines: []string{
+				`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+			},
+			want: TokenUsage{InputTokens: 60, OutputTokens: 15},
+		},
+		{
+			name: "missing timestamp after boundary remains in delta",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+				`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":180,"output_tokens":30}}}}`,
+			},
+			want: TokenUsage{InputTokens: 80, OutputTokens: 20},
+		},
 	}
 
 	for _, tc := range tests {
@@ -865,7 +890,7 @@ func TestParseCodexSessionFileSinceResumeEdgeCases(t *testing.T) {
 			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 				t.Fatalf("write fixture: %v", err)
 			}
-			got := parseCodexSessionFileSince(path, startTime)
+			got := parseCodexSessionFileSince(path, startTime, true)
 			if got == nil {
 				t.Fatal("expected usage")
 			}
@@ -873,6 +898,28 @@ func TestParseCodexSessionFileSinceResumeEdgeCases(t *testing.T) {
 				t.Fatalf("usage = %+v, want %+v", got.usage, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseCodexSessionFileSinceAllMissingTimestamps(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+
+	if got := parseCodexSessionFileSince(path, startTime, true); got != nil {
+		t.Fatalf("ambiguous resumed usage = %+v, want nil", got.usage)
+	}
+	got := parseCodexSessionFileSince(path, startTime, false)
+	if got == nil {
+		t.Fatal("fresh rollout should retain timestamp-less usage")
+	}
+	want := TokenUsage{InputTokens: 100, OutputTokens: 10}
+	if got.usage != want {
+		t.Fatalf("fresh usage = %+v, want %+v", got.usage, want)
 	}
 }
 
@@ -898,7 +945,7 @@ func TestScanCodexSessionUsageFindsCrossDayResumeWithCacheOnlyDelta(t *testing.T
 		t.Fatalf("set session mtime: %v", err)
 	}
 
-	got := scanCodexSessionUsage(startTime, taskHome, threadID)
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
 	if got == nil {
 		t.Fatal("expected cross-day cache-only usage")
 	}
@@ -943,7 +990,7 @@ func TestScanCodexSessionUsageFollowsLinkedSessionsRoot(t *testing.T) {
 		t.Fatalf("set rollout mtime: %v", err)
 	}
 
-	got := scanCodexSessionUsage(startTime, taskHome, threadID)
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
 	if got == nil {
 		t.Fatal("expected usage through linked sessions root")
 	}
@@ -977,13 +1024,53 @@ func TestScanCodexSessionUsageSelectsCurrentThread(t *testing.T) {
 	writeRollout("current-thread", 60, startTime.Add(time.Second))
 	writeRollout("newer-subagent-thread", 900, startTime.Add(2*time.Second))
 
-	got := scanCodexSessionUsage(startTime, taskHome, "current-thread")
+	got := scanCodexSessionUsage(startTime, taskHome, "current-thread", false)
 	if got == nil {
 		t.Fatal("expected current thread usage")
 	}
 	want := TokenUsage{InputTokens: 60}
 	if got.usage != want {
 		t.Fatalf("usage = %+v, want current thread %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageUsesSessionMetadataWhenFilenameDrifts(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+
+	writeRollout := func(filenameID, metadataID string, input int, modTime time.Time) {
+		t.Helper()
+		content := strings.Join([]string{
+			fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:11Z","type":"session_meta","payload":{"id":%q}}`, metadataID),
+			fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d}}}}`, input),
+			"",
+		}, "\n")
+		path := filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+filenameID+".jsonl")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s rollout: %v", filenameID, err)
+		}
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatalf("set %s rollout mtime: %v", filenameID, err)
+		}
+	}
+
+	// The apparent filename match belongs to another thread and must be rejected.
+	writeRollout("current-thread", "other-thread", 900, startTime.Add(2*time.Second))
+	// A future filename format can still be attributed by canonical session_meta.
+	writeRollout("future-filename", "current-thread", 60, startTime.Add(time.Second))
+
+	got := scanCodexSessionUsage(startTime, taskHome, "current-thread", false)
+	if got == nil {
+		t.Fatal("expected current thread usage from session metadata")
+	}
+	want := TokenUsage{InputTokens: 60}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want metadata-owned thread %+v", got.usage, want)
 	}
 }
 

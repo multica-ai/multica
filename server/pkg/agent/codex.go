@@ -1212,7 +1212,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// there rather than in the shared ~/.codex/sessions (MUL-4424).
 		if u.InputTokens == 0 && u.OutputTokens == 0 {
 			taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
-			if scanned := scanCodexSessionUsage(startTime, taskCodexHome, threadID); scanned != nil {
+			if scanned := scanCodexSessionUsage(startTime, taskCodexHome, threadID, resumed); scanned != nil {
 				u = scanned.usage
 				if scanned.model != "" && opts.Model == "" {
 					opts.Model = scanned.model
@@ -2256,12 +2256,12 @@ type codexSessionUsage struct {
 }
 
 // scanCodexSessionUsage extracts usage for threadID from its Codex rollout.
-// Rollout filenames end in the thread ID, which is the same ownership contract
-// the daemon uses to decide whether a thread can be resumed. Binding the scan to
-// that ID prevents a concurrently-created rollout (for example a Codex subagent)
-// from being billed to this task. A resumed rollout keeps its original date
-// directory, so both flat and YYYY/MM/DD layouts are searched.
-func scanCodexSessionUsage(startTime time.Time, codexHome, threadID string) *codexSessionUsage {
+// Codex 0.144.4 embeds the app-server thread ID in both the rollout filename and
+// the first session_meta item. Binding the scan to that ID prevents a
+// concurrently-created rollout (for example a Codex subagent) from being billed
+// to this task. A resumed rollout keeps its original date directory, so both flat
+// and YYYY/MM/DD layouts are searched.
+func scanCodexSessionUsage(startTime time.Time, codexHome, threadID string, resumed bool) *codexSessionUsage {
 	root := codexSessionRoot(codexHome)
 	if root == "" || strings.TrimSpace(threadID) == "" {
 		return nil
@@ -2292,7 +2292,7 @@ func scanCodexSessionUsage(startTime time.Time, codexHome, threadID string) *cod
 	// Multiple paths for one thread can transiently exist during layout migration.
 	// They have the same owner, so prefer the latest deterministically without ever
 	// crossing into a different thread's rollout.
-	result := parseCodexSessionFileSince(files[len(files)-1].path, startTime)
+	result := parseCodexSessionFileSince(files[len(files)-1].path, startTime, resumed)
 	if result == nil || (result.usage.InputTokens == 0 && result.usage.OutputTokens == 0 &&
 		result.usage.CacheReadTokens == 0 && result.usage.CacheWriteTokens == 0) {
 		return nil
@@ -2303,8 +2303,11 @@ func scanCodexSessionUsage(startTime time.Time, codexHome, threadID string) *cod
 // findCodexSessionRollouts returns uncompressed rollout files owned by threadID
 // in the two layouts supported by Codex 0.14x. filepath.Glob traverses a linked
 // sessions root, unlike WalkDir, which treats a symlink root as a single file and
-// never visits its children. Filtering the basename after globbing also keeps a
-// provider-supplied thread ID out of the glob expression.
+// never visits its children. The normal path uses Codex's filename contract and
+// validates session_meta.id when present. If a future Codex version changes the
+// filename, the metadata pass preserves exact ownership instead of silently
+// dropping usage. Filtering after globbing also keeps a provider-supplied thread
+// ID out of the glob expression.
 func findCodexSessionRollouts(root, threadID string) []string {
 	threadID = strings.TrimSpace(threadID)
 	if root == "" || threadID == "" {
@@ -2315,23 +2318,77 @@ func findCodexSessionRollouts(root, threadID string) []string {
 		filepath.Join(root, "rollout-*.jsonl"),
 		filepath.Join(root, "*", "*", "*", "rollout-*.jsonl"),
 	}
-	suffix := "-" + threadID + ".jsonl"
 	seen := make(map[string]bool)
-	var matches []string
+	var candidates []string
 	for _, pattern := range patterns {
 		paths, err := filepath.Glob(pattern)
 		if err != nil {
 			continue
 		}
 		for _, path := range paths {
-			if !strings.HasSuffix(filepath.Base(path), suffix) || seen[path] {
+			if seen[path] {
 				continue
 			}
 			seen[path] = true
+			candidates = append(candidates, path)
+		}
+	}
+
+	// Fast path for the current Codex contract. Reject a filename match if its
+	// canonical session_meta explicitly names a different thread.
+	suffix := "-" + threadID + ".jsonl"
+	var matches []string
+	for _, path := range candidates {
+		if !strings.HasSuffix(filepath.Base(path), suffix) {
+			continue
+		}
+		if metadataID, ok := readCodexRolloutThreadID(path); ok && metadataID != threadID {
+			continue
+		}
+		matches = append(matches, path)
+	}
+	if len(matches) > 0 {
+		return matches
+	}
+
+	// Compatibility path for a future filename format: the first session_meta
+	// remains the canonical owner of a rollout in Codex's own resume reader.
+	for _, path := range candidates {
+		if metadataID, ok := readCodexRolloutThreadID(path); ok && metadataID == threadID {
 			matches = append(matches, path)
 		}
 	}
 	return matches
+}
+
+// readCodexRolloutThreadID reads only the head of a rollout. Codex writes the
+// canonical session_meta first; the line cap prevents a malformed legacy file
+// without metadata from turning ownership checks into a full multi-GB scan.
+func readCodexRolloutThreadID(path string) (string, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+
+	var evt struct {
+		Type    string `json:"type"`
+		Payload *struct {
+			ID string `json:"id"`
+		} `json:"payload"`
+	}
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for lineCount := 0; lineCount < 64 && scanner.Scan(); lineCount++ {
+		line := scanner.Bytes()
+		if !bytesContainsStr(line, "session_meta") {
+			continue
+		}
+		if err := json.Unmarshal(line, &evt); err == nil && evt.Type == "session_meta" && evt.Payload != nil && evt.Payload.ID != "" {
+			return evt.Payload.ID, true
+		}
+	}
+	return "", false
 }
 
 // codexSessionRoot returns the Codex sessions directory. It prefers the
@@ -2386,14 +2443,16 @@ type codexSessionTokenCount struct {
 
 // parseCodexSessionFile extracts the final token_count from a Codex session file.
 func parseCodexSessionFile(path string) *codexSessionUsage {
-	return parseCodexSessionFileSince(path, time.Time{})
+	return parseCodexSessionFileSince(path, time.Time{}, false)
 }
 
 // parseCodexSessionFileSince extracts usage accumulated after startTime. Codex
 // reports total_token_usage cumulatively for the whole resumed session, so the
-// last total before startTime is subtracted from the final total. Fresh sessions
-// have no baseline and retain the previous whole-file behavior.
-func parseCodexSessionFileSince(path string, startTime time.Time) *codexSessionUsage {
+// last total before startTime is subtracted from the final total. Timestamp-less
+// events in a resumed rollout are baseline-only until an explicit post-start
+// timestamp establishes the boundary; fresh sessions retain the previous
+// whole-file behavior because every event belongs to the new task.
+func parseCodexSessionFileSince(path string, startTime time.Time, resumed bool) *codexSessionUsage {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
@@ -2404,6 +2463,7 @@ func parseCodexSessionFileSince(path string, startTime time.Time) *codexSessionU
 	var previousTotal, accumulated, finalUsage codexRawTokenUsage
 	previousTotalFound := false
 	finalUsageFound := false
+	afterStartBoundary := false
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
@@ -2420,6 +2480,10 @@ func parseCodexSessionFileSince(path string, startTime time.Time) *codexSessionU
 		if err := json.Unmarshal(line, &evt); err != nil || evt.Payload == nil {
 			continue
 		}
+		timestampAfterStart := !startTime.IsZero() && !evt.Timestamp.IsZero() && evt.Timestamp.After(startTime)
+		if timestampAfterStart {
+			afterStartBoundary = true
+		}
 
 		// Track model from turn_context events.
 		if evt.Type == "turn_context" && evt.Payload.Model != "" {
@@ -2429,7 +2493,8 @@ func parseCodexSessionFileSince(path string, startTime time.Time) *codexSessionU
 
 		// Extract token usage from token_count events.
 		if evt.Payload.Type == "token_count" && evt.Payload.Info != nil {
-			afterStart := startTime.IsZero() || evt.Timestamp.IsZero() || evt.Timestamp.After(startTime)
+			afterStart := startTime.IsZero() || timestampAfterStart ||
+				(evt.Timestamp.IsZero() && (!resumed || afterStartBoundary))
 			if usage := evt.Payload.Info.TotalTokenUsage; usage != nil {
 				current := normalizeCodexRawTokenUsage(*usage)
 				if afterStart {
@@ -2470,6 +2535,9 @@ func parseCodexSessionFileSince(path string, startTime time.Time) *codexSessionU
 func subtractCodexRawTokenUsage(total, baseline codexRawTokenUsage) codexRawTokenUsage {
 	total = normalizeCodexRawTokenUsage(total)
 	baseline = normalizeCodexRawTokenUsage(baseline)
+	// Guard each counter independently. Treating one field's reset as a reset of
+	// the entire snapshot would re-report still-monotonic fields and recreate the
+	// over-counting this fallback is meant to prevent.
 	return codexRawTokenUsage{
 		InputTokens:           nonNegativeTokenDelta(total.InputTokens, baseline.InputTokens),
 		OutputTokens:          nonNegativeTokenDelta(total.OutputTokens, baseline.OutputTokens),
