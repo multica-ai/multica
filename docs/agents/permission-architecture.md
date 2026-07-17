@@ -12,7 +12,9 @@ Line numbers drift; this doc cites files + functions. Grep the function name if 
 > **Secure browser fill (FIR-3006):** this is a code-only compound gate, not a
 > new permission model. It requires `tools:personal-browser` for the target host
 > and an explicit exact-resource `credential.reveal` Allow authored on the
-> `browser-testers` group. The resource is one app-specific Agent Vault box,
+> `browser-testers` group. The owner must be a member of that group and the
+> exact calling agent must be on the same group's agent allowlist. The resource
+> is one app-specific Agent Vault box,
 > `agentvault-vault:Shared/browser-login/<app>`; no capability-wide reveal is
 > accepted. Plaintext exists only between the backend Agent Vault client and the
 > desktop Chromium injection frame.
@@ -130,7 +132,7 @@ The unified tool-policy chain is the model we want **everything** to converge on
 |---|---|---|
 | agent-browser unix-socket (`tools:agent-browser`, **Base=Deny**) | `daemon_tool_policy_cerebro.go:281` | live |
 | personal browser per-action host gate (`tools:personal-browser`, agent opt-in + feature kill switch) | `personal_browser_authorize_cerebro.go` `AuthorizePersonalBrowser` | live |
-| agent-browser Agent Vault login provisioning (`credential.reveal`, exact `Shared/browser-login/<app>` box + `browser-testers`) | `handler/agent_browser_auth_cerebro.go` | live |
+| agent-browser Agent Vault login provisioning (`credential.reveal`, exact `Shared/browser-login/<app>` box + owner membership and exact-agent allowlist in `browser-testers`) | `handler/agent_browser_auth_cerebro.go` | live |
 | repo checkout (`repo.checkout`, Base=Allow) | `handler/repo_approval_cerebro.go:42` `CheckDaemonRepoCapability` | live |
 | `create_local_runtime` | `group_permissions_cerebro.go:186` | live |
 | `manage_connections` | `group_permissions_cerebro.go:237` (+ router middleware) | live |
