@@ -741,6 +741,7 @@ func TestCodexSessionRootPrefersExplicitTaskHome(t *testing.T) {
 func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 	t.Parallel()
 	taskHome := t.TempDir()
+	threadID := "task-thread"
 	startTime := time.Now().Add(-time.Minute)
 	dateDir := filepath.Join(taskHome, "sessions",
 		fmt.Sprintf("%04d", startTime.Year()),
@@ -755,11 +756,11 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 		fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":20},"model":"gpt-5.6-sol"}}}`, startTime.Add(2*time.Second).UTC().Format(time.RFC3339Nano)),
 		"",
 	}, "\n")
-	if err := os.WriteFile(filepath.Join(dateDir, "rollout.jsonl"), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write session file: %v", err)
 	}
 
-	got := scanCodexSessionUsage(startTime, taskHome)
+	got := scanCodexSessionUsage(startTime, taskHome, threadID)
 	if got == nil {
 		t.Fatal("expected usage scanned from the per-task home")
 	}
@@ -774,6 +775,7 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
 	t.Parallel()
 	taskHome := t.TempDir()
+	threadID := "resumed-thread"
 	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
 	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
 	if err := os.MkdirAll(dateDir, 0o755); err != nil {
@@ -786,11 +788,11 @@ func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
 		`{"timestamp":"2026-07-13T00:00:12.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":1400,"output_tokens":100,"reasoning_output_tokens":25},"model":"gpt-5.6-sol"}}}`,
 		"",
 	}, "\n")
-	if err := os.WriteFile(filepath.Join(dateDir, "rollout.jsonl"), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write session file: %v", err)
 	}
 
-	got := scanCodexSessionUsage(startTime, taskHome)
+	got := scanCodexSessionUsage(startTime, taskHome, threadID)
 	if got == nil {
 		t.Fatal("expected usage")
 	}
@@ -877,6 +879,7 @@ func TestParseCodexSessionFileSinceResumeEdgeCases(t *testing.T) {
 func TestScanCodexSessionUsageFindsCrossDayResumeWithCacheOnlyDelta(t *testing.T) {
 	t.Parallel()
 	taskHome := t.TempDir()
+	threadID := "cross-day-thread"
 	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
 	previousDateDir := filepath.Join(taskHome, "sessions", "2026", "07", "12")
 	if err := os.MkdirAll(previousDateDir, 0o755); err != nil {
@@ -887,7 +890,7 @@ func TestScanCodexSessionUsageFindsCrossDayResumeWithCacheOnlyDelta(t *testing.T
 		`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":150}}}}`,
 		"",
 	}, "\n")
-	path := filepath.Join(previousDateDir, "rollout.jsonl")
+	path := filepath.Join(previousDateDir, "rollout-2026-07-12T23-59-59-"+threadID+".jsonl")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write session file: %v", err)
 	}
@@ -895,13 +898,92 @@ func TestScanCodexSessionUsageFindsCrossDayResumeWithCacheOnlyDelta(t *testing.T
 		t.Fatalf("set session mtime: %v", err)
 	}
 
-	got := scanCodexSessionUsage(startTime, taskHome)
+	got := scanCodexSessionUsage(startTime, taskHome, threadID)
 	if got == nil {
 		t.Fatal("expected cross-day cache-only usage")
 	}
 	want := TokenUsage{CacheReadTokens: 50}
 	if got.usage != want {
 		t.Fatalf("usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageFollowsLinkedSessionsRoot(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("directory symlink setup requires Windows developer mode")
+	}
+
+	root := t.TempDir()
+	taskHome := filepath.Join(root, "task-home")
+	store := filepath.Join(root, "session-store")
+	threadID := "linked-thread"
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(store, "2026", "07", "12")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir store date dir: %v", err)
+	}
+	if err := os.MkdirAll(taskHome, 0o755); err != nil {
+		t.Fatalf("mkdir task home: %v", err)
+	}
+	if err := os.Symlink(store, filepath.Join(taskHome, "sessions")); err != nil {
+		t.Fatalf("link sessions root: %v", err)
+	}
+
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+		`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+		"",
+	}, "\n")
+	path := filepath.Join(dateDir, "rollout-2026-07-12T23-59-59-"+threadID+".jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write linked rollout: %v", err)
+	}
+	if err := os.Chtimes(path, startTime.Add(time.Second), startTime.Add(time.Second)); err != nil {
+		t.Fatalf("set rollout mtime: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID)
+	if got == nil {
+		t.Fatal("expected usage through linked sessions root")
+	}
+	want := TokenUsage{InputTokens: 60, OutputTokens: 15}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageSelectsCurrentThread(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+
+	writeRollout := func(threadID string, input int, modTime time.Time) {
+		t.Helper()
+		content := fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d}}}}`+"\n", input)
+		path := filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s rollout: %v", threadID, err)
+		}
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatalf("set %s rollout mtime: %v", threadID, err)
+		}
+	}
+
+	writeRollout("current-thread", 60, startTime.Add(time.Second))
+	writeRollout("newer-subagent-thread", 900, startTime.Add(2*time.Second))
+
+	got := scanCodexSessionUsage(startTime, taskHome, "current-thread")
+	if got == nil {
+		t.Fatal("expected current thread usage")
+	}
+	want := TokenUsage{InputTokens: 60}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want current thread %+v", got.usage, want)
 	}
 }
 

@@ -1212,7 +1212,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// there rather than in the shared ~/.codex/sessions (MUL-4424).
 		if u.InputTokens == 0 && u.OutputTokens == 0 {
 			taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
-			if scanned := scanCodexSessionUsage(startTime, taskCodexHome); scanned != nil {
+			if scanned := scanCodexSessionUsage(startTime, taskCodexHome, threadID); scanned != nil {
 				u = scanned.usage
 				if scanned.model != "" && opts.Model == "" {
 					opts.Model = scanned.model
@@ -2255,15 +2255,15 @@ type codexSessionUsage struct {
 	model string
 }
 
-// scanCodexSessionUsage scans Codex session JSONL files written after startTime
-// to extract token usage. Codex writes token_count events below
-// $CODEX_HOME/sessions. A resumed rollout keeps its original date directory, so
-// scanning only startTime's date would miss cross-day resumes. codexHome is the
-// backend's per-task CODEX_HOME; sessions are isolated there rather than in the
-// shared ~/.codex/sessions (MUL-4424), so usage must be read from it.
-func scanCodexSessionUsage(startTime time.Time, codexHome string) *codexSessionUsage {
+// scanCodexSessionUsage extracts usage for threadID from its Codex rollout.
+// Rollout filenames end in the thread ID, which is the same ownership contract
+// the daemon uses to decide whether a thread can be resumed. Binding the scan to
+// that ID prevents a concurrently-created rollout (for example a Codex subagent)
+// from being billed to this task. A resumed rollout keeps its original date
+// directory, so both flat and YYYY/MM/DD layouts are searched.
+func scanCodexSessionUsage(startTime time.Time, codexHome, threadID string) *codexSessionUsage {
 	root := codexSessionRoot(codexHome)
-	if root == "" {
+	if root == "" || strings.TrimSpace(threadID) == "" {
 		return nil
 	}
 
@@ -2272,21 +2272,14 @@ func scanCodexSessionUsage(startTime time.Time, codexHome string) *codexSessionU
 		modTime time.Time
 	}
 	var files []candidate
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		if entry.IsDir() || filepath.Ext(path) != ".jsonl" {
-			return nil
-		}
-		info, infoErr := entry.Info()
-		if infoErr != nil || info.ModTime().Before(startTime) {
-			return nil
+	for _, path := range findCodexSessionRollouts(root, threadID) {
+		info, err := os.Stat(path)
+		if err != nil || info.ModTime().Before(startTime) {
+			continue
 		}
 		files = append(files, candidate{path: path, modTime: info.ModTime()})
-		return nil
-	})
-	if err != nil || len(files) == 0 {
+	}
+	if len(files) == 0 {
 		return nil
 	}
 	sort.Slice(files, func(i, j int) bool {
@@ -2296,20 +2289,49 @@ func scanCodexSessionUsage(startTime time.Time, codexHome string) *codexSessionU
 		return files[i].modTime.Before(files[j].modTime)
 	})
 
-	// Files are ordered by modification time so the latest task rollout wins.
-	var result codexSessionUsage
-	for _, f := range files {
-		if u := parseCodexSessionFileSince(f.path, startTime); u != nil {
-			// Take the last matching file's data (usually there's only one per task).
-			result = *u
-		}
-	}
-
-	if result.usage.InputTokens == 0 && result.usage.OutputTokens == 0 &&
-		result.usage.CacheReadTokens == 0 && result.usage.CacheWriteTokens == 0 {
+	// Multiple paths for one thread can transiently exist during layout migration.
+	// They have the same owner, so prefer the latest deterministically without ever
+	// crossing into a different thread's rollout.
+	result := parseCodexSessionFileSince(files[len(files)-1].path, startTime)
+	if result == nil || (result.usage.InputTokens == 0 && result.usage.OutputTokens == 0 &&
+		result.usage.CacheReadTokens == 0 && result.usage.CacheWriteTokens == 0) {
 		return nil
 	}
-	return &result
+	return result
+}
+
+// findCodexSessionRollouts returns uncompressed rollout files owned by threadID
+// in the two layouts supported by Codex 0.14x. filepath.Glob traverses a linked
+// sessions root, unlike WalkDir, which treats a symlink root as a single file and
+// never visits its children. Filtering the basename after globbing also keeps a
+// provider-supplied thread ID out of the glob expression.
+func findCodexSessionRollouts(root, threadID string) []string {
+	threadID = strings.TrimSpace(threadID)
+	if root == "" || threadID == "" {
+		return nil
+	}
+
+	patterns := []string{
+		filepath.Join(root, "rollout-*.jsonl"),
+		filepath.Join(root, "*", "*", "*", "rollout-*.jsonl"),
+	}
+	suffix := "-" + threadID + ".jsonl"
+	seen := make(map[string]bool)
+	var matches []string
+	for _, pattern := range patterns {
+		paths, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, path := range paths {
+			if !strings.HasSuffix(filepath.Base(path), suffix) || seen[path] {
+				continue
+			}
+			seen[path] = true
+			matches = append(matches, path)
+		}
+	}
+	return matches
 }
 
 // codexSessionRoot returns the Codex sessions directory. It prefers the
