@@ -296,17 +296,23 @@ func TestMatcherClaimAndMatchDispatches(t *testing.T) {
 	hookID := f.seedHook(t, "issue.status_changed", `{"to":"done"}`, `[]`, automation.FirePerEvent)
 	event := f.seedEvent(t, "done", 0)
 
-	n, err := f.svc.ClaimAndMatch(ctx, MatcherBatchSize)
-	if err != nil {
-		t.Fatalf("claim and match: %v", err)
-	}
-	if n < 1 {
-		t.Fatalf("dispatched %d events, want >=1", n)
-	}
+	// ClaimAndMatch is a GLOBAL outbox consumer (not workspace-scoped) and the
+	// shared CI test DB carries a backlog of undispatched events from other tests.
+	// Our event has the newest (highest) seq, so drain in bounded batches until it
+	// is reached — its seq is fixed, and concurrently-added events have higher seq,
+	// so this converges.
 	var status string
-	f.pool.QueryRow(ctx, `SELECT dispatch_status FROM domain_event WHERE id = $1`, util.UUIDToString(event.ID)).Scan(&status)
+	for i := 0; i < 60; i++ {
+		if _, err := f.svc.ClaimAndMatch(ctx, 500); err != nil {
+			t.Fatalf("claim and match: %v", err)
+		}
+		f.pool.QueryRow(ctx, `SELECT dispatch_status FROM domain_event WHERE id = $1`, util.UUIDToString(event.ID)).Scan(&status)
+		if status == "dispatched" {
+			break
+		}
+	}
 	if status != "dispatched" {
-		t.Errorf("event dispatch_status = %q, want dispatched", status)
+		t.Fatalf("event dispatch_status = %q after draining, want dispatched", status)
 	}
 	if r := f.execFor(t, hookID); r.status != hookExecQueued {
 		t.Errorf("expected queued execution after claim+match, got %+v", r)
