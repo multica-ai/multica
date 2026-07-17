@@ -80,6 +80,8 @@ type ModelEntry struct {
 	Provider string         `json:"provider,omitempty"`
 	Default  bool           `json:"default,omitempty"`
 	Thinking *ModelThinking `json:"thinking,omitempty"`
+	// CEREBRO-PATCH(runtime-model-speed-wire): keep daemon speed catalogs in model-list responses.
+	Speed *ModelSpeed `json:"speed,omitempty"`
 }
 
 // ModelThinking is the wire shape for the per-model thinking catalog.
@@ -96,6 +98,22 @@ type ModelThinking struct {
 // `Description` is optional helper copy (Codex's debug-models output
 // includes one per level).
 type ThinkingLevel struct {
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+// ModelSpeed is the wire shape for the per-model speed catalog.
+// Mirrors agent.ModelSpeed so the daemon's report passes through
+// without remapping.
+type ModelSpeed struct {
+	SupportedLevels []SpeedLevel `json:"supported_levels"`
+}
+
+// SpeedLevel is the wire shape for a single entry in a model's
+// speed catalog. `Value` is the literal token the daemon passes to
+// the CLI; `Label` is the human-readable display string.
+type SpeedLevel struct {
 	Value       string `json:"value"`
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`

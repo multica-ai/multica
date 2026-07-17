@@ -225,8 +225,11 @@
     "thinking_clear_title": "清除覆盖，让本地 CLI（claude/codex）的配置决定推理级别"
   },
   "runtime_settings": {
+    "_comment_search_select": "CEREBRO-PATCH(agent-runtime-setting-search-select): searchable Effort and Speed selectors aligned with Model",
     "effort": "思考强度",
     "speed": "速度",
+    "search_effort": "搜索思考强度",
+    "search_speed": "搜索速度",
     "runtime_default": "跟随运行时默认值"
   },
   "model_dropdown": {

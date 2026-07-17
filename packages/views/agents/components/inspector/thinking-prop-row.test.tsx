@@ -182,6 +182,19 @@ describe("ThinkingPropRow", () => {
     expect((await screen.findAllByText("High")).length).toBeGreaterThan(0);
   });
 
+  it("searches the advertised effort levels and selects the result", async () => {
+    const { onChange } = renderRow({ value: "low" });
+
+    await screen.findByRole("button", { name: /Thinking: Low/i });
+    fireEvent.click(screen.getByRole("button", { name: /Thinking: Low/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: /Search effort/i }), {
+      target: { value: "high" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "High" }));
+
+    expect(onChange).toHaveBeenCalledWith("high");
+  });
+
   it("renders the row with \"Follow CLI config\" when value is empty and the model exposes levels", async () => {
     renderRow({ value: "" });
 

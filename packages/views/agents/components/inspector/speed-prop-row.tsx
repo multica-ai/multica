@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { PropRow } from "../../../common/prop-row";
 import { useT } from "../../../i18n";
+// CEREBRO-PATCH(agent-runtime-setting-search-select): match the Model property picker interaction.
+import { RuntimeSettingSearchSelect } from "@multica/cerebro-ui/components/runtime-setting-search-select";
 
 export function SpeedPropRow({
   runtimeId,
@@ -33,14 +35,14 @@ export function SpeedPropRow({
   return (
     <PropRow label={t(($) => $.inspector.prop_speed)} interactive={false}>
       {canEdit && levels.length > 0 ? (
-        <select
-          aria-label={t(($) => $.runtime_settings.speed)}
+        <RuntimeSettingSearchSelect
+          variant="property"
+          ariaLabel={t(($) => $.runtime_settings.speed)}
           value={displayValue}
-          onChange={(event) => void onChange(event.target.value)}
-          className="max-w-28 rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px]"
-        >
-          {levels.map((level) => <option key={level.value} value={level.value}>{level.label}</option>)}
-        </select>
+          options={levels}
+          searchPlaceholder={t(($) => $.runtime_settings.search_speed)}
+          onChange={onChange}
+        />
       ) : (
         <span className="font-mono text-[11px] text-muted-foreground">{displayValue}</span>
       )}

@@ -194,8 +194,11 @@
     "thinking_clear_title": "上書きをクリアし、推論レベルをローカルの CLI 設定（claude/codex）に任せます"
   },
   "runtime_settings": {
+    "_comment_search_select": "CEREBRO-PATCH(agent-runtime-setting-search-select): searchable Effort and Speed selectors aligned with Model",
     "effort": "思考強度",
     "speed": "速度",
+    "search_effort": "思考強度を検索",
+    "search_speed": "速度を検索",
     "runtime_default": "ランタイムのデフォルトに従う"
   },
   "model_dropdown": {
