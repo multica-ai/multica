@@ -57,12 +57,13 @@ func TestModelListStore_RunningRequestTimesOut(t *testing.T) {
 	}
 }
 
-// TestReportModelListResult_PreservesDefault guards the daemon → server
+// CEREBRO-PATCH(runtime-model-speed-wire-test): guard daemon → server → UI model metadata.
+// TestReportModelListResult_PreservesModelMetadata guards the daemon → server
 // → UI wire format for the model-discovery result. The `default` bool
-// on each ModelEntry lights up the UI's "default" badge; if it gets
-// dropped here (e.g. by going through a map[string]string), the badge
-// silently disappears.
-func TestReportModelListResult_PreservesDefault(t *testing.T) {
+// on each ModelEntry lights up the UI's "default" badge, and `speed`
+// powers the agent Speed picker; if either gets dropped here, the UI
+// silently loses runtime-supported controls.
+func TestReportModelListResult_PreservesModelMetadata(t *testing.T) {
 	ctx := context.Background()
 	store := NewInMemoryModelListStore()
 	req, err := store.Create(ctx, "runtime-xyz")
@@ -75,7 +76,18 @@ func TestReportModelListResult_PreservesDefault(t *testing.T) {
 		"status":    "completed",
 		"supported": true,
 		"models": []map[string]any{
-			{"id": "foo-default", "label": "Foo", "provider": "p", "default": true},
+			{
+				"id":       "foo-default",
+				"label":    "Foo",
+				"provider": "p",
+				"default":  true,
+				"speed": map[string]any{
+					"supported_levels": []map[string]any{
+						{"value": "standard", "label": "Standard"},
+						{"value": "fast", "label": "Fast", "description": "Faster responses"},
+					},
+				},
+			},
 			{"id": "bar", "label": "Bar", "provider": "p"},
 		},
 	}
@@ -111,22 +123,34 @@ func TestReportModelListResult_PreservesDefault(t *testing.T) {
 	if got.Models[1].Default {
 		t.Errorf("second model should carry Default=false, got %+v", got.Models[1])
 	}
+	if got.Models[0].Speed == nil {
+		t.Fatalf("first model should carry Speed catalog, got %+v", got.Models[0])
+	}
+	if len(got.Models[0].Speed.SupportedLevels) != 2 {
+		t.Fatalf("expected 2 speed levels, got %+v", got.Models[0].Speed.SupportedLevels)
+	}
+	if got.Models[0].Speed.SupportedLevels[1].Value != "fast" {
+		t.Errorf("speed level lost: %+v", got.Models[0].Speed.SupportedLevels[1])
+	}
 
 	// Serialise the stored request back out (what UI actually sees)
-	// and confirm `default: true` survives.
+	// and confirm `default: true` and `speed` survive.
 	out, _ := json.Marshal(got)
 	if !bytes.Contains(out, []byte(`"default":true`)) {
 		t.Errorf(`expected "default":true in JSON response, got: %s`, out)
 	}
+	if !bytes.Contains(out, []byte(`"speed"`)) || !bytes.Contains(out, []byte(`"fast"`)) {
+		t.Errorf(`expected speed catalog in JSON response, got: %s`, out)
+	}
 }
 
-// TestReportModelListResult_DecodesJSONBodyDefault verifies the
-// handler's request-body parsing accepts the `default` bool from
-// the daemon POST — not just through the store API.
-func TestReportModelListResult_DecodesJSONBodyDefault(t *testing.T) {
+// TestReportModelListResult_DecodesJSONBodyModelMetadata verifies the
+// handler's request-body parsing accepts model metadata from the
+// daemon POST — not just through the store API.
+func TestReportModelListResult_DecodesJSONBodyModelMetadata(t *testing.T) {
 	// Simulate the shape the daemon POSTs: status + models + supported
-	// with `default` on one entry.
-	payload := `{"status":"completed","supported":true,"models":[{"id":"a","label":"A","default":true},{"id":"b","label":"B"}]}`
+	// with `default` and `speed` on one entry.
+	payload := `{"status":"completed","supported":true,"models":[{"id":"a","label":"A","default":true,"speed":{"supported_levels":[{"value":"standard","label":"Standard"}]}},{"id":"b","label":"B"}]}`
 	r := httptest.NewRequest(http.MethodPost, "/api/daemon/runtimes/rt/models/req/result", bytes.NewBufferString(payload))
 
 	var body struct {
@@ -142,6 +166,9 @@ func TestReportModelListResult_DecodesJSONBodyDefault(t *testing.T) {
 	}
 	if !body.Models[0].Default {
 		t.Errorf("default flag lost on model[0]: %+v", body.Models[0])
+	}
+	if body.Models[0].Speed == nil || len(body.Models[0].Speed.SupportedLevels) != 1 {
+		t.Fatalf("speed catalog lost on model[0]: %+v", body.Models[0])
 	}
 }
 
