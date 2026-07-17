@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -160,6 +161,120 @@ func TestListIssues_TableFacetsAreServerSide(t *testing.T) {
 	assertList("&ids="+issueA+","+issueC, issueA, issueC)
 	assertList("&ids="+issueA+","+issueC+"&statuses=done", issueC)
 	assertList("&ids=")
+}
+
+// POST /api/issues/query is the body-transport twin of GET /api/issues for
+// filter sets too large for a request line (the agents-working ids facet can
+// carry hundreds of UUIDs; proxies cap request lines around 8 KB). It must
+// return exactly what the GET returns for the same parameters, including at
+// id-list sizes that would overflow a GET.
+func TestQueryIssues_PostTwinMatchesGet(t *testing.T) {
+	ctx := context.Background()
+	token := fmt.Sprintf("post-query-%d", time.Now().UnixNano())
+	metadata := fmt.Sprintf(`{"post_query_test":%q}`, token)
+
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE metadata @> $1::jsonb`, metadata)
+	})
+
+	nextNumber := func() int {
+		var number int
+		if err := testPool.QueryRow(ctx, `
+			UPDATE workspace
+			SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+			WHERE id = $1 RETURNING issue_counter
+		`, testWorkspaceID).Scan(&number); err != nil {
+			t.Fatalf("next issue number: %v", err)
+		}
+		return number
+	}
+	insertIssue := func(title string) string {
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (
+				workspace_id, title, status, priority, creator_type, creator_id,
+				position, number, metadata
+			) VALUES ($1, $2, 'todo', 'none', 'member', $3, 0, $4, $5::jsonb)
+			RETURNING id
+		`, testWorkspaceID, title, testUserID, nextNumber(), metadata).Scan(&id); err != nil {
+			t.Fatalf("create issue %q: %v", title, err)
+		}
+		return id
+	}
+	issueA := insertIssue(token + " A")
+	issueB := insertIssue(token + " B")
+	insertIssue(token + " C")
+
+	decode := func(w *httptest.ResponseRecorder, transport string) ([]string, int64) {
+		t.Helper()
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d: %s", transport, w.Code, w.Body.String())
+		}
+		var response struct {
+			Issues []IssueResponse `json:"issues"`
+			Total  int64           `json:"total"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatalf("%s decode: %v", transport, err)
+		}
+		ids := make([]string, 0, len(response.Issues))
+		for _, issue := range response.Issues {
+			ids = append(ids, issue.ID)
+		}
+		sort.Strings(ids)
+		return ids, response.Total
+	}
+
+	// Pad the target ids with 300 extra UUIDs — a body far beyond any GET
+	// request-line budget. The extras match nothing; the result must still be
+	// exactly A and B.
+	padded := []string{issueA, issueB}
+	for i := 0; i < 300; i++ {
+		var extra string
+		if err := testPool.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&extra); err != nil {
+			t.Fatalf("generate uuid: %v", err)
+		}
+		padded = append(padded, extra)
+	}
+
+	postBody := map[string]string{
+		"workspace_id": testWorkspaceID,
+		"metadata":     metadata,
+		"limit":        "100",
+		"ids":          strings.Join(padded, ","),
+	}
+	postRecorder := httptest.NewRecorder()
+	testHandler.QueryIssues(postRecorder, newRequest("POST", "/api/issues/query", postBody))
+	postIDs, postTotal := decode(postRecorder, "POST")
+
+	wantIDs := []string{issueA, issueB}
+	sort.Strings(wantIDs)
+	if fmt.Sprint(postIDs) != fmt.Sprint(wantIDs) || postTotal != 2 {
+		t.Fatalf("POST ids = %v total = %d, want %v total 2", postIDs, postTotal, wantIDs)
+	}
+
+	getPath := fmt.Sprintf(
+		"/api/issues?workspace_id=%s&limit=100&metadata=%s&ids=%s",
+		testWorkspaceID, url.QueryEscape(metadata),
+		url.QueryEscape(issueA+","+issueB),
+	)
+	getRecorder := httptest.NewRecorder()
+	testHandler.ListIssues(getRecorder, newRequest("GET", getPath, nil))
+	getIDs, getTotal := decode(getRecorder, "GET")
+
+	if fmt.Sprint(postIDs) != fmt.Sprint(getIDs) || postTotal != getTotal {
+		t.Fatalf("transport mismatch: POST %v/%d vs GET %v/%d", postIDs, postTotal, getIDs, getTotal)
+	}
+
+	// Malformed body fails closed.
+	badRecorder := httptest.NewRecorder()
+	badRequest := httptest.NewRequest("POST", "/api/issues/query", strings.NewReader("not json"))
+	badRequest.Header.Set("X-User-ID", testUserID)
+	badRequest.Header.Set("X-Workspace-ID", testWorkspaceID)
+	testHandler.QueryIssues(badRecorder, badRequest)
+	if badRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("malformed body: expected 400, got %d", badRecorder.Code)
+	}
 }
 
 // Offset pages are only stable when the full ORDER BY is deterministic. All

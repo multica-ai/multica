@@ -755,6 +755,7 @@ export function IssuesHeader({
   onDateFilterChange,
   isRefreshing = false,
   facetCountsExact = true,
+  workingScopeIssueIds,
 }: {
   scopedIssues: Issue[];
   allowGantt?: boolean;
@@ -763,6 +764,14 @@ export function IssuesHeader({
   isRefreshing?: boolean;
   /** See IssueDisplayControls.facetCountsExact. */
   facetCountsExact?: boolean;
+  /**
+   * Authoritative running-issue scope for the working chip. The table's
+   * loaded pages are only a slice of its server window, so deriving the
+   * chip scope from `scopedIssues` there says "0 working" while the filter
+   * itself would find matches on unfetched pages. When set, this wins over
+   * the loaded-row derivation; leave undefined for full-window surfaces.
+   */
+  workingScopeIssueIds?: ReadonlySet<string>;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -778,11 +787,14 @@ export function IssuesHeader({
   // Scope the chip to whatever issues this page is currently showing.
   // /issues uses the full workspace minus Members/Agents pill filtering;
   // passing the visible-issue id set lets the chip count match the list
-  // length when the filter is on.
-  const scopedIssueIds = useMemo(
+  // length when the filter is on. An explicit workingScopeIssueIds override
+  // (the table's authoritative ids-facet window) wins over the loaded-row
+  // derivation — see the prop doc.
+  const loadedIssueIds = useMemo(
     () => new Set(scopedIssues.map((i) => i.id)),
     [scopedIssues],
   );
+  const scopedIssueIds = workingScopeIssueIds ?? loadedIssueIds;
   const SCOPE_LABEL_KEY: Record<IssuesScope, "all_label" | "members_label" | "agents_label"> = {
     all: "all_label",
     members: "members_label",

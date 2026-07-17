@@ -27,6 +27,7 @@ export function MyIssuesHeader({
   onScopeChange,
   isRefreshing = false,
   facetCountsExact = true,
+  workingScopeIssueIds,
 }: {
   allIssues: Issue[];
   scope: MyIssuesScope;
@@ -34,6 +35,8 @@ export function MyIssuesHeader({
   isRefreshing?: boolean;
   /** See IssueDisplayControls.facetCountsExact. */
   facetCountsExact?: boolean;
+  /** See IssuesHeader.workingScopeIssueIds — table-mode chip authority. */
+  workingScopeIssueIds?: ReadonlySet<string>;
 }) {
   const { t } = useT("my-issues");
   const { t: tIssues } = useT("issues");
@@ -47,10 +50,11 @@ export function MyIssuesHeader({
   const toggleAgentRunningFilter = useViewStore(
     (s) => s.toggleAgentRunningFilter,
   );
-  const scopedIssueIds = useMemo(
+  const loadedIssueIds = useMemo(
     () => new Set(allIssues.map((i) => i.id)),
     [allIssues],
   );
+  const scopedIssueIds = workingScopeIssueIds ?? loadedIssueIds;
   const scopeLabel = SCOPES.find((s) => s.value === scope)?.label ?? SCOPES[0]?.label;
 
   return (

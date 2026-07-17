@@ -122,6 +122,7 @@
     "search_placeholder": "搜索标题或 issue 编号…",
     "search_clear": "清除搜索",
     "loaded_count": "已载入 {{count}} / {{total}}",
+    "structure_paused": "分组和层级已暂停——{{total}} 个 issue 超过 {{limit}} 个上限，收窄筛选后自动恢复。",
     "hierarchy": "层级",
     "hierarchy_description": "将子 issue 嵌套显示在父 issue 下方",
     "group_label": "分组",

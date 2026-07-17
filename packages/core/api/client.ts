@@ -594,6 +594,19 @@ export class ApiClient {
     if (params?.date_end) search.set("date_end", params.date_end);
     if (params?.sort_by) search.set("sort", params.sort_by);
     if (params?.sort_direction) search.set("direction", params.sort_direction);
+    // An ids facet can carry hundreds of UUIDs (agents-working filter) —
+    // enough to blow the ~8 KB request-line cap of common reverse proxies.
+    // Route those windows through the POST twin, which takes the SAME
+    // key/value pairs as a JSON body.
+    if (params?.ids) {
+      const raw = await this.fetch<unknown>("/api/issues/query", {
+        method: "POST",
+        body: JSON.stringify(Object.fromEntries(search)),
+      });
+      return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
+        endpoint: "POST /api/issues/query",
+      });
+    }
     const path = `/api/issues?${search}`;
     const raw = await this.fetch<unknown>(path);
     return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {

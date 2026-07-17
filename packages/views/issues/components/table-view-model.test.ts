@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Issue, IssueProperty } from "@multica/core/types";
 import {
+  TABLE_STRUCTURE_MAX_WINDOW,
   buildIssueTableCsv,
   buildIssueTableRows,
   calculateIssueTableColumn,
   getIssueTableSelectionRange,
+  isTableStructureSuspended,
 } from "./table-view-model";
 
 function makeIssue(id: string, overrides: Partial<Issue> = {}): Issue {
@@ -69,6 +71,14 @@ const baseOptions = {
   trueLabel: "Yes",
   falseLabel: "No",
 };
+
+describe("isTableStructureSuspended", () => {
+  it("suspends structure only above the ceiling; unknown totals do not suspend", () => {
+    expect(isTableStructureSuspended(0)).toBe(false);
+    expect(isTableStructureSuspended(TABLE_STRUCTURE_MAX_WINDOW)).toBe(false);
+    expect(isTableStructureSuspended(TABLE_STRUCTURE_MAX_WINDOW + 1)).toBe(true);
+  });
+});
 
 describe("buildIssueTableRows", () => {
   it("renders a parent before its children and honors parent collapse", () => {

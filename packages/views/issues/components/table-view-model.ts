@@ -11,6 +11,26 @@ import type {
   IssuePropertyValue,
 } from "@multica/core/types";
 
+/**
+ * Ceiling for the whole-window structure features (grouping, hierarchy).
+ * Both are only truthful over a COMPLETE window, and completing the window
+ * means materializing every offset page — at 100 rows/page an unbounded
+ * materialize would issue total/100 sequential GETs and pin every entity in
+ * memory (grouping is persisted view state, so it would re-run on every
+ * visit). Below the ceiling the table auto-loads the ~10 remaining pages;
+ * above it, structure features suspend with an explicit notice instead of
+ * triggering an unbounded download.
+ */
+export const TABLE_STRUCTURE_MAX_WINDOW = 1000;
+
+/** True when the window is too large for grouping/hierarchy — see
+ *  TABLE_STRUCTURE_MAX_WINDOW. `total` is the server-reported window size
+ *  (0 while unknown, which must NOT suspend: an unknown window is handled
+ *  by the windowComplete gate, not this ceiling). */
+export function isTableStructureSuspended(total: number): boolean {
+  return total > TABLE_STRUCTURE_MAX_WINDOW;
+}
+
 export type IssueTableDisplayRow =
   | {
       kind: "group";

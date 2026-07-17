@@ -122,6 +122,7 @@
     "search_placeholder": "제목 또는 이슈 ID 검색…",
     "search_clear": "검색 지우기",
     "loaded_count": "{{total}}개 중 {{count}}개 불러옴",
+    "structure_paused": "그룹화와 계층이 일시 중지되었습니다 — 이슈 {{total}}개가 상한 {{limit}}개를 초과했습니다. 필터로 좁히면 다시 활성화됩니다.",
     "hierarchy": "계층",
     "hierarchy_description": "하위 이슈를 상위 이슈 아래에 중첩해 표시",
     "group_label": "그룹",

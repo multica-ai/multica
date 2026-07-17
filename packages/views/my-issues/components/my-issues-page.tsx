@@ -47,6 +47,7 @@ export function MyIssuesPage() {
               facetCountsExact={
                 !(controller.viewMode === "table" && controller.hasNextFlatPage)
               }
+              workingScopeIssueIds={controller.workingScopeIssueIds}
             />
           )}
           renderEmpty={() => (

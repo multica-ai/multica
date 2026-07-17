@@ -67,6 +67,13 @@ export interface IssueSurfaceData {
   hasNextFlatPage: boolean;
   isFetchingNextFlatPage: boolean;
   flatTotal: number;
+  /** Running issues that belong to the CURRENT table window, resolved by the
+   *  authoritative ids-facet query — NOT by intersecting with loaded rows,
+   *  which under-reports whenever a running issue sits on an unfetched page.
+   *  undefined outside table mode and while the window query is still
+   *  resolving (callers fall back to loaded-row scoping); an empty running
+   *  snapshot short-circuits to an empty set without a request. */
+  workingScopeIssueIds?: ReadonlySet<string>;
   filterIssuesForExport: (issues: Issue[]) => Issue[];
   isLoading: boolean;
   /** The window's data is being revalidated while the previous snapshot is
@@ -86,6 +93,7 @@ export function useIssueSurfaceData({
   usesTable,
   sort,
   tableFacets,
+  workingFacets,
   activity,
   statusFilters,
   priorityFilters,
@@ -108,6 +116,10 @@ export function useIssueSurfaceData({
   usesTable: boolean;
   sort: IssueSortParam;
   tableFacets: IssueFlatFilter;
+  /** tableFacets restricted to the running set (ids facet) — the working
+   *  chip's authoritative scope, and the table window itself while the
+   *  agents-working filter is on (identical query key in that state). */
+  workingFacets: IssueFlatFilter;
   /** Owned by the controller so the agents-working facet and the client
    *  display filters read the same task snapshot. */
   activity: IssueSurfaceActivity;
@@ -185,6 +197,23 @@ export function useIssueSurfaceData({
     [flatIssuesQuery.data?.pages],
   );
   const flatTotal = flatIssuesQuery.data?.pages[0]?.total ?? 0;
+
+  // Running-restricted window — see IssueSurfaceData.workingScopeIssueIds.
+  // While the agents-working filter is on this observer shares the main flat
+  // query's key (one fetch); while it is off, it keeps the filter's window
+  // warm and gives the chip its authoritative count.
+  const hasRunningIssues = activity.runningIssueIds.size > 0;
+  const workingWindowQuery = useInfiniteQuery({
+    ...issueSurfaceFlatOptions(wsId, queryPlan, sort, workingFacets),
+    enabled: usesTable && hasRunningIssues,
+  });
+  const workingScopeIssueIds = useMemo<ReadonlySet<string> | undefined>(() => {
+    if (!usesTable) return undefined;
+    if (!hasRunningIssues) return new Set<string>();
+    const pages = workingWindowQuery.data?.pages;
+    if (!pages) return undefined;
+    return new Set(pages.flatMap((page) => page.issues.map((issue) => issue.id)));
+  }, [hasRunningIssues, usesTable, workingWindowQuery.data?.pages]);
 
   const bucketedIssues = useMemo(() => {
     return usesAssigneeBoard
@@ -420,6 +449,7 @@ export function useIssueSurfaceData({
     hasNextFlatPage: flatIssuesQuery.hasNextPage ?? false,
     isFetchingNextFlatPage: flatIssuesQuery.isFetchingNextPage,
     flatTotal,
+    workingScopeIssueIds,
     filterIssuesForExport,
     isLoading,
     isRefreshing,

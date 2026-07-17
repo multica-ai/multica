@@ -124,6 +124,7 @@
     "search_placeholder": "Search title or issue ID…",
     "search_clear": "Clear search",
     "loaded_count": "Loaded {{count}} of {{total}}",
+    "structure_paused": "Grouping and hierarchy are paused — {{total}} issues exceed the {{limit}}-issue limit. Narrow filters to re-enable.",
     "hierarchy": "Hierarchy",
     "hierarchy_description": "Nest sub-issues beneath their parents",
     "group_label": "Group",

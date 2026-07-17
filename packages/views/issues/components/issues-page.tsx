@@ -13,10 +13,12 @@ function IssuesSurfaceHeader({
   issues,
   isRefreshing,
   facetCountsExact,
+  workingScopeIssueIds,
 }: {
   issues: Issue[];
   isRefreshing: boolean;
   facetCountsExact: boolean;
+  workingScopeIssueIds?: ReadonlySet<string>;
 }) {
   const dateFilter = useViewStore((s) => s.dateFilter);
   const setDateFilter = useViewStore((s) => s.setDateFilter);
@@ -28,6 +30,7 @@ function IssuesSurfaceHeader({
       onDateFilterChange={setDateFilter}
       isRefreshing={isRefreshing}
       facetCountsExact={facetCountsExact}
+      workingScopeIssueIds={workingScopeIssueIds}
     />
   );
 }
@@ -54,6 +57,7 @@ export function IssuesPage() {
             facetCountsExact={
               !(controller.viewMode === "table" && controller.hasNextFlatPage)
             }
+            workingScopeIssueIds={controller.workingScopeIssueIds}
           />
         )}
         renderEmpty={() => (

@@ -755,6 +755,26 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// QueryIssues is the POST twin of ListIssues for filter sets too large for a
+// GET request line — the table's agents-working facet can carry hundreds of
+// issue ids, and common reverse proxies cap request lines around 8 KB. The
+// body is a flat JSON object with EXACTLY the same keys and string encodings
+// as ListIssues' query parameters; the handler rebuilds the query string and
+// delegates, so the two transports cannot drift.
+func (h *Handler) QueryIssues(w http.ResponseWriter, r *http.Request) {
+	var params map[string]string
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&params); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	values := make(url.Values, len(params))
+	for key, value := range params {
+		values.Set(key, value)
+	}
+	r.URL.RawQuery = values.Encode()
+	h.ListIssues(w, r)
+}
+
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 

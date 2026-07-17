@@ -184,6 +184,7 @@ function IssueSurfaceContent({
             facetCountsExact={
               !(controller.viewMode === "table" && controller.hasNextFlatPage)
             }
+            workingScopeIssueIds={controller.workingScopeIssueIds}
           />
         )}
         {controller.isLoading ? (

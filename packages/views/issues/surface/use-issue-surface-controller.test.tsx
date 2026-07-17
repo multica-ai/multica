@@ -340,10 +340,11 @@ describe("useIssueSurfaceController", () => {
       store.getState().setViewMode("board");
     });
 
-    await waitFor(() => {
-      expect(result.current.viewMode).toBe("board");
-      expect(result.current.selection.selectedIds).toEqual(new Set());
-    });
+    // Synchronous on purpose: the reset happens during render (not in an
+    // effect), so no committed frame pairs the new view with the old
+    // selection.
+    expect(result.current.viewMode).toBe("board");
+    expect(result.current.selection.selectedIds).toEqual(new Set());
   });
 
   it("delegates movement through useUpdateIssue without rewriting the mutation path", () => {
@@ -545,6 +546,52 @@ describe("useIssueSurfaceController", () => {
     );
   });
 
+  it("resolves the working-chip scope from the ids window even while the filter is off", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("table");
+    const running = makeIssue({ id: "issue-running", status: "in_progress" });
+    // The running issue lives beyond the loaded page (main window returns
+    // nothing); only the ids-facet query can see it. A chip scoped to loaded
+    // rows would report 0 here while the filter itself would find the issue.
+    listIssues.mockImplementation((params?: ListIssuesParams) =>
+      Promise.resolve(
+        params?.ids
+          ? { issues: [running], total: 1 }
+          : { issues: [], total: 0 },
+      ),
+    );
+    setApiInstance({
+      listIssues,
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      getAgentTaskSnapshot: vi.fn(() =>
+        Promise.resolve([
+          { id: "task-1", issue_id: "issue-running", status: "running" },
+        ] as unknown as AgentTask[]),
+      ),
+      getChildIssueProgress: vi.fn(() => never()),
+    } as unknown as ApiClient);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["table"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => {
+      expect(result.current.workingScopeIssueIds).toEqual(
+        new Set(["issue-running"]),
+      );
+    });
+    // The main table window itself stayed unrestricted — the filter is off.
+    expect(listIssues).toHaveBeenCalledWith(
+      expect.objectContaining({ project_id: "p1", limit: 100, offset: 0 }),
+    );
+  });
+
   it("clears surface selection when the membership window changes (filters, search)", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("list");
@@ -567,13 +614,13 @@ describe("useIssueSurfaceController", () => {
     // Batch actions mutate raw selected ids while export/common-field
     // consumers intersect with visible rows — a selection surviving a
     // membership change would let the same "1 selected" mean different sets.
+    // Asserted synchronously: the reset is render-phase, so not even one
+    // frame commits the new membership with the old selection.
     act(() => {
       store.getState().toggleStatusFilter("todo");
     });
 
-    await waitFor(() => {
-      expect(result.current.selection.selectedIds).toEqual(new Set());
-    });
+    expect(result.current.selection.selectedIds).toEqual(new Set());
   });
 
   it("still reports isEmpty for the full-window modes when the list is empty", async () => {

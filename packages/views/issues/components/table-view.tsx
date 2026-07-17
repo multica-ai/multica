@@ -106,9 +106,11 @@ import {
 } from "./pickers";
 import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
 import {
+  TABLE_STRUCTURE_MAX_WINDOW,
   buildIssueTableCsv,
   buildIssueTableRows,
   getIssueTableSelectionRange,
+  isTableStructureSuspended,
   type IssueTableDisplayRow,
 } from "./table-view-model";
 import type { ChildProgress } from "./list-row";
@@ -695,16 +697,30 @@ export function TableView({
       ? "none"
       : tableGrouping;
 
-  // Group headers assert counts (and membership) for the WHOLE window, and a
-  // group whose first row sits on an unfetched page would be missing
-  // entirely — so while grouping is active, materialize the full window:
-  // one page per completed fetch, stopping the moment grouping turns off or
-  // the window completes. Grouping is an explicit opt-in; the default
-  // ungrouped view keeps the one-page-per-scroll sentinel.
+  // Grouping and hierarchy are whole-window statements, so the window must
+  // be materialized for them — but only under an explicit ceiling: grouping
+  // is persisted view state and hierarchy is on by default, so an unbounded
+  // loop would re-download entire large workspaces on every visit (round-3
+  // review P1#1). Below the ceiling the remaining pages load sequentially
+  // (one per completed fetch — the toolbar's loaded-of-total line is the
+  // visible progress, and flipping the toggles off stops the loop), which
+  // also makes hierarchy apply without scrolling to the last page (round-3
+  // P1#2). Above the ceiling both features suspend and the toolbar notice
+  // explains why; the window keeps the one-page-per-scroll sentinel.
+  const structureSuspended = isTableStructureSuspended(total);
+  const structureWanted = effectiveTableGrouping !== "none" || tableHierarchy;
+  const structureGrouping = structureSuspended ? "none" : effectiveTableGrouping;
+  const structureHierarchy = tableHierarchy && !structureSuspended;
   useEffect(() => {
-    if (effectiveTableGrouping === "none") return;
+    if (structureSuspended || !structureWanted) return;
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
-  }, [effectiveTableGrouping, fetchNextPage, hasNextPage, isFetchingNextPage]);
+  }, [
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    structureSuspended,
+    structureWanted,
+  ]);
 
   const visibleColumnConfigs = useMemo(
     () =>
@@ -718,11 +734,11 @@ export function TableView({
   const displayRows = useMemo(
     () =>
       buildIssueTableRows(issues, {
-        grouping: effectiveTableGrouping,
+        grouping: structureGrouping,
         properties,
         collapsedGroups: new Set(tableCollapsedGroups),
         collapsedParents: new Set(tableCollapsedParents),
-        hierarchy: tableHierarchy,
+        hierarchy: structureHierarchy,
         windowComplete: !hasNextPage,
         getActorName,
         getStatusLabel: (status) => t(($) => $.status[status]),
@@ -739,8 +755,8 @@ export function TableView({
       t,
       tableCollapsedGroups,
       tableCollapsedParents,
-      effectiveTableGrouping,
-      tableHierarchy,
+      structureGrouping,
+      structureHierarchy,
     ],
   );
   const visibleIssueIds = useMemo(
@@ -1218,8 +1234,16 @@ export function TableView({
           placeholder={t(($) => $.table.search_placeholder)}
           clearLabel={t(($) => $.table.search_clear)}
         />
-        <span className="mr-auto text-xs text-muted-foreground">
+        <span className="mr-auto min-w-0 truncate text-xs text-muted-foreground">
           {t(($) => $.table.loaded_count, { count: issues.length, total })}
+          {structureSuspended && structureWanted && (
+            <span className="ml-2">
+              {t(($) => $.table.structure_paused, {
+                total,
+                limit: TABLE_STRUCTURE_MAX_WINDOW,
+              })}
+            </span>
+          )}
         </span>
         <DropdownMenu>
           <DropdownMenuTrigger

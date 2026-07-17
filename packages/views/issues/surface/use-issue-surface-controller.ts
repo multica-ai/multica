@@ -87,6 +87,9 @@ export interface IssueSurfaceController {
   hasNextFlatPage: boolean;
   isFetchingNextFlatPage: boolean;
   flatTotal: number;
+  /** See IssueSurfaceData.workingScopeIssueIds — authoritative in-window
+   *  running set for the working chip in table mode. */
+  workingScopeIssueIds?: ReadonlySet<string>;
   tableSearch: string;
   setTableSearch: (query: string) => void;
   exportTableIssues: () => Promise<Issue[]>;
@@ -265,13 +268,12 @@ export function useIssueSurfaceController({
   // re-key the query. An EMPTY set is sent as an empty facet (empty window),
   // never dropped.
   const activity = useIssueSurfaceActivity();
-  const runningIdsFacet = useMemo(
-    () =>
-      agentRunningFilter ? [...activity.runningIssueIds].sort() : undefined,
-    [activity.runningIssueIds, agentRunningFilter],
+  const sortedRunningIds = useMemo(
+    () => [...activity.runningIssueIds].sort(),
+    [activity.runningIssueIds],
   );
 
-  const tableFacets = useMemo<IssueFlatFilter>(
+  const baseTableFacets = useMemo<IssueFlatFilter>(
     () => ({
       ...(debouncedTableSearch ? { q: debouncedTableSearch } : {}),
       ...(statusFilters.length > 0 ? { statuses: statusFilters } : {}),
@@ -289,7 +291,6 @@ export function useIssueSurfaceController({
       ...(viewIncludeNoProject ? { include_no_project: true } : {}),
       ...(labelFilters.length > 0 ? { label_ids: labelFilters } : {}),
       ...(showSubIssues === false ? { top_level_only: true } : {}),
-      ...(runningIdsFacet ? { ids: runningIdsFacet } : {}),
     }),
     [
       assigneeFilters,
@@ -298,13 +299,23 @@ export function useIssueSurfaceController({
       includeNoAssignee,
       labelFilters,
       priorityFilters,
-      runningIdsFacet,
       showSubIssues,
       statusFilters,
       viewIncludeNoProject,
       viewProjectFilters,
     ],
   );
+  // The running-restricted variant of the window. It IS the table window
+  // while the filter is on; while the filter is off the data hook still
+  // subscribes to it (same query key, so toggling the filter hits a warm
+  // cache) to give the working chip its authoritative in-window count —
+  // deriving that count from loaded rows says "0 working" whenever the only
+  // running issue sits on an unfetched page (round-3 review P2#3).
+  const workingFacets = useMemo<IssueFlatFilter>(
+    () => ({ ...baseTableFacets, ids: sortedRunningIds }),
+    [baseTableFacets, sortedRunningIds],
+  );
+  const tableFacets = agentRunningFilter ? workingFacets : baseTableFacets;
 
   // Selection is only meaningful within the current membership window: batch
   // actions act on selected ids while export/common-field consumers intersect
@@ -361,6 +372,7 @@ export function useIssueSurfaceController({
     usesTable,
     sort,
     tableFacets,
+    workingFacets,
     activity,
     statusFilters,
     priorityFilters,
