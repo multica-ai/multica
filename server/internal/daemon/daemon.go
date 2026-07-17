@@ -3611,6 +3611,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkspaceContext:                 task.WorkspaceContext,
 		EffectiveTools:                   effectiveToolsForEnv(task.EffectiveTools), // CEREBRO-PATCH(daemon-task-effective-tools-ctx): FIR-2312 carry resolved non-CLI tools into the brief
 	}
+	taskCtx.WorkspaceBriefMode, taskCtx.ToolsBriefMode = briefLayerModesForTask(task) // CEREBRO-PATCH(brief-layer-modes): FIR-3212 nil-agent safe.
 
 	// Mark candidate env roots as active before any env work so the GC loop
 	// can't reclaim artifacts inside them mid-execution. We mark both the

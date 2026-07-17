@@ -91,12 +91,17 @@ type CreateChangeRequestRequest struct {
 	// SystemPromptMode sets how the prompt reaches the model (append|replace|
 	// prepend); empty restores the runtime default. FIR-3212. It is stored inside
 	// runtime_config, so this is a typed shortcut past hand-editing that blob.
-	SystemPromptMode *string          `json:"system_prompt_mode"`
-	SkillIDs         *[]string        `json:"skill_ids"`
-	McpConfig        *json.RawMessage `json:"mcp_config"`
-	CustomArgs       *json.RawMessage `json:"custom_args"`
-	RuntimeConfig    *json.RawMessage `json:"runtime_config"`
-	WorkSessionID    *string          `json:"work_session_id"`
+	SystemPromptMode *string `json:"system_prompt_mode"`
+	// WorkspaceBriefMode ("off") and ToolsBriefMode ("summary") configure the
+	// two largest layers of the injected brief; empty or "full" restores the
+	// default. FIR-3212. Stored inside runtime_config like SystemPromptMode.
+	WorkspaceBriefMode *string          `json:"workspace_brief_mode"`
+	ToolsBriefMode     *string          `json:"tools_brief_mode"`
+	SkillIDs           *[]string        `json:"skill_ids"`
+	McpConfig          *json.RawMessage `json:"mcp_config"`
+	CustomArgs         *json.RawMessage `json:"custom_args"`
+	RuntimeConfig      *json.RawMessage `json:"runtime_config"`
+	WorkSessionID      *string          `json:"work_session_id"`
 }
 
 // ReviewChangeRequestRequest approves or rejects a pending proposal.
@@ -492,6 +497,25 @@ func (h *Handler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
 			}
 			snap = updated
 		}
+		// FIR-3212: same ordering rule as SystemPromptMode — an explicit typed
+		// mode wins over one embedded in a wholesale runtime_config replacement
+		// in the same request.
+		if req.WorkspaceBriefMode != nil {
+			updated, err := WithWorkspaceBriefMode(snap, *req.WorkspaceBriefMode)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			snap = updated
+		}
+		if req.ToolsBriefMode != nil {
+			updated, err := WithToolsBriefMode(snap, *req.ToolsBriefMode)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			snap = updated
+		}
 	}
 
 	// Validate the mode carried by the snapshot itself. The proposed_snapshot
@@ -501,6 +525,14 @@ func (h *Handler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
 	// versioned, approved, and then silently dropped at run time: the failure
 	// FIR-3212 exists to remove.
 	if !h.validateSnapshotSystemPromptMode(w, r, agent.ID, snap) {
+		return
+	}
+	// FIR-3212: same chokepoint for the brief-layer modes — the proposed_snapshot
+	// path and a raw runtime_config override both bypass the With* writers. No
+	// provider dimension: the layers render identically for every provider, so
+	// only the vocabulary can be wrong.
+	if err := ValidateSnapshotBriefLayerModes(snap); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

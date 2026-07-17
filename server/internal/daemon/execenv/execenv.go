@@ -137,6 +137,9 @@ type TaskContextForEnv struct {
 	// runtimes that ship no resolved set — those get no extra section. See
 	// FIR-2312.
 	EffectiveTools []ToolBriefEntry // CEREBRO-PATCH(cerebro-tools-brief-ctx): FIR-2312 resolved per-permission tools for the brief
+	// CEREBRO-PATCH(brief-layer-modes): FIR-3212 per-agent brief-layer config from runtime_config — see cerebro_brief_layers.go. Empty = full brief, exactly as today.
+	WorkspaceBriefMode string // CEREBRO-PATCH(brief-layer-modes): "off" keeps identity layers only
+	ToolsBriefMode     string // CEREBRO-PATCH(brief-layer-modes): "summary" folds connection tool lists
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
