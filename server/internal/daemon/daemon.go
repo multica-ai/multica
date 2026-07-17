@@ -48,11 +48,23 @@ var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace
 // stale-heartbeat sweep.
 var ErrNoRuntimesToRegister = errors.New("no agent runtimes could be registered")
 
+// errTaskPrepareTimeout distinguishes the daemon's dispatched -> running
+// startup deadline from provider execution timeouts. handleTask maps it to the
+// platform-side timeout failure reason so the server's existing retry path can
+// recover the task on a fresh attempt.
+var errTaskPrepareTimeout = errors.New("task preparation timed out")
+
 const (
 	taskSlotWaitTimeout      = 2 * time.Second
 	taskSlotCapacityBackoff  = 5 * time.Second
 	repoCheckoutModeEnv      = "MULTICA_REPO_CHECKOUT_MODE"
 	repoCheckoutModeIsolated = "isolated"
+	// defaultTaskPrepareTimeout is a hard liveness bound for everything after
+	// claim and before StartTask succeeds: runtime resolution, skill bundles,
+	// execution-environment setup, and the StartTask request itself. It is
+	// intentionally independent from AgentTimeout, which only governs the
+	// provider process after the task reaches running.
+	defaultTaskPrepareTimeout = 5 * time.Minute
 )
 
 func repoCheckoutModeFor(provider, goos string) string {
@@ -323,6 +335,10 @@ type Daemon struct {
 
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
+	// taskPrepareTimeout is the dispatched -> running hard deadline. New sets
+	// the production default; zero-valued test daemons fall back to the same
+	// default in effectiveTaskPrepareTimeout.
+	taskPrepareTimeout time.Duration
 	// runUpdateFn executes the brew-or-download upgrade. Set to d.runUpdate by
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
@@ -365,6 +381,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
+		taskPrepareTimeout:        defaultTaskPrepareTimeout,
 		reconcile:                 newReconcileBroadcaster(),
 		workspaceChanges:          newWorkspaceChangeSignal(),
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
@@ -3239,7 +3256,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
 			errorMessage:  err.Error(),
-			failureReason: taskfailure.Classify(err.Error()).String(),
+			failureReason: taskRunFailureReason(err),
 		}); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
@@ -3285,6 +3302,13 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			}
 		}
 	}
+}
+
+func taskRunFailureReason(err error) string {
+	if errors.Is(err, errTaskPrepareTimeout) {
+		return taskfailure.ReasonTimeout.String()
+	}
+	return taskfailure.Classify(err.Error()).String()
 }
 
 // acquireLocalDirectoryLockIfNeeded inspects the task's project resources for
@@ -3875,6 +3899,40 @@ func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, t
 	}
 }
 
+type executionEnvironmentResult struct {
+	env *execenv.Environment
+	err error
+}
+
+// waitForExecutionEnvironment makes the pre-start deadline observable around
+// execenv's synchronous filesystem setup. Some filesystem calls cannot be
+// interrupted by a Go context (for example, opening a FIFO or accessing a
+// wedged mount). Running only the local I/O step in a goroutine lets runTask
+// stop the prepare lease and fail the dispatched task when its deadline fires.
+// The closure must never perform a server-side state transition: an underlying
+// syscall may still return later, after this helper has reported the timeout.
+func waitForExecutionEnvironment(ctx context.Context, prepare func() (*execenv.Environment, error)) (*execenv.Environment, error) {
+	resultCh := make(chan executionEnvironmentResult, 1)
+	go func() {
+		env, err := prepare()
+		resultCh <- executionEnvironmentResult{env: env, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, context.Cause(ctx)
+	case result := <-resultCh:
+		return result.env, result.err
+	}
+}
+
+func (d *Daemon) effectiveTaskPrepareTimeout() time.Duration {
+	if d.taskPrepareTimeout > 0 {
+		return d.taskPrepareTimeout
+	}
+	return defaultTaskPrepareTimeout
+}
+
 func skillRefKey(source, id string) string {
 	return source + "\x00" + id
 }
@@ -3906,7 +3964,7 @@ func skillRefFromBundle(bundle SkillData) SkillRefData {
 	}
 }
 
-func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
+func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (taskResult TaskResult, returnErr error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
 	// CLI would otherwise silently fall back to the user-global config — a
@@ -3915,6 +3973,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.WorkspaceID == "" {
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
 	}
+
+	prepareTimeout := d.effectiveTaskPrepareTimeout()
+	prepareCtx, cancelPrepare := context.WithTimeoutCause(ctx, prepareTimeout, errTaskPrepareTimeout)
+	prepareComplete := false
+	defer func() {
+		cancelPrepare()
+		if prepareComplete || returnErr == nil || !errors.Is(context.Cause(prepareCtx), errTaskPrepareTimeout) {
+			return
+		}
+		// Collapse every deadline shape (context deadline, HTTP cancellation,
+		// or the explicit waitForExecutionEnvironment cause) into one sentinel
+		// that handleTask can classify as a retryable platform timeout.
+		taskResult = TaskResult{}
+		returnErr = fmt.Errorf("%w after %s", errTaskPrepareTimeout, prepareTimeout)
+	}()
 
 	// task.Repos is the authoritative repo list for this task — when the
 	// claimed task belongs to a project with github_repo resources the server
@@ -3952,16 +4025,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// upgrade deleted (MUL-4486). Only reached when no custom profile owns
 		// the launch, so a custom runtime's path is never second-guessed and a
 		// custom-only host pays no wasted re-resolution.
-		entry, resolvedVersion = d.resolveAgentEntry(ctx, provider, entry)
+		entry, resolvedVersion = d.resolveAgentEntry(prepareCtx, provider, entry)
 	}
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
 	}
 
-	stopPrepareLease := d.startTaskPrepareLeaseExtender(ctx, task, taskLog)
+	stopPrepareLease := d.startTaskPrepareLeaseExtender(prepareCtx, task, taskLog)
 	defer stopPrepareLease()
 
-	if err := d.ensureTaskSkillBundles(ctx, &task); err != nil {
+	if err := d.ensureTaskSkillBundles(prepareCtx, &task); err != nil {
 		return TaskResult{}, err
 	}
 
@@ -4132,22 +4205,28 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	if shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
-		env = execenv.Reuse(execenv.ReuseParams{
-			WorkspacesRoot:        d.cfg.WorkspacesRoot,
-			Profile:               d.cfg.Profile,
-			WorkDir:               task.PriorWorkDir,
-			Provider:              provider,
-			CodexVersion:          codexVersion,
-			ResumeSessionID:       task.PriorSessionID,
-			OpenclawBin:           openclawBin,
-			McpConfig:             effectiveMcpConfig,
-			CursorMcpAuthSource:   cursorMcpAuthSource,
-			OpenclawGateway:       openclawGateway,
-			HermesSourceHome:      hermesSourceHome,
-			HermesSourceMustExist: hermesSourceMustExist,
-			HermesEnv:             hermesEnv,
-			Task:                  taskCtx,
-		}, d.logger)
+		var err error
+		env, err = waitForExecutionEnvironment(prepareCtx, func() (*execenv.Environment, error) {
+			return execenv.Reuse(execenv.ReuseParams{
+				WorkspacesRoot:        d.cfg.WorkspacesRoot,
+				Profile:               d.cfg.Profile,
+				WorkDir:               task.PriorWorkDir,
+				Provider:              provider,
+				CodexVersion:          codexVersion,
+				ResumeSessionID:       task.PriorSessionID,
+				OpenclawBin:           openclawBin,
+				McpConfig:             effectiveMcpConfig,
+				CursorMcpAuthSource:   cursorMcpAuthSource,
+				OpenclawGateway:       openclawGateway,
+				HermesSourceHome:      hermesSourceHome,
+				HermesSourceMustExist: hermesSourceMustExist,
+				HermesEnv:             hermesEnv,
+				Task:                  taskCtx,
+			}, d.logger), nil
+		})
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("reuse execution environment: %w", err)
+		}
 	}
 	if env == nil {
 		var err error
@@ -4171,7 +4250,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if localAssignment != nil {
 			prepParams.LocalWorkDir = localAssignment.AbsPath
 		}
-		env, err = execenv.Prepare(prepParams, d.logger)
+		env, err = waitForExecutionEnvironment(prepareCtx, func() (*execenv.Environment, error) {
+			return execenv.Prepare(prepParams, d.logger)
+		})
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 		}
@@ -4203,11 +4284,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// taskfailure.Classify path records the failure with the same
 	// "start task failed: <…>" string and the same failure_reason
 	// taxonomy as before — see MUL-2946 for the classifier contract.
-	if err := d.client.StartTask(ctx, task.ID); err != nil {
+	if err := d.client.StartTask(prepareCtx, task.ID); err != nil {
 		stopPrepareLease()
 		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
 	}
 	stopPrepareLease()
+	prepareComplete = true
+	cancelPrepare()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
