@@ -2,6 +2,14 @@ import { useState, type FormEvent } from "react";
 import type { Rock, Terminology } from "../core/types";
 import { useRockCheckIn } from "../core/queries";
 import { HealthBadge, HealthScore } from "./health-score";
+import { SearchSelect } from "./search-select";
+
+const CHECK_IN_HEALTH_OPTIONS = [
+  { value: "unset", label: "Not reported" },
+  { value: "on_track", label: "On track" },
+  { value: "at_risk", label: "At risk" },
+  { value: "off_track", label: "Off track" },
+];
 
 const formatDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(value));
 
@@ -42,9 +50,9 @@ export function RockDetail({ wsId, rock, terminology, onEdit }: { wsId: string; 
           <input aria-label="Check-in confidence" type="range" min={0} max={100} value={confidence} onChange={(event) => setConfidence(Number(event.target.value))} />
           <span className="text-right text-xs text-muted-foreground">{confidence}%</span>
         </label>
-        <label className="mt-3 grid gap-1 text-sm">Health
-          <select aria-label="Check-in health" value={reportedHealth} onChange={(event) => setReportedHealth(event.target.value as "unset" | "on_track" | "at_risk" | "off_track")} className="h-10 rounded-md border bg-background px-3"><option value="unset">Not reported</option><option value="on_track">On track</option><option value="at_risk">At risk</option><option value="off_track">Off track</option></select>
-        </label>
+        <div className="mt-3 grid gap-1 text-sm"><span>Health</span>
+          <SearchSelect label="Check-in health" options={CHECK_IN_HEALTH_OPTIONS} value={reportedHealth} onChange={(value) => setReportedHealth(value as "unset" | "on_track" | "at_risk" | "off_track")} placeholder="Not reported" />
+        </div>
         <label className="mt-3 grid gap-1 text-sm">Note
           <textarea aria-label="Check-in note" value={note} onChange={(event) => setNote(event.target.value)} rows={4} className="rounded-md border bg-background px-3 py-2" placeholder="What changed this week?" />
         </label>

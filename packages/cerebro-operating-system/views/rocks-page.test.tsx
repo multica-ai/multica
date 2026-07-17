@@ -13,7 +13,7 @@ const state = vi.hoisted(() => ({
   goalTypes: [] as Array<{ id: string; workspace_id: string; name: string; color: string; scope_label: string; position: number; created_at: string; updated_at: string }>,
   rocksLoading: false,
   rocksError: false,
-  periods: [{ id: "period-1", workspace_id: "workspace-1", name: "Q3 2026", starts_on: "2026-07-01", ends_on: "2026-09-30" }],
+  periods: [{ id: "period-1", workspace_id: "workspace-1", name: "Q3 2026", unit: "quarter", starts_on: "2026-07-01", ends_on: "2026-09-30" }],
   projects: [{ id: "project-1", title: "Carrier migration", status: "in_progress" }],
   issues: [{ id: "issue-1", identifier: "FIR-2711", title: "Carrier API migration", status: "blocked" }],
   members: [{ id: "member-1", name: "Jesper" }],
@@ -21,6 +21,7 @@ const state = vi.hoisted(() => ({
   strategy: [{ id: "strategy-1", title: "Best-in-class logistics cost", kind: "horizon_goal", position: 0 }],
   mutate: vi.fn(),
   checkIn: vi.fn(),
+  savePeriod: vi.fn(),
 }));
 
 vi.mock("@multica/cerebro-feature-flags", () => ({ useFeatureFlag: () => state.enabled }));
@@ -57,6 +58,7 @@ vi.mock("../core/queries", async (importOriginal) => {
     ...actual,
     useSaveRock: () => ({ mutate: state.mutate, isPending: false }),
     useRockCheckIn: () => ({ mutate: state.checkIn, isPending: false }),
+    useSavePeriod: () => ({ mutate: state.savePeriod, isPending: false }),
   };
 });
 
@@ -73,22 +75,23 @@ const rock: Rock = {
 };
 
 describe("RocksPage", () => {
-  beforeEach(() => { state.enabled = true; state.rocks = []; state.goalTypes = []; state.rocksLoading = false; state.rocksError = false; state.mutate.mockReset(); state.checkIn.mockReset(); });
+  beforeEach(() => { state.enabled = true; state.rocks = []; state.goalTypes = []; state.rocksLoading = false; state.rocksError = false; state.mutate.mockReset(); state.checkIn.mockReset(); state.savePeriod.mockReset(); });
 
   it("stays hidden when the feature flag is off", () => {
     state.enabled = false;
     expect(render(<RocksPage />).container).toBeEmptyDOMElement();
   });
 
-  it("renders the v4 header, KPI strip and empty state", () => {
+  it("renders the header, KPI strip, inline add row and empty state", () => {
     render(<RocksPage />);
     expect(screen.getByRole("heading", { name: "Rocks" })).toBeInTheDocument();
-    expect(screen.getByText(/Quarterly priorities · Q3 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/Priorities · Q3 2026/)).toBeInTheDocument();
     expect(screen.getByText("OVERALL HEALTH")).toBeInTheDocument();
     expect(screen.getByText("ON TRACK")).toBeInTheDocument();
     expect(screen.getByText("NEED ATTENTION")).toBeInTheDocument();
     expect(screen.getByText("DAYS LEFT IN Q3")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "+ New Rock" })).toBeInTheDocument();
+    expect(screen.getByLabelText("New Rock title")).toBeInTheDocument();
+    expect(screen.getByText("No Rocks yet")).toBeInTheDocument();
   });
 
   it("communicates loading and error states", () => {
@@ -106,7 +109,8 @@ describe("RocksPage", () => {
     render(<RocksPage />);
     expect(screen.getByText("Cut fulfilment cost 12%")).toBeInTheDocument();
     expect(screen.getByText("↳ 1-Year Plan · Best-in-class logistics cost")).toBeInTheDocument();
-    expect(screen.getByText("Sara · agent")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cut fulfilment cost 12% owner" })).toHaveTextContent("Sara");
+    expect(screen.getByRole("button", { name: "Cut fulfilment cost 12% period" })).toHaveTextContent("Q3 2026");
     expect(screen.getByText("1/3 issues · 1 project")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View Cut fulfilment cost 12%" }));
     expect(screen.getByText("Under this Rock — Cut fulfilment cost 12%")).toBeInTheDocument();
@@ -115,13 +119,27 @@ describe("RocksPage", () => {
     expect(screen.getByText(/Carrier migration blocked/)).toBeInTheDocument();
   });
 
-  it("creates a standalone Rock and allows optional Project and Issue links", () => {
+  it("creates a Rock inline from the add row with Enter", () => {
     render(<RocksPage />);
-    fireEvent.click(screen.getByRole("button", { name: "+ New Rock" }));
-    fireEvent.change(screen.getByLabelText("Rock title"), { target: { value: "Independent Rock" } });
-    fireEvent.change(screen.getByLabelText("Period"), { target: { value: "period-1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Rock" }));
-    expect(state.mutate).toHaveBeenCalledWith(expect.objectContaining({ input: expect.objectContaining({ title: "Independent Rock", project_ids: [], issue_ids: [] }) }), expect.any(Object));
+    fireEvent.change(screen.getByLabelText("New Rock title"), { target: { value: "Independent Rock" } });
+    fireEvent.keyDown(screen.getByLabelText("New Rock title"), { key: "Enter" });
+    expect(state.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ input: expect.objectContaining({ title: "Independent Rock", period_id: "period-1", project_ids: [], issue_ids: [] }) }),
+      expect.any(Object),
+    );
+  });
+
+  it("creates a typed Rock via the inline type picker", () => {
+    state.goalTypes = [{ id: "type-1", workspace_id: "workspace-1", name: "Company", color: "#22C55E", scope_label: "", position: 0, created_at: "", updated_at: "" }];
+    render(<RocksPage />);
+    fireEvent.change(screen.getByLabelText("New Rock title"), { target: { value: "Typed goal" } });
+    fireEvent.click(screen.getByRole("button", { name: "New Rock type" }));
+    fireEvent.click(screen.getByRole("option", { name: /Company/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Rock" }));
+    expect(state.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ input: expect.objectContaining({ title: "Typed goal", goal_type_id: "type-1" }) }),
+      expect.any(Object),
+    );
   });
 
   it("badges and filters Rocks by their configurable type", () => {
@@ -131,23 +149,56 @@ describe("RocksPage", () => {
     ];
     state.rocks = [{ ...rock, goal_type_id: "type-1", goal_type_name: "Company", goal_type_color: "#22C55E" }, { ...rock, id: "rock-2", title: "Untyped goal", strategy_item_id: undefined, strategy_item_title: undefined }];
     render(<RocksPage />);
-    expect(screen.getByRole("group", { name: "Filter by rock type" })).toBeInTheDocument();
+    const filterGroup = screen.getByRole("group", { name: "Filter by rock type" });
+    expect(filterGroup).toBeInTheDocument();
     expect(screen.getByText("Untyped goal")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Company/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /Company/ })[0]!);
     expect(screen.queryByText("Untyped goal")).not.toBeInTheDocument();
     expect(screen.getByText("Cut fulfilment cost 12%")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "All" }));
     expect(screen.getByText("Untyped goal")).toBeInTheDocument();
   });
 
-  it("submits the selected type when saving a Rock", () => {
-    state.goalTypes = [{ id: "type-1", workspace_id: "workspace-1", name: "Company", color: "#22C55E", scope_label: "", position: 0, created_at: "", updated_at: "" }];
+  it("changes a Rock owner inline from the list", () => {
+    state.rocks = [rock];
     render(<RocksPage />);
-    fireEvent.click(screen.getByRole("button", { name: "+ New Rock" }));
-    fireEvent.change(screen.getByLabelText("Rock title"), { target: { value: "Typed goal" } });
-    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "type-1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Rock" }));
-    expect(state.mutate).toHaveBeenCalledWith(expect.objectContaining({ input: expect.objectContaining({ title: "Typed goal", goal_type_id: "type-1" }) }), expect.any(Object));
+    fireEvent.click(screen.getByRole("button", { name: "Cut fulfilment cost 12% owner" }));
+    fireEvent.click(screen.getByRole("option", { name: "Jesper" }));
+    expect(state.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      id: "rock-1",
+      input: expect.objectContaining({ owner_type: "member", owner_id: "member-1", title: "Cut fulfilment cost 12%", period_id: "period-1" }),
+    }));
+  });
+
+  it("renames a Rock inline", () => {
+    state.rocks = [rock];
+    render(<RocksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Rename Cut fulfilment cost 12%" }));
+    const input = screen.getByLabelText("Cut fulfilment cost 12% new title");
+    fireEvent.change(input, { target: { value: "Cut fulfilment cost 15%" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(state.mutate).toHaveBeenCalledWith(expect.objectContaining({ id: "rock-1", input: expect.objectContaining({ title: "Cut fulfilment cost 15%" }) }));
+  });
+
+  it("plans the next period from the period filter", () => {
+    render(<RocksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Period filter" }));
+    fireEvent.click(screen.getByRole("button", { name: /Plan next period/ }));
+    expect(state.savePeriod).toHaveBeenCalledWith(
+      expect.objectContaining({ input: expect.objectContaining({ unit: "quarter", starts_on: "2026-10-01", ends_on: "2026-12-31", name: "Q4 2026" }) }),
+      expect.any(Object),
+    );
+  });
+
+  it("switches to the timeline view grouped by owner", () => {
+    state.rocks = [rock];
+    render(<RocksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Timeline view" }));
+    expect(screen.getByLabelText("Rocks timeline")).toBeInTheDocument();
+    expect(screen.getByText("Sara")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Cut fulfilment cost 12%" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Group by type" }));
+    expect(screen.getByText("No type")).toBeInTheDocument();
   });
 
   it("records a weekly check-in directly from the selected Rock", () => {
