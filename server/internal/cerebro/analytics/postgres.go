@@ -64,7 +64,10 @@ func (s *postgresSourceDB) loadRun(ctx context.Context, runID string) (RunProjec
 		LEFT JOIN agent_runtime ar ON ar.id=atq.runtime_id
 		LEFT JOIN chat_session cs ON cs.id=atq.chat_session_id
 		LEFT JOIN comment trigger_comment ON trigger_comment.id=atq.trigger_comment_id
-		LEFT JOIN "user" person ON person.id=COALESCE(atq.initiator_user_id,CASE WHEN trigger_comment.author_type='member' THEN trigger_comment.author_id END,cs.creator_id,CASE WHEN i.creator_type='member' THEN i.creator_id END)
+		LEFT JOIN issue parent_issue ON parent_issue.id=i.parent_issue_id
+		LEFT JOIN autopilot_run apr ON apr.id=atq.autopilot_run_id
+		LEFT JOIN autopilot ap ON ap.id=apr.autopilot_id
+		LEFT JOIN "user" person ON person.id=COALESCE(atq.initiator_user_id,CASE WHEN trigger_comment.author_type='member' THEN trigger_comment.author_id END,cs.creator_id,CASE WHEN i.creator_type='member' THEN i.creator_id END,CASE WHEN ap.created_by_type='member' THEN ap.created_by_id END,CASE WHEN parent_issue.creator_type='member' THEN parent_issue.creator_id END)
 		LEFT JOIN LATERAL (SELECT SUM(input_tokens)::bigint input_tokens,SUM(output_tokens)::bigint output_tokens,SUM(cache_read_tokens)::bigint cache_read_tokens,SUM(cache_write_tokens)::bigint cache_write_tokens,CASE WHEN COUNT(*)>0 THEN COALESCE(SUM(cost_cents),0)::bigint END cost_cents,MAX(provider) provider,MAX(model) model FROM task_usage WHERE task_id=atq.id) usage ON true
 		WHERE atq.id=$1`, runID).Scan(
 		&r.RunID, &r.WorkspaceID, &r.Population, &r.SourceType, &r.SourceID, &r.SourceLabel,

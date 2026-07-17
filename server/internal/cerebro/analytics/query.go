@@ -68,6 +68,9 @@ func (q *Query) Normalize() error {
 		if (filter.Operator == OperatorEqual || filter.Operator == OperatorGreaterEqual || filter.Operator == OperatorLessEqual) && len(filter.Values) != 1 {
 			return fmt.Errorf("analytics: operator %q requires exactly one value", filter.Operator)
 		}
+		if (filter.Operator == OperatorContains || filter.Operator == OperatorNotContains) && filter.Dimension == DimensionTime {
+			return fmt.Errorf("analytics: operator %q is not supported for the time dimension", filter.Operator)
+		}
 	}
 
 	fields := make(map[string]struct{}, len(q.Metrics)+len(q.Dimensions))

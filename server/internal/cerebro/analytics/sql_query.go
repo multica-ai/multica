@@ -39,7 +39,11 @@ func BuildSQL(query Query, workspaceID string) (SQLPlan, error) {
 	}
 
 	for _, filter := range query.Filters {
-		args = append(args, filter.Values)
+		values := filter.Values
+		if filter.Operator == OperatorContains || filter.Operator == OperatorNotContains {
+			values = containsPatterns(filter.Values)
+		}
+		args = append(args, values)
 		expr, param, err := filterExpression(filter.Dimension, len(args))
 		if err != nil {
 			return SQLPlan{}, err
@@ -55,6 +59,10 @@ func BuildSQL(query Query, workspaceID string) (SQLPlan, error) {
 			where = append(where, expr+" >= ("+param+")[1]")
 		case OperatorLessEqual:
 			where = append(where, expr+" <= ("+param+")[1]")
+		case OperatorContains:
+			where = append(where, expr+" ILIKE ANY("+param+")")
+		case OperatorNotContains:
+			where = append(where, "NOT ("+expr+" ILIKE ANY("+param+"))")
 		}
 	}
 	offset := 0
@@ -94,6 +102,9 @@ func BuildSQL(query Query, workspaceID string) (SQLPlan, error) {
 		if !queryUsesDimension(query, DimensionContext) {
 			joins += " AND ref.href IS NOT NULL"
 		}
+	}
+	if queryUsesDimension(query, DimensionIssue) {
+		joins += " LEFT JOIN cerebro_analytics_reference ref_issue ON ref_issue.analytics_run_id=r.id AND ref_issue.reference_kind IN ('issue','dm','channel')"
 	}
 	sql := `SELECT ` + strings.Join(selects, ", ") + ` FROM cerebro_analytics_run r` + joins + ` WHERE ` + strings.Join(where, " AND ")
 	if len(groups) > 0 {
@@ -141,7 +152,18 @@ func parseOffsetCursor(cursor string) (int, bool) {
 
 var filterDimensionSQL = map[Dimension]string{
 	DimensionPerson: "r.person_label", DimensionAgent: "r.agent_label", DimensionProject: "r.project_label", DimensionRuntime: "r.runtime_label", DimensionSource: "r.source_type", DimensionProvider: "r.provider", DimensionModel: "r.model", DimensionSkill: "sk.skill_name", DimensionStatus: "r.status", DimensionCostKind: "r.cost_kind", DimensionQualityType: "q.measurement_type", DimensionQualityCategory: "q.category", DimensionContext: "ref.reference_kind",
-	DimensionRun: "r.run_id::text", DimensionSourceID: "r.source_id::text", DimensionReference: "ref.reference_id", DimensionReferenceLabel: "ref.label", DimensionDebugLink: "ref.href", DimensionTrace: "r.trace_id",
+	DimensionRun: "r.run_id::text", DimensionIssue: "ref_issue.label", DimensionSourceID: "r.source_id::text", DimensionReference: "ref.reference_id", DimensionReferenceLabel: "ref.label", DimensionDebugLink: "ref.href", DimensionTrace: "r.trace_id",
+}
+
+// containsPatterns turns raw filter values into ILIKE patterns, escaping the
+// LIKE metacharacters so user text always matches literally.
+func containsPatterns(values []string) []string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	patterns := make([]string, len(values))
+	for i, value := range values {
+		patterns[i] = "%" + replacer.Replace(value) + "%"
+	}
+	return patterns
 }
 
 func filterExpression(d Dimension, argIndex int) (string, string, error) {
@@ -152,7 +174,9 @@ func filterExpression(d Dimension, argIndex int) (string, string, error) {
 	if !ok {
 		return "", "", fmt.Errorf("analytics: dimension %q is not queryable yet", d)
 	}
-	return expr, "$" + strconv.Itoa(argIndex) + "::text[]", nil
+	// NULL-safe: an empty filter value must match runs where the dimension is
+	// unset, so clicking an "Unknown" cell in the UI actually filters.
+	return "COALESCE(" + expr + ",'')", "$" + strconv.Itoa(argIndex) + "::text[]", nil
 }
 
 func dimensionSQL(d Dimension, grain Grain, timezone string, args *[]any) (string, error) {

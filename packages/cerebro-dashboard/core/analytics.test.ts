@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  addAnalyticsFilterValue,
   buildVisualQuery,
   DEFAULT_ANALYTICS_VISUALS,
   filtersFromSearchParams,
@@ -44,6 +45,28 @@ describe("dashboard analytics model", () => {
     ];
     const params = filtersToSearchParams(filters, new URLSearchParams("tab=runs"));
     expect(params.toString()).toBe("tab=runs&provider=openai&exclude.status=failed");
+    expect(filtersFromSearchParams(params)).toEqual(filters);
+  });
+
+  it("appends contains filters without disturbing include filters", () => {
+    let filters = addAnalyticsFilterValue([], "model", "gpt", "contains");
+    filters = addAnalyticsFilterValue(filters, "model", "claude", "contains");
+    filters = addAnalyticsFilterValue(filters, "provider", "openai", "in");
+    expect(filters).toEqual([
+      { dimension: "model", operator: "contains", values: ["claude", "gpt"] },
+      { dimension: "provider", operator: "in", values: ["openai"] },
+    ]);
+    expect(addAnalyticsFilterValue(filters, "model", "gpt", "contains")).toEqual(filters);
+  });
+
+  it("round-trips contains filters and empty values through the dashboard URL", () => {
+    const filters = [
+      { dimension: "person" as const, operator: "in" as const, values: [""] },
+      { dimension: "model" as const, operator: "contains" as const, values: ["gpt"] },
+      { dimension: "issue" as const, operator: "not_contains" as const, values: ["draft"] },
+    ];
+    const params = filtersToSearchParams(filters);
+    expect(params.toString()).toBe("person=&model.contains=gpt&issue.not_contains=draft");
     expect(filtersFromSearchParams(params)).toEqual(filters);
   });
 

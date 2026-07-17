@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { AnalyticsCatalog, AnalyticsDimension, AnalyticsOperator, AnalyticsQueryResult } from "@multica/cerebro-usage";
+import type { AnalyticsCatalog, AnalyticsDimension, AnalyticsGrain, AnalyticsOperator, AnalyticsQueryResult } from "@multica/cerebro-usage";
 import type { AnalyticsFilter, AnalyticsVisual } from "../../core/analytics";
+import { dimensionLabel, operatorLabel, valueLabel } from "../../core/dimension-labels";
 import { VisualBuilderDrawer } from "./visual-builder-drawer";
 
 type Results = Record<string, AnalyticsQueryResult | undefined>;
@@ -12,6 +13,7 @@ interface AnalyticsWorkbenchProps {
   results: Results;
   filters: AnalyticsFilter[];
   onFilter: (dimension: AnalyticsDimension, value: string, operator: "in" | "not_in") => void;
+  onTimeFilter?: (grain: AnalyticsGrain, value: string) => void;
   onRemoveFilter: (dimension: AnalyticsDimension, value: string, operator: AnalyticsOperator) => void;
   onNext: (visualId: string, cursor: string) => void;
   onPrevious?: (visualId: string) => void;
@@ -25,10 +27,10 @@ interface AnalyticsWorkbenchProps {
 }
 
 const DIMENSIONS = new Set<AnalyticsDimension>([
-  "time", "person", "agent", "project", "runtime", "source", "provider", "model", "skill", "status", "cost_kind", "quality_type", "quality_category", "context", "run", "source_id", "reference", "reference_label",
+  "time", "person", "agent", "project", "runtime", "source", "provider", "model", "skill", "status", "cost_kind", "quality_type", "quality_category", "context", "run", "issue", "source_id", "reference", "reference_label",
 ]);
 
-export function AnalyticsWorkbench({ visuals, results, filters, onFilter, onRemoveFilter, onNext, onPrevious, canPrevious = {}, onAddVisual, onConfigure, catalog, showToolbar = true, builderOpen, onBuilderOpenChange }: AnalyticsWorkbenchProps) {
+export function AnalyticsWorkbench({ visuals, results, filters, onFilter, onTimeFilter, onRemoveFilter, onNext, onPrevious, canPrevious = {}, onAddVisual, onConfigure, catalog, showToolbar = true, builderOpen, onBuilderOpenChange }: AnalyticsWorkbenchProps) {
   const [internalCreating, setInternalCreating] = useState(false);
   const [editing, setEditing] = useState<AnalyticsVisual | null>(null);
   const creating = builderOpen ?? internalCreating;
@@ -42,7 +44,7 @@ export function AnalyticsWorkbench({ visuals, results, filters, onFilter, onRemo
         <div className="flex flex-wrap gap-1.5" aria-label="Active filters">
           {filters.length === 0 ? <span className="text-xs text-muted-foreground">All workspace activity</span> : filters.flatMap((filter) => filter.values.map((value) => (
             <button key={`${filter.dimension}:${filter.operator}:${value}`} type="button" onClick={() => onRemoveFilter(filter.dimension, value, filter.operator)} className="rounded border bg-muted/40 px-2 py-1 text-xs">
-              {filter.dimension} {filter.operator === "not_in" ? "≠" : "="} {value} ×
+              {dimensionLabel(filter.dimension)} {operatorLabel(filter.operator)} {valueLabel(filter.dimension, value)} ×
             </button>
           )))}
         </div>
@@ -56,6 +58,7 @@ export function AnalyticsWorkbench({ visuals, results, filters, onFilter, onRemo
             visual={visual}
             result={results[visual.id]}
             onFilter={onFilter}
+            onTimeFilter={onTimeFilter}
             onNext={onNext}
             onPrevious={onPrevious}
             canPrevious={canPrevious[visual.id] === true}
@@ -69,7 +72,7 @@ export function AnalyticsWorkbench({ visuals, results, filters, onFilter, onRemo
   );
 }
 
-function VisualBlock({ visual, result, onFilter, onNext, onPrevious, canPrevious, onConfigure }: { visual: AnalyticsVisual; result?: AnalyticsQueryResult; onFilter: AnalyticsWorkbenchProps["onFilter"]; onNext: AnalyticsWorkbenchProps["onNext"]; onPrevious?: AnalyticsWorkbenchProps["onPrevious"]; canPrevious: boolean; onConfigure?: AnalyticsWorkbenchProps["onConfigure"] }) {
+function VisualBlock({ visual, result, onFilter, onTimeFilter, onNext, onPrevious, canPrevious, onConfigure }: { visual: AnalyticsVisual; result?: AnalyticsQueryResult; onFilter: AnalyticsWorkbenchProps["onFilter"]; onTimeFilter?: AnalyticsWorkbenchProps["onTimeFilter"]; onNext: AnalyticsWorkbenchProps["onNext"]; onPrevious?: AnalyticsWorkbenchProps["onPrevious"]; canPrevious: boolean; onConfigure?: AnalyticsWorkbenchProps["onConfigure"] }) {
   const rows = result?.rows ?? [];
   const columns = result?.columns ?? [...visual.dimensions, ...visual.metrics];
   return (
@@ -88,14 +91,18 @@ function VisualBlock({ visual, result, onFilter, onNext, onPrevious, canPrevious
         <div className="grid grid-cols-7 gap-1 p-4" aria-label="Activity grid">
           {rows.map((row, index) => {
             const runs = numeric(row.runs);
-            return <button key={`${String(row.time)}:${index}`} type="button" title={`${String(row.time)} · ${runs} runs`} onClick={() => onFilter("time", String(row.time), "in")} className="aspect-square min-h-8 rounded border bg-primary/10 text-[10px] tabular-nums hover:bg-primary/20">{runs}</button>;
+            const bucket = String(row.time);
+            // Bucket starts are truncated timestamps: an equality filter can
+            // never match a raw run timestamp, so clicks resolve to a
+            // grain-sized time range instead.
+            return <button key={`${bucket}:${index}`} type="button" title={`${bucket} · ${runs} runs`} onClick={() => onTimeFilter?.(visual.grain, bucket)} className="aspect-square min-h-8 rounded border bg-primary/10 text-[10px] tabular-nums hover:bg-primary/20">{runs}</button>;
           })}
           {rows.length === 0 && <p className="col-span-7 py-6 text-center text-xs text-muted-foreground">No activity matches the filters.</p>}
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs"><thead className="text-[10px] uppercase tracking-wide text-muted-foreground"><tr>{columns.map((column) => <th key={column} className="px-3 py-2 font-medium">{column.replaceAll("_", " ")}</th>)}</tr></thead>
-            <tbody>{rows.map((row, index) => <tr key={index} className="border-t">{columns.map((column) => <td key={column} className="px-3 py-2 tabular-nums">{column === "debug_link" && typeof row[column] === "string" ? <a href={row[column]} className="font-medium text-primary underline-offset-2 hover:underline">Open context</a> : column === "trace" && row[column] ? <span className="font-mono text-[11px]">{formatValue(row[column])}</span> : DIMENSIONS.has(column as AnalyticsDimension) && row[column] != null ? <button type="button" aria-label={`Include ${column} ${String(row[column])}`} onClick={() => onFilter(column as AnalyticsDimension, String(row[column]), "in")} className="rounded px-1 py-0.5 text-left hover:bg-muted">{formatValue(row[column])}</button> : formatValue(row[column])}</td>)}</tr>)}</tbody>
+          <table className="w-full text-left text-xs"><thead className="text-[10px] uppercase tracking-wide text-muted-foreground"><tr>{columns.map((column) => <th key={column} className="px-3 py-2 font-medium">{DIMENSIONS.has(column as AnalyticsDimension) ? dimensionLabel(column) : column.replaceAll("_", " ")}</th>)}</tr></thead>
+            <tbody>{rows.map((row, index) => <tr key={index} className="border-t">{columns.map((column) => <td key={column} className="px-3 py-2 tabular-nums">{column === "debug_link" && typeof row[column] === "string" ? <a href={row[column]} className="font-medium text-primary underline-offset-2 hover:underline">Open context</a> : column === "trace" && row[column] ? <span className="font-mono text-[11px]">{formatValue(row[column])}</span> : DIMENSIONS.has(column as AnalyticsDimension) ? <button type="button" aria-label={`Include ${dimensionLabel(column)} ${valueLabel(column, row[column] == null ? "" : String(row[column]))}`} onClick={() => onFilter(column as AnalyticsDimension, row[column] == null ? "" : String(row[column]), "in")} className="rounded px-1 py-0.5 text-left hover:bg-muted">{valueLabel(column, row[column] == null ? "" : String(row[column]))}</button> : formatValue(row[column])}</td>)}</tr>)}</tbody>
           </table>
           {rows.length === 0 && <p className="px-4 py-8 text-center text-xs text-muted-foreground">No data matches the filters.</p>}
         </div>
@@ -145,9 +152,10 @@ function BarVisual({ visual, rows, onFilter }: { visual: AnalyticsVisual; rows: 
     <div className="space-y-2 p-4">
       {rows.map((row, index) => {
         const value = numeric(metric ? row[metric] : 0);
-        const dimensionValue = dimension ? String(row[dimension] ?? "Unknown") : `Row ${index + 1}`;
+        const rawValue = dimension ? String(row[dimension] ?? "") : "";
+        const dimensionValue = dimension ? valueLabel(dimension, rawValue) : `Row ${index + 1}`;
         return (
-          <button key={`${dimensionValue}:${index}`} type="button" onClick={() => dimension && onFilter(dimension, dimensionValue, "in")} className="grid w-full grid-cols-[110px_1fr_50px] items-center gap-3 text-left text-xs">
+          <button key={`${dimensionValue}:${index}`} type="button" onClick={() => dimension && onFilter(dimension, rawValue, "in")} className="grid w-full grid-cols-[110px_1fr_50px] items-center gap-3 text-left text-xs">
             <span className="truncate text-muted-foreground">{dimensionValue}</span>
             <span className="h-2 overflow-hidden rounded bg-muted"><span className="block h-full rounded bg-primary" style={{ width: `${(value / max) * 100}%` }} /></span>
             <span className="text-right font-mono">{formatValue(value)}</span>

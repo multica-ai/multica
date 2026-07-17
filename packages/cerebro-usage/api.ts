@@ -28,13 +28,14 @@ export type AnalyticsDimension =
   | "quality_category"
   | "context"
   | "run"
+  | "issue"
   | "source_id"
   | "reference"
   | "reference_label"
   | "debug_link"
   | "trace";
 export type AnalyticsGrain = "none" | "hour" | "day" | "week" | "month";
-export type AnalyticsOperator = "in" | "not_in" | "eq" | "gte" | "lte";
+export type AnalyticsOperator = "in" | "not_in" | "eq" | "gte" | "lte" | "contains" | "not_contains";
 
 export interface AnalyticsQuery {
   population: AnalyticsPopulation;

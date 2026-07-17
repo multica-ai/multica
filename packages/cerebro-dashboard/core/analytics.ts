@@ -51,8 +51,9 @@ export type AnalyticsFilter = {
   values: string[];
 };
 
-const FILTER_DIMENSIONS: AnalyticsDimension[] = ["time", "person", "agent", "project", "runtime", "source", "provider", "model", "skill", "status", "cost_kind", "quality_type", "quality_category", "context", "run", "source_id", "reference", "reference_label", "trace"];
+const FILTER_DIMENSIONS: AnalyticsDimension[] = ["time", "person", "agent", "project", "runtime", "source", "provider", "model", "skill", "status", "cost_kind", "quality_type", "quality_category", "context", "run", "issue", "source_id", "reference", "reference_label", "trace"];
 const RANGE_OPERATORS: Extract<AnalyticsOperator, "gte" | "lte">[] = ["gte", "lte"];
+const TEXT_OPERATORS: Extract<AnalyticsOperator, "contains" | "not_contains">[] = ["contains", "not_contains"];
 
 export const DEFAULT_ANALYTICS_VISUALS: AnalyticsVisual[] = [
   { id: "activity", title: "Activity", kind: "activity", metrics: ["runs", "cost_cents", "saved_cents"], dimensions: ["time"], grain: "day", limit: 42 },
@@ -111,6 +112,25 @@ export function toggleAnalyticsFilter(
     .filter((filter) => filter.values.length > 0);
 }
 
+export function addAnalyticsFilterValue(
+  filters: AnalyticsFilter[],
+  dimension: AnalyticsDimension,
+  value: string,
+  operator: Extract<AnalyticsOperator, "in" | "not_in" | "contains" | "not_contains">,
+): AnalyticsFilter[] {
+  if (operator === "in" || operator === "not_in") {
+    return toggleAnalyticsFilter(filters, dimension, value, operator);
+  }
+  const existing = filters.find(
+    (filter) => filter.dimension === dimension && filter.operator === operator,
+  );
+  if (!existing) return [...filters, { dimension, operator, values: [value] }];
+  if (existing.values.includes(value)) return filters;
+  return filters.map((filter) =>
+    filter === existing ? { ...filter, values: [...filter.values, value].sort() } : filter,
+  );
+}
+
 export function removeAnalyticsFilterValue(
   filters: AnalyticsFilter[],
   dimension: AnalyticsDimension,
@@ -133,7 +153,7 @@ export function filtersFromSearchParams(params: URLSearchParams): AnalyticsFilte
     const exclude = [...new Set(params.getAll(`exclude.${dimension}`))].sort();
     if (include.length) filters.push({ dimension, operator: "in", values: include });
     if (exclude.length) filters.push({ dimension, operator: "not_in", values: exclude });
-    for (const operator of RANGE_OPERATORS) {
+    for (const operator of [...RANGE_OPERATORS, ...TEXT_OPERATORS]) {
       const values = [...new Set(params.getAll(`${dimension}.${operator}`))].sort();
       if (values.length) filters.push({ dimension, operator, values });
     }
@@ -146,13 +166,13 @@ export function filtersToSearchParams(filters: AnalyticsFilter[], current = new 
   for (const dimension of FILTER_DIMENSIONS) {
     params.delete(dimension);
     params.delete(`exclude.${dimension}`);
-    for (const operator of RANGE_OPERATORS) params.delete(`${dimension}.${operator}`);
+    for (const operator of [...RANGE_OPERATORS, ...TEXT_OPERATORS]) params.delete(`${dimension}.${operator}`);
   }
   for (const filter of filters) {
     const key =
       filter.operator === "not_in"
         ? `exclude.${filter.dimension}`
-        : filter.operator === "gte" || filter.operator === "lte"
+        : filter.operator === "gte" || filter.operator === "lte" || filter.operator === "contains" || filter.operator === "not_contains"
           ? `${filter.dimension}.${filter.operator}`
           : filter.dimension;
     filter.values.forEach((value) => params.append(key, value));

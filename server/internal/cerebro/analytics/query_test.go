@@ -29,7 +29,8 @@ func TestQueryNormalizeRejectsInvalidContractValues(t *testing.T) {
 		{name: "metric", query: Query{Population: PopulationAgent, Metrics: []Metric{"revenue"}}},
 		{name: "dimension", query: Query{Population: PopulationAgent, Dimensions: []Dimension{"team"}}},
 		{name: "grain", query: Query{Population: PopulationAgent, Grain: "minute"}},
-		{name: "operator", query: Query{Population: PopulationAgent, Filters: []Filter{{Dimension: DimensionModel, Operator: "contains", Values: []string{"x"}}}}},
+		{name: "operator", query: Query{Population: PopulationAgent, Filters: []Filter{{Dimension: DimensionModel, Operator: "matches", Values: []string{"x"}}}}},
+		{name: "contains on time", query: Query{Population: PopulationAgent, Filters: []Filter{{Dimension: DimensionTime, Operator: OperatorContains, Values: []string{"2026"}}}}},
 		{name: "filter values", query: Query{Population: PopulationAgent, Filters: []Filter{{Dimension: DimensionModel, Operator: OperatorIn}}}},
 		{name: "page limit", query: Query{Population: PopulationAgent, Page: Page{Limit: MaxPageLimit + 1}}},
 		{name: "timezone", query: Query{Population: PopulationAgent, Timezone: "Mars/Olympus"}},
@@ -74,7 +75,7 @@ func TestQueryNormalizeCanonicalizesFilters(t *testing.T) {
 
 func TestCatalogExposesEverySupportedValue(t *testing.T) {
 	catalog := ContractCatalog()
-	if len(catalog.Populations) != 3 || len(catalog.Metrics) != 9 || len(catalog.Dimensions) != 20 {
+	if len(catalog.Populations) != 3 || len(catalog.Metrics) != 9 || len(catalog.Dimensions) != 21 {
 		t.Fatalf("unexpected catalog sizes: populations=%d metrics=%d dimensions=%d", len(catalog.Populations), len(catalog.Metrics), len(catalog.Dimensions))
 	}
 }

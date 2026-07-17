@@ -25,7 +25,7 @@ func TestBuildSQLUsesCanonicalProjectionForDimensionsMetricsAndFilters(t *testin
 		"r.person_label AS person", "r.project_label AS project", "r.provider AS provider",
 		"COUNT(DISTINCT r.run_id)::bigint AS runs", "SUM(r.cost_cents)::bigint AS cost_cents",
 		"SUM(s.saved_cents)::bigint AS saved_cents", "quality_pass_rate",
-		"r.model = ANY", "NOT (r.status = ANY", "ORDER BY cost_cents DESC", "LIMIT 26",
+		"COALESCE(r.model,'') = ANY", "NOT (COALESCE(r.status,'') = ANY", "ORDER BY cost_cents DESC", "LIMIT 26",
 	} {
 		if !strings.Contains(plan.SQL, fragment) {
 			t.Errorf("SQL missing %q:\n%s", fragment, plan.SQL)
@@ -66,7 +66,7 @@ func TestBuildSQLSupportsTimeFiltersAndMissingCostMetric(t *testing.T) {
 		"r.cost_kind AS cost_kind",
 		"COUNT(DISTINCT r.run_id) FILTER (WHERE r.cost_kind = 'missing')::bigint AS missing_cost_runs",
 		"r.started_at >= ($2::timestamptz[])[1]",
-		"r.cost_kind = ANY($3::text[])",
+		"COALESCE(r.cost_kind,'') = ANY($3::text[])",
 	} {
 		if !strings.Contains(plan.SQL, fragment) {
 			t.Errorf("SQL missing %q:\n%s", fragment, plan.SQL)
@@ -129,7 +129,69 @@ func TestBuildSQLExposesAndFiltersRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fragment := range []string{"r.runtime_label AS runtime", "r.runtime_label = ANY($2::text[])"} {
+	for _, fragment := range []string{"r.runtime_label AS runtime", "COALESCE(r.runtime_label,'') = ANY($2::text[])"} {
+		if !strings.Contains(plan.SQL, fragment) {
+			t.Errorf("SQL missing %q:\n%s", fragment, plan.SQL)
+		}
+	}
+}
+
+func TestBuildSQLSupportsContainsOperators(t *testing.T) {
+	query := Query{
+		Population: PopulationAll,
+		Metrics:    []Metric{MetricRuns},
+		Filters: []Filter{
+			{Dimension: DimensionModel, Operator: OperatorContains, Values: []string{"gpt", "50%_off"}},
+			{Dimension: DimensionPerson, Operator: OperatorNotContains, Values: []string{"bot"}},
+		},
+		Page: Page{Limit: 10},
+	}
+	plan, err := BuildSQL(query, "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		"COALESCE(r.model,'') ILIKE ANY($2::text[])",
+		"NOT (COALESCE(r.person_label,'') ILIKE ANY($3::text[]))",
+	} {
+		if !strings.Contains(plan.SQL, fragment) {
+			t.Errorf("SQL missing %q:\n%s", fragment, plan.SQL)
+		}
+	}
+	patterns, ok := plan.Args[1].([]string)
+	if !ok || len(patterns) != 2 || patterns[0] != "%50\\%\\_off%" || patterns[1] != "%gpt%" {
+		t.Fatalf("contains patterns = %#v", plan.Args[1])
+	}
+}
+
+func TestBuildSQLRejectsContainsOnTime(t *testing.T) {
+	query := Query{
+		Population: PopulationAll,
+		Filters:    []Filter{{Dimension: DimensionTime, Operator: OperatorContains, Values: []string{"2026"}}},
+		Page:       Page{Limit: 10},
+	}
+	if _, err := BuildSQL(query, "workspace-1"); err == nil {
+		t.Fatal("BuildSQL() error = nil, want contains-on-time rejection")
+	}
+}
+
+func TestBuildSQLExposesIssueDimension(t *testing.T) {
+	query := Query{
+		Population: PopulationAll,
+		Metrics:    []Metric{MetricRuns},
+		Dimensions: []Dimension{DimensionIssue},
+		Filters:    []Filter{{Dimension: DimensionIssue, Operator: OperatorIn, Values: []string{"Dashboard i Multica"}}},
+		Page:       Page{Limit: 10},
+	}
+	plan, err := BuildSQL(query, "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		"ref_issue.label AS issue",
+		"LEFT JOIN cerebro_analytics_reference ref_issue ON ref_issue.analytics_run_id=r.id AND ref_issue.reference_kind IN ('issue','dm','channel')",
+		"COALESCE(ref_issue.label,'') = ANY($2::text[])",
+	} {
 		if !strings.Contains(plan.SQL, fragment) {
 			t.Errorf("SQL missing %q:\n%s", fragment, plan.SQL)
 		}

@@ -6,7 +6,7 @@ import type { DashboardOverview, TopActor } from "../../core/api";
 import {
   DEFAULT_ANALYTICS_VISUALS,
   removeAnalyticsFilterValue,
-  toggleAnalyticsFilter,
+  addAnalyticsFilterValue,
   type AnalyticsFilter,
 } from "../../core/analytics";
 import { useDashboardStore } from "../../core/store";
@@ -47,8 +47,8 @@ export function OverviewControlRoom({
   const setRange = useDashboardStore((state) => state.setRange);
   const [compactLayout, setCompactLayout] = useState(false);
 
-  const addFilter = (dimension: AnalyticsDimension, value: string, operator: "in" | "not_in") => {
-    onFiltersChange((current) => toggleAnalyticsFilter(current, dimension, value, operator));
+  const addFilter = (dimension: AnalyticsDimension, value: string, operator: "in" | "not_in" | "contains" | "not_contains") => {
+    onFiltersChange((current) => addAnalyticsFilterValue(current, dimension, value, operator));
   };
   const removeFilter = (dimension: AnalyticsDimension, value: string, operator: AnalyticsOperator) => {
     onFiltersChange((current) => removeAnalyticsFilterValue(current, dimension, value, operator));
@@ -69,6 +69,7 @@ export function OverviewControlRoom({
   return (
     <div className={`min-w-0 p-6 ${compactLayout ? "space-y-2" : "space-y-3"}`}>
       <RunsToolbar
+        workspaceId={workspaceId}
         range={range}
         onRangeChange={setRange}
         filters={filters}

@@ -22,11 +22,12 @@ import {
   type AnalyticsQueryResult,
 } from "@multica/cerebro-usage";
 import {
+  addAnalyticsFilterValue,
   filtersToSearchParams,
   removeAnalyticsFilterValue,
-  toggleAnalyticsFilter,
   type AnalyticsFilter,
 } from "../../core/analytics";
+import { valueLabel } from "../../core/dimension-labels";
 import { useDashboardStore } from "../../core/store";
 import { timeRangeToDays } from "../../core/types";
 import { RunDetailDrawer, type RunRow } from "./run-detail-drawer";
@@ -74,6 +75,8 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
   const [panelCursors, setPanelCursors] = useState<Record<string, string[]>>({});
   const [selectedRun, setSelectedRun] = useState<RunRow | null>(null);
   const [compactLayout, setCompactLayout] = useState(false);
+  const [peoplePage, setPeoplePage] = useState(0);
+  const [projectPage, setProjectPage] = useState(0);
 
   // Time-range floor, recomputed only when the range changes so query keys stay
   // stable across renders. Every panel query inherits this filter.
@@ -149,7 +152,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
       // 11 matching runs
       analyticsQueryOptions(workspaceId, build(
         ["cost_cents", "skill_invocations", "input_tokens", "output_tokens", "saved_cents", "duration_seconds"],
-        ["run", "time", "person", "source", "runtime", "provider", "model", "status", "cost_kind", "reference_label", "debug_link", "trace"],
+        ["run", "time", "person", "source", "runtime", "provider", "model", "status", "cost_kind", "issue", "reference_label", "debug_link", "trace"],
         { page: { limit: 25, ...(runsCursor ? { cursor: runsCursor } : {}) }, sort: [{ field: "time", direction: "desc" }] },
       )),
     ],
@@ -159,19 +162,28 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
     queries.map((q) => q.data) as Result[];
   const loading = queries.some((q) => q.isLoading);
 
-  const onFilter = (dimension: AnalyticsDimension, value: string, operator: "in" | "not_in" = "in") => {
-    if (!value) return;
-    onFiltersChange((current) => toggleAnalyticsFilter(current, dimension, value, operator));
+  // Empty string is a legitimate value: it matches runs where the dimension is
+  // unset, so clicking an "unattributed" cell narrows to exactly those runs.
+  const resetPaging = () => {
     setRunsCursors([]);
     setPanelCursors({});
+    setPeoplePage(0);
+    setProjectPage(0);
+  };
+  const onFilter = (dimension: AnalyticsDimension, value: string, operator: "in" | "not_in" | "contains" | "not_contains" = "in") => {
+    onFiltersChange((current) => addAnalyticsFilterValue(current, dimension, value, operator));
+    resetPaging();
   };
   const onRemoveFilter = (dimension: AnalyticsDimension, value: string, operator: AnalyticsOperator) => {
     onFiltersChange((current) => removeAnalyticsFilterValue(current, dimension, value, operator));
-    setRunsCursors([]);
-    setPanelCursors({});
+    resetPaging();
   };
+  // Buckets arrive as local wall time serialized with a Z suffix (the SQL
+  // truncates in the query timezone). Re-interpret them as local time before
+  // building the UTC range, otherwise the filter is offset by the timezone
+  // and matches the wrong runs.
   const onTimeBucketFilter = (value: string) => {
-    const start = new Date(value);
+    const start = new Date(value.replace(/(\.\d+)?Z$/, ""));
     if (Number.isNaN(start.getTime())) return;
     const end = new Date(start);
     if (heatGrain === "hour") end.setHours(end.getHours() + 1);
@@ -182,8 +194,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
       { dimension: "time", operator: "gte", values: [start.toISOString()] },
       { dimension: "time", operator: "lte", values: [end.toISOString()] },
     ]);
-    setRunsCursors([]);
-    setPanelCursors({});
+    resetPaging();
   };
 
   const nextPanel = (key: string, result: Result) => {
@@ -202,17 +213,21 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
 
   const kpiRow = (kpi?.rows ?? [])[0] ?? {};
   const gatePass = num(kpiRow.quality_pass_rate);
+  const aggregated = aggregatePeopleProject(peopleProject);
+  const peoplePages = countTablePages(aggregated.people.size);
+  const projectPages = countTablePages(aggregated.projects.size);
 
   return (
     <div className="flex min-h-0 flex-1">
       <div className={`min-w-0 flex-1 p-6 ${compactLayout ? "space-y-2" : "space-y-3"}`}>
         <RunsToolbar
+          workspaceId={workspaceId}
           range={range}
           onRangeChange={setRange}
           filters={filters}
           onAddFilter={onFilter}
           onRemoveFilter={onRemoveFilter}
-          onClear={() => { onFiltersChange([]); setRunsCursors([]); setPanelCursors({}); }}
+          onClear={() => { onFiltersChange([]); resetPaging(); }}
           onCustomize={() => setCompactLayout((compact) => !compact)}
           onNewVisual={() => {
             setSelectedRun(null);
@@ -243,7 +258,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
               <span className="rounded border bg-[#f3f2f0] px-2 py-1">Color: Volume</span>
             </div>
           </div>
-          <ActivityHeatmap result={heat} onFilter={onTimeBucketFilter} />
+          <ActivityHeatmap result={heat} grain={heatGrain} onFilter={onTimeBucketFilter} />
           <PanelFooterPager
             label="Activity grid"
             page={(panelCursors.activity?.length ?? 0) + 1}
@@ -267,10 +282,10 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
               <PanelFooterPager label="Runs and cost" page={(panelCursors["time-series"]?.length ?? 0) + 1} canPrevious={(panelCursors["time-series"]?.length ?? 0) > 0} canNext={Boolean(timeSeries?.next_cursor)} onPrevious={() => previousPanel("time-series")} onNext={() => nextPanel("time-series", timeSeries)} />
             </Panel>
           </div>
-          {/* People & sources */}
-          <Panel title="People & sources" meta="Click any cell to filter">
+          {/* Members & triggers */}
+          <Panel title="Members & triggers" meta="Click any cell to filter">
             <div className="space-y-4 p-4">
-              <Eyebrow>Usage by source</Eyebrow>
+              <Eyebrow>Usage by trigger</Eyebrow>
               <div className="grid grid-cols-2 gap-2">
                 {(bySource?.rows ?? []).map((row, index) => (
                   <button
@@ -279,7 +294,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
                     onClick={() => onFilter("source", str(row.source) ?? "")}
                     className="rounded-md border bg-card px-3 py-2 text-left hover:border-primary"
                   >
-                    <span className="block text-[10px] text-muted-foreground">{str(row.source) ?? "Unknown"}</span>
+                    <span className="block text-[10px] text-muted-foreground">{valueLabel("source", str(row.source))}</span>
                     <span className="block font-mono text-sm font-semibold">{compact(row.runs)}</span>
                   </button>
                 ))}
@@ -299,18 +314,18 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
                 ))}
               </div>
             </div>
-            <PanelFooterPager label="People and sources" page={(panelCursors.sources?.length ?? 0) + 1} canPrevious={(panelCursors.sources?.length ?? 0) > 0} canNext={Boolean(bySource?.next_cursor)} onPrevious={() => previousPanel("sources")} onNext={() => nextPanel("sources", bySource)} />
+            <PanelFooterPager label="Members and triggers" page={(panelCursors.sources?.length ?? 0) + 1} canPrevious={(panelCursors.sources?.length ?? 0) > 0} canNext={Boolean(bySource?.next_cursor)} onPrevious={() => previousPanel("sources")} onNext={() => nextPanel("sources", bySource)} />
           </Panel>
         </div>
 
         <div className="grid gap-3 lg:grid-cols-2">
-          <Panel title="People performance" meta="Click person or metric to filter">
-            <PeopleTable result={peopleProject} onFilter={onFilter} />
-            <PanelFooterPager label="People performance" page={(panelCursors["people-project"]?.length ?? 0) + 1} canPrevious={(panelCursors["people-project"]?.length ?? 0) > 0} canNext={Boolean(peopleProject?.next_cursor)} onPrevious={() => previousPanel("people-project")} onNext={() => nextPanel("people-project", peopleProject)} />
+          <Panel title="Member performance" meta="Click a member or metric to filter">
+            <PeopleTable result={peopleProject} page={peoplePage} onFilter={onFilter} />
+            <PanelFooterPager label="Member performance" page={peoplePage + 1} canPrevious={peoplePage > 0} canNext={peoplePage + 1 < peoplePages} onPrevious={() => setPeoplePage((page) => Math.max(0, page - 1))} onNext={() => setPeoplePage((page) => page + 1)} />
           </Panel>
-          <Panel title="Projects" meta="People, usage & quality">
-            <ProjectTable result={peopleProject} onFilter={onFilter} />
-            <PanelFooterPager label="Projects" page={(panelCursors["people-project"]?.length ?? 0) + 1} canPrevious={(panelCursors["people-project"]?.length ?? 0) > 0} canNext={Boolean(peopleProject?.next_cursor)} onPrevious={() => previousPanel("people-project")} onNext={() => nextPanel("people-project", peopleProject)} />
+          <Panel title="Projects" meta="Members, usage & quality">
+            <ProjectTable result={peopleProject} page={projectPage} onFilter={onFilter} />
+            <PanelFooterPager label="Projects" page={projectPage + 1} canPrevious={projectPage > 0} canNext={projectPage + 1 < projectPages} onPrevious={() => setProjectPage((page) => Math.max(0, page - 1))} onNext={() => setProjectPage((page) => page + 1)} />
           </Panel>
         </div>
 
@@ -494,40 +509,147 @@ function Segments<T extends string>({ options, value, onChange }: { options: T[]
 
 // ---------- panels ----------
 
-export function ActivityHeatmap({ result, onFilter }: { result: Result; onFilter: (value: string) => void }) {
+const WEEKDAY_LABELS = ["Mon", "", "Wed", "", "Fri", "", ""];
+
+function heatLevel(value: number, max: number): string {
+  if (max === 0 || value === 0) return "bg-muted";
+  const ratio = value / max;
+  if (ratio > 0.75) return "bg-[#6557d8]";
+  if (ratio > 0.5) return "bg-[#8e82df]";
+  if (ratio > 0.25) return "bg-[#bdb5ef]";
+  return "bg-[#ddd9fa]";
+}
+
+// GitHub-style contribution grid: weekday rows × week columns for the day
+// grain, hour rows × day columns for the hour grain. Buckets with no runs are
+// filled in as empty cells so the grid keeps its calendar shape.
+export function ActivityHeatmap({ result, grain, onFilter }: { result: Result; grain: HeatGrain; onFilter: (value: string) => void }) {
   const rows = result?.rows ?? [];
-  const max = rows.reduce((acc, row) => Math.max(acc, num(row.runs)), 0);
-  const level = (value: number) => {
-    if (max === 0 || value === 0) return "bg-muted";
-    const ratio = value / max;
-    if (ratio > 0.75) return "bg-[#6557d8]";
-    if (ratio > 0.5) return "bg-[#8e82df]";
-    if (ratio > 0.25) return "bg-[#bdb5ef]";
-    return "bg-[#ddd9fa]";
-  };
-  if (rows.length === 0) {
+  const buckets = rows
+    .map((row) => ({ date: new Date(str(row.time) ?? ""), runs: num(row.runs) }))
+    .filter((bucket) => !Number.isNaN(bucket.date.getTime()));
+  if (buckets.length === 0) {
     return <p className="p-6 text-center text-xs text-muted-foreground">No activity in this range.</p>;
   }
-  return (
-    <div
-      role="grid"
-      aria-label="Activity by time bucket"
-      className="grid gap-1 overflow-hidden p-4"
-      style={{ gridTemplateColumns: "repeat(42, minmax(0, 1fr))" }}
-    >
-      {rows.map((row, index) => {
-        const value = num(row.runs);
-        const label = str(row.time) ?? "";
-        return (
+  const max = buckets.reduce((acc, bucket) => Math.max(acc, bucket.runs), 0);
+  const byKey = new Map(buckets.map((bucket) => [bucket.date.getTime(), bucket.runs]));
+  const first = buckets[0]!.date;
+  const last = buckets[buckets.length - 1]!.date;
+
+  // All bucket math happens in UTC: the SQL truncates in the query timezone
+  // and serializes the local wall time with a Z suffix, so the UTC fields of
+  // the parsed date ARE the local calendar fields.
+  if (grain === "month") {
+    return (
+      <div role="grid" aria-label="Activity by month" className="flex flex-wrap gap-1 p-4">
+        {buckets.map((bucket) => (
           <button
-            key={`${label}:${index}`}
+            key={bucket.date.toISOString()}
             type="button"
-            title={`${label} · ${value} runs`}
-            onClick={() => onFilter(label)}
-            className={`h-4 min-w-3 rounded-sm ${level(value)} hover:ring-2 hover:ring-foreground/40`}
-          />
-        );
-      })}
+            title={`${bucket.date.toLocaleDateString("en", { month: "short", year: "numeric", timeZone: "UTC" })} · ${bucket.runs} runs`}
+            onClick={() => onFilter(bucket.date.toISOString())}
+            className={`flex h-10 w-16 flex-col items-center justify-center rounded-sm text-[9px] ${heatLevel(bucket.runs, max)} hover:ring-2 hover:ring-foreground/40`}
+          >
+            <span className={bucket.runs / Math.max(1, max) > 0.5 ? "text-white" : "text-muted-foreground"}>
+              {bucket.date.toLocaleDateString("en", { month: "short", timeZone: "UTC" })}
+            </span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  if (grain === "hour") {
+    const dayColumns: { day: Date; cells: { time: Date; runs: number }[] }[] = [];
+    const cursor = new Date(first);
+    cursor.setUTCHours(0, 0, 0, 0);
+    while (cursor <= last) {
+      const day = new Date(cursor);
+      const cells = Array.from({ length: 24 }, (_, hour) => {
+        const time = new Date(day);
+        time.setUTCHours(hour);
+        return { time, runs: byKey.get(time.getTime()) ?? 0 };
+      });
+      dayColumns.push({ day, cells });
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    const labelEvery = Math.max(1, Math.ceil(dayColumns.length / 8));
+    return (
+      <div role="grid" aria-label="Activity by hour" className="flex gap-2 overflow-x-auto p-4">
+        <div className="flex flex-col justify-between py-0.5 text-[9px] text-muted-foreground">
+          <span>00</span><span>06</span><span>12</span><span>18</span><span>23</span>
+        </div>
+        {dayColumns.map(({ day, cells }, index) => (
+          <div key={day.toISOString()} className="flex min-w-2.5 flex-1 flex-col gap-px">
+            {cells.map((cell) => (
+              <button
+                key={cell.time.toISOString()}
+                type="button"
+                title={`${cell.time.toLocaleString("en", { day: "2-digit", month: "short", hour: "2-digit", timeZone: "UTC" })} · ${cell.runs} runs`}
+                onClick={() => onFilter(cell.time.toISOString())}
+                className={`h-1.5 w-full rounded-[2px] ${heatLevel(cell.runs, max)} hover:ring-1 hover:ring-foreground/50`}
+              />
+            ))}
+            <span className="mt-1 h-3 truncate text-center text-[8px] text-muted-foreground">
+              {index % labelEvery === 0 ? day.toLocaleDateString("en", { day: "2-digit", month: "short", timeZone: "UTC" }) : ""}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Day grain: weeks as columns, weekdays (Mon–Sun) as rows, month labels on
+  // top — the GitHub contribution layout.
+  const start = new Date(first);
+  start.setUTCHours(0, 0, 0, 0);
+  start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
+  const weeks: { time: Date; runs: number; inRange: boolean }[][] = [];
+  const cursor = new Date(start);
+  while (cursor <= last) {
+    const week = Array.from({ length: 7 }, (_, weekday) => {
+      const time = new Date(cursor);
+      time.setUTCDate(time.getUTCDate() + weekday);
+      return { time, runs: byKey.get(time.getTime()) ?? 0, inRange: time >= first && time <= last };
+    });
+    weeks.push(week);
+    cursor.setUTCDate(cursor.getUTCDate() + 7);
+  }
+  return (
+    <div role="grid" aria-label="Activity by day" className="overflow-x-auto p-4">
+      <div className="flex gap-1">
+        <div className="mt-4 flex flex-col gap-1 pr-1 text-[9px] leading-none text-muted-foreground">
+          {WEEKDAY_LABELS.map((label, index) => <span key={index} className="h-3">{label}</span>)}
+        </div>
+        {weeks.map((week, weekIndex) => {
+          const firstOfMonth = week.find((cell) => cell.time.getUTCDate() === 1);
+          const monthLabel = weekIndex === 0 || firstOfMonth
+            ? (firstOfMonth?.time ?? week[0]!.time).toLocaleDateString("en", { month: "short", timeZone: "UTC" })
+            : "";
+          return (
+            <div key={week[0]!.time.toISOString()} className="flex min-w-3 flex-1 flex-col gap-1">
+              <span className="h-3 truncate text-[9px] leading-none text-muted-foreground">{monthLabel}</span>
+              {week.map((cell) => (
+                <button
+                  key={cell.time.toISOString()}
+                  type="button"
+                  disabled={!cell.inRange}
+                  title={`${cell.time.toLocaleDateString("en", { day: "2-digit", month: "short" })} · ${cell.runs} runs`}
+                  onClick={() => onFilter(cell.time.toISOString())}
+                  className={`h-3 w-full rounded-[2px] ${cell.inRange ? heatLevel(cell.runs, max) : "bg-transparent"} ${cell.inRange ? "hover:ring-1 hover:ring-foreground/50" : ""}`}
+                />
+              ))}
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex items-center justify-end gap-1 text-[9px] text-muted-foreground">
+        <span>Less</span>
+        {["bg-muted", "bg-[#ddd9fa]", "bg-[#bdb5ef]", "bg-[#8e82df]", "bg-[#6557d8]"].map((cls) => (
+          <span key={cls} className={`inline-block size-2.5 rounded-[2px] ${cls}`} />
+        ))}
+        <span>More</span>
+      </div>
     </div>
   );
 }
@@ -591,18 +713,19 @@ function BarList({
       <Eyebrow>{title}</Eyebrow>
       <div className="mt-2 space-y-2">
         {rows.map((row, index) => {
-          const label = str(row[dimension]) ?? "Unknown";
+          const raw = str(row[dimension]) ?? "";
+          const label = valueLabel(dimension, raw);
           const value = num(row[metric]);
           return (
             <button
-              key={`${label}:${index}`}
+              key={`${raw}:${index}`}
               type="button"
-              onClick={() => onFilter(dimension, label)}
+              onClick={() => onFilter(dimension, raw)}
               className="grid w-full grid-cols-[80px_1fr_36px] items-center gap-2 text-left text-[11px] hover:opacity-80"
             >
               <span className="truncate text-muted-foreground">{label}</span>
               <span className="h-1.5 overflow-hidden rounded bg-muted">
-                <span className={`block h-full rounded ${color(label)}`} style={{ width: `${(value / max) * 100}%` }} />
+                <span className={`block h-full rounded ${color(raw || label)}`} style={{ width: `${(value / max) * 100}%` }} />
               </span>
               <span className="text-right font-mono">{compact(value)}</span>
             </button>
@@ -616,11 +739,11 @@ function BarList({
 
 function PeopleSourceMatrix({ result, onFilter }: { result: Result; onFilter: (dimension: AnalyticsDimension, value: string) => void }) {
   const rows = result?.rows ?? [];
-  const sources = [...new Set(rows.map((row) => str(row.source) ?? "—"))].slice(0, 4);
+  const sources = [...new Set(rows.map((row) => str(row.source) ?? ""))].slice(0, 4);
   const byPerson = new Map<string, Map<string, number>>();
   for (const row of rows) {
-    const person = str(row.person) ?? "Unknown";
-    const source = str(row.source) ?? "—";
+    const person = str(row.person) ?? "";
+    const source = str(row.source) ?? "";
     const map = byPerson.get(person) ?? new Map();
     map.set(source, num(row.runs));
     byPerson.set(person, map);
@@ -632,15 +755,15 @@ function PeopleSourceMatrix({ result, onFilter }: { result: Result; onFilter: (d
   if (people.length === 0) return null;
   return (
     <div>
-      <Eyebrow>People × source</Eyebrow>
+      <Eyebrow>Members × trigger</Eyebrow>
       <div className="mt-2 space-y-1">
         {people.map(({ person, map }) => (
           <div key={person} className="grid grid-cols-[64px_repeat(4,1fr)] items-center gap-1 text-[10px]">
             <button type="button" onClick={() => onFilter("person", person)} className="truncate text-left font-medium hover:text-primary">
-              {person}
+              {valueLabel("person", person)}
             </button>
             {sources.map((source) => (
-              <span key={source} className="rounded bg-muted/50 px-1 py-0.5 text-center">
+              <span key={source} className="rounded bg-muted/50 px-1 py-0.5 text-center" title={valueLabel("source", source)}>
                 {map.get(source) ?? 0}
               </span>
             ))}
@@ -677,8 +800,8 @@ function aggregatePeopleProject(result: Result) {
   const people = new Map<string, PersonAgg>();
   const projects = new Map<string, { runs: number; cost: number; people: Set<string>; passSum: number; passRuns: number }>();
   for (const row of rows) {
-    const person = str(row.person) ?? "Unknown";
-    const project = str(row.project) ?? "Unassigned";
+    const person = str(row.person) ?? "";
+    const project = str(row.project) ?? "";
     const runs = num(row.runs);
     const cost = num(row.cost_cents);
     const rate = num(row.quality_pass_rate);
@@ -700,24 +823,28 @@ function aggregatePeopleProject(result: Result) {
   return { people, projects };
 }
 
-export function PeopleTable({ result, onFilter }: { result: Result; onFilter: (dimension: AnalyticsDimension, value: string) => void }) {
+const TABLE_PAGE_SIZE = 6;
+
+export function PeopleTable({ result, page = 0, onFilter }: { result: Result; page?: number; onFilter: (dimension: AnalyticsDimension, value: string) => void }) {
   const { people } = aggregatePeopleProject(result);
-  const rows = [...people.entries()].sort((a, b) => b[1].runs - a[1].runs).slice(0, 6);
+  const all = [...people.entries()].sort((a, b) => b[1].runs - a[1].runs);
+  const rows = all.slice(page * TABLE_PAGE_SIZE, (page + 1) * TABLE_PAGE_SIZE);
   return (
     <table className="w-full text-left text-xs">
       <thead className="text-[10px] uppercase tracking-wide text-muted-foreground">
-        <tr><Th>Person</Th><Th>Projects</Th><Th>Runs</Th><Th>Cost</Th><Th>Gate pass</Th></tr>
+        <tr><Th>Member</Th><Th>Projects</Th><Th>Runs</Th><Th>Cost</Th><Th>Gate pass</Th></tr>
       </thead>
       <tbody>
         {rows.map(([person, agg]) => {
           const rate = agg.passRuns ? agg.passSum / agg.passRuns : 0;
+          const label = valueLabel("person", person);
           return (
             <tr key={person} className="cursor-pointer border-t hover:bg-primary/5" onClick={() => onFilter("person", person)}>
               <td className="px-4 py-2 font-medium">
                 <span className="mr-2 inline-grid size-[22px] place-items-center rounded-full bg-[rgba(101,87,216,0.10)] font-semibold text-[#6557d8]">
-                  {person.charAt(0).toUpperCase() || "?"}
+                  {label.charAt(0).toUpperCase() || "?"}
                 </span>
-                {person}
+                {label}
               </td>
               <td className="px-4 py-2 tabular-nums">{agg.projects.size}</td>
               <td className="px-4 py-2 font-mono">{compact(agg.runs)}</td>
@@ -732,20 +859,21 @@ export function PeopleTable({ result, onFilter }: { result: Result; onFilter: (d
   );
 }
 
-function ProjectTable({ result, onFilter }: { result: Result; onFilter: (dimension: AnalyticsDimension, value: string) => void }) {
+function ProjectTable({ result, page = 0, onFilter }: { result: Result; page?: number; onFilter: (dimension: AnalyticsDimension, value: string) => void }) {
   const { projects } = aggregatePeopleProject(result);
-  const rows = [...projects.entries()].sort((a, b) => b[1].runs - a[1].runs).slice(0, 6);
+  const all = [...projects.entries()].sort((a, b) => b[1].runs - a[1].runs);
+  const rows = all.slice(page * TABLE_PAGE_SIZE, (page + 1) * TABLE_PAGE_SIZE);
   return (
     <table className="w-full text-left text-xs">
       <thead className="text-[10px] uppercase tracking-wide text-muted-foreground">
-        <tr><Th>Project</Th><Th>People</Th><Th>Runs</Th><Th>Cost</Th><Th>Gate pass</Th></tr>
+        <tr><Th>Project</Th><Th>Members</Th><Th>Runs</Th><Th>Cost</Th><Th>Gate pass</Th></tr>
       </thead>
       <tbody>
         {rows.map(([project, agg]) => {
           const rate = agg.passRuns ? agg.passSum / agg.passRuns : 0;
           return (
             <tr key={project} className="cursor-pointer border-t hover:bg-primary/5" onClick={() => onFilter("project", project)}>
-              <td className="px-4 py-2 font-medium">{project}</td>
+              <td className="px-4 py-2 font-medium">{valueLabel("project", project)}</td>
               <td className="px-4 py-2 tabular-nums">{agg.people.size}</td>
               <td className="px-4 py-2 font-mono">{compact(agg.runs)}</td>
               <td className="px-4 py-2 font-mono">{dollars(agg.cost)}</td>
@@ -757,6 +885,10 @@ function ProjectTable({ result, onFilter }: { result: Result; onFilter: (dimensi
       </tbody>
     </table>
   );
+}
+
+export function countTablePages(size: number): number {
+  return Math.max(1, Math.ceil(size / TABLE_PAGE_SIZE));
 }
 
 function RunsTable({
@@ -790,7 +922,7 @@ function RunsTable({
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead className="text-[10px] uppercase tracking-wide text-muted-foreground">
-            <tr><Th>Started</Th><Th>Source</Th><Th>Person → provider → model</Th><Th>Context</Th><Th>Status</Th><Th>Cost</Th><Th>Skills</Th></tr>
+            <tr><Th>Started</Th><Th>Trigger</Th><Th>Member → provider → model</Th><Th>Issue</Th><Th>Status</Th><Th>Cost</Th><Th>Skills</Th></tr>
           </thead>
           <tbody>
             {rows.map((row, index) => {
@@ -808,11 +940,11 @@ function RunsTable({
                     </button>
                   </td>
                   <td className="px-4 py-2">
-                    <Cell onClick={(event) => { event.stopPropagation(); onFilter("source", str(row.source) ?? ""); }} badge>{str(row.source) ?? "—"}</Cell>
+                    <Cell onClick={(event) => { event.stopPropagation(); onFilter("source", str(row.source) ?? ""); }} badge>{valueLabel("source", str(row.source))}</Cell>
                   </td>
                   <td className="px-4 py-2">
                     <span className="flex items-center gap-1 text-[11px]">
-                      <Cell onClick={(event) => { event.stopPropagation(); onFilter("person", str(row.person) ?? ""); }}>{str(row.person) ?? "—"}</Cell>
+                      <Cell onClick={(event) => { event.stopPropagation(); onFilter("person", str(row.person) ?? ""); }}>{valueLabel("person", str(row.person))}</Cell>
                       <span className="text-muted-foreground">›</span>
                       <Cell onClick={(event) => { event.stopPropagation(); onFilter("provider", str(row.provider) ?? ""); }}>{str(row.provider) ?? "—"}</Cell>
                       <span className="text-muted-foreground">›</span>
@@ -820,7 +952,7 @@ function RunsTable({
                     </span>
                   </td>
                   <td className="max-w-[160px] px-4 py-2">
-                    <Cell onClick={(event) => { event.stopPropagation(); onFilter("reference_label", str(row.reference_label) ?? ""); }}>{str(row.reference_label) ?? "—"}</Cell>
+                    <Cell onClick={(event) => { event.stopPropagation(); onFilter("issue", str(row.issue) ?? ""); }}>{str(row.issue) ?? str(row.reference_label) ?? "—"}</Cell>
                   </td>
                   <td className="px-4 py-2">
                     <Cell onClick={(event) => { event.stopPropagation(); onFilter("status", status); }}>

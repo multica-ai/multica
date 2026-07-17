@@ -6,18 +6,47 @@ import { ActivityHeatmap, Donut, PanelFooterPager, PanelPager, PeopleTable, Time
 afterEach(cleanup);
 
 describe("ActivityHeatmap", () => {
-  it("keeps sparse activity in fixed-width time buckets", () => {
+  it("lays out day buckets as a GitHub-style weekday-by-week grid", () => {
+    const onFilter = vi.fn();
     render(
       <ActivityHeatmap
-        result={{ columns: ["time", "runs"], rows: [{ time: "2026-07-13T18:00:00Z", runs: 1 }] }}
+        grain="day"
+        result={{
+          columns: ["time", "runs"],
+          rows: [
+            { time: "2026-07-13T00:00:00Z", runs: 1 },
+            { time: "2026-07-15T00:00:00Z", runs: 4 },
+          ],
+        }}
+        onFilter={onFilter}
+      />,
+    );
+
+    expect(screen.getByRole("grid", { name: "Activity by day" })).toBeTruthy();
+    expect(screen.getByText("Mon")).toBeTruthy();
+    expect(screen.getByText("Fri")).toBeTruthy();
+    expect(screen.getByText("Less")).toBeTruthy();
+    expect(screen.getByText("More")).toBeTruthy();
+    // 2026-07-14 has no data but stays in the grid as an empty calendar cell.
+    expect(screen.getByTitle("Jul 14 · 0 runs")).toBeTruthy();
+    expect(screen.getByTitle("Jul 15 · 4 runs").className).toContain("bg-[#6557d8]");
+    fireEvent.click(screen.getByTitle("Jul 15 · 4 runs"));
+    expect(onFilter).toHaveBeenCalledWith("2026-07-15T00:00:00.000Z");
+  });
+
+  it("lays out hour buckets as hour rows under day columns", () => {
+    render(
+      <ActivityHeatmap
+        grain="hour"
+        result={{ columns: ["time", "runs"], rows: [{ time: "2026-07-13T18:00:00Z", runs: 2 }] }}
         onFilter={vi.fn()}
       />,
     );
 
-    expect(screen.getByRole("grid", { name: "Activity by time bucket" }).style.gridTemplateColumns).toBe(
-      "repeat(42, minmax(0, 1fr))",
-    );
-    expect(screen.getByTitle(/1 runs/).className).toContain("bg-[#6557d8]");
+    expect(screen.getByRole("grid", { name: "Activity by hour" })).toBeTruthy();
+    expect(screen.getByText("00")).toBeTruthy();
+    expect(screen.getByText("23")).toBeTruthy();
+    expect(screen.getByTitle(/2 runs/).className).toContain("bg-[#6557d8]");
   });
 
   it("renders the mockup configure and pagination controls", () => {

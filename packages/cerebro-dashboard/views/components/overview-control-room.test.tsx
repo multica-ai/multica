@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DashboardOverview } from "../../core/api";
@@ -7,6 +8,11 @@ import { OverviewControlRoom } from "./overview-control-room";
 vi.mock("./analytics-dashboard", () => ({
   AnalyticsDashboard: () => <div>Analytics visuals</div>,
 }));
+
+function renderWithQueryClient(ui: React.ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 afterEach(cleanup);
 
@@ -29,7 +35,7 @@ const overview = {
 
 describe("OverviewControlRoom", () => {
   it("renders the new operational overview without legacy section labels", () => {
-    render(
+    renderWithQueryClient(
       <OverviewControlRoom
         workspaceId="workspace-1"
         data={overview}
@@ -50,7 +56,7 @@ describe("OverviewControlRoom", () => {
 
   it("turns a person click into a shared Dashboard filter", () => {
     const onSelectActor = vi.fn();
-    render(
+    renderWithQueryClient(
       <OverviewControlRoom
         workspaceId="workspace-1"
         data={overview}

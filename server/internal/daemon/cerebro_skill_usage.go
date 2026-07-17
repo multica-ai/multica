@@ -67,6 +67,12 @@ func extractSkillUsageFromTranscript(path string) ([]TaskSkillUsageEntry, error)
 				byKey[key] = entry
 			}
 		}
+		for _, name := range skillToolInvocations(event) {
+			key := "name:" + name
+			entry := byKey[key]
+			entry.Name, entry.Count = name, entry.Count+1
+			byKey[key] = entry
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
@@ -85,6 +91,34 @@ func extractSkillUsageFromTranscript(path string) ([]TaskSkillUsageEntry, error)
 		return result[i].Name < result[j].Name
 	})
 	return result, nil
+}
+
+// skillToolInvocations finds Skill tool calls in transcript events. Skills
+// invoked through the harness Skill tool never touch SKILL.md via a shell
+// command, so command scanning alone misses them entirely.
+func skillToolInvocations(value any) []string {
+	switch typed := value.(type) {
+	case map[string]any:
+		result := []string{}
+		if toolName, _ := typed["name"].(string); toolName == "Skill" {
+			if input, ok := typed["input"].(map[string]any); ok {
+				if skill, _ := input["skill"].(string); strings.TrimSpace(skill) != "" {
+					result = append(result, strings.TrimSpace(skill))
+				}
+			}
+		}
+		for _, child := range typed {
+			result = append(result, skillToolInvocations(child)...)
+		}
+		return result
+	case []any:
+		result := []string{}
+		for _, child := range typed {
+			result = append(result, skillToolInvocations(child)...)
+		}
+		return result
+	}
+	return nil
 }
 
 func commandStrings(value any, key string) []string {

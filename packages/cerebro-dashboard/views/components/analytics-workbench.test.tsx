@@ -18,7 +18,7 @@ describe("AnalyticsWorkbench", () => {
     const onFilter = vi.fn();
     const onNext = vi.fn();
     render(<AnalyticsWorkbench visuals={DEFAULT_ANALYTICS_VISUALS} results={results} filters={[]} onFilter={onFilter} onRemoveFilter={vi.fn()} onNext={onNext} onAddVisual={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Include provider openai" }));
+    fireEvent.click(screen.getByRole("button", { name: "Include Provider openai" }));
     expect(onFilter).toHaveBeenCalledWith("provider", "openai", "in");
     fireEvent.click(screen.getByRole("button", { name: "Next Activity page" }));
     expect(onNext).toHaveBeenCalledWith("activity", "2026-07-11T00:00:00Z");
@@ -92,7 +92,7 @@ describe("AnalyticsWorkbench", () => {
         onAddVisual={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /time = 2026-07-13T00:00:00.000Z/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Time ≥ 2026-07-13T00:00:00.000Z/ }));
     expect(onRemoveFilter).toHaveBeenCalledWith("time", "2026-07-13T00:00:00.000Z", "gte");
   });
 });

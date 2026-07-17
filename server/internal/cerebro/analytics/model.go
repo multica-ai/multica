@@ -40,6 +40,7 @@ const (
 	DimensionQualityCategory Dimension = "quality_category"
 	DimensionContext         Dimension = "context"
 	DimensionRun             Dimension = "run"
+	DimensionIssue           Dimension = "issue"
 	DimensionSourceID        Dimension = "source_id"
 	DimensionReference       Dimension = "reference"
 	DimensionReferenceLabel  Dimension = "reference_label"
@@ -65,6 +66,8 @@ const (
 	OperatorEqual        Operator = "eq"
 	OperatorGreaterEqual Operator = "gte"
 	OperatorLessEqual    Operator = "lte"
+	OperatorContains     Operator = "contains"
+	OperatorNotContains  Operator = "not_contains"
 )
 
 type SortDirection string
@@ -121,6 +124,6 @@ func ContractCatalog() Catalog {
 
 var allPopulations = []Population{PopulationAgent, PopulationGateway, PopulationAll}
 var allMetrics = []Metric{MetricRuns, MetricInputTokens, MetricOutputTokens, MetricCostCents, MetricMissingCostRuns, MetricSavedCents, MetricDurationSeconds, MetricQualityPassRate, MetricSkillInvocations}
-var allDimensions = []Dimension{DimensionTime, DimensionPerson, DimensionAgent, DimensionProject, DimensionRuntime, DimensionSource, DimensionProvider, DimensionModel, DimensionSkill, DimensionStatus, DimensionCostKind, DimensionQualityType, DimensionQualityCategory, DimensionContext, DimensionRun, DimensionSourceID, DimensionReference, DimensionReferenceLabel, DimensionDebugLink, DimensionTrace}
+var allDimensions = []Dimension{DimensionTime, DimensionPerson, DimensionAgent, DimensionProject, DimensionRuntime, DimensionSource, DimensionProvider, DimensionModel, DimensionSkill, DimensionStatus, DimensionCostKind, DimensionQualityType, DimensionQualityCategory, DimensionContext, DimensionRun, DimensionIssue, DimensionSourceID, DimensionReference, DimensionReferenceLabel, DimensionDebugLink, DimensionTrace}
 var allGrains = []Grain{GrainNone, GrainHour, GrainDay, GrainWeek, GrainMonth}
-var allOperators = []Operator{OperatorIn, OperatorNotIn, OperatorEqual, OperatorGreaterEqual, OperatorLessEqual}
+var allOperators = []Operator{OperatorIn, OperatorNotIn, OperatorEqual, OperatorGreaterEqual, OperatorLessEqual, OperatorContains, OperatorNotContains}

@@ -24,3 +24,22 @@ func TestExtractSkillUsageFromTranscriptCountsExplicitReads(t *testing.T) {
 		t.Fatalf("unexpected skill usage: %#v", got)
 	}
 }
+
+func TestExtractSkillUsageFromTranscriptCountsSkillToolInvocations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"deploy"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"deploy","args":"prod"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo Skill"}}]}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := extractSkillUsageFromTranscript(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "deploy" || got[0].Count != 2 {
+		t.Fatalf("unexpected skill usage: %#v", got)
+	}
+}

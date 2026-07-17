@@ -9,6 +9,7 @@ import {
   createAnalyticsVisual,
   updateAnalyticsVisual,
   type AnalyticsDimension,
+  type AnalyticsGrain,
 } from "@multica/cerebro-usage";
 import {
   buildVisualQuery,
@@ -90,12 +91,31 @@ export function AnalyticsDashboard({ workspaceId, initialVisuals = DEFAULT_ANALY
     setFilters((current) => removeAnalyticsFilterValue(current, dimension, value, operator));
     setCursorHistory({});
   };
+  // Clicking a time bucket narrows to that bucket's range. Buckets are local
+  // wall time serialized with a Z suffix, so strip the Z and re-interpret as
+  // local time before building the UTC range.
+  const timeFilter = (grain: AnalyticsGrain, value: string) => {
+    const start = new Date(value.replace(/(\.\d+)?Z$/, ""));
+    if (Number.isNaN(start.getTime())) return;
+    const end = new Date(start);
+    if (grain === "hour") end.setHours(end.getHours() + 1);
+    else if (grain === "week") end.setDate(end.getDate() + 7);
+    else if (grain === "month") end.setMonth(end.getMonth() + 1);
+    else end.setDate(end.getDate() + 1);
+    setFilters((current) => [
+      ...current.filter((filter) => !(filter.dimension === "time" && (filter.operator === "gte" || filter.operator === "lte"))),
+      { dimension: "time", operator: "gte", values: [start.toISOString()] },
+      { dimension: "time", operator: "lte", values: [end.toISOString()] },
+    ]);
+    setCursorHistory({});
+  };
   return (
     <AnalyticsWorkbench
       visuals={visuals}
       results={results}
       filters={filters}
       onFilter={toggleFilter}
+      onTimeFilter={timeFilter}
       onRemoveFilter={removeFilter}
       onNext={(visualId, cursor) =>
         setCursorHistory((current) => ({
