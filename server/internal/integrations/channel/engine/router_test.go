@@ -161,9 +161,17 @@ type fakeTasks struct {
 	initiator  pgtype.UUID
 	messageIDs [][]pgtype.UUID
 	err        error
+	gate       chan struct{}
+	entered    chan struct{}
 }
 
 func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool, messageIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+	if f.entered != nil {
+		f.entered <- struct{}{}
+	}
+	if f.gate != nil {
+		<-f.gate
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.called = true
@@ -576,6 +584,41 @@ func TestRouter_FlushFailureRearmsRetryWithoutAnotherMessage(t *testing.T) {
 	}
 	if len(calls[1]) != 1 || calls[1][0] != messageID {
 		t.Fatalf("retry input = %v, want original failed batch", calls[1])
+	}
+}
+
+func TestRouter_FlushesSameSessionSerially(t *testing.T) {
+	h := newHarness(t)
+	h.tasks.gate = make(chan struct{})
+	h.tasks.entered = make(chan struct{}, 1)
+	firstID := uuidFromString(t, "66666666-6666-6666-6666-666666666666")
+	secondID := uuidFromString(t, "77777777-7777-7777-7777-777777777777")
+
+	firstDone := make(chan struct{})
+	go func() {
+		h.router.flushChatRun(ResolverSet{}, h.inst.inst, p2pMessage(t), h.binder.ensureID, h.ident.id.UserID, false, []pgtype.UUID{firstID})
+		close(firstDone)
+	}()
+	<-h.tasks.entered
+
+	secondDone := make(chan struct{})
+	go func() {
+		h.router.flushChatRun(ResolverSet{}, h.inst.inst, p2pMessage(t), h.binder.ensureID, h.ident.id.UserID, false, []pgtype.UUID{secondID})
+		close(secondDone)
+	}()
+
+	select {
+	case <-h.tasks.entered:
+		t.Fatal("second same-session flush reached enqueue before the first completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(h.tasks.gate)
+	<-firstDone
+	<-secondDone
+	calls := h.tasks.inputCalls()
+	if len(calls) != 2 || len(calls[0]) != 1 || calls[0][0] != firstID || len(calls[1]) != 1 || calls[1][0] != secondID {
+		t.Fatalf("flush input calls = %v, want first then second", calls)
 	}
 }
 

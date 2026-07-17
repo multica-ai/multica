@@ -267,6 +267,69 @@ func TestChannelChat_RecoversUnownedInputAfterRouterRestart(t *testing.T) {
 	}
 }
 
+func TestChannelChat_RecoverySkipsAnsweredLegacyHistory(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, runtimeID, _ := setupDirectChatSession(t, ctx, "channel rolling upgrade recovery")
+	legacyUser, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ChatSessionID: parseUUID(sessionID),
+		Role:          "user",
+		Content:       "answered before upgrade",
+	})
+	if err != nil {
+		t.Fatalf("create legacy input: %v", err)
+	}
+	legacyTask := insertChannelChatTask(t, ctx, agentID, runtimeID, sessionID)
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(legacyTask), completeResult(t, "legacy answer"), "", ""); err != nil {
+		t.Fatalf("complete legacy channel task: %v", err)
+	}
+	var legacyOwner pgtype.UUID
+	if err := testPool.QueryRow(ctx, `SELECT task_id FROM chat_message WHERE id = $1`, legacyUser).Scan(&legacyOwner); err == nil && legacyOwner.Valid {
+		t.Fatalf("legacy channel input unexpectedly owned by %s", uuidToString(legacyOwner))
+	}
+
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	recovered, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ChatSessionID: session.ID,
+		Role:          "user",
+		Content:       "unflushed after upgrade",
+	})
+	if err != nil {
+		t.Fatalf("create recoverable input: %v", err)
+	}
+	current, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ChatSessionID: session.ID,
+		Role:          "user",
+		Content:       "current after restart",
+	})
+	if err != nil {
+		t.Fatalf("create current input: %v", err)
+	}
+	task, err := testHandler.TaskService.EnqueueChannelChatTask(ctx, session, parseUUID(testUserID), false, []pgtype.UUID{current.ID})
+	if err != nil {
+		t.Fatalf("enqueue post-upgrade channel task: %v", err)
+	}
+	owned, err := testHandler.Queries.ListChatInputMessages(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list recovered input: %v", err)
+	}
+	if got := msgContents(owned); len(got) != 2 || got[0] != "unflushed after upgrade" || got[1] != "current after restart" {
+		t.Fatalf("recovered input = %v, want only post-assistant U1 then U2", got)
+	}
+	var recoveredOwner string
+	if err := testPool.QueryRow(ctx, `SELECT task_id FROM chat_message WHERE id = $1`, recovered).Scan(&recoveredOwner); err != nil {
+		t.Fatalf("read recovered owner: %v", err)
+	}
+	if recoveredOwner != uuidToString(task.ID) {
+		t.Fatalf("recovered input owner = %s, want %s", recoveredOwner, uuidToString(task.ID))
+	}
+}
+
 func TestChannelChat_RecoversRolledBackBatchAfterRouterRestart(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

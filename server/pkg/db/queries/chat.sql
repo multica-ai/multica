@@ -242,7 +242,9 @@ RETURNING *;
 -- Seals the explicit debounce batch plus older unowned channel user messages.
 -- The newest explicit row is the recovery boundary: this rediscovers durable
 -- messages whose in-memory trigger was lost across a process restart without
--- absorbing messages appended after this flush began.
+-- absorbing messages appended after this flush began. The lower bound is the
+-- last assistant reply so a rolling deploy cannot replay already-answered
+-- legacy channel history whose user rows still have task_id NULL.
 WITH boundary AS (
     SELECT created_at, id
     FROM chat_message
@@ -251,14 +253,23 @@ WITH boundary AS (
       AND role = 'user'
     ORDER BY created_at DESC, id DESC
     LIMIT 1
+), last_assistant AS (
+    SELECT created_at, id
+    FROM chat_message
+    WHERE chat_session_id = sqlc.arg(chat_session_id)
+      AND role = 'assistant'
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
 )
 UPDATE chat_message m
 SET task_id = sqlc.arg(task_id)
 FROM boundary b
+LEFT JOIN last_assistant a ON TRUE
 WHERE m.chat_session_id = sqlc.arg(chat_session_id)
   AND m.role = 'user'
   AND m.task_id IS NULL
   AND (m.created_at, m.id) <= (b.created_at, b.id)
+  AND (a.id IS NULL OR (m.created_at, m.id) > (a.created_at, a.id))
 RETURNING m.id;
 
 -- name: IsChannelChatSession :one

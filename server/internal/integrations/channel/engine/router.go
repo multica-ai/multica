@@ -43,9 +43,16 @@ type Router struct {
 
 	logger *slog.Logger
 
+	flushMu        sync.Mutex
+	flushLocks     map[string]*flushLock
 	pendingInputMu sync.Mutex
 	pendingInput   map[string][]pgtype.UUID
 	pendingFresh   map[string]bool
+}
+
+type flushLock struct {
+	mu       sync.Mutex
+	refCount int
 }
 
 // Config tunes the Router. Zero values default.
@@ -75,6 +82,7 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 		reader:       reader,
 		replyTimeout: cfg.ReplyTimeout,
 		logger:       cfg.Logger,
+		flushLocks:   make(map[string]*flushLock),
 		pendingFresh: make(map[string]bool),
 		pendingInput: make(map[string][]pgtype.UUID),
 	}
@@ -349,6 +357,9 @@ const chatRunFlushTimeout = 10 * time.Second
 // one chat task for the window, and emit the offline/archived notice (only
 // known here now) via the replier. Errors are logged, not returned.
 func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, forceFresh bool, messageIDs []pgtype.UUID) {
+	unlock := r.lockFlush(keyForSession(sessionID))
+	defer unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), chatRunFlushTimeout)
 	defer cancel()
 
@@ -376,6 +387,28 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 			r.logger.Error("channel router: flush enqueue chat task failed",
 				"chat_session_id", uuidString(sessionID), "err", err.Error())
 		}
+	}
+}
+
+func (r *Router) lockFlush(key string) func() {
+	r.flushMu.Lock()
+	lock := r.flushLocks[key]
+	if lock == nil {
+		lock = &flushLock{}
+		r.flushLocks[key] = lock
+	}
+	lock.refCount++
+	r.flushMu.Unlock()
+
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		r.flushMu.Lock()
+		lock.refCount--
+		if lock.refCount == 0 {
+			delete(r.flushLocks, key)
+		}
+		r.flushMu.Unlock()
 	}
 }
 
