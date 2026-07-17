@@ -86,6 +86,7 @@ vi.mock("@tanstack/react-query", async () => {
 
 import {
   WorkspaceAgentWorkingChip,
+  chipAppearance,
   deriveWorkingChipView,
 } from "./workspace-agent-working-chip";
 
@@ -218,12 +219,9 @@ describe("WorkspaceAgentWorkingChip", () => {
     expect(screen.queryByTestId("agent-avatar-stack")).toBeNull();
   });
 
-  // Colour is carried by three self-contained Button variants, never by
-  // brand classes layered over `outline` — layering silently loses to
-  // outline's `dark:` chain in dark mode (MUL-4884). Asserting the variant
-  // is what pins that: a className check would pass even when the colour
-  // never wins the cascade, which is exactly the false confidence that let
-  // the dark-mode bug through.
+  // Colour is carried by three self-contained Button variants. The tier
+  // rules are unit-tested against `chipAppearance` below; these two cover
+  // the wiring.
   it("uses the filled brand variant only while the filter is on", () => {
     mockState.snapshot = [makeTask({ id: "t-1", issue_id: "issue-1" })];
 
@@ -329,5 +327,43 @@ describe("deriveWorkingChipView", () => {
     // shows.
     expect(view.agentIds).toEqual(["a1"]);
     expect(view.taskCount).toBe(2);
+  });
+});
+
+// The chip's colour must come from its Button variant and nothing else. A
+// colour class in `className` is appended AFTER the variant, so
+// tailwind-merge keeps it and it beats the variant — the opposite of what
+// "the variant owns the colour" implies. These pin the tier rules including
+// the state that already got this wrong.
+describe("chipAppearance", () => {
+  it("wears the filled brand tier while the filter is on", () => {
+    expect(chipAppearance(true, true).variant).toBe("brand");
+  });
+
+  it("wears the tint tier for activity without the filter", () => {
+    expect(chipAppearance(false, true).variant).toBe("brandSubtle");
+  });
+
+  it("wears the plain tier with muted text when nothing is running", () => {
+    const a = chipAppearance(false, false);
+    expect(a.variant).toBe("outline");
+    // `outline` sets no text colour, so this tier supplies its own.
+    expect(a.className).toContain("text-muted-foreground");
+  });
+
+  it("does not mute the text when the filter is on with 0 agents", () => {
+    // Real state: the filter stays on after the last agent finishes. The
+    // variant is `brand` here, so appending `text-muted-foreground` would
+    // WIN over the variant's `text-brand-foreground` and paint grey text on
+    // a brand-blue fill.
+    const a = chipAppearance(true, false);
+    expect(a.variant).toBe("brand");
+    expect(a.className).not.toContain("text-muted-foreground");
+  });
+
+  it("never carries a colour class for either brand tier", () => {
+    for (const a of [chipAppearance(true, true), chipAppearance(false, true)]) {
+      expect(a.className).not.toMatch(/(^|\s)(text|bg|border)-/);
+    }
   });
 });

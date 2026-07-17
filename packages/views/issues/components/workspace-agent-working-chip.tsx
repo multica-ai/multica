@@ -22,13 +22,13 @@ interface WorkspaceAgentWorkingChipProps {
   value: boolean;
   onToggle: () => void;
   // The rows this filter leaves on screen, computed by the surface from the
-  // same pipeline that renders them (see `workingScopeIssues`). The chip's
-  // number is this list's length — that is the whole point: the number and
-  // the click result cannot disagree, because they are the same list.
+  // same pipeline that renders them (see `workingScopeIssues`).
   //
-  // The chip used to take the PRE-filter issue set and count distinct running
-  // `issue_id`s out of the task snapshot itself. That was a second derivation
-  // of "what's on screen" and it drifted from the real one (MUL-4884).
+  // The chip does not count these — it counts the agents working ON them. The
+  // list decides WHICH agents count: an agent whose only running task sits on
+  // an issue this filter would hide is not part of the number. Taking scope
+  // from the render pipeline instead of re-deriving it from the task snapshot
+  // is what keeps that judgement in step with the list (MUL-4884).
   workingIssues: readonly Issue[];
 }
 
@@ -88,6 +88,31 @@ export function deriveWorkingChipView(
 }
 
 /**
+ * Which colour tier the chip wears, and the only classes allowed alongside
+ * it. Exported so the tier rules are testable without a DOM.
+ *
+ * The tier lives entirely in the Button variant. `className` carries layout
+ * only — with ONE exception: the idle tier needs muted text, which `outline`
+ * does not set. That exception is gated on `!value`, and the gate matters:
+ * `filter ON + 0 agents` is a real state (the filter stays on after the last
+ * agent finishes), and there the variant is `brand`. Appending
+ * `text-muted-foreground` there does not lose to the variant — it WINS, because
+ * tailwind-merge keeps the last class in a group and `className` is appended
+ * after the variant. The result would be muted grey text on a brand-blue
+ * fill. Colour classes in `className` are how this component keeps breaking;
+ * the safe rule is that a tier's colours only ever come from its variant.
+ */
+export function chipAppearance(
+  value: boolean,
+  hasAgents: boolean,
+): { variant: "brand" | "brandSubtle" | "outline"; className: string } {
+  const layout = "h-8 px-2 md:h-7 md:px-2.5";
+  if (value) return { variant: "brand", className: layout };
+  if (hasAgents) return { variant: "brandSubtle", className: layout };
+  return { variant: "outline", className: `${layout} text-muted-foreground` };
+}
+
+/**
  * Filter chip on the issues / my-issues header, sitting to the left of the
  * Filter button. Always rendered so the filter toggle never disappears
  * mid-flight (a previous design hid the chip when no agents were running,
@@ -136,18 +161,18 @@ export function WorkspaceAgentWorkingChip({
     count: agentCount,
   });
 
+  // Three tiers: filter ON is the loud filled state, activity without the
+  // filter is a tint, nothing running is a plain control.
+  const appearance = chipAppearance(value, hasAgents);
+
   return (
     <HoverCard>
       <HoverCardTrigger
         render={
           <Button
-            // Three tiers: filter ON is the loud filled state, activity
-            // without the filter is a tint, nothing running is a plain
-            // control. Each is a self-contained variant — no colour classes
-            // in `className`.
-            variant={value ? "brand" : hasAgents ? "brandSubtle" : "outline"}
+            variant={appearance.variant}
             size="sm"
-            className={`h-8 px-2 md:h-7 md:px-2.5 ${hasAgents ? "" : "text-muted-foreground"}`}
+            className={appearance.className}
             onClick={onToggle}
             aria-pressed={value}
             // The narrow layout shows the bare number, so pin the full

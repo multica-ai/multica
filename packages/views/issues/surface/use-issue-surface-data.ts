@@ -273,21 +273,22 @@ export function useIssueSurfaceData({
   );
 
   // The rows the agents-working filter leaves on screen — i.e. exactly what
-  // the header chip promises you get when you click it.
+  // you get when you click the header chip.
   //
   // This is deliberately a PROJECTION OF THE RENDER PIPELINE, not a second
   // pass over the task snapshot: it reuses the same predicates, the same
   // filter state and the same per-mode source as the rows below, with
-  // `workingOnly` forced on. That makes "chip count === row count" true by
-  // construction. The chip used to count distinct running `issue_id`s
-  // straight from the snapshot against the PRE-filter issue set, so any
-  // active status/assignee/label filter (or a sub-issue hidden by the
-  // display toggle) made it disagree with the list it was filtering
-  // (MUL-4884).
+  // `workingOnly` forced on. Turning the filter on only adds `workingOnly` to
+  // this same pipeline, so the set is the post-click list whether the filter
+  // is currently on or off.
   //
-  // Turning the filter on only adds `workingOnly` to this same pipeline, so
-  // the preview is the post-click list whether the filter is currently on or
-  // off.
+  // The chip counts AGENTS, not this list's length, so these are not equal
+  // (one agent can hold two of these rows). What this set does decide is
+  // WHICH agents the chip counts — only those working on rows that survive
+  // the filters. Re-deriving that scope from the snapshot instead is what
+  // made the chip disagree with the list it was filtering: any active
+  // status/assignee/label filter, or a sub-issue hidden by the display
+  // toggle, moved the list but not the chip (MUL-4884).
   //
   // Each branch below must take the SAME source the matching branch of
   // IssueSurface renders:

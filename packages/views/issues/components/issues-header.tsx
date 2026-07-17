@@ -750,8 +750,8 @@ export function IssuesHeader({
   isRefreshing = false,
 }: {
   scopedIssues: Issue[];
-  /** The rows the agents-working filter would leave on screen — the chip's
-   *  count is this list's length, so it matches the post-click list. */
+  /** The rows the agents-working filter would leave on screen. Scopes the
+   *  chip: it counts the agents working on these rows. */
   workingIssues: Issue[];
   allowGantt?: boolean;
   dateFilter?: IssueDateFilter | null;

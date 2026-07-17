@@ -656,8 +656,9 @@ describe("useIssueSurfaceController", () => {
       expect(result.current.workingScopeIssues.length).toBe(2),
     );
 
-    // The chip's number IS this list's length, so this identity is the whole
-    // promise: what it says equals what you get.
+    // The scope the chip counts agents within must be the rendered list
+    // itself — that identity is what keeps the chip in step with the filter
+    // (the chip's own number counts agents, not these rows).
     expect(result.current.workingScopeIssues.map((i) => i.id)).toEqual(
       result.current.issues.map((i) => i.id),
     );
