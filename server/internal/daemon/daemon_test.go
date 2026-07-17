@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 func createDaemonTestRepo(t *testing.T) string {
@@ -1159,6 +1160,46 @@ func (b *fakeBackend) Execute(_ context.Context, _ string, opts agent.ExecOption
 	close(msgCh)
 	resCh <- b.results[i]
 	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestCompletedEmptyOutputTaskResultFailsChatTasks(t *testing.T) {
+	t.Parallel()
+
+	usage := []TaskUsageEntry{{Provider: "codex", Model: "gpt-5", InputTokens: 12}}
+	got, ok := completedEmptyOutputTaskResult(
+		Task{ChatSessionID: "chat-1"},
+		"codex",
+		agent.Result{Status: "completed", SessionID: "runtime-session-1"},
+		"/tmp/work",
+		"/tmp/env",
+		usage,
+	)
+	if !ok {
+		t.Fatal("expected chat empty output to be converted to a task result")
+	}
+	if got.Status != "failed" {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+	if got.Comment != "codex completed without returning a chat response" {
+		t.Fatalf("comment = %q", got.Comment)
+	}
+	if got.FailureReason != taskfailure.ReasonAgentEmptyOrUnparseableOutput.String() {
+		t.Fatalf("failure reason = %q, want %q", got.FailureReason, taskfailure.ReasonAgentEmptyOrUnparseableOutput.String())
+	}
+	if got.SessionID != "runtime-session-1" || got.WorkDir != "/tmp/work" || got.EnvRoot != "/tmp/env" {
+		t.Fatalf("resume fields not forwarded: %+v", got)
+	}
+	if len(got.Usage) != 1 || got.Usage[0].InputTokens != 12 {
+		t.Fatalf("usage not forwarded: %+v", got.Usage)
+	}
+}
+
+func TestCompletedEmptyOutputTaskResultLeavesNonChatTasksAlone(t *testing.T) {
+	t.Parallel()
+
+	if got, ok := completedEmptyOutputTaskResult(Task{IssueID: "issue-1"}, "codex", agent.Result{Status: "completed"}, "", "", nil); ok {
+		t.Fatalf("non-chat empty output should keep side-effect-only completion path, got %+v", got)
+	}
 }
 
 func newTestDaemon(t *testing.T) *Daemon {

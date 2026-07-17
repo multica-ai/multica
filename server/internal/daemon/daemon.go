@@ -4486,6 +4486,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	switch result.Status {
 	case "completed":
 		if result.Output == "" {
+			if taskResult, ok := completedEmptyOutputTaskResult(task, provider, result, env.WorkDir, env.RootDir, usageEntries); ok {
+				return taskResult, nil
+			}
 			// The agent completed successfully but produced no text output.
 			// This is valid — the agent may have done all its work via tool
 			// calls (e.g. posting comments via CLI, pushing code). Treat as
@@ -4632,6 +4635,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			FailureReason: failureReason,
 		}, nil
 	}
+}
+
+func completedEmptyOutputTaskResult(task Task, provider string, result agent.Result, workDir, envRoot string, usageEntries []TaskUsageEntry) (TaskResult, bool) {
+	if task.ChatSessionID == "" {
+		return TaskResult{}, false
+	}
+	comment := fmt.Sprintf("%s completed without returning a chat response", provider)
+	return TaskResult{
+		Status:        "failed",
+		Comment:       comment,
+		SessionID:     result.SessionID,
+		WorkDir:       workDir,
+		EnvRoot:       envRoot,
+		Usage:         usageEntries,
+		FailureReason: taskfailure.ReasonAgentEmptyOrUnparseableOutput.String(),
+	}, true
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
