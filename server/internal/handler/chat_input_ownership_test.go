@@ -322,7 +322,7 @@ func TestChannelChat_RecoverySkipsAnsweredLegacyHistory(t *testing.T) {
 		t.Fatalf("recovered input = %v, want only post-assistant U1 then U2", got)
 	}
 	var recoveredOwner string
-	if err := testPool.QueryRow(ctx, `SELECT task_id FROM chat_message WHERE id = $1`, recovered).Scan(&recoveredOwner); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT task_id FROM chat_message WHERE id = $1`, recovered.ID).Scan(&recoveredOwner); err != nil {
 		t.Fatalf("read recovered owner: %v", err)
 	}
 	if recoveredOwner != uuidToString(task.ID) {
