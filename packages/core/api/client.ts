@@ -205,6 +205,7 @@ import {
   ListIssuesResponseSchema,
   CreateIssueResponseSchema,
   ListWebhookDeliveriesResponseSchema,
+  AgentActivityBucketListSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -1547,8 +1548,24 @@ export class ApiClient {
   // completed_at. One workspace-wide fetch backs both the Agents-list
   // sparkline (uses trailing 7 buckets) and the agent detail "Last 30
   // days" panel (uses all 30).
-  async getWorkspaceAgentActivity30d(): Promise<AgentActivityBucket[]> {
-    return this.fetch(`/api/agent-activity-30d`);
+  async getWorkspaceAgentActivity30d(params?: {
+    tz?: string;
+  }): Promise<AgentActivityBucket[]> {
+    const search = new URLSearchParams();
+    // `tz` drives the calendar-day boundary, like the usage reports.
+    // Caller-supplied; the backend falls back to user.timezone / UTC if
+    // omitted.
+    if (params?.tz) search.set("tz", params.tz);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(
+      `/api/agent-activity-30d${qs ? `?${qs}` : ""}`,
+    );
+    return parseWithFallback<AgentActivityBucket[]>(
+      raw,
+      AgentActivityBucketListSchema,
+      [],
+      { endpoint: "GET /api/agent-activity-30d" },
+    );
   }
 
   // Per-agent 30-day total run count for the Agents-list RUNS column.

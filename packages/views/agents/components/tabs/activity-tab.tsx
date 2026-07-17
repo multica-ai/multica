@@ -38,6 +38,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
+import { useViewingTimezone } from "../../../common/use-viewing-timezone";
 import { AttributionBadge } from "../../../issues/components/attribution-badge";
 import { taskStatusConfig } from "../../config";
 import { failureReasonLabel } from "./task-failure";
@@ -84,7 +85,8 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
   const { data: agentTasks = [], isLoading: isLoadingRecent } = useQuery(
     agentTasksOptions(wsId, agent.id),
   );
-  const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
+  const viewTZ = useViewingTimezone();
+  const { byAgent: activityMap } = useWorkspaceActivityMap(wsId, viewTZ);
   const activity = activityMap.get(agent.id);
 
   const [recentDisplayLimit, setRecentDisplayLimit] = useState(RECENT_INITIAL);
@@ -205,7 +207,8 @@ export function AgentPerformanceSummary({ agent }: { agent: Agent }) {
   const { data: agentTasks = [] } = useQuery(
     agentTasksOptions(wsId, agent.id),
   );
-  const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
+  const viewTZ = useViewingTimezone();
+  const { byAgent: activityMap } = useWorkspaceActivityMap(wsId, viewTZ);
   const activity = activityMap.get(agent.id);
   const summary = summarizeActivityWindow(activity, 30);
   const avgDurationMs = useMemo(

@@ -2728,23 +2728,29 @@ func (q *Queries) GetLatestTaskRoleForIssueAndAgent(ctx context.Context, arg Get
 const getWorkspaceAgentActivity30d = `-- name: GetWorkspaceAgentActivity30d :many
 SELECT
     atq.agent_id,
-    DATE_TRUNC('day', atq.completed_at)::timestamptz AS bucket,
+    DATE(atq.completed_at AT TIME ZONE $2::text) AS date,
     COUNT(*)::int AS task_count,
     COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
-  AND atq.completed_at > now() - INTERVAL '30 days'
-GROUP BY atq.agent_id, bucket
-ORDER BY atq.agent_id, bucket
+  AND atq.completed_at >= $3
+GROUP BY atq.agent_id, date
+ORDER BY atq.agent_id, date
 `
 
+type GetWorkspaceAgentActivity30dParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Tz          string             `json:"tz"`
+	Since       pgtype.Timestamptz `json:"since"`
+}
+
 type GetWorkspaceAgentActivity30dRow struct {
-	AgentID     pgtype.UUID        `json:"agent_id"`
-	Bucket      pgtype.Timestamptz `json:"bucket"`
-	TaskCount   int32              `json:"task_count"`
-	FailedCount int32              `json:"failed_count"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	Date        pgtype.Date `json:"date"`
+	TaskCount   int32       `json:"task_count"`
+	FailedCount int32       `json:"failed_count"`
 }
 
 // Returns per-agent daily activity buckets for the last 30 days. Single
@@ -2761,8 +2767,16 @@ type GetWorkspaceAgentActivity30dRow struct {
 // still in flight has no completed_at and contributes nothing here — that's
 // correct: in-flight tasks are surfaced via the live presence indicator,
 // not the historical trend.
-func (q *Queries) GetWorkspaceAgentActivity30d(ctx context.Context, workspaceID pgtype.UUID) ([]GetWorkspaceAgentActivity30dRow, error) {
-	rows, err := q.db.Query(ctx, getWorkspaceAgentActivity30d, workspaceID)
+//
+// Days are cut in the caller-supplied @tz (the viewer's tz, like the
+// dashboard/runtime usage reports) so every viewer of a workspace sees the
+// same tasks attributed to the same calendar day. DATE_TRUNC without a zone
+// would bucket in the session tz and make the sparkline disagree with the
+// usage charts. @since is the viewer-local start-of-day cutoff computed by
+// parseSinceParamInTZ; see ListDashboardUsageDaily for why it must not be
+// re-truncated here.
+func (q *Queries) GetWorkspaceAgentActivity30d(ctx context.Context, arg GetWorkspaceAgentActivity30dParams) ([]GetWorkspaceAgentActivity30dRow, error) {
+	rows, err := q.db.Query(ctx, getWorkspaceAgentActivity30d, arg.WorkspaceID, arg.Tz, arg.Since)
 	if err != nil {
 		return nil, err
 	}
@@ -2772,7 +2786,7 @@ func (q *Queries) GetWorkspaceAgentActivity30d(ctx context.Context, workspaceID 
 		var i GetWorkspaceAgentActivity30dRow
 		if err := rows.Scan(
 			&i.AgentID,
-			&i.Bucket,
+			&i.Date,
 			&i.TaskCount,
 			&i.FailedCount,
 		); err != nil {

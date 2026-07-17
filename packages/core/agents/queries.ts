@@ -8,7 +8,13 @@ export const agentTaskSnapshotKeys = {
 
 export const agentActivityKeys = {
   all: (wsId: string) => ["workspaces", wsId, "agent-activity"] as const,
-  last30d: (wsId: string) => [...agentActivityKeys.all(wsId), "30d"] as const,
+  // Prefix without tz — invalidation targets every tz variant at once.
+  last30dAll: (wsId: string) =>
+    [...agentActivityKeys.all(wsId), "30d"] as const,
+  // tz is part of the fetch key: the backend cuts the daily buckets in the
+  // viewer's timezone, so a tz change is a different dataset.
+  last30d: (wsId: string, tz: string) =>
+    [...agentActivityKeys.last30dAll(wsId), tz] as const,
 };
 
 export const agentRunCountsKeys = {
@@ -41,10 +47,10 @@ export function agentTaskSnapshotOptions(wsId: string) {
 // the agent detail "Last 30 days" panel. WS task lifecycle events
 // invalidate this query in useRealtimeSync; the staleTime is a
 // tab-focus safety net.
-export function agentActivity30dOptions(wsId: string) {
+export function agentActivity30dOptions(wsId: string, tz: string) {
   return queryOptions({
-    queryKey: agentActivityKeys.last30d(wsId),
-    queryFn: () => api.getWorkspaceAgentActivity30d(),
+    queryKey: agentActivityKeys.last30d(wsId, tz),
+    queryFn: () => api.getWorkspaceAgentActivity30d({ tz }),
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,

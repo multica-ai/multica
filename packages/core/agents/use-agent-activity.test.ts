@@ -8,9 +8,18 @@ import {
 
 const DAY = 24 * 60 * 60 * 1000;
 
-// Fixed anchor — derivation uses local-time start of "today", a real
-// clock would drift. 12:00 also keeps "today" stable across odd timezones.
-const NOW = new Date("2026-04-28T12:00:00").getTime();
+// Fixed anchors. Buckets are calendar-day strings pre-cut in the viewer's
+// timezone by the backend; the derivation only does whole-day arithmetic
+// between them and TODAY, so tests are timezone-independent by design.
+const TODAY = "2026-04-28";
+const NOW = new Date(`${TODAY}T12:00:00`).getTime();
+
+function isoDaysAgo(daysAgo: number): string {
+  const [y, m, d] = TODAY.split("-").map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d!) - daysAgo * DAY)
+    .toISOString()
+    .slice(0, 10);
+}
 
 function bucket(
   agentId: string,
@@ -18,11 +27,9 @@ function bucket(
   taskCount: number,
   failedCount = 0,
 ): AgentActivityBucket {
-  const t = new Date(NOW);
-  t.setHours(0, 0, 0, 0);
   return {
     agent_id: agentId,
-    bucket_at: new Date(t.getTime() - daysAgo * DAY).toISOString(),
+    date: isoDaysAgo(daysAgo),
     task_count: taskCount,
     failed_count: failedCount,
   };
@@ -64,6 +71,7 @@ describe("deriveAgentActivity", () => {
       buckets,
       fullHistoryAgent.created_at,
       NOW,
+      TODAY,
     );
     expect(result.buckets).toHaveLength(30);
     expect(result.buckets[0]).toEqual({ total: 1, failed: 0 });
@@ -73,13 +81,13 @@ describe("deriveAgentActivity", () => {
 
   it("clamps daysSinceCreated for young agents", () => {
     const created = new Date(NOW - 3 * DAY - 60 * 1000).toISOString();
-    const result = deriveAgentActivity([bucket("fresh", 1, 4)], created, NOW);
+    const result = deriveAgentActivity([bucket("fresh", 1, 4)], created, NOW, TODAY);
     expect(result.daysSinceCreated).toBe(3);
   });
 
   it("treats sub-day-old agents as daysSinceCreated = 0", () => {
     const created = new Date(NOW - 2 * 60 * 60 * 1000).toISOString();
-    const result = deriveAgentActivity([bucket("fresh", 0, 1)], created, NOW);
+    const result = deriveAgentActivity([bucket("fresh", 0, 1)], created, NOW, TODAY);
     expect(result.daysSinceCreated).toBe(0);
     // Today's bucket still records — pre-life days simply look like zero
     // days, which is on purpose.
@@ -91,6 +99,7 @@ describe("deriveAgentActivity", () => {
       [bucket("a1", 60, 99)],
       fullHistoryAgent.created_at,
       NOW,
+      TODAY,
     );
     expect(
       result.buckets.reduce((s, b) => s + b.total, 0),
@@ -102,6 +111,7 @@ describe("deriveAgentActivity", () => {
       [],
       fullHistoryAgent.created_at,
       NOW,
+      TODAY,
     );
     expect(result.buckets).toHaveLength(30);
     expect(result.buckets.every((b) => b.total === 0 && b.failed === 0)).toBe(
@@ -121,6 +131,7 @@ describe("summarizeActivityWindow", () => {
       ],
       fullHistoryAgent.created_at,
       NOW,
+      TODAY,
     );
     const last7 = summarizeActivityWindow(result, 7);
     expect(last7.totalRuns).toBe(4);
@@ -146,6 +157,7 @@ describe("summarizeActivityWindow", () => {
       [bucket("a1", 0, 2)],
       fullHistoryAgent.created_at,
       NOW,
+      TODAY,
     );
     const summary = summarizeActivityWindow(result, 1000);
     expect(summary.buckets).toHaveLength(30);
@@ -157,6 +169,7 @@ describe("summarizeActivityWindow", () => {
       [bucket("a1", 0, 5)],
       fullHistoryAgent.created_at,
       NOW,
+      TODAY,
     );
     const summary = summarizeActivityWindow(result, 0);
     expect(summary.buckets).toEqual([]);
@@ -175,7 +188,7 @@ describe("buildActivityMap", () => {
       bucket("a2", 1, 2, 1),
       bucket("a1", 2, 4),
     ];
-    const map = buildActivityMap(agents, buckets, NOW);
+    const map = buildActivityMap(agents, buckets, NOW, TODAY);
     expect(map.size).toBe(2);
     expect(summarizeActivityWindow(map.get("a1"), 30).totalRuns).toBe(7);
     expect(summarizeActivityWindow(map.get("a2"), 30).totalRuns).toBe(2);
@@ -184,7 +197,7 @@ describe("buildActivityMap", () => {
 
   it("emits a zero-filled entry for an agent with no buckets", () => {
     const agents: Agent[] = [fullHistoryAgent];
-    const map = buildActivityMap(agents, [], NOW);
+    const map = buildActivityMap(agents, [], NOW, TODAY);
     const a = map.get("a1");
     expect(a?.buckets).toHaveLength(30);
     expect(summarizeActivityWindow(a, 30).totalRuns).toBe(0);

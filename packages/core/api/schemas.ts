@@ -696,6 +696,15 @@ const RuntimeHourlyActivitySchema = z.object({
 
 export const RuntimeHourlyActivityListSchema = z.array(RuntimeHourlyActivitySchema);
 
+const AgentActivityBucketSchema = z.object({
+  agent_id: z.string().default(""),
+  date: z.string().default(""),
+  task_count: z.number().default(0),
+  failed_count: z.number().default(0),
+}).loose();
+
+export const AgentActivityBucketListSchema = z.array(AgentActivityBucketSchema);
+
 const RuntimeUsageByAgentSchema = z.object({
   agent_id: z.string().default(""),
   provider: z.string().default(""),

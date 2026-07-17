@@ -68,7 +68,10 @@ const EMPTY_SUMMARY: ActivityWindowSummary = {
  * list AND the detail panel — adding rows costs O(1) HTTP and O(N)
  * compute (not O(N) HTTP).
  */
-export function useWorkspaceActivityMap(wsId: string | undefined): {
+export function useWorkspaceActivityMap(
+  wsId: string | undefined,
+  tz: string,
+): {
   byAgent: Map<string, AgentActivity>;
   loading: boolean;
 } {
@@ -77,14 +80,14 @@ export function useWorkspaceActivityMap(wsId: string | undefined): {
     enabled: !!wsId,
   });
   const { data: buckets, isPending: bucketsPending } = useQuery({
-    ...agentActivity30dOptions(wsId ?? ""),
+    ...agentActivity30dOptions(wsId ?? "", tz),
     enabled: !!wsId,
   });
 
   const byAgent = useMemo(() => {
     if (!agents || !buckets) return new Map<string, AgentActivity>();
-    return buildActivityMap(agents, buckets, Date.now());
-  }, [agents, buckets]);
+    return buildActivityMap(agents, buckets, Date.now(), todayIsoInTz(tz));
+  }, [agents, buckets, tz]);
 
   return { byAgent, loading: agentsPending || bucketsPending };
 }
@@ -93,6 +96,7 @@ export function buildActivityMap(
   agents: readonly Agent[],
   buckets: readonly AgentActivityBucket[],
   now: number,
+  todayIso: string,
 ): Map<string, AgentActivity> {
   // Group buckets by agent once so per-agent derivation is O(buckets) not
   // O(agents × buckets).
@@ -111,6 +115,7 @@ export function buildActivityMap(
         bucketsByAgent.get(agent.id) ?? [],
         agent.created_at,
         now,
+        todayIso,
       ),
     );
   }
@@ -127,20 +132,24 @@ export function deriveAgentActivity(
   buckets: readonly AgentActivityBucket[],
   agentCreatedAt: string,
   now: number,
+  todayIso: string,
 ): AgentActivity {
   const series: ActivityBucket[] = Array.from({ length: DAYS }, () => ({
     total: 0,
     failed: 0,
   }));
 
-  // Newest slot is the start of "today" in local time; we walk back DAYS
-  // slots so index 0 = oldest, index DAYS-1 = today.
-  const today = startOfDay(now);
+  // Buckets arrive as calendar days (YYYY-MM-DD) already cut in the
+  // viewer's timezone by the backend; `todayIso` is today in that same
+  // timezone. Slotting is pure date arithmetic — parsing both sides as
+  // UTC midnights keeps the diff exact and independent of the browser tz.
+  // Index 0 = oldest, index DAYS-1 = today.
+  const today = isoDateToUtcMs(todayIso);
 
   for (const b of buckets) {
-    const ts = new Date(b.bucket_at).getTime();
+    const ts = isoDateToUtcMs(b.date);
     if (Number.isNaN(ts)) continue;
-    const daysAgo = Math.floor((today - startOfDay(ts)) / DAY_MS);
+    const daysAgo = Math.round((today - ts) / DAY_MS);
     if (daysAgo < 0 || daysAgo >= DAYS) continue;
     const slot = DAYS - 1 - daysAgo;
     series[slot]!.total += b.task_count;
@@ -191,14 +200,27 @@ export function summarizeActivityWindow(
   return { buckets: slice, totalRuns, totalFailed, windowDays };
 }
 
-function startOfDay(ts: number): number {
-  // Local-time day boundary. The back-end truncates to UTC midnight, but
-  // the user's mental model is "today/yesterday in the timezone they're
-  // looking at"; using local matches that and keeps "today" stable across
-  // a working session even when buckets cross UTC midnight.
-  const d = new Date(ts);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
+// UTC-midnight epoch ms for a YYYY-MM-DD string. Used only for exact
+// whole-day arithmetic between two such strings — never for display.
+function isoDateToUtcMs(iso: string): number {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return NaN;
+  return Date.UTC(y, m - 1, d);
+}
+
+// Today's calendar date (YYYY-MM-DD) in the given IANA timezone. `en-CA`
+// formats as ISO. Falls back to the browser tz on an invalid zone.
+export function todayIsoInTz(tz: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  } catch {
+    return new Intl.DateTimeFormat("en-CA").format(new Date());
+  }
 }
 
 export const __EMPTY_ACTIVITY = EMPTY;

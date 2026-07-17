@@ -60,6 +60,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import {
   CollectionPageHeader,
   CollectionPageHeaderAction,
@@ -759,8 +760,9 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   );
   const { byAgent: presenceMap, loading: presenceLoading } =
     useWorkspacePresenceMap(wsId);
+  const viewTZ = useViewingTimezone();
   const { byAgent: activityMap, loading: activityLoading } =
-    useWorkspaceActivityMap(wsId);
+    useWorkspaceActivityMap(wsId, viewTZ);
 
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
