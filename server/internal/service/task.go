@@ -3093,11 +3093,21 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // allowed to act on. Agent-side errors (compile failures, model rejections,
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
+//
+// The one agent_error.* exception is provider_network: a mid-stream provider
+// disconnect (e.g. Claude Code's "API Error: Connection closed mid-response")
+// is transient infrastructure flakiness, not an agent decision. Unattended
+// issue runs otherwise terminate on it, while interactive chat only survives
+// because the CLI's own in-process retry happens to recover first — so we make
+// the platform retry it directly (MUL-4910). It is resume-safe (not in
+// resumeUnsafeFailureReason), so the retry child inherits the session and
+// continues the truncated conversation rather than restarting from scratch.
 var retryableReasons = map[string]bool{
 	"runtime_offline":           true,
 	"runtime_recovery":          true,
 	"timeout":                   true,
 	"codex_semantic_inactivity": true,
+	string(taskfailure.ReasonAgentProviderNetwork): true,
 }
 
 func resumeUnsafeFailureReason(reason string) bool {
