@@ -10,7 +10,7 @@ import (
 )
 
 type recordingObservationStore struct {
-	appended int
+	observations []Observation
 }
 
 func (s *recordingObservationStore) AppendObservation(
@@ -19,8 +19,16 @@ func (s *recordingObservationStore) AppendObservation(
 	_ string,
 	input ObservationInput,
 ) (Observation, error) {
-	s.appended++
-	return Observation{ID: uuid.New(), MetricID: input.MetricID, Value: input.Value}, nil
+	observation := Observation{ID: uuid.New(), MetricID: input.MetricID, Value: input.Value}
+	s.observations = append(s.observations, observation)
+	return observation, nil
+}
+
+func (s *recordingObservationStore) ListObservations(
+	_ context.Context,
+	_, _ uuid.UUID,
+) ([]Observation, error) {
+	return append([]Observation(nil), s.observations...), nil
 }
 
 func TestServiceAppendObservationAllowsOwnerAdminAndKeepsMemberReadOnly(t *testing.T) {
@@ -56,7 +64,11 @@ func TestServiceAppendObservationAllowsOwnerAdminAndKeepsMemberReadOnly(t *testi
 	); !errors.Is(err, ErrReadOnly) {
 		t.Fatalf("member append error = %v, want ErrReadOnly", err)
 	}
-	if store.appended != 2 {
-		t.Fatalf("store append count = %d, want only owner and admin writes", store.appended)
+	observations, err := service.ListObservations(context.Background(), workspaceID, input.MetricID)
+	if err != nil {
+		t.Fatalf("member list observations: %v", err)
+	}
+	if len(observations) != 2 {
+		t.Fatalf("member read count = %d, want the owner and admin observations", len(observations))
 	}
 }

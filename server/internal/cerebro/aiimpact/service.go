@@ -16,6 +16,7 @@ type ObservationStore interface {
 		actorType string,
 		input ObservationInput,
 	) (Observation, error)
+	ListObservations(ctx context.Context, workspaceID, metricID uuid.UUID) ([]Observation, error)
 }
 
 type Service struct {
@@ -36,4 +37,11 @@ func (s *Service) AppendObservation(
 		return Observation{}, ErrReadOnly
 	}
 	return s.store.AppendObservation(ctx, workspaceID, actorID, actorType, input)
+}
+
+func (s *Service) ListObservations(
+	ctx context.Context,
+	workspaceID, metricID uuid.UUID,
+) ([]Observation, error) {
+	return s.store.ListObservations(ctx, workspaceID, metricID)
 }
