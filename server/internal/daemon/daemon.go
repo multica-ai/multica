@@ -229,6 +229,10 @@ type Daemon struct {
 	// directly. Reset when the WS (re)connects, so a server upgrade that
 	// bounces the connection re-probes the batch route (MUL-4257).
 	batchClaimUnsupported atomic.Bool
+	// wsClaimHTTPFallbackAfter is set after an uncertain WS claim outcome. Once
+	// the safety delay elapses, the next claim bypasses WS once and uses HTTP so
+	// a flaky reconnecting WS cannot starve queued tasks indefinitely.
+	wsClaimHTTPFallbackAfter atomic.Int64
 
 	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
 	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
