@@ -176,6 +176,7 @@
     "prop_runtime": "运行时",
     "prop_model": "模型",
     "prop_thinking": "思考",
+    "prop_speed": "速度",
     "prop_visibility": "可见性",
     "prop_concurrency": "并发",
     "prop_owner": "所有者",
@@ -222,6 +223,11 @@
     "thinking_tooltip": "思考 · {{value}}",
     "thinking_clear": "跟随 CLI 配置",
     "thinking_clear_title": "清除覆盖，让本地 CLI（claude/codex）的配置决定推理级别"
+  },
+  "runtime_settings": {
+    "effort": "思考强度",
+    "speed": "速度",
+    "runtime_default": "跟随运行时默认值"
   },
   "model_dropdown": {
     "label": "模型",

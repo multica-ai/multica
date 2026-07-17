@@ -188,7 +188,7 @@ type toolPolicySpawn struct {
 // CEREBRO_TOOLPOLICY_STAGE only for the hook's own transport-error fail
 // direction; workspace_id / agent_id / daemon port come from the MULTICA_* env
 // already injected into the spawn.
-func (d *Daemon) prepareToolPolicySpawn(provider, stage, workdir string) (*toolPolicySpawn, error) {
+func (d *Daemon) prepareToolPolicySpawn(provider, stage, workdir string, fastMode bool) (*toolPolicySpawn, error) {
 	if stage == "" || stage == "off" {
 		return nil, nil
 	}
@@ -201,7 +201,7 @@ func (d *Daemon) prepareToolPolicySpawn(provider, stage, workdir string) (*toolP
 		return nil, fmt.Errorf("resolve multica executable for tool-policy hook: %w", err)
 	}
 
-	settingsPath, err := writeToolPolicySettingsJSON(workdir, exe)
+	settingsPath, err := writeToolPolicySettingsJSON(workdir, exe, fastMode)
 	if err != nil {
 		return nil, fmt.Errorf("write tool-policy settings.json: %w", err)
 	}
@@ -219,7 +219,7 @@ func (d *Daemon) prepareToolPolicySpawn(provider, stage, workdir string) (*toolP
 // reads it via --settings (the daemon passes the absolute path at spawn). The
 // filename is distinct from the persona hook's settings.json so both hooks can
 // coexist when both are enabled.
-func writeToolPolicySettingsJSON(workdir, exe string) (string, error) {
+func writeToolPolicySettingsJSON(workdir, exe string, fastMode bool) (string, error) {
 	dir := filepath.Join(workdir, ".claude")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -239,6 +239,9 @@ func writeToolPolicySettingsJSON(workdir, exe string) (string, error) {
 				},
 			},
 		},
+	}
+	if fastMode {
+		settings["fastMode"] = true
 	}
 	data, _ := json.MarshalIndent(settings, "", "  ")
 	path := filepath.Join(dir, "cerebro-tool-policy-settings.json")

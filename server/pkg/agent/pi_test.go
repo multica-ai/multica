@@ -41,6 +41,18 @@ func TestBuildPiArgsBasicFlags(t *testing.T) {
 	}
 }
 
+func TestBuildPiArgsPassesThinkingLevel(t *testing.T) {
+	args := buildPiArgs("prompt", "/tmp/s.jsonl", ExecOptions{
+		Model:         "anthropic/claude-opus-4-8",
+		ThinkingLevel: "xhigh",
+	}, slog.Default())
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--thinking xhigh") {
+		t.Fatalf("expected Pi thinking level in args, got: %v", args)
+	}
+}
+
 func TestBuildPiArgsCustomArgsAppended(t *testing.T) {
 	// Users can still restrict tools via custom_args if desired.
 	args := buildPiArgs("prompt", "/tmp/s.jsonl", ExecOptions{

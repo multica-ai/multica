@@ -31,7 +31,7 @@ func TestDaemonSpawnPermissionWiringPresent(t *testing.T) {
 		why      string
 	}{
 		{
-			fragment: "d.prepareToolPolicySpawn(provider, task.LocalToolPolicyStage, env.WorkDir)",
+			fragment: "d.prepareToolPolicySpawn(",
 			why:      "runTask must wire the Claude PreToolUse hook from the claim's stage, or local per-tool enforcement never reaches the CLI (TECH-2563).",
 		},
 		{

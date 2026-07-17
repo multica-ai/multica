@@ -52,6 +52,10 @@ type ExecOptions struct {
 	// field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
+	// SpeedMode selects the runtime-native latency tier. Empty and
+	// "standard" leave the runtime default unchanged; "fast" is honoured only
+	// by providers whose catalog advertises it for the selected model.
+	SpeedMode string
 	// CEREBRO-PATCH(agent-system-prompt-mode): FIR-3212 - how SystemPrompt reaches the model; see cerebro_prompt_mode.go. Empty preserves each backend's prior behaviour.
 	SystemPromptMode SystemPromptMode
 }

@@ -82,6 +82,8 @@ export type {
   RuntimeModel,
   RuntimeModelThinking,
   RuntimeModelThinkingLevel,
+  RuntimeModelSpeed,
+  RuntimeModelSpeedLevel,
   RuntimeModelListRequest,
   RuntimeModelListStatus,
   RuntimeModelsResult,

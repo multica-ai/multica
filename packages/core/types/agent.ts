@@ -920,6 +920,18 @@ export interface RuntimeModel {
    * picker for this model". See MUL-2339.
    */
   thinking?: RuntimeModelThinking;
+  /** Runtime-native response-speed choices for this model. */
+  speed?: RuntimeModelSpeed;
+}
+
+export interface RuntimeModelSpeed {
+  supported_levels: RuntimeModelSpeedLevel[];
+}
+
+export interface RuntimeModelSpeedLevel {
+  value: string;
+  label: string;
+  description?: string;
 }
 
 export interface RuntimeModelThinking {

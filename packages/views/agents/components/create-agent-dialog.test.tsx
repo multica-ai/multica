@@ -31,6 +31,18 @@ vi.mock("./model-dropdown", () => ({
   ModelDropdown: () => null,
 }));
 
+vi.mock("./runtime-settings-fields", () => ({
+  RuntimeSettingsFields: ({ onThinkingChange, onSpeedChange }: {
+    onThinkingChange: (value: string) => void;
+    onSpeedChange: (value: string) => void;
+  }) => (
+    <>
+      <button type="button" onClick={() => onThinkingChange("high")}>Set effort</button>
+      <button type="button" onClick={() => onSpeedChange("fast")}>Set speed</button>
+    </>
+  ),
+}));
+
 // Provider logos don't matter for these assertions but they pull in SVGs.
 vi.mock("../../runtimes/components/provider-logo", () => ({
   ProviderLogo: () => null,
@@ -290,5 +302,21 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       .find((b) => b.textContent === "Create");
     expect(createBtn).toBeDefined();
     expect((createBtn as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("submits runtime-native effort and speed settings", async () => {
+    const runtime = makeRuntime({ id: "rt-codex", provider: "codex" });
+    const { onCreate } = renderDialog([runtime]);
+
+    fireEvent.change(screen.getAllByRole("textbox")[0]!, { target: { value: "Fast agent" } });
+    fireEvent.click(screen.getByText("Set effort"));
+    fireEvent.click(screen.getByText("Set speed"));
+    fireEvent.click(screen.getByText("Create"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      thinking_level: "high",
+      runtime_config: { speed_mode: "fast" },
+    }));
   });
 });

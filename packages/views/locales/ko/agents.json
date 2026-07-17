@@ -176,6 +176,7 @@
     "prop_runtime": "런타임",
     "prop_model": "모델",
     "prop_thinking": "추론",
+    "prop_speed": "속도",
     "prop_visibility": "공개 범위",
     "prop_concurrency": "동시 실행",
     "prop_owner": "소유자",
@@ -222,6 +223,11 @@
     "thinking_tooltip": "추론 · {{value}}",
     "thinking_clear": "CLI 설정 따르기",
     "thinking_clear_title": "재정의를 지우고 추론 수준을 로컬 CLI 설정(claude/codex)에 맡깁니다"
+  },
+  "runtime_settings": {
+    "effort": "추론 강도",
+    "speed": "속도",
+    "runtime_default": "런타임 기본값 따르기"
   },
   "model_dropdown": {
     "label": "모델",

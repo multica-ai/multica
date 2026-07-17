@@ -35,7 +35,7 @@ func TestPrepareToolPolicySpawn_Gating(t *testing.T) {
 
 	// Off / empty stage → no wiring regardless of provider.
 	for _, stage := range []string{"", "off"} {
-		got, err := d.prepareToolPolicySpawn("claude", stage, workdir)
+		got, err := d.prepareToolPolicySpawn("claude", stage, workdir, false)
 		if err != nil {
 			t.Fatalf("stage %q: unexpected error %v", stage, err)
 		}
@@ -46,7 +46,7 @@ func TestPrepareToolPolicySpawn_Gating(t *testing.T) {
 
 	// Non-Claude provider → no wiring even when enabled (follow-up runtimes).
 	for _, provider := range []string{"codex", "cursor", "gemini", "firtal-gateway"} {
-		got, err := d.prepareToolPolicySpawn(provider, "enforce", workdir)
+		got, err := d.prepareToolPolicySpawn(provider, "enforce", workdir, false)
 		if err != nil {
 			t.Fatalf("provider %q: unexpected error %v", provider, err)
 		}
@@ -61,7 +61,7 @@ func TestPrepareToolPolicySpawn_ClaudeWiresHook(t *testing.T) {
 	workdir := t.TempDir()
 
 	for _, stage := range []string{"observe", "enforce"} {
-		got, err := d.prepareToolPolicySpawn("claude", stage, workdir)
+		got, err := d.prepareToolPolicySpawn("claude", stage, workdir, false)
 		if err != nil {
 			t.Fatalf("stage %q: unexpected error %v", stage, err)
 		}
@@ -104,7 +104,7 @@ func TestPrepareToolPolicySpawn_ClaudeWiresHook(t *testing.T) {
 
 func TestWriteToolPolicySettingsJSON_Path(t *testing.T) {
 	workdir := t.TempDir()
-	path, err := writeToolPolicySettingsJSON(workdir, "/opt/multica/multica")
+	path, err := writeToolPolicySettingsJSON(workdir, "/opt/multica/multica", false)
 	if err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -128,5 +128,26 @@ func TestWriteToolPolicySettingsJSON_Path(t *testing.T) {
 	got := parsed.Hooks.PreToolUse[0].Hooks[0].Command
 	if got != `"/opt/multica/multica" cerebro-tool-policy-hook` {
 		t.Errorf("command = %q, want quoted exe + subcommand", got)
+	}
+}
+
+func TestWriteToolPolicySettingsJSON_MergesFastMode(t *testing.T) {
+	path, err := writeToolPolicySettingsJSON(t.TempDir(), "/opt/multica/multica", true)
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var parsed struct {
+		FastMode bool           `json:"fastMode"`
+		Hooks    map[string]any `json:"hooks"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("settings json: %v", err)
+	}
+	if !parsed.FastMode || parsed.Hooks == nil {
+		t.Fatalf("expected fast mode and hooks in one settings document: %+v", parsed)
 	}
 }

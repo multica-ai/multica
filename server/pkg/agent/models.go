@@ -37,6 +37,19 @@ type Model struct {
 	// per-model and Claude's `--effort` superset has known per-model gaps
 	// (`xhigh` is Opus-only, `max` is session-only). See MUL-2339.
 	Thinking *ModelThinking `json:"thinking,omitempty"`
+	// Speed advertises runtime-native latency tiers for this model. nil means
+	// the runtime/model has no per-agent speed control.
+	Speed *ModelSpeed `json:"speed,omitempty"`
+}
+
+type ModelSpeed struct {
+	SupportedLevels []SpeedLevel `json:"supported_levels"`
+}
+
+type SpeedLevel struct {
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 // ModelThinking carries the per-model reasoning/effort catalog
@@ -95,10 +108,12 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 	case "claude":
 		models := claudeStaticModels()
 		annotateClaudeThinking(ctx, models, executablePath)
+		annotateModelSpeed(models, "claude")
 		return models, nil
 	case "codex":
 		models := codexStaticModels()
 		annotateCodexThinking(ctx, models, executablePath)
+		annotateModelSpeed(models, "codex")
 		return models, nil
 	case "gemini":
 		return geminiStaticModels(), nil
@@ -154,6 +169,26 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return firtalLocalStaticModels(), nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
+	}
+}
+
+func annotateModelSpeed(models []Model, provider string) {
+	for i := range models {
+		supported := false
+		switch provider {
+		case "codex":
+			supported = strings.HasPrefix(models[i].ID, "gpt-5.6-") ||
+				models[i].ID == "gpt-5.5" || models[i].ID == "gpt-5.4"
+		case "claude":
+			supported = models[i].ID == "claude-opus-4-8" || models[i].ID == "claude-opus-4-7"
+		}
+		if !supported {
+			continue
+		}
+		models[i].Speed = &ModelSpeed{SupportedLevels: []SpeedLevel{
+			{Value: "standard", Label: "Standard", Description: "Default speed"},
+			{Value: "fast", Label: "Fast", Description: "Faster responses with higher usage"},
+		}}
 	}
 }
 
@@ -677,8 +712,22 @@ func parsePiModels(output string) []Model {
 			provider = id[:i]
 		}
 		models = append(models, Model{ID: id, Label: id, Provider: provider})
+		models[len(models)-1].Thinking = piModelThinking()
 	}
 	return models
+}
+
+func piModelThinking() *ModelThinking {
+	values := []string{"off", "minimal", "low", "medium", "high", "xhigh"}
+	levels := make([]ThinkingLevel, 0, len(values))
+	for _, value := range values {
+		label := strings.Title(value) //nolint:staticcheck
+		if value == "xhigh" {
+			label = "Extra high"
+		}
+		levels = append(levels, ThinkingLevel{Value: value, Label: label})
+	}
+	return &ModelThinking{SupportedLevels: levels}
 }
 
 // isPiDiscoveryNoise reports whether a `pi --list-models` line is a diagnostic

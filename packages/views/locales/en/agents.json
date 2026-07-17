@@ -176,6 +176,7 @@
     "prop_runtime": "Runtime",
     "prop_model": "Model",
     "prop_thinking": "Thinking",
+    "prop_speed": "Speed",
     "prop_visibility": "Visibility",
     "prop_concurrency": "Concurrency",
     "prop_owner": "Owner",
@@ -222,6 +223,11 @@
     "thinking_tooltip": "Thinking · {{value}}",
     "thinking_clear": "Follow CLI config",
     "thinking_clear_title": "Clear the override and let the local CLI config (claude/codex) decide the reasoning level"
+  },
+  "runtime_settings": {
+    "effort": "Effort",
+    "speed": "Speed",
+    "runtime_default": "Follow runtime default"
   },
   "model_dropdown": {
     "label": "Model",

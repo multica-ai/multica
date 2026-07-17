@@ -636,6 +636,11 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		// the launch line readable in `agent command` logs.
 		args = append(args, "--effort", opts.ThinkingLevel)
 	}
+	if opts.SpeedMode == "fast" {
+		// Claude Code's non-interactive mode only enables fast mode when the
+		// session is launched with fastMode in --settings.
+		args = append(args, "--settings", `{"fastMode":true}`)
+	}
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
 	}

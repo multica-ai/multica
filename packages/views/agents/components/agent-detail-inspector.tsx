@@ -43,6 +43,7 @@ import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
 import { ThinkingPropRow } from "./inspector/thinking-prop-row";
+import { SpeedPropRow } from "./inspector/speed-prop-row";
 import { VisibilityPicker } from "./inspector/visibility-picker";
 // CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — per-surface discovery visibility editor.
 import { AgentSurfaceVisibilityPicker } from "@multica/cerebro-access/views";
@@ -152,6 +153,19 @@ export function AgentDetailInspector({
           value={agent.thinking_level ?? ""}
           canEdit={canEdit}
           onChange={(v) => update({ thinking_level: v })}
+        />
+        <SpeedPropRow
+          runtimeId={agent.runtime_id}
+          runtimeOnline={!!isOnline}
+          model={agent.model ?? ""}
+          value={typeof agent.runtime_config?.speed_mode === "string" ? agent.runtime_config.speed_mode : ""}
+          canEdit={canEdit}
+          onChange={(speedMode) => {
+            const runtimeConfig = { ...(agent.runtime_config ?? {}) };
+            if (speedMode === "fast") runtimeConfig.speed_mode = speedMode;
+            else delete runtimeConfig.speed_mode;
+            return update({ runtime_config: runtimeConfig });
+          }}
         />
         <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
           <VisibilityPicker

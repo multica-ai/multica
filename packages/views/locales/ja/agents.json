@@ -145,6 +145,7 @@
     "prop_runtime": "ランタイム",
     "prop_model": "モデル",
     "prop_thinking": "思考",
+    "prop_speed": "速度",
     "prop_visibility": "公開範囲",
     "prop_concurrency": "同時実行数",
     "prop_owner": "オーナー",
@@ -191,6 +192,11 @@
     "thinking_tooltip": "思考 · {{value}}",
     "thinking_clear": "CLI 設定に従う",
     "thinking_clear_title": "上書きをクリアし、推論レベルをローカルの CLI 設定（claude/codex）に任せます"
+  },
+  "runtime_settings": {
+    "effort": "思考強度",
+    "speed": "速度",
+    "runtime_default": "ランタイムのデフォルトに従う"
   },
   "model_dropdown": {
     "label": "モデル",

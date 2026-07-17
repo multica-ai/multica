@@ -1020,6 +1020,34 @@ func TestCodexStartOrResumeThreadStartsFresh(t *testing.T) {
 	}
 }
 
+func TestCodexStartThreadEnablesFastServiceTier(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	wait := drainRPCScript(t, c, fs, []rpcResponse{{
+		method: "thread/start",
+		result: json.RawMessage(`{"thread":{"id":"thr_fast"}}`),
+		assertFn: func(t *testing.T, params map[string]any) {
+			cfg, ok := params["config"].(map[string]any)
+			if !ok {
+				t.Fatalf("config = %#v, want map", params["config"])
+			}
+			if cfg["service_tier"] != "fast" {
+				t.Fatalf("service_tier = %#v, want fast", cfg["service_tier"])
+			}
+			features, ok := cfg["features"].(map[string]any)
+			if !ok || features["fast_mode"] != true {
+				t.Fatalf("features = %#v, want fast_mode=true", cfg["features"])
+			}
+		},
+	}})
+	defer wait()
+
+	if _, _, err := c.startOrResumeThread(context.Background(), ExecOptions{SpeedMode: "fast"}, slog.Default()); err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+}
+
 func TestCodexStartOrResumeThreadResumesPriorThread(t *testing.T) {
 	t.Parallel()
 

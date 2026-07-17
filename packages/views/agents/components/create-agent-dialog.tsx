@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Globe, Lock } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModelDropdown } from "./model-dropdown";
+import { RuntimeSettingsFields } from "./runtime-settings-fields";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { InstructionsEditor } from "./instructions-editor";
 import { SkillMultiSelect } from "./skill-multi-select";
@@ -95,6 +96,12 @@ export function CreateAgentDialog({
     template?.visibility ?? "workspace",
   );
   const [model, setModel] = useState(template?.model ?? "");
+  const [thinkingLevel, setThinkingLevel] = useState(template?.thinking_level ?? "");
+  const [speedMode, setSpeedMode] = useState(
+    typeof template?.runtime_config?.speed_mode === "string"
+      ? template.runtime_config.speed_mode
+      : "standard",
+  );
   const [instructions, setInstructions] = useState(template?.instructions ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(template?.avatar_url ?? null);
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(
@@ -168,9 +175,17 @@ export function CreateAgentDialog({
         runtime_id: selectedRuntime.id,
         visibility,
         model: model.trim() || undefined,
+        thinking_level: thinkingLevel || undefined,
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
       };
+      const runtimeConfig = { ...(template?.runtime_config ?? {}) };
+      if (speedMode && speedMode !== "standard") {
+        runtimeConfig.speed_mode = speedMode;
+      } else {
+        delete runtimeConfig.speed_mode;
+      }
+      if (Object.keys(runtimeConfig).length > 0) data.runtime_config = runtimeConfig;
       if (template) {
         // Duplicate path: forward the hidden config fields the source
         // agent had so the clone is functional out of the box (args /
@@ -354,6 +369,16 @@ export function CreateAgentDialog({
               value={model}
               onChange={setModel}
               disabled={!selectedRuntime}
+            />
+
+            <RuntimeSettingsFields
+              runtimeId={selectedRuntime?.id ?? null}
+              runtimeOnline={selectedRuntime?.status === "online"}
+              model={model}
+              thinkingLevel={thinkingLevel}
+              speedMode={speedMode}
+              onThinkingChange={setThinkingLevel}
+              onSpeedChange={setSpeedMode}
             />
 
             {/* --- Optional sections (instructions / skills) ---

@@ -45,6 +45,8 @@ const (
 	FieldMaxTurns ExecOptionField = "max_turns"
 	// FieldThinkingLevel sets runtime-native reasoning effort.
 	FieldThinkingLevel ExecOptionField = "thinking_level"
+	// FieldSpeedMode selects a provider-native fast response tier.
+	FieldSpeedMode ExecOptionField = "speed_mode"
 	// FieldResumeSession resumes a prior session. ExecOptions.ResumeSessionID.
 	FieldResumeSession ExecOptionField = "resume_session"
 	// FieldMCPConfig injects MCP servers. ExecOptions.McpConfig.
@@ -65,6 +67,7 @@ func ExecOptionFields() []ExecOptionField {
 		FieldSystemPrompt,
 		FieldMaxTurns,
 		FieldThinkingLevel,
+		FieldSpeedMode,
 		FieldResumeSession,
 		FieldMCPConfig,
 		FieldDisallowedTools,
@@ -114,6 +117,7 @@ var execOptionsSupport = map[string]map[ExecOptionField]FieldHandling{
 		FieldSystemPrompt:    HandlingHonoured, // claude.go:643 via ClaudeSystemPromptArgs
 		FieldMaxTurns:        HandlingHonoured, // claude.go:640 --max-turns
 		FieldThinkingLevel:   HandlingHonoured,
+		FieldSpeedMode:       HandlingHonoured,
 		FieldResumeSession:   HandlingHonoured,
 		FieldMCPConfig:       HandlingHonoured,
 		FieldDisallowedTools: HandlingHonoured, // claude.go:627 --disallowedTools
@@ -126,6 +130,7 @@ var execOptionsSupport = map[string]map[ExecOptionField]FieldHandling{
 		FieldModel:         HandlingHonoured,
 		FieldSystemPrompt:  HandlingHonoured, // codex.go:914 developerInstructions
 		FieldThinkingLevel: HandlingHonoured, // codex.go:717 applyCodexReasoningEffort
+		FieldSpeedMode:     HandlingHonoured,
 		FieldResumeSession: HandlingHonoured,
 		FieldMCPConfig:     HandlingHonoured,
 		FieldExtraArgs:     HandlingHonoured,
@@ -202,6 +207,7 @@ var execOptionsSupport = map[string]map[ExecOptionField]FieldHandling{
 	"pi": {
 		FieldModel:         HandlingHonoured,
 		FieldSystemPrompt:  HandlingHonoured,
+		FieldThinkingLevel: HandlingHonoured,
 		FieldResumeSession: HandlingHonoured,
 		FieldCustomArgs:    HandlingHonoured,
 	},

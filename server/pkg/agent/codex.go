@@ -919,6 +919,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		// agent's thinking_level since. See MUL-2339 — Elon flagged that
 		// resume must honour the live config, not the stored one.
 		applyCodexReasoningEffort(resumeParams, opts.ThinkingLevel)
+		applyCodexSpeedMode(resumeParams, opts.SpeedMode)
 		resumeResult, err := c.request(ctx, "thread/resume", resumeParams)
 		if err == nil {
 			if threadID := extractThreadID(resumeResult); threadID != "" {
@@ -946,6 +947,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"persistExtendedHistory": true,
 	}
 	applyCodexReasoningEffort(startParams, opts.ThinkingLevel)
+	applyCodexSpeedMode(startParams, opts.SpeedMode)
 	startResult, err := c.request(ctx, "thread/start", startParams)
 	if err != nil {
 		return "", false, fmt.Errorf("codex thread/start failed: %w", err)
@@ -987,6 +989,24 @@ func applyCodexReasoningEffort(params map[string]any, level string) {
 		cfg = map[string]any{}
 	}
 	cfg["model_reasoning_effort"] = level
+	params["config"] = cfg
+}
+
+func applyCodexSpeedMode(params map[string]any, mode string) {
+	if params == nil || mode != "fast" {
+		return
+	}
+	cfg, _ := params["config"].(map[string]any)
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	cfg["service_tier"] = "fast"
+	features, _ := cfg["features"].(map[string]any)
+	if features == nil {
+		features = map[string]any{}
+	}
+	features["fast_mode"] = true
+	cfg["features"] = features
 	params["config"] = cfg
 }
 

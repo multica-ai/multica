@@ -3850,7 +3850,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// PreToolUse hook to the local tool-policy resolve IPC when the workspace
 	// has opted in (claim carries the resolved stage). No-op for the default
 	// "off" stage and for non-Claude providers.
-	toolPolicySpawn, tperr := d.prepareToolPolicySpawn(provider, task.LocalToolPolicyStage, env.WorkDir)
+	speedMode := speedModeForTask(task)
+	toolPolicySpawn, tperr := d.prepareToolPolicySpawn(
+		provider,
+		task.LocalToolPolicyStage,
+		env.WorkDir,
+		provider == "claude" && speedMode == "fast",
+	)
 	if tperr != nil {
 		return TaskResult{}, fmt.Errorf("tool-policy prep: %w", tperr)
 	}
@@ -3968,6 +3974,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// CEREBRO-PATCH(daemon-connection-tool-deny): TECH-3156 forward claim-time MCP denies into the provider spawn path.
 		DisallowedMCPTools: task.DisallowedMCPTools,
 		ThinkingLevel:      thinkingLevel,
+		SpeedMode:          speedModeForExec(speedMode, provider, toolPolicySpawn),
 		OpenclawMode:       openclawMode,
 		// CEREBRO-PATCH(agent-system-prompt-mode): FIR-3212 - source the delivery mode from agent runtime_config; see cerebro_system_prompt_mode.go.
 		SystemPromptMode: systemPromptModeForTask(task), // CEREBRO-PATCH(agent-system-prompt-mode): nil-agent safe.

@@ -1614,6 +1614,18 @@ The intake contract, validation and Gateway tool remain fork-owned in `server/in
 
 Approved by Jesper Hvejsel on FIR-3272: “byg det hele uden stop og deploy”, 2026-07-15.
 
+## FIR-3406 — Per-agent runtime settings
+
+| Patch | Location | Reason |
+|---|---|---|
+| `agent-runtime-setting-types` | `packages/core/types/agent.ts`; `packages/core/types/index.ts` | Add the catalog shape that lets a runtime advertise only the speed choices a model actually supports. |
+| `agent-runtime-setting-ui` | `packages/views/agents/components/create-agent-dialog.tsx`; `runtime-settings-fields.tsx`; `agent-detail-inspector.tsx`; `inspector/speed-prop-row.tsx`; matching tests and agent locale files | Put model-native Effort and Speed beside Model during creation and editing while preserving unrelated runtime configuration during duplication. |
+| `agent-runtime-setting-catalog` | `server/pkg/agent/models.go`; `thinking.go`; matching tests | Advertise Pi thinking levels and model-gated Codex/Claude speed choices through the existing runtime model catalog. |
+| `agent-runtime-setting-exec` | `server/pkg/agent/agent.go`; `pi.go`; `claude.go`; `codex.go`; `cerebro_exec_options_matrix.go`; matching tests | Translate the saved choices into each provider's native launch/session format. |
+| `daemon-runtime-speed` | `server/internal/daemon/daemon.go`; `cerebro_speed_mode.go`; `toolpolicy.go`; matching tests | Decode the safe speed token at claim time and merge Claude fast mode with the existing tool-policy settings document so security hooks remain active. |
+
+Approved by Jesper Hvejsel through FIR-3406, 2026-07-16.
+
 ## FIR-3362 — Stable Pi and Hermes cloud runtime
 
 | Patch | Location | Reason |

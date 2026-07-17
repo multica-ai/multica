@@ -417,6 +417,14 @@ func TestBuildClaudeArgsPassesThroughCustomArgs(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeArgsEnablesFastModeForSession(t *testing.T) {
+	args := buildClaudeArgs(ExecOptions{SpeedMode: "fast"}, slog.Default())
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, `--settings {"fastMode":true}`) {
+		t.Fatalf("expected Claude fast-mode session settings, got: %v", args)
+	}
+}
+
 func TestBuildClaudeArgsFiltersBlockedCustomArgs(t *testing.T) {
 	t.Parallel()
 

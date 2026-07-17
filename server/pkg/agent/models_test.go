@@ -30,6 +30,35 @@ func TestListModelsStaticProviders(t *testing.T) {
 	}
 }
 
+func TestSpeedCatalogOnlyAppearsOnSupportedModels(t *testing.T) {
+	tests := []struct {
+		provider string
+		fastID   string
+		slowID   string
+	}{
+		{provider: "codex", fastID: "gpt-5.6-sol", slowID: "gpt-5.3-codex"},
+		{provider: "claude", fastID: "claude-opus-4-8", slowID: "claude-sonnet-4-6"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.provider, func(t *testing.T) {
+			models, err := ListModels(context.Background(), tc.provider, "/nonexistent")
+			if err != nil {
+				t.Fatal(err)
+			}
+			byID := map[string]Model{}
+			for _, model := range models {
+				byID[model.ID] = model
+			}
+			if byID[tc.fastID].Speed == nil {
+				t.Fatalf("%s should advertise speed options", tc.fastID)
+			}
+			if byID[tc.slowID].Speed != nil {
+				t.Fatalf("%s must not advertise fast mode", tc.slowID)
+			}
+		})
+	}
+}
+
 func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 	// Copilot uses dynamic ACP discovery, but with no `copilot`
 	// binary on PATH (the discovery LookPath fails) it must fall
@@ -501,6 +530,21 @@ bareword-only-line
 	// the legacy `provider:model` form gets colon→slash normalization.
 	if models[3].ID != "opencode/claude-sonnet-4-6:exp" || models[3].Provider != "opencode" {
 		t.Errorf("expected ':' inside table-format model name to be preserved: %+v", models[3])
+	}
+}
+
+func TestParsePiModelsAdvertisesThinkingLevels(t *testing.T) {
+	models := parsePiModels("anthropic  claude-opus-4-8  200000\n")
+	if len(models) != 1 || models[0].Thinking == nil {
+		t.Fatalf("expected Pi model thinking catalog, got %+v", models)
+	}
+	got := make([]string, 0, len(models[0].Thinking.SupportedLevels))
+	for _, level := range models[0].Thinking.SupportedLevels {
+		got = append(got, level.Value)
+	}
+	want := []string{"off", "minimal", "low", "medium", "high", "xhigh"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("Pi thinking levels = %v, want %v", got, want)
 	}
 }
 
