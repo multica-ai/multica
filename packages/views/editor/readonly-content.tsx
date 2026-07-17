@@ -17,17 +17,14 @@
  */
 
 import { isValidElement, memo, useMemo, useRef, useState } from "react";
-import ReactMarkdown, {
-  defaultUrlTransform,
-  type Components,
-} from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import type { ReactNode } from "react";
 import rehypeKatex from "rehype-katex";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import rehypeSanitize from "rehype-sanitize";
 import { toHtml } from "hast-util-to-html";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -41,7 +38,12 @@ import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectChip } from "../projects/components/project-chip";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
-import { isAllowedFileCardHref, isIssueIdentifier } from "@multica/ui/markdown";
+import {
+  isAllowedFileCardHref,
+  isIssueIdentifier,
+  markdownSanitizeSchema,
+  markdownUrlTransform,
+} from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { highlightToHtml } from "./utils/highlight-markdown";
 import { MermaidDiagram } from "./mermaid-diagram";
@@ -58,68 +60,6 @@ import "./styles/index.css";
 // Anchored to whole class tokens so `language-htmlbars` / `language-mermaidx`
 // don't accidentally match and lose their <pre> wrapper.
 const PRE_UNWRAP_RE = /(^|\s)language-(html|mermaid)(\s|$)/;
-
-// ---------------------------------------------------------------------------
-// Sanitization schema — extends GitHub defaults to allow file-card data attrs
-// ---------------------------------------------------------------------------
-
-const sanitizeSchema = {
-  ...defaultSchema,
-  // Allow <mark> (text highlight) — emitted by highlightToHtml from `==text==`.
-  // It carries no attributes, so only the tag name needs whitelisting.
-  tagNames: [...(defaultSchema.tagNames ?? []), "mark"],
-  protocols: {
-    ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "mention", "slash"],
-    // Permit inline data-URI images (QR codes, charts, base64 screenshots).
-    // The scheme gate only allows `data:` through here; attributes.img below
-    // narrows it to image/* so non-image data URIs are still rejected.
-    src: [...(defaultSchema.protocols?.src ?? []), "data"],
-  },
-  attributes: {
-    ...defaultSchema.attributes,
-    div: [
-      ...(defaultSchema.attributes?.div ?? []),
-      "dataType",
-      "dataHref",
-      "dataFilename",
-    ],
-    code: [
-      ...(defaultSchema.attributes?.code ?? []),
-      ["className", /^language-/],
-      ["className", /^math-/],
-      ["className", /^hljs/],
-    ],
-    img: [
-      // Drop the default plain `src` entry so the value allow-list below is the
-      // one findDefinition resolves — it returns the first match by name, so a
-      // bare `src` string would otherwise shadow (and disable) the allow-list.
-      ...(defaultSchema.attributes?.img ?? []).filter(
-        (attr) => (typeof attr === "string" ? attr : attr[0]) !== "src",
-      ),
-      "alt",
-      // Allow inline data:image/* URIs while leaving every other src form
-      // (http/https/site-relative) exactly as before: the negative lookahead
-      // keeps all non-data values, and data: is narrowed to images only.
-      ["src", /^data:image\//i, /^(?!data:)/i],
-    ],
-  },
-};
-
-// ---------------------------------------------------------------------------
-// URL transform — allow mention:// protocol through react-markdown's sanitizer
-// ---------------------------------------------------------------------------
-
-function urlTransform(url: string): string {
-  if (url.startsWith("mention://")) return url;
-  if (url.startsWith("slash://skill/")) return url;
-  // Allow inline data:image/* URIs — defaultUrlTransform strips every data: URL
-  // to '', which would blank the src even after rehype-sanitize keeps it. Kept
-  // in sync with the image/* narrowing in sanitizeSchema (protocols.src +
-  // attributes.img) so both gates agree on what a valid inline image is.
-  if (/^data:image\//i.test(url)) return url;
-  return defaultUrlTransform(url);
-}
 
 // ---------------------------------------------------------------------------
 // Custom react-markdown components
@@ -480,8 +420,8 @@ export const ReadonlyContent = memo(function ReadonlyContent({
           remarkBreaks,
           [remarkGfm, { singleTilde: false }],
         ]}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
-        urlTransform={urlTransform}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSanitizeSchema], rehypeKatex]}
+        urlTransform={markdownUrlTransform}
         components={components}
       >
         {processed}
