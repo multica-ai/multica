@@ -54,6 +54,19 @@ test("loads relative modules from the immutable backend bundle", async () => {
   assert.deepEqual(output, { value: "MILK" });
 });
 
+// What actually stops the allocation loop below is the deadline, not memoryBytes:
+// quickjs-emscripten 0.31.0 does not enforce setMemoryLimit against string
+// allocation, so the loop runs to ~2GB of WASM heap and only then aborts. Left
+// on the 5s default that cost this one test ~13s of the package's ~14s runtime,
+// on every checkout's `make check` — which is what made this package a bad
+// neighbour on a shared machine. Bounding the deadline here keeps the subject
+// intact (each iteration still allocates hard, aborts, and must release its
+// handles in both variants) while cutting the wall-clock cost ~50x. The
+// product's own limits are untouched: workers run under the 5s default, and in
+// production the container caps memory at 64MB via cgroups regardless of what
+// QuickJS accounts for. See FIR-3452.
+const MEMORY_PRESSURE_DEADLINE_MS = 200;
+
 test("releases handles in release and debug variants under repeated memory pressure", async () => {
   for (const variant of [RELEASE_ASYNC, DEBUG_ASYNC]) {
     for (let index = 0; index < 2; index++) {
@@ -61,6 +74,7 @@ test("releases handles in release and debug variants under repeated memory press
         source: `export default () => { const values = []; while (true) values.push("x".repeat(65536)); }`,
         input: {},
         memoryBytes: 4 << 20,
+        deadlineMs: MEMORY_PRESSURE_DEADLINE_MS,
         variant,
       }), /App worker failed/);
     }
