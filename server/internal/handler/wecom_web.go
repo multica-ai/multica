@@ -224,3 +224,69 @@ func (h *Handler) wecomInstallService() *wecom.InstallationService {
 	}
 	return svc
 }
+
+// RedeemWecomBindingTokenRequest carries the raw token the user clicked
+// through from the bot's "link your Multica account" prompt.
+type RedeemWecomBindingTokenRequest struct {
+	Token string `json:"token"`
+}
+
+// RedeemWecomBindingTokenResponse echoes the bound workspace / installation
+// / wecom user so the frontend can confirm without a second fetch.
+type RedeemWecomBindingTokenResponse struct {
+	WorkspaceID    string `json:"workspace_id"`
+	InstallationID string `json:"installation_id"`
+	WecomUserID    string `json:"wecom_user_id"`
+}
+
+// RedeemWecomBindingToken (POST /api/wecom/binding/redeem) binds the WeCom
+// aibot userid carried by the token to the logged-in Multica user. The
+// redeemer's identity comes from the session, not the token, so a stolen
+// token cannot bind a WeCom id to an attacker's account. Failure modes map
+// to distinct status codes:
+//
+//   - 410 Gone:      token unknown / consumed / expired
+//   - 409 Conflict:  this WeCom id is already bound to a different user
+//   - 403 Forbidden: redeemer is not a workspace member
+func (h *Handler) RedeemWecomBindingToken(w http.ResponseWriter, r *http.Request) {
+	if h.WecomBindingTokens == nil {
+		writeError(w, http.StatusServiceUnavailable, "wecom integration not configured")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	var req RedeemWecomBindingTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Token == "" {
+		writeError(w, http.StatusBadRequest, "token is required")
+		return
+	}
+	userUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	redeemed, err := h.WecomBindingTokens.RedeemAndBind(r.Context(), req.Token, userUUID)
+	if err != nil {
+		switch {
+		case errors.Is(err, wecom.ErrBindingTokenInvalid):
+			writeError(w, http.StatusGone, "binding token invalid or expired")
+		case errors.Is(err, wecom.ErrBindingAlreadyAssigned):
+			writeError(w, http.StatusConflict, "this WeCom user is already bound to a different Multica user")
+		case errors.Is(err, wecom.ErrBindingNotWorkspaceMember):
+			writeError(w, http.StatusForbidden, "binding refused (are you a workspace member?)")
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to redeem token")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, RedeemWecomBindingTokenResponse{
+		WorkspaceID:    uuidToString(redeemed.WorkspaceID),
+		InstallationID: uuidToString(redeemed.InstallationID),
+		WecomUserID:    redeemed.WecomUserID,
+	})
+}

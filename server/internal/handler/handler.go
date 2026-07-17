@@ -240,6 +240,13 @@ type Handler struct {
 	// WecomCredentials unseals a wecom installation's smart-bot secret for the
 	// WebSocket subscribe frame. Nil disables the wecom integration.
 	WecomCredentials wecom.CredentialsResolver
+	// WecomBindingTokens mints/redeems the user-binding tokens behind the
+	// "link your Multica account" prompt sent to first-time WeCom users
+	// (their aibot userid is a "T"-prefixed anonymized id with no relation
+	// to their real userid or email, so an explicit binding is required —
+	// see wecom/binding.go). Nil disables the redeem endpoint (returns 503)
+	// and the OutboundReplier's binding-prompt path.
+	WecomBindingTokens *wecom.BindingTokenService
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in

@@ -576,6 +576,30 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				h.WecomStore = wecomStore
 				h.WecomCredentials = credsResolver
 
+				// Binding tokens back the per-user "link your Multica account"
+				// prompt sent to first-time WeCom senders. aibot userids are
+				// anonymized T-prefixed ids with no relation to real userids
+				// or emails, so an explicit binding table is the only correct
+				// answer — see wecom/binding.go for the rationale.
+				wecomBinding := wecom.NewBindingTokenService(queries, pool)
+				h.WecomBindingTokens = wecomBinding
+
+				// Senders registry: the wecom OutboundReplier is created here
+				// at boot, but the live wsSender it needs to push
+				// aibot_send_msg only exists inside a running wecomChannel.
+				// wecom.NewSendersRegistry mints a shared map; the
+				// ChannelDeps write side and the Replier read side both
+				// receive it, and each Channel.Connect self-registers on
+				// entry and clears on exit.
+				wecomSenders := wecom.NewSendersRegistry()
+
+				wecomReplier := wecom.NewOutboundReplier(wecom.OutboundReplierConfig{
+					Binding: wecomBinding,
+					Senders: wecomSenders,
+					AppURL:  appURLFromEnv(),
+					Logger:  slog.Default(),
+				})
+
 				// Wecom shares the engine.ChatSession (channel_type-keyed) so
 				// /issue, dedup, and run-triggering behave identically across
 				// platforms. Session titles use the wecom-flavored wording
@@ -588,10 +612,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 				wecom.RegisterWecom(channelRegistry, wecom.ChannelDeps{
 					Credentials: credsResolver,
+					Senders:     wecomSenders,
 					Logger:      slog.Default(),
 				})
 				channelRouter.Register(wecom.TypeWecom, wecom.NewResolverSet(
-					wecomStore, wecomSession, nil,
+					wecomStore, wecomSession, wecomReplier,
 				))
 				slog.Info("wecom integration enabled (smart bot, long connection)")
 			}
@@ -1043,6 +1068,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// logged-in user (from the session) is bound to the Slack id the token
 		// carries.
 		r.Post("/api/slack/binding/redeem", h.RedeemSlackBindingToken)
+		// WeCom smart-bot binding-token redemption. Same rationale as
+		// Lark/Slack: the session is the source of truth for the redeemer's
+		// Multica identity; the token only carries the WeCom userid to bind.
+		r.Post("/api/wecom/binding/redeem", h.RedeemWecomBindingToken)
 
 		// Composio integration (MUL-3720). User-scoped (no workspace context):
 		// a connection belongs to a user. These four require a logged-in
