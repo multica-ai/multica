@@ -12,6 +12,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/service"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // Router is the channel-agnostic inbound pipeline — the generalization of the
@@ -476,7 +477,64 @@ func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, ori
 		OriginType:   pgtype.Text{String: originType, Valid: originType != ""},
 		OriginID:     sessionID,
 	}
-	return r.issues.Create(ctx, params, service.IssueCreateOpts{})
+	// BroadcastPayload must populate payload["issue"] as a full field map — the
+	// subscriber listener (server/cmd/server/subscriber_listeners.go) type-asserts
+	// on that key to auto-subscribe the creator + assignee. Without it, the
+	// listener's extractIssueFields short-circuits, the creator is never added
+	// to issue_subscriber, and every downstream status-change / new-comment
+	// notification is filtered out as "no subscribers". This mirrors what the
+	// HTTP handler and autopilot paths already do — engine /issue was the only
+	// entry point still shipping a stub payload.
+	opts := service.IssueCreateOpts{
+		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, _ []db.IssueLabel) map[string]any {
+			prefix := ""
+			if ws, err := r.reader.GetWorkspace(ctx, issue.WorkspaceID); err == nil {
+				prefix = ws.IssuePrefix
+			}
+			return map[string]any{"issue": issueBroadcastMap(issue, prefix)}
+		},
+	}
+	return r.issues.Create(ctx, params, opts)
+}
+
+// issueBroadcastMap flattens a db.Issue into the map[string]any shape the
+// bus listeners downstream expect on EventIssueCreated. Mirrors
+// service.issueToMap (kept private to that package) so engine-created
+// issues broadcast the same field set autopilot-created ones do — the
+// subscriber listener, notification listener, and realtime broadcaster
+// all read from this shape.
+func issueBroadcastMap(issue db.Issue, issuePrefix string) map[string]any {
+	m := map[string]any{
+		"id":            uuidString(issue.ID),
+		"workspace_id":  uuidString(issue.WorkspaceID),
+		"number":        issue.Number,
+		"title":         issue.Title,
+		"status":        issue.Status,
+		"priority":      issue.Priority,
+		"creator_type":  issue.CreatorType,
+		"creator_id":    uuidString(issue.CreatorID),
+		"position":      issue.Position,
+	}
+	if issuePrefix != "" {
+		m["identifier"] = fmt.Sprintf("%s-%d", issuePrefix, issue.Number)
+	}
+	if issue.Description.Valid {
+		s := issue.Description.String
+		m["description"] = &s
+	}
+	if issue.AssigneeType.Valid {
+		s := issue.AssigneeType.String
+		m["assignee_type"] = &s
+	}
+	if issue.AssigneeID.Valid {
+		s := uuidString(issue.AssigneeID)
+		m["assignee_id"] = &s
+	}
+	if issue.ParentIssueID.Valid {
+		s := uuidString(issue.ParentIssueID)
+		m["parent_issue_id"] = &s
+	}
+	return m
 }
 
 // ErrEmptyIssueTitle is returned by createIssue when /issue has no title and
