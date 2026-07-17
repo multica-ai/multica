@@ -234,6 +234,32 @@ model = "o3"
 `,
 		},
 		{
+			name: "inline skills table removes only config",
+			original: `skills = { config = [{ name = "superpowers:brainstorming", enabled = false }], discovery_path = "skills" }
+model = "o3"
+`,
+			want: `skills = { discovery_path = "skills" }
+model = "o3"
+`,
+		},
+		{
+			name: "inline skills table removes trailing config",
+			original: `skills = { discovery_path = "literal } remains", config = [{ path = "/tmp/SKILL.md" }] }
+model = "o3"
+`,
+			want: `skills = { discovery_path = "literal } remains" }
+model = "o3"
+`,
+		},
+		{
+			name: "inline skills table with only config is dropped",
+			original: `model = "o3"
+skills = { config = [{ path = "/tmp/SKILL.md" }] }
+`,
+			want: `model = "o3"
+`,
+		},
+		{
 			name: "header-like text inside multiline string",
 			original: `developer_instructions = """
 [plugins.demo]

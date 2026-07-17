@@ -68,6 +68,18 @@ func stripTaskIrrelevantCodexConfigEntries(content []byte) ([]byte, error) {
 			fullKey := make([]string, 0, len(currentTable)+len(keys))
 			fullKey = append(fullKey, currentTable...)
 			fullKey = append(fullKey, keys...)
+			if len(fullKey) == 1 && fullKey[0] == "skills" && expr.Value().Kind == unstable.InlineTable {
+				inlineRanges, removeExpression, err := taskIrrelevantInlineSkillsRanges(content, expr.Value())
+				if err != nil {
+					return nil, fmt.Errorf("locate inline skills.config: %w", err)
+				}
+				if removeExpression {
+					ranges = append(ranges, tomlExpressionLineRange(content, expr))
+				} else {
+					ranges = append(ranges, inlineRanges...)
+				}
+				continue
+			}
 			if isTaskIrrelevantCodexConfigPath(fullKey) {
 				ranges = append(ranges, tomlExpressionLineRange(content, expr))
 			}
@@ -91,6 +103,166 @@ func stripTaskIrrelevantCodexConfigEntries(content []byte) ([]byte, error) {
 		}
 	}
 	return stripped, nil
+}
+
+// taskIrrelevantInlineSkillsRanges locates config entries inside a top-level
+// inline skills table. Removing the whole expression is safe only when every
+// entry belongs to skills.config; otherwise the returned ranges preserve the
+// remaining inline table byte-for-byte.
+func taskIrrelevantInlineSkillsRanges(content []byte, table *unstable.Node) ([]tomlByteRange, bool, error) {
+	entries := make([]*unstable.Node, 0, 4)
+	targets := make([]bool, 0, 4)
+	targetCount := 0
+	for it := table.Children(); it.Next(); {
+		entry := it.Node()
+		if entry.Kind != unstable.KeyValue {
+			return nil, false, fmt.Errorf("inline skills table contains %s instead of key-value", entry.Kind)
+		}
+		keys := tomlNodeKeys(entry)
+		isTarget := len(keys) > 0 && keys[0] == "config"
+		entries = append(entries, entry)
+		targets = append(targets, isTarget)
+		if isTarget {
+			targetCount++
+		}
+	}
+	if targetCount == 0 {
+		return nil, false, nil
+	}
+	if targetCount == len(entries) {
+		return nil, true, nil
+	}
+
+	closingBrace, err := tomlInlineTableClosingBrace(content, table)
+	if err != nil {
+		return nil, false, err
+	}
+	ranges := make([]tomlByteRange, 0, targetCount)
+	for index, entry := range entries {
+		if !targets[index] {
+			continue
+		}
+		start, err := firstTOMLKeyOffset(content, entry)
+		if err != nil {
+			return nil, false, err
+		}
+		if index+1 < len(entries) {
+			end, err := firstTOMLKeyOffset(content, entries[index+1])
+			if err != nil {
+				return nil, false, err
+			}
+			ranges = append(ranges, tomlByteRange{start: start, end: end})
+			continue
+		}
+
+		// The last entry has no following key whose offset can delimit it.
+		// Include its preceding separator and stop immediately before the
+		// inline table's closing brace.
+		separator := start
+		for separator > 0 && (content[separator-1] == ' ' || content[separator-1] == '\t') {
+			separator--
+		}
+		if separator == 0 || content[separator-1] != ',' {
+			return nil, false, fmt.Errorf("last inline skills.config entry has no preceding comma")
+		}
+		end := closingBrace
+		for end > start && (content[end-1] == ' ' || content[end-1] == '\t') {
+			end--
+		}
+		ranges = append(ranges, tomlByteRange{start: separator - 1, end: end})
+	}
+	return ranges, false, nil
+}
+
+func firstTOMLKeyOffset(content []byte, keyValue *unstable.Node) (int, error) {
+	it := keyValue.Key()
+	if !it.Next() {
+		return 0, fmt.Errorf("inline key-value has no key")
+	}
+	offset := int(it.Node().Raw.Offset)
+	if offset < 0 || offset > len(content) {
+		return 0, fmt.Errorf("inline key offset is outside config")
+	}
+	return offset, nil
+}
+
+// tomlInlineTableClosingBrace finds the matching closing brace while ignoring
+// braces in basic/literal strings and comments. The stable TOML decode above
+// already guarantees valid syntax; this scanner exists only to recover the
+// source boundary that go-toml's unstable AST does not expose.
+func tomlInlineTableClosingBrace(content []byte, table *unstable.Node) (int, error) {
+	start := int(table.Raw.Offset)
+	if start < 0 || start >= len(content) || content[start] != '{' {
+		return 0, fmt.Errorf("inline table opening brace is outside config")
+	}
+
+	const (
+		tomlScanNormal = iota
+		tomlScanBasicString
+		tomlScanLiteralString
+		tomlScanMultilineBasicString
+		tomlScanMultilineLiteralString
+		tomlScanComment
+	)
+	state := tomlScanNormal
+	depth := 0
+	for index := start; index < len(content); index++ {
+		switch state {
+		case tomlScanNormal:
+			switch content[index] {
+			case '#':
+				state = tomlScanComment
+			case '"':
+				if bytes.HasPrefix(content[index:], []byte(`"""`)) {
+					state = tomlScanMultilineBasicString
+					index += 2
+				} else {
+					state = tomlScanBasicString
+				}
+			case '\'':
+				if bytes.HasPrefix(content[index:], []byte(`'''`)) {
+					state = tomlScanMultilineLiteralString
+					index += 2
+				} else {
+					state = tomlScanLiteralString
+				}
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					return index, nil
+				}
+			}
+		case tomlScanBasicString:
+			if content[index] == '\\' {
+				index++
+			} else if content[index] == '"' {
+				state = tomlScanNormal
+			}
+		case tomlScanLiteralString:
+			if content[index] == '\'' {
+				state = tomlScanNormal
+			}
+		case tomlScanMultilineBasicString:
+			if content[index] == '\\' {
+				index++
+			} else if bytes.HasPrefix(content[index:], []byte(`"""`)) {
+				state = tomlScanNormal
+				index += 2
+			}
+		case tomlScanMultilineLiteralString:
+			if bytes.HasPrefix(content[index:], []byte(`'''`)) {
+				state = tomlScanNormal
+				index += 2
+			}
+		case tomlScanComment:
+			if content[index] == '\n' || content[index] == '\r' {
+				state = tomlScanNormal
+			}
+		}
+	}
+	return 0, fmt.Errorf("inline table has no matching closing brace")
 }
 
 func tomlExpressionLineRange(content []byte, expr *unstable.Node) tomlByteRange {
