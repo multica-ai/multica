@@ -54,9 +54,10 @@ RUN npm install -g @anthropic-ai/claude-code && claude --version
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.80.7 \
     && pi --version
 RUN python3 -m venv /opt/hermes \
-    && /opt/hermes/bin/pip install --no-cache-dir hermes-agent==0.18.2 \
+    && /opt/hermes/bin/pip install --no-cache-dir 'hermes-agent[acp]==0.18.2' \
     && ln -s /opt/hermes/bin/hermes /usr/local/bin/hermes \
-    && hermes version
+    && hermes version \
+    && /opt/hermes/bin/python -c 'import acp'
 
 COPY --from=builder /src/server/bin/multica /usr/local/bin/multica
 COPY docker/runtime-entrypoint.sh /usr/local/bin/runtime-entrypoint.sh

@@ -18,8 +18,8 @@ assert_contains() {
 
 assert_contains "$dockerfile" '@earendil-works/pi-coding-agent@0\.80\.7' \
   'Pi must remain pinned at 0.80.7'
-assert_contains "$dockerfile" 'hermes-agent==0\.18\.2' \
-  'Hermes Agent must be installed at pinned release 0.18.2'
+assert_contains "$dockerfile" 'hermes-agent\[acp\]==0\.18\.2' \
+  'Hermes Agent must be installed at pinned release 0.18.2 with the acp extra (hermes acp exits 1 without it)'
 assert_contains "$dockerfile" 'MULTICA_PI_PATH=/usr/local/bin/pi' \
   'MULTICA_PI_PATH must point at the image Pi binary'
 assert_contains "$dockerfile" 'MULTICA_HERMES_PATH=/usr/local/bin/hermes' \
