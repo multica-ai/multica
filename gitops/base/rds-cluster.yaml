@@ -7,7 +7,7 @@ spec:
   forProvider:
     region: us-east-1
     engine: aurora-postgresql
-    engineVersion: "16.4"
+    engineVersion: "16.11"
     allowMajorVersionUpgrade: true
     # Apply the cluster parameter group association (dynamic params, e.g.
     # cron.database_name) without waiting for the maintenance window. The

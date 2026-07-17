@@ -16,5 +16,6 @@ spec:
     instanceClass: db.t3.medium
     clusterIdentifier: agentfarm-postgres-cluster
     clusterIdentifierRef: null
+    autoMinorVersionUpgrade: false
     tags:
       Environment: development

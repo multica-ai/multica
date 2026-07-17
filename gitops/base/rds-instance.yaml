@@ -17,6 +17,7 @@ spec:
 
     # Public accessibility
     publiclyAccessible: false
+    autoMinorVersionUpgrade: false
 
     # Tags
     tags:

@@ -17,7 +17,7 @@ spec:
     # held ArgoCD's health gate on the Cluster CR and blocked the entire
     # wave-2/3 chain (Redis SubnetGroup, SecurityGroup, ReplicationGroup).
     # 16.4 -> 16.8 is a valid in-place minor upgrade (no replacement).
-    engineVersion: "16.8"
+    engineVersion: "16.11"
     allowMajorVersionUpgrade: true
     # Apply the parameter group association immediately; don't wait for the
     # Sunday maintenance window. The static param (shared_preload_libraries=
