@@ -185,6 +185,18 @@ export function SearchCommand() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  const cancelPendingSearch = useCallback(() => {
+    if (debounceRef.current !== null) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+
+    if (abortRef.current !== null) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+  }, []);
+
   const filteredPages = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
@@ -396,25 +408,20 @@ export function SearchCommand() {
   }, [open, setOpen]);
 
   // Cleanup debounce/abort on unmount
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (abortRef.current) abortRef.current.abort();
-    };
-  }, []);
+  useEffect(() => cancelPendingSearch, [cancelPendingSearch]);
 
   // Reset state when dialog closes
   useEffect(() => {
     if (!open) {
+      cancelPendingSearch();
       setQuery("");
       setResults({ issues: [], projects: [] });
       setIsLoading(false);
     }
-  }, [open]);
+  }, [cancelPendingSearch, open]);
 
   const search = useCallback((q: string) => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (abortRef.current) abortRef.current.abort();
+    cancelPendingSearch();
 
     if (!q.trim()) {
       setResults({ issues: [], projects: [] });
@@ -422,8 +429,10 @@ export function SearchCommand() {
       return;
     }
 
+    setResults({ issues: [], projects: [] });
     setIsLoading(true);
     debounceRef.current = setTimeout(async () => {
+      debounceRef.current = null;
       const controller = new AbortController();
       abortRef.current = controller;
       try {
@@ -450,11 +459,16 @@ export function SearchCommand() {
         }
       } catch {
         if (!controller.signal.aborted) {
+          setResults({ issues: [], projects: [] });
           setIsLoading(false);
+        }
+      } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
         }
       }
     }, 300);
-  }, []);
+  }, [cancelPendingSearch]);
 
   const handleValueChange = useCallback(
     (value: string) => {
