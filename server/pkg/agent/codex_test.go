@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
@@ -1538,6 +1539,56 @@ func TestStderrTailEmptyWhenNothingWritten(t *testing.T) {
 	s := newStderrTail(&sink, 16)
 	if tail := s.Tail(); tail != "" {
 		t.Errorf("expected empty tail, got %q", tail)
+	}
+}
+
+func TestStderrTailReturnsValidUTF8(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input []byte
+		max   int
+		want  string
+	}{
+		{
+			name:  "leading rune split by tail bound",
+			input: []byte("aa界bc"),
+			max:   4,
+			want:  "bc",
+		},
+		{
+			name:  "trailing incomplete rune",
+			input: append([]byte("ok"), []byte("界")[:2]...),
+			max:   16,
+			want:  "ok",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var sink bytes.Buffer
+			s := newStderrTail(&sink, tt.max)
+			if _, err := s.Write(tt.input); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+
+			if !bytes.Equal(sink.Bytes(), tt.input) {
+				t.Errorf("inner sink: got %q, want raw bytes %q", sink.Bytes(), tt.input)
+			}
+			got := s.Tail()
+			if !utf8.ValidString(got) {
+				t.Errorf("tail is not valid UTF-8: %q", got)
+			}
+			if len(got) > tt.max {
+				t.Errorf("tail exceeds bound: got %d bytes (%q), max %d", len(got), got, tt.max)
+			}
+			if got != tt.want {
+				t.Errorf("tail: got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

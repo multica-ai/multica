@@ -85,13 +85,16 @@ func (s *stderrTail) TotalBytes() int64 {
 	return s.total
 }
 
-// Tail returns the captured stderr with leading/trailing whitespace
-// trimmed; empty string means nothing was written or everything was
-// whitespace.
+// Tail returns the captured stderr as valid UTF-8 with leading/trailing
+// whitespace trimmed. A byte-bounded tail can start or end partway through a
+// multi-byte rune, so invalid fragments are discarded before the diagnostic is
+// persisted. The inner writer still receives every original byte verbatim.
+// Empty string means nothing was written or no valid non-whitespace text was
+// captured.
 func (s *stderrTail) Tail() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return strings.TrimSpace(string(s.buf))
+	return strings.TrimSpace(strings.ToValidUTF8(string(s.buf), ""))
 }
 
 // withAgentStderr appends a stderr tail hint to an error message when
