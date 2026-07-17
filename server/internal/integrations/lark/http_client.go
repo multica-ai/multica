@@ -358,7 +358,7 @@ func markdownLineContainerForLine(markdown string, start int) markdownLineContai
 	j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
 	if ok {
 		if after, ok := skipMarkdownListMarker(markdown, j); ok {
-			container.listContentIndent = after - start
+			container.listContentIndent = after - i
 		}
 	}
 	return container
@@ -372,7 +372,28 @@ func lineBelongsToMarkdownContainer(markdown string, start int, container markdo
 	if container.listContentIndent == 0 {
 		return true
 	}
-	return isBlankMarkdownLine(markdown, start) || markdownLineIndent(markdown, start) >= container.listContentIndent
+	return isBlankMarkdownLine(markdown, start) || markdownLineIndentAfterBlockquotes(markdown, start, container.blockquote) >= container.listContentIndent
+}
+
+func markdownLineIndentAfterBlockquotes(markdown string, start int, blockquotes int) int {
+	lineEnd := markdownLineEnd(markdown, start)
+	i := start
+	for n := 0; n < blockquotes; n++ {
+		j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
+		if !ok || j >= lineEnd || markdown[j] != '>' {
+			return -1
+		}
+		j++
+		if j < lineEnd && (markdown[j] == ' ' || markdown[j] == '	') {
+			j++
+		}
+		i = j
+	}
+	indent := 0
+	for i+indent < lineEnd && markdown[i+indent] == ' ' {
+		indent++
+	}
+	return indent
 }
 
 func isBlankMarkdownLine(markdown string, start int) bool {

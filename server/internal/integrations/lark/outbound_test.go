@@ -307,7 +307,7 @@ func TestPatcherRedactsReferenceLocalImageBeforeCardRouting(t *testing.T) {
 		Payload: protocol.ChatDonePayload{
 			TaskID:        uuidString(taskID),
 			ChatSessionID: uuidString(q.binding.ChatSessionID),
-			Content:       "**Scan:** ![result][local]\n\n- ~~~\n  [local]: https://example.com/image.png\n- [local]: /tmp/screenshot.png",
+			Content:       "**Scan:** ![result][local]\n\n> - ~~~\n>   [local]: https://example.com/image.png\n> - [local]: /tmp/screenshot.png",
 		},
 	})
 
@@ -316,7 +316,7 @@ func TestPatcherRedactsReferenceLocalImageBeforeCardRouting(t *testing.T) {
 	if len(api.mdCardSent) != 1 {
 		t.Fatalf("expected one SendMarkdownCard call; got %d", len(api.mdCardSent))
 	}
-	if got := api.mdCardSent[0].Markdown; got != "**Scan:** [result omitted]\n\n- ~~~\n  [local]: https://example.com/image.png\n" {
+	if got := api.mdCardSent[0].Markdown; got != "**Scan:** [result omitted]\n\n> - ~~~\n>   [local]: https://example.com/image.png\n" {
 		t.Errorf("local image must be redacted before card routing; got %q", got)
 	}
 	if len(api.textSent) != 0 {
