@@ -30,10 +30,14 @@ SELECT * FROM domain_event
 WHERE id = $1;
 
 -- name: ListDomainEventsByCorrelation :many
+-- Bounded correlation-chain read for the debug API. The LIMIT is pushed into the
+-- query (not applied after loading the whole chain) and rides the
+-- (workspace_id, correlation_id, seq) index (MUL-4332 PR3 review round: correlation).
 SELECT * FROM domain_event
 WHERE workspace_id = $1
   AND correlation_id = $2
-ORDER BY seq ASC;
+ORDER BY seq ASC
+LIMIT $3;
 
 -- name: CountDomainEventsBySubject :one
 SELECT count(*) FROM domain_event

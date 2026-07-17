@@ -155,15 +155,20 @@ SELECT id, seq, workspace_id, type, schema_version, subject_type, subject_id, ac
 WHERE workspace_id = $1
   AND correlation_id = $2
 ORDER BY seq ASC
+LIMIT $3
 `
 
 type ListDomainEventsByCorrelationParams struct {
 	WorkspaceID   pgtype.UUID `json:"workspace_id"`
 	CorrelationID pgtype.UUID `json:"correlation_id"`
+	Limit         int32       `json:"limit"`
 }
 
+// Bounded correlation-chain read for the debug API. The LIMIT is pushed into the
+// query (not applied after loading the whole chain) and rides the
+// (workspace_id, correlation_id, seq) index (MUL-4332 PR3 review round: correlation).
 func (q *Queries) ListDomainEventsByCorrelation(ctx context.Context, arg ListDomainEventsByCorrelationParams) ([]DomainEvent, error) {
-	rows, err := q.db.Query(ctx, listDomainEventsByCorrelation, arg.WorkspaceID, arg.CorrelationID)
+	rows, err := q.db.Query(ctx, listDomainEventsByCorrelation, arg.WorkspaceID, arg.CorrelationID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

@@ -107,11 +107,12 @@ func (s *HookService) Explain(ctx context.Context, workspaceID, hookID, eventID 
 	return automation.Evaluate(ctx, view, rev, &issueStateReader{q: s.Queries, workspaceID: workspaceID})
 }
 
-// EventsByCorrelation returns the domain events in a correlation chain (ordered
-// by seq), for execution-chain debugging.
-func (s *HookService) EventsByCorrelation(ctx context.Context, workspaceID, correlationID pgtype.UUID) ([]db.DomainEvent, error) {
+// EventsByCorrelation returns up to limit domain events in a correlation chain
+// (ordered by seq), for execution-chain debugging. The limit is enforced in the
+// query, not by truncating a fully-loaded chain.
+func (s *HookService) EventsByCorrelation(ctx context.Context, workspaceID, correlationID pgtype.UUID, limit int32) ([]db.DomainEvent, error) {
 	return s.Queries.ListDomainEventsByCorrelation(ctx, db.ListDomainEventsByCorrelationParams{
-		WorkspaceID: workspaceID, CorrelationID: correlationID,
+		WorkspaceID: workspaceID, CorrelationID: correlationID, Limit: limit,
 	})
 }
 

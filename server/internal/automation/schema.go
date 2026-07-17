@@ -91,6 +91,39 @@ func SchemaFor(eventType string) (EventSchema, bool) {
 	return s, ok
 }
 
+// PayloadFields returns the declared payload field names for an event type — its
+// schema's match fields minus the common envelope fields. An unknown event type
+// returns an empty set. Free-text / undeclared payload keys (e.g. an issue title)
+// are intentionally absent, so a projection over this set is fail-closed.
+func PayloadFields(eventType string) map[string]bool {
+	schema, ok := eventSchemas[eventType]
+	if !ok {
+		return map[string]bool{}
+	}
+	out := make(map[string]bool, len(schema.MatchFields))
+	for f := range schema.MatchFields {
+		if _, isEnvelope := envelopeMatchFields[f]; !isEnvelope {
+			out[f] = true
+		}
+	}
+	return out
+}
+
+// ProjectPayload returns a copy of payload keeping ONLY the event type's declared
+// payload fields (fail-closed redaction, §10): undeclared, sensitive or free-text
+// keys are dropped, and an unknown event type yields an empty object. Used to
+// project a domain event's payload for the read-only correlation debug surface.
+func ProjectPayload(eventType string, payload map[string]any) map[string]any {
+	allowed := PayloadFields(eventType)
+	out := make(map[string]any, len(allowed))
+	for k, v := range payload {
+		if allowed[k] {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 // Action types. User actions are creatable through the public API; system-only
 // actions are reserved for managed system hooks (PR5) and are rejected on a
 // user-authored spec.

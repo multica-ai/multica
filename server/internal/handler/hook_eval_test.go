@@ -28,6 +28,22 @@ func seedStatusChangedEvent(t *testing.T, issueID, from, to, correlationID strin
 	return id
 }
 
+// seedDomainEvent inserts a domain_event with an explicit workspace, type and
+// raw JSON payload.
+func seedDomainEvent(t *testing.T, workspaceID, typ, subjectID, payloadJSON, correlationID string) string {
+	t.Helper()
+	var id string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO domain_event (workspace_id, type, schema_version, subject_type, subject_id, actor_type, actor_id, payload, correlation_id)
+		VALUES ($1, $2, 1, 'issue', $3, 'member', $4, $5::jsonb, $6)
+		RETURNING id`,
+		workspaceID, typ, subjectID, testUserID, payloadJSON, correlationID).Scan(&id); err != nil {
+		t.Fatalf("seed domain_event: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM domain_event WHERE id = $1`, id) })
+	return id
+}
+
 func decodeEvaluation(t *testing.T, w *httptest.ResponseRecorder) automation.Evaluation {
 	t.Helper()
 	if w.Code != http.StatusOK {
@@ -53,7 +69,7 @@ func TestHookDryRun(t *testing.T) {
 	testHandler.DryRunHook(w, newMemberHookRequest(http.MethodPost, "/api/hooks/dry-run",
 		map[string]any{"hook": sampleHookSpec("dr", "hi", issueID), "event_id": eventID}))
 	ev := decodeEvaluation(t, w)
-	if !ev.Matched || !ev.WouldFire || ev.Reason != automation.ReasonMatched {
+	if !ev.Matched || !ev.Eligible || ev.DecisionComplete || ev.Reason != automation.ReasonMatched {
 		t.Fatalf("expected match, got %+v", ev)
 	}
 	if ev.EvaluatedAgainst != automation.EvaluatedAgainstCurrentState {
@@ -184,6 +200,83 @@ func TestHookEventsByCorrelation(t *testing.T) {
 		if e.CorrelationID != correlation {
 			t.Errorf("leaked event from correlation %s", e.CorrelationID)
 		}
+		if e.SchemaVersion != 1 {
+			t.Errorf("schema_version = %d, want 1", e.SchemaVersion)
+		}
+	}
+}
+
+// The correlation payload is projected to the event schema: free-text / undeclared
+// keys (e.g. an issue title) are redacted, declared fields survive (review point 3).
+func TestHookCorrelationRedactsPayload(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	enableHooksFlag(t)
+	issueID := seedHookIssue(t)
+	const correlation = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+	seedDomainEvent(t, testWorkspaceID, "issue.created", issueID,
+		`{"status":"todo","priority":"high","title":"SECRET internal title"}`, correlation)
+
+	w := httptest.NewRecorder()
+	testHandler.ListEventsByCorrelation(w, newMemberHookRequest(http.MethodGet, "/api/events?correlation_id="+correlation, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	var events []DomainEventResponse
+	json.NewDecoder(w.Body).Decode(&events)
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	var payload map[string]any
+	json.Unmarshal(events[0].Payload, &payload)
+	if _, leaked := payload["title"]; leaked {
+		t.Errorf("free-text title was not redacted: %v", payload)
+	}
+	if payload["status"] != "todo" || payload["priority"] != "high" {
+		t.Errorf("declared payload fields were dropped: %v", payload)
+	}
+}
+
+// A same-correlation event in a DIFFERENT workspace must never appear.
+func TestHookCorrelationCrossWorkspaceFiltered(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	enableHooksFlag(t)
+	issueID := seedHookIssue(t)
+	const correlation = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+	seedDomainEvent(t, testWorkspaceID, "issue.status_changed", issueID, `{"from":"todo","to":"done"}`, correlation)
+	// domain_event has no FK on workspace_id, so an arbitrary foreign workspace id
+	// with the SAME correlation must be filtered out by the workspace-scoped query.
+	seedDomainEvent(t, "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee", "issue.status_changed", issueID, `{"from":"todo","to":"done"}`, correlation)
+
+	w := httptest.NewRecorder()
+	testHandler.ListEventsByCorrelation(w, newMemberHookRequest(http.MethodGet, "/api/events?correlation_id="+correlation, nil))
+	var events []DomainEventResponse
+	json.NewDecoder(w.Body).Decode(&events)
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1 (foreign-workspace same-correlation must be filtered)", len(events))
+	}
+}
+
+// The chain limit is enforced in the query, not by truncating a fully-loaded chain.
+func TestHookCorrelationLimitPushedToQuery(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	ctx := context.Background()
+	issueID := seedHookIssue(t)
+	const correlation = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+	for i := 0; i < 3; i++ {
+		seedDomainEvent(t, testWorkspaceID, "issue.status_changed", issueID, `{"from":"todo","to":"done"}`, correlation)
+	}
+	got, err := testHandler.HookService.EventsByCorrelation(ctx, parseUUID(testWorkspaceID), parseUUID(correlation), 2)
+	if err != nil {
+		t.Fatalf("events by correlation: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("query returned %d rows, want 2 (LIMIT must be applied in SQL)", len(got))
 	}
 }
 

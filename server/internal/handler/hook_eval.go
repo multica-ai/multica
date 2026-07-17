@@ -26,11 +26,14 @@ type ExplainHookRequest struct {
 	Revision int32  `json:"revision,omitempty"`
 }
 
-// DomainEventResponse is the read-only API view of a domain event.
+// DomainEventResponse is the read-only API view of a domain event. Payload is
+// projected to the event's declared schema fields (fail-closed redaction); the
+// causation_* fields locate the direct action that produced the event.
 type DomainEventResponse struct {
 	ID                   string          `json:"id"`
 	Seq                  int64           `json:"seq"`
 	Type                 string          `json:"type"`
+	SchemaVersion        int32           `json:"schema_version"`
 	SubjectType          string          `json:"subject_type"`
 	SubjectID            string          `json:"subject_id"`
 	ActorType            string          `json:"actor_type"`
@@ -38,6 +41,7 @@ type DomainEventResponse struct {
 	Payload              json.RawMessage `json:"payload"`
 	CorrelationID        string          `json:"correlation_id"`
 	CausationExecutionID string          `json:"causation_execution_id,omitempty"`
+	CausationActionIndex *int32          `json:"causation_action_index,omitempty"`
 	HopCount             int32           `json:"hop_count"`
 	CreatedAt            string          `json:"created_at"`
 }
@@ -112,36 +116,47 @@ func (h *Handler) ListEventsByCorrelation(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	events, err := h.HookService.EventsByCorrelation(r.Context(), workspaceUUID, correlationUUID)
+	events, err := h.HookService.EventsByCorrelation(r.Context(), workspaceUUID, correlationUUID, hookEventListLimit)
 	if err != nil {
 		h.writeHookError(w, err)
 		return
 	}
 	resp := make([]DomainEventResponse, 0, len(events))
-	for i, e := range events {
-		if i >= hookEventListLimit {
-			break
-		}
+	for _, e := range events {
 		resp = append(resp, domainEventToResponse(e))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 func domainEventToResponse(e db.DomainEvent) DomainEventResponse {
-	return DomainEventResponse{
+	// Fail-closed schema projection: expose only the event type's declared
+	// payload fields; drop free-text / undeclared / sensitive keys.
+	var payload map[string]any
+	if len(e.Payload) > 0 {
+		_ = json.Unmarshal(e.Payload, &payload)
+	}
+	projected, _ := json.Marshal(automation.ProjectPayload(e.Type, payload))
+
+	resp := DomainEventResponse{
 		ID:                   uuidToString(e.ID),
 		Seq:                  e.Seq,
 		Type:                 e.Type,
+		SchemaVersion:        e.SchemaVersion,
 		SubjectType:          e.SubjectType,
 		SubjectID:            uuidToString(e.SubjectID),
 		ActorType:            e.ActorType,
 		ActorID:              uuidToString(e.ActorID),
-		Payload:              rawJSON(e.Payload),
+		Payload:              json.RawMessage(projected),
 		CorrelationID:        uuidToString(e.CorrelationID),
 		CausationExecutionID: uuidToString(e.CausationExecutionID),
 		HopCount:             e.HopCount,
 		CreatedAt:            timestampToString(e.CreatedAt),
 	}
+	if e.CausationActionIndex.Valid {
+		idx := e.CausationActionIndex.Int32
+		resp.CausationActionIndex = &idx
+	}
+	return resp
 }
 
 // decodeJSONBodyStrict decodes exactly one JSON document into dst, rejecting

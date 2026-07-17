@@ -57,23 +57,50 @@ type EvalRevision struct {
 	FireMode   string
 }
 
-// ClauseResult is the per-field outcome of one when-match clause.
+// ClauseResult is the per-field outcome of one when-match clause. It records the
+// operator, the observed event value and presence, and the expected operand, so a
+// single structured result feeds dry-run, explain and (next slice) the matcher's
+// stored match_snapshot — no re-derivation, no parallel logic (review point 2).
 type ClauseResult struct {
-	Field      string `json:"field"`
-	Op         string `json:"op"`
-	EventValue string `json:"event_value,omitempty"`
-	Present    bool   `json:"present"`
-	Matched    bool   `json:"matched"`
+	Field    string   `json:"field"`
+	Op       string   `json:"op"`
+	Observed string   `json:"observed,omitempty"`
+	Present  bool     `json:"present"`
+	Expected []string `json:"expected,omitempty"`
+	Matched  bool     `json:"matched"`
 }
 
-// ConditionResult is the outcome of one if-condition against current state.
+// IssueObserved records the observed current value of one issue field consulted
+// by a condition, and whether that issue satisfied the predicate.
+type IssueObserved struct {
+	ID       string `json:"id"`
+	Field    string `json:"field"`
+	Observed string `json:"observed,omitempty"`
+	Present  bool   `json:"present"`
+	Matched  bool   `json:"matched"`
+}
+
+// ConditionResult is the structured outcome of one if-condition against current
+// state: the operator/expected operand plus every observed input, so the same
+// object is the condition_snapshot the matcher will store (review point 2).
 type ConditionResult struct {
-	Kind    string `json:"kind"`
-	Matched bool   `json:"matched"`
-	Detail  string `json:"detail,omitempty"`
+	Kind     string          `json:"kind"` // issues_status | issue_field
+	Matched  bool            `json:"matched"`
+	Mode     string          `json:"mode,omitempty"`     // all | any (issues_status)
+	Field    string          `json:"field,omitempty"`    // issue field (issue_field)
+	Op       string          `json:"op,omitempty"`       // eq | in (issue_field)
+	Expected []string        `json:"expected,omitempty"` // target status / eq value / in-set
+	Issues   []IssueObserved `json:"issues,omitempty"`   // per-issue observed state
 }
 
 // Evaluation is the complete read-only decision for one (event, revision) pair.
+//
+// Eligible means the when-match held and every if-condition is currently
+// satisfied. It is NOT a fire decision: a rising-edge latch and the depth / rate
+// / permission / fuse guards are not evaluated in read-only mode, so
+// DecisionComplete is false and no field ever claims the rule "will execute"
+// (review point 1). The matcher (next slice) will set DecisionComplete and the
+// final fire verdict after evaluating the latch and guards.
 type Evaluation struct {
 	Event            string            `json:"event"`
 	HookEvent        string            `json:"hook_event"`
@@ -82,11 +109,18 @@ type Evaluation struct {
 	MatchClauses     []ClauseResult    `json:"match_clauses"`
 	ConditionsMet    bool              `json:"conditions_met"`
 	Conditions       []ConditionResult `json:"conditions"`
-	WouldFire        bool              `json:"would_fire"`
+	Eligible         bool              `json:"eligible"`
+	DecisionComplete bool              `json:"decision_complete"`
 	Reason           string            `json:"reason"`
 	EvaluatedAgainst string            `json:"evaluated_against"`
 	Note             string            `json:"note,omitempty"`
 }
+
+// MatchSnapshot / ConditionSnapshot serialize the structured inputs+conclusions
+// exactly as the matcher will persist them, so dry-run/explain and the stored
+// execution snapshot are byte-identical for the same (event, revision, state).
+func (e Evaluation) MatchSnapshot() (json.RawMessage, error)     { return json.Marshal(e.MatchClauses) }
+func (e Evaluation) ConditionSnapshot() (json.RawMessage, error) { return json.Marshal(e.Conditions) }
 
 // Evaluate is the shared read-only decision. It never mutates durable state.
 func Evaluate(ctx context.Context, event EventView, rev EvalRevision, state StateReader) (Evaluation, error) {
@@ -129,11 +163,16 @@ func Evaluate(ctx context.Context, event EventView, rev EvalRevision, state Stat
 		return ev, nil
 	}
 
+	// The event matches and conditions currently hold. This makes the rule
+	// ELIGIBLE, but not a completed fire decision: read-only evaluation does not
+	// consult the rising-edge latch or the depth/rate/permission/fuse guards, so
+	// DecisionComplete stays false and no field claims execution (review point 1).
+	ev.Eligible = true
 	ev.Reason = ReasonMatched
-	ev.WouldFire = true
 	if rev.FireMode == FireRisingEdge {
-		// Honest read-only note (2A): the durable latch decides the actual edge.
-		ev.Note = "rising_edge fires only on a false→true edge; the durable latch is not consulted in read-only dry-run/explain"
+		ev.Note = "eligible now, but rising_edge fires only on a false→true edge; the durable latch and guards are not evaluated in read-only mode"
+	} else {
+		ev.Note = "eligible now; the depth/rate/permission/fuse guards are not evaluated in read-only mode"
 	}
 	return ev, nil
 }
@@ -165,11 +204,12 @@ func evalMatch(event EventView, m Match) (bool, []ClauseResult) {
 			matched = false
 		}
 		results = append(results, ClauseResult{
-			Field:      field,
-			Op:         string(clause.Op),
-			EventValue: val,
-			Present:    present,
-			Matched:    ok,
+			Field:    field,
+			Op:       string(clause.Op),
+			Observed: val,
+			Present:  present,
+			Expected: clauseExpected(clause),
+			Matched:  ok,
 		})
 	}
 	// Stable order for deterministic snapshots / responses.
@@ -189,6 +229,18 @@ func evalClause(c MatchClause, val string, present bool) bool {
 	return false
 }
 
+func clauseExpected(c MatchClause) []string {
+	switch c.Op {
+	case MatchEq:
+		return []string{c.Value}
+	case MatchIn:
+		return c.Set
+	case MatchExists:
+		return []string{fmt.Sprintf("%t", c.Exists)}
+	}
+	return nil
+}
+
 func evalCondition(ctx context.Context, c ConditionSpec, state StateReader) (ConditionResult, error) {
 	if c.IssuesStatus != nil {
 		return evalIssuesStatus(ctx, *c.IssuesStatus, state)
@@ -197,7 +249,7 @@ func evalCondition(ctx context.Context, c ConditionSpec, state StateReader) (Con
 		return evalIssueField(ctx, *c.IssueField, state)
 	}
 	// A stored, validated condition always has exactly one variant.
-	return ConditionResult{Kind: "unknown", Matched: false, Detail: "empty condition"}, nil
+	return ConditionResult{Kind: "unknown", Matched: false}, nil
 }
 
 func evalIssuesStatus(ctx context.Context, c IssuesStatusCond, state StateReader) (ConditionResult, error) {
@@ -206,25 +258,32 @@ func evalIssuesStatus(ctx context.Context, c IssuesStatusCond, state StateReader
 		target, mode = c.Any, "any"
 	}
 	allHit, anyHit := true, false
+	observed := make([]IssueObserved, 0, len(c.IDs))
 	for _, id := range c.IDs {
 		status, exists, err := state.IssueField(ctx, id, IssueFieldStatus)
 		if err != nil {
 			return ConditionResult{}, err
 		}
-		if exists && status == target {
+		hit := exists && status == target
+		if hit {
 			anyHit = true
 		} else {
 			allHit = false
 		}
+		observed = append(observed, IssueObserved{ID: id, Field: IssueFieldStatus, Observed: status, Present: exists, Matched: hit})
 	}
 	met := allHit
 	if mode == "any" {
 		met = anyHit
 	}
 	return ConditionResult{
-		Kind:    "issues_status",
-		Matched: met,
-		Detail:  fmt.Sprintf("%s of %d issues == %q", mode, len(c.IDs), target),
+		Kind:     "issues_status",
+		Matched:  met,
+		Mode:     mode,
+		Field:    IssueFieldStatus,
+		Op:       string(MatchEq),
+		Expected: []string{target},
+		Issues:   observed,
 	}, nil
 }
 
@@ -233,7 +292,11 @@ func evalIssueField(ctx context.Context, c IssueFieldCond, state StateReader) (C
 	if err != nil {
 		return ConditionResult{}, err
 	}
+	op, expected := string(MatchEq), []string{c.Eq}
 	met := false
+	if c.Eq == "" {
+		op, expected = string(MatchIn), c.In
+	}
 	if exists {
 		if c.Eq != "" {
 			met = val == c.Eq
@@ -242,9 +305,12 @@ func evalIssueField(ctx context.Context, c IssueFieldCond, state StateReader) (C
 		}
 	}
 	return ConditionResult{
-		Kind:    "issue_field",
-		Matched: met,
-		Detail:  fmt.Sprintf("issue %s.%s", c.ID, c.Field),
+		Kind:     "issue_field",
+		Matched:  met,
+		Field:    c.Field,
+		Op:       op,
+		Expected: expected,
+		Issues:   []IssueObserved{{ID: c.ID, Field: c.Field, Observed: val, Present: exists, Matched: met}},
 	}, nil
 }
 
