@@ -36,3 +36,11 @@ export interface RegisterWecomBYORequest {
   bot_id: string;
   secret: string;
 }
+
+/** Post-redemption echo: the WeCom aibot userid the token carried is now
+ * bound to the logged-in Multica user in this workspace/installation. */
+export interface RedeemWecomBindingTokenResponse {
+  workspace_id: string;
+  installation_id: string;
+  wecom_user_id: string;
+}
