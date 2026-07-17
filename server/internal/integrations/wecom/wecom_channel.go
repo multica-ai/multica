@@ -20,15 +20,16 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"sync"
 	"time"
 
 	cryptorand "crypto/rand"
 	"encoding/hex"
 
 	"github.com/gorilla/websocket"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // DefaultWSURL is the aibot long-connection endpoint. WeChat publishes a
@@ -64,20 +65,18 @@ const handshakeTimeout = 15 * time.Second
 // registered Factory and drives lease / reconnect lifecycle; Connect blocks
 // on the receive loop until ctx is cancelled or the link drops.
 type wecomChannel struct {
-	installationID string
+	installationID pgtype.UUID
 	botID          string
 	secret         string
 	handler        channel.InboundHandler
 	dialer         Dialer
 	wsURL          string
 	logger         *slog.Logger
-
-	// send is the WS write handle a running connection installs on itself
-	// so wecomChannel.Send (called concurrently by the engine) can push an
-	// aibot_send_msg without opening a second connection. Nil while the
-	// receive loop is not running; guarded by sendMu.
-	sendMu sync.Mutex
-	send   *wsSender
+	// senders is the package-level installation→wsSender registry (see
+	// senders_registry.go). We hold a reference so Connect can register
+	// itself on entry and clear on exit. nil in tests that don't exercise
+	// the OutboundReplier path.
+	senders *sendersRegistry
 }
 
 var _ channel.Channel = (*wecomChannel)(nil)
@@ -128,7 +127,7 @@ func (c *wecomChannel) Connect(ctx context.Context) error {
 	if log == nil {
 		log = slog.Default()
 	}
-	log = log.With("installation_id", c.installationID, "bot_id", c.botID)
+	log = log.With("installation_id", util.UUIDToString(c.installationID), "bot_id", c.botID)
 
 	conn, _, err := dialer.DialContext(ctx, wsURL, nil)
 	if err != nil {
@@ -162,15 +161,14 @@ func (c *wecomChannel) Connect(ctx context.Context) error {
 	}
 	log.Info("wecom: subscribe ok")
 
-	// Install the sender so concurrent Send() calls can use this connection.
-	c.sendMu.Lock()
-	c.send = sender
-	c.sendMu.Unlock()
-	defer func() {
-		c.sendMu.Lock()
-		c.send = nil
-		c.sendMu.Unlock()
-	}()
+	// Install the sender on the package-level registry so the OutboundReplier
+	// (created at boot, not per-installation) can locate this connection by
+	// installation id and push aibot_send_msg over the same socket. Cleared
+	// on exit so a stale sender for a dead connection is never dispatched to.
+	if c.senders != nil && c.installationID.Valid {
+		c.senders.set(c.installationID, sender)
+		defer c.senders.clear(c.installationID)
+	}
 
 	// Heartbeat — WeChat kills silent sockets past ~90s. We ping every 30s
 	// via the shared writer mutex so it interleaves cleanly with other
@@ -355,9 +353,10 @@ func (c *wecomChannel) Send(ctx context.Context, out channel.OutboundMessage) (c
 	if out.ChatID == "" {
 		return channel.SendResult{}, errors.New("wecom: send requires chat_id")
 	}
-	c.sendMu.Lock()
-	sender := c.send
-	c.sendMu.Unlock()
+	if c.senders == nil || !c.installationID.Valid {
+		return channel.SendResult{}, errors.New("wecom: sender registry not configured")
+	}
+	sender := c.senders.get(c.installationID)
 	if sender == nil {
 		return channel.SendResult{}, errors.New("wecom: connection not ready")
 	}
@@ -388,6 +387,13 @@ func (c *wecomChannel) Send(ctx context.Context, out channel.OutboundMessage) (c
 type ChannelDeps struct {
 	Credentials CredentialsResolver
 	Logger      *slog.Logger
+
+	// Senders is the package-level installation→wsSender registry. The
+	// OutboundReplier and the wecomChannel.Send path both look up the live
+	// wsSender through it. Boot passes ONE registry instance shared with
+	// the OutboundReplier constructor. Nil in tests that don't exercise
+	// outbound.
+	Senders *sendersRegistry
 
 	// Dialer overrides the default gorilla dialer. Tests point it at an
 	// httptest server; production leaves this nil.
@@ -430,12 +436,14 @@ func newWecomFactory(deps ChannelDeps) channel.Factory {
 			return nil, fmt.Errorf("wecom: decrypt secret: %w", err)
 		}
 		return &wecomChannel{
-			botID:   creds.BotID,
-			secret:  creds.Secret,
-			handler: cfg.Handler,
-			dialer:  deps.Dialer,
-			wsURL:   deps.WSURL,
-			logger:  logger,
+			installationID: cfg.ID,
+			botID:          creds.BotID,
+			secret:         creds.Secret,
+			handler:        cfg.Handler,
+			dialer:         deps.Dialer,
+			wsURL:          deps.WSURL,
+			logger:         logger,
+			senders:        deps.Senders,
 		}, nil
 	}
 }
