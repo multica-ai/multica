@@ -367,6 +367,25 @@ RETURNING *;
 SELECT * FROM channel_user_binding
 WHERE installation_id = $1 AND channel_user_id = $2;
 
+-- name: FindChannelBindingForMember :one
+-- Outbound notification lookup: given a Multica member and a channel_type,
+-- return the (installation, channel_user_id) that outbound push should
+-- target. The wecom smart-bot inbox-notification path uses this to decide
+-- whether to deliver via the bot at all — no row means "unbound member,
+-- fall back to the legacy path (TOF/RTX)".
+--
+-- If a member has bound multiple installations of the same channel_type in
+-- one workspace (multi-bot org), the most-recently-bound wins — matches
+-- FindReusableChannelUserBinding's tiebreak so the two lookups agree.
+SELECT b.* FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = sqlc.arg('workspace_id')
+  AND b.multica_user_id = sqlc.arg('multica_user_id')
+  AND b.channel_type = sqlc.arg('channel_type')
+  AND ci.status = 'active'
+ORDER BY b.bound_at DESC
+LIMIT 1;
+
 -- name: FindReusableChannelUserBinding :one
 -- Cross-installation account-link reuse (MUL-3911). When a platform user
 -- messages an installation they have NOT linked, but the SAME user id is already
