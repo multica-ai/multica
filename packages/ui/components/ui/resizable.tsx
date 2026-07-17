@@ -37,10 +37,16 @@ function ResizablePanel({ ...props }: ResizablePrimitive.PanelProps) {
 // sidebar rail cannot drift apart.
 function ResizableHandle({
   withHandle,
+  rule = true,
   className,
   ...props
 }: ResizablePrimitive.SeparatorProps & {
   withHandle?: boolean
+  // Set false when there is no panel on the far side to divide from — a
+  // collapsed sidebar, say. The grab hint still appears on hover. Callers get
+  // this instead of a class override so that which pseudo-element draws the
+  // rule stays an implementation detail.
+  rule?: boolean
 }) {
   return (
     <ResizablePrimitive.Separator
@@ -49,7 +55,7 @@ function ResizableHandle({
         resizeHandleVariants({
           axis: "x",
           cursor: "none",
-          indicator: "rule",
+          indicator: rule ? "rule" : "line",
           hitArea: "overlay",
         }),
         "relative flex w-0 items-center justify-center focus-visible:outline-hidden",

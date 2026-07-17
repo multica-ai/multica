@@ -550,11 +550,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         </ResizablePanel>
         {/* No resting rule while the sidebar is collapsed — there is no panel
             on the far side to divide from. Hover still reveals the grab hint. */}
-        {!isMobile && (
-          <ResizableHandle
-            className={cn(!desktopSidebarVisualOpen && "before:bg-transparent")}
-          />
-        )}
+        {!isMobile && <ResizableHandle rule={desktopSidebarVisualOpen} />}
         {!isMobile && (
         <ResizablePanel
           id="sidebar"

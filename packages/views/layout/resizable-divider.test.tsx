@@ -20,8 +20,10 @@ import { resizeHandleVariants } from "@multica/ui/components/ui/resize-handle";
 // painted its own border-r/border-l, the handle's hover and active states were
 // tinting a line that was already there, so they read as no change at all.
 describe("resizable divider ownership", () => {
-  function renderHandle(className?: string) {
-    const { container } = render(<ResizableHandle className={className} />);
+  function renderHandle(
+    props?: Partial<React.ComponentProps<typeof ResizableHandle>>,
+  ) {
+    const { container } = render(<ResizableHandle {...props} />);
     return container.querySelector<HTMLElement>("[data-slot='resizable-handle']")!;
   }
 
@@ -35,13 +37,19 @@ describe("resizable divider ownership", () => {
     expect(handle).toHaveClass("data-[separator=active]:after:bg-foreground/25");
   });
 
-  it("lets a caller drop the resting rule without losing the hover hint", () => {
-    const handle = renderHandle("after:bg-transparent");
-    // tailwind-merge keeps the caller's override as the winning background...
-    expect(handle.className).toContain("after:bg-transparent");
-    expect(handle.className).not.toContain("after:bg-border");
-    // ...while the hover state is a different variant and survives.
+  // A collapsed sidebar has no panel on the far side, so the resting rule has
+  // to go while the grab hint stays.
+  //
+  // The assertion deliberately names no pseudo-element: the last regression
+  // was exactly that. The rule moved from ::before to ::after and the two
+  // callers kept overriding ::before via className, so they silently stopped
+  // hiding anything. `rule` is a prop now — which pseudo draws the line is the
+  // component's business, not the caller's.
+  it("drops the resting rule when there is nothing to divide", () => {
+    const handle = renderHandle({ rule: false });
+    expect(handle.className).not.toMatch(/:bg-border/);
     expect(handle).toHaveClass("hover:after:bg-foreground/15");
+    expect(handle).toHaveClass("data-[separator=active]:after:bg-foreground/25");
   });
 
   // The whole point of the sweep: the panel divider and the hand-written
