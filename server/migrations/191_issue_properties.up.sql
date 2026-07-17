@@ -12,7 +12,7 @@
 -- stay resolvable. The active-definition cap (20/workspace) and per-type value
 -- validation live in the handler.
 
-CREATE TABLE issue_property (
+CREATE TABLE IF NOT EXISTS issue_property (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL,
     name TEXT NOT NULL,
@@ -26,17 +26,39 @@ CREATE TABLE issue_property (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-ALTER TABLE issue ADD COLUMN properties JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE issue ADD COLUMN IF NOT EXISTS properties JSONB NOT NULL DEFAULT '{}'::jsonb;
 -- NOT VALID + VALIDATE keeps the ACCESS EXCLUSIVE lock instantaneous; the
 -- validation pass then runs under SHARE UPDATE EXCLUSIVE without blocking
 -- writes (zero-downtime deploys, review round 3).
-ALTER TABLE issue ADD CONSTRAINT issue_properties_is_object
-    CHECK (jsonb_typeof(properties) = 'object') NOT VALID;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'issue_properties_is_object'
+          AND conrelid = 'issue'::regclass
+    ) THEN
+        ALTER TABLE issue ADD CONSTRAINT issue_properties_is_object
+            CHECK (jsonb_typeof(properties) = 'object') NOT VALID;
+    END IF;
+END
+$$;
 ALTER TABLE issue VALIDATE CONSTRAINT issue_properties_is_object;
 -- Larger than metadata's 8KB: multi_select arrays and text values are bigger
 -- than metadata primitives, but the bag is still bounded by the definition cap.
-ALTER TABLE issue ADD CONSTRAINT issue_properties_size_limit
-    CHECK (pg_column_size(properties) <= 16384) NOT VALID;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'issue_properties_size_limit'
+          AND conrelid = 'issue'::regclass
+    ) THEN
+        ALTER TABLE issue ADD CONSTRAINT issue_properties_size_limit
+            CHECK (pg_column_size(properties) <= 16384) NOT VALID;
+    END IF;
+END
+$$;
 ALTER TABLE issue VALIDATE CONSTRAINT issue_properties_size_limit;
 -- All indexes live in follow-up, single-statement migrations because CREATE
 -- INDEX CONCURRENTLY cannot share a migration with other statements. The GIN

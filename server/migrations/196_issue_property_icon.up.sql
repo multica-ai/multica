@@ -3,4 +3,4 @@
 -- current appearance. PostgreSQL can add this constant default without a
 -- table rewrite.
 ALTER TABLE issue_property
-    ADD COLUMN icon TEXT NOT NULL DEFAULT '';
+    ADD COLUMN IF NOT EXISTS icon TEXT NOT NULL DEFAULT '';

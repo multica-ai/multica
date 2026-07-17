@@ -185,6 +185,8 @@ var catalog = []Capability{
 			"POST /api/issues/batch-update",
 			"PUT /api/issues/{id}/metadata/{key}",
 			"DELETE /api/issues/{id}/metadata/{key}",
+			"PUT /api/issues/{id}/properties/{propertyId}",
+			"DELETE /api/issues/{id}/properties/{propertyId}",
 			"POST /api/issues/{id}/labels",
 			"DELETE /api/issues/{id}/labels/{labelId}",
 			"POST /api/issues/{id}/blocks",
@@ -248,6 +250,17 @@ var catalog = []Capability{
 			"POST /api/labels/",
 			"PUT /api/labels/{id}/",
 			"DELETE /api/labels/{id}/",
+		},
+	},
+	{
+		Key:           "manage_issue_properties",
+		Title:         "Define / edit issue properties",
+		Category:      CategoryIssues,
+		Description:   "Create, edit, archive, or restore workspace custom issue properties (distinct from setting a value on an issue).",
+		DescriptionZh: "创建、编辑、归档或恢复工作区自定义工单属性（区别于在工单上设置属性值）。",
+		Ops: []string{
+			"POST /api/properties/",
+			"PATCH /api/properties/{id}/",
 		},
 	},
 	{
