@@ -1,13 +1,16 @@
 package execenv
 
 import (
+	"bytes"
 	"fmt"
 	"os"
-	"strings"
+
+	"github.com/pelletier/go-toml/v2"
+	"github.com/pelletier/go-toml/v2/unstable"
 )
 
-// stripSkillsConfigEntries removes every `[[skills.config]]` array-of-tables
-// block from the given config.toml content.
+// stripTaskIrrelevantCodexConfigEntries removes user-level skill config and
+// marketplace update sources from copied config.toml content.
 //
 // Background: Codex Desktop writes one `[[skills.config]]` entry per skill it
 // knows about — file-backed skills get a `path = "..."` field, while
@@ -24,93 +27,111 @@ import (
 // that directory. The user-level skill registry is irrelevant to a per-task
 // run, so dropping it is both safe and the right scope of isolation.
 //
-// Lines outside `[[skills.config]]` blocks are preserved untouched.
-func stripSkillsConfigEntries(content string) string {
-	if !strings.Contains(content, "[[skills.config]]") {
-		return content
+// Multica materializes the agent's assigned skills directly under the per-task
+// CODEX_HOME/skills. User-level `[marketplaces.*]` entries are also unsafe in a
+// task copy because Codex probes or clones each git source before the first
+// turn. `[plugins.*]` entries remain intact so installed plugins still load
+// from the shared plugin cache exposed by prepareCodexHomeWithOpts.
+//
+// Source ranges preserve comments and every unrelated expression byte-for-byte
+// while supporting all legal TOML key forms, including dotted keys, quoted
+// tables, inline root values, and array tables.
+func stripTaskIrrelevantCodexConfigEntries(content []byte) ([]byte, error) {
+	if len(bytes.TrimSpace(content)) == 0 {
+		return content, nil
 	}
 
-	lines := strings.Split(content, "\n")
-	out := make([]string, 0, len(lines))
-	inSkillsConfig := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
+	var decoded map[string]any
+	if err := toml.Unmarshal(content, &decoded); err != nil {
+		return nil, fmt.Errorf("parse config.toml before task sanitization: %w", err)
+	}
 
-		// A new TOML header always closes the current `[[skills.config]]`
-		// block, regardless of whether it's another entry of the same array
-		// or a different table.
-		if strings.HasPrefix(trimmed, "[") {
-			if trimmed == "[[skills.config]]" {
-				inSkillsConfig = true
-				continue
+	var parser unstable.Parser
+	parser.Reset(content)
+	var currentTable []string
+	ranges := make([]tomlByteRange, 0, 16)
+	for parser.NextExpression() {
+		expr := parser.Expression()
+		keys := tomlNodeKeys(expr)
+		switch expr.Kind {
+		case unstable.Table, unstable.ArrayTable:
+			currentTable = keys
+			if isTaskIrrelevantCodexConfigPath(keys) {
+				r, err := tomlTableHeaderLineRange(content, expr)
+				if err != nil {
+					return nil, fmt.Errorf("locate task-irrelevant config table: %w", err)
+				}
+				r.start = precedingBlankLinesStart(content, r.start)
+				ranges = append(ranges, r)
 			}
-			inSkillsConfig = false
-			out = append(out, line)
-			continue
+		case unstable.KeyValue:
+			fullKey := make([]string, 0, len(currentTable)+len(keys))
+			fullKey = append(fullKey, currentTable...)
+			fullKey = append(fullKey, keys...)
+			if isTaskIrrelevantCodexConfigPath(fullKey) {
+				ranges = append(ranges, tomlExpressionLineRange(content, expr))
+			}
 		}
-
-		if inSkillsConfig {
-			continue
+	}
+	if err := parser.Error(); err != nil {
+		return nil, fmt.Errorf("parse config.toml task sanitization expressions: %w", err)
+	}
+	stripped, err := removeTOMLByteRanges(content, ranges)
+	if err != nil {
+		return nil, fmt.Errorf("remove task-irrelevant config expressions: %w", err)
+	}
+	if err := toml.Unmarshal(stripped, &decoded); err != nil {
+		return nil, fmt.Errorf("validate config.toml after task sanitization: %w", err)
+	}
+	if len(ranges) > 0 {
+		stripped = bytes.TrimLeft(stripped, "\n")
+		stripped = bytes.TrimRight(stripped, "\n")
+		if len(stripped) > 0 {
+			stripped = append(stripped, '\n')
 		}
-		out = append(out, line)
 	}
-
-	stripped := strings.Join(out, "\n")
-	// Collapse the trailing blank-line cluster that the removal can leave
-	// behind so repeated copies don't grow the file unboundedly.
-	stripped = strings.TrimRight(stripped, "\n") + "\n"
-	if strings.TrimSpace(stripped) == "" {
-		return ""
-	}
-	return stripped
+	return stripped, nil
 }
 
-// stripUserPluginRegistryEntries removes the user-level marketplace and
-// plugin registry tables from a copied config.toml. Multica materializes the
-// agent's assigned skills directly under the per-task CODEX_HOME/skills, so
-// these registries are redundant inside an isolated task. Keeping them makes
-// Codex refresh git-backed marketplaces on every fresh task home, even though
-// the downloaded plugin code is not part of the task's assigned capability
-// set.
-func stripUserPluginRegistryEntries(content string) string {
-	if !strings.Contains(content, "[marketplaces") && !strings.Contains(content, "[plugins") {
-		return content
-	}
-
-	lines := strings.Split(content, "\n")
-	out := make([]string, 0, len(lines))
-	inRegistryTable := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") {
-			header := strings.TrimLeft(trimmed, "[")
-			inRegistryTable = strings.HasPrefix(header, "marketplaces.") ||
-				strings.HasPrefix(header, "marketplaces]") ||
-				strings.HasPrefix(header, "plugins.") ||
-				strings.HasPrefix(header, "plugins]")
-			if inRegistryTable {
-				continue
-			}
+func tomlExpressionLineRange(content []byte, expr *unstable.Node) tomlByteRange {
+	start := int(expr.Raw.Offset)
+	end := start + int(expr.Raw.Length)
+	start = bytes.LastIndexByte(content[:start], '\n') + 1
+	if end < len(content) {
+		if newline := bytes.IndexByte(content[end:], '\n'); newline >= 0 {
+			end += newline + 1
 		}
+	}
+	return tomlByteRange{start: start, end: end}
+}
 
-		if inRegistryTable {
-			continue
+func precedingBlankLinesStart(content []byte, start int) int {
+	for start > 0 {
+		lineEnd := start - 1
+		lineStart := bytes.LastIndexByte(content[:lineEnd], '\n') + 1
+		if len(bytes.TrimSpace(content[lineStart:lineEnd])) != 0 {
+			break
 		}
-		out = append(out, line)
+		start = lineStart
 	}
+	return start
+}
 
-	stripped := strings.Join(out, "\n")
-	stripped = strings.TrimRight(stripped, "\n") + "\n"
-	if strings.TrimSpace(stripped) == "" {
-		return ""
+func isTaskIrrelevantCodexConfigPath(keys []string) bool {
+	if len(keys) == 0 {
+		return false
 	}
-	return stripped
+	if keys[0] == "marketplaces" {
+		return true
+	}
+	return len(keys) >= 2 && keys[0] == "skills" && keys[1] == "config"
 }
 
 // sanitizeCopiedCodexConfig rewrites the per-task config.toml in place,
-// dropping user-level skill, plugin, and marketplace registries inherited
-// from the shared `~/.codex/config.toml`. No-op if the file doesn't exist or
-// doesn't change.
+// dropping user-level skill config and marketplace update sources inherited
+// from the shared `~/.codex/config.toml`. Installed plugin entries remain so
+// they can load from the shared plugin cache. No-op if the file doesn't exist
+// or doesn't change.
 func sanitizeCopiedCodexConfig(configPath string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -119,12 +140,14 @@ func sanitizeCopiedCodexConfig(configPath string) error {
 		}
 		return fmt.Errorf("read config.toml: %w", err)
 	}
-	stripped := stripSkillsConfigEntries(string(data))
-	stripped = stripUserPluginRegistryEntries(stripped)
-	if stripped == string(data) {
+	stripped, err := stripTaskIrrelevantCodexConfigEntries(data)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(stripped, data) {
 		return nil
 	}
-	if err := os.WriteFile(configPath, []byte(stripped), 0o644); err != nil {
+	if err := os.WriteFile(configPath, stripped, 0o644); err != nil {
 		return fmt.Errorf("write config.toml: %w", err)
 	}
 	return nil
