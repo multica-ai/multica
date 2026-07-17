@@ -83,6 +83,11 @@ RETURNING *;
 SELECT * FROM hook_revision
 WHERE id = $1;
 
+-- name: GetHookRevisionByNumber :one
+-- A specific revision of a hook, for `explain --revision N` (read-only debug).
+SELECT * FROM hook_revision
+WHERE hook_id = $1 AND revision = $2;
+
 -- name: GetMaxHookRevision :one
 -- Highest revision number for a hook, 0 when none exist yet. Used to compute the
 -- next revision on PATCH.

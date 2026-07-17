@@ -70,6 +70,19 @@ var hookExecutionsCmd = &cobra.Command{
 	RunE:  runHookExecutions,
 }
 
+var hookDryRunCmd = &cobra.Command{
+	Use:   "dry-run",
+	Short: "Evaluate a candidate hook spec against a historical event (read-only)",
+	RunE:  runHookDryRun,
+}
+
+var hookExplainCmd = &cobra.Command{
+	Use:   "explain <hook-id>",
+	Short: "Explain whether a stored hook would fire for a historical event (read-only)",
+	Args:  exactArgs(1),
+	RunE:  runHookExplain,
+}
+
 func init() {
 	hookCmd.AddCommand(hookListCmd)
 	hookCmd.AddCommand(hookGetCmd)
@@ -79,6 +92,8 @@ func init() {
 	hookCmd.AddCommand(hookDisableCmd)
 	hookCmd.AddCommand(hookDeleteCmd)
 	hookCmd.AddCommand(hookExecutionsCmd)
+	hookCmd.AddCommand(hookDryRunCmd)
+	hookCmd.AddCommand(hookExplainCmd)
 
 	hookListCmd.Flags().String("output", "table", "Output format: table or json")
 	hookGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -90,6 +105,15 @@ func init() {
 	_ = hookUpdateCmd.MarkFlagRequired("file")
 
 	hookDisableCmd.Flags().String("reason", "", "Optional reason recorded on the hook")
+
+	hookDryRunCmd.Flags().String("file", "", "Path to a JSON hook spec file (required)")
+	_ = hookDryRunCmd.MarkFlagRequired("file")
+	hookDryRunCmd.Flags().String("event", "", "Historical event id to evaluate against (required)")
+	_ = hookDryRunCmd.MarkFlagRequired("event")
+
+	hookExplainCmd.Flags().String("event", "", "Historical event id to evaluate against (required)")
+	_ = hookExplainCmd.MarkFlagRequired("event")
+	hookExplainCmd.Flags().Int("revision", 0, "Explain a specific revision number (default: active revision)")
 }
 
 // readHookSpecFile loads and validates that the spec file is well-formed JSON,
@@ -267,6 +291,48 @@ func runHookExecutions(cmd *cobra.Command, args []string) error {
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+func runHookDryRun(cmd *cobra.Command, _ []string) error {
+	path, _ := cmd.Flags().GetString("file")
+	event, _ := cmd.Flags().GetString("event")
+	spec, err := readHookSpecFile(path)
+	if err != nil {
+		return err
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/hooks/dry-run", map[string]any{"hook": spec, "event_id": event}, &result); err != nil {
+		return fmt.Errorf("dry-run hook: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func runHookExplain(cmd *cobra.Command, args []string) error {
+	event, _ := cmd.Flags().GetString("event")
+	revision, _ := cmd.Flags().GetInt("revision")
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	body := map[string]any{"hook_id": args[0], "event_id": event}
+	if revision > 0 {
+		body["revision"] = revision
+	}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/hooks/explain", body, &result); err != nil {
+		return fmt.Errorf("explain hook: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, result)
 }
 
 // hookRevisionField reads a field out of the nested "revision" object for the

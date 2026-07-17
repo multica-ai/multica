@@ -1254,6 +1254,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/hooks", func(r chi.Router) {
 				r.Get("/", h.ListHooks)
 				r.Post("/", h.CreateHook)
+				// Read-only debug surface (PR3, decision 2A): evaluate a candidate
+				// spec or a stored hook against a historical event without executing
+				// anything. chi matches these static routes before the /{id} param.
+				r.Post("/dry-run", h.DryRunHook)
+				r.Post("/explain", h.ExplainHook)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetHook)
 					r.Patch("/", h.UpdateHook)
@@ -1263,6 +1268,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/executions", h.ListHookExecutions)
 				})
 			})
+
+			// Event Hooks correlation-chain read (PR3, decision 2A), gated on the
+			// same automation_event_hooks flag inside the handler.
+			r.Get("/api/events", h.ListEventsByCorrelation)
 
 			// Dashboard — workspace-wide token + run-time rollups for the
 			// "/{slug}/dashboard" page. Optional ?project_id filter scopes

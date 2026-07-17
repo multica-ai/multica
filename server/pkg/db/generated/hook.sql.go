@@ -280,6 +280,36 @@ func (q *Queries) GetHookRevision(ctx context.Context, id pgtype.UUID) (HookRevi
 	return i, err
 }
 
+const getHookRevisionByNumber = `-- name: GetHookRevisionByNumber :one
+SELECT id, hook_id, revision, event_type, match, conditions, fire_mode, actions, created_by_type, created_by_id, created_at FROM hook_revision
+WHERE hook_id = $1 AND revision = $2
+`
+
+type GetHookRevisionByNumberParams struct {
+	HookID   pgtype.UUID `json:"hook_id"`
+	Revision int32       `json:"revision"`
+}
+
+// A specific revision of a hook, for `explain --revision N` (read-only debug).
+func (q *Queries) GetHookRevisionByNumber(ctx context.Context, arg GetHookRevisionByNumberParams) (HookRevision, error) {
+	row := q.db.QueryRow(ctx, getHookRevisionByNumber, arg.HookID, arg.Revision)
+	var i HookRevision
+	err := row.Scan(
+		&i.ID,
+		&i.HookID,
+		&i.Revision,
+		&i.EventType,
+		&i.Match,
+		&i.Conditions,
+		&i.FireMode,
+		&i.Actions,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getMaxHookRevision = `-- name: GetMaxHookRevision :one
 SELECT COALESCE(MAX(revision), 0)::int AS max_revision
 FROM hook_revision

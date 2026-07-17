@@ -383,6 +383,8 @@ func (h *Handler) writeHookError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrHookNotFound):
 		writeError(w, http.StatusNotFound, "hook not found")
+	case errors.Is(err, service.ErrHookEventNotFound):
+		writeError(w, http.StatusNotFound, "event not found")
 	case errors.Is(err, service.ErrHookSystemManaged):
 		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, service.ErrHookForbidden):
