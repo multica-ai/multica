@@ -1,0 +1,91 @@
+package aiimpact
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/middleware"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+)
+
+func TestObservationHTTPSeamAllowsOwnerWriteAndMemberReadOnly(t *testing.T) {
+	store := &recordingObservationStore{}
+	handler := NewHandler(NewService(store))
+	workspaceID := uuid.New()
+	metricID := uuid.New()
+	actorID := uuid.New()
+	body := `{
+		"period_start":"2026-07-01T00:00:00Z",
+		"period_end":"2026-07-02T00:00:00Z",
+		"value":12,
+		"evidence_status":"Measured",
+		"confidence":0.9,
+		"source":"support",
+		"method":"audited count"
+	}`
+
+	request := func(method, role string, requestBody *strings.Reader) *http.Request {
+		var req *http.Request
+		if requestBody == nil {
+			req = httptest.NewRequest(method, "/observations/"+metricID.String(), nil)
+		} else {
+			req = httptest.NewRequest(method, "/observations/"+metricID.String(), requestBody)
+		}
+		routeContext := chi.NewRouteContext()
+		routeContext.URLParams.Add("metricId", metricID.String())
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeContext)
+		ctx = middleware.SetMemberContext(ctx, workspaceID.String(), db.Member{
+			UserID: pgtype.UUID{Bytes: [16]byte(actorID), Valid: true},
+			Role:   role,
+		})
+		return req.WithContext(ctx)
+	}
+
+	createdRecorder := httptest.NewRecorder()
+	handler.AppendObservation(createdRecorder, request(http.MethodPost, "owner", strings.NewReader(body)))
+	if createdRecorder.Code != http.StatusCreated {
+		t.Fatalf("owner append status = %d, want 201: %s", createdRecorder.Code, createdRecorder.Body.String())
+	}
+	var created struct {
+		ID       string  `json:"id"`
+		MetricID string  `json:"metric_id"`
+		Value    float64 `json:"value"`
+	}
+	if err := json.NewDecoder(createdRecorder.Body).Decode(&created); err != nil {
+		t.Fatalf("decode owner append response: %v", err)
+	}
+	if created.ID == "" || created.MetricID != metricID.String() || created.Value != 12 {
+		t.Fatalf("owner append response = %+v", created)
+	}
+
+	listRecorder := httptest.NewRecorder()
+	handler.ListObservations(listRecorder, request(http.MethodGet, "member", nil))
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("member list status = %d, want 200: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+	var listed struct {
+		Observations []struct {
+			ID string `json:"id"`
+		} `json:"observations"`
+	}
+	if err := json.NewDecoder(listRecorder.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode member list response: %v", err)
+	}
+	if len(listed.Observations) != 1 || listed.Observations[0].ID != created.ID {
+		t.Fatalf("member list response = %+v, want the owner observation", listed)
+	}
+
+	readOnlyRecorder := httptest.NewRecorder()
+	handler.AppendObservation(readOnlyRecorder, request(http.MethodPost, "member", strings.NewReader(body)))
+	if readOnlyRecorder.Code != http.StatusForbidden {
+		t.Fatalf("member append status = %d, want 403: %s", readOnlyRecorder.Code, readOnlyRecorder.Body.String())
+	}
+}
