@@ -30,7 +30,8 @@ import (
 // stripped separately by filterCodexCustomConfigOverrides because they
 // share the `-c` flag with legitimate non-MCP overrides like `-c model=…`.
 var codexBlockedArgs = map[string]blockedArgMode{
-	"--listen": blockedWithValue, // stdio:// transport for daemon communication
+	"--listen":         blockedWithValue, // stdio:// transport for daemon communication
+	"--session-source": blockedWithValue, // Multica-owned Codex Desktop classification when supported
 }
 
 // codexStderrTailBytes bounds the stderr tail captured for inclusion in
@@ -138,8 +139,11 @@ type codexBackend struct {
 	cfg Config
 }
 
-func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
+func buildCodexArgs(execPath string, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
+	if isStandaloneCodexAppServer(execPath) {
+		args = []string{"--listen", "stdio://", "--session-source", "multica-agent-sdk"}
+	}
 	extra := filterCustomArgs(opts.ExtraArgs, codexBlockedArgs, logger)
 	custom := filterCustomArgs(opts.CustomArgs, codexBlockedArgs, logger)
 	// Only claim ownership of the `mcp_servers` namespace when the agent
@@ -156,6 +160,11 @@ func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args = append(args, extra...)
 	args = append(args, custom...)
 	return args
+}
+
+func isStandaloneCodexAppServer(execPath string) bool {
+	base := filepath.Base(execPath)
+	return base == "codex-app-server" || base == "codex-app-server.exe"
 }
 
 // hasManagedCodexMcpConfig reports whether the agent's mcp_config field is
@@ -649,7 +658,8 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	if execPath == "" {
 		execPath = "codex"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolvedPath, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("codex executable not found at %q: %w", execPath, err)
 	}
 
@@ -693,7 +703,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		return nil, fmt.Errorf("codex: mcp_config is set but CODEX_HOME env var is not configured; cannot apply managed MCP")
 	}
 
-	codexArgs := buildCodexArgs(opts, b.cfg.Logger)
+	codexArgs := buildCodexArgs(resolvedPath, opts, b.cfg.Logger)
 	cmd := exec.CommandContext(runCtx, execPath, codexArgs...)
 	hideAgentWindow(cmd)
 	// Run codex in its own process group so a cancel-on-stuck cleanup
