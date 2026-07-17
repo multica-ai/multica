@@ -32,6 +32,35 @@ export interface SkillMetadata {
  */
 export type SystemPromptMode = "" | "append" | "replace" | "prepend";
 
+/**
+ * FIR-3212: how much of the shared Multica workspace brief an agent reads before
+ * its task. Mirrors `WorkspaceBriefMode*` in
+ * `server/internal/cerebro/agentoffice/cerebro_brief_layer_modes.go` — keep the
+ * two in step.
+ *
+ * - `""` — the full shared brief, exactly as every agent gets today (default).
+ * - `"off"` — strip the shared workspace brief; the injected config keeps only
+ *   the agent's own identity layers, for triage/CFO/support agents whose role
+ *   text carries their whole contract.
+ *
+ * `"full"` is also accepted on write as the explicit spelling of the default,
+ * but the server normalises it back to `""`.
+ */
+export type WorkspaceBriefMode = "" | "off";
+
+/**
+ * FIR-3212: how the generated Connections & MCP tools list is rendered in an
+ * agent's brief. Mirrors `ToolsBriefMode*` in the same Go file — keep in step.
+ *
+ * - `""` — list every resolved tool individually, as today (default).
+ * - `"summary"` — fold each connection's generated endpoint tools to one line
+ *   (name, count, ask-count, discovery pointer); platform MCP tools stay listed.
+ *
+ * `"full"` is also accepted on write as the explicit default spelling and is
+ * normalised to `""` by the server.
+ */
+export type ToolsBriefMode = "" | "summary";
+
 declare module "@multica/core/types/agent" {
   interface SkillSummary {
     // TECH-3077: included when the server returns metadata (cerebro skill-metadata feature).
@@ -47,6 +76,21 @@ declare module "@multica/core/types/agent" {
      * approving it and dropping it silently at run time.
      */
     system_prompt_mode?: SystemPromptMode;
+    /**
+     * FIR-3212: typed shortcut for the workspace-brief mode stored in
+     * `runtime_config`. `""` (or `"full"`) restores today's full shared brief;
+     * `"off"` strips it. Applied after a `runtime_config` override in the same
+     * request, so an explicit mode wins. The server rejects an unknown mode
+     * with 400 rather than storing it and dropping it silently at run time.
+     */
+    workspace_brief_mode?: WorkspaceBriefMode;
+    /**
+     * FIR-3212: typed shortcut for the tools-brief mode stored in
+     * `runtime_config`. `""` (or `"full"`) lists every tool individually as
+     * today; `"summary"` folds each connection to one line. Same ordering and
+     * validation rules as `workspace_brief_mode`.
+     */
+    tools_brief_mode?: ToolsBriefMode;
   }
   interface Agent {
     // TECH-3670: per-surface discovery visibility. Orthogonal to `visibility`

@@ -94,9 +94,10 @@ by the context owner/approvers; on approval it is applied atomically and
 snapshotted as a new version. Nothing changes until approved.
 
 You may either edit individual fields (instructions, model, thinking_level,
-persona_sandbox, skill_ids, mcp_config) which are merged onto the agent's current
-context, OR pass a full proposed_snapshot object. proposed_version must be a
-semver X.Y.Z strictly greater than the agent's current context_version.`,
+persona_sandbox, workspace_brief_mode, tools_brief_mode, skill_ids, mcp_config)
+which are merged onto the agent's current context, OR pass a full
+proposed_snapshot object. proposed_version must be a semver X.Y.Z strictly
+greater than the agent's current context_version.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"agent_id", "title", "proposed_version"},
@@ -109,6 +110,16 @@ semver X.Y.Z strictly greater than the agent's current context_version.`,
 				"model":            map[string]any{"type": "string", "description": "Model override"},
 				"thinking_level":   map[string]any{"type": "string", "description": "Thinking level override"},
 				"persona_sandbox":  map[string]any{"type": "string", "description": "Persona sandbox override"},
+				"workspace_brief_mode": map[string]any{
+					"type":        "string",
+					"enum":        []string{"", "full", "off"},
+					"description": "FIR-3212: shared-workspace-brief mode. 'off' strips the shared Multica brief so the agent reads only its own role; '' or 'full' keeps today's full brief.",
+				},
+				"tools_brief_mode": map[string]any{
+					"type":        "string",
+					"enum":        []string{"", "full", "summary"},
+					"description": "FIR-3212: tools-brief mode. 'summary' folds each connection's generated tools to one line; '' or 'full' lists every tool individually as today.",
+				},
 				"skill_ids": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
@@ -154,6 +165,15 @@ semver X.Y.Z strictly greater than the agent's current context_version.`,
 		}
 		if v, ok := args["persona_sandbox"].(string); ok {
 			body["persona_sandbox"] = v
+		}
+		// FIR-3212 brief-layer modes. Forwarded verbatim when present (including
+		// the empty string, which resets to the full default) so the MCP, CLI
+		// and API surfaces stay symmetric.
+		if v, ok := args["workspace_brief_mode"].(string); ok {
+			body["workspace_brief_mode"] = v
+		}
+		if v, ok := args["tools_brief_mode"].(string); ok {
+			body["tools_brief_mode"] = v
 		}
 		if v, ok := args["skill_ids"]; ok {
 			body["skill_ids"] = v

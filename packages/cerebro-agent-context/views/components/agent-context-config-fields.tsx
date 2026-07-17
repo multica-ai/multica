@@ -38,9 +38,13 @@ interface Props {
   model: string;
   thinkingLevel: string;
   personaSandbox: string;
+  workspaceBriefMode: string;
+  toolsBriefMode: string;
   onModel: (v: string) => void;
   onThinkingLevel: (v: string) => void;
   onPersonaSandbox: (v: string) => void;
+  onWorkspaceBriefMode: (v: string) => void;
+  onToolsBriefMode: (v: string) => void;
 }
 
 export function AgentContextConfigFields({
@@ -48,9 +52,13 @@ export function AgentContextConfigFields({
   model,
   thinkingLevel,
   personaSandbox,
+  workspaceBriefMode,
+  toolsBriefMode,
   onModel,
   onThinkingLevel,
   onPersonaSandbox,
+  onWorkspaceBriefMode,
+  onToolsBriefMode,
 }: Props) {
   const wsId = useWorkspaceId();
 
@@ -89,6 +97,7 @@ export function AgentContextConfigFields({
   const thinkingInList = levels.some((l) => l.value === thinkingLevel);
 
   return (
+    <div className="space-y-3">
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
       {/* Model */}
       <div className="space-y-1.5">
@@ -204,6 +213,59 @@ export function AgentContextConfigFields({
               </NativeSelectOption>
             )}
         </NativeSelect>
+      </div>
+    </div>
+
+      {/* FIR-3212: brief-layer modes. What the agent reads before its task —
+          the shared workspace brief and the generated tools list. Both default
+          to today's full brief; changing either flows through propose→approve
+          like every other field. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {/* Workspace brief */}
+        <div className="space-y-1.5">
+          <Label htmlFor="ac-workspace-brief" className="text-xs">
+            Workspace brief
+          </Label>
+          <NativeSelect
+            id="ac-workspace-brief"
+            value={workspaceBriefMode}
+            onChange={(e) => onWorkspaceBriefMode(e.target.value)}
+            size="sm"
+            className="w-full"
+          >
+            <NativeSelectOption value="">Full (default)</NativeSelectOption>
+            <NativeSelectOption value="off">
+              Off — only this agent&apos;s own role
+            </NativeSelectOption>
+          </NativeSelect>
+          <p className="text-[10px] text-muted-foreground">
+            Off strips the shared Multica brief so the agent reads only its own
+            identity and role.
+          </p>
+        </div>
+
+        {/* Tools brief */}
+        <div className="space-y-1.5">
+          <Label htmlFor="ac-tools-brief" className="text-xs">
+            Tools list
+          </Label>
+          <NativeSelect
+            id="ac-tools-brief"
+            value={toolsBriefMode}
+            onChange={(e) => onToolsBriefMode(e.target.value)}
+            size="sm"
+            className="w-full"
+          >
+            <NativeSelectOption value="">Full list (default)</NativeSelectOption>
+            <NativeSelectOption value="summary">
+              Summary — one line per connection
+            </NativeSelectOption>
+          </NativeSelect>
+          <p className="text-[10px] text-muted-foreground">
+            Summary folds each connection&apos;s generated tools to a single
+            line to shrink the brief.
+          </p>
+        </div>
       </div>
     </div>
   );
