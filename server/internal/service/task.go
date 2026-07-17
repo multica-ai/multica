@@ -2926,6 +2926,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	var (
 		wantRetry    bool
 		retryOverlay runtimeMCPOverlayData
+		retryFireAt  pgtype.Timestamptz
 	)
 	if retryableReasons[failureReason] {
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
@@ -2933,6 +2934,12 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				"task_id", util.UUIDToString(taskID), "error", perr)
 		} else if retryEligible(failureReason, parent) {
 			wantRetry = true
+			// Defer this attempt when the reason's schedule calls for a backoff
+			// (provider_network's final attempt waits ~5s); a zero delay leaves
+			// fire_at NULL so the child is created immediately-claimable.
+			if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
+				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
+			}
 			if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
 				// Best-effort: a missing overlay is not retry-fatal — the child
 				// simply runs without the Composio overlay.
@@ -2987,6 +2994,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		if wantRetry {
 			child, cerr := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 				ID:                   taskID,
+				FireAt:               retryFireAt,
 				RuntimeMcpOverlay:    retryOverlay.Overlay,
 				RuntimeConnectedApps: retryOverlay.ConnectedApps,
 			})
@@ -3029,7 +3037,9 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// The auto-retry child (if any) was created inside the transaction above so
 	// no newer chat task could jump ahead of it. Surface it now: broadcast
 	// queued first, then notify the daemon — see EnqueueTaskForIssue for the
-	// ordering rationale.
+	// ordering rationale. A deferred child (backoff armed via fire_at) is NOT
+	// queued yet: PromoteDueDeferredTasksForRuntime emits its queued event and
+	// daemon wakeup when fire_at arrives, so announcing it here would be wrong.
 	if retried != nil {
 		slog.Info("task auto-retry enqueued",
 			"parent_task_id", util.UUIDToString(task.ID),
@@ -3037,9 +3047,12 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			"reason", failureReason,
 			"attempt", retried.Attempt,
 			"max_attempts", retried.MaxAttempts,
+			"status", retried.Status,
 		)
-		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, *retried)
-		s.NotifyTaskEnqueued(ctx, *retried)
+		if retried.Status == "queued" {
+			s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, *retried)
+			s.NotifyTaskEnqueued(ctx, *retried)
+		}
 	}
 
 	// Skip the per-failure system comment when we'll immediately retry —
@@ -3110,6 +3123,40 @@ var retryableReasons = map[string]bool{
 	string(taskfailure.ReasonAgentProviderNetwork): true,
 }
 
+// Transient provider stream cuts (provider_network) get a bespoke three-tier
+// schedule (MUL-4910): first run + immediate retry + one retry deferred ~5s.
+// A blip that survives the immediate retry gets a short cooldown before the
+// final attempt instead of firing back-to-back. Every other retryable reason
+// keeps the task's generic max_attempts ceiling and retries immediately.
+const (
+	providerNetworkMaxAttempts    = 3
+	providerNetworkFinalRetryWait = 5 * time.Second
+)
+
+// retryAttemptCeiling reports how many attempts the auto-retry path allows for
+// a failure reason. It overrides the task's generic max_attempts only for
+// reasons with a bespoke schedule; everything else keeps the column's value
+// (default 2 = first run + one retry).
+func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
+	if reason == string(taskfailure.ReasonAgentProviderNetwork) {
+		return providerNetworkMaxAttempts
+	}
+	return taskMaxAttempts
+}
+
+// retryDelayForAttempt reports how long to defer the NEXT attempt after a
+// failure at failedAttempt. Only provider_network's final attempt is deferred
+// (~5s); every other retry — including provider_network's first — is immediate
+// (zero delay → the child is created 'queued', claimable at once). Callers pass
+// the returned delay to CreateRetryTask via fire_at.
+func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
+	if reason == string(taskfailure.ReasonAgentProviderNetwork) &&
+		failedAttempt >= providerNetworkMaxAttempts-1 {
+		return providerNetworkFinalRetryWait
+	}
+	return 0
+}
+
 func resumeUnsafeFailureReason(reason string) bool {
 	switch reason {
 	// Failures that poison the agent CONVERSATION (not the workdir): resuming
@@ -3153,7 +3200,7 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 // so both agree on which failures re-run.
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 	return retryableReasons[failureReason] &&
-		t.Attempt < t.MaxAttempts &&
+		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
 		(t.IssueID.Valid || t.ChatSessionID.Valid)
 }
@@ -3179,11 +3226,17 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	if !retryableReasons[reason] {
 		return nil, nil
 	}
-	if parent.Attempt >= parent.MaxAttempts {
+	// Use the reason-aware ceiling, not the raw max_attempts column, so an
+	// orphaned provider_network task recovered on its 2nd attempt is still
+	// allowed its deferred 3rd attempt (retryAttemptCeiling raises the ceiling
+	// to 3). Kept in sync with retryEligible below, which applies the same
+	// ceiling to the primary FailTask path.
+	if parent.Attempt >= retryAttemptCeiling(reason, parent.MaxAttempts) {
 		slog.Info("task auto-retry skipped: budget exhausted",
 			"task_id", util.UUIDToString(parent.ID),
 			"attempt", parent.Attempt,
 			"max_attempts", parent.MaxAttempts,
+			"ceiling", retryAttemptCeiling(reason, parent.MaxAttempts),
 		)
 		return nil, nil
 	}
@@ -3208,8 +3261,15 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	} else {
 		runtimeMCPOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
 	}
+	// Mirror FailTask's in-tx backoff: defer the final provider_network attempt
+	// ~5s via fire_at; a zero delay leaves fire_at NULL for an immediate child.
+	var retryFireAt pgtype.Timestamptz
+	if delay := retryDelayForAttempt(reason, parent.Attempt); delay > 0 {
+		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
+	}
 	child, err := s.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 		ID:                   parent.ID,
+		FireAt:               retryFireAt,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 	})
@@ -3227,13 +3287,16 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		"reason", reason,
 		"attempt", child.Attempt,
 		"max_attempts", child.MaxAttempts,
+		"status", child.Status,
 	)
-	// Retry creates a fresh queued row, same status transition (∅ → queued)
-	// as EnqueueTaskFor*. Broadcast queued first, then notify the daemon —
-	// see EnqueueTaskForIssue for ordering rationale.
-	//
-	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, child)
-	s.NotifyTaskEnqueued(ctx, child)
+	// A queued child transitions ∅ → queued (same as EnqueueTaskFor*): broadcast
+	// queued first, then notify the daemon — see EnqueueTaskForIssue for ordering
+	// rationale. A deferred child (backoff armed) stays inert until
+	// PromoteDueDeferredTasksForRuntime fires its queued event + wakeup.
+	if child.Status == "queued" {
+		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, child)
+		s.NotifyTaskEnqueued(ctx, child)
+	}
 	return &child, nil
 }
 

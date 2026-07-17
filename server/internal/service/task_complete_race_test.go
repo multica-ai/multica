@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -164,6 +165,68 @@ func TestFailTask_AlreadyFinalized(t *testing.T) {
 				t.Error("returned task ID doesn't match")
 			}
 		})
+	}
+}
+
+// TestProviderNetworkRetrySchedule locks in the three-tier schedule for a
+// transient provider stream cut (MUL-4910): first run + immediate retry + one
+// retry deferred ~5s, and only for provider_network — other retryable reasons
+// keep their generic max_attempts=2 (single, immediate retry).
+func TestProviderNetworkRetrySchedule(t *testing.T) {
+	const provNet = "agent_error.provider_network"
+
+	// Attempt ceiling: provider_network is raised to 3; others keep the column.
+	if got := retryAttemptCeiling(provNet, 2); got != providerNetworkMaxAttempts {
+		t.Errorf("ceiling(provider_network, 2) = %d, want %d", got, providerNetworkMaxAttempts)
+	}
+	if got := retryAttemptCeiling("timeout", 2); got != 2 {
+		t.Errorf("ceiling(timeout, 2) = %d, want 2", got)
+	}
+
+	// Backoff: only provider_network's final attempt (after the 2nd failure) is
+	// deferred; its first retry and every other reason are immediate.
+	delayCases := []struct {
+		reason        string
+		failedAttempt int32
+		want          time.Duration
+	}{
+		{provNet, 1, 0}, // first failure → immediate retry
+		{provNet, 2, providerNetworkFinalRetryWait}, // second failure → 5s-deferred retry
+		{"timeout", 2, 0}, // unrelated reason → never deferred
+	}
+	for _, tc := range delayCases {
+		if got := retryDelayForAttempt(tc.reason, tc.failedAttempt); got != tc.want {
+			t.Errorf("retryDelayForAttempt(%q, %d) = %s, want %s", tc.reason, tc.failedAttempt, got, tc.want)
+		}
+	}
+
+	// Eligibility across the whole chain. mkTask has an issue link and no
+	// autopilot run so only the reason/attempt/ceiling gate is exercised.
+	mkTask := func(attempt, max int32) db.AgentTaskQueue {
+		return db.AgentTaskQueue{
+			Attempt:     attempt,
+			MaxAttempts: max,
+			IssueID:     pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+		}
+	}
+	eligCases := []struct {
+		name    string
+		reason  string
+		attempt int32
+		max     int32
+		want    bool
+	}{
+		{"provider_network first run retries", provNet, 1, 2, true},
+		{"provider_network second run still retries (deferred tier)", provNet, 2, 2, true},
+		{"provider_network third run is the ceiling", provNet, 3, 2, false},
+		{"timeout keeps single immediate retry", "timeout", 1, 2, true},
+		{"timeout exhausts at attempt 2", "timeout", 2, 2, false},
+		{"non-retryable reason never retries", "agent_error.unknown", 1, 2, false},
+	}
+	for _, tc := range eligCases {
+		if got := retryEligible(tc.reason, mkTask(tc.attempt, tc.max)); got != tc.want {
+			t.Errorf("%s: retryEligible(%q, attempt=%d/max=%d) = %v, want %v", tc.name, tc.reason, tc.attempt, tc.max, got, tc.want)
+		}
 	}
 }
 
