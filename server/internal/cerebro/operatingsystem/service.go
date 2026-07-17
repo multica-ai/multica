@@ -20,6 +20,7 @@ import (
 
 var ErrProjectNotInWorkspace = errors.New("project not found in workspace")
 var ErrOwnerNotInWorkspace = errors.New("owner not found in workspace")
+var ErrElementDisabled = errors.New("operating system element is disabled")
 
 var validStrategyKinds = map[string]bool{
 	"core_value": true, "core_focus": true, "horizon_goal": true,
@@ -216,6 +217,40 @@ func ValidateStrategyInput(input StrategyItemInput) error {
 	}
 	if input.HorizonUnit != "" || input.HorizonCount != 0 {
 		return errors.New("only horizon goals accept a horizon")
+	}
+	return nil
+}
+
+func ValidateVisionPlanSectionInput(input VisionPlanSectionInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return errors.New("name is required")
+	}
+	if input.SectionType != "list" && input.SectionType != "structured" && input.SectionType != "process" {
+		return errors.New("section_type must be list, structured, or process")
+	}
+	return nil
+}
+
+func ValidateVisionPlanItemInput(input VisionPlanItemInput) error {
+	if _, err := util.ParseUUID(input.SectionID); err != nil {
+		return errors.New("section_id must be a UUID")
+	}
+	if strings.TrimSpace(input.Title) == "" {
+		return errors.New("title is required")
+	}
+	if input.State != "" && input.State != "active" && input.State != "archived" {
+		return errors.New("state must be active or archived")
+	}
+	if (input.OwnerType == "") != (input.OwnerID == "") {
+		return errors.New("owner_type and owner_id must be provided together")
+	}
+	if input.OwnerType != "" {
+		if input.OwnerType != "member" && input.OwnerType != "agent" {
+			return errors.New("owner_type must be member or agent")
+		}
+		if _, err := util.ParseUUID(input.OwnerID); err != nil {
+			return errors.New("owner_id must be a UUID")
+		}
 	}
 	return nil
 }
@@ -418,6 +453,176 @@ func (s *Service) UpdateStrategyItem(ctx context.Context, workspaceID, id pgtype
 func (s *Service) DeleteStrategyItem(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
 	count, err := s.queries.DeleteStrategyItem(ctx, cerebrodb.DeleteStrategyItemParams{ID: id, WorkspaceID: workspaceID})
 	return count > 0, err
+}
+
+func (s *Service) ensureVisionPlanEnabled(ctx context.Context, workspaceID pgtype.UUID) error {
+	elements, err := s.ListElements(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, element := range elements {
+		if element.Key == "vision_plan" && element.Enabled {
+			return nil
+		}
+	}
+	return ErrElementDisabled
+}
+
+func (s *Service) ListVisionPlan(ctx context.Context, workspaceID pgtype.UUID) (VisionPlanResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.EnsureDefaultVisionPlanSections(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.EnsureLegacyVisionPlanSections(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.AssignLegacyVisionPlanItems(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	sectionRows, err := s.queries.ListVisionPlanSections(ctx, workspaceID)
+	if err != nil {
+		return VisionPlanResponse{}, err
+	}
+	itemRows, err := s.queries.ListVisionPlanItems(ctx, workspaceID)
+	if err != nil {
+		return VisionPlanResponse{}, err
+	}
+	connectionRows, err := s.queries.ListVisionPlanGoalConnections(ctx, workspaceID)
+	if err != nil {
+		return VisionPlanResponse{}, err
+	}
+
+	connections := make(map[string][]VisionPlanGoalConnection)
+	for _, row := range connectionRows {
+		itemID := util.UUIDToString(row.StrategyItemID)
+		connections[itemID] = append(connections[itemID], VisionPlanGoalConnection{
+			ConnectionID: util.UUIDToString(row.ID), GoalID: util.UUIDToString(row.GoalID),
+		})
+	}
+	items := make(map[string][]VisionPlanItemResponse)
+	for _, row := range itemRows {
+		response := visionPlanItemResponse(
+			row.ID, row.WorkspaceID, row.SectionID, row.Title, row.Description, row.PartLabel,
+			row.OwnerType, row.OwnerID, row.OwnerName, row.Position, row.State,
+			row.CreatedAt, row.UpdatedAt,
+		)
+		response.GoalConnections = connections[response.ID]
+		if response.GoalConnections == nil {
+			response.GoalConnections = []VisionPlanGoalConnection{}
+		}
+		items[response.SectionID] = append(items[response.SectionID], response)
+	}
+	sections := make([]VisionPlanSectionResponse, 0, len(sectionRows))
+	for _, row := range sectionRows {
+		section := visionPlanSectionResponse(row)
+		section.Items = items[section.ID]
+		if section.Items == nil {
+			section.Items = []VisionPlanItemResponse{}
+		}
+		sections = append(sections, section)
+	}
+	return VisionPlanResponse{Sections: sections}, nil
+}
+
+func (s *Service) CreateVisionPlanSection(ctx context.Context, workspaceID pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
+	if err := ValidateVisionPlanSectionInput(input); err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
+	row, err := s.queries.CreateVisionPlanSection(ctx, cerebrodb.CreateVisionPlanSectionParams{
+		WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType, Position: input.Position,
+	})
+	if err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
+	return visionPlanSectionResponse(row), nil
+}
+
+func (s *Service) UpdateVisionPlanSection(ctx context.Context, workspaceID, id pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
+	if err := ValidateVisionPlanSectionInput(input); err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
+	row, err := s.queries.UpdateVisionPlanSection(ctx, cerebrodb.UpdateVisionPlanSectionParams{
+		ID: id, WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType, Position: input.Position,
+	})
+	if err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
+	return visionPlanSectionResponse(row), nil
+}
+
+func (s *Service) DeleteVisionPlanSection(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return false, err
+	}
+	count, err := s.queries.DeleteVisionPlanSection(ctx, cerebrodb.DeleteVisionPlanSectionParams{ID: id, WorkspaceID: workspaceID})
+	return count > 0, err
+}
+
+func (s *Service) CreateVisionPlanItem(ctx context.Context, workspaceID pgtype.UUID, input VisionPlanItemInput) (VisionPlanItemResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanItemResponse{}, err
+	}
+	if err := ValidateVisionPlanItemInput(input); err != nil {
+		return VisionPlanItemResponse{}, err
+	}
+	sectionID, _ := util.ParseUUID(input.SectionID)
+	ownerID := pgtype.UUID{}
+	if input.OwnerID != "" {
+		ownerID, _ = util.ParseUUID(input.OwnerID)
+		if err := EnsureOwnerInWorkspace(ctx, s.projects, input.OwnerType, ownerID, workspaceID); err != nil {
+			return VisionPlanItemResponse{}, err
+		}
+	}
+	row, err := s.queries.CreateVisionPlanItem(ctx, cerebrodb.CreateVisionPlanItemParams{
+		ID: sectionID, WorkspaceID: workspaceID, Title: strings.TrimSpace(input.Title),
+		Description: strings.TrimSpace(input.Description), Position: input.Position, State: defaultState(input.State),
+		PartLabel: strings.TrimSpace(input.PartLabel), OwnerType: text(input.OwnerType), OwnerID: ownerID,
+	})
+	if err != nil {
+		return VisionPlanItemResponse{}, err
+	}
+	return visionPlanItemResponse(row.ID, row.WorkspaceID, row.SectionID, row.Title, row.Description, row.PartLabel, row.OwnerType, row.OwnerID, "", row.Position, row.State, row.CreatedAt, row.UpdatedAt), nil
+}
+
+func (s *Service) UpdateVisionPlanItem(ctx context.Context, workspaceID, id pgtype.UUID, input VisionPlanItemInput) (VisionPlanItemResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanItemResponse{}, err
+	}
+	if err := ValidateVisionPlanItemInput(input); err != nil {
+		return VisionPlanItemResponse{}, err
+	}
+	sectionID, _ := util.ParseUUID(input.SectionID)
+	ownerID := pgtype.UUID{}
+	if input.OwnerID != "" {
+		ownerID, _ = util.ParseUUID(input.OwnerID)
+		if err := EnsureOwnerInWorkspace(ctx, s.projects, input.OwnerType, ownerID, workspaceID); err != nil {
+			return VisionPlanItemResponse{}, err
+		}
+	}
+	row, err := s.queries.UpdateVisionPlanItem(ctx, cerebrodb.UpdateVisionPlanItemParams{
+		ID: id, WorkspaceID: workspaceID, SectionID: sectionID, Title: strings.TrimSpace(input.Title),
+		Description: strings.TrimSpace(input.Description), Position: input.Position, State: defaultState(input.State),
+		PartLabel: strings.TrimSpace(input.PartLabel), OwnerType: text(input.OwnerType), OwnerID: ownerID,
+	})
+	if err != nil {
+		return VisionPlanItemResponse{}, err
+	}
+	return visionPlanItemResponse(row.ID, row.WorkspaceID, row.SectionID, row.Title, row.Description, row.PartLabel, row.OwnerType, row.OwnerID, "", row.Position, row.State, row.CreatedAt, row.UpdatedAt), nil
+}
+
+func (s *Service) DeleteVisionPlanItem(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return false, err
+	}
+	return s.DeleteStrategyItem(ctx, workspaceID, id)
 }
 
 func (s *Service) UpsertRock(ctx context.Context, workspaceID pgtype.UUID, input RockInput) error {
@@ -703,6 +908,14 @@ func (s *Service) CreateConnection(ctx context.Context, workspaceID pgtype.UUID,
 	if err != nil {
 		return ObjectConnectionResponse{}, err
 	}
+	if input.SourceType == "strategy_item" && input.TargetType == "rock" {
+		if _, err := s.queries.GetStrategyItem(ctx, cerebrodb.GetStrategyItemParams{ID: params.SourceID, WorkspaceID: workspaceID}); err != nil {
+			return ObjectConnectionResponse{}, err
+		}
+		if _, err := s.queries.GetRock(ctx, cerebrodb.GetRockParams{ID: params.TargetID, WorkspaceID: workspaceID}); err != nil {
+			return ObjectConnectionResponse{}, err
+		}
+	}
 	row, err := s.queries.CreateObjectConnection(ctx, params)
 	if IsDuplicateConnection(err) {
 		return ObjectConnectionResponse{}, fmt.Errorf("duplicate connection: %w", err)
@@ -898,6 +1111,24 @@ func strategyResponse(id, workspaceID pgtype.UUID, kind, title, description stri
 		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID), Kind: kind,
 		Title: title, Description: description, HorizonUnit: horizonUnit.String,
 		HorizonCount: horizonCount.Int32, HorizonLabel: horizonLabel.String, Position: position, State: state,
+		CreatedAt: timestamp(createdAt), UpdatedAt: timestamp(updatedAt),
+	}
+}
+
+func visionPlanSectionResponse(row cerebrodb.CerebroVisionPlanSection) VisionPlanSectionResponse {
+	return VisionPlanSectionResponse{
+		ID: util.UUIDToString(row.ID), WorkspaceID: util.UUIDToString(row.WorkspaceID),
+		Key: row.Key, Name: row.Name, SectionType: row.SectionType, Position: row.Position,
+		Items: []VisionPlanItemResponse{}, CreatedAt: timestamp(row.CreatedAt), UpdatedAt: timestamp(row.UpdatedAt),
+	}
+}
+
+func visionPlanItemResponse(id, workspaceID, sectionID pgtype.UUID, title, description, partLabel string, ownerType pgtype.Text, ownerID pgtype.UUID, ownerName string, position int32, state string, createdAt, updatedAt pgtype.Timestamptz) VisionPlanItemResponse {
+	return VisionPlanItemResponse{
+		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID), SectionID: util.UUIDToString(sectionID),
+		Title: title, Description: description, PartLabel: partLabel,
+		OwnerType: ownerType.String, OwnerID: util.UUIDToString(ownerID), OwnerName: ownerName,
+		Position: position, State: state, GoalConnections: []VisionPlanGoalConnection{},
 		CreatedAt: timestamp(createdAt), UpdatedAt: timestamp(updatedAt),
 	}
 }

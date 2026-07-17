@@ -38,6 +38,46 @@ func TestValidateStrategyInput(t *testing.T) {
 	}
 }
 
+func TestValidateVisionPlanSectionInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   VisionPlanSectionInput
+		wantErr bool
+	}{
+		{name: "list", input: VisionPlanSectionInput{Name: "Core Values", SectionType: "list"}},
+		{name: "structured", input: VisionPlanSectionInput{Name: "Marketing Strategy", SectionType: "structured"}},
+		{name: "process", input: VisionPlanSectionInput{Name: "Core Processes", SectionType: "process"}},
+		{name: "missing name", input: VisionPlanSectionInput{SectionType: "list"}, wantErr: true},
+		{name: "invalid type", input: VisionPlanSectionInput{Name: "Custom", SectionType: "cards"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateVisionPlanSectionInput(tt.input); (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateVisionPlanSectionInput(%#v) error = %v", tt.input, err)
+			}
+		})
+	}
+}
+
+func TestValidateVisionPlanItemInput(t *testing.T) {
+	valid := VisionPlanItemInput{SectionID: testWorkspaceID, Title: "Serve a clear niche"}
+	if err := ValidateVisionPlanItemInput(valid); err != nil {
+		t.Fatalf("valid item rejected: %v", err)
+	}
+
+	tests := []VisionPlanItemInput{
+		{SectionID: "bad", Title: valid.Title},
+		{SectionID: valid.SectionID},
+		{SectionID: valid.SectionID, Title: valid.Title, OwnerType: "member"},
+		{SectionID: valid.SectionID, Title: valid.Title, OwnerType: "team", OwnerID: testMemberID},
+	}
+	for _, input := range tests {
+		if err := ValidateVisionPlanItemInput(input); err == nil {
+			t.Fatalf("invalid item accepted: %#v", input)
+		}
+	}
+}
+
 func TestValidateRockInput(t *testing.T) {
 	valid := RockInput{
 		Title:          "Cut fulfilment cost 12%",

@@ -13,6 +13,8 @@ import {
   rocksListSchema,
   strategyListSchema,
   strategyHistoryListSchema,
+  visionPlanSchema,
+  EMPTY_VISION_PLAN,
 } from "./api-schemas";
 
 describe("operating system API schemas", () => {
@@ -99,5 +101,19 @@ describe("operating system API schemas", () => {
     expect(objectConnectionListSchema.safeParse({ connections: null }).success).toBe(false);
     expect(objectConnectionListSchema.safeParse({ connections: [{ target_id: 4 }] }).success).toBe(false);
     expect(EMPTY_CONNECTIONS).toEqual({ connections: [] });
+  });
+
+  it("parses Vision Plan sections, structured parts, owners and Goal connections", () => {
+    const parsed = visionPlanSchema.parse({ sections: [{
+      id: "s1", workspace_id: "w1", key: "marketing-strategy", name: "Marketing Strategy",
+      section_type: "structured", position: 3, created_at: "", updated_at: "", items: [{
+        id: "i1", workspace_id: "w1", section_id: "s1", title: "Nordic operators", description: "",
+        part_label: "Target market", owner_type: "agent", owner_id: "a1", owner_name: "Lone",
+        position: 0, state: "active", goal_connections: [{ connection_id: "c1", goal_id: "g1" }], created_at: "", updated_at: "",
+      }],
+    }] });
+    expect(parsed.sections[0]?.items[0]).toMatchObject({ part_label: "Target market", owner_name: "Lone", goal_connections: [{ goal_id: "g1" }] });
+    expect(visionPlanSchema.safeParse({ sections: null }).success).toBe(false);
+    expect(EMPTY_VISION_PLAN).toEqual({ sections: [] });
   });
 });

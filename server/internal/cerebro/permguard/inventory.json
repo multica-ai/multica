@@ -345,6 +345,14 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/cerebro/vision-plan/items/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/cerebro/vision-plan/sections/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/terminal/sessions/{sessionId}",
       "gate": "workspace_member"
     },
@@ -862,6 +870,14 @@
     },
     {
       "id": "POST /api/cerebro/strategy-items/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/vision-plan/items",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/vision-plan/sections",
       "gate": "workspace_member"
     },
     {
@@ -1778,6 +1794,14 @@
     },
     {
       "id": "PUT /api/cerebro/strategy-items/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/vision-plan/items/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/vision-plan/sections/{id}",
       "gate": "workspace_member"
     },
     {

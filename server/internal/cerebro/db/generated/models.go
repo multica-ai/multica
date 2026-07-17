@@ -1709,6 +1709,10 @@ type CerebroStrategyItem struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	HorizonLabel pgtype.Text        `json:"horizon_label"`
+	SectionID    pgtype.UUID        `json:"section_id"`
+	PartLabel    string             `json:"part_label"`
+	OwnerType    pgtype.Text        `json:"owner_type"`
+	OwnerID      pgtype.UUID        `json:"owner_id"`
 }
 
 type CerebroStrategyItemHistory struct {
@@ -1808,6 +1812,17 @@ type CerebroUserInfisicalIdentity struct {
 	ScopedPathsHash        string             `json:"scoped_paths_hash"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroVisionPlanSection struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Key         string             `json:"key"`
+	Name        string             `json:"name"`
+	SectionType string             `json:"section_type"`
+	Position    int32              `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroWebFetchPolicy struct {

@@ -23,6 +23,13 @@ type handlerService interface {
 	ListStrategyHistory(context.Context, pgtype.UUID) ([]StrategyHistoryResponse, error)
 	UpdateStrategyItem(context.Context, pgtype.UUID, pgtype.UUID, StrategyItemInput) (StrategyItemResponse, error)
 	DeleteStrategyItem(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
+	ListVisionPlan(context.Context, pgtype.UUID) (VisionPlanResponse, error)
+	CreateVisionPlanSection(context.Context, pgtype.UUID, VisionPlanSectionInput) (VisionPlanSectionResponse, error)
+	UpdateVisionPlanSection(context.Context, pgtype.UUID, pgtype.UUID, VisionPlanSectionInput) (VisionPlanSectionResponse, error)
+	DeleteVisionPlanSection(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
+	CreateVisionPlanItem(context.Context, pgtype.UUID, VisionPlanItemInput) (VisionPlanItemResponse, error)
+	UpdateVisionPlanItem(context.Context, pgtype.UUID, pgtype.UUID, VisionPlanItemInput) (VisionPlanItemResponse, error)
+	DeleteVisionPlanItem(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
 	ListPeriods(context.Context, pgtype.UUID) ([]OperatingPeriodResponse, error)
 	CreatePeriod(context.Context, pgtype.UUID, OperatingPeriodInput) (OperatingPeriodResponse, error)
 	UpdatePeriod(context.Context, pgtype.UUID, pgtype.UUID, OperatingPeriodInput) (OperatingPeriodResponse, error)
@@ -70,6 +77,15 @@ func (h *Handler) MountRoutes(r chi.Router) {
 		r.Delete("/{id}", h.DeleteStrategyItem)
 	})
 	r.Get("/api/cerebro/strategy-history", h.ListStrategyHistory)
+	r.Route("/api/cerebro/vision-plan", func(r chi.Router) {
+		r.Get("/", h.ListVisionPlan)
+		r.Post("/sections", h.CreateVisionPlanSection)
+		r.Put("/sections/{id}", h.UpdateVisionPlanSection)
+		r.Delete("/sections/{id}", h.DeleteVisionPlanSection)
+		r.Post("/items", h.CreateVisionPlanItem)
+		r.Put("/items/{id}", h.UpdateVisionPlanItem)
+		r.Delete("/items/{id}", h.DeleteVisionPlanItem)
+	})
 	r.Route("/api/cerebro/rocks", func(r chi.Router) {
 		r.Get("/", h.ListRocks)
 		r.Post("/", h.UpsertRock)
@@ -172,6 +188,101 @@ func (h *Handler) DeleteStrategyItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	deleted, err := h.service.DeleteStrategyItem(r.Context(), ws, id)
+	writeDelete(w, deleted, err)
+}
+
+func (h *Handler) ListVisionPlan(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	out, err := h.service.ListVisionPlan(r.Context(), ws)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) CreateVisionPlanSection(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	var input VisionPlanSectionInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.CreateVisionPlanSection(r.Context(), ws, input)
+	writeResult(w, http.StatusCreated, out, err)
+}
+
+func (h *Handler) UpdateVisionPlanSection(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var input VisionPlanSectionInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.UpdateVisionPlanSection(r.Context(), ws, id, input)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) DeleteVisionPlanSection(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	deleted, err := h.service.DeleteVisionPlanSection(r.Context(), ws, id)
+	writeDelete(w, deleted, err)
+}
+
+func (h *Handler) CreateVisionPlanItem(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	var input VisionPlanItemInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.CreateVisionPlanItem(r.Context(), ws, input)
+	writeResult(w, http.StatusCreated, out, err)
+}
+
+func (h *Handler) UpdateVisionPlanItem(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var input VisionPlanItemInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.UpdateVisionPlanItem(r.Context(), ws, id, input)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) DeleteVisionPlanItem(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	deleted, err := h.service.DeleteVisionPlanItem(r.Context(), ws, id)
 	writeDelete(w, deleted, err)
 }
 
@@ -487,7 +598,7 @@ func writeDelete(w http.ResponseWriter, deleted bool, err error) {
 
 func writeServiceError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, ErrProjectNotInWorkspace), errors.Is(err, pgx.ErrNoRows):
+	case errors.Is(err, ErrProjectNotInWorkspace), errors.Is(err, ErrElementDisabled), errors.Is(err, pgx.ErrNoRows):
 		writeError(w, http.StatusNotFound, err.Error())
 	case strings.Contains(err.Error(), "duplicate connection"):
 		writeError(w, http.StatusConflict, "connection already exists")
