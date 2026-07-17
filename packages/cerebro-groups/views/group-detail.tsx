@@ -754,9 +754,6 @@ function AgentsSection({
   const { data: rows = [] } = useQuery(groupAgentsOptions(wsId, groupId));
   const { data: allAgents = [] } = useQuery(agentListOptions(wsId));
   const { data: allRuntimes = [] } = useQuery(runtimeListOptions(wsId));
-  const { data: capabilityRows = [] } = useQuery(
-    groupCapabilitiesOptions(wsId, groupId),
-  );
   const { data: runtimeRows = [] } = useQuery(
     groupRuntimesOptions(wsId, groupId),
   );
@@ -788,10 +785,6 @@ function AgentsSection({
     for (const rt of allRuntimes) m.set(rt.id, rt);
     return m;
   }, [allRuntimes]);
-  const hasCreateAgent = useMemo(
-    () => capabilityRows.some((r) => r.capability === "create_agent"),
-    [capabilityRows],
-  );
   const allowedAgents = useMemo(
     () => liveAgents.filter((a) => allowed.has(a.id)),
     [liveAgents, allowed],
@@ -800,7 +793,6 @@ function AgentsSection({
     () =>
       liveAgents
         .filter((a) => !allowed.has(a.id))
-        .filter((a) => hasCreateAgent || a.visibility !== "private")
         .filter((a) => {
           if (pickerSearch === "") return true;
           const q = pickerSearch.toLowerCase();
@@ -809,7 +801,7 @@ function AgentsSection({
             (a.description ?? "").toLowerCase().includes(q)
           );
         }),
-    [liveAgents, allowed, hasCreateAgent, pickerSearch],
+    [liveAgents, allowed, pickerSearch],
   );
 
   const handleAddAgent = async (agentId: string) => {
