@@ -181,6 +181,9 @@ function IssueSurfaceContent({
             scopedIssues={controller.surfaceIssues}
             allowGantt={controller.allowGantt}
             isRefreshing={controller.isRefreshing}
+            facetCountsExact={
+              !(controller.viewMode === "table" && controller.hasNextFlatPage)
+            }
           />
         )}
         {controller.isLoading ? (

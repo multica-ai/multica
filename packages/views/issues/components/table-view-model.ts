@@ -34,6 +34,17 @@ export interface BuildIssueTableRowsOptions {
   collapsedGroups: ReadonlySet<string>;
   collapsedParents: ReadonlySet<string>;
   hierarchy: boolean;
+  /**
+   * Whether `issues` is the FULL window (no unfetched pages). Hierarchy
+   * nesting and parent-based group assignment only apply to a complete
+   * window: deriving structure from loaded pages re-parents rows as later
+   * pages arrive — a child renders as root, then jumps under its parent /
+   * into another group mid-scroll (round-2 review P2#3). While incomplete,
+   * rows stay in flat sort order and group by their own fields, which is
+   * stable under pagination; the tree assembles once, when the data is all
+   * there.
+   */
+  windowComplete: boolean;
   getActorName: (type: string, id: string) => string;
   getStatusLabel: (status: Issue["status"]) => string;
   noValueLabel: string;
@@ -195,17 +206,20 @@ export function buildIssueTableRows(
   issues: Issue[],
   options: BuildIssueTableRowsOptions,
 ): IssueTableDisplayRow[] {
+  // See BuildIssueTableRowsOptions.windowComplete — parent-derived structure
+  // is only trustworthy (and stable) once every page is loaded.
+  const applyHierarchy = options.hierarchy && options.windowComplete;
   if (options.grouping === "none") {
     return hierarchyRows(
       issues,
       options.collapsedParents,
-      options.hierarchy,
+      applyHierarchy,
     );
   }
 
   const issueById = new Map(issues.map((issue) => [issue.id, issue]));
   const groupSource = (issue: Issue) => {
-    if (!options.hierarchy) return issue;
+    if (!applyHierarchy) return issue;
     let current = issue;
     const seen = new Set<string>();
     while (current.parent_issue_id && !seen.has(current.id)) {
@@ -253,7 +267,7 @@ export function buildIssueTableRows(
         ...hierarchyRows(
           group.issues,
           options.collapsedParents,
-          options.hierarchy,
+          applyHierarchy,
         ),
       );
     }

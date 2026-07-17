@@ -152,4 +152,102 @@ func TestListIssues_TableFacetsAreServerSide(t *testing.T) {
 		"&statuses=todo&priorities=high&include_no_assignee=true&label_ids="+labelA+"&top_level_only=true",
 		issueA,
 	)
+
+	// The ids facet restricts the window to an explicit id set (the table's
+	// agents-working filter). It must compose with other facets, and a
+	// PRESENT-but-EMPTY list must yield an empty window — the "nothing is
+	// running" state — not fall back to the unrestricted one.
+	assertList("&ids="+issueA+","+issueC, issueA, issueC)
+	assertList("&ids="+issueA+","+issueC+"&statuses=done", issueC)
+	assertList("&ids=")
+}
+
+// Offset pages are only stable when the full ORDER BY is deterministic. All
+// rows here share status, priority, AND created_at, so ordering falls
+// entirely to the unique id tie-break — without it the database may reorder
+// ties between two LIMIT/OFFSET requests, duplicating or dropping rows at
+// page boundaries.
+func TestListIssues_OffsetPaginationStableOnCreatedAtTies(t *testing.T) {
+	ctx := context.Background()
+	token := fmt.Sprintf("tie-page-%d", time.Now().UnixNano())
+	metadata := fmt.Sprintf(`{"tie_page_test":%q}`, token)
+
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE metadata @> $1::jsonb`, metadata)
+	})
+
+	nextNumber := func() int {
+		var number int
+		if err := testPool.QueryRow(ctx, `
+			UPDATE workspace
+			SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+			WHERE id = $1 RETURNING issue_counter
+		`, testWorkspaceID).Scan(&number); err != nil {
+			t.Fatalf("next issue number: %v", err)
+		}
+		return number
+	}
+
+	const totalIssues = 5
+	want := make(map[string]bool, totalIssues)
+	for i := 0; i < totalIssues; i++ {
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (
+				workspace_id, title, status, priority, creator_type, creator_id,
+				position, number, metadata, created_at, updated_at
+			) VALUES ($1, $2, 'todo', 'none', 'member', $3, 0, $4, $5::jsonb,
+				'2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+			RETURNING id
+		`, testWorkspaceID, fmt.Sprintf("%s %d", token, i), testUserID,
+			nextNumber(), metadata).Scan(&id); err != nil {
+			t.Fatalf("create issue %d: %v", i, err)
+		}
+		want[id] = true
+	}
+
+	page := func(offset int) []string {
+		t.Helper()
+		path := fmt.Sprintf(
+			"/api/issues?workspace_id=%s&metadata=%s&sort=status&direction=asc&limit=2&offset=%d",
+			testWorkspaceID, url.QueryEscape(metadata), offset,
+		)
+		w := httptest.NewRecorder()
+		testHandler.ListIssues(w, newRequest("GET", path, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("ListIssues offset=%d: expected 200, got %d: %s", offset, w.Code, w.Body.String())
+		}
+		var response struct {
+			Issues []IssueResponse `json:"issues"`
+			Total  int64           `json:"total"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if response.Total != totalIssues {
+			t.Fatalf("offset=%d total = %d, want %d", offset, response.Total, totalIssues)
+		}
+		ids := make([]string, 0, len(response.Issues))
+		for _, issue := range response.Issues {
+			ids = append(ids, issue.ID)
+		}
+		return ids
+	}
+
+	seen := make(map[string]int, totalIssues)
+	var walked []string
+	for offset := 0; offset < totalIssues; offset += 2 {
+		for _, id := range page(offset) {
+			seen[id]++
+			walked = append(walked, id)
+		}
+	}
+	if len(walked) != totalIssues {
+		t.Fatalf("walked %d rows across pages, want %d (%v)", len(walked), totalIssues, walked)
+	}
+	for id := range want {
+		if seen[id] != 1 {
+			t.Fatalf("issue %s appeared %d times across pages, want exactly once", id, seen[id])
+		}
+	}
 }

@@ -30,7 +30,7 @@ import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { IssueFilters } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
 import type { IssueSurfaceMode } from "./types";
-import type { IssueSurfaceActivity } from "./activity";
+import { useIssueSurfaceActivity, type IssueSurfaceActivity } from "./activity";
 import type { IssueSurfaceActions } from "./actions-context";
 import {
   type IssueSurfaceSelection,
@@ -242,11 +242,6 @@ export function useIssueSurfaceController({
     };
   }, [dateParams, effectivePropertyFilters, propertySortId, rawPropertySortId, sortBy, sortDirection]);
 
-  const selection = useCreateIssueSurfaceSelection(
-    scopeKey,
-    `${scopeKey}:${effectiveViewMode}`,
-  );
-
   const usesAssigneeBoard =
     effectiveViewMode === "board" && grouping === "assignee";
   const usesGantt = effectiveViewMode === "gantt" && !!projectId;
@@ -261,6 +256,20 @@ export function useIssueSurfaceController({
   );
   const { projectFilters: viewProjectFilters, includeNoProject: viewIncludeNoProject } =
     projectFilterState;
+
+  // The agents-working filter is a live client-side signal (WS-driven task
+  // snapshot), but the table window is server-paginated — filtering loaded
+  // pages would permanently hide matches on unfetched pages (round-2 review
+  // P1#1). Send the running set as a server `ids` facet instead: total,
+  // pagination, and export all see the same window, and snapshot changes
+  // re-key the query. An EMPTY set is sent as an empty facet (empty window),
+  // never dropped.
+  const activity = useIssueSurfaceActivity();
+  const runningIdsFacet = useMemo(
+    () =>
+      agentRunningFilter ? [...activity.runningIssueIds].sort() : undefined,
+    [activity.runningIssueIds, agentRunningFilter],
+  );
 
   const tableFacets = useMemo<IssueFlatFilter>(
     () => ({
@@ -280,6 +289,7 @@ export function useIssueSurfaceController({
       ...(viewIncludeNoProject ? { include_no_project: true } : {}),
       ...(labelFilters.length > 0 ? { label_ids: labelFilters } : {}),
       ...(showSubIssues === false ? { top_level_only: true } : {}),
+      ...(runningIdsFacet ? { ids: runningIdsFacet } : {}),
     }),
     [
       assigneeFilters,
@@ -288,11 +298,58 @@ export function useIssueSurfaceController({
       includeNoAssignee,
       labelFilters,
       priorityFilters,
+      runningIdsFacet,
       showSubIssues,
       statusFilters,
       viewIncludeNoProject,
       viewProjectFilters,
     ],
+  );
+
+  // Selection is only meaningful within the current membership window: batch
+  // actions act on selected ids while export/common-field consumers intersect
+  // with visible rows, so a selection that survives a membership change lets
+  // "1 selected" mean different sets to different consumers (round-2 review
+  // P1#2). Reset whenever any membership-affecting input changes. Sort is
+  // excluded on purpose — reordering does not change membership. The live
+  // running set is also excluded: while the agents-working filter is on, a
+  // task finishing should not wipe the user's selection mid-action.
+  const membershipKey = useMemo(
+    () =>
+      JSON.stringify([
+        statusFilters,
+        priorityFilters,
+        assigneeFilters,
+        includeNoAssignee,
+        creatorFilters,
+        viewProjectFilters,
+        viewIncludeNoProject,
+        labelFilters,
+        effectivePropertyFilters,
+        agentRunningFilter,
+        showSubIssues,
+        dateParams,
+        debouncedTableSearch,
+      ]),
+    [
+      agentRunningFilter,
+      assigneeFilters,
+      creatorFilters,
+      dateParams,
+      debouncedTableSearch,
+      effectivePropertyFilters,
+      includeNoAssignee,
+      labelFilters,
+      priorityFilters,
+      showSubIssues,
+      statusFilters,
+      viewIncludeNoProject,
+      viewProjectFilters,
+    ],
+  );
+  const selection = useCreateIssueSurfaceSelection(
+    scopeKey,
+    `${scopeKey}:${effectiveViewMode}:${membershipKey}`,
   );
 
   const data = useIssueSurfaceData({
@@ -304,6 +361,7 @@ export function useIssueSurfaceController({
     usesTable,
     sort,
     tableFacets,
+    activity,
     statusFilters,
     priorityFilters,
     assigneeFilters,

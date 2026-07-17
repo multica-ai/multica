@@ -140,6 +140,10 @@ const DATE_FIELD_LABEL_KEY: Record<IssueDateField, "date_field_created" | "date_
   updated_at: "date_field_updated",
 };
 
+/** Feeding this to useIssueCounts hides every per-option badge (badges only
+ *  render at count > 0) without touching the option lists themselves. */
+const NO_COUNT_ISSUES: Issue[] = [];
+
 function useIssueCounts(allIssues: Issue[]) {
   return useMemo(() => {
     const status = new Map<string, number>();
@@ -750,12 +754,15 @@ export function IssuesHeader({
   dateFilter = null,
   onDateFilterChange,
   isRefreshing = false,
+  facetCountsExact = true,
 }: {
   scopedIssues: Issue[];
   allowGantt?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
   isRefreshing?: boolean;
+  /** See IssueDisplayControls.facetCountsExact. */
+  facetCountsExact?: boolean;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -857,6 +864,7 @@ export function IssuesHeader({
             allowGantt={allowGantt}
             dateFilter={dateFilter}
             onDateFilterChange={onDateFilterChange}
+            facetCountsExact={facetCountsExact}
           />
           <ViewRefreshIndicator active={isRefreshing} />
         </div>
@@ -871,6 +879,7 @@ export function IssueDisplayControls({
   allowGantt = false,
   dateFilter = null,
   onDateFilterChange,
+  facetCountsExact = true,
 }: {
   scopedIssues: Issue[];
   hideViewToggle?: boolean;
@@ -880,6 +889,15 @@ export function IssueDisplayControls({
   // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
   // fall back to List if the option were exposed there. Keep Gantt opt-in.
   allowGantt?: boolean;
+  /**
+   * Whether `scopedIssues` covers the surface's full window. The table's
+   * offset pagination hands us only the loaded pages — presenting counts
+   * derived from a partial window as per-option totals under-reports
+   * (round-2 review P2#3), so the badges are suppressed until the window is
+   * complete. Filter OPTIONS are unaffected; they come from the
+   * member/agent/project/label directories.
+   */
+  facetCountsExact?: boolean;
 }) {
   const { t } = useT("issues");
   const viewMode = useViewStore((s) => s.viewMode);
@@ -938,7 +956,9 @@ export function IssueDisplayControls({
     [tableColumns],
   );
 
-  const counts = useIssueCounts(scopedIssues);
+  const counts = useIssueCounts(
+    facetCountsExact ? scopedIssues : NO_COUNT_ISSUES,
+  );
   const showDateFilter = !!onDateFilterChange;
 
   // Only count filters whose definition is still active — a filter pinned to

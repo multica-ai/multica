@@ -31,10 +31,7 @@ import {
   type IssueFilters,
 } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
-import {
-  useIssueSurfaceActivity,
-  type IssueSurfaceActivity,
-} from "./activity";
+import type { IssueSurfaceActivity } from "./activity";
 
 const EMPTY_ISSUES: Issue[] = [];
 const EMPTY_CHILD_PROGRESS = new Map<string, ChildProgress>();
@@ -89,6 +86,7 @@ export function useIssueSurfaceData({
   usesTable,
   sort,
   tableFacets,
+  activity,
   statusFilters,
   priorityFilters,
   assigneeFilters,
@@ -110,6 +108,9 @@ export function useIssueSurfaceData({
   usesTable: boolean;
   sort: IssueSortParam;
   tableFacets: IssueFlatFilter;
+  /** Owned by the controller so the agents-working facet and the client
+   *  display filters read the same task snapshot. */
+  activity: IssueSurfaceActivity;
   statusFilters: IssueStatus[];
   priorityFilters: IssueFilterState["priorityFilters"];
   assigneeFilters: IssueFilterState["assigneeFilters"];
@@ -123,7 +124,6 @@ export function useIssueSurfaceData({
   showSubIssues: boolean;
   loadProjects: boolean;
 }): IssueSurfaceData {
-  const activity = useIssueSurfaceActivity();
   const filterContext = useMemo(
     () => ({ activityByIssueId: activity.activityByIssueId }),
     [activity.activityByIssueId],

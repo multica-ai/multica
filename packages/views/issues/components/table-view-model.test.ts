@@ -61,6 +61,7 @@ const baseOptions = {
   collapsedGroups: new Set<string>(),
   collapsedParents: new Set<string>(),
   hierarchy: true,
+  windowComplete: true,
   getActorName: (_type: string, id: string) => id,
   getStatusLabel: (status: Issue["status"]) => status,
   noValueLabel: "No value",
@@ -89,6 +90,43 @@ describe("buildIssueTableRows", () => {
       collapsedParents: new Set([parent.id]),
     });
     expect(collapsed.map((row) => row.key)).toEqual([parent.id]);
+  });
+
+  it("suspends hierarchy and parent-based grouping while the window is incomplete", () => {
+    const parent = makeIssue("issue-1", { status: "done" });
+    const child = makeIssue("issue-2", {
+      parent_issue_id: parent.id,
+      status: "todo",
+    });
+
+    // Nesting derived from loaded pages re-parents rows as later pages
+    // arrive; rows must stay in flat sort order until the window completes.
+    const flat = buildIssueTableRows([child, parent], {
+      ...baseOptions,
+      windowComplete: false,
+    });
+    expect(
+      flat.map((row) =>
+        row.kind === "issue" ? [row.issue.id, row.depth] : row.key,
+      ),
+    ).toEqual([
+      ["issue-2", 0],
+      ["issue-1", 0],
+    ]);
+
+    // Grouped: the child buckets by its OWN status instead of climbing to
+    // the parent, so its group cannot change when the parent pages in.
+    const grouped = buildIssueTableRows([child, parent], {
+      ...baseOptions,
+      grouping: "status",
+      windowComplete: false,
+    });
+    expect(grouped.map((row) => row.key)).toEqual([
+      "status:todo",
+      child.id,
+      "status:done",
+      parent.id,
+    ]);
   });
 
   it("keeps a hierarchy together under the parent custom-property group", () => {

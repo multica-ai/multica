@@ -15,6 +15,7 @@ import {
   PROJECT_GANTT_MAX_ISSUES,
   PROJECT_GANTT_PAGE_LIMIT,
   childrenByParentsOptions,
+  compareIssuesForSort,
   issueFlatExportOptions,
   issueFlatListOptions,
   issueIdentifierOptions,
@@ -357,6 +358,38 @@ describe("flat issue table queries", () => {
       shared.id,
     ]);
     expect(listIssues).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("compareIssuesForSort tie-break", () => {
+  it("orders equal sort values by created_at DESC then id DESC (server ORDER BY parity)", () => {
+    // Same status AND same created_at — only the id disambiguates. Without a
+    // unique final key the relative order would depend on input order, which
+    // is exactly the instability that duplicates/drops rows at page
+    // boundaries server-side.
+    const first = makeIssue(1, { created_at: "2025-01-01T00:00:00Z" });
+    const second = makeIssue(2, { created_at: "2025-01-01T00:00:00Z" });
+    const sort = { sort_by: "status", sort_direction: "asc" } as const;
+
+    expect(
+      [first, second].sort((a, b) => compareIssuesForSort(a, b, sort)).map((i) => i.id),
+    ).toEqual(["issue-2", "issue-1"]);
+    expect(
+      [second, first].sort((a, b) => compareIssuesForSort(a, b, sort)).map((i) => i.id),
+    ).toEqual(["issue-2", "issue-1"]);
+  });
+
+  it("applies the id tie-break to created_at sorts as well", () => {
+    const first = makeIssue(1, { created_at: "2025-01-01T00:00:00Z" });
+    const second = makeIssue(2, { created_at: "2025-01-01T00:00:00Z" });
+    const sort = { sort_by: "created_at", sort_direction: "desc" } as const;
+
+    expect(
+      [first, second].sort((a, b) => compareIssuesForSort(a, b, sort)).map((i) => i.id),
+    ).toEqual(["issue-2", "issue-1"]);
+    expect(
+      [second, first].sort((a, b) => compareIssuesForSort(a, b, sort)).map((i) => i.id),
+    ).toEqual(["issue-2", "issue-1"]);
   });
 });
 

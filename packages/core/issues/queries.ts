@@ -164,6 +164,7 @@ export type IssueFlatFilter = MyIssuesFilter &
     | "include_no_project"
     | "label_ids"
     | "top_level_only"
+    | "ids"
   >;
 
 export type AssigneeGroupedIssuesFilter = Omit<
@@ -248,8 +249,11 @@ const MERGE_STATUS_RANK: Record<string, number> = {
 export function compareIssuesForSort(a: Issue, b: Issue, sort?: IssueSortParam): number {
   const by = sort?.sort_by ?? "position";
   const dir = by !== "position" && sort?.sort_direction === "desc" ? -1 : 1;
+  // created_at DESC then id DESC, mirroring the server's unique ORDER BY
+  // suffix — ids disambiguate bulk-created issues that share a timestamp.
   const tieBreak = () =>
-    new Date(b.created_at).getTime() - new Date(a.created_at).getTime(); // created_at DESC, server parity
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime() ||
+    (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
 
   const missingAware = (av: string | null, bv: string | null): number => {
     if (!av && !bv) return tieBreak();
@@ -278,7 +282,7 @@ export function compareIssuesForSort(a: Issue, b: Issue, sort?: IssueSortParam):
     case "title":
       return dir * a.title.localeCompare(b.title) || tieBreak();
     case "created_at":
-      return dir * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      return dir * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) || tieBreak();
     case "updated_at":
       return dir * (new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()) || tieBreak();
     case "start_date":

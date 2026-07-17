@@ -1083,6 +1083,20 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			addArg(labelIDs),
 		))
 	}
+	// ids restricts the window to an explicit id set (the table's
+	// agents-working facet sends the live running-issue ids). Presence with an
+	// EMPTY list is meaningful — it must yield an empty window, not degrade to
+	// the unrestricted one, so gate on Has() rather than the parsed length.
+	if r.URL.Query().Has("ids") {
+		idsFilter, ok := parseUUIDParamList(w, r.URL.Query().Get("ids"), "ids")
+		if !ok {
+			return
+		}
+		if idsFilter == nil {
+			idsFilter = []pgtype.UUID{}
+		}
+		where = append(where, fmt.Sprintf("i.id = ANY(%s::uuid[])", addArg(idsFilter)))
+	}
 	if r.URL.Query().Get("top_level_only") == "true" {
 		where = append(where, "i.parent_issue_id IS NULL")
 	}
@@ -1145,7 +1159,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		// directions (mirrors the client comparator).
 		orderBy += " NULLS LAST"
 	}
-	orderBy += ", i.created_at DESC"
+	// created_at alone is not unique (bulk imports share timestamps); without
+	// a unique final key the database may reorder ties between two
+	// LIMIT/OFFSET requests, duplicating or dropping rows at page boundaries.
+	orderBy += ", i.created_at DESC, i.id DESC"
 
 	offsetRef := addArg(int64(offset))
 	limitRef := addArg(int64(limit))
@@ -1702,7 +1719,9 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	if sortCol == "start_date" || sortCol == "due_date" || sortIsProperty {
 		intraGroupOrder += " NULLS LAST"
 	}
-	intraGroupOrder += ", i.created_at DESC"
+	// Unique final key — see ListIssues: created_at ties would otherwise make
+	// ROW_NUMBER() unstable across per-group offset pages.
+	intraGroupOrder += ", i.created_at DESC, i.id DESC"
 
 	offsetRef := addArg(int64(offset))
 	limitRef := addArg(int64(limit))

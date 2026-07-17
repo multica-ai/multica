@@ -503,6 +503,79 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.isEmpty).toBe(false);
   });
 
+  it("sends the agents-working filter as a server ids facet so later pages can match", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("table");
+    store.getState().toggleAgentRunningFilter();
+    listIssues.mockResolvedValue({ issues: [], total: 0 });
+    setApiInstance({
+      listIssues,
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      getAgentTaskSnapshot: vi.fn(() =>
+        Promise.resolve([
+          { id: "task-1", issue_id: "issue-running", status: "running" },
+        ] as unknown as AgentTask[]),
+      ),
+      getChildIssueProgress: vi.fn(() => never()),
+    } as unknown as ApiClient);
+
+    renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["table"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    // Before the task snapshot lands the running set is empty — the facet
+    // must still be PRESENT (ids: []) so the server returns an empty window
+    // instead of every issue.
+    await waitFor(() =>
+      expect(listIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: "p1", ids: [] }),
+      ),
+    );
+    // Once the snapshot resolves, the window re-keys to the running set.
+    await waitFor(() =>
+      expect(listIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: "p1", ids: ["issue-running"] }),
+      ),
+    );
+  });
+
+  it("clears surface selection when the membership window changes (filters, search)", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("list");
+    listIssues.mockResolvedValue({ issues: [], total: 0 });
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["list"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    act(() => {
+      result.current.selection.select(["issue-1"]);
+    });
+    expect(result.current.selection.selectedIds).toEqual(new Set(["issue-1"]));
+
+    // Batch actions mutate raw selected ids while export/common-field
+    // consumers intersect with visible rows — a selection surviving a
+    // membership change would let the same "1 selected" mean different sets.
+    act(() => {
+      store.getState().toggleStatusFilter("todo");
+    });
+
+    await waitFor(() => {
+      expect(result.current.selection.selectedIds).toEqual(new Set());
+    });
+  });
+
   it("still reports isEmpty for the full-window modes when the list is empty", async () => {
     listIssues.mockResolvedValue({ issues: [], total: 0 });
 

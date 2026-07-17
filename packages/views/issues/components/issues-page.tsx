@@ -12,9 +12,11 @@ import { IssuesHeader } from "./issues-header";
 function IssuesSurfaceHeader({
   issues,
   isRefreshing,
+  facetCountsExact,
 }: {
   issues: Issue[];
   isRefreshing: boolean;
+  facetCountsExact: boolean;
 }) {
   const dateFilter = useViewStore((s) => s.dateFilter);
   const setDateFilter = useViewStore((s) => s.setDateFilter);
@@ -25,6 +27,7 @@ function IssuesSurfaceHeader({
       dateFilter={dateFilter}
       onDateFilterChange={setDateFilter}
       isRefreshing={isRefreshing}
+      facetCountsExact={facetCountsExact}
     />
   );
 }
@@ -48,6 +51,9 @@ export function IssuesPage() {
           <IssuesSurfaceHeader
             issues={controller.surfaceIssues}
             isRefreshing={controller.isRefreshing}
+            facetCountsExact={
+              !(controller.viewMode === "table" && controller.hasNextFlatPage)
+            }
           />
         )}
         renderEmpty={() => (

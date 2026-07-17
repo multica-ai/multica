@@ -44,6 +44,9 @@ export function MyIssuesPage() {
               scope={scope}
               onScopeChange={setScope}
               isRefreshing={controller.isRefreshing}
+              facetCountsExact={
+                !(controller.viewMode === "table" && controller.hasNextFlatPage)
+              }
             />
           )}
           renderEmpty={() => (

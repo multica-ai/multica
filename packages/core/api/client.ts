@@ -576,6 +576,10 @@ export class ApiClient {
     if (params?.include_no_project) search.set("include_no_project", "true");
     if (params?.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
     if (params?.top_level_only) search.set("top_level_only", "true");
+    // No `.length` guard on purpose: an empty ids array must still send
+    // `ids=` — the server treats a PRESENT-but-empty list as an empty window
+    // (nothing running), while an absent param means no restriction.
+    if (params?.ids) search.set("ids", params.ids.join(","));
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params?.metadata && Object.keys(params.metadata).length > 0) {
       search.set("metadata", JSON.stringify(params.metadata));

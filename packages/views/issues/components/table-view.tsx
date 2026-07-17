@@ -74,7 +74,12 @@ import {
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyListOptions } from "@multica/core/properties";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useActorName } from "@multica/core/workspace/hooks";
+import { buildActorNameResolver, useActorName } from "@multica/core/workspace/hooks";
+import {
+  agentListOptions,
+  memberListOptions,
+  squadListOptions,
+} from "@multica/core/workspace/queries";
 import type {
   Issue,
   IssueProperty,
@@ -82,7 +87,7 @@ import type {
   Project,
   UpdateIssueRequest,
 } from "@multica/core/types";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { LabelChip } from "../../labels/label-chip";
 import { useNavigation } from "../../navigation";
@@ -648,6 +653,7 @@ export function TableView({
 }: TableViewProps) {
   const { t, i18n } = useT("issues");
   const wsId = useWorkspaceId();
+  const queryClient = useQueryClient();
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
   const actions = useIssueSurfaceActionsOptional();
@@ -689,6 +695,17 @@ export function TableView({
       ? "none"
       : tableGrouping;
 
+  // Group headers assert counts (and membership) for the WHOLE window, and a
+  // group whose first row sits on an unfetched page would be missing
+  // entirely — so while grouping is active, materialize the full window:
+  // one page per completed fetch, stopping the moment grouping turns off or
+  // the window completes. Grouping is an explicit opt-in; the default
+  // ungrouped view keeps the one-page-per-scroll sentinel.
+  useEffect(() => {
+    if (effectiveTableGrouping === "none") return;
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [effectiveTableGrouping, fetchNextPage, hasNextPage, isFetchingNextPage]);
+
   const visibleColumnConfigs = useMemo(
     () =>
       tableColumns.filter((column) => {
@@ -706,6 +723,7 @@ export function TableView({
         collapsedGroups: new Set(tableCollapsedGroups),
         collapsedParents: new Set(tableCollapsedParents),
         hierarchy: tableHierarchy,
+        windowComplete: !hasNextPage,
         getActorName,
         getStatusLabel: (status) => t(($) => $.status[status]),
         noValueLabel: t(($) => $.table.no_value),
@@ -715,6 +733,7 @@ export function TableView({
       }),
     [
       getActorName,
+      hasNextPage,
       issues,
       properties,
       t,
@@ -1059,8 +1078,32 @@ export function TableView({
   const handleExport = async (mode: "all" | "selected") => {
     setExporting(mode);
     try {
-      const csvColumns = visibleColumnConfigs;
-      const [rows, exportLookups] = await Promise.all([
+      // Every lookup the file depends on is AWAITED here rather than read
+      // from render-time hook state — a cold or errored query must fail the
+      // export, not silently degrade it: with an unsettled catalog the
+      // user's property columns vanish from the file, and with unsettled
+      // directories every actor exports as "Unknown *" (round-2 review
+      // P2#4). fetchQuery throws on failure, which lands in the catch below.
+      const needsPropertyCatalog = tableColumns.some(
+        (column) => propertyIdFromViewKey(column.key) !== null,
+      );
+      // fetchQuery bypasses the options' `select`, so unwrap the response.
+      const exportProperties = needsPropertyCatalog
+        ? (await queryClient.fetchQuery(propertyListOptions(wsId))).properties
+        : [];
+      const exportPropertyById = new Map(
+        exportProperties.map((property) => [property.id, property]),
+      );
+      // Configured columns against the RESOLVED catalog — only a property
+      // definition that is genuinely gone (archived/deleted) drops out.
+      const csvColumns = tableColumns.filter((column) => {
+        const propertyId = propertyIdFromViewKey(column.key);
+        return !propertyId || exportPropertyById.has(propertyId);
+      });
+      const needsActors = csvColumns.some(
+        (column) => column.key === "assignee" || column.key === "creator",
+      );
+      const [rows, exportLookups, exportActorName] = await Promise.all([
         mode === "all" ? exportIssues() : Promise.resolve(selectedIssues),
         resolveExportLookups({
           projects: csvColumns.some((column) => column.key === "project"),
@@ -1068,13 +1111,26 @@ export function TableView({
             (column) => column.key === "child_progress",
           ),
         }),
+        needsActors
+          ? Promise.all([
+              queryClient.fetchQuery(memberListOptions(wsId)),
+              queryClient.fetchQuery(agentListOptions(wsId)),
+              queryClient.fetchQuery(squadListOptions(wsId)),
+            ]).then(([members, agents, squads]) =>
+              buildActorNameResolver({ members, agents, squads }),
+            )
+          : Promise.resolve(getActorName),
       ]);
-      const headers = csvColumns.map((column) => columnLabel(column.key));
+      const headers = csvColumns.map((column) => {
+        const propertyId = propertyIdFromViewKey(column.key);
+        if (propertyId) return exportPropertyById.get(propertyId)?.name ?? "";
+        return columnLabel(column.key);
+      });
       const csvRows = rows.map((issue) =>
         csvColumns.map((column) => {
           const propertyId = propertyIdFromViewKey(column.key);
           if (propertyId) {
-            const property = propertyById.get(propertyId);
+            const property = exportPropertyById.get(propertyId);
             return property
               ? propertyDisplayValue(property, issue.properties[propertyId])
               : "";
@@ -1090,7 +1146,7 @@ export function TableView({
               return t(($) => $.priority[issue.priority]);
             case "assignee":
               return issue.assignee_type && issue.assignee_id
-                ? getActorName(issue.assignee_type, issue.assignee_id)
+                ? exportActorName(issue.assignee_type, issue.assignee_id)
                 : "";
             case "labels":
               return issue.labels?.map((label) => label.name).join(", ") ?? "";
@@ -1109,7 +1165,7 @@ export function TableView({
               return progress ? `${progress.done}/${progress.total}` : "";
             }
             case "creator":
-              return getActorName(issue.creator_type, issue.creator_id);
+              return exportActorName(issue.creator_type, issue.creator_id);
           }
           return "";
         }),

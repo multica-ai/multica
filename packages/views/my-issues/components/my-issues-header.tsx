@@ -26,11 +26,14 @@ export function MyIssuesHeader({
   scope,
   onScopeChange,
   isRefreshing = false,
+  facetCountsExact = true,
 }: {
   allIssues: Issue[];
   scope: MyIssuesScope;
   onScopeChange: (scope: MyIssuesScope) => void;
   isRefreshing?: boolean;
+  /** See IssueDisplayControls.facetCountsExact. */
+  facetCountsExact?: boolean;
 }) {
   const { t } = useT("my-issues");
   const { t: tIssues } = useT("issues");
@@ -115,7 +118,10 @@ export function MyIssuesHeader({
             onToggle={toggleAgentRunningFilter}
             scopedIssueIds={scopedIssueIds}
           />
-          <IssueDisplayControls scopedIssues={allIssues} />
+          <IssueDisplayControls
+            scopedIssues={allIssues}
+            facetCountsExact={facetCountsExact}
+          />
           <ViewRefreshIndicator active={isRefreshing} />
         </div>
       </div>

@@ -105,6 +105,13 @@ export interface ListIssuesParams {
   /** Restrict the window to root issues instead of filtering loaded pages. */
   top_level_only?: boolean;
   /**
+   * Hard restriction of the window to the given issue ids (the table's
+   * agents-working facet sends the live running-issue set). An EMPTY array is
+   * meaningful and yields an EMPTY window — omit the field entirely for "no
+   * restriction".
+   */
+  ids?: string[];
+  /**
    * Widen the assignee filter to issues where the user is the *indirect*
    * assignee — assignee is one of the user's owned agents, or a squad that
    * involves the user (human member / leader-via-owned-agent / agent member
