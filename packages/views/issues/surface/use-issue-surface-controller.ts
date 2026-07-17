@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryKey } from "@tanstack/react-query";
 import type {
   Issue,
@@ -13,6 +13,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
 import type {
   AssigneeGroupedIssuesFilter,
+  IssueFlatFilter,
   IssueSortParam,
   MyIssuesFilter,
 } from "@multica/core/issues/queries";
@@ -21,6 +22,7 @@ import {
   type IssueSurfaceQueryPlan,
 } from "@multica/core/issues/surface/query-plan";
 import type { IssueScope } from "@multica/core/issues/surface/scope";
+import { issueSurfaceFlatExportOptions } from "@multica/core/issues/surface/repository";
 import type { IssueDateFilter, SortField } from "@multica/core/issues/stores/view-store";
 import { propertyListOptions } from "@multica/core/properties";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
@@ -28,7 +30,7 @@ import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { IssueFilters } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
 import type { IssueSurfaceMode } from "./types";
-import type { IssueSurfaceActivity } from "./activity";
+import { useIssueSurfaceActivity, type IssueSurfaceActivity } from "./activity";
 import type { IssueSurfaceActions } from "./actions-context";
 import {
   type IssueSurfaceSelection,
@@ -59,7 +61,8 @@ export interface IssueSurfaceController {
   swimlaneIssues: Issue[];
   /** The rows the agents-working filter would leave on screen. Feeds the
    *  header chip so its count IS the post-click row count (MUL-4884). */
-  workingScopeIssues: Issue[];
+  /** See IssueSurfaceData.workingScopeIssues — undefined means UNKNOWN. */
+  workingScopeIssues: Issue[] | undefined;
   filteredGanttIssues: Issue[];
   assigneeGroups?: IssueAssigneeGroup[];
   assigneeGroupQueryKey?: QueryKey;
@@ -77,6 +80,26 @@ export interface IssueSurfaceController {
   selection: IssueSurfaceSelection;
   childProgressMap: Map<string, ChildProgress>;
   projectMap: Map<string, Project>;
+  resolveTableExportLookups: (needs: {
+    projects: boolean;
+    childProgress: boolean;
+  }) => Promise<{
+    projectMap: Map<string, Project>;
+    childProgressMap: Map<string, ChildProgress>;
+  }>;
+  fetchNextFlatPage: () => Promise<unknown>;
+  hasNextFlatPage: boolean;
+  isFetchingNextFlatPage: boolean;
+  flatTotal: number;
+  /** See IssueSurfaceData.flatWindowError. */
+  flatWindowError: boolean;
+  /** See IssueSurfaceData.flatWindowColdError. */
+  flatWindowColdError: boolean;
+  /** See IssueSurfaceData.refetchFlatWindow. */
+  refetchFlatWindow: () => Promise<unknown>;
+  tableSearch: string;
+  setTableSearch: (query: string) => void;
+  exportTableIssues: () => Promise<Issue[]>;
   isLoading: boolean;
   /** See IssueSurfaceData.isRefreshing — placeholder-backed revalidation. */
   isRefreshing: boolean;
@@ -108,12 +131,27 @@ function issueDateFilterToApiParams(filter: IssueDateFilter | null) {
   };
 }
 
+function useDebouncedTableSearch(value: string, delayMs = 250) {
+  const [debouncedValue, setDebouncedValue] = useState(value.trim());
+
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setDebouncedValue(value.trim()),
+      delayMs,
+    );
+    return () => window.clearTimeout(timer);
+  }, [delayMs, value]);
+
+  return debouncedValue;
+}
+
 export function useIssueSurfaceController({
   scope,
   modes,
   createDefaults,
 }: UseIssueSurfaceControllerInput): IssueSurfaceController {
   const wsId = useWorkspaceId();
+  const queryClient = useQueryClient();
   const queryPlan = useMemo<IssueSurfaceQueryPlan>(
     () => buildIssueSurfaceQueryPlan(scope),
     [scope],
@@ -141,6 +179,9 @@ export function useIssueSurfaceController({
   const ganttShowCompleted = useViewStore((s) => s.ganttShowCompleted);
   const cardProperties = useViewStore((s) => s.cardProperties);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
+  const tableColumns = useViewStore((s) => s.tableColumns);
+  const [tableSearch, setTableSearch] = useState("");
+  const debouncedTableSearch = useDebouncedTableSearch(tableSearch);
 
   const allowedModes = useMemo(() => new Set<IssueSurfaceMode>(modes), [modes]);
   const fallbackMode = modes[0] ?? "list";
@@ -212,14 +253,10 @@ export function useIssueSurfaceController({
     };
   }, [dateParams, effectivePropertyFilters, propertySortId, rawPropertySortId, sortBy, sortDirection]);
 
-  const selection = useCreateIssueSurfaceSelection(
-    scopeKey,
-    `${scopeKey}:${effectiveViewMode}`,
-  );
-
   const usesAssigneeBoard =
     effectiveViewMode === "board" && grouping === "assignee";
   const usesGantt = effectiveViewMode === "gantt" && !!projectId;
+  const usesTable = effectiveViewMode === "table";
 
   const projectFilterState = useMemo(
     () => ({
@@ -231,14 +268,121 @@ export function useIssueSurfaceController({
   const { projectFilters: viewProjectFilters, includeNoProject: viewIncludeNoProject } =
     projectFilterState;
 
+  // The agents-working filter is a live client-side signal (WS-driven task
+  // snapshot), but the table window is server-paginated — filtering loaded
+  // pages would permanently hide matches on unfetched pages (round-2 review
+  // P1#1). Send the running set as a server `ids` facet instead: total,
+  // pagination, and export all see the same window, and snapshot changes
+  // re-key the query. An EMPTY set is sent as an empty facet (empty window),
+  // never dropped.
+  const activity = useIssueSurfaceActivity();
+  const sortedRunningIds = useMemo(
+    () => [...activity.runningIssueIds].sort(),
+    [activity.runningIssueIds],
+  );
+
+  const baseTableFacets = useMemo<IssueFlatFilter>(
+    () => ({
+      ...(debouncedTableSearch ? { q: debouncedTableSearch } : {}),
+      ...(statusFilters.length > 0 ? { statuses: statusFilters } : {}),
+      ...(priorityFilters.length > 0 ? { priorities: priorityFilters } : {}),
+      ...(assigneeFilters.length > 0
+        ? { assignee_filters: assigneeFilters }
+        : {}),
+      ...(includeNoAssignee ? { include_no_assignee: true } : {}),
+      ...(creatorFilters.length > 0
+        ? { creator_filters: creatorFilters }
+        : {}),
+      ...(viewProjectFilters.length > 0
+        ? { project_ids: viewProjectFilters }
+        : {}),
+      ...(viewIncludeNoProject ? { include_no_project: true } : {}),
+      ...(labelFilters.length > 0 ? { label_ids: labelFilters } : {}),
+      ...(showSubIssues === false ? { top_level_only: true } : {}),
+    }),
+    [
+      assigneeFilters,
+      creatorFilters,
+      debouncedTableSearch,
+      includeNoAssignee,
+      labelFilters,
+      priorityFilters,
+      showSubIssues,
+      statusFilters,
+      viewIncludeNoProject,
+      viewProjectFilters,
+    ],
+  );
+  // The running-restricted variant of the window. It IS the table window
+  // while the filter is on; while the filter is off the data hook still
+  // subscribes to it (same query key, so toggling the filter hits a warm
+  // cache) to give the working chip its authoritative in-window count —
+  // deriving that count from loaded rows says "0 working" whenever the only
+  // running issue sits on an unfetched page (round-3 review P2#3).
+  const workingFacets = useMemo<IssueFlatFilter>(
+    () => ({ ...baseTableFacets, ids: sortedRunningIds }),
+    [baseTableFacets, sortedRunningIds],
+  );
+  const tableFacets = agentRunningFilter ? workingFacets : baseTableFacets;
+
+  // Selection is only meaningful within the current membership window: batch
+  // actions act on selected ids while export/common-field consumers intersect
+  // with visible rows, so a selection that survives a membership change lets
+  // "1 selected" mean different sets to different consumers (round-2 review
+  // P1#2). Reset whenever any membership-affecting input changes. Sort is
+  // excluded on purpose — reordering does not change membership. The live
+  // running set is also excluded: while the agents-working filter is on, a
+  // task finishing should not wipe the user's selection mid-action.
+  const membershipKey = useMemo(
+    () =>
+      JSON.stringify([
+        statusFilters,
+        priorityFilters,
+        assigneeFilters,
+        includeNoAssignee,
+        creatorFilters,
+        viewProjectFilters,
+        viewIncludeNoProject,
+        labelFilters,
+        effectivePropertyFilters,
+        agentRunningFilter,
+        showSubIssues,
+        dateParams,
+        debouncedTableSearch,
+      ]),
+    [
+      agentRunningFilter,
+      assigneeFilters,
+      creatorFilters,
+      dateParams,
+      debouncedTableSearch,
+      effectivePropertyFilters,
+      includeNoAssignee,
+      labelFilters,
+      priorityFilters,
+      showSubIssues,
+      statusFilters,
+      viewIncludeNoProject,
+      viewProjectFilters,
+    ],
+  );
+  const selection = useCreateIssueSurfaceSelection(
+    scopeKey,
+    `${scopeKey}:${effectiveViewMode}:${membershipKey}`,
+  );
+
   const data = useIssueSurfaceData({
     wsId,
     queryPlan,
     projectId,
     usesAssigneeBoard,
     usesGantt,
+    usesTable,
     ganttShowCompleted,
     sort,
+    tableFacets,
+    workingFacets,
+    activity,
     statusFilters,
     priorityFilters,
     assigneeFilters,
@@ -252,12 +396,22 @@ export function useIssueSurfaceController({
     showSubIssues,
     loadProjects:
       cardProperties.project ||
+      (usesTable && tableColumns.some((column) => column.key === "project")) ||
       (effectiveViewMode === "swimlane" && swimlaneGrouping === "project"),
   });
+
+  const exportTableIssues = useCallback(async () => {
+    const exportIssues = await queryClient.fetchQuery(
+      issueSurfaceFlatExportOptions(wsId, queryPlan, sort, tableFacets),
+    );
+    return data.filterIssuesForExport(exportIssues);
+  }, [data, queryClient, queryPlan, sort, tableFacets, wsId]);
 
   const { actions, openCreateIssue, moveIssue } = useIssueSurfaceActions({
     createDefaults: resolvedCreateDefaults,
   });
+
+  const { filterIssuesForExport: _filterIssuesForExport, ...surfaceData } = data;
 
   return {
     scopeKey,
@@ -265,11 +419,21 @@ export function useIssueSurfaceController({
     createDefaults: resolvedCreateDefaults,
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
-    ...data,
+    ...surfaceData,
+    // Keep TableView mounted for an empty search result so its local search
+    // control remains available to refine or clear the query. Include the
+    // debounced value as well to avoid a brief empty-screen flash while a
+    // cleared query is waiting to re-fetch the unsearched window.
+    isEmpty:
+      surfaceData.isEmpty &&
+      !(usesTable && (tableSearch.trim() || debouncedTableSearch)),
     sort,
     actions,
     selection,
+    tableSearch,
+    setTableSearch,
     openCreateIssue,
     moveIssue,
+    exportTableIssues,
   };
 }

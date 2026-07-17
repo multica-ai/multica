@@ -6,6 +6,7 @@ import {
   applyIssueChange,
   invalidateIssueDerivatives,
   invalidateStaleListKeys,
+  type IssueFlatCache,
 } from "./cache-coordinator";
 import {
   addIssueToBuckets,
@@ -16,6 +17,44 @@ import { cleanupDeletedIssueCaches } from "./delete-cache";
 import type { Issue, IssueLabelsResponse, IssueMetadata, IssuePropertyValues, Label } from "../types";
 import type { ListIssuesCache } from "../types";
 
+function patchIssueInFlatCaches(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  patch: Partial<Issue>,
+) {
+  for (const [key, data] of qc.getQueriesData<IssueFlatCache>({
+    queryKey: issueKeys.flatAll(wsId),
+  })) {
+    if (!data?.pages) continue;
+    qc.setQueryData<IssueFlatCache>(key, {
+      ...data,
+      pages: data.pages.map((page) => ({
+        ...page,
+        issues: page.issues.map((issue) =>
+          issue.id === issueId ? { ...issue, ...patch } : issue,
+        ),
+      })),
+    });
+  }
+}
+
+function findIssueInFlatCaches(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+) {
+  for (const [, data] of qc.getQueriesData<IssueFlatCache>({
+    queryKey: issueKeys.flatAll(wsId),
+  })) {
+    for (const page of data?.pages ?? []) {
+      const issue = page.issues.find((candidate) => candidate.id === issueId);
+      if (issue) return issue;
+    }
+  }
+  return undefined;
+}
+
 export function onIssueCreated(
   qc: QueryClient,
   wsId: string,
@@ -25,6 +64,7 @@ export function onIssueCreated(
     if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, issue));
   }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   if (issue.project_id) {
@@ -64,7 +104,8 @@ export function onIssueUpdated(
   const detailData = qc.getQueryData<Issue>(issueKeys.detail(wsId, issue.id));
   const cachedIssue =
     detailData ??
-    (firstListData ? findIssueLocation(firstListData, issue.id)?.issue : undefined);
+    (firstListData ? findIssueLocation(firstListData, issue.id)?.issue : undefined) ??
+    findIssueInFlatCaches(qc, wsId, issue.id);
   const oldParentId =
     detailData?.parent_issue_id ?? cachedIssue?.parent_issue_id ?? null;
   // The NEW parent comes from the WS payload when parent_issue_id changed
@@ -153,9 +194,21 @@ export function onIssueLabelsChanged(
   issueId: string,
   labels: Label[],
 ) {
+  patchIssueLabels(qc, wsId, issueId, labels);
+  invalidateIssueLabelDerivatives(qc, wsId);
+}
+
+/** Deterministic label snapshot patch used by optimistic mutation legs. */
+export function patchIssueLabels(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  labels: Label[],
+) {
   for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { labels }));
   }
+  patchIssueInFlatCaches(qc, wsId, issueId, { labels });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
   );
@@ -176,9 +229,22 @@ export function onIssueLabelsChanged(
     );
     qc.setQueryData<Issue[]>(key, next);
   }
+}
+
+/** Reconcile server-filtered label windows only after the write commits. */
+export function invalidateIssueLabelDerivatives(qc: QueryClient, wsId: string) {
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  qc.invalidateQueries({
+    queryKey: issueKeys.flatAll(wsId),
+    predicate: (query) =>
+      query.queryKey.some((part) => {
+        if (!part || typeof part !== "object" || Array.isArray(part)) return false;
+        const labelIds = (part as { label_ids?: unknown }).label_ids;
+        return Array.isArray(labelIds) && labelIds.length > 0;
+      }),
+  });
 }
 
 /**
@@ -199,6 +265,7 @@ export function onIssueMetadataChanged(
   for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { metadata }));
   }
+  patchIssueInFlatCaches(qc, wsId, issueId, { metadata });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, metadata } : old,
   );
@@ -217,12 +284,7 @@ export function onIssuePropertiesChanged(
   issueId: string,
   properties: IssuePropertyValues,
 ) {
-  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
-    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { properties }));
-  }
-  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
-    old ? { ...old, properties } : old,
-  );
+  patchIssueProperties(qc, wsId, issueId, properties);
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   // Plain assignee-group caches are never patched in place (their bucket
   // shape differs) and would otherwise hold stale chips forever under
@@ -230,6 +292,24 @@ export function onIssuePropertiesChanged(
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   invalidatePropertyWindowQueries(qc, wsId);
+}
+
+/** Patch only deterministic entity snapshots. Optimistic mutation legs use
+ * this helper so they never start a property-filter/sort refetch before the
+ * server commit (which could return the old bag and stomp the optimistic one). */
+export function patchIssueProperties(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  properties: IssuePropertyValues,
+) {
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { properties }));
+  }
+  patchIssueInFlatCaches(qc, wsId, issueId, { properties });
+  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
+    old ? { ...old, properties } : old,
+  );
 }
 
 /**

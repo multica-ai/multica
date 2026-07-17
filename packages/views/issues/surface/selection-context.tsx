@@ -4,7 +4,6 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -27,13 +26,20 @@ export function useCreateIssueSurfaceSelection(
   resetKey = surfaceKey,
 ): IssueSurfaceSelection {
   const [selectedIds, setSelectedIds] = useState(() => new Set<string>());
+  const [committedResetKey, setCommittedResetKey] = useState(resetKey);
 
-  useEffect(() => {
-    // Functional bail: on mount (and on resetKey changes where nothing was
-    // selected) the selection is already empty — swapping in a NEW empty Set
-    // here re-rendered the entire surface once per mount for nothing.
-    setSelectedIds((current) => (current.size === 0 ? current : new Set()));
-  }, [resetKey]);
+  // Render-phase reset (the React "adjusting state when props change"
+  // pattern), NOT an effect: an effect runs after commit, so one frame would
+  // ship the NEW membership (filters/search) with the OLD selection — batch
+  // consumers could act on rows the window no longer contains during that
+  // gap. Setting state during render re-renders synchronously before commit,
+  // so no such frame ever becomes visible. The size guard keeps the common
+  // nothing-selected key change from allocating a new Set and re-rendering
+  // the surface.
+  if (committedResetKey !== resetKey) {
+    setCommittedResetKey(resetKey);
+    if (selectedIds.size > 0) setSelectedIds(new Set());
+  }
 
   const toggle = useCallback((id: string) => {
     setSelectedIds((current) => {

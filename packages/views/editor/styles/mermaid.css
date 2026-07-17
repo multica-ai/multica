@@ -1,19 +1,78 @@
 /* Mermaid diagrams */
+
+/* The outer container does NOT scroll — `.mermaid-diagram-scroll` inside it
+   does. That split is what keeps the toolbar pinned: when the container itself
+   was the scroller, the absolutely-positioned toolbar scrolled away with wide
+   diagrams and left no visible way to open or copy them. */
 .rich-text-editor .mermaid-diagram {
   background: var(--muted);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   margin: 0.75rem 0;
-  overflow-x: auto;
+  overflow: hidden;
   padding: 1rem;
   position: relative;
+}
+
+.rich-text-editor .mermaid-diagram-scroll {
+  display: flex;
+  /* Small diagrams sit centered at natural size; only oversized ones scroll.
+     Upscaling a small diagram to fill the column would just coarsen it. */
+  justify-content: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  cursor: zoom-in;
+  /* Dragging a diagram would otherwise start a native text selection: the
+     iframe is a replaced element, so the whole diagram box gets painted with
+     the selection highlight, and the drag runs on into the surrounding
+     comment text. Selecting prose *through* the diagram still works — this
+     only stops a selection from starting on the diagram itself. */
+  user-select: none;
 }
 
 .rich-text-editor .mermaid-diagram-frame {
   border: 0;
   display: block;
-  height: auto;
-  width: 100%;
+  /* Natural width, never shrunk to the column: a wide diagram must keep a
+     readable font size and scroll sideways instead of being squashed until the
+     labels are unreadable. `flex: none` stops the flex parent from shrinking
+     it; a `max-width` here would defeat the scroll entirely. */
+  flex: none;
+  /* The iframe cannot forward clicks to this document, so it would swallow
+     the click-to-open gesture. Disabling pointer events hands wheel, click,
+     and drag to the scroll container instead. */
+  pointer-events: none;
+}
+
+/* Edge fades: a hint that the diagram continues past the container. Driven by
+   data attributes the component sets from scroll position, so a diagram that
+   fits shows no fade, and a scrolled-to-the-end one fades only on the left. */
+.rich-text-editor .mermaid-diagram::before,
+.rich-text-editor .mermaid-diagram::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2rem;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 1;
+}
+
+.rich-text-editor .mermaid-diagram::before {
+  left: 0;
+  background: linear-gradient(to right, var(--muted), transparent);
+}
+
+.rich-text-editor .mermaid-diagram::after {
+  right: 0;
+  background: linear-gradient(to left, var(--muted), transparent);
+}
+
+.rich-text-editor .mermaid-diagram[data-overflow-start]::before,
+.rich-text-editor .mermaid-diagram[data-overflow-end]::after {
+  opacity: 1;
 }
 
 .rich-text-editor .mermaid-diagram-loading,
@@ -23,11 +82,45 @@
   margin: 0;
 }
 
-.rich-text-editor .mermaid-diagram-error pre {
-  margin-bottom: 0;
+.rich-text-editor .mermaid-diagram-error-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
-/* Mermaid toolbar — dark pill, top-right corner, appears on hover */
+.rich-text-editor .mermaid-diagram-error-head button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--muted-foreground);
+  flex: none;
+}
+
+.rich-text-editor .mermaid-diagram-error-head button:hover {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+.rich-text-editor .mermaid-diagram-error-detail {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  margin: 0.375rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* The error state has no inner scroller, and the container clips; without its
+   own overflow a long source line would be cut off with no way to read it. */
+.rich-text-editor .mermaid-diagram-error pre {
+  margin-bottom: 0;
+  overflow-x: auto;
+}
+
+/* Mermaid toolbar — dark pill, top-right corner */
 .rich-text-editor .mermaid-diagram-toolbar {
   position: absolute;
   top: 0.5rem;
@@ -38,14 +131,22 @@
   background: color-mix(in srgb, black 75%, transparent);
   backdrop-filter: blur(8px);
   border-radius: var(--radius);
-  opacity: 0;
   transition: opacity 0.15s;
-  z-index: 1;
+  z-index: 2;
 }
 
-.rich-text-editor .mermaid-diagram:hover .mermaid-diagram-toolbar,
-.rich-text-editor .mermaid-diagram-toolbar:focus-within {
-  opacity: 1;
+/* Reveal-on-hover only where hovering exists. On touch there is no hover
+   state to enter, so the toolbar would have been permanently invisible and
+   the diagram effectively un-openable. */
+@media (hover: hover) {
+  .rich-text-editor .mermaid-diagram-toolbar {
+    opacity: 0;
+  }
+
+  .rich-text-editor .mermaid-diagram:hover .mermaid-diagram-toolbar,
+  .rich-text-editor .mermaid-diagram-toolbar:focus-within {
+    opacity: 1;
+  }
 }
 
 .rich-text-editor .mermaid-diagram-toolbar button {
@@ -63,22 +164,66 @@
   background: color-mix(in srgb, white 15%, transparent);
 }
 
-/* Mermaid lightbox — full-screen preview (ESC or click backdrop to close) */
-.mermaid-diagram-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, black 80%, transparent);
-  cursor: zoom-out;
+/* Full-screen viewer canvas. Not scoped to .rich-text-editor: the viewer is
+   portaled to document.body by the Dialog and never renders inside the editor
+   subtree. */
+.mermaid-viewer-canvas {
+  position: relative;
+  width: 100%;
+  /* Flex owns the height: the header is shrink-0 and the canvas takes the rest.
+     `min-height: 0` is what allows it to shrink below content size instead of
+     pushing the toolbar out of the dialog. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--muted);
+  cursor: grab;
+  /* Claim every touch gesture: browser pan/pinch would otherwise scroll or
+     zoom the page underneath instead of moving the diagram. */
+  touch-action: none;
+  /* A pan that leaves the canvas would otherwise start a native text selection
+     and highlight the toolbar text plus the whole iframe box. Done in CSS
+     rather than by preventDefault-ing pointerdown, which would also suppress
+     the default focus and silently kill the keyboard controls. */
+  user-select: none;
+  outline: none;
 }
 
-.mermaid-diagram-lightbox-frame {
+.mermaid-viewer-canvas:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.mermaid-viewer-canvas.is-panning {
+  cursor: grabbing;
+}
+
+.mermaid-viewer-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* Only discrete controls (toolbar buttons, +/-/0, arrow keys) ease between
+   states. Drag and wheel/pinch set `is-animated` off so the diagram tracks the
+   input exactly — easing direct manipulation reads as lag, not polish. */
+.mermaid-viewer-content.is-animated {
+  transition: transform 150ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mermaid-viewer-content.is-animated {
+    transition: none;
+  }
+}
+
+.mermaid-viewer-frame {
   border: 0;
-  width: 90vw;
-  height: 90vh;
+  display: block;
   background: transparent;
-  cursor: default;
+  /* Same reason as the inline frame: interaction is owned by the canvas in
+     this document, so the sandbox never has to be relaxed to allow zooming. */
+  pointer-events: none;
 }

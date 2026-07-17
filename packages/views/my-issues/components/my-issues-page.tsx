@@ -36,7 +36,7 @@ export function MyIssuesPage() {
             userId: user.id,
             relation: relationFromScope(scope),
           }}
-          modes={["board", "list", "swimlane"]}
+          modes={["board", "list", "table", "swimlane"]}
           batchToolbar="list"
           renderHeader={({ controller, workingIssues }) => (
             <MyIssuesHeader
@@ -45,6 +45,9 @@ export function MyIssuesPage() {
               scope={scope}
               onScopeChange={setScope}
               isRefreshing={controller.isRefreshing}
+              facetCountsExact={
+                !(controller.viewMode === "table" && controller.hasNextFlatPage)
+              }
             />
           )}
           renderEmpty={() => (

@@ -3,7 +3,11 @@ import { api } from "../api";
 import { labelKeys } from "./queries";
 import { useWorkspaceId } from "../hooks";
 import { issueKeys } from "../issues/queries";
-import { onIssueLabelsChanged } from "../issues/ws-updaters";
+import {
+  invalidateIssueLabelDerivatives,
+  onIssueLabelsChanged,
+  patchIssueLabels,
+} from "../issues/ws-updaters";
 import type {
   Label,
   CreateLabelRequest,
@@ -157,7 +161,11 @@ export function useAttachLabel(issueId: string) {
   return useMutation({
     mutationFn: (labelId: string) => api.attachLabel(issueId, labelId),
     onMutate: async (labelId) => {
-      await qc.cancelQueries({ queryKey: labelKeys.byIssue(wsId, issueId) });
+      await Promise.all([
+        qc.cancelQueries({ queryKey: labelKeys.byIssue(wsId, issueId) }),
+        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
+        qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
+      ]);
       const prev = qc.getQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId));
       // Only patch when we already know the current label set — otherwise
       // appending `[label]` to an empty array would wipe denormalized
@@ -171,13 +179,13 @@ export function useAttachLabel(issueId: string) {
       if (!label) return { prev };
       const next: IssueLabelsResponse = { ...prev, labels: [...prev.labels, label] };
       qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), next);
-      onIssueLabelsChanged(qc, wsId, issueId, next.labels);
+      patchIssueLabels(qc, wsId, issueId, next.labels);
       return { prev };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev) {
         qc.setQueryData(labelKeys.byIssue(wsId, issueId), ctx.prev);
-        onIssueLabelsChanged(qc, wsId, issueId, ctx.prev.labels);
+        patchIssueLabels(qc, wsId, issueId, ctx.prev.labels);
       }
     },
     onSuccess: (data: IssueLabelsResponse) => {
@@ -192,6 +200,7 @@ export function useAttachLabel(issueId: string) {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: labelKeys.byIssue(wsId, issueId) });
+      invalidateIssueLabelDerivatives(qc, wsId);
     },
   });
 }
@@ -226,25 +235,30 @@ export function useDetachLabel(issueId: string) {
   return useMutation({
     mutationFn: (labelId: string) => api.detachLabel(issueId, labelId),
     onMutate: async (labelId) => {
-      await qc.cancelQueries({ queryKey: labelKeys.byIssue(wsId, issueId) });
+      await Promise.all([
+        qc.cancelQueries({ queryKey: labelKeys.byIssue(wsId, issueId) }),
+        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
+        qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
+      ]);
       const prev = qc.getQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId));
       const next = prev
         ? { ...prev, labels: prev.labels.filter((l: Label) => l.id !== labelId) }
         : undefined;
       if (next) {
         qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), next);
-        onIssueLabelsChanged(qc, wsId, issueId, next.labels);
+        patchIssueLabels(qc, wsId, issueId, next.labels);
       }
       return { prev };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev) {
         qc.setQueryData(labelKeys.byIssue(wsId, issueId), ctx.prev);
-        onIssueLabelsChanged(qc, wsId, issueId, ctx.prev.labels);
+        patchIssueLabels(qc, wsId, issueId, ctx.prev.labels);
       }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: labelKeys.byIssue(wsId, issueId) });
+      invalidateIssueLabelDerivatives(qc, wsId);
     },
   });
 }

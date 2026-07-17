@@ -16,6 +16,7 @@ import { GanttView } from "../components/gantt-view";
 import { IssuesHeader } from "../components/issues-header";
 import { ListView } from "../components/list-view";
 import { SwimLaneView } from "../components/swimlane-view";
+import { TableView } from "../components/table-view";
 import { useT } from "../../i18n";
 import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
@@ -31,8 +32,10 @@ export interface IssueSurfaceRenderContext {
   issues: Issue[];
   /** The rows the agents-working filter would leave on screen, with this
    *  surface's `clientFilter` applied — headers feed it to the working chip
-   *  so the chip's count is the post-click row count (MUL-4884). */
-  workingIssues: Issue[];
+   *  so the chip's count is the post-click row count (MUL-4884). Undefined
+   *  means the set is UNKNOWN (table window resolving / failed / too large);
+   *  the chip renders an indeterminate state instead of a number. */
+  workingIssues: Issue[] | undefined;
 }
 
 interface IssueSurfaceComponentProps extends IssueSurfaceProps {
@@ -121,6 +124,7 @@ function IssueSurfaceContent({
   contentClassName,
 }: Omit<IssueSurfaceComponentProps, "surfaceKey">) {
   const { t } = useT("projects");
+  const { t: tIssues } = useT("issues");
   const controller = useIssueSurfaceController({
     scope,
     modes,
@@ -142,9 +146,11 @@ function IssueSurfaceContent({
   );
   // Same clientFilter the rendered rows go through, so the chip's promise
   // survives on surfaces that narrow the list locally (e.g. a search box).
+  // An UNKNOWN scope (undefined) passes through untouched — there is nothing
+  // to filter and the chip must see it as unknown.
   const workingIssues = useMemo(
     () =>
-      clientFilter
+      clientFilter && controller.workingScopeIssues
         ? controller.workingScopeIssues.filter((issue) => clientFilter(issue))
         : controller.workingScopeIssues,
     [clientFilter, controller.workingScopeIssues],
@@ -174,7 +180,9 @@ function IssueSurfaceContent({
     (showClientEmpty ? showClientEmpty(renderContext) : true);
   const shouldShowBatchToolbar =
     batchToolbar !== "never" &&
-    (batchToolbar === "always" || controller.viewMode === "list");
+    (batchToolbar === "always" ||
+      controller.viewMode === "list" ||
+      controller.viewMode === "table");
 
   return (
     <IssueSurfaceActionsProvider actions={controller.actions}>
@@ -192,6 +200,9 @@ function IssueSurfaceContent({
             workingIssues={workingIssues}
             allowGantt={controller.allowGantt}
             isRefreshing={controller.isRefreshing}
+            facetCountsExact={
+              !(controller.viewMode === "table" && controller.hasNextFlatPage)
+            }
           />
         )}
         {controller.isLoading ? (
@@ -200,6 +211,21 @@ function IssueSurfaceContent({
           ) : (
             <IssueSurfaceSkeleton mode={controller.viewMode} />
           )
+        ) : controller.viewMode === "table" && controller.flatWindowColdError ? (
+          // A cold-load failure is NOT an empty workspace: rendering the
+          // create-issue empty state here misreports a 5xx/offline as "no
+          // issues" and leaves no recovery path, since TableView (and its
+          // load-more Retry) never mounts without data (round-5 review P2).
+          <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
+            <p className="text-sm">{tIssues(($) => $.table.load_failed)}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void controller.refetchFlatWindow()}
+            >
+              {tIssues(($) => $.table.load_failed_retry)}
+            </Button>
+          </div>
         ) : controller.isEmpty || shouldShowClientEmpty ? (
           renderEmpty ? (
             renderEmpty(renderContext)
@@ -253,6 +279,21 @@ function IssueSurfaceContent({
                 onCreateIssue={openCreateIssue}
               />
             )}
+            {controller.viewMode === "table" && (
+              <TableView
+                issues={issues}
+                childProgressMap={controller.childProgressMap}
+                fetchNextPage={controller.fetchNextFlatPage}
+                hasNextPage={controller.hasNextFlatPage}
+                isFetchingNextPage={controller.isFetchingNextFlatPage}
+                windowError={controller.flatWindowError}
+                total={controller.flatTotal}
+                search={controller.tableSearch}
+                onSearchChange={controller.setTableSearch}
+                exportIssues={controller.exportTableIssues}
+                resolveExportLookups={controller.resolveTableExportLookups}
+              />
+            )}
             {controller.viewMode === "gantt" && (
               <GanttView issues={controller.filteredGanttIssues} />
             )}
@@ -284,11 +325,18 @@ function IssueSurfaceContent({
 }
 
 function IssueSurfaceSkeleton({ mode }: { mode: string }) {
-  if (mode === "list") {
+  if (mode === "list" || mode === "table") {
     return (
-      <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-10 w-full rounded-lg" />
+      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
+        {mode === "table" && <Skeleton className="mb-1 h-8 w-full" />}
+        {Array.from({ length: mode === "table" ? 8 : 4 }).map((_, i) => (
+          <Skeleton
+            key={i}
+            className={cn(
+              "w-full",
+              mode === "table" ? "h-9 rounded-sm" : "h-10 rounded-lg",
+            )}
+          />
         ))}
       </div>
     );

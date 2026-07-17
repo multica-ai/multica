@@ -81,7 +81,23 @@
   },
   "mermaid": {
     "render_error": "Mermaid ダイアグラムを描画できません。",
-    "rendering": "ダイアグラムを描画中…"
+    "rendering": "ダイアグラムを描画中…",
+    "viewer_title": "ダイアグラム",
+    "canvas_label": "ダイアグラムキャンバス。ドラッグで移動、スクロールで拡大縮小できます。",
+    "open_viewer": "ダイアグラムビューアを開く",
+    "close_viewer": "閉じる",
+    "copy_source": "ダイアグラムのソースをコピー",
+    "show_source": "ソースを表示",
+    "show_diagram": "ダイアグラムを表示",
+    "zoom_in": "拡大",
+    "zoom_out": "縮小",
+    "zoom_fit": "画面に合わせる",
+    "zoom_actual": "実際のサイズ",
+    "reset_view": "表示をリセット",
+    "export": "エクスポート",
+    "export_png": "PNG をダウンロード",
+    "export_svg": "SVG をダウンロード",
+    "export_source": ".mmd をダウンロード"
   },
   "slash_command": {
     "no_skills_configured": "設定済みスキルなし",
