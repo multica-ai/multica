@@ -11,6 +11,7 @@ import {
   onIssueDeleted,
   onIssueLabelsChanged,
   onIssueMetadataChanged,
+  onIssuePropertiesChanged,
   onIssueUpdated,
 } from "./ws-updaters";
 import { issueKeys } from "./queries";
@@ -76,6 +77,7 @@ const baseIssue: Issue = {
   start_date: null,
   due_date: null,
   labels: [labelA],
+  properties: {},
   created_at: "2025-01-01T00:00:00Z",
   updated_at: "2025-01-01T00:00:00Z",
 };
@@ -215,6 +217,65 @@ describe("onIssueMetadataChanged", () => {
 
     expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.list(WS_ID))).toBeUndefined();
+  });
+});
+
+describe("onIssuePropertiesChanged", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+  });
+
+  it("replaces the property bag in detail and every list cache", () => {
+    const plainKey = issueKeys.listSorted(WS_ID, { sort_by: "position" });
+    qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), {
+      ...baseIssue,
+      properties: { "property-old": 1 },
+    });
+    qc.setQueryData<ListIssuesCache>(plainKey, {
+      byStatus: {
+        todo: {
+          issues: [{ ...baseIssue, properties: { "property-old": 1 } }],
+          total: 1,
+        },
+      },
+    });
+
+    onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, {
+      "property-business-value": 125000,
+    });
+
+    expect(qc.getQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID))?.properties).toEqual({
+      "property-business-value": 125000,
+    });
+    const list = qc.getQueryData<ListIssuesCache>(plainKey);
+    expect(list?.byStatus.todo?.issues[0]?.properties).toEqual({
+      "property-business-value": 125000,
+    });
+  });
+
+  it("invalidates only server windows filtered or sorted by a custom property", () => {
+    const plainKey = issueKeys.listSorted(WS_ID, { sort_by: "priority" });
+    const filteredKey = issueKeys.listSorted(WS_ID, {
+      properties: { "property-select": ["option-a"] },
+    });
+    const sortedKey = issueKeys.listSorted(WS_ID, {
+      sort_by: "property:property-business-value",
+      sort_direction: "desc",
+    });
+    const cache = makeListCache(baseIssue);
+    qc.setQueryData(plainKey, cache);
+    qc.setQueryData(filteredKey, cache);
+    qc.setQueryData(sortedKey, cache);
+
+    onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, {
+      "property-business-value": 125000,
+    });
+
+    expect(qc.getQueryState(plainKey)?.isInvalidated).toBe(false);
+    expect(qc.getQueryState(filteredKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(sortedKey)?.isInvalidated).toBe(true);
   });
 });
 

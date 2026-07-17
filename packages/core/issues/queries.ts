@@ -16,6 +16,9 @@ export interface IssueSortParam {
   date_field?: ListIssuesParams["date_field"];
   date_start?: ListIssuesParams["date_start"];
   date_end?: ListIssuesParams["date_end"];
+  /** Server-side custom-property filter. Keeping it in this bag makes it
+   * part of every list query key and every load-more request. */
+  properties?: ListIssuesParams["properties"];
 }
 
 export const issueKeys = {
@@ -169,6 +172,63 @@ async function fetchFirstPages(
  * total — pagination on the "All" scope is out of scope; the first
  * 50-per-status × 3 widening (deduped) is what the page renders.
  */
+const MERGE_PRIORITY_RANK: Record<string, number> = {
+  urgent: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+  none: 4,
+};
+
+/**
+ * The all-scope combines three independently sorted server responses. Re-sort
+ * the merged set so relation order never wins over the user's selected sort.
+ */
+function compareIssuesForSort(a: Issue, b: Issue, sort?: IssueSortParam): number {
+  const by = sort?.sort_by ?? "position";
+  const dir = by !== "position" && sort?.sort_direction === "desc" ? -1 : 1;
+  const tieBreak = () =>
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+
+  const missingAware = (av: string | null, bv: string | null): number => {
+    if (!av && !bv) return tieBreak();
+    if (!av) return 1;
+    if (!bv) return -1;
+    return dir * av.localeCompare(bv) || tieBreak();
+  };
+
+  if (by.startsWith("property:")) {
+    const propertyId = by.slice("property:".length);
+    const av = a.properties?.[propertyId];
+    const bv = b.properties?.[propertyId];
+    const aMissing = av === undefined || Array.isArray(av) || typeof av === "boolean";
+    const bMissing = bv === undefined || Array.isArray(bv) || typeof bv === "boolean";
+    if (aMissing && bMissing) return tieBreak();
+    if (aMissing) return 1;
+    if (bMissing) return -1;
+    if (typeof av === "number" && typeof bv === "number") {
+      return dir * (av - bv) || tieBreak();
+    }
+    return dir * String(av).localeCompare(String(bv)) || tieBreak();
+  }
+
+  switch (by) {
+    case "priority":
+      return dir * ((MERGE_PRIORITY_RANK[a.priority] ?? 9) - (MERGE_PRIORITY_RANK[b.priority] ?? 9)) || tieBreak();
+    case "title":
+      return dir * a.title.localeCompare(b.title) || tieBreak();
+    case "created_at":
+      return dir * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    case "start_date":
+      return missingAware(a.start_date, b.start_date);
+    case "due_date":
+      return missingAware(a.due_date, b.due_date);
+    case "position":
+    default:
+      return a.position - b.position || tieBreak();
+  }
+}
+
 async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Promise<ListIssuesCache> {
   const [byAssignee, byCreator, byInvolves] = await Promise.all([
     fetchFirstPages({ assignee_id: userId }, sort),
@@ -188,6 +248,7 @@ async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Prom
         merged.push(issue);
       }
     }
+    merged.sort((a, b) => compareIssuesForSort(a, b, sort));
     byStatus[status] = { issues: merged, total: merged.length };
   }
   return { byStatus };
@@ -245,7 +306,11 @@ async function fetchAllMyAssigneeGroups(
       existing.total = existing.issues.length;
     }
   }
-  return { groups: [...merged.values()] };
+  const groups = [...merged.values()];
+  for (const group of groups) {
+    group.issues.sort((a, b) => compareIssuesForSort(a, b, sort));
+  }
+  return { groups };
 }
 
 /**

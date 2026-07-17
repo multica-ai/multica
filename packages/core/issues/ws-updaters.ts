@@ -8,7 +8,7 @@ import {
   patchIssueInBuckets,
 } from "./cache-helpers";
 import { cleanupDeletedIssueCaches } from "./delete-cache";
-import type { Issue, IssueLabelsResponse, Label } from "../types";
+import type { Issue, IssueLabelsResponse, IssuePropertyValues, Label } from "../types";
 import type { ListIssuesCache } from "../types";
 
 export function onIssueCreated(
@@ -168,6 +168,49 @@ export function onIssueMetadataChanged(
     old ? { ...old, metadata } : old,
   );
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+}
+
+/**
+ * Apply the server's full custom-property bag snapshot to issue caches.
+ * List/detail caches can be patched immediately, while server-filtered or
+ * property-sorted windows must refetch because membership/order may change.
+ */
+export function onIssuePropertiesChanged(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  properties: IssuePropertyValues,
+) {
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { properties }));
+  }
+  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
+    old ? { ...old, properties } : old,
+  );
+  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  invalidatePropertyWindowQueries(qc, wsId);
+}
+
+/** Refetch issue windows whose server result depends on property values. */
+export function invalidatePropertyWindowQueries(qc: QueryClient, wsId: string) {
+  qc.invalidateQueries({
+    queryKey: issueKeys.all(wsId),
+    predicate: (query) =>
+      query.queryKey.some((part) => {
+        if (!part || typeof part !== "object" || Array.isArray(part)) return false;
+        const rec = part as Record<string, unknown>;
+        if (
+          rec.properties &&
+          typeof rec.properties === "object" &&
+          Object.keys(rec.properties as Record<string, unknown>).length > 0
+        ) {
+          return true;
+        }
+        return typeof rec.sort_by === "string" && rec.sort_by.startsWith("property:");
+      }),
+  });
 }
 
 export function onIssueDeleted(

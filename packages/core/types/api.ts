@@ -56,6 +56,8 @@ export interface ListIssuesParams {
   creator_id?: string;
   project_id?: string;
   involves_user_id?: string;
+  /** Custom-property filter: definition id to accepted values. */
+  properties?: Record<string, string[]>;
   open_only?: boolean;
   /**
    * Restrict the result to issues with at least one of `start_date` /
@@ -73,7 +75,7 @@ export interface ListIssuesParams {
   date_field?: "created_at" | "updated_at" | "due_date";
   date_start?: string;
   date_end?: string;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date" | `property:${string}`;
   sort_direction?: "asc" | "desc";
 }
 
@@ -99,6 +101,8 @@ export interface ListGroupedIssuesParams {
   creator_id?: string;
   project_id?: string;
   involves_user_id?: string;
+  /** Custom-property filter: definition id to accepted values. */
+  properties?: Record<string, string[]>;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];
@@ -117,7 +121,7 @@ export interface ListGroupedIssuesParams {
   date_field?: "created_at" | "updated_at" | "due_date";
   date_start?: string;
   date_end?: string;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date" | `property:${string}`;
   sort_direction?: "asc" | "desc";
 }
 

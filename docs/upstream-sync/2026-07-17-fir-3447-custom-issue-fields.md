@@ -4,6 +4,16 @@ This change ports only the upstream custom issue property catalog, typed issue
 values, API, CLI, migrations, and server-side list filtering and sorting. It is
 not a full upstream sync.
 
+## Port status
+
+- Schema/API slice: migrations 191–196, handlers, CLI, routes, generated DB
+  code, and the public issue-property contract are present.
+- Core client/cache/realtime slice: defensive API schemas, workspace-scoped
+  query keys, optimistic single-property writes, single-key rollback,
+  property-filter/sort persistence, and websocket reconciliation are present.
+- UI slices remain intentionally separate: Issue detail/Create issue, then
+  list/Table/Settings, then filters/sort/polish.
+
 ## Upstream provenance
 
 - `b85bb71a582ee0a106290fcda8346599f2a383b9`: custom issue properties.
@@ -24,6 +34,13 @@ not a full upstream sync.
   issue-value routes.
 - Kept Cerebro workspace deletion behavior and added only property cleanup.
 - Adapted the upstream CLI to Cerebro's existing request context convention.
+- Kept Cerebro's workspace-scoped query keys, saved/date/sprint/reference
+  filters, sub-issue display state, and external realtime handler registration
+  while adding property filters, sorting, cache reconciliation, and reconnect
+  invalidation.
+- Did not apply upstream's generic issue-mutation reconciliation hunk because
+  this fork's update mutation does not write server responses back into the
+  cache; property writes keep their own authoritative single-key pipeline.
 - Updated the built-in issue-working skill because the public API and CLI gain
   property operations.
 

@@ -19,6 +19,7 @@ import {
   issueKeys,
   projectGanttIssuesOptions,
   issueListOptions,
+  myIssueListOptions,
 } from "./queries";
 
 const WS_ID = "ws-1";
@@ -45,6 +46,7 @@ function makeIssue(idx: number): Issue {
     start_date: "2026-05-01T00:00:00Z",
     due_date: null,
     labels: [],
+    properties: {},
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
   };
@@ -196,6 +198,55 @@ describe("issueListOptions", () => {
         reference: "github_pr:firtal-group/firtal-cerebro#525",
       });
     }
+  });
+});
+
+describe("myIssueListOptions property sorting", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("re-sorts the merged all-scope globally by a numeric custom property", async () => {
+    const propertyId = "property-business-value";
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => {
+        if (params?.status !== "todo") return { issues: [], total: 0 };
+        if (params.assignee_id) {
+          return { issues: [{ ...makeIssue(9), properties: { [propertyId]: 900000 } }], total: 1 };
+        }
+        if (params.creator_id) {
+          return { issues: [{ ...makeIssue(1), properties: { [propertyId]: 100000 } }], total: 1 };
+        }
+        if (params.involves_user_id) {
+          return { issues: [{ ...makeIssue(5), properties: { [propertyId]: 500000 } }], total: 1 };
+        }
+        return { issues: [], total: 0 };
+      });
+    installFakeApi({ listIssues });
+
+    const data = await qc.fetchQuery(
+      myIssueListOptions(
+        WS_ID,
+        "all",
+        {},
+        "user-1",
+        { sort_by: `property:${propertyId}`, sort_direction: "asc" },
+      ),
+    );
+
+    expect(data.byStatus.todo?.issues.map((issue) => issue.id)).toEqual([
+      "issue-1",
+      "issue-5",
+      "issue-9",
+    ]);
   });
 });
 

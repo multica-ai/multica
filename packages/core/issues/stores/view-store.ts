@@ -15,9 +15,9 @@ import type { RelativeDateSpec } from "../date";
 
 export type ViewMode = "board" | "list" | "gantt" | "swimlane";
 export type GanttZoom = "day" | "week" | "month";
-export type IssueGrouping = "status" | "assignee";
+export type IssueGrouping = "status" | "assignee" | `property:${string}`;
 export type SwimlaneGrouping = "parent" | "project" | "assignee";
-export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
+export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title" | `property:${string}`;
 export type SortDirection = "asc" | "desc";
 export type SubIssueDisplay = "standalone" | "on-parent" | "hidden";
 // CEREBRO-PATCH(issue-due-date-filter): FIR-1658 — add due_date to the upstream date filter.
@@ -101,7 +101,18 @@ export interface ActorFilterValue {
   id: string;
 }
 
-export const SORT_OPTIONS: { value: SortField; label: string }[] = [
+export const PROPERTY_VIEW_PREFIX = "property:";
+
+export function propertyIdFromViewKey(key: string): string | null {
+  return key.startsWith(PROPERTY_VIEW_PREFIX)
+    ? key.slice(PROPERTY_VIEW_PREFIX.length)
+    : null;
+}
+
+export type StaticSortField = Exclude<SortField, `property:${string}`>;
+export type StaticIssueGrouping = Exclude<IssueGrouping, `property:${string}`>;
+
+export const SORT_OPTIONS: { value: StaticSortField; label: string }[] = [
   { value: "position", label: "Manual" },
   { value: "priority", label: "Priority" },
   { value: "start_date", label: "Start date" },
@@ -110,7 +121,7 @@ export const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "title", label: "Title" },
 ];
 
-export const GROUPING_OPTIONS: { value: IssueGrouping; label: string }[] = [
+export const GROUPING_OPTIONS: { value: StaticIssueGrouping; label: string }[] = [
   { value: "status", label: "Status" },
   { value: "assignee", label: "Assignee" },
 ];
@@ -137,6 +148,8 @@ export interface IssueViewState {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  /** Property definition id to accepted option ids. */
+  propertyFilters: Record<string, string[]>;
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 selected on-behalf-of member user UUIDs.
   onBehalfOfFilters: string[];
   dateFilter: IssueDateFilter | null;
@@ -155,6 +168,8 @@ export interface IssueViewState {
   sortBy: SortField;
   sortDirection: SortDirection;
   cardProperties: CardProperties;
+  /** Custom property definition ids rendered on board/list cards. */
+  cardPropertyIds: string[];
   listCollapsedStatuses: IssueStatus[];
   subIssueDisplay: SubIssueDisplay;
   ganttZoom: GanttZoom;
@@ -180,6 +195,7 @@ export interface IssueViewState {
   toggleProjectFilter: (projectId: string) => void;
   toggleNoProject: () => void;
   toggleLabelFilter: (labelId: string) => void;
+  togglePropertyFilter: (propertyId: string, optionId: string) => void;
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 toggle one on-behalf-of member.
   toggleOnBehalfOfFilter: (userId: string) => void;
   setDateFilter: (filter: IssueDateFilter | null) => void;
@@ -193,6 +209,7 @@ export interface IssueViewState {
   setSortBy: (field: SortField) => void;
   setSortDirection: (dir: SortDirection) => void;
   toggleCardProperty: (key: keyof CardProperties) => void;
+  toggleCardPropertyId: (propertyId: string) => void;
   toggleListCollapsed: (status: IssueStatus) => void;
   // CEREBRO-PATCH(sub-issue-display): sub-issue display mode toggle.
   setSubIssueDisplay: (mode: SubIssueDisplay) => void;
@@ -214,6 +231,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   projectFilters: [],
   includeNoProject: false,
   labelFilters: [],
+  propertyFilters: {},
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 default empty.
   onBehalfOfFilters: [],
   dateFilter: null,
@@ -232,6 +250,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     childProgress: true,
     labels: true,
   },
+  cardPropertyIds: [],
   listCollapsedStatuses: [],
   subIssueDisplay: "standalone",
   ganttZoom: "week",
@@ -299,6 +318,17 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.labelFilters.filter((id) => id !== labelId)
         : [...state.labelFilters, labelId],
     })),
+  togglePropertyFilter: (propertyId, optionId) =>
+    set((state) => {
+      const current = state.propertyFilters[propertyId] ?? [];
+      const next = current.includes(optionId)
+        ? current.filter((id) => id !== optionId)
+        : [...current, optionId];
+      const propertyFilters = { ...state.propertyFilters };
+      if (next.length === 0) delete propertyFilters[propertyId];
+      else propertyFilters[propertyId] = next;
+      return { propertyFilters };
+    }),
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 toggle on-behalf-of member.
   toggleOnBehalfOfFilter: (userId) =>
     set((state) => ({
@@ -337,6 +367,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       projectFilters: [],
       includeNoProject: false,
       labelFilters: [],
+      propertyFilters: {},
       // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 reset on clear.
       onBehalfOfFilters: [],
       dateFilter: null,
@@ -352,6 +383,12 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ...state.cardProperties,
         [key]: !state.cardProperties[key],
       },
+    })),
+  toggleCardPropertyId: (propertyId) =>
+    set((state) => ({
+      cardPropertyIds: state.cardPropertyIds.includes(propertyId)
+        ? state.cardPropertyIds.filter((id) => id !== propertyId)
+        : [...state.cardPropertyIds, propertyId],
     })),
   toggleListCollapsed: (status) =>
     set((state) => ({
@@ -401,11 +438,13 @@ export const viewStorePersistOptions = (name: string) => ({
     projectFilters: state.projectFilters,
     includeNoProject: state.includeNoProject,
     labelFilters: state.labelFilters,
+    propertyFilters: state.propertyFilters,
     // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 persist across reloads.
     onBehalfOfFilters: state.onBehalfOfFilters,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,
+    cardPropertyIds: state.cardPropertyIds,
     listCollapsedStatuses: state.listCollapsedStatuses,
     subIssueDisplay: state.subIssueDisplay,
     ganttZoom: state.ganttZoom,
