@@ -114,58 +114,46 @@ func (r *installationResolver) ResolveInstallation(ctx context.Context, msg chan
 
 type identityResolver struct{ store *Store }
 
-// ResolveSender maps the WeChat userid (from Source.SenderID) to a Multica
-// user via implicit email-prefix binding: WeChat userids in a Tencent-style
-// deployment usually match the local-part of the corporate email
-// (leroychen@tencent.com → wecom userid "leroychen"). A proper explicit
-// binding table is on the roadmap but not needed for the first iteration.
+// ResolveSender maps the WeCom smart-bot userid (the anonymized "T"-prefixed
+// id the aibot API assigns per bot, from Source.SenderID) to a Multica user
+// via the channel_user_binding table. First-time senders have no row and
+// return engine.ErrSenderUnbound, which the Router pairs with the outbound
+// binding prompt (see OutboundReplier.sendBindingPrompt).
 //
-// ErrSenderUnbound / ErrSenderNotMember let the Router surface the correct
-// product outcome (a needs-binding reply vs. a silent drop).
+// Why explicit binding rather than an implicit heuristic: aibot's userids
+// have no relationship to real enterprise userids or emails — they are
+// per-(bot, user) anonymized stable ids — so email-prefix matching (the
+// pattern the internal customer-service adapter used) cannot work. See
+// binding.go for the rationale.
+//
+// Membership re-check: the binding row's existence does NOT prove current
+// workspace membership — a removed member's binding survives until an admin
+// vacuums it. ErrSenderNotMember lets the Router drop silently rather than
+// re-prompt (the correct product outcome, avoids leaking that a user was
+// once a member).
 func (r *identityResolver) ResolveSender(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage) (engine.ResolvedIdentity, error) {
-	prefix := strings.TrimSpace(msg.Source.SenderID)
-	if prefix == "" {
+	senderID := strings.TrimSpace(msg.Source.SenderID)
+	if senderID == "" {
 		return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
 	}
-	userID, err := r.findWorkspaceMemberByEmailPrefix(ctx, inst.WorkspaceID, prefix)
+	binding, err := r.store.Queries.GetChannelUserBindingByUserID(ctx, db.GetChannelUserBindingByUserIDParams{
+		InstallationID: inst.ID,
+		ChannelUserID:  senderID,
+	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
 		}
 		return engine.ResolvedIdentity{}, err
 	}
-	isMember, err := r.store.IsWorkspaceMember(ctx, inst.WorkspaceID, userID)
+	isMember, err := r.store.IsWorkspaceMember(ctx, inst.WorkspaceID, binding.MulticaUserID)
 	if err != nil {
 		return engine.ResolvedIdentity{}, err
 	}
 	if !isMember {
 		return engine.ResolvedIdentity{}, engine.ErrSenderNotMember
 	}
-	return engine.ResolvedIdentity{UserID: userID}, nil
-}
-
-// findWorkspaceMemberByEmailPrefix walks the workspace's member list looking
-// for a user whose email local-part (case-insensitive) matches prefix.
-// Bounded by workspace size; on a full deployment (thousands of members) we
-// would introduce a functional index and a dedicated sqlc query, but the
-// smart-bot scenario does not warrant that yet. Returns pgx.ErrNoRows when
-// nothing matches.
-func (r *identityResolver) findWorkspaceMemberByEmailPrefix(ctx context.Context, workspaceID pgtype.UUID, prefix string) (pgtype.UUID, error) {
-	members, err := r.store.Queries.ListMembersWithUser(ctx, workspaceID)
-	if err != nil {
-		return pgtype.UUID{}, err
-	}
-	lp := strings.ToLower(prefix)
-	for _, m := range members {
-		local := m.UserEmail
-		if at := strings.IndexByte(local, '@'); at >= 0 {
-			local = local[:at]
-		}
-		if strings.ToLower(local) == lp {
-			return m.UserID, nil
-		}
-	}
-	return pgtype.UUID{}, pgx.ErrNoRows
+	return engine.ResolvedIdentity{UserID: binding.MulticaUserID}, nil
 }
 
 // ---- dedup ----
