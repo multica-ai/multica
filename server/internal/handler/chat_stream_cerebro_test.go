@@ -170,6 +170,53 @@ func TestStreamChatSessionRun_ReplaysCompletedTask(t *testing.T) {
 	}
 }
 
+func TestStreamChatSessionRun_ReplaysArtifactURLWithWorkspaceSlug(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	withChatStreamBroker(t)
+	ctx := context.Background()
+	sessionID := createChatSessionForCoalesceTest(t)
+	taskID := insertChatTask(t, sessionID, "running")
+	artifact := createMemberArtifact(t, "June board report")
+
+	previousPublicURL := testHandler.cfg.PublicURL
+	testHandler.cfg.PublicURL = "https://multica.example"
+	t.Cleanup(func() { testHandler.cfg.PublicURL = previousPublicURL })
+
+	result, _ := json.Marshal(protocol.TaskCompletedPayload{
+		TaskID: taskID,
+		Output: artifactToken(artifact.ID),
+	})
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), result, "", ""); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.StreamChatSessionRun(w, streamRequest(sessionID, taskID))
+
+	wantURL := "https://multica.example/" + handlerTestWorkspaceSlug + "/documents/" + artifact.ID
+	for _, frame := range sseFrames(w.Body.String()) {
+		if frame == "[DONE]" {
+			continue
+		}
+		var chunk struct {
+			Type string            `json:"type"`
+			Data map[string]string `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(frame), &chunk); err != nil {
+			t.Fatalf("frame not JSON: %q: %v", frame, err)
+		}
+		if chunk.Type == "data-artifact" {
+			if got := chunk.Data["url"]; got != wantURL {
+				t.Fatalf("artifact url = %q, want %q", got, wantURL)
+			}
+			return
+		}
+	}
+	t.Fatalf("stream missing data-artifact frame: %s", w.Body.String())
+}
+
 func TestStreamChatSessionRun_LiveChatDoneFinishesStream(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

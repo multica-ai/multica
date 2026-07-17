@@ -3,7 +3,6 @@ package handler
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/chatstream"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -11,6 +10,13 @@ import (
 
 func (h *Handler) chatStreamArtifactParts(r *http.Request, content, workspaceID string) []any {
 	ids := parseArtifactMentions(content)
+	if len(ids) == 0 {
+		return nil
+	}
+	workspaceSlug := ""
+	if workspace, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID)); err == nil {
+		workspaceSlug = workspace.Slug
+	}
 	parts := make([]any, 0, len(ids))
 	for _, id := range ids {
 		artifact, err := h.Queries.GetArtifact(r.Context(), db.GetArtifactParams{
@@ -22,8 +28,8 @@ func (h *Handler) chatStreamArtifactParts(r *http.Request, content, workspaceID 
 		data := map[string]string{
 			"id": id, "title": artifact.Title, "kind": artifact.Kind, "body": artifact.Body,
 		}
-		if baseURL := strings.TrimSuffix(h.cfg.PublicURL, "/"); baseURL != "" {
-			data["url"] = baseURL + "/" + workspaceID + "/documents/" + id
+		if documentURL := chatstream.ArtifactDocumentURL(h.cfg.PublicURL, workspaceSlug, id); documentURL != "" {
+			data["url"] = documentURL
 		}
 		parts = append(parts, chatstream.DataChunk{
 			Type: "data-artifact",
