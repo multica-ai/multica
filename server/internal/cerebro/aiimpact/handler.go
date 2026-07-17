@@ -22,6 +22,12 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// Mount registers the AI Impact Observation routes on a workspace-scoped router.
+func (h *Handler) Mount(r chi.Router) {
+	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
+	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
+}
+
 type appendObservationRequest struct {
 	PeriodStart    time.Time      `json:"period_start"`
 	PeriodEnd      time.Time      `json:"period_end"`
