@@ -19,6 +19,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 | `APP_ENV` | 空 | **はい**（`production` である必要があります） |
 | `FRONTEND_ORIGIN` | 空 | **はい**（セルフホストは自身のドメインを設定する必要があります） |
 | `MULTICA_DEV_VERIFICATION_CODE` | 空 | いいえ（プロダクションでは必ず空のままにしてください） |
+| `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | いいえ。`SIGTERM`/`SIGINT` の受信後、グレースフルシャットダウンを開始する前の任意の待機時間。`300s` や `5m` などの非負の Go duration を受け付けます。空または `0` の場合は直ちにシャットダウンを開始します |
 
 <Callout type="warning">
 **プロダクションでは `MULTICA_DEV_VERIFICATION_CODE` を空のままにしてください。** 固定のローカルテストコードはデフォルトで無効になっていますが、`MULTICA_DEV_VERIFICATION_CODE=888888` で有効にすると、`APP_ENV` が production 以外の間は、コードを要求できる誰もがその固定値でサインインできてしまいます。このショートカットは `APP_ENV=production` のときには無視されます。
