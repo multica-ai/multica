@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/automation"
 	"github.com/multica-ai/multica/server/internal/featureflags"
@@ -498,7 +499,6 @@ func seedAutopilotWith(t *testing.T, creatorUserID, assigneeType, assigneeID str
 	return id
 }
 
-
 func triggerAgentSpec(name, issueID, agentID string) map[string]any {
 	return map[string]any{
 		"name": name,
@@ -703,6 +703,11 @@ func TestHookAutopilotAssigneeAdmission(t *testing.T) {
 		VALUES ($1, 'member', $2, $3)`, autopilotID, memberA, testUserID); err != nil {
 		t.Fatalf("grant collaborator: %v", err)
 	}
+	// autopilot_collaborator has no FK/cascade, so drop the grant explicitly to keep
+	// the shared test DB clean across repeat runs.
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM autopilot_collaborator WHERE autopilot_id = $1`, autopilotID)
+	})
 
 	// ...but A cannot invoke the autopilot's private-agent assignee, so save fails.
 	w := httptest.NewRecorder()
@@ -746,6 +751,152 @@ func TestHookAssigneeOperandTypes(t *testing.T) {
 	testHandler.CreateHook(w, newMemberHookRequest(http.MethodPost, "/api/hooks", assigneeCond(ghost)))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("ghost assignee operand: status %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+// runBlockedByMemberMutation opens an uncommitted member-row mutation (removal or
+// role demotion), runs a hook op in a goroutine that is expected to BLOCK on the
+// FOR SHARE membership read, asserts it blocks, then commits the mutation and
+// returns the op's error. This deterministically reproduces the round-5 concurrency
+// gap: the mutation lands before the hook write can proceed.
+func runBlockedByMemberMutation(t *testing.T, mutationSQL string, args []any, op func() error) error {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := testPool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire conn: %v", err)
+	}
+	defer conn.Release()
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin mutation tx: %v", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback(ctx)
+		}
+	}()
+	if _, err := tx.Exec(ctx, mutationSQL, args...); err != nil {
+		t.Fatalf("member mutation: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- op() }()
+
+	// The op must block on the locked member row while the mutation is uncommitted.
+	select {
+	case err := <-done:
+		t.Fatalf("hook op completed (err=%v) before the concurrent member mutation committed — FOR SHARE did not serialize", err)
+	case <-time.After(750 * time.Millisecond):
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit member mutation: %v", err)
+	}
+	committed = true
+	return <-done
+}
+
+func hookRevisionCount(t *testing.T, hookID string) int {
+	t.Helper()
+	var n int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM hook_revision WHERE hook_id = $1`, hookID).Scan(&n); err != nil {
+		t.Fatalf("count revisions: %v", err)
+	}
+	return n
+}
+
+func memberAuthor(userID string) service.HookAuthor {
+	return service.HookAuthor{ActorType: "member", ActorID: parseUUID(userID), PrincipalUserID: parseUUID(userID)}
+}
+
+// A concurrent removal of the hook's stored principal, committed while an update is
+// mid-transaction, must make the update fail closed — not commit a new revision
+// under the departed principal's authority (review round 5).
+func TestHookUpdateBlocksOnConcurrentPrincipalRemoval(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	enableHooksFlag(t)
+	issueID := seedHookIssue(t)
+	memberA := seedHookMember(t, "member")
+	hook := createHookAs(t, memberA, sampleHookSpec("A hook", "hi", issueID))
+	spec := hookSpecFromMap(sampleHookSpec("edited", "x", issueID))
+
+	err := runBlockedByMemberMutation(t,
+		`DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, []any{testWorkspaceID, memberA},
+		func() error {
+			// Owner (admin) edits A's hook; admission runs against the stored
+			// principal A, whose membership is being removed concurrently.
+			_, e := testHandler.HookService.UpdateHook(context.Background(), parseUUID(testWorkspaceID), parseUUID(hook.ID), spec, memberAuthor(testUserID))
+			return e
+		})
+	if err == nil {
+		t.Fatalf("UpdateHook committed after the stored principal was removed mid-transaction")
+	}
+	if n := hookRevisionCount(t, hook.ID); n != 1 {
+		t.Errorf("hook_revision count = %d, want 1 (no revision may commit under a removed principal)", n)
+	}
+}
+
+// Enable is a re-arming op, so a concurrent removal of the stored principal must
+// also block it fail-closed.
+func TestHookEnableBlocksOnConcurrentPrincipalRemoval(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	enableHooksFlag(t)
+	ctx := context.Background()
+	issueID := seedHookIssue(t)
+	memberA := seedHookMember(t, "member")
+	hook := createHookAs(t, memberA, sampleHookSpec("A hook", "hi", issueID))
+
+	// Disable it first (allowed) so a failed re-enable is observable.
+	if _, err := testHandler.HookService.SetEnabled(ctx, parseUUID(testWorkspaceID), parseUUID(hook.ID), false, "", memberAuthor(testUserID)); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+
+	err := runBlockedByMemberMutation(t,
+		`DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, []any{testWorkspaceID, memberA},
+		func() error {
+			_, e := testHandler.HookService.SetEnabled(context.Background(), parseUUID(testWorkspaceID), parseUUID(hook.ID), true, "", memberAuthor(testUserID))
+			return e
+		})
+	if err == nil {
+		t.Fatalf("EnableHook committed after the stored principal was removed mid-transaction")
+	}
+	var enabled bool
+	testPool.QueryRow(ctx, `SELECT enabled FROM hook WHERE id = $1`, hook.ID).Scan(&enabled)
+	if enabled {
+		t.Errorf("hook was re-enabled despite the principal being removed")
+	}
+}
+
+// A concurrent admin→member demotion of the EDITOR, committed mid-transaction, must
+// make the update fail closed (the editor is no longer authorized).
+func TestHookUpdateBlocksOnConcurrentEditorDemotion(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	enableHooksFlag(t)
+	issueID := seedHookIssue(t)
+	memberA := seedHookMember(t, "member") // stored principal (stays a member)
+	adminB := seedHookMember(t, "admin")   // editor, demoted mid-transaction
+	hook := createHookAs(t, memberA, sampleHookSpec("A hook", "hi", issueID))
+	spec := hookSpecFromMap(sampleHookSpec("edited", "x", issueID))
+
+	err := runBlockedByMemberMutation(t,
+		`UPDATE member SET role = 'member' WHERE workspace_id = $1 AND user_id = $2`, []any{testWorkspaceID, adminB},
+		func() error {
+			_, e := testHandler.HookService.UpdateHook(context.Background(), parseUUID(testWorkspaceID), parseUUID(hook.ID), spec, memberAuthor(adminB))
+			return e
+		})
+	if err == nil {
+		t.Fatalf("UpdateHook committed after the editor was demoted from admin mid-transaction")
+	}
+	if n := hookRevisionCount(t, hook.ID); n != 1 {
+		t.Errorf("hook_revision count = %d, want 1 (no revision may commit under a demoted editor)", n)
 	}
 }
 

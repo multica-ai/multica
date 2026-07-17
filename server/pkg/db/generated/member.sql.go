@@ -86,6 +86,38 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 	return i, err
 }
 
+const getMemberByUserAndWorkspaceForShare = `-- name: GetMemberByUserAndWorkspaceForShare :one
+SELECT id, workspace_id, user_id, role, created_at FROM member
+WHERE user_id = $1 AND workspace_id = $2
+FOR SHARE
+`
+
+type GetMemberByUserAndWorkspaceForShareParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Locking membership read for authorization inside a write transaction. FOR SHARE
+// takes a shared row lock that blocks a concurrent role UPDATE (demotion) or member
+// DELETE (removal) from committing until this transaction ends, so a hook write can
+// never commit under a membership/role that was revoked mid-transaction — a plain
+// read under READ COMMITTED would miss that (MUL-4332 PR2 review round 5). Multiple
+// concurrent hook writes may still share-lock the same member without blocking each
+// other. Use ONLY inside the hook write transaction; the plain variant remains for
+// non-transactional reads.
+func (q *Queries) GetMemberByUserAndWorkspaceForShare(ctx context.Context, arg GetMemberByUserAndWorkspaceForShareParams) (Member, error) {
+	row := q.db.QueryRow(ctx, getMemberByUserAndWorkspaceForShare, arg.UserID, arg.WorkspaceID)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getMemberInWorkspace = `-- name: GetMemberInWorkspace :one
 SELECT id, workspace_id, user_id, role, created_at FROM member
 WHERE id = $1 AND workspace_id = $2

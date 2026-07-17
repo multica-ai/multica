@@ -18,6 +18,19 @@ WHERE id = $1 AND workspace_id = $2;
 SELECT * FROM member
 WHERE user_id = $1 AND workspace_id = $2;
 
+-- name: GetMemberByUserAndWorkspaceForShare :one
+-- Locking membership read for authorization inside a write transaction. FOR SHARE
+-- takes a shared row lock that blocks a concurrent role UPDATE (demotion) or member
+-- DELETE (removal) from committing until this transaction ends, so a hook write can
+-- never commit under a membership/role that was revoked mid-transaction — a plain
+-- read under READ COMMITTED would miss that (MUL-4332 PR2 review round 5). Multiple
+-- concurrent hook writes may still share-lock the same member without blocking each
+-- other. Use ONLY inside the hook write transaction; the plain variant remains for
+-- non-transactional reads.
+SELECT * FROM member
+WHERE user_id = $1 AND workspace_id = $2
+FOR SHARE;
+
 -- name: CreateMember :one
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)

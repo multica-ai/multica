@@ -86,8 +86,10 @@ func (s *HookService) CreateHook(ctx context.Context, workspaceID pgtype.UUID, s
 
 	var out HookWithRevision
 	err = s.inTx(ctx, func(qtx *db.Queries) error {
-		// The creator's principal must be a current member of the workspace.
-		creator, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		// The creator's principal must be a current member of the workspace. The
+		// FOR SHARE lock blocks a concurrent removal/demotion from committing before
+		// this hook write does (review round 5).
+		creator, err := qtx.GetMemberByUserAndWorkspaceForShare(ctx, db.GetMemberByUserAndWorkspaceForShareParams{
 			UserID: author.PrincipalUserID, WorkspaceID: workspaceID,
 		})
 		if err != nil {
@@ -335,7 +337,9 @@ func (s *HookService) lockEditableHook(ctx context.Context, qtx *db.Queries, wor
 	if existing.Origin == "system" {
 		return db.Hook{}, ErrHookSystemManaged
 	}
-	editor, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+	// FOR SHARE so a concurrent removal/demotion of the editor cannot commit before
+	// this edit does — the authorization decision stays consistent to commit.
+	editor, err := qtx.GetMemberByUserAndWorkspaceForShare(ctx, db.GetMemberByUserAndWorkspaceForShareParams{
 		UserID: author.PrincipalUserID, WorkspaceID: workspaceID,
 	})
 	if err != nil {
@@ -355,7 +359,9 @@ func (s *HookService) lockEditableHook(ctx context.Context, qtx *db.Queries, wor
 // making live membership a hard precondition for re-arming a hook (update/enable).
 // A departed principal fails closed; a real DB error is propagated.
 func (s *HookService) requireLivePrincipal(ctx context.Context, qtx *db.Queries, workspaceID, principal pgtype.UUID) (db.Member, error) {
-	member, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+	// FOR SHARE so a concurrent removal of the stored principal cannot commit before
+	// the hook is re-armed under that principal's (now-stale) authority.
+	member, err := qtx.GetMemberByUserAndWorkspaceForShare(ctx, db.GetMemberByUserAndWorkspaceForShareParams{
 		UserID: principal, WorkspaceID: workspaceID,
 	})
 	if err != nil {
