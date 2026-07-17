@@ -724,6 +724,11 @@ export function ManualCreatePanel({
       disabled={submitBusy}
       aria-disabled={submitState === "missing_title" || undefined}
       aria-busy={submitBusy || undefined}
+      // The Button base only dims/blocks on native `disabled`, so aria-disabled
+      // would otherwise stay a fully lit, pressable-looking primary button.
+      // Deliberately no `pointer-events-none`: this control still has to hover
+      // its tooltip and take the click that focuses the title.
+      className="aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:active:translate-y-0"
     >
       {submitState === "submitting" ? (
         t(($) => $.create_issue.submitting)

@@ -1398,5 +1398,18 @@ describe("CreateIssueModal", () => {
       createButton.focus();
       expect(createButton).toHaveFocus();
     });
+
+    it("carries its own disabled visuals, since the Button base only styles native disabled", () => {
+      renderManual();
+      const createButton = screen.getByRole("button", { name: "Create Issue" });
+
+      // Without these the control reads as a live primary button while
+      // aria-disabled. `pointer-events-none` is deliberately absent: it would
+      // kill the tooltip hover and the click that focuses the title.
+      expect(createButton.className).toContain("aria-disabled:opacity-50");
+      expect(createButton.className).toContain("aria-disabled:cursor-not-allowed");
+      expect(createButton.className).toContain("aria-disabled:active:translate-y-0");
+      expect(createButton.className).not.toContain("aria-disabled:pointer-events-none");
+    });
   });
 });
