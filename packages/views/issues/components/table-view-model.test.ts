@@ -7,6 +7,7 @@ import {
   calculateIssueTableColumn,
   getIssueTableSelectionRange,
   isTableStructureSuspended,
+  shouldAutoLoadNextStructurePage,
 } from "./table-view-model";
 
 function makeIssue(id: string, overrides: Partial<Issue> = {}): Issue {
@@ -77,6 +78,57 @@ describe("isTableStructureSuspended", () => {
     expect(isTableStructureSuspended(0)).toBe(false);
     expect(isTableStructureSuspended(TABLE_STRUCTURE_MAX_WINDOW)).toBe(false);
     expect(isTableStructureSuspended(TABLE_STRUCTURE_MAX_WINDOW + 1)).toBe(true);
+  });
+});
+
+describe("shouldAutoLoadNextStructurePage", () => {
+  const base = {
+    structureWanted: true,
+    total: 500,
+    loadedCount: 100,
+    hasNextPage: true,
+    isFetchingNextPage: false,
+    hasError: false,
+  };
+
+  it("advances only while structure is wanted, healthy, and under the ceiling", () => {
+    expect(shouldAutoLoadNextStructurePage(base)).toBe(true);
+    expect(
+      shouldAutoLoadNextStructurePage({ ...base, structureWanted: false }),
+    ).toBe(false);
+    expect(shouldAutoLoadNextStructurePage({ ...base, hasNextPage: false })).toBe(
+      false,
+    );
+    expect(
+      shouldAutoLoadNextStructurePage({ ...base, isFetchingNextPage: true }),
+    ).toBe(false);
+  });
+
+  it("stops permanently on a fetch error instead of refiring (request storm)", () => {
+    // After a failed page fetch, hasNextPage stays true and
+    // isFetchingNextPage returns to false — exactly the state that used to
+    // re-trigger the loop forever.
+    expect(shouldAutoLoadNextStructurePage({ ...base, hasError: true })).toBe(
+      false,
+    );
+  });
+
+  it("hard-stops at the ceiling even when a stale total says otherwise", () => {
+    // page 1 reported total=900 (under the ceiling) but the window has since
+    // grown to 50,000: the fresh total suspends...
+    expect(
+      shouldAutoLoadNextStructurePage({ ...base, total: 50_000 }),
+    ).toBe(false);
+    // ...and independently of ANY reported total, the loaded count is an
+    // absolute stop at the ceiling — page 3 must never be requested once
+    // 1,000 rows are in memory.
+    expect(
+      shouldAutoLoadNextStructurePage({
+        ...base,
+        total: 900,
+        loadedCount: TABLE_STRUCTURE_MAX_WINDOW,
+      }),
+    ).toBe(false);
   });
 });
 

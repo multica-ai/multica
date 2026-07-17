@@ -90,6 +90,8 @@ export interface IssueSurfaceController {
   hasNextFlatPage: boolean;
   isFetchingNextFlatPage: boolean;
   flatTotal: number;
+  /** See IssueSurfaceData.flatWindowError. */
+  flatWindowError: boolean;
   tableSearch: string;
   setTableSearch: (query: string) => void;
   exportTableIssues: () => Promise<Issue[]>;

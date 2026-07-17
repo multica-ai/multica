@@ -613,6 +613,92 @@ describe("useIssueSurfaceController", () => {
     );
   });
 
+  it("reports the LATEST page's total so a stale first page cannot re-open the structure ceiling", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("table");
+    // page 1 claims a small window (under the ceiling); by page 2 the real
+    // window has grown far beyond it. The ceiling check must see the fresh
+    // total — pagination itself already advances on it.
+    listIssues.mockImplementation((params?: ListIssuesParams) =>
+      Promise.resolve(
+        (params?.offset ?? 0) === 0
+          ? {
+              issues: [
+                makeIssue({ id: "i-1", status: "todo" }),
+                makeIssue({ id: "i-2", status: "todo" }),
+              ],
+              total: 900,
+            }
+          : { issues: [makeIssue({ id: "i-3", status: "todo" })], total: 50_000 },
+      ),
+    );
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["table"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.flatTotal).toBe(900));
+    await act(async () => {
+      await result.current.fetchNextFlatPage();
+    });
+    await waitFor(() => expect(result.current.flatTotal).toBe(50_000));
+  });
+
+  it("materializes the working window past page one so the chip scope is complete", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("table");
+    // 101 running issues spread over two pages: presenting page 1 alone as
+    // the authoritative scope makes the chip under-count until the filter is
+    // toggled (round-4 review P2#3) — the bounded loop must fetch page 2 by
+    // itself, and only a COMPLETE window is treated as authoritative.
+    const runningIssues = Array.from({ length: 101 }, (_, index) =>
+      makeIssue({ id: `run-${index}`, status: "in_progress" }),
+    );
+    listIssues.mockImplementation((params?: ListIssuesParams) => {
+      if (params?.ids) {
+        const offset = params.offset ?? 0;
+        return Promise.resolve({
+          issues: runningIssues.slice(offset, offset + 100),
+          total: runningIssues.length,
+        });
+      }
+      return Promise.resolve({ issues: [], total: 0 });
+    });
+    setApiInstance({
+      listIssues,
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      getAgentTaskSnapshot: vi.fn(() =>
+        Promise.resolve(
+          runningIssues.map((issue, index) => ({
+            id: `task-${index}`,
+            issue_id: issue.id,
+            status: "running",
+          })) as unknown as AgentTask[],
+        ),
+      ),
+      getChildIssueProgress: vi.fn(() => never()),
+    } as unknown as ApiClient);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["table"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => {
+      expect(result.current.workingScopeIssues).toHaveLength(101);
+    });
+  });
+
   it("clears surface selection when the membership window changes (filters, search)", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("list");

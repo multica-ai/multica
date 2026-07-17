@@ -266,6 +266,7 @@ function IssueSurfaceContent({
                 fetchNextPage={controller.fetchNextFlatPage}
                 hasNextPage={controller.hasNextFlatPage}
                 isFetchingNextPage={controller.isFetchingNextFlatPage}
+                windowError={controller.flatWindowError}
                 total={controller.flatTotal}
                 search={controller.tableSearch}
                 onSearchChange={controller.setTableSearch}

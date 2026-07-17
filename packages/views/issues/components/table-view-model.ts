@@ -31,6 +31,37 @@ export function isTableStructureSuspended(total: number): boolean {
   return total > TABLE_STRUCTURE_MAX_WINDOW;
 }
 
+/**
+ * Single decision point for the structure materialization loop. Every gate
+ * here exists because its absence was a concrete failure mode:
+ *
+ * - `hasError`: a page that keeps failing leaves `hasNextPage` true and
+ *   `isFetchingNextPage` false after each attempt, so an ungated effect
+ *   refires forever — a silent request storm behind a stuck "Loaded X of N"
+ *   (round-4 review P1#1). Terminal errors stop the loop; resuming is an
+ *   explicit user Retry.
+ * - `loadedCount`: an ABSOLUTE stop at the ceiling, independent of any
+ *   server-reported total. The suspension check alone is not a hard limit
+ *   when totals drift between pages — a stale small page-1 total kept the
+ *   ceiling open while pagination advanced toward a much larger real window
+ *   (round-4 review P1#2).
+ * - `total` must be the FRESHEST page's total (pagination itself advances on
+ *   the latest page), for the same reason.
+ */
+export function shouldAutoLoadNextStructurePage(input: {
+  structureWanted: boolean;
+  total: number;
+  loadedCount: number;
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  hasError: boolean;
+}): boolean {
+  if (!input.structureWanted || input.hasError) return false;
+  if (isTableStructureSuspended(input.total)) return false;
+  if (input.loadedCount >= TABLE_STRUCTURE_MAX_WINDOW) return false;
+  return input.hasNextPage && !input.isFetchingNextPage;
+}
+
 export type IssueTableDisplayRow =
   | {
       kind: "group";

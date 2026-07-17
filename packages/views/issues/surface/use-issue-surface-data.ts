@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   useInfiniteQuery,
   useQuery,
@@ -93,6 +93,11 @@ export interface IssueSurfaceData {
   hasNextFlatPage: boolean;
   isFetchingNextFlatPage: boolean;
   flatTotal: number;
+  /** The flat window query is in error state (initial or next-page fetch,
+   *  retries exhausted). Auto-advance loops MUST stop on this — re-firing
+   *  after every failed attempt is a request storm — and surface an explicit
+   *  Retry instead. */
+  flatWindowError: boolean;
   filterIssuesForExport: (issues: Issue[]) => Issue[];
   isLoading: boolean;
   /** The window's data is being revalidated while the previous snapshot is
@@ -219,17 +224,50 @@ export function useIssueSurfaceData({
       EMPTY_ISSUES,
     [flatIssuesQuery.data?.pages],
   );
-  const flatTotal = flatIssuesQuery.data?.pages[0]?.total ?? 0;
+  // The LATEST page's total, not page 1's: totals drift while concurrent
+  // writes land, and the pagination protocol itself advances on the latest
+  // page's total — a consumer holding page 1's stale (smaller) total while
+  // hasNextPage kept advancing is how the structure ceiling stopped being a
+  // hard limit (round-4 review P1#2).
+  const flatPages = flatIssuesQuery.data?.pages;
+  const flatTotal = flatPages?.[flatPages.length - 1]?.total ?? 0;
 
   // Running-restricted window — the table branch of the workingScopeIssues
   // projection below. While the agents-working filter is on this observer
   // shares the main flat query's key (one fetch); while it is off, it keeps
   // the filter's window warm and gives the chip its authoritative scope.
   const hasRunningIssues = activity.runningIssueIds.size > 0;
+  const workingWindowEnabled = usesTable && hasRunningIssues;
   const workingWindowQuery = useInfiniteQuery({
     ...issueSurfaceFlatOptions(wsId, queryPlan, sort, workingFacets),
-    enabled: usesTable && hasRunningIssues,
+    enabled: workingWindowEnabled,
   });
+  // Materialize the running window to completion — it is inherently bounded
+  // by the running set (the ids facet), so this is a handful of pages at
+  // worst, and the chip must not present a single 100-row page as the whole
+  // scope (round-4 review P2#3). An error stops the loop (the projection
+  // then falls back to loaded rows); while the filter is ON this query is
+  // ALSO the main window, and the structure loop / sentinel drive it — this
+  // effect is idempotent alongside them (both no-op while a fetch is in
+  // flight).
+  const {
+    hasNextPage: workingWindowHasNext,
+    isFetchingNextPage: workingWindowFetchingNext,
+    isError: workingWindowError,
+    fetchNextPage: fetchNextWorkingWindowPage,
+  } = workingWindowQuery;
+  useEffect(() => {
+    if (!workingWindowEnabled || workingWindowError) return;
+    if (workingWindowHasNext && !workingWindowFetchingNext) {
+      void fetchNextWorkingWindowPage();
+    }
+  }, [
+    fetchNextWorkingWindowPage,
+    workingWindowEnabled,
+    workingWindowError,
+    workingWindowFetchingNext,
+    workingWindowHasNext,
+  ]);
   const bucketedIssues = useMemo(() => {
     return usesAssigneeBoard
       ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
@@ -383,15 +421,18 @@ export function useIssueSurfaceData({
       ).flatMap((group) => group.issues);
     }
     if (usesTable) {
-      const workingWindowRows = workingWindowQuery.data?.pages.flatMap(
-        (page) => page.issues,
-      );
-      // Fall back to the loaded-rows projection only while the authoritative
-      // window is still resolving (or nothing is running — the query is
-      // disabled then and the projection is trivially correct).
-      if (workingWindowRows) {
+      // Authoritative ONLY when complete: presenting a single 100-row page
+      // as the whole scope makes the chip under-count the moment more than
+      // one page of issues is running (round-4 review P2#3). The bounded
+      // effect above drives the window to completion; until then — and on
+      // error — fall back to the loaded-rows projection.
+      const workingWindowComplete =
+        workingWindowQuery.data !== undefined &&
+        !workingWindowHasNext &&
+        !workingWindowError;
+      if (workingWindowComplete) {
         return applyIssueFilters(
-          workingWindowRows,
+          workingWindowQuery.data.pages.flatMap((page) => page.issues),
           { ...baseFilterState, workingOnly: true },
           filterContext,
         );
@@ -415,7 +456,9 @@ export function useIssueSurfaceData({
     usesAssigneeBoard,
     usesGantt,
     usesTable,
-    workingWindowQuery.data?.pages,
+    workingWindowError,
+    workingWindowHasNext,
+    workingWindowQuery.data,
   ]);
 
   const {
@@ -558,6 +601,7 @@ export function useIssueSurfaceData({
     hasNextFlatPage: flatIssuesQuery.hasNextPage ?? false,
     isFetchingNextFlatPage: flatIssuesQuery.isFetchingNextPage,
     flatTotal,
+    flatWindowError: flatIssuesQuery.isError,
     filterIssuesForExport,
     isLoading,
     isRefreshing,

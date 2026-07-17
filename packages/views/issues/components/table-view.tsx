@@ -111,6 +111,7 @@ import {
   buildIssueTableRows,
   getIssueTableSelectionRange,
   isTableStructureSuspended,
+  shouldAutoLoadNextStructurePage,
   type IssueTableDisplayRow,
 } from "./table-view-model";
 import type { ChildProgress } from "./list-row";
@@ -125,6 +126,9 @@ type TableViewProps = {
   fetchNextPage: () => Promise<unknown>;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
+  /** The window query is in error state — page auto-advance (structure loop
+   *  AND scroll sentinel) must stop and hand control to the explicit Retry. */
+  windowError: boolean;
   total: number;
   search: string;
   onSearchChange: (query: string) => void;
@@ -647,6 +651,7 @@ export function TableView({
   fetchNextPage,
   hasNextPage,
   isFetchingNextPage,
+  windowError,
   total,
   search,
   onSearchChange,
@@ -707,19 +712,35 @@ export function TableView({
   // also makes hierarchy apply without scrolling to the last page (round-3
   // P1#2). Above the ceiling both features suspend and the toolbar notice
   // explains why; the window keeps the one-page-per-scroll sentinel.
+  // Advancement gates (error stop, hard loaded-count ceiling, fresh total)
+  // live in shouldAutoLoadNextStructurePage — see its doc for the failure
+  // modes each gate closes (round-4 review P1#1/P1#2).
   const structureSuspended = isTableStructureSuspended(total);
   const structureWanted = effectiveTableGrouping !== "none" || tableHierarchy;
   const structureGrouping = structureSuspended ? "none" : effectiveTableGrouping;
   const structureHierarchy = tableHierarchy && !structureSuspended;
+  const loadedCount = issues.length;
   useEffect(() => {
-    if (structureSuspended || !structureWanted) return;
-    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+    if (
+      shouldAutoLoadNextStructurePage({
+        structureWanted,
+        total,
+        loadedCount,
+        hasNextPage,
+        isFetchingNextPage,
+        hasError: windowError,
+      })
+    ) {
+      void fetchNextPage();
+    }
   }, [
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-    structureSuspended,
+    loadedCount,
     structureWanted,
+    total,
+    windowError,
   ]);
 
   const visibleColumnConfigs = useMemo(
@@ -1214,7 +1235,12 @@ export function TableView({
         >
           <InfiniteScrollSentinel
             onVisible={() => {
-              if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+              // A failed window stops implicit loading too — otherwise every
+              // visibility transition retries into the same failure. The
+              // toolbar Retry is the explicit resume path.
+              if (hasNextPage && !isFetchingNextPage && !windowError) {
+                void fetchNextPage();
+              }
             }}
             loading={false}
             rootMargin="320px"
@@ -1236,6 +1262,15 @@ export function TableView({
         />
         <span className="mr-auto min-w-0 truncate text-xs text-muted-foreground">
           {t(($) => $.table.loaded_count, { count: issues.length, total })}
+          {windowError && hasNextPage && (
+            <button
+              type="button"
+              onClick={() => void fetchNextPage()}
+              className="ml-2 text-destructive underline-offset-2 hover:underline"
+            >
+              {t(($) => $.table.load_more_failed_retry)}
+            </button>
+          )}
           {structureSuspended && structureWanted && (
             <span className="ml-2">
               {t(($) => $.table.structure_paused, {
