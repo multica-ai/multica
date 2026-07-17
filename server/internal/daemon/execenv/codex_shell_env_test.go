@@ -116,6 +116,38 @@ func TestCodexShellEnvAllowlistIncludesExplicitCredentialNames(t *testing.T) {
 	}
 }
 
+// Regression for the #5601 follow-up at the config layer: when an explicit
+// custom_env key is a case-variant of an inherited daemon secret, the allowlist
+// must emit only the explicit name — not the inherited secret. include_only
+// matches case-insensitively, so the daemon (buildCodexEnv) drops the inherited
+// case-variant from the process env; here we assert the config side never
+// re-adds it and folds to a single entry.
+func TestCodexShellEnvAllowlistCaseVariantExplicitDropsInheritedSecret(t *testing.T) {
+	t.Parallel()
+
+	got := CodexShellEnvAllowlist(
+		[]string{"PATH=/usr/bin", "HOST_API_KEY=daemon-secret"},
+		map[string]string{"host_api_key": "agent-value"},
+	)
+	want := []string{"host_api_key", "PATH"} // case-insensitive sort: HOST_API_KEY < PATH
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CodexShellEnvAllowlist() = %#v, want %#v", got, want)
+	}
+	// Exactly one entry folds to HOST_API_KEY, and it is the explicit casing.
+	folded := 0
+	for _, k := range got {
+		if strings.EqualFold(k, "HOST_API_KEY") {
+			folded++
+			if k != "host_api_key" {
+				t.Fatalf("allowlist emitted inherited casing %q, want explicit host_api_key", k)
+			}
+		}
+	}
+	if folded != 1 {
+		t.Fatalf("expected exactly one HOST_API_KEY-folded entry, got %d in %#v", folded, got)
+	}
+}
+
 // Regression for #5601 at the config layer: the credential-named explicit key
 // must land in the managed include_only that nested shell/worker subprocesses
 // read, while its value never touches config.toml.

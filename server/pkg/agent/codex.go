@@ -735,7 +735,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	cmd.Env = buildCodexEnv(b.cfg.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -1470,6 +1470,36 @@ func appendCodexKnownStderrHint(msg, stderrTail string) string {
 		return msg + "; diagnosis: Codex stderr shows the model catalog refresh timed out. Try setting an explicit model, switching Codex CLI versions, or using another runtime while Codex app-server recovers"
 	}
 	return msg
+}
+
+// buildCodexEnv assembles the Codex child-process environment. Beyond
+// buildEnv's inherited-namespace filtering, it drops any inherited variable
+// whose name case-insensitively collides with an explicitly configured key.
+//
+// Codex matches shell_environment_policy.include_only case-insensitively, and
+// the daemon allowlists explicit custom_env keys by their exact name. On a
+// case-sensitive OS (macOS/Linux) an inherited daemon secret like
+// HOST_API_KEY and an explicit custom_env host_api_key would both survive the
+// case-sensitive parent environment, so the case-insensitive include_only entry
+// for host_api_key would pull the daemon secret HOST_API_KEY into the task
+// shell. Removing the inherited case-variant here keeps the explicit value the
+// only survivor; the folding mirrors the allowlist's (see
+// execenv.CodexShellEnvAllowlist), so the two never disagree.
+func buildCodexEnv(extra map[string]string) []string {
+	explicitFolded := make(map[string]struct{}, len(extra))
+	for k := range extra {
+		explicitFolded[strings.ToUpper(k)] = struct{}{}
+	}
+	inherited := os.Environ()
+	base := make([]string, 0, len(inherited))
+	for _, entry := range inherited {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, collides := explicitFolded[strings.ToUpper(key)]; collides {
+			continue
+		}
+		base = append(base, entry)
+	}
+	return mergeEnv(base, extra)
 }
 
 func detectCodexVersionForDiagnostics(ctx context.Context, execPath string, env []string, logger *slog.Logger) string {

@@ -3221,3 +3221,48 @@ func TestHasManagedCodexMcpConfig(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildCodexEnvDropsInheritedCaseCollisionWithExplicitKey is a regression
+// for the #5601 follow-up: on case-sensitive OSes (macOS/Linux) an inherited
+// daemon secret must not ride Codex's case-insensitive
+// shell_environment_policy.include_only into the task shell when an explicit
+// custom_env key shares its case-folded name. buildCodexEnv must drop the
+// inherited case-variant and keep only the explicit value.
+func TestBuildCodexEnvDropsInheritedCaseCollisionWithExplicitKey(t *testing.T) {
+	// buildCodexEnv reads os.Environ(); t.Setenv forbids t.Parallel.
+	t.Setenv("HOST_API_KEY", "daemon-secret")
+	t.Setenv("UNRELATED_INHERITED", "keep-me")
+
+	env := buildCodexEnv(map[string]string{
+		"host_api_key":    "agent-value", // case-variant of the inherited secret
+		"CUSTOM_ENDPOINT": "https://example.com",
+	})
+
+	var hostFolded []string
+	sawExplicit, sawUnrelated := false, false
+	for _, entry := range env {
+		key, val, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(key, "HOST_API_KEY") {
+			hostFolded = append(hostFolded, entry)
+			if val == "daemon-secret" {
+				t.Fatalf("inherited daemon secret leaked into Codex env: %q", entry)
+			}
+		}
+		if key == "host_api_key" && val == "agent-value" {
+			sawExplicit = true
+		}
+		if key == "UNRELATED_INHERITED" && val == "keep-me" {
+			sawUnrelated = true
+		}
+	}
+	if !sawExplicit {
+		t.Fatalf("explicit host_api_key=agent-value missing:\n%s", strings.Join(env, "\n"))
+	}
+	// Exactly one entry folds to HOST_API_KEY — the explicit one.
+	if len(hostFolded) != 1 {
+		t.Fatalf("expected exactly one HOST_API_KEY-folded entry, got %v", hostFolded)
+	}
+	if !sawUnrelated {
+		t.Fatalf("unrelated inherited var was wrongly dropped:\n%s", strings.Join(env, "\n"))
+	}
+}
