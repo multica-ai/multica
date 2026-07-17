@@ -238,14 +238,15 @@ func assignPositiveDuration(dst *string, key, value string) error {
 		*dst = ""
 		return nil
 	}
-	d, err := time.ParseDuration(strings.TrimSpace(value))
+	normalized := strings.TrimSpace(value)
+	d, err := time.ParseDuration(normalized)
 	if err != nil {
 		return fmt.Errorf("%s must be a Go duration (e.g. 10s, 500ms): %w", key, err)
 	}
 	if d <= 0 {
 		return fmt.Errorf("%s must be positive (got %s); use `config set %s \"\"` to clear it", key, d, key)
 	}
-	*dst = value
+	*dst = normalized
 	return nil
 }
 

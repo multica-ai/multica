@@ -135,6 +135,41 @@ func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 	}
 }
 
+func TestApplyConfigSetPositiveDurationRoundTripsToDaemonResolver(t *testing.T) {
+	const envName = "TEST_MULTICA_PERSISTED_DURATION"
+	t.Setenv(envName, "")
+
+	cases := []struct {
+		key  string
+		read func(cli.CLIConfig) string
+	}{
+		{"heartbeat_interval", func(cfg cli.CLIConfig) string { return cfg.HeartbeatInterval }},
+		{"codex_semantic_inactivity_timeout", func(cfg cli.CLIConfig) string { return cfg.CodexSemanticInactivityTimeout }},
+		{"codex_handshake_timeout", func(cfg cli.CLIConfig) string { return cfg.CodexHandshakeTimeout }},
+		{"auto_update_check_interval", func(cfg cli.CLIConfig) string { return cfg.AutoUpdateCheckInterval }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			cfg := cli.CLIConfig{}
+			if err := applyConfigSet(&cfg, tc.key, " 5s "); err != nil {
+				t.Fatalf("applyConfigSet: %v", err)
+			}
+
+			stored := tc.read(cfg)
+			if stored != "5s" {
+				t.Fatalf("stored value = %q, want canonical %q", stored, "5s")
+			}
+			got, err := resolveDaemonDurationOverride(0, envName, stored)
+			if err != nil {
+				t.Fatalf("resolve persisted value: %v", err)
+			}
+			if got != 5*time.Second {
+				t.Fatalf("resolved duration = %v, want %v", got, 5*time.Second)
+			}
+		})
+	}
+}
+
 // TestApplyConfigSetAgentTimeoutTriState pins the agent_timeout
 // pointer-based semantics: "" clears, "0s" persists as an explicit
 // "disabled" sentinel, positive durations persist as-is. Negative
@@ -270,4 +305,3 @@ func TestPollIntervalRoundTripThroughDuration(t *testing.T) {
 		t.Fatalf("parsed = %v, want %v", got, want)
 	}
 }
-
