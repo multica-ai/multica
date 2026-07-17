@@ -457,6 +457,7 @@
     "retry_task_aria": "Retry task",
     "retry_failed": "Failed to retry task",
     "retry_blocked": "Not retried — you don't have permission to use this agent",
+    "retry_success": "Task retried",
     "transcript_tooltip": "View transcript",
     "cancel_failed": "Failed to cancel task",
     "trigger_retry": "Retry",
