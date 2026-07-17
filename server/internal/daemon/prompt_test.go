@@ -553,6 +553,36 @@ func TestBuildChatPromptSlashSkills(t *testing.T) {
 	})
 }
 
+func TestBuildPromptPrependsNativeSkillInvocations(t *testing.T) {
+	task := Task{
+		IssueID: "issue-1",
+		SelectedSkillInvocations: []SkillInvocationData{
+			{Name: "deploy"},
+			{Name: "review"},
+		},
+	}
+	out := BuildPrompt(task, "pi")
+	if !strings.HasPrefix(out, "/skill:deploy\n/skill:review\n\nYou are running as a local coding agent") {
+		t.Fatalf("prompt must start with native skill commands, got:\n%s", out)
+	}
+}
+
+func TestBuildPromptDoesNotPrependNativeSkillInvocationsForUnsupportedProvider(t *testing.T) {
+	task := Task{
+		IssueID: "issue-1",
+		SelectedSkillInvocations: []SkillInvocationData{
+			{Name: "deploy"},
+		},
+	}
+	out := BuildPrompt(task, "codex")
+	if strings.HasPrefix(out, "/skill:deploy") {
+		t.Fatalf("unsupported provider must not receive native skill command, got:\n%s", out)
+	}
+	if !strings.HasPrefix(out, "You are running as a local coding agent") {
+		t.Fatalf("prompt should keep normal wrapper first, got:\n%s", out)
+	}
+}
+
 // TestBuildPromptDefaultMentionsRecent pins that the catch-all fallback
 // prompt (no trigger comment, no chat, no autopilot, no quick-create)
 // starts assignment-triggered comment catch-up with a bounded recent read,

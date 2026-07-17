@@ -15,30 +15,50 @@ import (
 // post with `--content-file`) because the shell-layer corruption it guards
 // against is not specific to any one provider or host (MUL-2904, #4182).
 func BuildPrompt(task Task, provider string) string {
+	var prompt string
 	if task.ChatSessionID != "" {
-		return buildChatPrompt(task)
+		prompt = buildChatPrompt(task)
+	} else if task.TriggerCommentID != "" {
+		prompt = buildCommentPrompt(task, provider)
+	} else if task.AutopilotRunID != "" {
+		prompt = buildAutopilotPrompt(task)
+	} else if task.QuickCreatePrompt != "" {
+		prompt = buildQuickCreatePrompt(task)
+	} else {
+		var b strings.Builder
+		b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
+		fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+		// Assignment handoff (MUL-3375): a free-text instruction the person who
+		// assigned/promoted this issue left for you. Frame it as a handoff, not a
+		// comment to reply to — there is no comment thread to answer here.
+		if task.HandoffNote != "" {
+			b.WriteString("You were handed this issue with a handoff note. Treat it as the assigner's scoping instruction for this run; follow it before doing anything broader, and do not reply to it as if it were a comment:\n\n")
+			fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
+		}
+		fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
+		fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Start with `multica issue comment list %s --recent 10 --output json` to read the 10 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. Resolved threads come back folded — `--full` to expand. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
+		prompt = b.String()
 	}
-	if task.TriggerCommentID != "" {
-		return buildCommentPrompt(task, provider)
-	}
-	if task.AutopilotRunID != "" {
-		return buildAutopilotPrompt(task)
-	}
-	if task.QuickCreatePrompt != "" {
-		return buildQuickCreatePrompt(task)
+	return prependNativeSkillInvocations(prompt, provider, task.SelectedSkillInvocations)
+}
+
+func prependNativeSkillInvocations(prompt, provider string, selected []SkillInvocationData) string {
+	if len(selected) == 0 || provider != "pi" {
+		return prompt
 	}
 	var b strings.Builder
-	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
-	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
-	// Assignment handoff (MUL-3375): a free-text instruction the person who
-	// assigned/promoted this issue left for you. Frame it as a handoff, not a
-	// comment to reply to — there is no comment thread to answer here.
-	if task.HandoffNote != "" {
-		b.WriteString("You were handed this issue with a handoff note. Treat it as the assigner's scoping instruction for this run; follow it before doing anything broader, and do not reply to it as if it were a comment:\n\n")
-		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
+	for _, skill := range selected {
+		name := strings.TrimSpace(skill.Name)
+		if name == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "/skill:%s\n", name)
 	}
-	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
-	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Start with `multica issue comment list %s --recent 10 --output json` to read the 10 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. Resolved threads come back folded — `--full` to expand. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
+	if b.Len() == 0 {
+		return prompt
+	}
+	b.WriteString("\n")
+	b.WriteString(prompt)
 	return b.String()
 }
 
