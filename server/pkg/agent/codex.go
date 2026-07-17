@@ -19,8 +19,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-
-	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
@@ -65,23 +63,8 @@ var activeCodexLaunches atomic.Int64
 var maxActiveCodexLaunchesObserved atomic.Int64
 var codexCleanupConfirmationOverride atomic.Int32
 
-var (
-	codexAuthorizationHeaderRe = regexp.MustCompile(`(?im)(authorization\s*:\s*)[^\r\n]+`)
-	codexJSONSecretRe          = regexp.MustCompile(`(?i)("(?:token|auth|authorization|api[_-]?key|secret|password)"\s*:\s*)"(?:\\.|[^"\\])*"`)
-	codexDiagnosticSecretRe    = regexp.MustCompile(`(?i)(authorization|auth|api[_-]?key|token|secret|password)(\s*[:=]\s*)([^\s,;]+)`)
-)
-
 func sanitizeCodexDiagnostic(value string) string {
-	value = strings.Map(func(r rune) rune {
-		if r < 0x20 && r != '\n' && r != '\t' {
-			return -1
-		}
-		return r
-	}, value)
-	value = codexAuthorizationHeaderRe.ReplaceAllString(value, `$1[REDACTED]`)
-	value = codexJSONSecretRe.ReplaceAllString(value, `$1"[REDACTED]"`)
-	value = codexDiagnosticSecretRe.ReplaceAllString(value, `$1$2[REDACTED]`)
-	return redact.Text(value)
+	return sanitizeAgentDiagnostic(value)
 }
 
 func codexProcessExitStatus(state *os.ProcessState) any {
