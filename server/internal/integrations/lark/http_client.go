@@ -291,8 +291,8 @@ type markdownReferenceDefinitionScanState struct {
 }
 
 type markdownLineContainer struct {
-	blockquote int
-	list       bool
+	blockquote        int
+	listContentIndent int
 }
 
 func (s *markdownReferenceDefinitionScanState) skipLine(markdown string, start int) bool {
@@ -357,7 +357,9 @@ func markdownLineContainerForLine(markdown string, start int) markdownLineContai
 	}
 	j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
 	if ok {
-		_, container.list = skipMarkdownListMarker(markdown, j)
+		if after, ok := skipMarkdownListMarker(markdown, j); ok {
+			container.listContentIndent = after - start
+		}
 	}
 	return container
 }
@@ -367,7 +369,10 @@ func lineBelongsToMarkdownContainer(markdown string, start int, container markdo
 	if current.blockquote < container.blockquote {
 		return false
 	}
-	return !container.list || current.list || isBlankMarkdownLine(markdown, start) || markdownLineIndent(markdown, start) >= 2
+	if container.listContentIndent == 0 {
+		return true
+	}
+	return isBlankMarkdownLine(markdown, start) || markdownLineIndent(markdown, start) >= container.listContentIndent
 }
 
 func isBlankMarkdownLine(markdown string, start int) bool {
