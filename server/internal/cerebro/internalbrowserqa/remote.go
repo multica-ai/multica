@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -65,7 +66,11 @@ func (r *RemoteRunner) Verify(ctx context.Context, app string, credential Creden
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return Result{}, fmt.Errorf("internal browser verification failed")
+		var failure struct {
+			Error string `json:"error"`
+		}
+		_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<10)).Decode(&failure)
+		return Result{}, errors.New(SafeError(errors.New(failure.Error)))
 	}
 	var result Result
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxScreenshotBytes+1<<20)).Decode(&result); err != nil {
