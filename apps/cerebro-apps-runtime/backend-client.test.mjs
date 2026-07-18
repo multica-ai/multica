@@ -20,13 +20,13 @@ test("signs callbacks and reads pending deployments", async () => {
     fetch: async (url, init = {}) => {
       requests.push({ url: String(url), init });
       if (init.method === "POST") return Response.json({ status: "ready" });
-      return Response.json([{ app_id: "a", version: "1.0.0", bundle_sha256: "b" }]);
+      return Response.json([{ app_id: "a", app_name: "Allergen Formatter", version: "1.0.0", bundle_sha256: "b" }]);
     },
   });
   await client.callback("a", "1.0.0", { status: "ready" });
   assert.match(requests[0].init.headers["x-multica-signature"], /^sha256=/);
   assert.ok(requests[0].init.headers["x-multica-timestamp"]);
-  assert.deepEqual(await client.pending(), [{ appId: "a", version: "1.0.0", bundleSha256: "b" }]);
+  assert.deepEqual(await client.pending(), [{ appId: "a", appName: "Allergen Formatter", version: "1.0.0", bundleSha256: "b" }]);
 });
 
 test("resolves the concrete ready internal domain instead of guessing a service name", async () => {

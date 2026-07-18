@@ -76,10 +76,10 @@ export function createAppsRuntime(options = {}) {
 			} catch {
 				return json({ error: "Request body must be valid JSON" }, 400);
 			}
-			if (!deploymentManager || !new RegExp(`^${UUID}$`, "i").test(payload.app_id) || !new RegExp(`^${SEMVER}$`, "i").test(payload.version) || !/^[0-9a-f]{64}$/i.test(payload.bundle_sha256)) {
+			if (!deploymentManager || !new RegExp(`^${UUID}$`, "i").test(payload.app_id) || typeof payload.app_name !== "string" || !payload.app_name.trim() || /[\u0000-\u001f\u007f]/.test(payload.app_name) || !new RegExp(`^${SEMVER}$`, "i").test(payload.version) || !/^[0-9a-f]{64}$/i.test(payload.bundle_sha256)) {
 				return json({ error: "Invalid deployment request" }, 400);
 			}
-			deploymentManager.deploy({ appId: payload.app_id, version: payload.version, bundleSha256: payload.bundle_sha256 }).catch((error) => {
+			deploymentManager.deploy({ appId: payload.app_id, appName: payload.app_name.trim(), version: payload.version, bundleSha256: payload.bundle_sha256 }).catch((error) => {
 				console.error("mini-app deployment dispatch failed", { appId: payload.app_id, version: payload.version, error });
 			});
 			return json({ status: "provisioning" }, 202);

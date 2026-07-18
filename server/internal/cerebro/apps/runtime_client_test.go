@@ -35,11 +35,27 @@ func TestRuntimeClientSignsDeploymentRequest(t *testing.T) {
 	client := NewRuntimeClient(server.URL, secret)
 	err := client.Deploy(context.Background(), RuntimeDeploymentRequest{
 		AppID:        "f1540000-0000-4154-8154-000000000001",
+		AppName:      "Allergen Formatter",
 		Version:      "1.0.0",
 		BundleSHA256: strings.Repeat("a", 64),
 	})
 	if err != nil {
 		t.Fatalf("deploy: %v", err)
+	}
+}
+
+func TestRuntimeDeploymentRequestIncludesHumanAppName(t *testing.T) {
+	body, err := json.Marshal(RuntimeDeploymentRequest{
+		AppID:        "f1540000-0000-4154-8154-000000000001",
+		AppName:      "Allergen Formatter",
+		Version:      "1.0.0",
+		BundleSHA256: strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"app_name":"Allergen Formatter"`) {
+		t.Fatalf("human app name missing from deployment request: %s", body)
 	}
 }
 
