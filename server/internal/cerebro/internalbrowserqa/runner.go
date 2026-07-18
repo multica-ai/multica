@@ -28,6 +28,7 @@ type Target struct {
 	UsernameSelector string
 	PasswordSelector string
 	SubmitSelector   string
+	NavigateLinkName string
 	ExpectedText     []string
 	SessionCookie    bool
 }
@@ -43,11 +44,11 @@ func (t Target) Host() string {
 var targets = map[string]Target{
 	"multica": {
 		Name: "multica", URL: "http://multica.internal:3000/login",
-		ExpectedText: []string{"Issues", "Agents"}, SessionCookie: true,
+		NavigateLinkName: "Issues", ExpectedText: []string{"Issues", "Agents", "Settings"}, SessionCookie: true,
 	},
 	"cerebro": {
 		Name: "cerebro", URL: "http://multica-staging-web.internal:3000/login",
-		ExpectedText: []string{"Issues", "Agents"}, SessionCookie: true,
+		NavigateLinkName: "Issues", ExpectedText: []string{"Issues", "Agents", "Settings"}, SessionCookie: true,
 	},
 	"registry": {
 		Name: "registry", URL: "http://firtal-data-registry-private.internal:3000/auth/login?manual=true",
@@ -177,6 +178,7 @@ func SafeError(err error) string {
 		"internal browser stage auth failed",
 		"internal browser stage reload failed",
 		"internal browser stage render failed",
+		"internal browser stage navigation failed",
 		"internal browser stage snapshot failed",
 		"internal browser stage markers failed",
 		"internal browser stage url failed",
@@ -251,6 +253,14 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	}
 	if _, err := r.runStage(ctx, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
 		return Result{}, err
+	}
+	if target.NavigateLinkName != "" {
+		if _, err := r.runStage(ctx, "navigation", "", append(baseArgs, "find", "role", "link", "click", "--name", target.NavigateLinkName)...); err != nil {
+			return Result{}, err
+		}
+		if _, err := r.runStage(ctx, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
+			return Result{}, err
+		}
 	}
 	snapshot, err := r.runStage(ctx, "snapshot", "", append(baseArgs, "snapshot")...)
 	if err != nil {

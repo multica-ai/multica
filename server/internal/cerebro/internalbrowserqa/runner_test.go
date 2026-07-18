@@ -37,7 +37,7 @@ func (c *recordingCommander) Run(_ context.Context, stdin string, args ...string
 	case len(args) > 0 && args[len(args)-1] == "url":
 		return []byte("http://firtal-data-registry-private.internal:3000/\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "snapshot":
-		return []byte("Dashboard\nData Sources\nYour roles:\nIssues\nAgents\nDesk\nAnalytics\nLogout\n"), nil
+		return []byte("Dashboard\nData Sources\nYour roles:\nIssues\nAgents\nSettings\nDesk\nAnalytics\nLogout\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "errors":
 		return []byte("[]\n"), nil
 	default:
@@ -83,6 +83,38 @@ func TestFinanceTargetUsesAuthenticatedDashboardMarker(t *testing.T) {
 	}
 	if len(target.ExpectedText) != 1 || target.ExpectedText[0] != "Your roles:" {
 		t.Fatalf("finance markers = %v, want Your roles:", target.ExpectedText)
+	}
+}
+
+func TestMulticaTargetUsesFullProductionNavigationMarkers(t *testing.T) {
+	target, err := TargetFor("multica")
+	if err != nil {
+		t.Fatalf("TargetFor(multica): %v", err)
+	}
+	want := []string{"Issues", "Agents", "Settings"}
+	if strings.Join(target.ExpectedText, "|") != strings.Join(want, "|") {
+		t.Fatalf("multica markers = %v, want %v", target.ExpectedText, want)
+	}
+}
+
+func TestRunnerNavigatesMulticaToIssuesBeforeSnapshot(t *testing.T) {
+	commander := &recordingCommander{}
+	if _, err := NewRunner(commander).Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"}); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	var navigateIndex, snapshotIndex = -1, -1
+	for i, call := range commander.calls {
+		joined := strings.Join(call.args, " ")
+		if strings.Contains(joined, "find role link click --name Issues") {
+			navigateIndex = i
+		}
+		if len(call.args) > 0 && call.args[len(call.args)-1] == "snapshot" {
+			snapshotIndex = i
+		}
+	}
+	if navigateIndex < 0 || snapshotIndex <= navigateIndex {
+		t.Fatalf("navigate/snapshot order = %d/%d, want Issues navigation before snapshot", navigateIndex, snapshotIndex)
 	}
 }
 
