@@ -18,6 +18,7 @@ import { evalBindingsOptions, evalKeys, evalRunsOptions, evalsListOptions } from
 import { buildWriteInput, EMPTY_FORM, formFromEval, GRADER_MATCHES, type DraftTask } from "./form";
 import { EVAL_TEMPLATES, duplicateForm } from "./templates";
 import { statusInput } from "./lifecycle";
+import { filterEvals, STATUS_FILTERS, statusCounts, type StatusFilter } from "./catalog";
 import { formatCost, formatDuration } from "../format";
 import { RunDetail } from "./run-detail";
 import { EvalDetail, type EvalDetailTab } from "./eval-detail";
@@ -31,6 +32,7 @@ export function EvalsPage() {
   const queryClient = useQueryClient();
   const workspaceId = workspace?.id ?? "";
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<CerebroEval | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -78,10 +80,8 @@ export function EvalsPage() {
   });
   const unbindMutation = useMutation({ mutationFn: deleteEvalBinding, onSuccess: () => queryClient.invalidateQueries({ queryKey: evalKeys.bindings(workspaceId) }) });
 
-  const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return (evalsQuery.data ?? []).filter((item) => !needle || [item.title, item.key, item.objective, String(item.target.kind ?? "")].some((value) => value.toLowerCase().includes(needle)));
-  }, [evalsQuery.data, search]);
+  const counts = useMemo(() => statusCounts(evalsQuery.data ?? []), [evalsQuery.data]);
+  const filtered = useMemo(() => filterEvals(evalsQuery.data ?? [], statusFilter, search), [evalsQuery.data, statusFilter, search]);
 
   if (!workflowsEnabled || !evalsEnabled) return null;
   if (!workspace) return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading workspace context…</div>;
@@ -166,6 +166,7 @@ export function EvalsPage() {
 
           <section className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold">Catalog</h2><p className="text-xs text-muted-foreground">One searchable definition per eval version — never one workspace skill per eval.</p></div><Input className="max-w-xs" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search evals…" /></div>
+            <div className="flex flex-wrap gap-1.5">{STATUS_FILTERS.map((status) => <Button key={status} size="sm" variant={statusFilter === status ? "secondary" : "ghost"} aria-pressed={statusFilter === status} onClick={() => setStatusFilter(status)}><span className="capitalize">{status}</span><Badge variant="outline" className="ml-1.5">{counts[status]}</Badge></Button>)}</div>
             {evalsQuery.isError && <p className="text-sm text-destructive">Failed to load evals.</p>}
             <Table><TableHeader><TableRow><TableHead>Eval</TableHead><TableHead>Target</TableHead><TableHead>Version</TableHead><TableHead>Status</TableHead><TableHead>Source</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader><TableBody>
               {filtered.length === 0 && !evalsQuery.isLoading && <TableRow><TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground"><FlaskConical className="mx-auto mb-2 size-5" />No evals found.</TableCell></TableRow>}
