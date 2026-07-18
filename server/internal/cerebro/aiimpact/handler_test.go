@@ -707,6 +707,67 @@ func TestWorkspaceEvidenceReadModelFiltersSourceBeforeSelectingLatestObservation
 	}
 }
 
+func TestWorkspaceEvidenceReadModelFiltersMinimumConfidenceBeforeSelectingLatestObservation(t *testing.T) {
+	workspaceID := uuid.New()
+	functionID := uuid.New()
+	operatingLoopID := uuid.New()
+	metricID := uuid.New()
+	periodStart := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.Add(24 * time.Hour)
+	store := &recordingObservationStore{
+		functions: []Function{
+			{ID: functionID, WorkspaceID: workspaceID, Name: "Customer Service", Active: true},
+		},
+		operatingLoops: []OperatingLoop{
+			{ID: operatingLoopID, WorkspaceID: workspaceID, FunctionID: functionID, Name: "Resolve customer needs", Active: true},
+		},
+		metrics: []Metric{
+			{ID: metricID, WorkspaceID: workspaceID, OperatingLoopID: operatingLoopID, Name: "Resolved needs", Family: FamilyOutcome, Unit: "needs", Direction: DirectionIncrease, Source: "support", Active: true},
+		},
+		workspaceObservations: []Observation{
+			{
+				ID: uuid.New(), MetricID: metricID, PeriodStart: periodStart, PeriodEnd: periodEnd,
+				Value: 15, EvidenceStatus: EvidenceMeasured, Confidence: 0.9,
+				Source: "support", Method: "audited count", CreatedAt: periodEnd,
+			},
+			{
+				ID: uuid.New(), MetricID: metricID, PeriodStart: periodStart, PeriodEnd: periodEnd,
+				Value: 20, EvidenceStatus: EvidenceMeasured, Confidence: 0.4,
+				Source: "support", Method: "sampled estimate", CreatedAt: periodEnd.Add(time.Hour),
+			},
+		},
+	}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cerebro/ai-impact/evidence?minimum_confidence=0.8", nil)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("confidence-filtered evidence response = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Evidence []struct {
+			MetricID   uuid.UUID `json:"metric_id"`
+			Value      float64   `json:"value"`
+			Confidence float64   `json:"confidence"`
+		} `json:"evidence"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode confidence-filtered evidence response: %v", err)
+	}
+	if len(response.Evidence) != 1 || response.Evidence[0].MetricID != metricID ||
+		response.Evidence[0].Value != 15 || response.Evidence[0].Confidence != 0.9 {
+		t.Fatalf("confidence-filtered evidence response = %+v, want latest observation meeting minimum confidence", response.Evidence)
+	}
+}
+
 func TestFunctionEvidenceReadModelReturnsOnlyLatestEvidenceForRequestedFunction(t *testing.T) {
 	workspaceID := uuid.New()
 	requestedFunctionID := uuid.New()

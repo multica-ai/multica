@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -92,6 +93,11 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 	metricFamily := MetricFamily(r.URL.Query().Get("metric_family"))
 	evidenceStatus := EvidenceStatus(r.URL.Query().Get("evidence_status"))
 	source := r.URL.Query().Get("source")
+	minimumConfidence, err := parseMinimumConfidence(r.URL.Query().Get("minimum_confidence"))
+	if err != nil {
+		writeObservationError(w, http.StatusBadRequest, "invalid minimum_confidence")
+		return
+	}
 	periodStart, err := parseEvidencePeriod(r.URL.Query().Get("period_start"))
 	if err != nil {
 		writeObservationError(w, http.StatusBadRequest, "invalid period_start")
@@ -115,11 +121,12 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	evidence, err := h.service.ListFilteredEvidence(r.Context(), workspaceID, EvidenceFilter{
-		MetricFamily:   metricFamily,
-		EvidenceStatus: evidenceStatus,
-		Source:         source,
-		PeriodStart:    periodStart,
-		PeriodEnd:      periodEnd,
+		MetricFamily:      metricFamily,
+		EvidenceStatus:    evidenceStatus,
+		Source:            source,
+		MinimumConfidence: minimumConfidence,
+		PeriodStart:       periodStart,
+		PeriodEnd:         periodEnd,
 	})
 	if err != nil {
 		writeObservationError(w, http.StatusInternalServerError, "failed to list workspace evidence")
@@ -130,6 +137,17 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 		response = append(response, toEvidenceResponse(item))
 	}
 	writeObservationJSON(w, http.StatusOK, map[string]any{"evidence": response})
+}
+
+func parseMinimumConfidence(value string) (float64, error) {
+	if value == "" {
+		return 0, nil
+	}
+	confidence, err := strconv.ParseFloat(value, 64)
+	if err != nil || confidence < 0 || confidence > 1 {
+		return 0, errors.New("minimum confidence must be between zero and one")
+	}
+	return confidence, nil
 }
 
 func parseEvidencePeriod(value string) (time.Time, error) {
