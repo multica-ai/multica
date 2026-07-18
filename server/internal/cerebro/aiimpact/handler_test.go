@@ -321,3 +321,72 @@ func TestWorkspaceEvidenceReadModelReturnsLatestObservationWithTaxonomy(t *testi
 		t.Fatalf("workspace evidence read model did not keep every read workspace-scoped")
 	}
 }
+
+func TestFunctionEvidenceReadModelReturnsOnlyLatestEvidenceForRequestedFunction(t *testing.T) {
+	workspaceID := uuid.New()
+	requestedFunctionID := uuid.New()
+	otherFunctionID := uuid.New()
+	requestedLoopID := uuid.New()
+	otherLoopID := uuid.New()
+	requestedMetricID := uuid.New()
+	otherMetricID := uuid.New()
+	periodStart := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.Add(24 * time.Hour)
+	store := &recordingObservationStore{
+		functions: []Function{
+			{ID: requestedFunctionID, WorkspaceID: workspaceID, Name: "Customer Service", Active: true},
+			{ID: otherFunctionID, WorkspaceID: workspaceID, Name: "Finance", Active: true},
+		},
+		operatingLoops: []OperatingLoop{
+			{ID: requestedLoopID, WorkspaceID: workspaceID, FunctionID: requestedFunctionID, Name: "Resolve customer needs", Active: true},
+			{ID: otherLoopID, WorkspaceID: workspaceID, FunctionID: otherFunctionID, Name: "Close the books", Active: true},
+		},
+		metrics: []Metric{
+			{ID: requestedMetricID, WorkspaceID: workspaceID, OperatingLoopID: requestedLoopID, Name: "Resolved needs", Family: FamilyOutcome, Unit: "needs", Direction: DirectionIncrease, Source: "support", Active: true},
+			{ID: otherMetricID, WorkspaceID: workspaceID, OperatingLoopID: otherLoopID, Name: "Close duration", Family: FamilyOutput, Unit: "hours", Direction: DirectionDecrease, Source: "ledger", Active: true},
+		},
+		workspaceObservations: []Observation{
+			{ID: uuid.New(), MetricID: requestedMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 12, EvidenceStatus: EvidenceEstimated, Confidence: 0.6, Source: "support", Method: "sampled assessment", CreatedAt: periodEnd},
+			{ID: uuid.New(), MetricID: requestedMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 15, EvidenceStatus: EvidenceMeasured, Confidence: 0.9, Source: "support", Method: "audited count", CreatedAt: periodEnd.Add(time.Hour)},
+			{ID: uuid.New(), MetricID: otherMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 8, EvidenceStatus: EvidenceMeasured, Confidence: 0.8, Source: "ledger", Method: "reconciliation", CreatedAt: periodEnd},
+		},
+	}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cerebro/ai-impact/functions/"+requestedFunctionID.String()+"/evidence", nil)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("function evidence read model status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Evidence []struct {
+			FunctionID      uuid.UUID      `json:"function_id"`
+			OperatingLoopID uuid.UUID      `json:"operating_loop_id"`
+			MetricID        uuid.UUID      `json:"metric_id"`
+			Value           float64        `json:"value"`
+			EvidenceStatus  EvidenceStatus `json:"evidence_status"`
+			Source          string         `json:"source"`
+			Method          string         `json:"method"`
+		} `json:"evidence"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode function evidence read model: %v", err)
+	}
+	if len(response.Evidence) != 1 {
+		t.Fatalf("function evidence count = %d, want one latest observation", len(response.Evidence))
+	}
+	evidence := response.Evidence[0]
+	if evidence.FunctionID != requestedFunctionID || evidence.OperatingLoopID != requestedLoopID ||
+		evidence.MetricID != requestedMetricID || evidence.Value != 15 ||
+		evidence.EvidenceStatus != EvidenceMeasured || evidence.Source != "support" || evidence.Method != "audited count" {
+		t.Fatalf("function evidence = %+v, want only the requested function's latest measured observation", evidence)
+	}
+}

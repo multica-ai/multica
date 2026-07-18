@@ -188,3 +188,22 @@ func (s *Service) ListWorkspaceEvidence(
 	}
 	return evidence, nil
 }
+
+// ListFunctionEvidence returns the latest workspace evidence for one Function.
+func (s *Service) ListFunctionEvidence(
+	ctx context.Context,
+	workspaceID, functionID uuid.UUID,
+) ([]EvidenceReadModel, error) {
+	evidence, err := s.ListWorkspaceEvidence(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]EvidenceReadModel, 0, len(evidence))
+	for _, item := range evidence {
+		if item.Function.ID == functionID {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
