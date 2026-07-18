@@ -32,6 +32,7 @@ const installationsRef = vi.hoisted(() => ({
     installations: [] as {
       id: string;
       account_login: string;
+      account_type: "User" | "Organization";
       installation_id?: number;
       connected_by?: string;
     }[],
@@ -194,28 +195,71 @@ describe("GitHubTab", () => {
     });
   });
 
-  it("clicking Disconnect opens the confirmation and only fires on confirm", async () => {
+  it("renders every installation separately and keeps Connect another available", () => {
+    installationsRef.current = {
+      configured: true,
+      can_manage: true,
+      installations: [
+        {
+          id: "inst-user",
+          account_login: "octocat",
+          account_type: "User",
+          installation_id: 41,
+        },
+        {
+          id: "inst-org",
+          account_login: "acme-org",
+          account_type: "Organization",
+          installation_id: 42,
+          connected_by: "Jiayuan",
+        },
+      ],
+    };
+
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByText("octocat")).toBeTruthy();
+    expect(screen.getByText("acme-org")).toBeTruthy();
+    expect(screen.getByText("Personal account")).toBeTruthy();
+    expect(screen.getByText("Organization")).toBeTruthy();
+    expect(screen.queryByText(/octocat, acme-org/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Connect another GitHub" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Disconnect octocat" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Disconnect acme-org" })).toBeTruthy();
+  });
+
+  it("disconnects the selected installation row", async () => {
     const user = userEvent.setup();
     installationsRef.current = {
       configured: true,
       can_manage: true,
-      installations: [{ id: "inst-42", account_login: "acme", installation_id: 42 }],
+      installations: [
+        {
+          id: "inst-first",
+          account_login: "octocat",
+          account_type: "User",
+          installation_id: 41,
+        },
+        {
+          id: "inst-second",
+          account_login: "acme-org",
+          account_type: "Organization",
+          installation_id: 42,
+        },
+      ],
     };
     mockDeleteInstallation.mockResolvedValue(undefined);
 
     render(<GitHubTab />, { wrapper: I18nWrapper });
 
-    await user.click(screen.getByRole("button", { name: /^Disconnect$/ }));
-    expect(screen.getByText(/Multica will stop receiving webhooks/i)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Disconnect acme-org" }));
+    expect(screen.getByRole("heading", { name: "Disconnect acme-org?" })).toBeTruthy();
     expect(mockDeleteInstallation).not.toHaveBeenCalled();
 
-    const dialogConfirm = screen
-      .getAllByRole("button", { name: /^Disconnect$/ })
-      .find((b) => b.getAttribute("data-slot")?.includes("alert-dialog"));
-    await user.click(dialogConfirm ?? screen.getAllByRole("button", { name: /^Disconnect$/ })[1]!);
+    await user.click(screen.getByRole("button", { name: /^Disconnect$/ }));
 
     await waitFor(() => {
-      expect(mockDeleteInstallation).toHaveBeenCalledWith("workspace-1", "inst-42");
+      expect(mockDeleteInstallation).toHaveBeenCalledWith("workspace-1", "inst-second");
     });
   });
 
@@ -224,10 +268,17 @@ describe("GitHubTab", () => {
     installationsRef.current = {
       configured: true,
       can_manage: true,
-      installations: [{ id: "inst-1", account_login: "acme", installation_id: 1 }],
+      installations: [
+        {
+          id: "inst-1",
+          account_login: "acme",
+          account_type: "Organization",
+          installation_id: 1,
+        },
+      ],
     };
     render(<GitHubTab />, { wrapper: I18nWrapper });
-    expect(screen.getByRole("button", { name: /^Disconnect$/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Disconnect acme" })).toBeTruthy();
   });
 
   it("non-admin sees the existing connection but no Connect/Disconnect controls", () => {
@@ -235,14 +286,15 @@ describe("GitHubTab", () => {
     installationsRef.current = {
       configured: true,
       can_manage: false,
-      installations: [{ id: "inst-1", account_login: "acme" }],
+      installations: [{ id: "inst-1", account_login: "acme", account_type: "User" }],
     };
     render(<GitHubTab />, { wrapper: I18nWrapper });
 
-    expect(screen.getByText(/Connected to acme/i)).toBeTruthy();
+    expect(screen.getByText("acme")).toBeTruthy();
+    expect(screen.getByText("Personal account")).toBeTruthy();
     expect(screen.getByText(/Read-only view\./i)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Connect GitHub$/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Disconnect$/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Connect/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Disconnect/ })).toBeNull();
   });
 
   it("non-admin with no connection sees the contact-admin hint", () => {
@@ -266,6 +318,7 @@ describe("GitHubTab", () => {
         {
           id: "inst-7",
           account_login: "acme",
+          account_type: "Organization",
           installation_id: 7,
           connected_by: "Jiayuan",
         },
