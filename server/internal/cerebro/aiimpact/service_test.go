@@ -29,6 +29,21 @@ func (s *recordingObservationStore) CreateFunction(
 	}, nil
 }
 
+func (s *recordingObservationStore) CreateOperatingLoop(
+	_ context.Context,
+	workspaceID uuid.UUID,
+	input OperatingLoopInput,
+) (OperatingLoop, error) {
+	return OperatingLoop{
+		ID:          uuid.New(),
+		WorkspaceID: workspaceID,
+		FunctionID:  input.FunctionID,
+		Name:        input.Name,
+		Description: input.Description,
+		Active:      true,
+	}, nil
+}
+
 func (s *recordingObservationStore) AppendObservation(
 	_ context.Context,
 	_, _ uuid.UUID,

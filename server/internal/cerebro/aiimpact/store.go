@@ -56,6 +56,51 @@ func (s *Store) CreateFunction(
 	))
 }
 
+const operatingLoopColumns = `id, workspace_id, function_id, name, description,
+ active, created_at, updated_at`
+
+func scanOperatingLoop(row pgx.Row) (OperatingLoop, error) {
+	var operatingLoop OperatingLoop
+	err := row.Scan(
+		&operatingLoop.ID,
+		&operatingLoop.WorkspaceID,
+		&operatingLoop.FunctionID,
+		&operatingLoop.Name,
+		&operatingLoop.Description,
+		&operatingLoop.Active,
+		&operatingLoop.CreatedAt,
+		&operatingLoop.UpdatedAt,
+	)
+	return operatingLoop, err
+}
+
+func (s *Store) CreateOperatingLoop(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	input OperatingLoopInput,
+) (OperatingLoop, error) {
+	if err := ValidateOperatingLoop(input); err != nil {
+		return OperatingLoop{}, err
+	}
+
+	operatingLoop, err := scanOperatingLoop(s.pool.QueryRow(ctx, `
+		INSERT INTO cerebro_ai_impact_operating_loop
+			(workspace_id, function_id, name, description)
+		SELECT $1, ai_function.id, $3, $4
+		FROM cerebro_ai_impact_function ai_function
+		WHERE ai_function.workspace_id = $1 AND ai_function.id = $2
+		RETURNING `+operatingLoopColumns,
+		workspaceID,
+		input.FunctionID,
+		input.Name,
+		input.Description,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return OperatingLoop{}, ErrNotFound
+	}
+	return operatingLoop, err
+}
+
 const observationColumns = `id, metric_id, period_start, period_end, value,
  evidence_status, confidence, source, method, created_at`
 

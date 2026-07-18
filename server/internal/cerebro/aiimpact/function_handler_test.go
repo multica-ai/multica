@@ -71,3 +71,59 @@ func TestFunctionHTTPSeamAllowsOwnerAdminCreateAndKeepsMemberReadOnly(t *testing
 		t.Fatalf("member create function status = %d, want 403: %s", readOnlyRecorder.Code, readOnlyRecorder.Body.String())
 	}
 }
+
+func TestOperatingLoopHTTPSeamAllowsOwnerAdminCreateAndKeepsMemberReadOnly(t *testing.T) {
+	store := &recordingObservationStore{}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	workspaceID := uuid.New()
+	actorID := uuid.New()
+	functionID := uuid.New()
+	body := `{
+		"function_id":"` + functionID.String() + `",
+		"name":"Resolve customer need",
+		"description":"Resolve tracking and order status without manual work"
+	}`
+
+	request := func(role string) *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/api/cerebro/ai-impact/operating-loops", strings.NewReader(body))
+		ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+			UserID: pgtype.UUID{Bytes: [16]byte(actorID), Valid: true},
+			Role:   role,
+		})
+		return req.WithContext(ctx)
+	}
+
+	for _, role := range []string{"owner", "admin"} {
+		t.Run(role, func(t *testing.T) {
+			createdRecorder := httptest.NewRecorder()
+			router.ServeHTTP(createdRecorder, request(role))
+			if createdRecorder.Code != http.StatusCreated {
+				t.Fatalf("%s create operating loop status = %d, want 201: %s", role, createdRecorder.Code, createdRecorder.Body.String())
+			}
+			var created struct {
+				ID          string `json:"id"`
+				FunctionID  string `json:"function_id"`
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				Active      bool   `json:"active"`
+			}
+			if err := json.NewDecoder(createdRecorder.Body).Decode(&created); err != nil {
+				t.Fatalf("decode create operating loop response: %v", err)
+			}
+			if created.ID == "" || created.FunctionID != functionID.String() ||
+				created.Name != "Resolve customer need" ||
+				created.Description != "Resolve tracking and order status without manual work" || !created.Active {
+				t.Fatalf("create operating loop response = %+v", created)
+			}
+		})
+	}
+
+	readOnlyRecorder := httptest.NewRecorder()
+	router.ServeHTTP(readOnlyRecorder, request("member"))
+	if readOnlyRecorder.Code != http.StatusForbidden {
+		t.Fatalf("member create operating loop status = %d, want 403: %s", readOnlyRecorder.Code, readOnlyRecorder.Body.String())
+	}
+}

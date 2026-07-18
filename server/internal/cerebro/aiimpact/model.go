@@ -74,6 +74,33 @@ type Function struct {
 	UpdatedAt   time.Time
 }
 
+type OperatingLoopInput struct {
+	FunctionID  uuid.UUID
+	Name        string
+	Description string
+}
+
+func ValidateOperatingLoop(input OperatingLoopInput) error {
+	if input.FunctionID == uuid.Nil {
+		return errors.New("operating loop function id is required")
+	}
+	if input.Name == "" {
+		return errors.New("operating loop name is required")
+	}
+	return nil
+}
+
+type OperatingLoop struct {
+	ID          uuid.UUID
+	WorkspaceID uuid.UUID
+	FunctionID  uuid.UUID
+	Name        string
+	Description string
+	Active      bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type MetricInput struct {
 	Name          string
 	Family        MetricFamily

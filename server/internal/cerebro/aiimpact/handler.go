@@ -25,6 +25,7 @@ func NewHandler(service *Service) *Handler {
 // Mount registers the AI Impact routes on a workspace-scoped router.
 func (h *Handler) Mount(r chi.Router) {
 	r.Post("/api/cerebro/ai-impact/functions", h.CreateFunction)
+	r.Post("/api/cerebro/ai-impact/operating-loops", h.CreateOperatingLoop)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
 	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
 }
@@ -91,6 +92,69 @@ func (h *Handler) CreateFunction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeObservationJSON(w, http.StatusCreated, toFunctionResponse(function))
+}
+
+type createOperatingLoopRequest struct {
+	FunctionID  uuid.UUID `json:"function_id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+}
+
+type operatingLoopResponse struct {
+	ID          uuid.UUID `json:"id"`
+	FunctionID  uuid.UUID `json:"function_id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Active      bool      `json:"active"`
+}
+
+func toOperatingLoopResponse(operatingLoop OperatingLoop) operatingLoopResponse {
+	return operatingLoopResponse{
+		ID:          operatingLoop.ID,
+		FunctionID:  operatingLoop.FunctionID,
+		Name:        operatingLoop.Name,
+		Description: operatingLoop.Description,
+		Active:      operatingLoop.Active,
+	}
+}
+
+// CreateOperatingLoop creates one workspace-scoped operating loop.
+func (h *Handler) CreateOperatingLoop(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, role, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+
+	var request createOperatingLoopRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeObservationError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	input := OperatingLoopInput{
+		FunctionID:  request.FunctionID,
+		Name:        request.Name,
+		Description: request.Description,
+	}
+	if err := ValidateOperatingLoop(input); err != nil {
+		writeObservationError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	operatingLoop, err := h.service.CreateOperatingLoop(r.Context(), workspaceID, role, input)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrReadOnly):
+			writeObservationError(w, http.StatusForbidden, err.Error())
+		case errors.Is(err, ErrNotFound):
+			writeObservationError(w, http.StatusNotFound, err.Error())
+		default:
+			writeObservationError(w, http.StatusInternalServerError, "failed to create operating loop")
+		}
+		return
+	}
+	writeObservationJSON(w, http.StatusCreated, toOperatingLoopResponse(operatingLoop))
 }
 
 type appendObservationRequest struct {
