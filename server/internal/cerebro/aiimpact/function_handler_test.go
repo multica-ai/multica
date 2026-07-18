@@ -73,6 +73,59 @@ func TestFunctionHTTPSeamAllowsOwnerAdminCreateAndKeepsMemberReadOnly(t *testing
 	}
 }
 
+func TestFunctionHTTPSeamLetsMemberListWorkspaceFunctions(t *testing.T) {
+	workspaceID := uuid.New()
+	functionID := uuid.New()
+	functionOwnerID := uuid.New()
+	store := &recordingObservationStore{functions: []Function{{
+		ID:          functionID,
+		WorkspaceID: workspaceID,
+		Name:        "Customer Service",
+		Description: "Resolve customer needs",
+		OwnerType:   "member",
+		OwnerID:     functionOwnerID,
+		Active:      true,
+	}}}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cerebro/ai-impact/functions", nil)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("member list functions status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Functions []struct {
+			ID          uuid.UUID `json:"id"`
+			Name        string    `json:"name"`
+			Description string    `json:"description"`
+			OwnerType   string    `json:"owner_type"`
+			OwnerID     uuid.UUID `json:"owner_id"`
+			Active      bool      `json:"active"`
+		} `json:"functions"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode member list functions response: %v", err)
+	}
+	if len(response.Functions) != 1 || response.Functions[0].ID != functionID ||
+		response.Functions[0].Name != "Customer Service" ||
+		response.Functions[0].Description != "Resolve customer needs" ||
+		response.Functions[0].OwnerType != "member" || response.Functions[0].OwnerID != functionOwnerID ||
+		!response.Functions[0].Active {
+		t.Fatalf("member list functions response = %+v", response.Functions)
+	}
+	if store.listFunctionsWorkspaceID != workspaceID {
+		t.Fatalf("list functions workspace = %s, want %s", store.listFunctionsWorkspaceID, workspaceID)
+	}
+}
+
 func TestOperatingLoopHTTPSeamAllowsOwnerAdminCreateAndKeepsMemberReadOnly(t *testing.T) {
 	store := &recordingObservationStore{}
 	handler := NewHandler(NewService(store))

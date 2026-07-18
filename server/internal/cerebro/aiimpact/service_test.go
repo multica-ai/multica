@@ -10,7 +10,17 @@ import (
 )
 
 type recordingObservationStore struct {
-	observations []Observation
+	observations             []Observation
+	functions                []Function
+	listFunctionsWorkspaceID uuid.UUID
+}
+
+func (s *recordingObservationStore) ListFunctions(
+	_ context.Context,
+	workspaceID uuid.UUID,
+) ([]Function, error) {
+	s.listFunctionsWorkspaceID = workspaceID
+	return append([]Function(nil), s.functions...), nil
 }
 
 func (s *recordingObservationStore) CreateFunction(

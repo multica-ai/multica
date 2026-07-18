@@ -24,12 +24,32 @@ func NewHandler(service *Service) *Handler {
 
 // Mount registers the AI Impact routes on a workspace-scoped router.
 func (h *Handler) Mount(r chi.Router) {
+	r.Get("/api/cerebro/ai-impact/functions", h.ListFunctions)
 	r.Post("/api/cerebro/ai-impact/functions", h.CreateFunction)
 	r.Post("/api/cerebro/ai-impact/operating-loops", h.CreateOperatingLoop)
 	r.Post("/api/cerebro/ai-impact/project-bindings", h.CreateProjectBinding)
 	r.Post("/api/cerebro/ai-impact/metrics", h.CreateMetric)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
 	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
+}
+
+// ListFunctions returns workspace-scoped organizational functions.
+func (h *Handler) ListFunctions(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, _, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+
+	functions, err := h.service.ListFunctions(r.Context(), workspaceID)
+	if err != nil {
+		writeObservationError(w, http.StatusInternalServerError, "failed to list functions")
+		return
+	}
+	response := make([]functionResponse, 0, len(functions))
+	for _, function := range functions {
+		response = append(response, toFunctionResponse(function))
+	}
+	writeObservationJSON(w, http.StatusOK, map[string]any{"functions": response})
 }
 
 type createProjectBindingRequest struct {

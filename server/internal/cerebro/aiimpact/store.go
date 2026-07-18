@@ -56,6 +56,28 @@ func (s *Store) CreateFunction(
 	))
 }
 
+func (s *Store) ListFunctions(ctx context.Context, workspaceID uuid.UUID) ([]Function, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+functionColumns+`
+		FROM cerebro_ai_impact_function
+		WHERE workspace_id = $1
+		ORDER BY name, id`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	functions := make([]Function, 0)
+	for rows.Next() {
+		function, err := scanFunction(rows)
+		if err != nil {
+			return nil, err
+		}
+		functions = append(functions, function)
+	}
+	return functions, rows.Err()
+}
+
 const operatingLoopColumns = `id, workspace_id, function_id, name, description,
  active, created_at, updated_at`
 
