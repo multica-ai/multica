@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,10 @@ type failingCommander struct{}
 
 type blockingCommander struct{}
 
+type classifiedFailingCommander struct {
+	kind commandFailureKind
+}
+
 func (failingCommander) Run(_ context.Context, _ string, _ ...string) ([]byte, error) {
 	return nil, errors.New("must not escape")
 }
@@ -29,6 +34,10 @@ func (failingCommander) Run(_ context.Context, _ string, _ ...string) ([]byte, e
 func (blockingCommander) Run(ctx context.Context, _ string, _ ...string) ([]byte, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()
+}
+
+func (c classifiedFailingCommander) Run(_ context.Context, _ string, _ ...string) ([]byte, error) {
+	return nil, commandFailure{kind: c.kind}
 }
 
 func (c *recordingCommander) Run(_ context.Context, stdin string, args ...string) ([]byte, error) {
@@ -58,6 +67,10 @@ func (failingCommander) CaptureScreenshot(_ context.Context, _ ...string) ([]byt
 func (blockingCommander) CaptureScreenshot(ctx context.Context, _ ...string) ([]byte, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()
+}
+
+func (classifiedFailingCommander) CaptureScreenshot(_ context.Context, _ ...string) ([]byte, error) {
+	return nil, errors.New("unused")
 }
 
 func TestTargetForUsesOnlyInternalAllowlist(t *testing.T) {
@@ -256,6 +269,41 @@ func TestRunnerReturnsOnlySafeFailureStage(t *testing.T) {
 	}
 }
 
+func TestRunnerReturnsSafeOpenFailureClass(t *testing.T) {
+	_, err := NewRunner(classifiedFailingCommander{kind: commandFailureDNS}).Verify(context.Background(), "customer-service", Credential{})
+	if err == nil || err.Error() != "internal browser stage open dns failed" {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestClassifyCommandFailure(t *testing.T) {
+	tests := []struct {
+		name   string
+		ctx    context.Context
+		stderr string
+		want   commandFailureKind
+	}{
+		{name: "dns", ctx: context.Background(), stderr: "Navigation failed: net::ERR_NAME_NOT_RESOLVED", want: commandFailureDNS},
+		{name: "connection", ctx: context.Background(), stderr: "Navigation failed: net::ERR_CONNECTION_REFUSED", want: commandFailureConnection},
+		{name: "browser launch", ctx: context.Background(), stderr: "Failed to launch Chrome: Chrome exited early", want: commandFailureBrowserLaunch},
+		{name: "unknown", ctx: context.Background(), stderr: "password=must-not-escape", want: commandFailureUnknown},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := &exec.ExitError{Stderr: []byte(test.stderr)}
+			if got := classifyCommandFailure(test.ctx, err); got != test.want {
+				t.Fatalf("classifyCommandFailure() = %q, want %q", got, test.want)
+			}
+		})
+	}
+
+	timedOut, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := classifyCommandFailure(timedOut, context.Canceled); got != commandFailureTimeout {
+		t.Fatalf("cancelled classification = %q, want %q", got, commandFailureTimeout)
+	}
+}
+
 func TestRunnerBoundsStagesAndCleanup(t *testing.T) {
 	runner := &Runner{
 		commander:      blockingCommander{},
@@ -265,7 +313,7 @@ func TestRunnerBoundsStagesAndCleanup(t *testing.T) {
 	}
 	started := time.Now()
 	_, err := runner.Verify(context.Background(), "customer-service", Credential{})
-	if err == nil || err.Error() != "internal browser stage open failed" {
+	if err == nil || err.Error() != "internal browser stage open timeout failed" {
 		t.Fatalf("error = %v", err)
 	}
 	if elapsed := time.Since(started); elapsed < 20*time.Millisecond || elapsed > 100*time.Millisecond {
@@ -283,5 +331,21 @@ func TestSafeErrorAllowsScreenshotStageWithoutDetails(t *testing.T) {
 	err := errors.New("internal browser stage screenshot failed")
 	if got := SafeError(err); got != "internal browser stage screenshot failed" {
 		t.Fatalf("safe error = %q", got)
+	}
+}
+
+func TestSafeErrorAllowsOnlyKnownOpenFailureClasses(t *testing.T) {
+	for _, message := range []string{
+		"internal browser stage open dns failed",
+		"internal browser stage open connection failed",
+		"internal browser stage open browser-launch failed",
+		"internal browser stage open timeout failed",
+	} {
+		if got := SafeError(errors.New(message)); got != message {
+			t.Fatalf("safe error = %q, want %q", got, message)
+		}
+	}
+	if got := SafeError(errors.New("internal browser stage open password=must-not-escape failed")); got != "internal browser verification failed" {
+		t.Fatalf("unexpected open detail escaped: %q", got)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -90,6 +91,67 @@ type Commander interface {
 
 type ExecCommander struct{}
 
+type commandFailureKind string
+
+const (
+	commandFailureUnknown       commandFailureKind = "unknown"
+	commandFailureTimeout       commandFailureKind = "timeout"
+	commandFailureDNS           commandFailureKind = "dns"
+	commandFailureConnection    commandFailureKind = "connection"
+	commandFailureBrowserLaunch commandFailureKind = "browser-launch"
+)
+
+type commandFailure struct {
+	kind commandFailureKind
+}
+
+func (failure commandFailure) Error() string {
+	return "agent-browser command failed"
+}
+
+func classifyCommandFailure(ctx context.Context, err error) commandFailureKind {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return commandFailureTimeout
+	}
+
+	var exitError *exec.ExitError
+	if !errors.As(err, &exitError) {
+		return commandFailureUnknown
+	}
+	stderr := strings.ToLower(string(exitError.Stderr))
+	switch {
+	case strings.Contains(stderr, "err_name_not_resolved"),
+		strings.Contains(stderr, "name does not resolve"),
+		strings.Contains(stderr, "no such host"),
+		strings.Contains(stderr, "getaddrinfo"):
+		return commandFailureDNS
+	case strings.Contains(stderr, "timed out"), strings.Contains(stderr, "timeout"):
+		return commandFailureTimeout
+	case strings.Contains(stderr, "err_connection_refused"),
+		strings.Contains(stderr, "connection refused"),
+		strings.Contains(stderr, "err_connection_reset"),
+		strings.Contains(stderr, "err_connection_closed"):
+		return commandFailureConnection
+	case strings.Contains(stderr, "failed to launch chrome"),
+		strings.Contains(stderr, "chrome exited early"),
+		strings.Contains(stderr, "browser process exited"):
+		return commandFailureBrowserLaunch
+	default:
+		return commandFailureUnknown
+	}
+}
+
+func safeCommandFailureKind(err error) commandFailureKind {
+	var failure commandFailure
+	if errors.As(err, &failure) {
+		return failure.kind
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return commandFailureTimeout
+	}
+	return commandFailureUnknown
+}
+
 func (ExecCommander) Run(ctx context.Context, stdin string, args ...string) ([]byte, error) {
 	command := exec.CommandContext(ctx, "agent-browser", args...)
 	if stdin != "" {
@@ -97,7 +159,7 @@ func (ExecCommander) Run(ctx context.Context, stdin string, args ...string) ([]b
 	}
 	output, err := command.Output()
 	if err != nil {
-		return nil, fmt.Errorf("agent-browser command failed")
+		return nil, commandFailure{kind: classifyCommandFailure(ctx, err)}
 	}
 	return output, nil
 }
@@ -166,6 +228,9 @@ func (r *Runner) runStage(ctx context.Context, stage, stdin string, args ...stri
 	defer cancel()
 	output, err := r.commander.Run(stageCtx, stdin, args...)
 	if err != nil {
+		if kind := safeCommandFailureKind(err); stage == "open" && kind != commandFailureUnknown {
+			return nil, fmt.Errorf("internal browser stage %s %s failed", stage, kind)
+		}
 		return nil, fmt.Errorf("internal browser stage %s failed", stage)
 	}
 	return output, nil
@@ -175,6 +240,10 @@ func SafeError(err error) string {
 	message := err.Error()
 	switch message {
 	case "internal browser stage open failed",
+		"internal browser stage open dns failed",
+		"internal browser stage open connection failed",
+		"internal browser stage open browser-launch failed",
+		"internal browser stage open timeout failed",
 		"internal browser stage auth failed",
 		"internal browser stage reload failed",
 		"internal browser stage render failed",

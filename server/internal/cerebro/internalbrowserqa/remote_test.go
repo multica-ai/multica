@@ -66,6 +66,7 @@ func TestRemoteRunnerPreservesOnlySafeRunnerStageErrors(t *testing.T) {
 		want     string
 	}{
 		{name: "safe stage", response: `{"error":"internal browser stage open failed"}`, want: "internal browser stage open failed"},
+		{name: "safe open class", response: `{"error":"internal browser stage open dns failed"}`, want: "internal browser stage open dns failed"},
 		{name: "untrusted detail", response: `{"error":"password leaked from browser"}`, want: "internal browser verification failed"},
 	}
 	for _, tt := range tests {
