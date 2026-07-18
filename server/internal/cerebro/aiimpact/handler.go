@@ -93,6 +93,15 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 	metricFamily := MetricFamily(r.URL.Query().Get("metric_family"))
 	evidenceStatus := EvidenceStatus(r.URL.Query().Get("evidence_status"))
 	source := r.URL.Query().Get("source")
+	var functionID uuid.UUID
+	if value := r.URL.Query().Get("function_id"); value != "" {
+		var err error
+		functionID, err = uuid.Parse(value)
+		if err != nil {
+			writeObservationError(w, http.StatusBadRequest, "invalid function_id")
+			return
+		}
+	}
 	minimumConfidence, err := parseMinimumConfidence(r.URL.Query().Get("minimum_confidence"))
 	if err != nil {
 		writeObservationError(w, http.StatusBadRequest, "invalid minimum_confidence")
@@ -121,6 +130,7 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	evidence, err := h.service.ListFilteredEvidence(r.Context(), workspaceID, EvidenceFilter{
+		FunctionID:        functionID,
 		MetricFamily:      metricFamily,
 		EvidenceStatus:    evidenceStatus,
 		Source:            source,
