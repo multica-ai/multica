@@ -2,10 +2,15 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -183,6 +188,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// resume. Only that is curable by starting a fresh session, so
 		// handshake/network failures below must leave it false.
 		var resumeRejected bool
+		// Per-model usage recovered from kimi's on-disk session wire
+		// when the ACP stream carries none (always, on kimi ≤ 0.27).
+		var wireUsage map[string]TokenUsage
 
 		// 1. Initialize handshake.
 		initResult, err := c.request(runCtx, "initialize", map[string]any{
@@ -353,6 +361,20 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				c.usageMu.Unlock()
 			default:
 			}
+
+			// Kimi answers session/prompt *before* flushing the turn's
+			// usage.record to the session wire, and the teardown below
+			// SIGKILLs the process — without this pause the record is
+			// lost and the run reports no usage. Poll briefly while the
+			// process is still alive, but only when the ACP stream
+			// itself carried no usage (kimi ≤ 0.27 never sends any).
+			c.usageMu.Lock()
+			acpUsageEmpty := c.usage.InputTokens == 0 && c.usage.OutputTokens == 0 &&
+				c.usage.CacheReadTokens == 0 && c.usage.CacheWriteTokens == 0
+			c.usageMu.Unlock()
+			if acpUsageEmpty && sessionID != "" && finalStatus == "completed" {
+				wireUsage = waitKimiWireUsage(sessionID, startTime, b.cfg.Logger)
+			}
 		}
 
 		duration := time.Since(startTime)
@@ -389,6 +411,15 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				model = "unknown"
 			}
 			usageMap = map[string]TokenUsage{model: u}
+		} else {
+			// Kimi (verified on 0.27.0) reports no usage over ACP at
+			// all: session/prompt returns only stopReason and no
+			// usage_update notifications flow. The per-turn usage lands
+			// in the session's wire.jsonl instead, recovered above so
+			// the run report carries the real model id and token counts
+			// (and therefore cost). Nil when nothing usable was found —
+			// the run then reports no usage, matching prior behavior.
+			usageMap = wireUsage
 		}
 
 		resCh <- Result{
@@ -450,4 +481,121 @@ func kimiToolNameFromTitle(title string) string {
 
 	// Fallback: snake_case the title so the UI gets a stable identifier.
 	return strings.ReplaceAll(lower, " ", "_")
+}
+
+// kimiWireUsageGrace absorbs clock granularity between the daemon's run
+// start and kimi's record timestamps (same host, same clock). It stays
+// far below the age of any previous task's records on a resumed session.
+const kimiWireUsageGrace = 5 * time.Second
+
+// kimiWireUsagePoll bounds the post-prompt wait for kimi to flush the
+// turn's usage.record to the session wire. Kimi answers session/prompt
+// before the record hits disk; without a brief poll the teardown SIGKILL
+// lands first and usage is lost. Typical flush is well under a second.
+const (
+	kimiWireUsagePollTimeout  = 2 * time.Second
+	kimiWireUsagePollInterval = 100 * time.Millisecond
+)
+
+// waitKimiWireUsage polls readKimiWireUsage until the turn's usage
+// record appears on disk or the poll budget runs out (nil).
+func waitKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) map[string]TokenUsage {
+	deadline := time.Now().Add(kimiWireUsagePollTimeout)
+	for {
+		if usage := readKimiWireUsage(sessionID, since, logger); usage != nil {
+			return usage
+		}
+		if time.Now().After(deadline) {
+			return nil
+		}
+		time.Sleep(kimiWireUsagePollInterval)
+	}
+}
+
+// readKimiWireUsage recovers per-model token usage from kimi's on-disk
+// session wire (<KIMI_CODE_HOME|~/.kimi-code>/sessions/<cwd-hash>/<sessionID>/agents/*/wire.jsonl).
+// Kimi appends one record per turn:
+//
+//	{"type":"usage.record","model":"kimi-code/k3","usageScope":"turn",
+//	 "usage":{"inputOther":1884,"output":35,"inputCacheRead":19200,"inputCacheCreation":0},
+//	 "time":1784398522242}
+//
+// Only records at or after `since` count: a resumed session's wire
+// accumulates every past turn, and re-summing history would double-report
+// tokens already billed to earlier tasks. Records are summed per model so
+// multi-model runs attribute correctly. The KIMI_CODE_HOME lookup uses the
+// daemon process env, which is what the child inherits in the common case.
+// Returns nil when nothing usable is found — the caller then reports no
+// usage, matching the pre-recovery behavior.
+func readKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) map[string]TokenUsage {
+	home := os.Getenv("KIMI_CODE_HOME")
+	if home == "" {
+		if h, err := os.UserHomeDir(); err == nil {
+			home = filepath.Join(h, ".kimi-code")
+		}
+	}
+	if home == "" {
+		return nil
+	}
+	files, err := filepath.Glob(filepath.Join(home, "sessions", "*", sessionID, "agents", "*", "wire.jsonl"))
+	if err != nil || len(files) == 0 {
+		return nil
+	}
+	cutoff := since.Add(-kimiWireUsageGrace).UnixMilli()
+	totals := map[string]TokenUsage{}
+	for _, f := range files {
+		if err := accumulateKimiWireFile(f, cutoff, totals); err != nil {
+			logger.Debug("kimi wire usage read failed", "file", f, "error", err)
+		}
+	}
+	if len(totals) == 0 {
+		return nil
+	}
+	return totals
+}
+
+// accumulateKimiWireFile sums usage.record entries newer than cutoffMs
+// into totals, keyed by the record's model id. Malformed lines are
+// skipped — the wire is an append-only log best read leniently.
+func accumulateKimiWireFile(path string, cutoffMs int64, totals map[string]TokenUsage) error {
+	fh, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+	scanner := bufio.NewScanner(fh)
+	scanner.Buffer(make([]byte, 0, 256*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		// Cheap pre-filter: almost no wire line is a usage record, and
+		// lines carrying tool output can be large.
+		if !bytes.Contains(line, []byte(`"usage.record"`)) {
+			continue
+		}
+		var rec struct {
+			Type  string `json:"type"`
+			Model string `json:"model"`
+			Usage struct {
+				InputOther         int64 `json:"inputOther"`
+				Output             int64 `json:"output"`
+				InputCacheRead     int64 `json:"inputCacheRead"`
+				InputCacheCreation int64 `json:"inputCacheCreation"`
+			} `json:"usage"`
+			Time int64 `json:"time"` // epoch ms
+		}
+		if err := json.Unmarshal(line, &rec); err != nil || rec.Type != "usage.record" {
+			continue
+		}
+		model := strings.TrimSpace(rec.Model)
+		if model == "" || rec.Time < cutoffMs {
+			continue
+		}
+		u := totals[model]
+		u.InputTokens += rec.Usage.InputOther
+		u.OutputTokens += rec.Usage.Output
+		u.CacheReadTokens += rec.Usage.InputCacheRead
+		u.CacheWriteTokens += rec.Usage.InputCacheCreation
+		totals[model] = u
+	}
+	return scanner.Err()
 }

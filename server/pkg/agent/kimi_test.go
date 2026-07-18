@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -333,5 +334,74 @@ func TestKimiResumeIncludesMcpServers(t *testing.T) {
 	}
 	if len(servers) != 1 || servers[0].(map[string]any)["name"] != "fetch" {
 		t.Fatalf("session/resume.mcpServers: got %v, want one entry named fetch", servers)
+	}
+}
+
+// kimiWireRec builds one wire.jsonl usage.record line for tests.
+func kimiWireRec(model string, in, out, cacheR, cacheW int64, at time.Time) string {
+	return fmt.Sprintf(`{"type":"usage.record","model":%q,"usage":{"inputOther":%d,"output":%d,"inputCacheRead":%d,"inputCacheCreation":%d},"usageScope":"turn","time":%d}`,
+		model, in, out, cacheR, cacheW, at.UnixMilli())
+}
+
+func TestReadKimiWireUsageSumsRecentRecordsPerModel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+
+	now := time.Now()
+	wire := strings.Join([]string{
+		`{"type":"llm.request","kind":"loop","model":"k3"}`,
+		"not json at all",
+		kimiWireRec("kimi-code/k3", 100, 10, 5, 1, now.Add(-2*time.Second)),           // in window
+		kimiWireRec("kimi-code/k3", 50, 5, 2, 0, now.Add(-3*time.Second)),             // in window, same model
+		kimiWireRec("kimi-code/kimi-for-coding", 7, 3, 0, 0, now.Add(-4*time.Second)), // in window, second model
+		kimiWireRec("kimi-code/k3", 9999, 9999, 0, 0, now.Add(-time.Hour)),            // previous task on a resumed session
+		kimiWireRec("", 4, 2, 0, 0, now),                                              // no model — skipped
+	}, "\n") + "\n"
+
+	dir := filepath.Join(home, "sessions", "wd_x_deadbeef", "session-abc", "agents", "main")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "wire.jsonl"), []byte(wire), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := readKimiWireUsage("session-abc", now.Add(-10*time.Second), slog.Default())
+	if len(got) != 2 {
+		t.Fatalf("expected 2 models, got %+v", got)
+	}
+	u := got["kimi-code/k3"]
+	if u.InputTokens != 150 || u.OutputTokens != 15 || u.CacheReadTokens != 7 || u.CacheWriteTokens != 1 {
+		t.Errorf("unexpected k3 totals: %+v", u)
+	}
+	if u := got["kimi-code/kimi-for-coding"]; u.InputTokens != 7 || u.OutputTokens != 3 {
+		t.Errorf("unexpected coding totals: %+v", u)
+	}
+}
+
+func TestReadKimiWireUsageMissingSessionReturnsNil(t *testing.T) {
+	t.Setenv("KIMI_CODE_HOME", t.TempDir())
+	if got := readKimiWireUsage("session-nope", time.Now().Add(-time.Minute), slog.Default()); got != nil {
+		t.Fatalf("expected nil for missing wire, got %+v", got)
+	}
+}
+
+func TestReadKimiWireUsageSumsAcrossAgentWires(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+	now := time.Now()
+	line := kimiWireRec("kimi-code/k3", 10, 1, 0, 0, now) + "\n"
+	for _, agentName := range []string{"main", "task-critic"} {
+		dir := filepath.Join(home, "sessions", "wd_x_deadbeef", "session-abc", "agents", agentName)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "wire.jsonl"), []byte(line), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := readKimiWireUsage("session-abc", now.Add(-10*time.Second), slog.Default())
+	if u := got["kimi-code/k3"]; u.InputTokens != 20 || u.OutputTokens != 2 {
+		t.Fatalf("expected both agent wires summed, got %+v", got)
 	}
 }
