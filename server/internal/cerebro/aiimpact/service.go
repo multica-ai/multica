@@ -219,6 +219,7 @@ type EvidenceFilter struct {
 	FunctionID        uuid.UUID
 	OperatingLoopID   uuid.UUID
 	MetricID          uuid.UUID
+	Guardrail         *bool
 	MetricFamily      MetricFamily
 	EvidenceStatus    EvidenceStatus
 	Source            string
@@ -247,6 +248,9 @@ func (s *Service) ListFilteredEvidence(
 			continue
 		}
 		if filter.MetricID != uuid.Nil && item.Metric.ID != filter.MetricID {
+			continue
+		}
+		if filter.Guardrail != nil && item.Metric.Guardrail != *filter.Guardrail {
 			continue
 		}
 		if filter.MetricFamily != "" && item.Metric.Family != filter.MetricFamily {

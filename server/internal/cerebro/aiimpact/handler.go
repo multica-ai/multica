@@ -125,6 +125,11 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 		writeObservationError(w, http.StatusBadRequest, "invalid minimum_confidence")
 		return
 	}
+	guardrail, err := parseGuardrail(r.URL.Query().Get("guardrail"))
+	if err != nil {
+		writeObservationError(w, http.StatusBadRequest, "invalid guardrail")
+		return
+	}
 	periodStart, err := parseEvidencePeriod(r.URL.Query().Get("period_start"))
 	if err != nil {
 		writeObservationError(w, http.StatusBadRequest, "invalid period_start")
@@ -151,6 +156,7 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 		FunctionID:        functionID,
 		OperatingLoopID:   operatingLoopID,
 		MetricID:          metricID,
+		Guardrail:         guardrail,
 		MetricFamily:      metricFamily,
 		EvidenceStatus:    evidenceStatus,
 		Source:            source,
@@ -167,6 +173,21 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 		response = append(response, toEvidenceResponse(item))
 	}
 	writeObservationJSON(w, http.StatusOK, map[string]any{"evidence": response})
+}
+
+func parseGuardrail(value string) (*bool, error) {
+	switch value {
+	case "":
+		return nil, nil
+	case "true":
+		guardrail := true
+		return &guardrail, nil
+	case "false":
+		guardrail := false
+		return &guardrail, nil
+	default:
+		return nil, errors.New("guardrail must be true or false")
+	}
 }
 
 func parseMinimumConfidence(value string) (float64, error) {
