@@ -18,10 +18,10 @@ Connect a GitLab group once in **Settings → GitLab**. After that:
 | **Issue sidebar → Merge requests** | Every MR auto-linked to this issue, with title, project, state (`Open` / `Merged` / `Closed`), and author. Click a row to open the MR in GitLab. |
 | **Issue sidebar → GitLab issue** | For issues synced from GitLab, a `group/repo#42` badge links back to the original GitLab issue and shows the GitLab assignee. |
 | **MR webhook** | On every `Merge Request Hook`, Multica upserts the MR, scans title and body for issue identifiers, and rebuilds link rows. Idempotent. |
-| **Issue webhook** | On `Issue Hook` with the **agent** label: creates or deletes the Multica issue. Syncs description, assignee, and status on every update. |
+| **Issue webhook** | On `Issue Hook` with the **agent** label: creates the Multica issue (if new) and syncs description/assignee. Close/reopen still update status on already-linked issues. |
 | **Comment sync** | New GitLab comments appear in Multica. New Multica comments are posted back to GitLab. Historical comments at the time of labeling are **not** imported. |
 | **Auto-status on MR merge** | When an MR transitions to `merged` and its reference used a closing keyword (`Closes MUL-1`, `Fixes MUL-1`, `Resolves MUL-1`), Multica moves the linked issue to **Done**. |
-| **Auto-status on issue close/reopen** | Closing a synced GitLab issue marks the Multica issue **Done**. Reopening marks it **In Progress**. Removing the **agent** label deletes the Multica issue. |
+| **Auto-status on issue close/reopen** | Closing a synced GitLab issue marks the Multica issue **Done**. Reopening marks it **In Progress**. Removing the **agent** label does **not** delete the Multica issue. |
 
 ## Merge request identifier matching
 
@@ -42,7 +42,7 @@ Issues are synced one-way: GitLab → Multica. Adding the **agent** label to a G
 | GitLab event | Multica action |
 |---|---|
 | **agent** label added | Create Multica issue with title and description |
-| **agent** label removed | Delete the Multica issue |
+| **agent** label removed | No delete — Multica issue and GitLab link stay |
 | Issue closed | Mark Multica issue **Done** |
 | Issue reopened | Mark Multica issue **In Progress** |
 | Description updated | Update Multica issue description |
@@ -98,16 +98,14 @@ On the API server:
 GITLAB_URL=https://gitlab.example.com        # your GitLab host, no trailing slash
 GITLAB_APP_ID=<Application ID from step 1>
 GITLAB_APP_SECRET=<Secret from step 1>
-GITLAB_WEBHOOK_SECRET=<generate: openssl rand -hex 32>
 GITLAB_SECRET_KEY=<generate: openssl rand -hex 32>
 ```
 
-All five are required. If any is missing:
+`GITLAB_URL`, `GITLAB_APP_ID`, `GITLAB_APP_SECRET`, and `GITLAB_SECRET_KEY` are required. If any is missing:
 
 - **Connect GitLab** in Settings is disabled and shows a "not configured" hint.
-- The `/api/webhooks/gitlab` endpoint returns `503 gitlab integration not configured`.
 
-`GITLAB_WEBHOOK_SECRET` signs webhook payloads sent from GitLab (the same value goes into the webhook form in step 4). `GITLAB_SECRET_KEY` encrypts the stored OAuth access token at rest — changing it after tokens are stored invalidates all existing connections.
+`GITLAB_SECRET_KEY` encrypts stored OAuth access tokens at rest and signs OAuth CSRF state — changing it after tokens are stored invalidates all existing connections. Webhook secrets are **not** env vars: Multica generates a unique secret per GitLab connection and shows it in Settings (owners/admins only).
 
 Restart the API after setting the env vars.
 
@@ -129,13 +127,15 @@ Migrations `128` and `129` create the GitLab tables: `gitlab_connection`, `gitla
 
 ### 5. Register the webhook in GitLab
 
+After connecting, **Settings → GitLab** shows a **Project webhook setup** card with the URL and a **per-connection secret token** (owners/admins only). Copy both into GitLab. You can **Rotate** the secret anytime; update GitLab afterward so deliveries keep working.
+
 In GitLab, go to the group or project where your issues and MRs live:  
 **Settings → Webhooks → Add new webhook**
 
 | Field | Value |
 |---|---|
-| **URL** | `https://<your-multica-host>/api/webhooks/gitlab` |
-| **Secret token** | The value you set as `GITLAB_WEBHOOK_SECRET` |
+| **URL** | Copy from Multica (preferred: `/api/webhooks/gitlab/{workspaceId}`), or `https://<your-multica-host>/api/webhooks/gitlab` |
+| **Secret token** | Copy from Multica Settings → GitLab (unique per connection — not an env var) |
 | **Trigger** | Check: **Merge request events**, **Issues events**, **Comments** |
 | **SSL verification** | Enabled (disable only if using a self-signed cert) |
 

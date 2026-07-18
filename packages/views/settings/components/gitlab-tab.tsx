@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { GitMerge, Tag, Copy } from "lucide-react";
+import { GitMerge, Tag, Copy, RefreshCw } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Input } from "@multica/ui/components/ui/input";
@@ -13,13 +13,22 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
-import { gitlabConnectionsOptions, useDeleteGitLabConnection, deriveGitLabSettings } from "@multica/core/gitlab";
+import {
+  gitlabConnectionsOptions,
+  useDeleteGitLabConnection,
+  useRotateGitLabWebhookSecret,
+  deriveGitLabSettings,
+} from "@multica/core/gitlab";
 import { api } from "@multica/core/api";
 import type { Workspace } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { GitLabMark } from "./gitlab-mark";
 
-type SettingsKey = "gitlab_enabled" | "gitlab_mr_sidebar_enabled" | "gitlab_issue_sync_enabled" | "gitlab_comment_sync_enabled";
+type SettingsKey =
+  | "gitlab_enabled"
+  | "gitlab_mr_sidebar_enabled"
+  | "gitlab_issue_sync_enabled"
+  | "gitlab_comment_sync_enabled";
 
 export function GitLabTab() {
   const { t } = useT("settings");
@@ -30,6 +39,7 @@ export function GitLabTab() {
   const [connecting, setConnecting] = useState(false);
   const [namespace, setNamespace] = useState("");
   const [savingKey, setSavingKey] = useState<SettingsKey | null>(null);
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
@@ -44,6 +54,7 @@ export function GitLabTab() {
   const canManage = connectionData?.can_manage === true;
 
   const deleteMutation = useDeleteGitLabConnection(wsId);
+  const rotateMutation = useRotateGitLabWebhookSecret(wsId);
 
   const flags = deriveGitLabSettings(workspace);
 
@@ -82,7 +93,22 @@ export function GitLabTab() {
     }
   }
 
+  async function handleRotate(connectionId: string) {
+    setRotatingId(connectionId);
+    try {
+      await rotateMutation.mutateAsync(connectionId);
+      toast.success(t(($) => $.gitlab.webhook_secret_rotated));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.gitlab.webhook_secret_rotate_failed));
+    } finally {
+      setRotatingId(null);
+    }
+  }
+
   if (!workspace) return null;
+
+  const webhookURL =
+    typeof window !== "undefined" ? `${window.location.origin}/api/webhooks/gitlab/${wsId}` : "";
 
   return (
     <div className="space-y-8">
@@ -172,27 +198,69 @@ export function GitLabTab() {
         <section className="space-y-3">
           <h2 className="text-sm font-semibold">{t(($) => $.gitlab.webhook_url_label)}</h2>
           <Card>
-            <CardContent className="space-y-2">
+            <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground">{t(($) => $.gitlab.webhook_url_description)}</p>
-              <div className="flex items-center gap-2">
-                <Input
-                  readOnly
-                  value={`${typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/gitlab/${wsId}`}
-                  className="font-mono text-xs"
-                />
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => {
-                    navigator.clipboard.writeText(
-                      `${window.location.origin}/api/webhooks/gitlab/${wsId}`,
-                    );
-                    toast.success(t(($) => $.gitlab.webhook_url_copied));
-                  }}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">
+                  {t(($) => $.gitlab.webhook_url_field_label)}
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Input readOnly value={webhookURL} className="font-mono text-xs" />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => {
+                      navigator.clipboard.writeText(webhookURL);
+                      toast.success(t(($) => $.gitlab.webhook_url_copied));
+                    }}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
+
+              {canManage &&
+                connections.map((conn) =>
+                  conn.webhook_secret ? (
+                    <div key={conn.id} className="space-y-2 border-t pt-4">
+                      <Label className="text-xs text-muted-foreground">
+                        {t(($) => $.gitlab.webhook_secret_label)}
+                        {connections.length > 1 ? ` · ${conn.namespace}` : ""}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {t(($) => $.gitlab.webhook_secret_description)}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          readOnly
+                          value={conn.webhook_secret}
+                          className="font-mono text-xs"
+                        />
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => {
+                            navigator.clipboard.writeText(conn.webhook_secret!);
+                            toast.success(t(($) => $.gitlab.webhook_secret_copied));
+                          }}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={rotatingId === conn.id}
+                          onClick={() => handleRotate(conn.id)}
+                        >
+                          <RefreshCw
+                            className={`mr-1.5 h-3.5 w-3.5 ${rotatingId === conn.id ? "animate-spin" : ""}`}
+                          />
+                          {t(($) => $.gitlab.webhook_secret_rotate)}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null,
+                )}
             </CardContent>
           </Card>
         </section>

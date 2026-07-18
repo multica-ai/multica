@@ -14,10 +14,10 @@ import (
 const createGitLabConnection = `-- name: CreateGitLabConnection :one
 INSERT INTO gitlab_connection (
     workspace_id, namespace, namespace_type, avatar_url, access_token,
-    refresh_token, token_expires_at, connected_by_id
+    refresh_token, token_expires_at, connected_by_id, webhook_secret
 ) VALUES (
-    $1, $2, $3, $5, $4,
-    $6, $7, $8
+    $1, $2, $3, $6, $4,
+    $7, $8, $9, $5
 )
 ON CONFLICT (workspace_id, namespace) DO UPDATE SET
     namespace_type   = EXCLUDED.namespace_type,
@@ -26,8 +26,13 @@ ON CONFLICT (workspace_id, namespace) DO UPDATE SET
     refresh_token    = EXCLUDED.refresh_token,
     token_expires_at = EXCLUDED.token_expires_at,
     connected_by_id  = EXCLUDED.connected_by_id,
+    -- Keep an existing per-connection secret across re-auth; only seed when empty.
+    webhook_secret   = CASE
+        WHEN gitlab_connection.webhook_secret <> '' THEN gitlab_connection.webhook_secret
+        ELSE EXCLUDED.webhook_secret
+    END,
     updated_at       = now()
-RETURNING id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token
+RETURNING id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token, webhook_secret
 `
 
 type CreateGitLabConnectionParams struct {
@@ -35,6 +40,7 @@ type CreateGitLabConnectionParams struct {
 	Namespace      string             `json:"namespace"`
 	NamespaceType  string             `json:"namespace_type"`
 	AccessToken    string             `json:"access_token"`
+	WebhookSecret  string             `json:"webhook_secret"`
 	AvatarUrl      pgtype.Text        `json:"avatar_url"`
 	RefreshToken   pgtype.Text        `json:"refresh_token"`
 	TokenExpiresAt pgtype.Timestamptz `json:"token_expires_at"`
@@ -47,6 +53,7 @@ func (q *Queries) CreateGitLabConnection(ctx context.Context, arg CreateGitLabCo
 		arg.Namespace,
 		arg.NamespaceType,
 		arg.AccessToken,
+		arg.WebhookSecret,
 		arg.AvatarUrl,
 		arg.RefreshToken,
 		arg.TokenExpiresAt,
@@ -65,6 +72,7 @@ func (q *Queries) CreateGitLabConnection(ctx context.Context, arg CreateGitLabCo
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RefreshToken,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
@@ -98,7 +106,7 @@ func (q *Queries) DeleteGitLabIssueByIssueID(ctx context.Context, arg DeleteGitL
 }
 
 const getFirstGitLabConnectionByWorkspace = `-- name: GetFirstGitLabConnectionByWorkspace :one
-SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token FROM gitlab_connection WHERE workspace_id = $1 LIMIT 1
+SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token, webhook_secret FROM gitlab_connection WHERE workspace_id = $1 LIMIT 1
 `
 
 func (q *Queries) GetFirstGitLabConnectionByWorkspace(ctx context.Context, workspaceID pgtype.UUID) (GitlabConnection, error) {
@@ -116,12 +124,13 @@ func (q *Queries) GetFirstGitLabConnectionByWorkspace(ctx context.Context, works
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RefreshToken,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
 
 const getGitLabConnectionByID = `-- name: GetGitLabConnectionByID :one
-SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token FROM gitlab_connection WHERE id = $1
+SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token, webhook_secret FROM gitlab_connection WHERE id = $1
 `
 
 func (q *Queries) GetGitLabConnectionByID(ctx context.Context, id pgtype.UUID) (GitlabConnection, error) {
@@ -139,12 +148,13 @@ func (q *Queries) GetGitLabConnectionByID(ctx context.Context, id pgtype.UUID) (
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RefreshToken,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
 
 const getGitLabConnectionByNamespace = `-- name: GetGitLabConnectionByNamespace :one
-SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token FROM gitlab_connection
+SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token, webhook_secret FROM gitlab_connection
 WHERE workspace_id = $1 AND namespace = $2
 `
 
@@ -168,12 +178,13 @@ func (q *Queries) GetGitLabConnectionByNamespace(ctx context.Context, arg GetGit
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RefreshToken,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
 
 const getGitLabConnectionByNamespaceGlobal = `-- name: GetGitLabConnectionByNamespaceGlobal :one
-SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token FROM gitlab_connection WHERE namespace = $1 LIMIT 1
+SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token, webhook_secret FROM gitlab_connection WHERE namespace = $1 LIMIT 1
 `
 
 // Used by the webhook handler to resolve workspace from project namespace
@@ -194,6 +205,7 @@ func (q *Queries) GetGitLabConnectionByNamespaceGlobal(ctx context.Context, name
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RefreshToken,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
@@ -372,7 +384,7 @@ func (q *Queries) LinkIssueToMergeRequest(ctx context.Context, arg LinkIssueToMe
 }
 
 const listGitLabConnectionsByWorkspace = `-- name: ListGitLabConnectionsByWorkspace :many
-SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token FROM gitlab_connection
+SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token, webhook_secret FROM gitlab_connection
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -398,6 +410,7 @@ func (q *Queries) ListGitLabConnectionsByWorkspace(ctx context.Context, workspac
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.RefreshToken,
+			&i.WebhookSecret,
 		); err != nil {
 			return nil, err
 		}
@@ -477,6 +490,40 @@ func (q *Queries) ListMergeRequestsByIssue(ctx context.Context, issueID pgtype.U
 		return nil, err
 	}
 	return items, nil
+}
+
+const setGitLabConnectionWebhookSecret = `-- name: SetGitLabConnectionWebhookSecret :one
+UPDATE gitlab_connection
+SET webhook_secret = $2,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $3
+RETURNING id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token, webhook_secret
+`
+
+type SetGitLabConnectionWebhookSecretParams struct {
+	ID            pgtype.UUID `json:"id"`
+	WebhookSecret string      `json:"webhook_secret"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) SetGitLabConnectionWebhookSecret(ctx context.Context, arg SetGitLabConnectionWebhookSecretParams) (GitlabConnection, error) {
+	row := q.db.QueryRow(ctx, setGitLabConnectionWebhookSecret, arg.ID, arg.WebhookSecret, arg.WorkspaceID)
+	var i GitlabConnection
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Namespace,
+		&i.NamespaceType,
+		&i.AvatarUrl,
+		&i.AccessToken,
+		&i.TokenExpiresAt,
+		&i.ConnectedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RefreshToken,
+		&i.WebhookSecret,
+	)
+	return i, err
 }
 
 const updateGitLabConnectionTokens = `-- name: UpdateGitLabConnectionTokens :exec

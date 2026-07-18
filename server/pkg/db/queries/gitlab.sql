@@ -1,10 +1,10 @@
 -- name: CreateGitLabConnection :one
 INSERT INTO gitlab_connection (
     workspace_id, namespace, namespace_type, avatar_url, access_token,
-    refresh_token, token_expires_at, connected_by_id
+    refresh_token, token_expires_at, connected_by_id, webhook_secret
 ) VALUES (
     $1, $2, $3, sqlc.narg('avatar_url'), $4,
-    sqlc.narg('refresh_token'), sqlc.narg('token_expires_at'), sqlc.narg('connected_by_id')
+    sqlc.narg('refresh_token'), sqlc.narg('token_expires_at'), sqlc.narg('connected_by_id'), $5
 )
 ON CONFLICT (workspace_id, namespace) DO UPDATE SET
     namespace_type   = EXCLUDED.namespace_type,
@@ -13,6 +13,11 @@ ON CONFLICT (workspace_id, namespace) DO UPDATE SET
     refresh_token    = EXCLUDED.refresh_token,
     token_expires_at = EXCLUDED.token_expires_at,
     connected_by_id  = EXCLUDED.connected_by_id,
+    -- Keep an existing per-connection secret across re-auth; only seed when empty.
+    webhook_secret   = CASE
+        WHEN gitlab_connection.webhook_secret <> '' THEN gitlab_connection.webhook_secret
+        ELSE EXCLUDED.webhook_secret
+    END,
     updated_at       = now()
 RETURNING *;
 
@@ -23,6 +28,13 @@ UPDATE gitlab_connection SET
     token_expires_at = $4,
     updated_at       = now()
 WHERE id = $1;
+
+-- name: SetGitLabConnectionWebhookSecret :one
+UPDATE gitlab_connection
+SET webhook_secret = $2,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $3
+RETURNING *;
 
 -- name: ListGitLabConnectionsByWorkspace :many
 SELECT * FROM gitlab_connection

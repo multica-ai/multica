@@ -7,6 +7,8 @@ export interface GitLabConnection {
   namespace_type: "group" | "user";
   avatar_url: string | null;
   created_at: string;
+  /** Per-connection X-Gitlab-Token value; only present for owners/admins. */
+  webhook_secret?: string | null;
 }
 
 export interface GitLabMergeRequest {

@@ -37,19 +37,58 @@ func isGitLabConfigured() bool {
 	return os.Getenv("GITLAB_URL") != "" &&
 		os.Getenv("GITLAB_APP_ID") != "" &&
 		os.Getenv("GITLAB_APP_SECRET") != "" &&
-		os.Getenv("GITLAB_WEBHOOK_SECRET") != ""
+		gitlabStateHMACKey() != ""
 }
 
-func gitlabWebhookSecret() string { return strings.TrimSpace(os.Getenv("GITLAB_WEBHOOK_SECRET")) }
+// gitlabLegacyWebhookSecret is the optional deploy-wide fallback used only for
+// connections that predate per-connection secrets (empty webhook_secret column).
+// New connections never rely on it; prefer rotating from the UI.
+func gitlabLegacyWebhookSecret() string {
+	return strings.TrimSpace(os.Getenv("GITLAB_WEBHOOK_SECRET"))
+}
 
-// signGitLabState and verifyGitLabState mirror the GitHub state-token pattern,
-// using GITLAB_WEBHOOK_SECRET as the HMAC key.
+// gitlabStateHMACKey is the server-only key for OAuth CSRF state tokens.
+// Prefer GITLAB_WEBHOOK_SECRET when set so existing deploys keep verifying
+// in-flight OAuth state after upgrade. Fall back to GITLAB_SECRET_KEY for
+// new deploys that no longer set the webhook env var.
+func gitlabStateHMACKey() string {
+	if k := gitlabLegacyWebhookSecret(); k != "" {
+		return k
+	}
+	return strings.TrimSpace(os.Getenv("GITLAB_SECRET_KEY"))
+}
+
+const gitlabWebhookSecretPrefix = "glwh_"
+
+// generateGitLabWebhookSecret returns a cryptographically random secret token
+// for the GitLab "Secret token" webhook field. Format mirrors autopilot tokens:
+// "glwh_" + URL-safe base64(32 bytes, no padding).
+func generateGitLabWebhookSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("rand: %w", err)
+	}
+	return gitlabWebhookSecretPrefix + base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// gitlabWebhookTokenMatches reports whether the X-Gitlab-Token matches this
+// connection. Prefer the per-connection secret; if it is empty (legacy row),
+// accept the deploy-wide GITLAB_WEBHOOK_SECRET as a temporary fallback.
+func gitlabWebhookTokenMatches(conn db.GitlabConnection, token string) bool {
+	if conn.WebhookSecret != "" {
+		return hmac.Equal([]byte(conn.WebhookSecret), []byte(token))
+	}
+	env := gitlabLegacyWebhookSecret()
+	return env != "" && hmac.Equal([]byte(env), []byte(token))
+}
+
+// signGitLabState and verifyGitLabState mirror the GitHub state-token pattern.
 // Token format: "{payload}|{namespace}.{nonce}.{sig}"
 // namespace may be empty (login flow); payload is workspaceID or "login".
 func signGitLabState(payload, namespace string) (string, error) {
-	secret := gitlabWebhookSecret()
+	secret := gitlabStateHMACKey()
 	if secret == "" {
-		return "", errors.New("gitlab webhook secret not configured")
+		return "", errors.New("gitlab state hmac key not configured")
 	}
 	nonceBytes := make([]byte, 12)
 	if _, err := rand.Read(nonceBytes); err != nil {
@@ -66,7 +105,7 @@ func signGitLabState(payload, namespace string) (string, error) {
 }
 
 func verifyGitLabState(token string) (payload, namespace string, ok bool) {
-	secret := gitlabWebhookSecret()
+	secret := gitlabStateHMACKey()
 	if secret == "" {
 		return "", "", false
 	}
@@ -104,6 +143,9 @@ type GitLabConnectionResponse struct {
 	NamespaceType string  `json:"namespace_type"`
 	AvatarURL     *string `json:"avatar_url"`
 	CreatedAt     string  `json:"created_at"`
+	// WebhookSecret is the per-connection X-Gitlab-Token value. Only set for
+	// owners/admins who need to paste it into GitLab; omitted for members.
+	WebhookSecret *string `json:"webhook_secret,omitempty"`
 }
 
 type GitLabMergeRequestResponse struct {
@@ -136,8 +178,8 @@ type GitLabIssueResponse struct {
 	GlAssigneeUsername *string `json:"gl_assignee_username"`
 }
 
-func gitlabConnectionToResponse(c db.GitlabConnection) GitLabConnectionResponse {
-	return GitLabConnectionResponse{
+func gitlabConnectionToResponse(c db.GitlabConnection, includeSecret bool) GitLabConnectionResponse {
+	resp := GitLabConnectionResponse{
 		ID:            uuidToString(c.ID),
 		WorkspaceID:   uuidToString(c.WorkspaceID),
 		Namespace:     c.Namespace,
@@ -145,6 +187,11 @@ func gitlabConnectionToResponse(c db.GitlabConnection) GitLabConnectionResponse 
 		AvatarURL:     textToPtr(c.AvatarUrl),
 		CreatedAt:     timestampToString(c.CreatedAt),
 	}
+	if includeSecret && c.WebhookSecret != "" {
+		s := c.WebhookSecret
+		resp.WebhookSecret = &s
+	}
+	return resp
 }
 
 func gitlabMRToResponse(mr db.GitlabMergeRequest) GitLabMergeRequestResponse {
@@ -180,39 +227,42 @@ func peekGitLabNamespace(body []byte) string {
 	return peek.Project.Namespace
 }
 
-// verifyGitLabWebhookSecret reads the body and validates X-Gitlab-Token.
-// Returns the body on success so callers don't need to re-read it.
-func verifyGitLabWebhookSecret(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+// readGitLabWebhookBody reads the request body with a size cap.
+func readGitLabWebhookBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "cannot read body")
 		return nil, false
 	}
-	secret := gitlabWebhookSecret()
-	if secret == "" {
-		writeError(w, http.StatusServiceUnavailable, "gitlab integration not configured")
-		return nil, false
-	}
-	if r.Header.Get("X-Gitlab-Token") != secret {
-		writeError(w, http.StatusUnauthorized, "invalid webhook token")
-		return nil, false
-	}
 	return body, true
 }
 
-// HandleGitLabWebhook (POST /api/webhooks/gitlab) verifies X-Gitlab-Token and
-// routes events to the correct workspace by matching the project namespace.
+// HandleGitLabWebhook (POST /api/webhooks/gitlab) verifies X-Gitlab-Token against
+// the resolved connection's per-connection secret (with a legacy env fallback)
+// and routes events by matching the project namespace.
 // Kept for backwards compatibility with already-registered project webhooks.
 func (h *Handler) HandleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
-	body, ok := verifyGitLabWebhookSecret(w, r)
+	body, ok := readGitLabWebhookBody(w, r)
 	if !ok {
 		return
 	}
+	token := r.Header.Get("X-Gitlab-Token")
 	namespace := peekGitLabNamespace(body)
 	conn, err := h.resolveGitLabConnectionByNamespace(r.Context(), namespace)
 	if err != nil {
+		// Unknown namespace: still reject bad tokens so probes cannot free-ride.
+		// If a legacy deploy-wide secret is set and matches, return 204 (same
+		// as the old global-secret path for unmatched namespaces).
+		if env := gitlabLegacyWebhookSecret(); env == "" || !hmac.Equal([]byte(env), []byte(token)) {
+			writeError(w, http.StatusUnauthorized, "invalid webhook token")
+			return
+		}
 		slog.Warn("gitlab: no connection for namespace", "namespace", namespace)
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if !gitlabWebhookTokenMatches(conn, token) {
+		writeError(w, http.StatusUnauthorized, "invalid webhook token")
 		return
 	}
 	h.dispatchGitLabWebhookEvent(r.Context(), r.Header.Get("X-Gitlab-Event"), conn, body)
@@ -220,11 +270,11 @@ func (h *Handler) HandleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleGitLabWebhookForWorkspace (POST /api/webhooks/gitlab/{workspaceId}) verifies
-// X-Gitlab-Token and routes the event to the specific workspace without a namespace
-// lookup. Use this URL in GitLab project webhook settings so multiple projects across
-// different workspaces each get their own endpoint.
+// X-Gitlab-Token against a connection in that workspace and routes the event
+// without a namespace lookup. Use this URL in GitLab project webhook settings so
+// multiple projects across different workspaces each get their own endpoint.
 func (h *Handler) HandleGitLabWebhookForWorkspace(w http.ResponseWriter, r *http.Request) {
-	body, ok := verifyGitLabWebhookSecret(w, r)
+	body, ok := readGitLabWebhookBody(w, r)
 	if !ok {
 		return
 	}
@@ -232,13 +282,44 @@ func (h *Handler) HandleGitLabWebhookForWorkspace(w http.ResponseWriter, r *http
 	if !ok {
 		return
 	}
-	conn, err := h.Queries.GetFirstGitLabConnectionByWorkspace(r.Context(), wsUUID)
+	token := r.Header.Get("X-Gitlab-Token")
+	conns, err := h.Queries.ListGitLabConnectionsByWorkspace(r.Context(), wsUUID)
 	if err != nil {
-		slog.Warn("gitlab: no connection for workspace", "workspace_id", uuidToString(wsUUID))
+		writeError(w, http.StatusInternalServerError, "failed to resolve connection")
+		return
+	}
+	if len(conns) == 0 {
+		// No connection yet — reject unless legacy env secret still matches
+		// (operator may have registered the webhook before connecting OAuth).
+		if env := gitlabLegacyWebhookSecret(); env == "" || !hmac.Equal([]byte(env), []byte(token)) {
+			writeError(w, http.StatusUnauthorized, "invalid webhook token")
+			return
+		}
+		slog.Warn("gitlab: no connection for workspace",
+			"workspace_id", uuidToString(wsUUID),
+			"event", r.Header.Get("X-Gitlab-Event"),
+		)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	h.dispatchGitLabWebhookEvent(r.Context(), r.Header.Get("X-Gitlab-Event"), conn, body)
+	var conn *db.GitlabConnection
+	for i := range conns {
+		if gitlabWebhookTokenMatches(conns[i], token) {
+			conn = &conns[i]
+			break
+		}
+	}
+	if conn == nil {
+		writeError(w, http.StatusUnauthorized, "invalid webhook token")
+		return
+	}
+	slog.Info("gitlab: webhook accepted",
+		"workspace_id", uuidToString(wsUUID),
+		"connection_id", uuidToString(conn.ID),
+		"namespace", conn.Namespace,
+		"event", r.Header.Get("X-Gitlab-Event"),
+	)
+	h.dispatchGitLabWebhookEvent(r.Context(), r.Header.Get("X-Gitlab-Event"), *conn, body)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -527,6 +608,7 @@ func (h *Handler) handleGitLabIssueEvent(ctx context.Context, conn db.GitlabConn
 	projectPath := p.Project.PathWithNamespace
 	action := p.ObjectAttributes.Action
 	workspaceID := uuidToString(conn.WorkspaceID)
+	glIID := p.ObjectAttributes.IID
 
 	hasAgent := containsLabel(p.Labels, "agent")
 
@@ -539,31 +621,31 @@ func (h *Handler) handleGitLabIssueEvent(ctx context.Context, conn db.GitlabConn
 	row, rowErr := h.Queries.GetGitLabIssueByProjectAndIID(ctx, db.GetGitLabIssueByProjectAndIIDParams{
 		WorkspaceID: conn.WorkspaceID,
 		ProjectPath: projectPath,
-		GlIssueIid:  p.ObjectAttributes.IID,
+		GlIssueIid:  glIID,
 	})
 	rowExists := rowErr == nil
 
-	// Agent label removed while row exists → delete Multica issue (cascade deletes row).
-	if !hasAgent && rowExists {
-		if err := h.Queries.DeleteIssue(ctx, db.DeleteIssueParams{
-			ID:          row.IssueID,
-			WorkspaceID: conn.WorkspaceID,
-		}); err != nil {
-			slog.Error("gitlab: failed to delete issue on label removal", "err", err)
-			return
-		}
-		h.publish(protocol.EventIssueDeleted, workspaceID, "system", "", map[string]any{
-			"issue_id": uuidToString(row.IssueID),
-		})
-		return
-	}
+	slog.Info("gitlab: issue hook",
+		"workspace", workspaceID,
+		"project", projectPath,
+		"gl_iid", glIID,
+		"action", action,
+		"has_agent", hasAgent,
+		"already_linked", rowExists,
+		"title", p.ObjectAttributes.Title,
+		"label_count", len(p.Labels),
+	)
 
+	// Creating and field-syncing Multica issues requires the agent label.
+	// Removing the label does not delete the Multica issue — the link stays
+	// and close/reopen status transitions still apply when a row exists.
 	if hasAgent {
 		if !rowExists && (action == "open" || action == "update") {
 			// Create Multica issue.
 			creatorID, ok := h.gitlabCreatorID(ctx, conn)
 			if !ok {
-				slog.Error("gitlab: no creator available, skipping issue creation", "workspace", workspaceID)
+				slog.Error("gitlab: no creator available, skipping issue creation",
+					"workspace", workspaceID, "project", projectPath, "gl_iid", glIID)
 				return
 			}
 
@@ -578,7 +660,8 @@ func (h *Handler) handleGitLabIssueEvent(ctx context.Context, conn db.GitlabConn
 				AllowDuplicate: true,
 			}, service.IssueCreateOpts{})
 			if err != nil {
-				slog.Error("gitlab: failed to create issue", "err", err)
+				slog.Error("gitlab: failed to create issue",
+					"err", err, "workspace", workspaceID, "project", projectPath, "gl_iid", glIID)
 				return
 			}
 
@@ -586,17 +669,31 @@ func (h *Handler) handleGitLabIssueEvent(ctx context.Context, conn db.GitlabConn
 				WorkspaceID:        conn.WorkspaceID,
 				ConnectionID:       conn.ID,
 				ProjectPath:        projectPath,
-				GlIssueIid:         p.ObjectAttributes.IID,
+				GlIssueIid:         glIID,
 				GlProjectID:        p.Project.ID,
 				IssueID:            res.Issue.ID,
 				GlAssigneeUsername: pgtype.Text{String: assigneeUsername, Valid: assigneeUsername != ""},
 			})
 			if err != nil {
-				slog.Error("gitlab: failed to insert gitlab_issue row", "err", err)
+				slog.Error("gitlab: failed to insert gitlab_issue row",
+					"err", err,
+					"workspace", workspaceID,
+					"project", projectPath,
+					"gl_iid", glIID,
+					"issue_id", uuidToString(res.Issue.ID),
+				)
 				return
 			}
 			row = glRow
 			rowExists = true
+			slog.Info("gitlab: created multica issue from agent label",
+				"workspace", workspaceID,
+				"project", projectPath,
+				"gl_iid", glIID,
+				"issue_id", uuidToString(res.Issue.ID),
+				"issue_number", res.Issue.Number,
+				"title", p.ObjectAttributes.Title,
+			)
 
 		} else if rowExists {
 			// Sync description.
@@ -604,16 +701,37 @@ func (h *Handler) handleGitLabIssueEvent(ctx context.Context, conn db.GitlabConn
 				ID:          row.IssueID,
 				Description: pgtype.Text{String: p.ObjectAttributes.Description, Valid: p.ObjectAttributes.Description != ""},
 			}); err != nil {
-				slog.Warn("gitlab: failed to sync description", "err", err)
+				slog.Warn("gitlab: failed to sync description", "err", err, "issue_id", uuidToString(row.IssueID))
 			}
 			// Sync assignee.
 			if err := h.Queries.UpdateGitLabIssueAssignee(ctx, db.UpdateGitLabIssueAssigneeParams{
 				ID:                 row.ID,
 				GlAssigneeUsername: pgtype.Text{String: assigneeUsername, Valid: assigneeUsername != ""},
 			}); err != nil {
-				slog.Warn("gitlab: failed to sync assignee", "err", err)
+				slog.Warn("gitlab: failed to sync assignee", "err", err, "issue_id", uuidToString(row.IssueID))
 			}
+			slog.Info("gitlab: synced existing linked issue",
+				"workspace", workspaceID,
+				"project", projectPath,
+				"gl_iid", glIID,
+				"issue_id", uuidToString(row.IssueID),
+				"action", action,
+			)
+		} else {
+			slog.Info("gitlab: agent label present but action does not create",
+				"workspace", workspaceID,
+				"project", projectPath,
+				"gl_iid", glIID,
+				"action", action,
+			)
 		}
+	} else if !rowExists {
+		slog.Info("gitlab: issue hook ignored (no agent label, not linked)",
+			"workspace", workspaceID,
+			"project", projectPath,
+			"gl_iid", glIID,
+			"action", action,
+		)
 	}
 
 	// Status transitions — applied after the create/sync block.
@@ -925,6 +1043,13 @@ func (h *Handler) GitLabSetupCallback(w http.ResponseWriter, r *http.Request) {
 		resolvedNamespace = userInfo.Namespace
 		resolvedType = userInfo.NamespaceType
 	}
+	webhookSecret, err := generateGitLabWebhookSecret()
+	if err != nil {
+		slog.Error("gitlab: failed to generate webhook secret", "err", err)
+		http.Redirect(w, r, settingsURL+"&gitlab_error=persist_failed", http.StatusFound)
+		return
+	}
+
 	conn, err := h.Queries.CreateGitLabConnection(r.Context(), db.CreateGitLabConnectionParams{
 		WorkspaceID:    wsUUID,
 		Namespace:      resolvedNamespace,
@@ -934,6 +1059,7 @@ func (h *Handler) GitLabSetupCallback(w http.ResponseWriter, r *http.Request) {
 		RefreshToken:   pgtype.Text{String: tokenResp.RefreshToken, Valid: tokenResp.RefreshToken != ""},
 		TokenExpiresAt: expiresAt,
 		ConnectedByID:  connectedBy,
+		WebhookSecret:  webhookSecret,
 	})
 	if err != nil {
 		slog.Error("gitlab: failed to persist connection", "err", err)
@@ -942,7 +1068,8 @@ func (h *Handler) GitLabSetupCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.publish(protocol.EventGitLabConnectionCreated, workspaceID, "system", "", map[string]any{
-		"connection": gitlabConnectionToResponse(conn),
+		// Never broadcast the webhook secret over the WS fanout.
+		"connection": gitlabConnectionToResponse(conn, false),
 	})
 	http.Redirect(w, r, settingsURL+"&gitlab_connected=1", http.StatusFound)
 }
@@ -962,15 +1089,78 @@ func (h *Handler) ListGitLabConnections(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to list connections")
 		return
 	}
+	// Lazy-issue secrets for legacy rows so admins can copy a token without
+	// re-connecting OAuth. Only managers trigger generation (avoids racing
+	// writes from every member list poll). Prefer seeding from the legacy env
+	// secret when set so existing GitLab webhooks keep working after upgrade;
+	// otherwise mint a fresh token.
+	if canManage {
+		for i := range conns {
+			if conns[i].WebhookSecret != "" {
+				continue
+			}
+			secret := gitlabLegacyWebhookSecret()
+			if secret == "" {
+				var gerr error
+				secret, gerr = generateGitLabWebhookSecret()
+				if gerr != nil {
+					slog.Error("gitlab: failed to generate webhook secret for legacy connection",
+						"connection_id", uuidToString(conns[i].ID), "err", gerr)
+					continue
+				}
+			}
+			updated, serr := h.Queries.SetGitLabConnectionWebhookSecret(r.Context(), db.SetGitLabConnectionWebhookSecretParams{
+				ID:            conns[i].ID,
+				WebhookSecret: secret,
+				WorkspaceID:   wsUUID,
+			})
+			if serr != nil {
+				slog.Error("gitlab: failed to persist webhook secret for legacy connection",
+					"connection_id", uuidToString(conns[i].ID), "err", serr)
+				continue
+			}
+			conns[i] = updated
+		}
+	}
 	resp := make([]GitLabConnectionResponse, len(conns))
 	for i, c := range conns {
-		resp[i] = gitlabConnectionToResponse(c)
+		resp[i] = gitlabConnectionToResponse(c, canManage)
 	}
 	writeJSON(w, http.StatusOK, ListGitLabConnectionsResponse{
 		Connections: resp,
 		Configured:  isGitLabConfigured(),
 		CanManage:   canManage,
 	})
+}
+
+// RotateGitLabConnectionWebhookSecret (POST /api/workspaces/{id}/gitlab/connections/{connectionId}/rotate-webhook-secret)
+// issues a fresh per-connection secret. The previous secret stops working immediately.
+func (h *Handler) RotateGitLabConnectionWebhookSecret(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	connectionID := chi.URLParam(r, "connectionId")
+	connUUID, ok := parseUUIDOrBadRequest(w, connectionID, "connection id")
+	if !ok {
+		return
+	}
+	secret, err := generateGitLabWebhookSecret()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate webhook secret")
+		return
+	}
+	conn, err := h.Queries.SetGitLabConnectionWebhookSecret(r.Context(), db.SetGitLabConnectionWebhookSecretParams{
+		ID:            connUUID,
+		WebhookSecret: secret,
+		WorkspaceID:   wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "connection not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, gitlabConnectionToResponse(conn, true))
 }
 
 // DeleteGitLabConnection (DELETE /api/workspaces/{id}/gitlab/connections/{connectionId})

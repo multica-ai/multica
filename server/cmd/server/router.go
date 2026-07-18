@@ -929,6 +929,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Get("/gitlab/connect", h.GitLabConnect)
 					r.Delete("/gitlab/connections/{connectionId}", h.DeleteGitLabConnection)
+					r.Post("/gitlab/connections/{connectionId}/rotate-webhook-secret", h.RotateGitLabConnectionWebhookSecret)
 				})
 
 				// Lark integration. Every endpoint here only requires

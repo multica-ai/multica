@@ -546,6 +546,7 @@ type GitlabConnection struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	RefreshToken   pgtype.Text        `json:"refresh_token"`
+	WebhookSecret  string             `json:"webhook_secret"`
 }
 
 type GitlabIssue struct {

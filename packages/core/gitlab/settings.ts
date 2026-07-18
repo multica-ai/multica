@@ -54,3 +54,14 @@ export function useDeleteGitLabConnection(wsId: string) {
     },
   });
 }
+
+export function useRotateGitLabWebhookSecret(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (connectionId: string) =>
+      api.rotateGitLabConnectionWebhookSecret(wsId, connectionId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: gitlabKeys.connections(wsId) });
+    },
+  });
+}
