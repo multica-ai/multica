@@ -12,7 +12,9 @@ import (
 type recordingObservationStore struct {
 	observations             []Observation
 	functions                []Function
+	operatingLoops           []OperatingLoop
 	listFunctionsWorkspaceID uuid.UUID
+	listLoopsWorkspaceID     uuid.UUID
 }
 
 func (s *recordingObservationStore) ListFunctions(
@@ -52,6 +54,14 @@ func (s *recordingObservationStore) CreateOperatingLoop(
 		Description: input.Description,
 		Active:      true,
 	}, nil
+}
+
+func (s *recordingObservationStore) ListOperatingLoops(
+	_ context.Context,
+	workspaceID uuid.UUID,
+) ([]OperatingLoop, error) {
+	s.listLoopsWorkspaceID = workspaceID
+	return append([]OperatingLoop(nil), s.operatingLoops...), nil
 }
 
 func (s *recordingObservationStore) CreateMetric(

@@ -123,6 +123,28 @@ func (s *Store) CreateOperatingLoop(
 	return operatingLoop, err
 }
 
+func (s *Store) ListOperatingLoops(ctx context.Context, workspaceID uuid.UUID) ([]OperatingLoop, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+operatingLoopColumns+`
+		FROM cerebro_ai_impact_operating_loop
+		WHERE workspace_id = $1
+		ORDER BY name, id`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	operatingLoops := make([]OperatingLoop, 0)
+	for rows.Next() {
+		operatingLoop, err := scanOperatingLoop(rows)
+		if err != nil {
+			return nil, err
+		}
+		operatingLoops = append(operatingLoops, operatingLoop)
+	}
+	return operatingLoops, rows.Err()
+}
+
 const projectBindingColumns = `id, workspace_id, project_id, operating_loop_id,
  active, created_at, updated_at`
 

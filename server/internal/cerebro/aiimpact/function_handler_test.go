@@ -182,6 +182,57 @@ func TestOperatingLoopHTTPSeamAllowsOwnerAdminCreateAndKeepsMemberReadOnly(t *te
 	}
 }
 
+func TestOperatingLoopHTTPSeamLetsMemberListWorkspaceOperatingLoops(t *testing.T) {
+	workspaceID := uuid.New()
+	operatingLoopID := uuid.New()
+	functionID := uuid.New()
+	store := &recordingObservationStore{operatingLoops: []OperatingLoop{{
+		ID:          operatingLoopID,
+		WorkspaceID: workspaceID,
+		FunctionID:  functionID,
+		Name:        "Resolve customer need",
+		Description: "Resolve tracking and order status without manual work",
+		Active:      true,
+	}}}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cerebro/ai-impact/operating-loops", nil)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("member list operating loops status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		OperatingLoops []struct {
+			ID          uuid.UUID `json:"id"`
+			FunctionID  uuid.UUID `json:"function_id"`
+			Name        string    `json:"name"`
+			Description string    `json:"description"`
+			Active      bool      `json:"active"`
+		} `json:"operating_loops"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode member list operating loops response: %v", err)
+	}
+	if len(response.OperatingLoops) != 1 || response.OperatingLoops[0].ID != operatingLoopID ||
+		response.OperatingLoops[0].FunctionID != functionID ||
+		response.OperatingLoops[0].Name != "Resolve customer need" ||
+		response.OperatingLoops[0].Description != "Resolve tracking and order status without manual work" ||
+		!response.OperatingLoops[0].Active {
+		t.Fatalf("member list operating loops response = %+v", response.OperatingLoops)
+	}
+	if store.listLoopsWorkspaceID != workspaceID {
+		t.Fatalf("list operating loops workspace = %s, want %s", store.listLoopsWorkspaceID, workspaceID)
+	}
+}
+
 func TestMetricHTTPSeamAllowsOwnerAdminCreateAndKeepsMemberReadOnly(t *testing.T) {
 	store := &recordingObservationStore{}
 	handler := NewHandler(NewService(store))

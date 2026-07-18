@@ -26,6 +26,7 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/cerebro/ai-impact/functions", h.ListFunctions)
 	r.Post("/api/cerebro/ai-impact/functions", h.CreateFunction)
+	r.Get("/api/cerebro/ai-impact/operating-loops", h.ListOperatingLoops)
 	r.Post("/api/cerebro/ai-impact/operating-loops", h.CreateOperatingLoop)
 	r.Post("/api/cerebro/ai-impact/project-bindings", h.CreateProjectBinding)
 	r.Post("/api/cerebro/ai-impact/metrics", h.CreateMetric)
@@ -284,6 +285,25 @@ func toOperatingLoopResponse(operatingLoop OperatingLoop) operatingLoopResponse 
 		Description: operatingLoop.Description,
 		Active:      operatingLoop.Active,
 	}
+}
+
+// ListOperatingLoops returns workspace-scoped operating loops.
+func (h *Handler) ListOperatingLoops(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, _, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+
+	operatingLoops, err := h.service.ListOperatingLoops(r.Context(), workspaceID)
+	if err != nil {
+		writeObservationError(w, http.StatusInternalServerError, "failed to list operating loops")
+		return
+	}
+	response := make([]operatingLoopResponse, 0, len(operatingLoops))
+	for _, operatingLoop := range operatingLoops {
+		response = append(response, toOperatingLoopResponse(operatingLoop))
+	}
+	writeObservationJSON(w, http.StatusOK, map[string]any{"operating_loops": response})
 }
 
 // CreateOperatingLoop creates one workspace-scoped operating loop.
