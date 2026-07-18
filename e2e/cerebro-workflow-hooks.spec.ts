@@ -71,17 +71,19 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
     await page.goto(`/${slug}/workflows/hooks/${HOOK_ID}`);
     const chain = page.getByRole("list", { name: "Hook chain" });
     await expect(chain).toBeVisible();
-    await expect(chain.getByRole("button", { name: /Configure/ })).toHaveCount(6);
+    await expect(chain.getByRole("button", { name: /Configure/ })).toHaveCount(3);
+    await expect(chain.getByRole("button", { name: "Configure When" })).toBeVisible();
+    await expect(chain.getByRole("button", { name: "Configure Guide or enforce" })).toBeVisible();
+    await expect(chain.getByRole("button", { name: "Configure Actions" })).toBeVisible();
     await capture(page, testInfo, "02-hook-editor");
 
-    await page.getByRole("button", { name: "Configure Filter" }).click();
+    await page.getByRole("button", { name: "Configure When" }).click();
     await expect(page.getByLabel("Filter field 1")).toContainText("Issue status");
     await expect(page.getByText("All of the following must match")).toBeVisible();
     await expect(page.getByLabel("Filter conjunction 2")).toHaveCount(0);
     await expect(page.getByText(/\{\s*"field"/)).toHaveCount(0);
     await capture(page, testInfo, "03-filter-rows");
 
-    await page.getByRole("button", { name: "Configure Applies to" }).click();
     const scope = page.getByRole("combobox", { name: "Scope 1" });
     for (const value of ["model", "issue", "session"]) {
       await scope.click();
@@ -112,9 +114,9 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
     await page.getByRole("button", { name: /Start from scratch/ }).click();
     await expect(page.getByLabel("Hook name")).toHaveValue("");
     await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Configure Trigger" })).toHaveAttribute("data-state", "incomplete");
+    await expect(page.getByRole("button", { name: "Configure When" })).toHaveAttribute("data-state", "incomplete");
 
-    await page.getByRole("button", { name: "Configure Action" }).click();
+    await page.getByRole("button", { name: "Configure Actions" }).click();
     await page.getByRole("button", { name: "Add action", exact: true }).click();
     await page.getByLabel("Action 1 type").click();
     await expect(page.getByRole("option", { name: "Start agent" })).toBeVisible();
@@ -130,7 +132,7 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
   test("saves a named target and keeps it after reload", async ({ page }) => {
     const slug = "e2e-workspace";
     await page.goto(`/${slug}/workflows/hooks/${HOOK_ID}`);
-    await page.getByRole("button", { name: "Configure Applies to" }).click();
+    await page.getByRole("button", { name: "Configure When" }).click();
     await page.getByRole("combobox", { name: "Scope 1" }).click();
     await page.getByRole("option", { name: "Agent" }).click();
     await page.getByLabel("Agent").click();
@@ -139,7 +141,7 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
     await page.getByRole("button", { name: "Save draft" }).click();
     expect((await saveRequest).postDataJSON().conditions[0]).toEqual({ field: "issue.status", op: "not_in", values: ["done", "cancelled"] });
     await page.reload();
-    await page.getByRole("button", { name: "Configure Applies to" }).click();
+    await page.getByRole("button", { name: "Configure When" }).click();
     await expect(page.getByLabel("Agent")).toContainText("Lone");
   });
 
@@ -175,23 +177,23 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
     await expectClickable(page, recipe);
     await recipe.click();
     const steps = page.getByRole("list", { name: "Hook steps" });
-    await expect(steps.getByRole("button")).toHaveCount(6);
+    await expect(steps.getByRole("button")).toHaveCount(3);
 
-    await page.getByRole("button", { name: "Go to Trigger step" }).click();
-    await expect(page.getByRole("region", { name: "trigger configuration" })).toBeVisible();
-    for (const region of ["scope", "filter", "decision", "action", "failure"]) {
+    await page.getByRole("button", { name: "Go to When step" }).click();
+    await expect(page.getByRole("region", { name: "when configuration" })).toBeVisible();
+    for (const region of ["guide", "actions"]) {
       const next = page.getByRole("button", { name: "Next step" });
       await expectClickable(page, next);
       await next.click();
       await expect(page.getByRole("region", { name: `${region} configuration` })).toBeVisible();
     }
-    await page.getByRole("radio", { name: /Fail closed/ }).click();
+    await page.getByRole("radio", { name: "Stop" }).click();
     const back = page.getByRole("button", { name: "Back one step" });
     await expectClickable(page, back);
     await back.click();
-    await expect(page.getByRole("region", { name: "action configuration" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "guide configuration" })).toBeVisible();
 
-    await page.getByRole("button", { name: "Go to Applies to step" }).click();
+    await page.getByRole("button", { name: "Go to When step" }).click();
     await page.getByRole("combobox", { name: "Scope 1" }).click();
     await page.getByRole("option", { name: "Agent" }).click();
     await page.getByRole("button", { name: "Agent" }).click();

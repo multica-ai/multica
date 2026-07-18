@@ -6,7 +6,7 @@ describe("workflow hook validation", () => {
   it("starts new hooks empty and guides the user to choose a trigger", () => {
     const draft = createHookDraft();
     expect(draft).toMatchObject({ name: "", events: [], bindings: [], conditions: [], actions: [] });
-    expect(validateHookStep(draft, "trigger")).toEqual({ valid: false, message: "Choose at least one trigger." });
+    expect(validateHookStep(draft, "when")).toEqual({ valid: false, message: "Choose at least one trigger." });
     expect(validateHook(draft).valid).toBe(false);
   });
 
@@ -24,6 +24,6 @@ describe("workflow hook validation", () => {
       requirement: "Add a continuation",
       actions: [{ type: "audit.record", label: "Record audit event", config: {} }],
     };
-    expect(validateHookStep(hook, "filter")).toEqual({ valid: false, message: "Choose a field available for the selected trigger." });
+    expect(validateHookStep(hook, "when")).toEqual({ valid: false, message: "Choose a filter field available for the selected trigger." });
   });
 });

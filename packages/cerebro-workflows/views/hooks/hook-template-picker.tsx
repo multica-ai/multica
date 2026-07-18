@@ -11,7 +11,7 @@ export function HookTemplatePicker({ onSelect, onBack }: { onSelect: (hook: Work
         <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">{template.id === "scratch" ? <Blocks className="size-4" /> : index % 2 === 0 ? <ShieldCheck className="size-4" /> : <WandSparkles className="size-4" />}</span>
         <strong className="mt-4 text-sm">{template.title}</strong><span className="mt-1 flex-1 text-sm text-muted-foreground">{template.description}</span><span className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-primary">Use this recipe <ArrowRight className="size-3" /></span>
       </button>)}</div>
-      <div className="mt-6 rounded-lg border bg-muted/30 p-4 text-sm"><strong>How Hooks work</strong><p className="mt-1 text-muted-foreground">Build the six-step chain, save it, and test it against a past event. Publishing stays locked until Dry run evidence exists.</p></div>
+      <div className="mt-6 rounded-lg border bg-muted/30 p-4 text-sm"><strong>How Hooks work</strong><p className="mt-1 text-muted-foreground">Set up When it runs, whether to Guide or enforce, and the Actions to take. Save it, then test it against a past event. Publishing stays locked until Dry run evidence exists.</p></div>
     </div>
   </div>;
 }
