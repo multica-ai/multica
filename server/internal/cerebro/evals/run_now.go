@@ -3,6 +3,8 @@ package evals
 import (
 	"context"
 	"net/http"
+
+	"github.com/google/uuid"
 )
 
 // run_now.go adds the default-OFF "Run now" endpoint (FIR-3496): it executes an
@@ -28,13 +30,31 @@ func (h *Handler) WithRunExecutor(x RunExecutor) *Handler {
 	return h
 }
 
+// ExecutorResolver builds a per-request executor for a workspace, so Run-now
+// uses that workspace's own Firtal Gateway credentials — the same firtal_gateway
+// settings the agent runtime and avatar generator already read — instead of a
+// separate server env var that duplicates a key the workspace already holds
+// (FIR-3496). It returns (nil, false) when the workspace has no gateway
+// configured, which keeps Run-now disabled there exactly as a nil executor does.
+type ExecutorResolver func(ctx context.Context, workspaceID uuid.UUID) (RunExecutor, bool)
+
+// WithExecutorResolver enables the real-run endpoint using per-workspace gateway
+// credentials. It is preferred over a static WithRunExecutor: when the resolver
+// yields an executor for the request's workspace, that executor is used; only if
+// it does not does the code fall back to any static executor. Returns the handler
+// for chained wiring.
+func (h *Handler) WithExecutorResolver(fn ExecutorResolver) *Handler {
+	h.resolver = fn
+	return h
+}
+
 // RunNow executes the eval for real and stores the resulting run. When no
 // executor is wired (flag OFF) the endpoint reports 404 so the feature stays
 // invisible until it is deliberately enabled. A setup error from the executor
 // (no tasks, no usable grader, a target kind not yet wired) is a 422: the eval
 // could not really run, so nothing is recorded as a pass.
 func (h *Handler) RunNow(w http.ResponseWriter, r *http.Request) {
-	if h.executor == nil {
+	if h.executor == nil && h.resolver == nil {
 		writeError(w, http.StatusNotFound, "run-now is not enabled")
 		return
 	}
@@ -46,12 +66,25 @@ func (h *Handler) RunNow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Prefer the per-workspace resolver (workspace-owned gateway credentials);
+	// fall back to any static executor. A workspace with no gateway configured
+	// resolves to nothing, so Run-now stays disabled there — a 404, not a pass.
+	executor := h.executor
+	if h.resolver != nil {
+		if resolved, ok := h.resolver(r.Context(), workspaceID); ok && resolved != nil {
+			executor = resolved
+		}
+	}
+	if executor == nil {
+		writeError(w, http.StatusNotFound, "run-now is not enabled")
+		return
+	}
 	eval, err := h.store.Get(r.Context(), workspaceID, id)
 	if err != nil {
 		h.storeError(w, r, err)
 		return
 	}
-	input, err := h.executor.ExecuteRun(r.Context(), eval)
+	input, err := executor.ExecuteRun(r.Context(), eval)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return

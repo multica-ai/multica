@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -827,6 +828,30 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		nil,
 	); err == nil {
 		cerebroEvalsHandler = cerebroEvalsHandler.WithRunExecutor(cerebroevalsrunner.NewEvalExecutor(evalsCompleter, nil))
+	}
+	// CEREBRO-PATCH(cerebro-evals-run-now-workspace-gateway): FIR-3496 — resolve the eval
+	// runner from each workspace's own Firtal Gateway settings (the firtal_gateway credentials
+	// the agent runtime and avatar generator already read), so Run-now works with the key the
+	// workspace already holds instead of a duplicate CEREBRO_EVALS_GATEWAY_* server env var. The
+	// env path above stays as a static fallback; a workspace without a gateway resolves to nothing
+	// and keeps Run-now disabled there.
+	if gwFallback, gwErr := cerebroruntime.LoadFirtalGatewayRuntimeConfig(); gwErr == nil {
+		cerebroEvalsHandler = cerebroEvalsHandler.WithExecutorResolver(
+			func(ctx context.Context, workspaceID uuid.UUID) (cerebroevals.RunExecutor, bool) {
+				ws, err := queries.GetWorkspace(ctx, pgtype.UUID{Bytes: workspaceID, Valid: true})
+				if err != nil {
+					return nil, false
+				}
+				cfg, ok, cfgErr := cerebroruntime.FirtalGatewayConfigFromWorkspaceSettings(ws.Settings, gwFallback)
+				if cfgErr != nil || !ok {
+					return nil, false
+				}
+				completer, cErr := cerebroevalsrunner.NewGatewayCompleter(cfg.BaseURL, cfg.APIKey, cfg.Model, nil)
+				if cErr != nil {
+					return nil, false
+				}
+				return cerebroevalsrunner.NewEvalExecutor(completer, nil), true
+			})
 	}
 	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool)) // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature.
 	h.TaskService.WorkflowCompletionGate = workflowHooksFeature.CompletionGate                      // CEREBRO-PATCH(workflow-hooks-completion-wire): FIR-3101 pre-completion delegation.
