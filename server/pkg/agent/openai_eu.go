@@ -32,9 +32,9 @@ type openaiEUConfig struct {
 }
 
 type openaiEUChatRequest struct {
-	Model    string           `json:"model"`
-	Messages []openaiEUMsg    `json:"messages"`
-	Stream   bool             `json:"stream"`
+	Model    string        `json:"model"`
+	Messages []openaiEUMsg `json:"messages"`
+	Stream   bool          `json:"stream"`
 	// MaxTokens is omitted for o-series reasoning models (they use max_completion_tokens).
 	MaxTokens *int `json:"max_tokens,omitempty"`
 }
@@ -95,6 +95,8 @@ func (b *openaiEUBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			Output:     output,
 			DurationMs: time.Since(start).Milliseconds(),
 			Usage:      map[string]TokenUsage{cfg.Model: usage},
+			// CEREBRO-PATCH(agent-openai-eu-call-usage-events): FIR-3337 one HTTP response equals one native model call.
+			UsageEvents: singleHTTPCallUsageEvent(openaiEUProvider, cfg.Model, firstEnv(b.cfg.Env, "MULTICA_TASK_ID"), usage, time.Now()),
 		}
 	}()
 

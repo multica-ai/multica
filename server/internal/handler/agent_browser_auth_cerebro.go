@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
+	"github.com/multica-ai/multica/server/internal/cerebro/browsertester"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -71,6 +72,11 @@ func (h *Handler) ProvisionAgentBrowserAuth(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return
 	}
+	browserTesterGroups, err := browsertester.AgentGroupIDs(r.Context(), groups, agentID, h.CerebroQueries.ListCerebroGroupAgents)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return
+	}
 	resource := agentvault.VaultResourcePrefix + strings.TrimSpace(req.Vault)
 	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
 	groupIDs := make([]pgtype.UUID, 0, len(groups))
@@ -78,6 +84,9 @@ func (h *Handler) ProvisionAgentBrowserAuth(w http.ResponseWriter, r *http.Reque
 	for _, group := range groups {
 		groupIDs = append(groupIDs, group.ID)
 		if !strings.EqualFold(strings.TrimSpace(group.Name), "browser-testers") {
+			continue
+		}
+		if _, allowed := browserTesterGroups[group.ID]; !allowed {
 			continue
 		}
 		rows, listErr := store.ListForSubject(r.Context(), wsID, toolpolicy.LayerGroup, group.ID)
@@ -126,7 +135,7 @@ func (h *Handler) ProvisionAgentBrowserAuth(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadGateway, "credential unavailable")
 		return
 	}
-	h.auditPersonalBrowser(wsID, agentID, toolpolicy.HostOf(req.Host), "agent-browser-provision-auth", "allow", "vault and group grant matched")
+	h.auditPersonalBrowser(wsID, agentID, toolpolicy.HostOf(req.Host), "agent-browser-provision-auth", "allow", "vault, group, and agent grant matched")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"username": username,
 		"password": password,

@@ -45,6 +45,21 @@ func (c *recordingCommander) Run(_ context.Context, stdin string, args ...string
 	}
 }
 
+func (c *recordingCommander) CaptureScreenshot(_ context.Context, args ...string) ([]byte, error) {
+	args = append(append([]string(nil), args...), "capture-screenshot")
+	c.calls = append(c.calls, commandCall{args: args})
+	return []byte("\x89PNG\r\n\x1a\nverified-registry-dashboard"), nil
+}
+
+func (failingCommander) CaptureScreenshot(_ context.Context, _ ...string) ([]byte, error) {
+	return nil, errors.New("must not escape")
+}
+
+func (blockingCommander) CaptureScreenshot(ctx context.Context, _ ...string) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 func TestTargetForUsesOnlyInternalAllowlist(t *testing.T) {
 	target, err := TargetFor("registry")
 	if err != nil {
@@ -85,6 +100,9 @@ func TestRunnerSendsCredentialsOnlyThroughBatchStdin(t *testing.T) {
 	if strings.Contains(string(encoded), username) || strings.Contains(string(encoded), password) {
 		t.Fatalf("result leaked a credential: %s", encoded)
 	}
+	if !strings.HasPrefix(string(result.ScreenshotPNG), "\x89PNG\r\n\x1a\n") {
+		t.Fatalf("result screenshot is not PNG data: %q", result.ScreenshotPNG)
+	}
 
 	var secretCallCount int
 	for _, call := range commander.calls {
@@ -101,6 +119,36 @@ func TestRunnerSendsCredentialsOnlyThroughBatchStdin(t *testing.T) {
 	}
 	if secretCallCount != 1 {
 		t.Fatalf("secret-bearing stdin calls = %d, want 1", secretCallCount)
+	}
+}
+
+func TestRunnerCapturesScreenshotAfterAuthenticatedMarkers(t *testing.T) {
+	commander := &recordingCommander{}
+	result, err := NewRunner(commander).Verify(context.Background(), "registry", Credential{
+		Username: "registry-test@example.com",
+		Password: "password-must-never-leak",
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !strings.HasPrefix(string(result.ScreenshotPNG), "\x89PNG\r\n\x1a\n") {
+		t.Fatalf("screenshot = %q, want PNG", result.ScreenshotPNG)
+	}
+
+	var snapshotIndex, screenshotIndex = -1, -1
+	for i, call := range commander.calls {
+		if len(call.args) == 0 {
+			continue
+		}
+		switch call.args[len(call.args)-1] {
+		case "snapshot":
+			snapshotIndex = i
+		case "capture-screenshot":
+			screenshotIndex = i
+		}
+	}
+	if snapshotIndex < 0 || screenshotIndex <= snapshotIndex {
+		t.Fatalf("snapshot/screenshot order = %d/%d, want screenshot after verified markers", snapshotIndex, screenshotIndex)
 	}
 }
 
@@ -195,6 +243,13 @@ func TestRunnerBoundsStagesAndCleanup(t *testing.T) {
 
 func TestSafeErrorRejectsUnexpectedDetails(t *testing.T) {
 	if got := SafeError(errors.New("password=must-not-escape")); got != "internal browser verification failed" {
+		t.Fatalf("safe error = %q", got)
+	}
+}
+
+func TestSafeErrorAllowsScreenshotStageWithoutDetails(t *testing.T) {
+	err := errors.New("internal browser stage screenshot failed")
+	if got := SafeError(err); got != "internal browser stage screenshot failed" {
 		t.Fatalf("safe error = %q", got)
 	}
 }

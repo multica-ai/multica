@@ -264,7 +264,13 @@ export function AgentOverviewPane({
       {/* Instructions now renders the versioned Agent Office surface (history /
           propose / approve / diff / restore); edited through Propose change. */}
       {tabId === "instructions" && (
-        <CerebroAgentContextTab agent={agent} canEdit={canEdit} />
+        // CEREBRO-PATCH(agent-office-tab): FIR-3212 — hand the loaded runtimes to
+        // the Instructions surface so its Engine swap panel has candidates.
+        <CerebroAgentContextTab
+          agent={agent}
+          runtimes={runtimes}
+          canEdit={canEdit}
+        />
       )}
       {tabId === "skills" && (
         <TabContent>

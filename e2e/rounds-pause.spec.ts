@@ -99,3 +99,35 @@ test("Pause folds the Round and returns an unanswered message to the next Play",
   await expect(block.getByText("1 ready", { exact: true })).toBeVisible();
   await expect(block.getByText(MESSAGE, { exact: false }).first()).toBeVisible();
 });
+
+test("answering the final Ready message shows a completed Round with green Play", async ({ page }) => {
+  const issue = await api.createIssue(MESSAGE, { allow_duplicate: true });
+  await api.insertInboxItem({ type: "mentioned", route: "inbox", title: MESSAGE, issueId: issue.id });
+
+  const created = await (api as any).authedFetch("/api/cerebro/rounds", {
+    method: "POST",
+    body: JSON.stringify({ name: ROUND }),
+  });
+  if (!created.ok) throw new Error(`create round failed: ${created.status} ${await created.text()}`);
+  const roundId = (await created.json()).id;
+  const added = await (api as any).authedFetch(`/api/cerebro/rounds/${roundId}/members`, {
+    method: "POST",
+    body: JSON.stringify({ issue_id: issue.id }),
+  });
+  if (!added.ok) throw new Error(`add member failed: ${added.status} ${await added.text()}`);
+
+  const block = await showRounds(page);
+  const play = block.getByRole("button", { name: `Play ${ROUND}` });
+  await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith(`/api/cerebro/rounds/${roundId}/start`) && response.request().method() === "POST"),
+    play.click(),
+  ]);
+  await expect(block.getByText("1 ready", { exact: true })).toBeVisible();
+
+  await api.createComment(issue.id, "Handled in this Round");
+
+  const replay = block.getByRole("button", { name: `Play ${ROUND}` });
+  await expect(replay).toHaveClass(/bg-success/);
+  await expect(block.getByRole("alert")).toHaveText("All ready messages handled.");
+  await expect(block.getByText("Complete", { exact: true })).toBeVisible();
+});

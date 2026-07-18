@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -54,7 +55,7 @@ export function HookStepPanel({ step, hook, onChange, directory = {} }: { step: 
         <Button type="button" variant="outline" size="icon" aria-label={`Remove trigger ${index + 1}`} onClick={() => onChange({ ...hook, events: hook.events.filter((_, current) => current !== index) })}><Trash2 className="size-4" /></Button>
       </div>)}
       <div className="flex flex-wrap gap-2"><Button type="button" variant="outline" className="w-fit" aria-label="Add trigger" onClick={() => onChange({ ...hook, events: [...hook.events, "before.task.complete"] })}><Plus className="size-4" />Add trigger</Button><Button type="button" variant="ghost" className="w-fit" onClick={() => setShowAdvanced((current) => !current)}>{showAdvanced ? "Hide advanced events" : "Show advanced events"}</Button></div>
-      {hook.events[0] && <p className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">{HOOK_EVENT_OPTIONS.find((option) => option.value === hook.events[0])?.description}</p>}
+      {hook.events.length > 0 && <div className="grid gap-2">{hook.events.map((eventType, index) => <p key={`${eventType}-description-${index}`} className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground"><strong className="text-foreground">Trigger {index + 1}: </strong>{HOOK_EVENT_OPTIONS.find((option) => option.value === eventType)?.description}</p>)}</div>}
     </div>}
 
     {step === "scope" && <div className="grid gap-3">
@@ -67,7 +68,8 @@ export function HookStepPanel({ step, hook, onChange, directory = {} }: { step: 
     </div>}
 
     {step === "filter" && <div className="grid gap-2">
-      {hook.conditions.map((condition, index) => { const definition = fieldDefinition(condition.field); const rowError = conditionError(condition, fields); return <div key={index} aria-label={`Condition group ${index + 1}`} className="grid gap-2 rounded-xl border-l-4 border-l-primary/40 pl-2">{index > 0 && <div className="w-20 justify-self-center"><ChoiceSelect label={`Filter conjunction ${index + 1}`} value={condition.conjunction ?? "AND"} options={[{ value: "AND", label: "AND" }, { value: "OR", label: "OR" }]} onChange={(value) => updateCondition(index, { conjunction: value as HookCondition["conjunction"] })} /></div>}<div className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1fr)_auto] sm:items-end">
+      {hook.conditions.length > 1 && <p className="text-sm font-medium">All of the following must match</p>}
+      {hook.conditions.map((condition, index) => { const definition = fieldDefinition(condition.field); const rowError = conditionError(condition, fields); return <div key={index} aria-label={`Condition group ${index + 1}`} className="grid gap-2 rounded-xl border-l-4 border-l-primary/40 pl-2"><div className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1fr)_auto] sm:items-end">
         <label className="grid gap-1 text-sm">Field<ChoiceSelect label={`Filter field ${index + 1}`} value={condition.field} placeholder="Select field" options={fields.map((field) => ({ value: field, label: fieldDefinition(field).label }))} onChange={(value) => updateCondition(index, { field: value, value: "" })} /></label>
         <label className="grid gap-1 text-sm">Operator<ChoiceSelect label={`Filter operator ${index + 1}`} value={condition.operator} options={operatorOptions} onChange={(value) => updateCondition(index, { operator: value })} /></label>
         <label className="grid gap-1 text-sm">Value<ConditionValue index={index} condition={condition} definition={definition} onChange={(value) => updateCondition(index, { value })} /></label>
@@ -142,4 +144,3 @@ const ACTION_OPTIONS = [
   { value: "workflow.activate", label: "Start workflow" }, { value: "workflow.pause", label: "Pause workflow" }, { value: "workflow.resume", label: "Resume workflow" }, { value: "workflow.stop", label: "Stop workflow" },
   { value: "approval.require", label: "Require approval" }, { value: "audit.record", label: "Record audit event" }, { value: "metric.increment", label: "Increment metric" },
 ] as const;
-import { useState } from "react";

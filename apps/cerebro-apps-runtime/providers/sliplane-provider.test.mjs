@@ -41,6 +41,9 @@ test("creates a private service on the runtime server and explicitly deploys it"
       if (String(url).endsWith("/services") && init.method === "POST") {
         return Response.json({ id: "service-1", network: { internalDomain: "cerebro-app-f1540000-v1-2-3.internal" } }, { status: 201 });
       }
+      if (String(url).endsWith("/services/service-1") && (!init.method || init.method === "GET")) {
+        return Response.json({ id: "service-1", serverId: "server-1", network: { internalDomain: "cerebro-app-f1540000-v1-2-3.internal" } });
+      }
       if (String(url).endsWith("/services/service-1/deploy")) return Response.json({ status: "queued" }, { status: 202 });
       if (String(url) === "http://cerebro-app-f1540000-v1-2-3.internal:4311/healthz") {
         healthChecks++;
@@ -72,7 +75,7 @@ test("creates a private service on the runtime server and explicitly deploys it"
   ]);
   assert.ok(!JSON.stringify(create.body).includes("sliplane.app"));
   assert.deepEqual(result, { serviceId: "service-1", internalDomain: "cerebro-app-f1540000-v1-2-3.internal" });
-  assert.match(requests[1].url, /projects\/project-1\/services\/service-1\/deploy$/);
+  assert.match(requests[2].url, /projects\/project-1\/services\/service-1\/deploy$/);
   assert.equal(healthChecks, 2);
 });
 
@@ -89,6 +92,9 @@ test("treats Sliplane's empty 204 deploy response as success", async () => {
       if (String(url).endsWith("/services") && init.method === "POST") {
         return Response.json({ id: "service-1", network: { internalDomain: "ready.internal" } }, { status: 201 });
       }
+      if (String(url).endsWith("/services/service-1") && (!init.method || init.method === "GET")) {
+        return Response.json({ id: "service-1", serverId: "server-1", network: { internalDomain: "ready.internal" } });
+      }
       if (String(url).endsWith("/services/service-1/deploy")) return new Response(null, { status: 204 });
       if (String(url) === "http://ready.internal:4311/healthz") return Response.json({ status: "ok", commit: workerCommit });
       throw new Error(`unexpected request ${init.method} ${url}`);
@@ -96,6 +102,50 @@ test("treats Sliplane's empty 204 deploy response as success", async () => {
   });
 
   assert.deepEqual(await provider.createOrDeploy(deployment), { serviceId: "service-1", internalDomain: "ready.internal" });
+});
+
+test("refreshes a created service before using its canonical internal domain", async () => {
+  const healthUrls = [];
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    workerBranch: "main",
+    workerCommit,
+    healthPollMs: 1,
+    healthTimeoutMs: 5,
+    fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/services") && init.method === "POST") {
+        return Response.json({
+          id: "service-1",
+          serverId: "server-1",
+          network: { internalDomain: "provisional-ujd9pc.internal" },
+        }, { status: 201 });
+      }
+      if (String(url).endsWith("/services/service-1") && (!init.method || init.method === "GET")) {
+        return Response.json({
+          id: "service-1",
+          serverId: "server-1",
+          network: { internalDomain: "canonical.internal" },
+        });
+      }
+      if (String(url).endsWith("/services/service-1/deploy")) return new Response(null, { status: 204 });
+      if (String(url).endsWith("/healthz")) {
+        healthUrls.push(String(url));
+        if (String(url) === "http://canonical.internal:4311/healthz") {
+          return Response.json({ status: "ok", commit: workerCommit });
+        }
+        throw new Error("getaddrinfo ENOTFOUND");
+      }
+      throw new Error(`unexpected request ${init.method} ${url}`);
+    },
+  });
+
+  assert.deepEqual(await provider.createOrDeploy(deployment), {
+    serviceId: "service-1",
+    internalDomain: "canonical.internal",
+  });
+  assert.deepEqual(healthUrls, ["http://canonical.internal:4311/healthz"]);
 });
 
 test("reuses a deterministic service after a create conflict", async () => {
@@ -178,6 +228,9 @@ test("fails safely when the private worker never becomes healthy", async () => {
       if (String(url).endsWith("/services") && init.method === "POST") {
         return Response.json({ id: "service-1", network: { internalDomain: "never-ready.internal" } }, { status: 201 });
       }
+      if (String(url).endsWith("/services/service-1") && (!init.method || init.method === "GET")) {
+        return Response.json({ id: "service-1", serverId: "server-1", network: { internalDomain: "never-ready.internal" } });
+      }
       if (String(url).endsWith("/services/service-1/deploy")) return Response.json({}, { status: 202 });
       if (String(url) === "http://never-ready.internal:4311/healthz") return Response.json({ status: "starting" }, { status: 503 });
       throw new Error(`unexpected request ${init.method} ${url}`);
@@ -193,6 +246,7 @@ test("rejects a healthy worker running a different commit", async () => {
     healthPollMs: 1, healthTimeoutMs: 5,
     fetch: async (url, init = {}) => {
       if (String(url).endsWith("/services") && init.method === "POST") return Response.json({ id: "service-1", network: { internalDomain: "wrong-commit.internal" } }, { status: 201 });
+      if (String(url).endsWith("/services/service-1") && (!init.method || init.method === "GET")) return Response.json({ id: "service-1", serverId: "server-1", network: { internalDomain: "wrong-commit.internal" } });
       if (String(url).endsWith("/services/service-1/deploy")) return Response.json({}, { status: 202 });
       if (String(url) === "http://wrong-commit.internal:4311/healthz") return Response.json({ status: "ok", commit: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" });
       throw new Error(`unexpected request ${init.method} ${url}`);

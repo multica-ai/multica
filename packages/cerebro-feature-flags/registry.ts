@@ -221,6 +221,8 @@ export type CerebroFlagKey =
   | "cerebro_workspace_logo"
   // FIR-2666: project sprint feature (sprint settings, auto-create next sprint, recurring tasks).
   | "cerebro_sprints"
+  // FIR-3425: nested Projects table with inline sprint rows.
+  | "cerebro_projects_tree"
   | "cerebro_operating_system"
   // TECH-3064: recurring issues — mark an issue recurring; on close, spawn the next occurrence.
   | "cerebro_recurring_issues"
@@ -634,6 +636,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // when ready. Hides the Sprints tab on the project page, the sprint picker
   // in the issue sidebar, and skips the sprint sweeper.
   cerebro_sprints: false,
+  // FIR-3425: opt-in until the Projects tree table passes its delivery gate.
+  cerebro_projects_tree: false,
   cerebro_operating_system: false,
   // TECH-3064: OFF by default. Hides the recurring panel on issues and skips
   // the recurring-issue sweeper.
@@ -1543,6 +1547,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Turn a project into a sprint container: per-project sprint settings (duration, start-day, lead days for auto-create, move-incomplete), a Sprints tab on the project page, a sprint picker in the issue sidebar, and a daily sweeper that creates the next sprint, moves incomplete issues, and clones recurring tasks. Every period (lead days, duration) is a setting — no hardcoded values. FIR-2666.",
+  },
+  {
+    key: "cerebro_projects_tree",
+    label: "Projects tree table",
+    group: "workspace",
+    description:
+      "Show nested projects and inline sprint progress in the Projects table. Search remains flat with parent paths, while filters retain dimmed ancestors for context. Off keeps the current flat table unchanged. FIR-3425.",
   },
   {
     key: "cerebro_operating_system",

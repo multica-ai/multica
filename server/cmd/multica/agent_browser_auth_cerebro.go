@@ -4,12 +4,14 @@ package main
 // auth vault without placing the password in argv, stdout, stderr, or logs.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -49,11 +51,12 @@ type internalBrowserVerifyRequest struct {
 }
 
 type internalBrowserVerifyResponse struct {
-	App          string   `json:"app"`
-	InternalHost string   `json:"internal_host"`
-	FinalURL     string   `json:"final_url"`
-	Markers      []string `json:"markers"`
-	Errors       []string `json:"errors"`
+	App           string   `json:"app"`
+	InternalHost  string   `json:"internal_host"`
+	FinalURL      string   `json:"final_url"`
+	Markers       []string `json:"markers"`
+	Errors        []string `json:"errors"`
+	ScreenshotPNG []byte   `json:"screenshot_png"`
 }
 
 type agentBrowserAuthSaver interface {
@@ -123,12 +126,39 @@ var agentBrowserProvisionAuthCmd = &cobra.Command{
 	},
 }
 
-func verifyInternalAgentBrowser(ctx context.Context, client *cli.APIClient, out io.Writer, app string) error {
+func verifyInternalAgentBrowser(ctx context.Context, client *cli.APIClient, out io.Writer, app, screenshotPath string) error {
 	var response internalBrowserVerifyResponse
 	if err := client.PostJSON(ctx, "/api/cerebro/agent-browser/internal-verify", internalBrowserVerifyRequest{App: app}, &response); err != nil {
 		return err
 	}
-	return json.NewEncoder(out).Encode(response)
+	if !bytes.HasPrefix(response.ScreenshotPNG, []byte("\x89PNG\r\n\x1a\n")) {
+		return fmt.Errorf("internal browser verification returned an invalid screenshot")
+	}
+	absPath, err := filepath.Abs(screenshotPath)
+	if err != nil {
+		return fmt.Errorf("resolve screenshot path")
+	}
+	file, err := os.OpenFile(absPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("write screenshot")
+	}
+	if _, err := file.Write(response.ScreenshotPNG); err != nil {
+		_ = file.Close()
+		_ = os.Remove(absPath)
+		return fmt.Errorf("write screenshot")
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(absPath)
+		return fmt.Errorf("write screenshot")
+	}
+	if err := os.Chmod(absPath, 0o600); err != nil {
+		_ = os.Remove(absPath)
+		return fmt.Errorf("secure screenshot")
+	}
+	return json.NewEncoder(out).Encode(map[string]any{
+		"app": response.App, "internal_host": response.InternalHost, "final_url": response.FinalURL,
+		"markers": response.Markers, "errors": response.Errors, "screenshot": absPath,
+	})
 }
 
 const internalBrowserVerifyTimeout = 2 * time.Minute
@@ -146,6 +176,10 @@ var agentBrowserInternalVerifyCmd = &cobra.Command{
 		if app == "" {
 			return fmt.Errorf("--app is required")
 		}
+		screenshotPath, _ := cmd.Flags().GetString("screenshot")
+		if screenshotPath == "" {
+			screenshotPath = fmt.Sprintf("%s-internal-verify.png", app)
+		}
 		client, err := newAPIClient(cmd)
 		if err != nil {
 			return err
@@ -153,7 +187,7 @@ var agentBrowserInternalVerifyCmd = &cobra.Command{
 		configureInternalBrowserVerifyClient(client)
 		ctx, cancel := context.WithTimeout(cmd.Context(), internalBrowserVerifyTimeout)
 		defer cancel()
-		return verifyInternalAgentBrowser(ctx, client, os.Stdout, app)
+		return verifyInternalAgentBrowser(ctx, client, os.Stdout, app, screenshotPath)
 	},
 }
 
@@ -165,5 +199,6 @@ func init() {
 	agentBrowserProvisionAuthCmd.Flags().String("password-key", "", "Credential key containing the login password")
 	agentBrowserCmd.AddCommand(agentBrowserProvisionAuthCmd)
 	agentBrowserInternalVerifyCmd.Flags().String("app", "", "Allowlisted app: multica, cerebro, registry, finance, pricing, or customer-service")
+	agentBrowserInternalVerifyCmd.Flags().String("screenshot", "", "PNG output path (default: <app>-internal-verify.png)")
 	agentBrowserCmd.AddCommand(agentBrowserInternalVerifyCmd)
 }

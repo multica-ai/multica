@@ -1709,6 +1709,10 @@ type CerebroStrategyItem struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	HorizonLabel pgtype.Text        `json:"horizon_label"`
+	SectionID    pgtype.UUID        `json:"section_id"`
+	PartLabel    string             `json:"part_label"`
+	OwnerType    pgtype.Text        `json:"owner_type"`
+	OwnerID      pgtype.UUID        `json:"owner_id"`
 }
 
 type CerebroStrategyItemHistory struct {
@@ -1808,6 +1812,17 @@ type CerebroUserInfisicalIdentity struct {
 	ScopedPathsHash        string             `json:"scoped_paths_hash"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroVisionPlanSection struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Key         string             `json:"key"`
+	Name        string             `json:"name"`
+	SectionType string             `json:"section_type"`
+	Position    int32              `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroWebFetchPolicy struct {
@@ -2388,6 +2403,53 @@ type ModelRegistryVersion struct {
 	Description string             `json:"description"`
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type ModelUsageEvent struct {
+	ID                   pgtype.UUID        `json:"id"`
+	SchemaVersion        string             `json:"schema_version"`
+	EventID              string             `json:"event_id"`
+	TaskID               pgtype.UUID        `json:"task_id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	IssueID              pgtype.UUID        `json:"issue_id"`
+	AgentID              pgtype.UUID        `json:"agent_id"`
+	RuntimeID            pgtype.UUID        `json:"runtime_id"`
+	SessionRootCommentID pgtype.UUID        `json:"session_root_comment_id"`
+	ChatSessionID        pgtype.UUID        `json:"chat_session_id"`
+	AutopilotRunID       pgtype.UUID        `json:"autopilot_run_id"`
+	ParentTaskID         pgtype.UUID        `json:"parent_task_id"`
+	ProviderSessionID    pgtype.Text        `json:"provider_session_id"`
+	CallID               pgtype.Text        `json:"call_id"`
+	Sequence             int64              `json:"sequence"`
+	ObservedAt           pgtype.Timestamptz `json:"observed_at"`
+	Provider             string             `json:"provider"`
+	Model                string             `json:"model"`
+	InputTokens          int64              `json:"input_tokens"`
+	OutputTokens         int64              `json:"output_tokens"`
+	ReasoningTokens      int64              `json:"reasoning_tokens"`
+	CacheReadTokens      int64              `json:"cache_read_tokens"`
+	CacheWriteTokens     int64              `json:"cache_write_tokens"`
+	CostCents            int64              `json:"cost_cents"`
+	ContextTokens        int64              `json:"context_tokens"`
+	ContextWindowTokens  int64              `json:"context_window_tokens"`
+	CompactionKind       string             `json:"compaction_kind"`
+	Source               string             `json:"source"`
+	Completeness         string             `json:"completeness"`
+	CounterSemantics     string             `json:"counter_semantics"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type ModelUsageTaskRollup struct {
+	TaskID           pgtype.UUID `json:"task_id"`
+	Provider         string      `json:"provider"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	CostCents        int64       `json:"cost_cents"`
+	CreatedAt        interface{} `json:"created_at"`
+	UpdatedAt        interface{} `json:"updated_at"`
 }
 
 type NotificationPreference struct {

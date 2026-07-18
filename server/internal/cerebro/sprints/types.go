@@ -104,6 +104,8 @@ type WorkspaceSprintResponse struct {
 	StartDate    string `json:"start_date"`
 	EndDate      string `json:"end_date"`
 	Goal         string `json:"goal,omitempty"`
+	IssueCount   int64  `json:"issue_count"`
+	DoneCount    int64  `json:"done_count"`
 	CreatedAt    string `json:"created_at"`
 	UpdatedAt    string `json:"updated_at"`
 }
@@ -119,6 +121,8 @@ func workspaceSprintToResponse(s cerebrodb.ListCerebroSprintsByWorkspaceRow) Wor
 		Status:       s.Status,
 		StartDate:    dateString(s.StartDate),
 		EndDate:      dateString(s.EndDate),
+		IssueCount:   s.IssueCount,
+		DoneCount:    s.DoneCount,
 		CreatedAt:    tsString(s.CreatedAt),
 		UpdatedAt:    tsString(s.UpdatedAt),
 	}

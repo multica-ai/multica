@@ -1,13 +1,16 @@
 package internalbrowserqa
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -81,6 +84,7 @@ func TargetFor(name string) (Target, error) {
 
 type Commander interface {
 	Run(ctx context.Context, stdin string, args ...string) ([]byte, error)
+	CaptureScreenshot(ctx context.Context, args ...string) ([]byte, error)
 }
 
 type ExecCommander struct{}
@@ -97,12 +101,38 @@ func (ExecCommander) Run(ctx context.Context, stdin string, args ...string) ([]b
 	return output, nil
 }
 
+const maxScreenshotBytes = 10 << 20
+
+var pngSignature = []byte("\x89PNG\r\n\x1a\n")
+
+func (commander ExecCommander) CaptureScreenshot(ctx context.Context, args ...string) ([]byte, error) {
+	dir, err := os.MkdirTemp("", "multica-internal-browser-")
+	if err != nil {
+		return nil, fmt.Errorf("create screenshot directory")
+	}
+	defer os.RemoveAll(dir)
+
+	path := filepath.Join(dir, "screenshot.png")
+	if _, err := commander.Run(ctx, "", append(args, "screenshot", path)...); err != nil {
+		return nil, err
+	}
+	screenshot, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read screenshot")
+	}
+	if len(screenshot) > maxScreenshotBytes || !bytes.HasPrefix(screenshot, pngSignature) {
+		return nil, fmt.Errorf("invalid screenshot")
+	}
+	return screenshot, nil
+}
+
 type Result struct {
-	App          string   `json:"app"`
-	InternalHost string   `json:"internal_host"`
-	FinalURL     string   `json:"final_url"`
-	Markers      []string `json:"markers"`
-	Errors       []string `json:"errors"`
+	App           string   `json:"app"`
+	InternalHost  string   `json:"internal_host"`
+	FinalURL      string   `json:"final_url"`
+	Markers       []string `json:"markers"`
+	Errors        []string `json:"errors"`
+	ScreenshotPNG []byte   `json:"screenshot_png"`
 }
 
 type Runner struct {
@@ -150,7 +180,8 @@ func SafeError(err error) string {
 		"internal browser stage snapshot failed",
 		"internal browser stage markers failed",
 		"internal browser stage url failed",
-		"internal browser stage errors failed":
+		"internal browser stage errors failed",
+		"internal browser stage screenshot failed":
 		return message
 	}
 	return "internal browser verification failed"
@@ -238,10 +269,16 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	if err != nil {
 		return Result{}, err
 	}
+	screenshotCtx, cancel := context.WithTimeout(ctx, r.stageTimeout)
+	defer cancel()
+	screenshot, err := r.commander.CaptureScreenshot(screenshotCtx, baseArgs...)
+	if err != nil {
+		return Result{}, fmt.Errorf("internal browser stage screenshot failed")
+	}
 	errors := decodeErrors(rawErrors)
 	return Result{
 		App: target.Name, InternalHost: target.Host(), FinalURL: strings.TrimSpace(string(finalURL)),
-		Markers: append([]string(nil), target.ExpectedText...), Errors: errors,
+		Markers: append([]string(nil), target.ExpectedText...), Errors: errors, ScreenshotPNG: screenshot,
 	}, nil
 }
 

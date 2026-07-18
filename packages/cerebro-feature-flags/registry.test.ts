@@ -53,6 +53,13 @@ describe("cerebro feature flag grouping", () => {
     expect(CEREBRO_FLAG_DEFAULTS.cerebro_pi_harness).toBe(true);
   });
 
+  it("ships the Projects tree table dark behind a workspace kill switch", () => {
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_projects_tree).toBe(false);
+    expect(CEREBRO_FLAGS.find((flag) => flag.key === "cerebro_projects_tree")?.group).toBe(
+      "workspace",
+    );
+  });
+
   it("has unique group keys", () => {
     expect(groupKeys.size).toBe(CEREBRO_FLAG_GROUPS.length);
   });

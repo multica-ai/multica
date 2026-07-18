@@ -32,7 +32,9 @@ export class SliplaneProvider extends AppProvider {
       this.#requireConfiguration();
       const name = serviceNameForVersion(deployment.appId, deployment.version);
       let service = await this.#createService(name, deployment);
-      if (!service) {
+      if (service?.id) {
+        service = await this.#getService(service.id);
+      } else if (!service) {
         service = await this.#findExistingService(name);
         if (!this.#matchesDeployment(service, deployment)) throw new Error("existing Sliplane service identity mismatch");
       }
@@ -99,6 +101,11 @@ export class SliplaneProvider extends AppProvider {
     const response = await this.#request(`/projects/${this.projectId}/services`, {}, [200], true);
     const services = await response.json();
     return services.find((service) => service.name === name && service.serverId === this.serverId);
+  }
+
+  async #getService(serviceId) {
+    const response = await this.#request(`/projects/${this.projectId}/services/${encodeURIComponent(serviceId)}`, {}, [200], true);
+    return response.json();
   }
 
   #matchesDeployment(service, deployment) {

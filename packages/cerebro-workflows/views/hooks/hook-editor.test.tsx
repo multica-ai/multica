@@ -2,10 +2,18 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHookDraft } from "../../core/hook-types";
 import { HookEditor } from "./hook-editor";
+import { HookTargetPicker } from "./hook-target-picker";
 
+beforeEach(() => {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
+  });
+});
 afterEach(cleanup);
 
 describe("HookEditor", () => {
@@ -31,9 +39,7 @@ describe("HookEditor", () => {
     expect(screen.queryByText(/\{\s*"field"/)).not.toBeInTheDocument();
   });
 
-  it("lets each additional filter join with AND or OR", async () => {
-    const user = userEvent.setup();
-    const onSave = vi.fn();
+  it("states the real all-conditions-must-match behavior without an OR control", () => {
     render(<HookEditor initialHook={{
       ...createHookDraft(),
       events: ["before.task.complete"],
@@ -41,14 +47,10 @@ describe("HookEditor", () => {
         { field: "issue.status", operator: "eq", value: "todo", conjunction: "AND" },
         { field: "issue.priority", operator: "eq", value: "urgent", conjunction: "AND" },
       ],
-    }} onSave={onSave} />);
+    }} onSave={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Configure Filter" }));
-    await user.click(screen.getByLabelText("Filter conjunction 2"));
-    await user.click(await screen.findByRole("option", { name: "OR" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
-      conditions: expect.arrayContaining([expect.objectContaining({ conjunction: "OR" })]),
-    }));
+    expect(screen.getByText("All of the following must match")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Filter conjunction 2")).not.toBeInTheDocument();
   });
 
   it("uses the same scope step for agent, issue, and session", () => {
@@ -72,6 +74,7 @@ describe("HookEditor", () => {
     };
     const { rerender } = render(<HookEditor initialHook={valid} onSave={vi.fn()} canPublish={false} />);
     expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByLabelText("Publish requirements")).toHaveTextContent("Run at least one dry-run test before publishing.");
     rerender(<HookEditor initialHook={{ ...valid, baseline_run_count: 4 }} onSave={vi.fn()} canPublish />);
     expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
   });
@@ -122,6 +125,19 @@ describe("HookEditor", () => {
     expect(screen.getByLabelText("What this hook does")).toHaveTextContent("before a task completes");
   });
 
+  it("labels an enforced version honestly", () => {
+    render(<HookEditor initialHook={{ ...createHookDraft(), mode: "enforce", version: 4 }} onSave={vi.fn()} />);
+    expect(screen.getByText(/Enforced v4/)).toBeInTheDocument();
+    expect(screen.queryByText(/Draft v4/)).not.toBeInTheDocument();
+  });
+
+  it("explains every selected trigger", () => {
+    render(<HookEditor initialHook={{ ...createHookDraft(), events: ["before.task.complete", "on.task.failure"] }} onSave={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure Trigger" }));
+    expect(screen.getByText("Trigger 1:")).toBeInTheDocument();
+    expect(screen.getByText("Trigger 2:")).toBeInTheDocument();
+  });
+
   it("saves current edits before publishing and asks for confirmation", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn().mockResolvedValue({ id: "hook-1" });
@@ -142,6 +158,23 @@ describe("HookEditor", () => {
     await user.click(screen.getByRole("button", { name: "Confirm publish" }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: "Changed name" }));
     expect(onPublish).toHaveBeenCalled();
+  });
+
+  it("warns before saving an enforced hook as a dry-run draft", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    render(<HookEditor initialHook={{ ...createHookDraft(), id: "hook-1", mode: "enforce" }} onSave={onSave} />);
+
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Save as draft?" })).toHaveTextContent("This hook is live. Saving a draft switches it to Dry run until you publish again.");
+
+    await user.click(screen.getByRole("button", { name: "Keep enforced" }));
+    expect(onSave).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await user.click(screen.getByRole("button", { name: "Save as draft" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ mode: "dry_run" }));
   });
 
   it("offers lifecycle controls for an existing editable hook", async () => {
@@ -166,5 +199,30 @@ describe("HookEditor", () => {
   it("uses a stacked layout on mobile-sized screens", () => {
     const { container } = render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
     expect(container.querySelector("main")).toHaveClass("grid-cols-1", "md:grid-cols-[minmax(18rem,430px)_minmax(0,1fr)]");
+  });
+
+  it("offers a compact six-step wizard with Back and Next controls on mobile", async () => {
+    const user = userEvent.setup();
+    render(<HookEditor initialHook={createHookDraft()} onSave={vi.fn()} />);
+
+    const steps = screen.getByRole("list", { name: "Hook steps" });
+    expect(within(steps).getAllByRole("button")).toHaveLength(6);
+    expect(screen.getByRole("button", { name: "Back one step" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Next step" }));
+    expect(screen.getByRole("region", { name: "scope configuration" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Back one step" })).toBeEnabled();
+  });
+
+  it("uses a full-width bottom sheet for target selection on mobile", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
+    });
+    const user = userEvent.setup();
+    render(<HookTargetPicker label="Agent" value="" options={[{ value: "lone", label: "Lone" }]} onChange={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Agent" }));
+    expect(await screen.findByRole("dialog")).toHaveAttribute("data-slot", "drawer-content");
+    expect(screen.getByRole("dialog")).toHaveClass("w-full");
   });
 });

@@ -906,6 +906,12 @@ var catalog = []Capability{
 			"POST /api/cerebro/strategy-items/",
 			"PUT /api/cerebro/strategy-items/{id}",
 			"DELETE /api/cerebro/strategy-items/{id}",
+			"POST /api/cerebro/vision-plan/sections",
+			"PUT /api/cerebro/vision-plan/sections/{id}",
+			"DELETE /api/cerebro/vision-plan/sections/{id}",
+			"POST /api/cerebro/vision-plan/items",
+			"PUT /api/cerebro/vision-plan/items/{id}",
+			"DELETE /api/cerebro/vision-plan/items/{id}",
 			"POST /api/cerebro/rocks/",
 			"PUT /api/cerebro/rocks/{id}",
 			"DELETE /api/cerebro/rocks/{id}",
@@ -1365,7 +1371,7 @@ var excluded = map[string]string{
 	"POST /api/cerebro/personal-browser/authorize":    "resolve-seam — agent-only per-action gate for the tools:personal-browser tool; runs the tool-policy chain internally with Base=Deny + host condition (FIR-2037), the enforcement point itself, not a separately-governable platform action",
 	"POST /api/cerebro/personal-browser/secure-fill":  "credential-bridge — signed-in desktop-only secret bridge; validates the embedded agent token and resolves credential.reveal for the exact Agent Vault box before returning a value to the desktop process (FIR-3006), not a separately-governable platform action",
 	"POST /api/cerebro/agent-browser/provision-auth":  "credential-bridge — task-token-only Agent Vault bridge for the local multica agent-browser provision-auth command; resolves browser-testers plus exact-box credential.reveal before the CLI writes the password to agent-browser over stdin (FIR-3006), not a separately-governable platform action",
-	"POST /api/cerebro/agent-browser/internal-verify": "credential-bridge — task-token-only internal browser verification; enforces the fixed private-DNS target list, browser-testers membership, and exact-box credential.reveal before running agent-browser server-side (FIR-3006), not a separately-governable platform action",
+	"POST /api/cerebro/agent-browser/internal-verify": "credential-bridge — task-token-only internal browser verification with a PNG screenshot result; enforces the fixed private-DNS target list, browser-testers membership, and exact-box credential.reveal before running agent-browser server-side (FIR-3006), not a separately-governable platform action",
 
 	// connection-tools — agent-only (mat_ token) dispatch of an api-type workspace
 	// connection as a server-side tool (FIR-2273). Per-endpoint authorization is

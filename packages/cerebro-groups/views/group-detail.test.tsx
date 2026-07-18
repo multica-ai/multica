@@ -265,6 +265,70 @@ describe("GroupDetailView", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("lists private agents in the picker when the group lacks create_agent", async () => {
+    runtimePayload.current = [
+      {
+        id: "rt-1",
+        workspace_id: "ws-1",
+        daemon_id: null,
+        name: "Claude Dev",
+        runtime_mode: "cloud",
+        provider: "anthropic",
+        launch_header: "",
+        status: "online",
+        device_info: "",
+        metadata: {},
+        owner_id: null,
+        sandbox_enabled: null,
+        persona_sandbox: "",
+        capabilities: {},
+        last_seen_at: null,
+        created_at: "",
+        updated_at: "",
+      },
+    ];
+    agentPayload.current = [
+      {
+        id: "agent-private",
+        workspace_id: "ws-1",
+        runtime_id: "rt-1",
+        name: "Sabine",
+        description: "",
+        instructions: "",
+        avatar_url: null,
+        runtime_mode: "cloud",
+        runtime_config: {},
+        custom_args: [],
+        custom_env_redacted: false,
+        visibility: "private",
+        status: "idle",
+        max_concurrent_tasks: 1,
+        model: "claude",
+        owner_id: null,
+        skills: [],
+        persona_sandbox: "",
+        created_at: "",
+        updated_at: "",
+        archived_at: null,
+        archived_by: null,
+      },
+    ];
+    // Group has no capabilities at all — the picker must still offer the
+    // private agent, flagged with the Private badge.
+    mockListGroupCapabilities.mockResolvedValue([]);
+    mockListGroupAgents.mockResolvedValue([]);
+
+    renderDetail();
+
+    const addAgentButton = await screen.findByRole("button", {
+      name: /Add agent/i,
+    });
+    fireEvent.click(addAgentButton);
+
+    expect(await screen.findByText("Sabine")).toBeInTheDocument();
+    expect(screen.queryByText("No matches.")).not.toBeInTheDocument();
+  });
+
   it("prompts to add the runtime when picking an agent without it", async () => {
     runtimePayload.current = [
       {

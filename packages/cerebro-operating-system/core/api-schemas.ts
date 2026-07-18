@@ -45,6 +45,19 @@ export const strategyItemSchema = z.object({
   state: fallbackEnum(["active", "archived", "unknown"] as const, "unknown"),
   created_at: z.string(), updated_at: z.string(),
 });
+export const visionPlanItemSchema = z.object({
+  id: z.string(), workspace_id: z.string(), section_id: z.string(), title: z.string(), description: z.string().default(""),
+  part_label: z.string().optional(), owner_type: z.enum(["member", "agent"]).optional(), owner_id: z.string().optional(), owner_name: z.string().optional(),
+  position: z.number().int(), state: z.enum(["active", "archived"]).catch("active"),
+  goal_connections: z.array(z.object({ connection_id: z.string(), goal_id: z.string() })).default([]),
+  created_at: z.string(), updated_at: z.string(),
+});
+export const visionPlanSectionSchema = z.object({
+  id: z.string(), workspace_id: z.string(), key: z.string(), name: z.string(),
+  section_type: z.enum(["list", "structured", "process"]).catch("list"), position: z.number().int(),
+  items: z.array(visionPlanItemSchema).default([]), created_at: z.string(), updated_at: z.string(),
+});
+export const visionPlanSchema = z.object({ sections: z.array(visionPlanSectionSchema) });
 const health = fallbackEnum(["on_track", "at_risk", "off_track", "unset", "unknown"] as const, "unknown");
 const reportedHealth = fallbackEnum(["on_track", "at_risk", "off_track", "unset"] as const, "unset");
 const rockProjectSchema = z.object({ id: z.string(), title: z.string(), issue_count: z.number().int().min(0), done_issue_count: z.number().int().min(0) });
@@ -93,4 +106,5 @@ export const EMPTY_PERIODS = { periods: [] };
 export const EMPTY_ELEMENTS = { elements: [] };
 export const EMPTY_GOAL_TYPES = { goal_types: [] };
 export const EMPTY_CONNECTIONS = { connections: [] };
+export const EMPTY_VISION_PLAN = { sections: [] };
 export const DEFAULT_SETTINGS = { workspace_id: "", terminology: { ...DEFAULT_TERMINOLOGY } };

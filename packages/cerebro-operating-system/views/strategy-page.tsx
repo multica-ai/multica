@@ -1,74 +1,202 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { DEFAULT_TERMINOLOGY } from "../core/api-schemas";
-import { rocksOptions, settingsOptions, strategyHistoryOptions, strategyOptions } from "../core/queries";
-import type { Rock, StrategyItem } from "../core/types";
-import { HealthBadge } from "./health-score";
-import { StrategyForm } from "./strategy-form";
+import {
+  periodsOptions, rocksOptions, settingsOptions, useCreateConnection, useCreateVisionPlanItem,
+  useCreateVisionPlanSection, useDeleteConnection, useDeleteVisionPlanItem, useDeleteVisionPlanSection,
+  useSaveRock, useUpdateVisionPlanItem, useUpdateVisionPlanSection, visionPlanOptions,
+} from "../core/queries";
+import type { Rock, VisionPlanItem, VisionPlanItemInput, VisionPlanSection, VisionPlanSectionType } from "../core/types";
+import { SearchSelect, type SearchSelectOption } from "./search-select";
 
-function ItemCard({ item, editable, onEdit }: { item: StrategyItem; editable: boolean; onEdit: () => void }) {
-  return <article className="rounded-lg border bg-background p-3"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><h3 className="break-words text-sm font-semibold">{item.title}</h3>{item.description && <p className="mt-1 break-words text-xs leading-relaxed text-muted-foreground">{item.description}</p>}</div>{editable && <button type="button" onClick={onEdit} className="shrink-0 text-xs font-medium underline underline-offset-4">Edit</button>}</div></article>;
+const MARKETING_PARTS = ["Target market", "Differentiators", "Proven process", "Guarantee"];
+
+const itemInput = (item: VisionPlanItem, overrides: Partial<VisionPlanItemInput> = {}): VisionPlanItemInput => ({
+  section_id: item.section_id, title: item.title, description: item.description,
+  part_label: item.part_label, owner_type: item.owner_type, owner_id: item.owner_id,
+  position: item.position, state: item.state, ...overrides,
+});
+
+interface PlanItemProps {
+  item: VisionPlanItem;
+  itemIndex: number;
+  siblingItems: VisionPlanItem[];
+  section: VisionPlanSection;
+  wsId: string;
+  goals: Rock[];
+  ownerOptions: SearchSelectOption[];
+  currentPeriodId?: string;
 }
 
-function Column({ title, items, empty, editable, onEdit }: { title: string; items: StrategyItem[]; empty: string; editable: boolean; onEdit: (item: StrategyItem) => void }) {
-  return <section className="min-w-0 rounded-xl border bg-card p-3"><h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h2><div className="grid gap-2">{items.length ? items.map((item) => <ItemCard key={item.id} item={item} editable={editable} onEdit={() => onEdit(item)} />) : <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">{empty}</p>}</div></section>;
+function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOptions, currentPeriodId }: PlanItemProps) {
+  const update = useUpdateVisionPlanItem(wsId);
+  const remove = useDeleteVisionPlanItem(wsId);
+  const connect = useCreateConnection(wsId);
+  const disconnect = useDeleteConnection(wsId);
+  const saveGoal = useSaveRock(wsId);
+  const [title, setTitle] = useState(item.title);
+  const [description, setDescription] = useState(item.description);
+  const [partLabel, setPartLabel] = useState(item.part_label ?? "");
+
+  function save(overrides: Partial<VisionPlanItemInput> = {}) {
+    if (!title.trim()) return;
+    update.mutate({ id: item.id, input: itemInput(item, { title: title.trim(), description: description.trim(), part_label: partLabel.trim(), ...overrides }) });
+  }
+
+  function changeGoals(goalIds: string[]) {
+    const existing = new Map(item.goal_connections.map((connection) => [connection.goal_id, connection.connection_id]));
+    for (const goalId of goalIds) {
+      if (!existing.has(goalId)) connect.mutate({ source_type: "strategy_item", source_id: item.id, target_type: "rock", target_id: goalId, relationship_type: "supports", provenance: "manual" });
+    }
+    for (const [goalId, connectionId] of existing) {
+      if (!goalIds.includes(goalId)) disconnect.mutate(connectionId);
+    }
+  }
+
+  function createLinkedGoal(query: string) {
+    if (!currentPeriodId) return;
+    saveGoal.mutate({ input: {
+      title: query || title, description, period_id: currentPeriodId, confidence: 50,
+      reported_health: "unset", project_ids: [], issue_ids: [], strategy_item_id: item.id,
+    } });
+  }
+
+  function move(direction: -1 | 1) {
+    const other = siblingItems[itemIndex + direction];
+    if (!other) return;
+    update.mutate({ id: item.id, input: itemInput(item, { title: title.trim(), description: description.trim(), part_label: partLabel.trim(), position: other.position }) });
+    update.mutate({ id: other.id, input: itemInput(other, { position: item.position }) });
+  }
+
+  const selectedGoals = item.goal_connections.map((connection) => connection.goal_id);
+  return (
+    <div className="group grid gap-2 rounded-lg border bg-background p-3 md:grid-cols-[minmax(0,1fr)_minmax(13rem,0.45fr)_auto]">
+      <div className="min-w-0">
+        {section.section_type === "structured" && (
+          <input aria-label={`${item.title} part`} value={partLabel} onChange={(event) => setPartLabel(event.target.value)} onBlur={() => save()} placeholder="Part label" className="mb-1 w-full bg-transparent text-xs font-semibold uppercase tracking-wide text-muted-foreground outline-none" />
+        )}
+        <input aria-label={`${item.title} title`} value={title} onChange={(event) => setTitle(event.target.value)} onBlur={() => save()} className="w-full bg-transparent text-sm font-medium outline-none focus:ring-1 focus:ring-ring" />
+        <textarea aria-label={`${item.title} description`} value={description} onChange={(event) => setDescription(event.target.value)} onBlur={() => save()} rows={description ? 2 : 1} placeholder="Add context…" className="mt-1 w-full resize-none bg-transparent text-xs leading-relaxed text-muted-foreground outline-none focus:ring-1 focus:ring-ring" />
+      </div>
+      <div className="grid content-start gap-2">
+        {section.section_type === "process" && (
+          <SearchSelect compact label={`${item.title} owner`} options={ownerOptions} value={item.owner_id ? `${item.owner_type}:${item.owner_id}` : ""} onChange={(value) => {
+            const [ownerType, ownerId] = value.split(":");
+            save({ owner_type: ownerId ? ownerType as "member" | "agent" : undefined, owner_id: ownerId || undefined });
+          }} clearLabel="No owner" placeholder="Process owner" />
+        )}
+        <SearchSelect compact multiple label={`${item.title} Goals`} options={goals.map((goal) => ({ value: goal.id, label: goal.title }))} values={selectedGoals} onValuesChange={changeGoals} placeholder="Connect Goals" actionLabel={currentPeriodId ? "Create linked Goal" : undefined} onAction={currentPeriodId ? createLinkedGoal : undefined} />
+      </div>
+      <div className="flex items-start gap-1 opacity-60 group-hover:opacity-100">
+        <button type="button" aria-label={`Move ${item.title} up`} disabled={itemIndex === 0} onClick={() => move(-1)} className="h-8 rounded px-1.5 text-muted-foreground hover:bg-muted disabled:opacity-30">↑</button>
+        <button type="button" aria-label={`Move ${item.title} down`} disabled={itemIndex === siblingItems.length - 1} onClick={() => move(1)} className="h-8 rounded px-1.5 text-muted-foreground hover:bg-muted disabled:opacity-30">↓</button>
+        <button type="button" aria-label={`Delete ${item.title}`} onClick={() => remove.mutate(item.id)} className="h-8 rounded px-2 text-xs text-muted-foreground hover:bg-muted hover:text-destructive">Delete</button>
+      </div>
+    </div>
+  );
 }
 
-function RockColumn({ rocks }: { rocks: Rock[] }) {
-  return <section className="min-w-0 rounded-xl border bg-card p-3"><h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quarterly Rocks</h2><div className="grid gap-2">{rocks.length ? rocks.map((rock) => <article key={rock.id} className="rounded-lg border bg-background p-3"><div className="flex items-start justify-between gap-2"><h3 className="break-words text-sm font-semibold">{rock.title}</h3><HealthBadge state={rock.derived_health.state} /></div><p className="mt-2 text-xs text-muted-foreground">{rock.done_issue_count}/{rock.issue_count} issues · {rock.confidence}% confidence</p></article>) : <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">No connected Rocks yet.</p>}</div></section>;
+interface PlanSectionProps {
+  section: VisionPlanSection;
+  index: number;
+  sections: VisionPlanSection[];
+  wsId: string;
+  goals: Rock[];
+  ownerOptions: SearchSelectOption[];
+  currentPeriodId?: string;
 }
 
-function byHorizon(items: StrategyItem[], label: string, count: number) {
-  return items.filter((item) => item.kind === "horizon_goal" && (item.horizon_label === label || item.horizon_count === count));
+function PlanSection({ section, index, sections, wsId, goals, ownerOptions, currentPeriodId }: PlanSectionProps) {
+  const createItem = useCreateVisionPlanItem(wsId);
+  const updateSection = useUpdateVisionPlanSection(wsId);
+  const deleteSection = useDeleteVisionPlanSection(wsId);
+  const [name, setName] = useState(section.name);
+  const [newItem, setNewItem] = useState("");
+
+  function sectionInput(overrides: Partial<{ name: string; section_type: VisionPlanSectionType; position: number }> = {}) {
+    return { name: name.trim() || section.name, section_type: section.section_type, position: section.position, ...overrides };
+  }
+
+  function addItem(title: string, partLabel?: string) {
+    if (!title.trim()) return;
+    createItem.mutate({ section_id: section.id, title: title.trim(), part_label: partLabel, position: section.items.length, state: "active" });
+    setNewItem("");
+  }
+
+  function onNewItemKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") { event.preventDefault(); addItem(newItem); }
+  }
+
+  function move(direction: -1 | 1) {
+    const other = sections[index + direction];
+    if (!other) return;
+    updateSection.mutate({ id: section.id, input: sectionInput({ position: other.position }) });
+    updateSection.mutate({ id: other.id, input: { name: other.name, section_type: other.section_type, position: section.position } });
+  }
+
+  const missingParts = section.section_type === "structured" ? MARKETING_PARTS.filter((part) => !section.items.some((item) => item.part_label === part)) : [];
+  const activeItems = section.items.filter((item) => item.state === "active");
+  return (
+    <section className="rounded-xl border bg-card p-4 shadow-sm">
+      <header className="flex items-center gap-2 border-b pb-3">
+        <span aria-hidden className="text-xs tabular-nums text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
+        <input aria-label={`${section.name} section name`} value={name} onChange={(event) => setName(event.target.value)} onBlur={() => updateSection.mutate({ id: section.id, input: sectionInput() })} className="min-w-0 flex-1 bg-transparent text-base font-semibold outline-none focus:ring-1 focus:ring-ring" />
+        <button type="button" aria-label={`Move ${section.name} up`} disabled={index === 0} onClick={() => move(-1)} className="h-8 rounded px-2 text-muted-foreground hover:bg-muted disabled:opacity-30">↑</button>
+        <button type="button" aria-label={`Move ${section.name} down`} disabled={index === sections.length - 1} onClick={() => move(1)} className="h-8 rounded px-2 text-muted-foreground hover:bg-muted disabled:opacity-30">↓</button>
+        <button type="button" aria-label={`Delete ${section.name} section`} onClick={() => { if (window.confirm(`Delete ${section.name} and its items?`)) deleteSection.mutate(section.id); }} className="h-8 rounded px-2 text-xs text-muted-foreground hover:bg-muted hover:text-destructive">Delete</button>
+      </header>
+      <div className="mt-3 grid gap-2">
+        {activeItems.map((item, itemIndex) => <PlanItem key={item.id} item={item} itemIndex={itemIndex} siblingItems={activeItems} section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} />)}
+        {missingParts.length > 0 && <div className="flex flex-wrap gap-1.5">{missingParts.map((part) => <button key={part} type="button" onClick={() => addItem(part, part)} className="rounded-full border border-dashed px-2.5 py-1 text-xs text-muted-foreground hover:border-foreground hover:text-foreground">+ {part}</button>)}</div>}
+        <input aria-label={`Add item to ${section.name}`} value={newItem} onChange={(event) => setNewItem(event.target.value)} onKeyDown={onNewItemKeyDown} placeholder={section.section_type === "process" ? "+ Add process and press Enter" : "+ Add item and press Enter"} className="h-9 rounded-md border border-dashed bg-transparent px-3 text-sm text-muted-foreground outline-none focus:border-ring focus:text-foreground" />
+      </div>
+    </section>
+  );
 }
 
 export function StrategyPage() {
   const enabled = useFeatureFlag("cerebro_operating_system");
   const wsId = useWorkspaceId();
   const settings = useQuery(settingsOptions(wsId));
-  const strategy = useQuery(strategyOptions(wsId));
+  const plan = useQuery(visionPlanOptions(wsId));
   const rocks = useQuery(rocksOptions(wsId));
-  const [editing, setEditing] = useState(false);
-  const [formItem, setFormItem] = useState<StrategyItem | null | undefined>(undefined);
-  const [history, setHistory] = useState(false);
-  const strategyHistory = useQuery({ ...strategyHistoryOptions(wsId), enabled: history && !!wsId });
+  const periods = useQuery(periodsOptions(wsId));
+  const members = useQuery(memberListOptions(wsId));
+  const agents = useQuery(agentListOptions(wsId));
+  const createSection = useCreateVisionPlanSection(wsId);
+  const [addingSection, setAddingSection] = useState(false);
+  const [sectionName, setSectionName] = useState("");
   if (!enabled) return null;
 
   const terminology = settings.data?.terminology ?? DEFAULT_TERMINOLOGY;
-  const items = (strategy.data?.strategy_items ?? []).filter((item) => item.state === "active").sort((a, b) => a.position - b.position);
-  const values = items.filter((item) => item.kind === "core_value");
-  const focus = items.filter((item) => item.kind === "core_focus");
-  const tenYear = byHorizon(items, "10-Year Target", 10);
-  const threeYear = byHorizon(items, "3-Year Picture", 3);
-  const oneYear = byHorizon(items, "1-Year Plan", 1);
-  const known = new Set([...tenYear, ...threeYear, ...oneYear].map((item) => item.id));
-  const otherHorizons = items.filter((item) => item.kind === "horizon_goal" && !known.has(item.id));
-  const customHorizons = Array.from(otherHorizons.reduce((groups, item) => {
-    const label = item.horizon_label || `${item.horizon_count ?? "Custom"}-${item.horizon_unit ?? "period"} Horizon`;
-    groups.set(label, [...(groups.get(label) ?? []), item]);
-    return groups;
-  }, new Map<string, StrategyItem[]>()));
-  const activeRocks = rocks.data?.rocks ?? [];
+  const sections = [...(plan.data?.sections ?? [])].sort((a, b) => a.position - b.position);
+  const goals = rocks.data?.rocks ?? [];
+  const ownerOptions: SearchSelectOption[] = [
+    ...(members.data ?? []).map((member) => ({ value: `member:${member.id}`, label: member.name, group: "Members" })),
+    ...(agents.data ?? []).map((agent) => ({ value: `agent:${agent.id}`, label: agent.name, group: "Agents" })),
+  ];
+
+  function addSection() {
+    if (!sectionName.trim()) return;
+    createSection.mutate({ name: sectionName.trim(), section_type: "list", position: sections.length });
+    setSectionName(""); setAddingSection(false);
+  }
 
   return (
     <main className="h-full min-w-0 overflow-y-auto bg-muted/20">
-      <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-5 p-4 sm:p-6">
-        <header className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="text-3xl font-semibold tracking-tight">{terminology.strategy}</h1><p className="mt-1 text-sm text-muted-foreground">From long-term direction to weekly execution</p></div><div className="flex gap-2"><button type="button" onClick={() => setHistory((value) => !value)} className="h-10 rounded-md border bg-background px-4 text-sm font-medium">History</button><button type="button" onClick={() => setEditing((value) => !value)} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Edit map</button></div></header>
-
-        {history && <section className="rounded-xl border bg-card p-5"><h2 className="font-semibold">Strategy history</h2><p className="mt-1 text-sm text-muted-foreground">Every saved map change is retained, including deleted items.</p><div className="mt-4 grid gap-2">{strategyHistory.isLoading ? <p className="text-sm text-muted-foreground">Loading history…</p> : (strategyHistory.data?.history ?? []).length === 0 ? <p className="text-sm text-muted-foreground">No saved changes yet.</p> : strategyHistory.data?.history.map((entry) => <div key={entry.id} className="flex flex-wrap justify-between gap-2 rounded-lg bg-muted/50 p-3 text-sm"><span><span className="mr-2 rounded-full border px-2 py-0.5 text-xs capitalize">{entry.action}</span>{entry.title}</span><time className="text-muted-foreground">{new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(entry.changed_at))}</time></div>)}</div></section>}
-
-        {editing && <section className="grid gap-3 rounded-xl border border-dashed p-4"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Edit map</h2><p className="text-sm text-muted-foreground">Edit any card or add a named horizon.</p></div><button type="button" onClick={() => setFormItem(null)} className="h-9 rounded-md border bg-background px-3 text-sm font-medium">+ Add item</button></div>{formItem !== undefined && <StrategyForm wsId={wsId} terminology={terminology} position={items.length} item={formItem ?? undefined} onSaved={() => setFormItem(undefined)} onCancel={() => setFormItem(undefined)} />}</section>}
-
-        {strategy.isLoading ? <p>Loading {terminology.strategy}…</p> : strategy.isError ? <p role="alert">{terminology.strategy} could not be loaded</p> : <>
-          <section className="grid gap-3 md:grid-cols-2"><div className="rounded-xl border bg-card p-4"><h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Core Values</h2><div className="mt-3 grid gap-2 sm:grid-cols-2">{values.length ? values.map((item) => <ItemCard key={item.id} item={item} editable={editing} onEdit={() => setFormItem(item)} />) : <p className="text-sm text-muted-foreground">Define the behaviors that guide every decision.</p>}</div></div><div className="rounded-xl border bg-card p-4"><h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Core Focus</h2><div className="mt-3 grid gap-2">{focus.length ? focus.map((item) => <ItemCard key={item.id} item={item} editable={editing} onEdit={() => setFormItem(item)} />) : <p className="text-sm text-muted-foreground">Define purpose, niche and advantage.</p>}</div></div></section>
-          <section className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4"><Column title={tenYear[0]?.horizon_label || "10-Year Target"} items={tenYear} empty="Set the long-term destination." editable={editing} onEdit={setFormItem} /><Column title={threeYear[0]?.horizon_label || "3-Year Picture"} items={threeYear} empty="Describe the mid-term picture." editable={editing} onEdit={setFormItem} /><Column title={oneYear[0]?.horizon_label || "1-Year Plan"} items={oneYear} empty="Choose this year's outcomes." editable={editing} onEdit={setFormItem} />{customHorizons.map(([label, horizonItems]) => <Column key={label} title={label} items={horizonItems} empty="Define this horizon." editable={editing} onEdit={setFormItem} />)}<RockColumn rocks={activeRocks} /></section>
-        </>}
-
-        <footer className="rounded-xl border border-dashed bg-card px-5 py-4 text-center text-sm text-muted-foreground"><strong className="text-foreground">Built on Multica</strong> — {terminology.strategy} connects direction to {terminology.rocks}, Projects and Issues without duplicating execution.</footer>
+      <div className="mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-5 p-4 sm:p-6">
+        <header className="flex flex-wrap items-end justify-between gap-4 border-b pb-5">
+          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Company direction</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">{terminology.vision_plan}</h1><p className="mt-1 text-sm text-muted-foreground">Edit the plan where it lives. Connect direction to {terminology.rocks} as it becomes actionable.</p></div>
+          <button type="button" aria-label="Add section" onClick={() => setAddingSection(true)} className="h-10 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted">+ Add section</button>
+        </header>
+        {addingSection && <div className="flex gap-2 rounded-xl border border-dashed bg-card p-3"><input autoFocus aria-label="New section name" value={sectionName} onChange={(event) => setSectionName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addSection(); }} placeholder="Section name" className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" /><button type="button" onClick={addSection} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Add</button><button type="button" onClick={() => setAddingSection(false)} className="h-10 rounded-md border px-4 text-sm">Cancel</button></div>}
+        {plan.isLoading ? <p>Loading {terminology.vision_plan}…</p> : plan.isError ? <p role="alert">{terminology.vision_plan} could not be loaded</p> : <div className="grid gap-3">{sections.map((section, index) => <PlanSection key={section.id} section={section} index={index} sections={sections} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={periods.data?.periods[0]?.id} />)}</div>}
+        <footer className="rounded-xl border border-dashed bg-card px-5 py-4 text-sm text-muted-foreground"><strong className="text-foreground">One plan, shared context.</strong> Connected {terminology.rocks} stay current on both pages.</footer>
       </div>
     </main>
   );

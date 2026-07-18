@@ -120,3 +120,38 @@ func TestUsageBreakdown_EmptyIssue(t *testing.T) {
 		t.Errorf("totals nonzero on empty issue")
 	}
 }
+
+// CEREBRO-PATCH(model-usage-breakdown-consumer-test): FIR-3337 session and
+// issue totals must come from call events without double-counting the legacy row.
+func TestUsageBreakdown_ReadsCanonicalEvents(t *testing.T) {
+	if sessTestPool == nil {
+		t.Skip("no test DB")
+	}
+	issueID, workspaceID := seedIssue(t)
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
+	rootID := seedRootComment(t, issueID, workspaceID)
+	taskID := seedTaskWithUsage(t, issueID, workspaceID, rootID, "gpt-5.6-sol", 999_000, 0)
+	if _, err := sessTestPool.Exec(context.Background(), `DELETE FROM task_usage WHERE task_id = $1::uuid`, taskID); err != nil {
+		t.Fatalf("delete legacy usage: %v", err)
+	}
+	seedCanonicalModelUsageEvent(t, taskID, rootID, "call-1", "gpt-5.6-sol", 1, 20_000, 500, 80_000, 100_000, 1_050_000, "", 20)
+	seedCanonicalModelUsageEvent(t, taskID, rootID, "call-2", "gpt-5.6-sol", 2, 10_000, 100, 20_000, 30_000, 1_050_000, "", 10)
+
+	var resp usageBreakdownResponse
+	if err := json.Unmarshal(callUsageBreakdown(h, issueID, workspaceID).Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("sessions = %+v, want one canonical session", resp.Sessions)
+	}
+	row := resp.Sessions[0]
+	if row.RunCount != 1 || row.InputTokens != 30_000 || row.OutputTokens != 600 || row.CacheReadTokens != 100_000 {
+		t.Fatalf("canonical totals = %+v", row)
+	}
+	if row.ContextTokens != 30_000 || row.MaxContextTokens != 1_050_000 || row.Approximate {
+		t.Fatalf("canonical current context = %+v", row)
+	}
+	if resp.TotalInputTokens != 30_000 || resp.TotalOutputTokens != 600 || resp.TotalCostCents <= 0 {
+		t.Fatalf("issue totals = %+v", resp)
+	}
+}

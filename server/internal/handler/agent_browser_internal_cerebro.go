@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
+	"github.com/multica-ai/multica/server/internal/cerebro/browsertester"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/internalbrowserqa"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
@@ -122,6 +123,11 @@ func (h *Handler) authorizeInternalAgentBrowser(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, false
 	}
+	browserTesterGroups, err := browsertester.AgentGroupIDs(r.Context(), groups, agentID, h.CerebroQueries.ListCerebroGroupAgents)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, false
+	}
 	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
 	groupIDs := make([]pgtype.UUID, 0, len(groups))
 	browserTester := false
@@ -130,6 +136,9 @@ func (h *Handler) authorizeInternalAgentBrowser(w http.ResponseWriter, r *http.R
 	for _, group := range groups {
 		groupIDs = append(groupIDs, group.ID)
 		if !strings.EqualFold(strings.TrimSpace(group.Name), "browser-testers") {
+			continue
+		}
+		if _, allowed := browserTesterGroups[group.ID]; !allowed {
 			continue
 		}
 		browserTester = true

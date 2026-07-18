@@ -47,6 +47,37 @@ func TestEvaluate_InOperator(t *testing.T) {
 	}
 }
 
+func TestEvaluate_NotInOperator(t *testing.T) {
+	ctx := map[string]any{"issue": map[string]any{"status": "in_progress"}}
+	cond := Condition{Field: "issue.status", Op: "not_in", Values: []any{"done", "cancelled"}}
+	if !evaluate([]Condition{cond}, ctx) {
+		t.Fatal("'in_progress' should not be in [done, cancelled]")
+	}
+	cond.Values = []any{"in_progress", "done"}
+	if evaluate([]Condition{cond}, ctx) {
+		t.Fatal("'in_progress' should fail not_in when it is present")
+	}
+	if evaluate([]Condition{{Field: "issue.missing", Op: "not_in", Values: []any{"done"}}}, ctx) {
+		t.Fatal("a missing field must fail not_in rather than match silently")
+	}
+	if evaluate([]Condition{{Field: "issue.status", Op: "not_in"}}, ctx) {
+		t.Fatal("an empty values list must fail not_in closed")
+	}
+}
+
+func TestEvaluate_NotExistsOperator(t *testing.T) {
+	ctx := map[string]any{"issue": map[string]any{"assignee_id": nil, "status": "todo"}}
+	if !evaluate([]Condition{{Field: "issue.assignee_id", Op: "not_exists"}}, ctx) {
+		t.Fatal("an explicit nil field should satisfy not_exists")
+	}
+	if !evaluate([]Condition{{Field: "issue.project_id", Op: "not_exists"}}, ctx) {
+		t.Fatal("a missing field should satisfy not_exists")
+	}
+	if evaluate([]Condition{{Field: "issue.status", Op: "not_exists"}}, ctx) {
+		t.Fatal("a populated field must fail not_exists")
+	}
+}
+
 func TestEvaluate_NullChecks(t *testing.T) {
 	ctx := map[string]any{"issue": map[string]any{"assignee_id": nil}}
 	isNull := []Condition{{Field: "issue.assignee_id", Op: "is_null"}}

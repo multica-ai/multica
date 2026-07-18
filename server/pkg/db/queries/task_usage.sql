@@ -19,7 +19,8 @@ DO UPDATE SET
     updated_at = now();
 
 -- name: GetTaskUsage :many
-SELECT * FROM task_usage
+-- CEREBRO-PATCH(model-usage-task-rollup): FIR-3337 read the canonical/legacy compatibility view.
+SELECT * FROM model_usage_task_rollup
 WHERE task_id = $1
 ORDER BY model;
 
@@ -30,7 +31,7 @@ SELECT
     COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
     COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1;
 
@@ -49,7 +50,7 @@ SELECT
     -- prefers this over the token estimate when it is > 0.
     COALESCE(SUM(tu.cost_cents), 0)::bigint AS total_cost_cents,
     COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1
 GROUP BY tu.model;
@@ -62,11 +63,11 @@ SELECT
     COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
     COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN issue i ON i.id = atq.issue_id
 WHERE i.workspace_id = $1
-  AND tu.created_at >= $2
+  AND tu.created_at >= sqlc.arg(created_at)::timestamptz
 GROUP BY tu.model;
 
 -- name: GetIssueSubtreeUsageByModel :many
@@ -89,7 +90,7 @@ SELECT
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
     COALESCE(SUM(tu.cost_cents), 0)::bigint AS total_cost_cents,
     COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id IN (SELECT id FROM subtree)
 GROUP BY tu.model;
@@ -105,7 +106,7 @@ SELECT
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
     COALESCE(SUM(tu.cost_cents), 0)::bigint AS total_cost_cents,
     COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
+FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.chat_session_id = $1
 GROUP BY tu.model;

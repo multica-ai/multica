@@ -62,6 +62,61 @@ type StrategyItemInput struct {
 	State        string `json:"state,omitempty"`
 }
 
+type VisionPlanSectionInput struct {
+	Name        string `json:"name"`
+	SectionType string `json:"section_type"`
+	Position    int32  `json:"position"`
+}
+
+type VisionPlanItemInput struct {
+	SectionID   string `json:"section_id"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	PartLabel   string `json:"part_label,omitempty"`
+	OwnerType   string `json:"owner_type,omitempty"`
+	OwnerID     string `json:"owner_id,omitempty"`
+	Position    int32  `json:"position"`
+	State       string `json:"state,omitempty"`
+}
+
+type VisionPlanGoalConnection struct {
+	ConnectionID string `json:"connection_id"`
+	GoalID       string `json:"goal_id"`
+}
+
+type VisionPlanItemResponse struct {
+	ID              string                     `json:"id"`
+	WorkspaceID     string                     `json:"workspace_id"`
+	SectionID       string                     `json:"section_id"`
+	Title           string                     `json:"title"`
+	Description     string                     `json:"description"`
+	PartLabel       string                     `json:"part_label,omitempty"`
+	OwnerType       string                     `json:"owner_type,omitempty"`
+	OwnerID         string                     `json:"owner_id,omitempty"`
+	OwnerName       string                     `json:"owner_name,omitempty"`
+	Position        int32                      `json:"position"`
+	State           string                     `json:"state"`
+	GoalConnections []VisionPlanGoalConnection `json:"goal_connections"`
+	CreatedAt       string                     `json:"created_at"`
+	UpdatedAt       string                     `json:"updated_at"`
+}
+
+type VisionPlanSectionResponse struct {
+	ID          string                   `json:"id"`
+	WorkspaceID string                   `json:"workspace_id"`
+	Key         string                   `json:"key"`
+	Name        string                   `json:"name"`
+	SectionType string                   `json:"section_type"`
+	Position    int32                    `json:"position"`
+	Items       []VisionPlanItemResponse `json:"items"`
+	CreatedAt   string                   `json:"created_at"`
+	UpdatedAt   string                   `json:"updated_at"`
+}
+
+type VisionPlanResponse struct {
+	Sections []VisionPlanSectionResponse `json:"sections"`
+}
+
 type RockInput struct {
 	Title          string   `json:"title,omitempty"`
 	Description    string   `json:"description,omitempty"`

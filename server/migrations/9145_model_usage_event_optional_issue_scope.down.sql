@@ -1,0 +1,3 @@
+-- CEREBRO-PATCH(model-usage-event-optional-issue-scope): FIR-3337 rollback.
+-- Keep issue_id nullable on rollback so already-recorded chat/autopilot usage
+-- rows do not make rollback fail.

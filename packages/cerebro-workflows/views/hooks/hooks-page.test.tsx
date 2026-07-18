@@ -29,5 +29,6 @@ describe("HooksPage", () => {
     expect(screen.getByRole("heading", { name: "Hooks" })).toBeInTheDocument();
     expect(container.querySelector("table")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New hook" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Hooks" }).parentElement?.parentElement).not.toHaveClass("flex-wrap");
   });
 });

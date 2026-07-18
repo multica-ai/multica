@@ -256,12 +256,14 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil, defaultTerminalRetrySchedule)
 }
 
-func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
-	if len(usage) == 0 {
+// CEREBRO-PATCH(daemon-model-usage-event-client): FIR-3337 forward canonical events beside aggregate usage.
+func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []TaskUsageEntry, events []ModelUsageEventEntry) error {
+	if len(usage) == 0 && len(events) == 0 {
 		return nil
 	}
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/usage", taskID), map[string]any{
-		"usage": usage,
+		"usage":  usage,
+		"events": events,
 	}, nil)
 }
 
