@@ -219,6 +219,50 @@ func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) er
 	return err
 }
 
+const findUnlinkedCommentByIssueAndContent = `-- name: FindUnlinkedCommentByIssueAndContent :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, gitlab_note_id FROM comment
+WHERE issue_id = $1
+  AND content = $2
+  AND gitlab_note_id IS NULL
+  AND type = 'comment'
+  AND created_at > now() - interval '30 minutes'
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type FindUnlinkedCommentByIssueAndContentParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	Content string      `json:"content"`
+}
+
+// Dual-write echo prevention: when an agent (or tool) posts the same body to
+// Multica and then GitLab, the Note Hook should attach the GitLab note id to
+// the existing Multica comment instead of creating a duplicate. Exact body
+// match within a short window; content is the Multica-stored form (no GitLab
+// HTML, no Multica relay sentinel).
+func (q *Queries) FindUnlinkedCommentByIssueAndContent(ctx context.Context, arg FindUnlinkedCommentByIssueAndContentParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, findUnlinkedCommentByIssueAndContent, arg.IssueID, arg.Content)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.SourceTaskID,
+		&i.GitlabNoteID,
+	)
+	return i, err
+}
+
 const getComment = `-- name: GetComment :one
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, gitlab_note_id FROM comment
 WHERE id = $1

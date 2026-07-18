@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, MemberRole } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core";
-import { agentRunCounts30dOptions } from "@multica/core/agents";
+import { agentRunCounts30dOptions, isGitLabPersonaAgent } from "@multica/core/agents";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -66,7 +66,7 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
   // query that powers the Agents-list RUNS column — no extra fetch.
   const runCountById = new Map(runCounts.map((r) => [r.agent_id, r.run_count]));
   const ownedAgents = agents
-    .filter((a) => a.owner_id === userId && !a.archived_at)
+    .filter((a) => a.owner_id === userId && !a.archived_at && !isGitLabPersonaAgent(a))
     .sort((a, b) => {
       const ra = runCountById.get(a.id) ?? 0;
       const rb = runCountById.get(b.id) ?? 0;

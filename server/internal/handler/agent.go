@@ -92,6 +92,10 @@ type AgentResponse struct {
 	UpdatedAt                        string              `json:"updated_at"`
 	ArchivedAt                       *string             `json:"archived_at"`
 	ArchivedBy                       *string             `json:"archived_by"`
+	// SystemKey is set for integration identity shells (e.g. GitLab comment
+	// personas keyed as gitlab:{id}). Omitted when null so normal agents
+	// keep a compact payload. Clients treat a gitlab: prefix as non-runnable.
+	SystemKey *string `json:"system_key,omitempty"`
 }
 
 // runtimeConfigGatewayTokenMask is the placeholder the API substitutes for
@@ -179,6 +183,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		UpdatedAt:                timestampToString(a.UpdatedAt),
 		ArchivedAt:               timestampToPtr(a.ArchivedAt),
 		ArchivedBy:               uuidToPtr(a.ArchivedBy),
+		SystemKey:                textToPtr(a.SystemKey),
 	}
 }
 

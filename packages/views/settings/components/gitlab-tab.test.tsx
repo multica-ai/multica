@@ -32,7 +32,9 @@ vi.mock("@multica/core/gitlab", () => ({
     mrSidebar: true,
     issueSync: true,
     commentSync: true,
+    issueSyncLabel: "agent",
   }),
+  DEFAULT_GITLAB_ISSUE_SYNC_LABEL: "agent",
 }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws1" }));
@@ -88,5 +90,12 @@ describe("GitLabTab", () => {
   it("shows the per-connection webhook secret for managers", async () => {
     render(<GitLabTab />, { wrapper });
     expect(await screen.findByDisplayValue(webhookSecret)).toBeTruthy();
+  });
+
+  it("shows the configurable issue sync label input", async () => {
+    render(<GitLabTab />, { wrapper });
+    // Placeholder matches DEFAULT_GITLAB_ISSUE_SYNC_LABEL; value is the derived setting.
+    const input = await screen.findByPlaceholderText("agent");
+    expect((input as HTMLInputElement).value).toBe("agent");
   });
 });

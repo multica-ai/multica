@@ -52,6 +52,7 @@ import {
 } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon } from ".";
 import { useQuery } from "@tanstack/react-query";
+import { isGitLabPersonaAgent } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -242,7 +243,9 @@ function ActorSubContent({
     m.name.toLowerCase().includes(query) || matchesPinyin(m.name, query),
   );
   const filteredAgents = agents.filter((a) =>
-    !a.archived_at && (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)),
+    !a.archived_at &&
+    !isGitLabPersonaAgent(a) &&
+    (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)),
   );
   const filteredSquads = squads.filter((s) =>
     !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)),

@@ -1,11 +1,24 @@
 -- name: ListAgents :many
+-- User-authored agents plus GitLab identity personas (kind=system,
+-- system_key gitlab:*) so comment author name/avatar resolution works
+-- via the same list path. Personas are non-runnable (max_concurrent_tasks=0)
+-- and filtered out of assign/work surfaces by the app layer.
 SELECT * FROM agent
-WHERE workspace_id = $1 AND archived_at IS NULL AND kind = 'user'
+WHERE workspace_id = $1
+  AND archived_at IS NULL
+  AND (
+    kind = 'user'
+    OR (kind = 'system' AND system_key LIKE 'gitlab:%')
+  )
 ORDER BY created_at ASC;
 
 -- name: ListAllAgents :many
 SELECT * FROM agent
-WHERE workspace_id = $1 AND kind = 'user'
+WHERE workspace_id = $1
+  AND (
+    kind = 'user'
+    OR (kind = 'system' AND system_key LIKE 'gitlab:%')
+  )
 ORDER BY created_at ASC;
 
 -- name: GetAgent :one
@@ -58,9 +71,10 @@ LIMIT 1;
 
 -- name: CreateGitLabPersonaAgent :one
 -- Identity agent for a GitLab user so comments can use author_type=agent with
--- the real name/avatar. public_to + max_concurrent_tasks=0: every workspace
--- member can see the persona in ListAgents (for avatar/name resolution) but
--- the claim path never dispatches runs for it. system_key holds gitlab:{id}.
+-- the real name/avatar. kind=system keeps GetAgentInWorkspace / assign / edit
+-- surfaces on kind=user only (personas are not real workers). ListAgents still
+-- returns gitlab:% system agents for avatar/name resolution. public_to +
+-- max_concurrent_tasks=0: claim never dispatches. system_key holds gitlab:{id}.
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, permission_mode,
@@ -70,7 +84,7 @@ INSERT INTO agent (
     @workspace_id, @name, @description, sqlc.narg('avatar_url'), @runtime_mode,
     '{}'::jsonb, @runtime_id, 'workspace', 'public_to',
     0, @owner_id, '', '{}'::jsonb, '[]'::jsonb,
-    'user', @system_key
+    'system', @system_key
 )
 RETURNING *;
 

@@ -147,6 +147,19 @@ describe("canAssignAgentToIssue", () => {
     { target_type: "workspace" as const, target_id: null },
   ];
 
+  it("denies GitLab identity personas even for the owner", () => {
+    const a = makeAgent({
+      system_key: "gitlab:4242",
+      max_concurrent_tasks: 0,
+      owner_id: ALICE,
+      permission_mode: "public_to",
+      invocation_targets: workspaceTargets,
+    });
+    expect(
+      canAssignAgentToIssue(a, { userId: ALICE, role: "owner" }).allowed,
+    ).toBe(false);
+  });
+
   it("allows any member to assign a public_to-workspace agent", () => {
     const a = makeAgent({
       visibility: "workspace",

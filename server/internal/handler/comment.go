@@ -1404,8 +1404,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// success instead of a silent no-op (MUL-4525 §2).
 	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs)
 
-	// Post comment to GitLab if the issue is synced — fire and forget.
-	go h.postCommentToGitLab(context.Background(), comment, issue)
+	// Multica does not auto-post comments to GitLab. Comment sync is
+	// GitLab → Multica only (Note Hook). Agents that need GitLab visibility
+	// post there with their own credentials.
 
 	writeJSON(w, http.StatusCreated, resp)
 }

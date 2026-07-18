@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -396,8 +395,9 @@ func (h *Handler) handleGitLabNoteEvent(ctx context.Context, conn db.GitlabConne
 	if p.ObjectAttributes.NoteableType != "Issue" || p.ObjectAttributes.System {
 		return
 	}
-	// Echo-loop prevention for notes created by Multica itself (see postCommentToGitLab).
-	if strings.Contains(p.ObjectAttributes.Note, "<!-- multica:gitlab-relay -->") {
+	// Skip notes Multica-mediated dual-write tools mark with the relay
+	// sentinel (appended in code, never relying on model-authored text).
+	if strings.Contains(p.ObjectAttributes.Note, gitlabNoteRelaySentinel) {
 		return
 	}
 
@@ -429,6 +429,26 @@ func (h *Handler) handleGitLabNoteEvent(ctx context.Context, conn db.GitlabConne
 	if err != nil {
 		slog.Warn("gitlab: issue not found for note", "issue_id", uuidToString(row.IssueID))
 		return
+	}
+
+	// Dual-write: Multica comment first, then GitLab with the same body.
+	// Link the note id onto the existing Multica row instead of duplicating.
+	noteBody := strings.TrimSpace(p.ObjectAttributes.Note)
+	if noteBody != "" {
+		if existing, err := h.Queries.FindUnlinkedCommentByIssueAndContent(ctx, db.FindUnlinkedCommentByIssueAndContentParams{
+			IssueID: issue.ID,
+			Content: noteBody,
+		}); err == nil {
+			if err := h.Queries.SetCommentGitLabNoteID(ctx, db.SetCommentGitLabNoteIDParams{
+				ID:           existing.ID,
+				GitlabNoteID: noteID,
+			}); err != nil {
+				slog.Warn("gitlab: failed to link dual-write note id", "comment_id", uuidToString(existing.ID), "err", err)
+			}
+			return
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("gitlab: dual-write comment lookup failed", "err", err)
+		}
 	}
 
 	// Prefer a persona agent matching the GitLab author (name + avatar) so the
@@ -686,102 +706,22 @@ func (h *Handler) refreshGitLabToken(ctx context.Context, conn db.GitlabConnecti
 	return tok.AccessToken, nil
 }
 
-// postCommentToGitLab posts a newly-created Multica comment to the linked
-// GitLab issue via the API, then stores the returned note ID on the comment
-// row for echo loop prevention. It is called as a goroutine from CreateComment
-// and from TaskService.createAgentComment.
-func (h *Handler) postCommentToGitLab(ctx context.Context, comment db.Comment, issue db.Issue) {
-	// Look up the gitlab_issue link.
-	glIssue, err := h.Queries.GetGitLabIssueByIssueID(ctx, issue.ID)
-	if err != nil {
-		slog.Debug("gitlab: comment relay skipped — issue not linked to GitLab", "issue_id", uuidToString(issue.ID))
-		return
-	}
+// gitlabNoteRelaySentinel marks a GitLab note as Multica-originated dual-write
+// so the Note Hook does not re-import it. Appended only by Multica code paths
+// that post to GitLab (not free-form model/skill text). Multica no longer
+// auto-relays Multica comments to GitLab; agents post with their own tokens
+// and should use AppendGitLabNoteRelaySentinel when they dual-write.
+const gitlabNoteRelaySentinel = "<!-- multica:gitlab-relay -->"
 
-	// Load the connection for the access token.
-	conn, err := h.Queries.GetGitLabConnectionByID(ctx, glIssue.ConnectionID)
-	if err != nil {
-		slog.Warn("gitlab: connection not found for comment post", "connection_id", uuidToString(glIssue.ConnectionID))
-		return
+// AppendGitLabNoteRelaySentinel appends the echo-prevention sentinel to a
+// GitLab note body. Call this in any Multica-controlled code that posts a
+// note already recorded (or about to be recorded) as a Multica comment.
+func AppendGitLabNoteRelaySentinel(body string) string {
+	body = strings.TrimRight(body, "\n")
+	if strings.Contains(body, gitlabNoteRelaySentinel) {
+		return body
 	}
-
-	if ws, err := h.Queries.GetWorkspace(ctx, conn.WorkspaceID); err == nil && !workspaceGitLabCommentSyncEnabled(ws.Settings) {
-		return
-	}
-
-	if h.GitLabBox == nil {
-		slog.Warn("gitlab: comment post skipped — GITLAB_SECRET_KEY not configured")
-		return
-	}
-
-	// Refresh the access token if it has expired.
-	var plainToken string
-	if conn.TokenExpiresAt.Valid && conn.TokenExpiresAt.Time.Before(time.Now()) {
-		refreshed, err := h.refreshGitLabToken(ctx, conn)
-		if err != nil {
-			slog.Warn("gitlab: token refresh failed, skipping comment post",
-				"connection_id", uuidToString(conn.ID), "err", err)
-			return
-		}
-		plainToken = refreshed
-	} else {
-		tokenBytes, err := base64.StdEncoding.DecodeString(conn.AccessToken)
-		if err != nil {
-			slog.Error("gitlab: failed to base64-decode token", "err", err)
-			return
-		}
-		plain, err := h.GitLabBox.Open(tokenBytes)
-		if err != nil {
-			slog.Error("gitlab: failed to decrypt token", "err", err)
-			return
-		}
-		plainToken = string(plain)
-	}
-
-	// POST to GitLab notes API.
-	apiURL := gitlabAPIURL() + fmt.Sprintf("/projects/%d/issues/%d/notes",
-		glIssue.GlProjectID, glIssue.GlIssueIid)
-	const sentinel = "<!-- multica:gitlab-relay -->"
-	body, err := json.Marshal(map[string]string{"body": comment.Content + "\n\n" + sentinel})
-	if err != nil {
-		slog.Error("gitlab: failed to marshal note body", "err", err)
-		return
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
-	if err != nil {
-		slog.Error("gitlab: failed to build note request", "err", err)
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+plainToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		slog.Error("gitlab: failed to post note", "err", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		slog.Error("gitlab: note post returned error status", "status", resp.StatusCode)
-		return
-	}
-
-	var noteResp struct {
-		ID int64 `json:"id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&noteResp); err != nil || noteResp.ID == 0 {
-		slog.Error("gitlab: failed to decode note response", "err", err)
-		return
-	}
-
-	// Store note_id on comment for echo loop prevention.
-	if err := h.Queries.SetCommentGitLabNoteID(ctx, db.SetCommentGitLabNoteIDParams{
-		ID:           comment.ID,
-		GitlabNoteID: pgtype.Int8{Int64: noteResp.ID, Valid: true},
-	}); err != nil {
-		slog.Warn("gitlab: failed to store gitlab_note_id", "err", err)
-	}
+	return body + "\n\n" + gitlabNoteRelaySentinel
 }
 
 // containsLabel reports whether the labels slice contains a label with the given title.
@@ -808,7 +748,11 @@ func (h *Handler) handleGitLabIssueEvent(ctx context.Context, conn db.GitlabConn
 	workspaceID := uuidToString(conn.WorkspaceID)
 	glIID := p.ObjectAttributes.IID
 
-	hasAgent := containsLabel(p.Labels, "agent")
+	syncLabel := defaultGitLabIssueSyncLabel
+	if ws, err := h.Queries.GetWorkspace(ctx, conn.WorkspaceID); err == nil {
+		syncLabel = workspaceGitLabIssueSyncLabel(ws.Settings)
+	}
+	hasSyncLabel := containsLabel(p.Labels, syncLabel)
 
 	assigneeUsername := ""
 	if len(p.Assignees) > 0 {
@@ -828,16 +772,18 @@ func (h *Handler) handleGitLabIssueEvent(ctx context.Context, conn db.GitlabConn
 		"project", projectPath,
 		"gl_iid", glIID,
 		"action", action,
-		"has_agent", hasAgent,
+		"sync_label", syncLabel,
+		"has_sync_label", hasSyncLabel,
 		"already_linked", rowExists,
 		"title", p.ObjectAttributes.Title,
 		"label_count", len(p.Labels),
 	)
 
-	// Creating and field-syncing Multica issues requires the agent label.
-	// Removing the label does not delete the Multica issue — the link stays
-	// and close/reopen status transitions still apply when a row exists.
-	if hasAgent {
+	// Creating and field-syncing Multica issues requires the configured sync
+	// label (default "agent"). Removing the label does not delete the Multica
+	// issue — the link stays and close/reopen status transitions still apply
+	// when a row exists.
+	if hasSyncLabel {
 		if !rowExists && (action == "open" || action == "update") {
 			// Create Multica issue.
 			creatorID, ok := h.gitlabCreatorID(ctx, conn)
@@ -884,13 +830,14 @@ func (h *Handler) handleGitLabIssueEvent(ctx context.Context, conn db.GitlabConn
 			}
 			row = glRow
 			rowExists = true
-			slog.Info("gitlab: created multica issue from agent label",
+			slog.Info("gitlab: created multica issue from sync label",
 				"workspace", workspaceID,
 				"project", projectPath,
 				"gl_iid", glIID,
 				"issue_id", uuidToString(res.Issue.ID),
 				"issue_number", res.Issue.Number,
 				"title", p.ObjectAttributes.Title,
+				"sync_label", syncLabel,
 			)
 
 		} else if rowExists {
@@ -916,19 +863,21 @@ func (h *Handler) handleGitLabIssueEvent(ctx context.Context, conn db.GitlabConn
 				"action", action,
 			)
 		} else {
-			slog.Info("gitlab: agent label present but action does not create",
+			slog.Info("gitlab: sync label present but action does not create",
 				"workspace", workspaceID,
 				"project", projectPath,
 				"gl_iid", glIID,
 				"action", action,
+				"sync_label", syncLabel,
 			)
 		}
 	} else if !rowExists {
-		slog.Info("gitlab: issue hook ignored (no agent label, not linked)",
+		slog.Info("gitlab: issue hook ignored (no sync label, not linked)",
 			"workspace", workspaceID,
 			"project", projectPath,
 			"gl_iid", glIID,
 			"action", action,
+			"sync_label", syncLabel,
 		)
 	}
 
@@ -1121,8 +1070,9 @@ func (h *Handler) resolveGitLabConnectionByNamespace(ctx context.Context, namesp
 	return h.Queries.GetGitLabConnectionByNamespaceGlobal(ctx, namespace)
 }
 
-// workspaceGitLabCommentSyncEnabled returns true (sync on) unless the workspace
-// has explicitly set gitlab_comment_sync_enabled=false in its settings JSON.
+// workspaceGitLabCommentSyncEnabled returns true (GitLab→Multica comment import
+// on) unless the workspace has explicitly set gitlab_comment_sync_enabled=false
+// in its settings JSON. Multica never auto-posts Multica comments to GitLab.
 func workspaceGitLabCommentSyncEnabled(settings []byte) bool {
 	if len(settings) == 0 {
 		return true
@@ -1134,6 +1084,29 @@ func workspaceGitLabCommentSyncEnabled(settings []byte) bool {
 		return true
 	}
 	return *s.CommentSync
+}
+
+// defaultGitLabIssueSyncLabel is used when workspace settings omit or blank
+// gitlab_issue_sync_label. Historical installs always matched the "agent" label.
+const defaultGitLabIssueSyncLabel = "agent"
+
+// workspaceGitLabIssueSyncLabel returns the GitLab label title that triggers
+// Multica issue creation. Defaults to "agent" when unset or empty.
+func workspaceGitLabIssueSyncLabel(settings []byte) string {
+	if len(settings) == 0 {
+		return defaultGitLabIssueSyncLabel
+	}
+	var s struct {
+		Label *string `json:"gitlab_issue_sync_label"`
+	}
+	if err := json.Unmarshal(settings, &s); err != nil || s.Label == nil {
+		return defaultGitLabIssueSyncLabel
+	}
+	label := strings.TrimSpace(*s.Label)
+	if label == "" {
+		return defaultGitLabIssueSyncLabel
+	}
+	return label
 }
 
 // ── Workspace OAuth ──────────────────────────────────────────────────────────

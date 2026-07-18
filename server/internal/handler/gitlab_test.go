@@ -3,8 +3,8 @@ package handler
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +13,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
-	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -26,6 +25,21 @@ func TestGitLabUserSystemKey(t *testing.T) {
 	}
 	if got := gitlabUserSystemKey(0, "  "); got != "" {
 		t.Fatalf("empty key: got %q", got)
+	}
+}
+
+func TestWorkspaceGitLabIssueSyncLabel(t *testing.T) {
+	if got := workspaceGitLabIssueSyncLabel(nil); got != "agent" {
+		t.Fatalf("nil settings: got %q", got)
+	}
+	if got := workspaceGitLabIssueSyncLabel([]byte(`{}`)); got != "agent" {
+		t.Fatalf("empty object: got %q", got)
+	}
+	if got := workspaceGitLabIssueSyncLabel([]byte(`{"gitlab_issue_sync_label":""}`)); got != "agent" {
+		t.Fatalf("blank label: got %q", got)
+	}
+	if got := workspaceGitLabIssueSyncLabel([]byte(`{"gitlab_issue_sync_label":"  multica  "}`)); got != "multica" {
+		t.Fatalf("custom label: got %q", got)
 	}
 }
 
@@ -172,6 +186,97 @@ func TestHandleGitLabIssueEvent_LabelAdd(t *testing.T) {
 	}
 	if issue.Title != "Sync me" {
 		t.Errorf("title: got %q, want %q", issue.Title, "Sync me")
+	}
+}
+
+// TestHandleGitLabIssueEvent_CustomSyncLabel creates a Multica issue when the
+// workspace configures a non-default GitLab label.
+func TestHandleGitLabIssueEvent_CustomSyncLabel(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database available")
+	}
+	ctx := context.Background()
+	wsUUID := parseUUID(testWorkspaceID)
+	userUUID := parseUUID(testUserID)
+
+	var previousSettings []byte
+	if err := testPool.QueryRow(ctx, `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&previousSettings); err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = $1::jsonb WHERE id = $2`,
+		`{"gitlab_issue_sync_label":"multica"}`, testWorkspaceID); err != nil {
+		t.Fatalf("set settings: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `UPDATE workspace SET settings = $1::jsonb WHERE id = $2`, previousSettings, testWorkspaceID)
+	})
+
+	conn, err := testHandler.Queries.CreateGitLabConnection(ctx, db.CreateGitLabConnectionParams{
+		WorkspaceID:   wsUUID,
+		Namespace:     "testorg-custom-label",
+		NamespaceType: "group",
+		AccessToken:   "dummy",
+		ConnectedByID: userUUID,
+	})
+	if err != nil {
+		t.Fatalf("setup: create connection: %v", err)
+	}
+	t.Cleanup(func() {
+		testHandler.Queries.DeleteGitLabConnection(ctx, db.DeleteGitLabConnectionParams{
+			ID: conn.ID, WorkspaceID: wsUUID,
+		})
+	})
+
+	// Default "agent" label must not create when custom label is configured.
+	agentOnly := `{
+		"object_kind": "issue",
+		"object_attributes": {"iid": 50, "title": "Wrong label", "description": "", "action": "open"},
+		"project": {"id": 500, "path_with_namespace": "testorg-custom-label/repo", "namespace": "testorg-custom-label"},
+		"labels": [{"title": "agent"}],
+		"assignees": []
+	}`
+	t.Setenv("GITLAB_WEBHOOK_SECRET", "s")
+	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/gitlab", strings.NewReader(agentOnly))
+	req.Header.Set("X-Gitlab-Token", "s")
+	req.Header.Set("X-Gitlab-Event", "Issue Hook")
+	w := httptest.NewRecorder()
+	testHandler.HandleGitLabWebhook(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+	if _, err := testHandler.Queries.GetGitLabIssueByProjectAndIID(ctx, db.GetGitLabIssueByProjectAndIIDParams{
+		WorkspaceID: wsUUID, ProjectPath: "testorg-custom-label/repo", GlIssueIid: 50,
+	}); err == nil {
+		t.Fatal("expected no gitlab_issue for default agent label when custom label configured")
+	}
+
+	customPayload := `{
+		"object_kind": "issue",
+		"object_attributes": {"iid": 51, "title": "Custom label sync", "description": "hi", "action": "open"},
+		"project": {"id": 500, "path_with_namespace": "testorg-custom-label/repo", "namespace": "testorg-custom-label"},
+		"labels": [{"title": "multica"}],
+		"assignees": []
+	}`
+	req2 := httptest.NewRequest(http.MethodPost, "/api/webhooks/gitlab", strings.NewReader(customPayload))
+	req2.Header.Set("X-Gitlab-Token", "s")
+	req2.Header.Set("X-Gitlab-Event", "Issue Hook")
+	w2 := httptest.NewRecorder()
+	testHandler.HandleGitLabWebhook(w2, req2)
+	if w2.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", w2.Code)
+	}
+	row, err := testHandler.Queries.GetGitLabIssueByProjectAndIID(ctx, db.GetGitLabIssueByProjectAndIIDParams{
+		WorkspaceID: wsUUID, ProjectPath: "testorg-custom-label/repo", GlIssueIid: 51,
+	})
+	if err != nil {
+		t.Fatalf("gitlab_issue not created for custom label: %v", err)
+	}
+	issue, err := testHandler.Queries.GetIssue(ctx, row.IssueID)
+	if err != nil {
+		t.Fatalf("multica issue not created: %v", err)
+	}
+	if issue.Title != "Custom label sync" {
+		t.Errorf("title: got %q, want %q", issue.Title, "Custom label sync")
 	}
 }
 
@@ -459,6 +564,9 @@ func TestHandleGitLabNoteEvent_CreatesComment(t *testing.T) {
 	if agent.MaxConcurrentTasks != 0 {
 		t.Errorf("persona max_concurrent_tasks: got %d, want 0", agent.MaxConcurrentTasks)
 	}
+	if agent.Kind != "system" {
+		t.Errorf("persona kind: got %q, want system", agent.Kind)
+	}
 
 	// Second note from the same GitLab user reuses the persona agent.
 	note2 := `{
@@ -547,59 +655,26 @@ func TestHandleGitLabNoteEvent_DuplicateSkipped(t *testing.T) {
 	}
 }
 
-// TestPostCommentToGitLab_EchoLoopPrevention tests that a comment posted from
-// Multica to GitLab gets a gitlab_note_id, and a subsequent Note Hook with
-// that same ID is a no-op. This test mocks the GitLab API server.
-func TestPostCommentToGitLab_EchoLoopPrevention(t *testing.T) {
+// TestHandleGitLabNoteEvent_SentinelSkipped verifies Note Hook ignores notes
+// marked with the Multica dual-write sentinel (appended by Multica code, not
+// free-form model text).
+func TestHandleGitLabNoteEvent_SentinelSkipped(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("no database available")
 	}
 	ctx := context.Background()
 
-	// Start a fake GitLab API server that records calls and returns a note ID.
-	var apiCalled int
-	fakeGitLab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		apiCalled++
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"id": 9999}`))
-	}))
-	defer fakeGitLab.Close()
-	t.Setenv("GITLAB_URL", fakeGitLab.URL)
-	t.Setenv("GITLAB_WEBHOOK_SECRET", "s")
-
-	// Set up a real secretbox so token decryption works in the test.
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		t.Fatalf("rand.Read: %v", err)
-	}
-	box, err := secretbox.New(key)
-	if err != nil {
-		t.Fatalf("secretbox.New: %v", err)
-	}
-	testHandler.GitLabBox = box
-	t.Cleanup(func() { testHandler.GitLabBox = nil })
-
-	// Seal "dummytoken" so the connection stores an encrypted token.
-	sealed, err := box.Seal([]byte("dummytoken"))
-	if err != nil {
-		t.Fatalf("box.Seal: %v", err)
-	}
-	accessToken := base64.StdEncoding.EncodeToString(sealed)
-
 	wsUUID := parseUUID(testWorkspaceID)
 	userUUID := parseUUID(testUserID)
-
-	// Create connection with a properly-sealed token.
 	conn, err := testHandler.Queries.CreateGitLabConnection(ctx, db.CreateGitLabConnectionParams{
 		WorkspaceID:   wsUUID,
-		Namespace:     "testorg-echo",
+		Namespace:     "testorg-sentinel",
 		NamespaceType: "group",
-		AccessToken:   accessToken,
+		AccessToken:   "dummy",
 		ConnectedByID: userUUID,
 	})
 	if err != nil {
-		t.Fatalf("create connection: %v", err)
+		t.Fatalf("setup: %v", err)
 	}
 	t.Cleanup(func() {
 		testHandler.Queries.DeleteGitLabConnection(ctx, db.DeleteGitLabConnectionParams{
@@ -607,61 +682,125 @@ func TestPostCommentToGitLab_EchoLoopPrevention(t *testing.T) {
 		})
 	})
 
-	// Create issue via Issue Hook.
-	issuePayload := `{"object_kind":"issue","object_attributes":{"iid":30,"title":"Echo test","description":"","action":"open"},"project":{"id":300,"path_with_namespace":"testorg-echo/repo","namespace":"testorg-echo"},"labels":[{"title":"agent"}],"assignees":[]}`
+	t.Setenv("GITLAB_WEBHOOK_SECRET", "s")
+	issuePayload := `{"object_kind":"issue","object_attributes":{"iid":31,"title":"Sentinel","description":"","action":"open"},"project":{"id":301,"path_with_namespace":"testorg-sentinel/repo","namespace":"testorg-sentinel"},"labels":[{"title":"agent"}],"assignees":[]}`
 	issueReq := httptest.NewRequest(http.MethodPost, "/api/webhooks/gitlab", strings.NewReader(issuePayload))
 	issueReq.Header.Set("X-Gitlab-Token", "s")
 	issueReq.Header.Set("X-Gitlab-Event", "Issue Hook")
 	testHandler.HandleGitLabWebhook(httptest.NewRecorder(), issueReq)
 
 	row, err := testHandler.Queries.GetGitLabIssueByProjectAndIID(ctx, db.GetGitLabIssueByProjectAndIIDParams{
-		WorkspaceID: wsUUID, ProjectPath: "testorg-echo/repo", GlIssueIid: 30,
+		WorkspaceID: wsUUID, ProjectPath: "testorg-sentinel/repo", GlIssueIid: 31,
 	})
 	if err != nil {
-		t.Fatalf("gitlab_issue not found after seed: %v", err)
+		t.Fatalf("gitlab_issue not found: %v", err)
 	}
 
-	// Directly create a comment and call postCommentToGitLab.
-	issue, _ := testHandler.Queries.GetIssue(ctx, row.IssueID)
-	comment, err := testHandler.Queries.CreateComment(ctx, db.CreateCommentParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  "member",
-		AuthorID:    userUUID,
-		Content:     "Hello from Multica",
-		Type:        "comment",
-	})
-	if err != nil {
-		t.Fatalf("create comment: %v", err)
-	}
-
-	// postCommentToGitLab runs inline (not goroutine) for testability.
-	testHandler.postCommentToGitLab(ctx, comment, issue)
-
-	// Verify gitlab_note_id was set.
-	updatedComment, err := testHandler.Queries.GetCommentByGitLabNoteID(ctx, pgtype.Int8{Int64: 9999, Valid: true})
-	if err != nil {
-		t.Fatalf("gitlab_note_id not set on comment: %v", err)
-	}
-	if uuidToString(updatedComment.ID) != uuidToString(comment.ID) {
-		t.Error("wrong comment has gitlab_note_id")
-	}
-
-	// Now fire Note Hook with the same note ID — should be skipped.
-	notePayload := `{"object_kind":"note","object_attributes":{"noteable_type":"Issue","system":false,"id":9999,"note":"Hello from Multica"},"project":{"path_with_namespace":"testorg-echo/repo","namespace":"testorg-echo"},"issue":{"iid":30},"user":{"username":"someone"}}`
+	noteBody := AppendGitLabNoteRelaySentinel("Posted via Multica-controlled dual-write")
+	notePayload := fmt.Sprintf(`{"object_kind":"note","object_attributes":{"noteable_type":"Issue","system":false,"id":9001,"note":%q},"project":{"path_with_namespace":"testorg-sentinel/repo","namespace":"testorg-sentinel"},"issue":{"iid":31},"user":{"username":"bot"}}`, noteBody)
 	noteReq := httptest.NewRequest(http.MethodPost, "/api/webhooks/gitlab", strings.NewReader(notePayload))
 	noteReq.Header.Set("X-Gitlab-Token", "s")
 	noteReq.Header.Set("X-Gitlab-Event", "Note Hook")
 	testHandler.HandleGitLabWebhook(httptest.NewRecorder(), noteReq)
 
-	// Only one comment should exist for this issue.
 	var count int
-	testPool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE issue_id = $1`, issue.ID).Scan(&count)
-	if count != 1 {
-		t.Errorf("echo loop: expected 1 comment, got %d", count)
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE issue_id = $1`, row.IssueID).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("sentinel note should not create a Multica comment, got %d", count)
+	}
+}
+
+// TestHandleGitLabNoteEvent_DualWriteLinksExistingComment verifies that when
+// Multica already has a comment with the same body (agent dual-write), the
+// Note Hook attaches gitlab_note_id instead of creating a second comment.
+func TestHandleGitLabNoteEvent_DualWriteLinksExistingComment(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database available")
+	}
+	ctx := context.Background()
+
+	wsUUID := parseUUID(testWorkspaceID)
+	userUUID := parseUUID(testUserID)
+	conn, err := testHandler.Queries.CreateGitLabConnection(ctx, db.CreateGitLabConnectionParams{
+		WorkspaceID:   wsUUID,
+		Namespace:     "testorg-dualwrite",
+		NamespaceType: "group",
+		AccessToken:   "dummy",
+		ConnectedByID: userUUID,
+	})
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	t.Cleanup(func() {
+		testHandler.Queries.DeleteGitLabConnection(ctx, db.DeleteGitLabConnectionParams{
+			ID: conn.ID, WorkspaceID: wsUUID,
+		})
+	})
+
+	t.Setenv("GITLAB_WEBHOOK_SECRET", "s")
+	issuePayload := `{"object_kind":"issue","object_attributes":{"iid":32,"title":"Dual write","description":"","action":"open"},"project":{"id":302,"path_with_namespace":"testorg-dualwrite/repo","namespace":"testorg-dualwrite"},"labels":[{"title":"agent"}],"assignees":[]}`
+	issueReq := httptest.NewRequest(http.MethodPost, "/api/webhooks/gitlab", strings.NewReader(issuePayload))
+	issueReq.Header.Set("X-Gitlab-Token", "s")
+	issueReq.Header.Set("X-Gitlab-Event", "Issue Hook")
+	testHandler.HandleGitLabWebhook(httptest.NewRecorder(), issueReq)
+
+	row, err := testHandler.Queries.GetGitLabIssueByProjectAndIID(ctx, db.GetGitLabIssueByProjectAndIIDParams{
+		WorkspaceID: wsUUID, ProjectPath: "testorg-dualwrite/repo", GlIssueIid: 32,
+	})
+	if err != nil {
+		t.Fatalf("gitlab_issue not found: %v", err)
+	}
+	issue, err := testHandler.Queries.GetIssue(ctx, row.IssueID)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
 	}
 
-	_ = apiCalled // used to confirm fake server was hit (implicit via note_id being set)
+	const body = "Agent progress update from dual-write"
+	comment, err := testHandler.Queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "member",
+		AuthorID:    userUUID,
+		Content:     body,
+		Type:        "comment",
+	})
+	if err != nil {
+		t.Fatalf("create multica comment: %v", err)
+	}
+
+	notePayload := fmt.Sprintf(`{"object_kind":"note","object_attributes":{"noteable_type":"Issue","system":false,"id":9002,"note":%q},"project":{"path_with_namespace":"testorg-dualwrite/repo","namespace":"testorg-dualwrite"},"issue":{"iid":32},"user":{"id":99,"username":"agentbot","name":"Agent Bot"}}`, body)
+	noteReq := httptest.NewRequest(http.MethodPost, "/api/webhooks/gitlab", strings.NewReader(notePayload))
+	noteReq.Header.Set("X-Gitlab-Token", "s")
+	noteReq.Header.Set("X-Gitlab-Event", "Note Hook")
+	testHandler.HandleGitLabWebhook(httptest.NewRecorder(), noteReq)
+
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE issue_id = $1`, issue.ID).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("dual-write should keep a single Multica comment, got %d", count)
+	}
+	linked, err := testHandler.Queries.GetCommentByGitLabNoteID(ctx, pgtype.Int8{Int64: 9002, Valid: true})
+	if err != nil {
+		t.Fatalf("expected gitlab_note_id linked on existing comment: %v", err)
+	}
+	if linked.ID != comment.ID {
+		t.Errorf("linked wrong comment: got %s want %s", uuidToString(linked.ID), uuidToString(comment.ID))
+	}
+}
+
+func TestAppendGitLabNoteRelaySentinel(t *testing.T) {
+	got := AppendGitLabNoteRelaySentinel("hello")
+	if !strings.Contains(got, gitlabNoteRelaySentinel) {
+		t.Fatalf("missing sentinel: %q", got)
+	}
+	// Idempotent.
+	if again := AppendGitLabNoteRelaySentinel(got); again != got {
+		t.Fatalf("second append changed body:\n%s\nvs\n%s", again, got)
+	}
 }
 
 // TestGetGitLabIssueForIssue tests the GET /api/issues/:id/gitlab-issue endpoint.

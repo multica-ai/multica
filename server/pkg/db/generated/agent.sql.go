@@ -1683,7 +1683,7 @@ INSERT INTO agent (
     $1, $2, $3, $4, $5,
     '{}'::jsonb, $6, 'workspace', 'public_to',
     0, $7, '', '{}'::jsonb, '[]'::jsonb,
-    'user', $8
+    'system', $8
 )
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
 `
@@ -1700,9 +1700,10 @@ type CreateGitLabPersonaAgentParams struct {
 }
 
 // Identity agent for a GitLab user so comments can use author_type=agent with
-// the real name/avatar. public_to + max_concurrent_tasks=0: every workspace
-// member can see the persona in ListAgents (for avatar/name resolution) but
-// the claim path never dispatches runs for it. system_key holds gitlab:{id}.
+// the real name/avatar. kind=system keeps GetAgentInWorkspace / assign / edit
+// surfaces on kind=user only (personas are not real workers). ListAgents still
+// returns gitlab:% system agents for avatar/name resolution. public_to +
+// max_concurrent_tasks=0: claim never dispatches. system_key holds gitlab:{id}.
 func (q *Queries) CreateGitLabPersonaAgent(ctx context.Context, arg CreateGitLabPersonaAgentParams) (Agent, error) {
 	row := q.db.QueryRow(ctx, createGitLabPersonaAgent,
 		arg.WorkspaceID,
@@ -3362,10 +3363,19 @@ func (q *Queries) ListAgentTasks(ctx context.Context, agentID pgtype.UUID) ([]Ag
 
 const listAgents = `-- name: ListAgents :many
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key FROM agent
-WHERE workspace_id = $1 AND archived_at IS NULL AND kind = 'user'
+WHERE workspace_id = $1
+  AND archived_at IS NULL
+  AND (
+    kind = 'user'
+    OR (kind = 'system' AND system_key LIKE 'gitlab:%')
+  )
 ORDER BY created_at ASC
 `
 
+// User-authored agents plus GitLab identity personas (kind=system,
+// system_key gitlab:*) so comment author name/avatar resolution works
+// via the same list path. Personas are non-runnable (max_concurrent_tasks=0)
+// and filtered out of assign/work surfaces by the app layer.
 func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Agent, error) {
 	rows, err := q.db.Query(ctx, listAgents, workspaceID)
 	if err != nil {
@@ -3415,7 +3425,11 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 
 const listAllAgents = `-- name: ListAllAgents :many
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key FROM agent
-WHERE workspace_id = $1 AND kind = 'user'
+WHERE workspace_id = $1
+  AND (
+    kind = 'user'
+    OR (kind = 'system' AND system_key LIKE 'gitlab:%')
+  )
 ORDER BY created_at ASC
 `
 

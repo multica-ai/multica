@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { GitMerge, Tag, Copy, RefreshCw } from "lucide-react";
@@ -18,11 +18,14 @@ import {
   useDeleteGitLabConnection,
   useRotateGitLabWebhookSecret,
   deriveGitLabSettings,
+  DEFAULT_GITLAB_ISSUE_SYNC_LABEL,
 } from "@multica/core/gitlab";
 import { api } from "@multica/core/api";
 import type { Workspace } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { GitLabMark } from "./gitlab-mark";
+import { SettingsSaveState } from "./settings-layout";
+import { useAutoSave } from "./use-auto-save";
 
 type SettingsKey =
   | "gitlab_enabled"
@@ -57,19 +60,59 @@ export function GitLabTab() {
   const rotateMutation = useRotateGitLabWebhookSecret(wsId);
 
   const flags = deriveGitLabSettings(workspace);
+  const [issueSyncLabelDraft, setIssueSyncLabelDraft] = useState(flags.issueSyncLabel);
 
-  async function persistSetting(key: SettingsKey, next: boolean) {
-    if (!workspace || savingKey) return;
-    setSavingKey(key);
-    try {
+  useEffect(() => {
+    setIssueSyncLabelDraft(flags.issueSyncLabel);
+    // Cache updates after auto-save replace the Workspace object. Keying on
+    // identity prevents that response from wiping a newer local keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on workspace identity
+  }, [workspace?.id]);
+
+  const persistWorkspaceSettings = useCallback(
+    async (patch: Record<string, unknown>) => {
+      if (!workspace) return;
+      // Prefer the latest cached workspace so concurrent flag toggles and label
+      // autosaves do not clobber each other with a stale settings object.
+      const cached = qc.getQueryData<Workspace[]>(workspaceKeys.list())?.find(
+        (ws) => ws.id === workspace.id,
+      );
+      const base = cached ?? workspace;
       const merged = {
-        ...((workspace.settings as Record<string, unknown>) ?? {}),
-        [key]: next,
+        ...((base.settings as Record<string, unknown>) ?? {}),
+        ...patch,
       };
       const updated = await api.updateWorkspace(workspace.id, { settings: merged });
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
+    },
+    [qc, workspace],
+  );
+
+  const labelAutoSave = useAutoSave({
+    value: issueSyncLabelDraft,
+    savedValue: flags.issueSyncLabel,
+    enabled: canManage && !!workspace,
+    onSave: async (value) => {
+      const next = value.trim() || DEFAULT_GITLAB_ISSUE_SYNC_LABEL;
+      await persistWorkspaceSettings({ gitlab_issue_sync_label: next });
+      if (next !== value) {
+        setIssueSyncLabelDraft(next);
+      }
+    },
+    onError: (e) => {
+      toast.error(e instanceof Error ? e.message : t(($) => $.gitlab.toast_failed));
+    },
+    isEqual: (a, b) =>
+      a.trim() === b.trim() || (a.trim() === "" && b === DEFAULT_GITLAB_ISSUE_SYNC_LABEL),
+  });
+
+  async function persistSetting(key: SettingsKey, next: boolean) {
+    if (!workspace || savingKey) return;
+    setSavingKey(key);
+    try {
+      await persistWorkspaceSettings({ [key]: next });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.gitlab.toast_failed));
     } finally {
@@ -267,7 +310,15 @@ export function GitLabTab() {
       )}
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold">{t(($) => $.gitlab.section_features)}</h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">{t(($) => $.gitlab.section_features)}</h2>
+          <SettingsSaveState
+            status={labelAutoSave.status}
+            savingLabel={t(($) => $.auto_save.saving)}
+            savedLabel={t(($) => $.auto_save.saved)}
+            errorLabel={t(($) => $.auto_save.failed)}
+          />
+        </div>
         <Card>
           <CardContent className="space-y-4">
             <FeatureRow
@@ -288,6 +339,27 @@ export function GitLabTab() {
               disabled={!canManage || !flags.enabled || savingKey === "gitlab_issue_sync_enabled"}
               onCheckedChange={(v) => persistSetting("gitlab_issue_sync_enabled", v)}
             />
+            <div className="flex items-start justify-between gap-4 border-t pt-4">
+              <div className="space-y-1">
+                <Label htmlFor="gitlab-issue-sync-label" className="text-sm font-medium">
+                  {t(($) => $.gitlab.issue_sync_label_label)}
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  {t(($) => $.gitlab.issue_sync_label_description)}
+                </p>
+              </div>
+              <Input
+                id="gitlab-issue-sync-label"
+                value={issueSyncLabelDraft}
+                onChange={(e) => setIssueSyncLabelDraft(e.target.value)}
+                onBlur={labelAutoSave.flush}
+                disabled={!canManage || !flags.enabled}
+                placeholder={DEFAULT_GITLAB_ISSUE_SYNC_LABEL}
+                spellCheck={false}
+                autoComplete="off"
+                className="max-w-[12rem] font-mono text-xs"
+              />
+            </div>
             <FeatureRow
               id="gitlab-comment-sync"
               icon={<Tag className="h-4 w-4" />}

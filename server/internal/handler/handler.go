@@ -304,7 +304,6 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		}),
 		cfg: cfg,
 	}
-	taskSvc.PostCommentToGitLab = h.postCommentToGitLab
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 	return h
 }

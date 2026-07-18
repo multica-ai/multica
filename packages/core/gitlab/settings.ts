@@ -4,11 +4,19 @@ import { api } from "../api";
 import { gitlabKeys } from "./queries";
 
 
+/** Default GitLab label that triggers Multica issue creation. */
+export const DEFAULT_GITLAB_ISSUE_SYNC_LABEL = "agent";
+
 export interface GitLabSettings {
   enabled: boolean;
   mrSidebar: boolean;
   issueSync: boolean;
   commentSync: boolean;
+  /**
+   * GitLab label title that creates/syncs Multica issues. Defaults to "agent"
+   * so workspaces predating this setting keep historical behavior.
+   */
+  issueSyncLabel: string;
 }
 
 export function deriveGitLabSettings(
@@ -16,11 +24,17 @@ export function deriveGitLabSettings(
 ): GitLabSettings {
   const s = (workspace?.settings ?? {}) as Record<string, unknown>;
   const enabled = s.gitlab_enabled !== false;
+  const rawLabel = s.gitlab_issue_sync_label;
+  const issueSyncLabel =
+    typeof rawLabel === "string" && rawLabel.trim() !== ""
+      ? rawLabel.trim()
+      : DEFAULT_GITLAB_ISSUE_SYNC_LABEL;
   return {
     enabled,
     mrSidebar: enabled && s.gitlab_mr_sidebar_enabled !== false,
     issueSync: enabled && s.gitlab_issue_sync_enabled !== false,
     commentSync: enabled && s.gitlab_comment_sync_enabled !== false,
+    issueSyncLabel,
   };
 }
 

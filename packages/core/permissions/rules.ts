@@ -1,3 +1,4 @@
+import { isGitLabPersonaAgent } from "../agents/identity";
 import type {
   Agent,
   Comment,
@@ -33,6 +34,12 @@ export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to edit this agent.");
   }
+  if (isGitLabPersonaAgent(agent)) {
+    return deny(
+      "not_resource_owner",
+      "GitLab identity personas are read-only attribution profiles.",
+    );
+  }
   if (isAdminLike(ctx.role)) return ALLOW;
   if (agent.owner_id !== null && agent.owner_id === ctx.userId) return ALLOW;
   return deny(
@@ -53,6 +60,7 @@ export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
  *   - permission_mode "public_to" + workspace target: any workspace member
  *   - permission_mode "public_to" + member target: only the matching user
  *   - team target: reserved, INERT in v1 (never grants)
+ *   - GitLab identity personas (system_key gitlab:*): never assignable
  */
 export function canAssignAgentToIssue(
   agent: Agent,
@@ -60,6 +68,14 @@ export function canAssignAgentToIssue(
 ): Decision {
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to assign agents.");
+  }
+
+  // GitLab comment personas are identity shells only — never invoke.
+  if (isGitLabPersonaAgent(agent)) {
+    return deny(
+      "private_visibility",
+      "GitLab identity personas cannot be assigned work.",
+    );
   }
 
   // The owner may always invoke their own agent, regardless of mode.
