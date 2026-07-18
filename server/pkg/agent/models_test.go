@@ -1232,3 +1232,59 @@ func TestCachedDiscovery(t *testing.T) {
 		t.Errorf("expected 1 underlying call due to cache, got %d", calls)
 	}
 }
+
+func TestKimiStaticModels(t *testing.T) {
+	t.Parallel()
+	models := kimiStaticModels()
+	if len(models) == 0 {
+		t.Fatal("expected static models, got empty list")
+	}
+
+	ids := map[string]Model{}
+	defaults := 0
+	for _, m := range models {
+		ids[m.ID] = m
+		if m.Default {
+			defaults++
+		}
+		if m.Provider != "kimi" {
+			t.Errorf("model %q has provider %q, want kimi", m.ID, m.Provider)
+		}
+	}
+
+	expectedIDs := []string{"kimi-k2.7-coding", "kimi-k2.7-coding-highspeed", "kimi-k3"}
+	for _, id := range expectedIDs {
+		if _, ok := ids[id]; !ok {
+			t.Errorf("missing expected model %q in: %+v", id, models)
+		}
+	}
+
+	if defaults != 1 {
+		t.Errorf("expected exactly 1 default model, got %d", defaults)
+	}
+	if !ids["kimi-k2.7-coding"].Default {
+		t.Error("expected kimi-k2.7-coding to be the default")
+	}
+}
+
+func TestDiscoverKimiModelsFallsBackToStatic(t *testing.T) {
+	t.Parallel()
+	// With a nonexistent binary, ACP discovery must fail and fall
+	// back to the static catalog so the UI stays usable.
+	ctx := context.Background()
+	models, err := discoverKimiModels(ctx, "/nonexistent/kimi")
+	if err != nil {
+		t.Fatalf("discoverKimiModels returned error: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected static fallback models, got empty list")
+	}
+
+	ids := map[string]bool{}
+	for _, m := range models {
+		ids[m.ID] = true
+	}
+	if !ids["kimi-k2.7-coding"] || !ids["kimi-k3"] {
+		t.Errorf("static fallback missing expected models: %+v", models)
+	}
+}
