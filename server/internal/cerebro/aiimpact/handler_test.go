@@ -825,6 +825,61 @@ func TestWorkspaceEvidenceReadModelFiltersByFunction(t *testing.T) {
 	}
 }
 
+func TestWorkspaceEvidenceReadModelFiltersByOperatingLoop(t *testing.T) {
+	workspaceID := uuid.New()
+	functionID := uuid.New()
+	selectedLoopID := uuid.New()
+	otherLoopID := uuid.New()
+	selectedMetricID := uuid.New()
+	otherMetricID := uuid.New()
+	periodStart := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.Add(24 * time.Hour)
+	store := &recordingObservationStore{
+		functions: []Function{
+			{ID: functionID, WorkspaceID: workspaceID, Name: "Customer Service", Active: true},
+		},
+		operatingLoops: []OperatingLoop{
+			{ID: selectedLoopID, WorkspaceID: workspaceID, FunctionID: functionID, Name: "Resolve customer needs", Active: true},
+			{ID: otherLoopID, WorkspaceID: workspaceID, FunctionID: functionID, Name: "Review service quality", Active: true},
+		},
+		metrics: []Metric{
+			{ID: selectedMetricID, WorkspaceID: workspaceID, OperatingLoopID: selectedLoopID, Name: "Resolved needs", Family: FamilyOutcome, Unit: "needs", Direction: DirectionIncrease, Source: "support", Active: true},
+			{ID: otherMetricID, WorkspaceID: workspaceID, OperatingLoopID: otherLoopID, Name: "Quality score", Family: FamilyQuality, Unit: "score", Direction: DirectionIncrease, Source: "review", Active: true},
+		},
+		workspaceObservations: []Observation{
+			{ID: uuid.New(), MetricID: selectedMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 15, EvidenceStatus: EvidenceMeasured, Confidence: 0.9, Source: "support", Method: "audited count", CreatedAt: periodEnd},
+			{ID: uuid.New(), MetricID: otherMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 0.8, EvidenceStatus: EvidenceMeasured, Confidence: 0.9, Source: "review", Method: "quality review", CreatedAt: periodEnd},
+		},
+	}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cerebro/ai-impact/evidence?operating_loop_id="+selectedLoopID.String(), nil)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("operating-loop-filtered evidence response = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Evidence []struct {
+			OperatingLoopID uuid.UUID `json:"operating_loop_id"`
+			MetricID        uuid.UUID `json:"metric_id"`
+		} `json:"evidence"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode operating-loop-filtered evidence response: %v", err)
+	}
+	if len(response.Evidence) != 1 || response.Evidence[0].OperatingLoopID != selectedLoopID || response.Evidence[0].MetricID != selectedMetricID {
+		t.Fatalf("operating-loop-filtered evidence response = %+v, want only selected operating loop evidence", response.Evidence)
+	}
+}
+
 func TestFunctionEvidenceReadModelReturnsOnlyLatestEvidenceForRequestedFunction(t *testing.T) {
 	workspaceID := uuid.New()
 	requestedFunctionID := uuid.New()

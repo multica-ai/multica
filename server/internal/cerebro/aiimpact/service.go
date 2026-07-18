@@ -217,6 +217,7 @@ func (s *Service) listWorkspaceEvidence(
 
 type EvidenceFilter struct {
 	FunctionID        uuid.UUID
+	OperatingLoopID   uuid.UUID
 	MetricFamily      MetricFamily
 	EvidenceStatus    EvidenceStatus
 	Source            string
@@ -239,6 +240,9 @@ func (s *Service) ListFilteredEvidence(
 	result := make([]EvidenceReadModel, 0, len(evidence))
 	for _, item := range evidence {
 		if filter.FunctionID != uuid.Nil && item.Function.ID != filter.FunctionID {
+			continue
+		}
+		if filter.OperatingLoopID != uuid.Nil && item.OperatingLoop.ID != filter.OperatingLoopID {
 			continue
 		}
 		if filter.MetricFamily != "" && item.Metric.Family != filter.MetricFamily {
