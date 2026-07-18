@@ -126,6 +126,7 @@ func Classify(rawError string) Reason {
 		"overloaded",
 		"529",
 		"no capacity available",
+		"at capacity", // CEREBRO-PATCH(taskfailure-model-capacity): FIR-3501 — "Selected model is at capacity" is a transient overload, not a missing model.
 	):
 		return ReasonAgentProviderCapacityOrRateLimit
 
