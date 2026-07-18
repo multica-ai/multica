@@ -218,6 +218,7 @@ func (s *Service) listWorkspaceEvidence(
 type EvidenceFilter struct {
 	FunctionID        uuid.UUID
 	OperatingLoopID   uuid.UUID
+	MetricID          uuid.UUID
 	MetricFamily      MetricFamily
 	EvidenceStatus    EvidenceStatus
 	Source            string
@@ -243,6 +244,9 @@ func (s *Service) ListFilteredEvidence(
 			continue
 		}
 		if filter.OperatingLoopID != uuid.Nil && item.OperatingLoop.ID != filter.OperatingLoopID {
+			continue
+		}
+		if filter.MetricID != uuid.Nil && item.Metric.ID != filter.MetricID {
 			continue
 		}
 		if filter.MetricFamily != "" && item.Metric.Family != filter.MetricFamily {

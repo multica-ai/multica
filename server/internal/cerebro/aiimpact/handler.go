@@ -111,6 +111,15 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+	var metricID uuid.UUID
+	if value := r.URL.Query().Get("metric_id"); value != "" {
+		var err error
+		metricID, err = uuid.Parse(value)
+		if err != nil {
+			writeObservationError(w, http.StatusBadRequest, "invalid metric_id")
+			return
+		}
+	}
 	minimumConfidence, err := parseMinimumConfidence(r.URL.Query().Get("minimum_confidence"))
 	if err != nil {
 		writeObservationError(w, http.StatusBadRequest, "invalid minimum_confidence")
@@ -141,6 +150,7 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 	evidence, err := h.service.ListFilteredEvidence(r.Context(), workspaceID, EvidenceFilter{
 		FunctionID:        functionID,
 		OperatingLoopID:   operatingLoopID,
+		MetricID:          metricID,
 		MetricFamily:      metricFamily,
 		EvidenceStatus:    evidenceStatus,
 		Source:            source,
