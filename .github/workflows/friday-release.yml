@@ -22,6 +22,7 @@ on:
         options: ["auto", "patch", "minor", "major"]
 
 permissions:
+  actions: write
   contents: write
   pull-requests: read
 
@@ -58,6 +59,9 @@ jobs:
           BUMP_OVERRIDE: ${{ github.event.inputs.bump_override || 'auto' }}
           RELEASE_NOTES_FILE: ${{ github.workspace }}/release-notes.md
         run: python3 scripts/release/compute_friday_release.py
+
+      - name: Verify release delivery chain
+        run: python3 scripts/release/workflow_delivery_test.py
 
       - name: Render and commit docs release notes
         if: steps.bump.outputs.tag != '' && (github.event.inputs.dry_run || 'false') != 'true'
@@ -119,3 +123,13 @@ jobs:
             --title "$TAG" \
             --notes-file release-notes.md \
             --verify-tag
+
+      - name: Dispatch binary release
+        if: steps.bump.outputs.tag != '' && (github.event.inputs.dry_run || 'false') != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          # A tag pushed by GITHUB_TOKEN does not trigger another workflow.
+          # Dispatch after creating the release so GoReleaser can upload to it.
+          gh workflow run release.yml --ref "$TAG"
