@@ -1,17 +1,14 @@
-import { Check, Circle, CircleAlert, Filter, Play, Target, ShieldAlert, Zap } from "lucide-react";
+import { Check, Circle, Play, ShieldAlert, Zap } from "lucide-react";
 import type { WorkflowHook } from "../../core/hook-types";
-import { validateHookStep } from "../../core/hook-validation";
+import { validateHookStep, type HookStepKey } from "../../core/hook-validation";
 import { stepSummary } from "../../core/hook-ux";
 
-export type HookStepKey = "trigger" | "scope" | "filter" | "decision" | "action" | "failure";
+export type { HookStepKey };
 
 export const HOOK_STEPS: ReadonlyArray<{ key: HookStepKey; label: string; icon: typeof Zap }> = [
-  { key: "trigger", label: "Trigger", icon: Zap },
-  { key: "scope", label: "Applies to", icon: Target },
-  { key: "filter", label: "Filter", icon: Filter },
-  { key: "decision", label: "Decision", icon: ShieldAlert },
-  { key: "action", label: "Action", icon: Play },
-  { key: "failure", label: "On hook failure", icon: CircleAlert },
+  { key: "when", label: "When", icon: Zap },
+  { key: "guide", label: "Guide or enforce", icon: ShieldAlert },
+  { key: "actions", label: "Actions", icon: Play },
 ];
 
 export function HookChain({ selected, hook, onSelect }: { selected: HookStepKey; hook: WorkflowHook; onSelect: (step: HookStepKey) => void }) {
