@@ -15,6 +15,7 @@ type ServiceStore interface {
 	CreateOperatingLoop(ctx context.Context, workspaceID uuid.UUID, input OperatingLoopInput) (OperatingLoop, error)
 	ListOperatingLoops(ctx context.Context, workspaceID uuid.UUID) ([]OperatingLoop, error)
 	CreateProjectBinding(ctx context.Context, workspaceID uuid.UUID, input ProjectBindingInput) (ProjectBinding, error)
+	ListProjectBindings(ctx context.Context, workspaceID uuid.UUID) ([]ProjectBinding, error)
 	CreateMetric(ctx context.Context, workspaceID uuid.UUID, input MetricInput) (Metric, error)
 	ListMetrics(ctx context.Context, workspaceID uuid.UUID) ([]Metric, error)
 	AppendObservation(
@@ -32,6 +33,10 @@ func (s *Service) ListFunctions(ctx context.Context, workspaceID uuid.UUID) ([]F
 
 func (s *Service) ListOperatingLoops(ctx context.Context, workspaceID uuid.UUID) ([]OperatingLoop, error) {
 	return s.store.ListOperatingLoops(ctx, workspaceID)
+}
+
+func (s *Service) ListProjectBindings(ctx context.Context, workspaceID uuid.UUID) ([]ProjectBinding, error) {
+	return s.store.ListProjectBindings(ctx, workspaceID)
 }
 
 func (s *Service) ListMetrics(ctx context.Context, workspaceID uuid.UUID) ([]Metric, error) {

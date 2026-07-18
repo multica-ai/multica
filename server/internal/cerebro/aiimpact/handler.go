@@ -28,6 +28,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Post("/api/cerebro/ai-impact/functions", h.CreateFunction)
 	r.Get("/api/cerebro/ai-impact/operating-loops", h.ListOperatingLoops)
 	r.Post("/api/cerebro/ai-impact/operating-loops", h.CreateOperatingLoop)
+	r.Get("/api/cerebro/ai-impact/project-bindings", h.ListProjectBindings)
 	r.Post("/api/cerebro/ai-impact/project-bindings", h.CreateProjectBinding)
 	r.Get("/api/cerebro/ai-impact/metrics", h.ListMetrics)
 	r.Post("/api/cerebro/ai-impact/metrics", h.CreateMetric)
@@ -73,6 +74,25 @@ func toProjectBindingResponse(binding ProjectBinding) projectBindingResponse {
 		OperatingLoopID: binding.OperatingLoopID,
 		Active:          binding.Active,
 	}
+}
+
+// ListProjectBindings returns workspace-scoped project bindings.
+func (h *Handler) ListProjectBindings(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, _, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+
+	bindings, err := h.service.ListProjectBindings(r.Context(), workspaceID)
+	if err != nil {
+		writeObservationError(w, http.StatusInternalServerError, "failed to list project bindings")
+		return
+	}
+	response := make([]projectBindingResponse, 0, len(bindings))
+	for _, binding := range bindings {
+		response = append(response, toProjectBindingResponse(binding))
+	}
+	writeObservationJSON(w, http.StatusOK, map[string]any{"project_bindings": response})
 }
 
 // CreateProjectBinding binds one workspace project to an operating loop.

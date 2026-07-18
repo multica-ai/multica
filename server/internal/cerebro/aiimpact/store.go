@@ -190,6 +190,28 @@ func (s *Store) CreateProjectBinding(
 	return binding, err
 }
 
+func (s *Store) ListProjectBindings(ctx context.Context, workspaceID uuid.UUID) ([]ProjectBinding, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+projectBindingColumns+`
+		FROM cerebro_ai_impact_project_binding
+		WHERE workspace_id = $1
+		ORDER BY created_at, id`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	bindings := make([]ProjectBinding, 0)
+	for rows.Next() {
+		binding, err := scanProjectBinding(rows)
+		if err != nil {
+			return nil, err
+		}
+		bindings = append(bindings, binding)
+	}
+	return bindings, rows.Err()
+}
+
 const metricColumns = `id, workspace_id, operating_loop_id, name, family, unit,
  direction, baseline_start, baseline_end, source, guardrail, active, created_at, updated_at`
 

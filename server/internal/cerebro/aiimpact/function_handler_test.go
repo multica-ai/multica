@@ -424,3 +424,52 @@ func TestProjectBindingHTTPSeamAllowsOwnerAdminCreateAndKeepsMemberReadOnly(t *t
 		t.Fatalf("member create project binding status = %d, want 403: %s", readOnlyRecorder.Code, readOnlyRecorder.Body.String())
 	}
 }
+
+func TestProjectBindingHTTPSeamLetsMemberListWorkspaceProjectBindings(t *testing.T) {
+	workspaceID := uuid.New()
+	bindingID := uuid.New()
+	projectID := uuid.New()
+	operatingLoopID := uuid.New()
+	store := &recordingObservationStore{projectBindings: []ProjectBinding{{
+		ID:              bindingID,
+		WorkspaceID:     workspaceID,
+		ProjectID:       projectID,
+		OperatingLoopID: operatingLoopID,
+		Active:          true,
+	}}}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cerebro/ai-impact/project-bindings", nil)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("member list project bindings status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		ProjectBindings []struct {
+			ID              uuid.UUID `json:"id"`
+			ProjectID       uuid.UUID `json:"project_id"`
+			OperatingLoopID uuid.UUID `json:"operating_loop_id"`
+			Active          bool      `json:"active"`
+		} `json:"project_bindings"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode member list project bindings response: %v", err)
+	}
+	if len(response.ProjectBindings) != 1 || response.ProjectBindings[0].ID != bindingID ||
+		response.ProjectBindings[0].ProjectID != projectID ||
+		response.ProjectBindings[0].OperatingLoopID != operatingLoopID ||
+		!response.ProjectBindings[0].Active {
+		t.Fatalf("member list project bindings response = %+v", response.ProjectBindings)
+	}
+	if store.listBindingsWorkspaceID != workspaceID {
+		t.Fatalf("list project bindings workspace = %s, want %s", store.listBindingsWorkspaceID, workspaceID)
+	}
+}
