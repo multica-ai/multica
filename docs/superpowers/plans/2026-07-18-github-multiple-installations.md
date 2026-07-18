@@ -4,18 +4,20 @@
 
 **目标：** 让一个 Multica 工作区可以在设置页添加、查看并分别断开多个 GitHub App installation。
 
-**架构：** 保持 React Query 返回的 `installations` 数组为唯一服务端状态来源，不增加 store 或后端接口。`GitHubTab` 直接遍历数组生成独立行，连接入口与数组是否为空解耦，断开确认框保存并提交被选中行的数据库 ID。
+**架构：** 保持 React Query 返回的 `installations` 数组为唯一服务端状态来源，不增加 store 或新后端接口。`GitHubTab` 直接遍历数组生成独立行，连接入口与数组是否为空解耦，断开确认框保存并提交被选中行的数据库 ID。现有列表查询 enrich `connected_by`，核心 API 客户端以宽松 Zod schema 解析响应。
 
-**技术栈：** React、TypeScript、TanStack Query、Vitest、Testing Library、项目现有 JSON i18n。
+**技术栈：** React、TypeScript、TanStack Query、Zod、Vitest、Testing Library、Go、sqlc、项目现有 JSON i18n。
 
 ## 全局约束
 
-- 只改共享前端 `packages/views`，不修改后端、数据库或 GitHub 回调。
+- 不新增端点、迁移或 GitHub 回调；允许修正现有列表查询/响应，使 `connected_by` 与 API 兼容解析满足生产契约。
 - 普通成员只能查看 installation；只有后端返回 `can_manage: true` 时才能连接或断开。
 - GitHub 总开关关闭时仍允许断开 installation。
 - 已有 installation 时连接按钮文案为“连接另一个 GitHub”；没有时仍为“连接 GitHub”。
 - 每一条断开请求必须使用该行的 `installation.id`，不得使用数组下标或 GitHub numeric installation ID。
 - 英文、简体中文、日文和韩文文案必须同步。
+- 每行展示 `account_avatar_url`，空值或加载失败时使用 GitHub 图标 fallback。
+- 未知 `account_type` 必须明确显示为未知，不得误标为个人账号。
 
 ---
 
@@ -313,17 +315,38 @@ git commit -m "fix(settings): support multiple GitHub installations"
 
 ---
 
+### 任务 2.5：修复独立审查发现的生产契约缺口
+
+**文件：**
+
+- 修改：`server/pkg/db/queries/github.sql`、`server/pkg/db/generated/github.sql.go`
+- 修改：`server/internal/handler/github.go`、`server/internal/handler/github_test.go`
+- 修改：`packages/core/types/github.ts`
+- 修改：`packages/core/api/schemas.ts`、`packages/core/api/schemas.test.ts`、`packages/core/api/client.ts`
+- 修改：GitHub 设置组件、测试与四语文案
+
+- [ ] 列表查询左连接连接用户名称，handler 返回可选 `connected_by`，并用 handler 测试固定头像与连接人响应。
+- [ ] 使用 sqlc v1.31.1 生成查询代码，不手改生成文件。
+- [ ] 为 installation 列表添加宽松 Zod schema；保留未来账号类型，损坏响应降级为空列表。
+- [ ] 每行展示头像与 fallback，未知账号类型显示明确文案，连接区在窄屏改为纵向布局。
+- [ ] 增加头像、未知类型、失败断开、普通成员多行可见和 API 损坏响应测试。
+
+---
+
 ### 任务 3：自动化验证与浏览器回归
 
 **文件：**
 
 - 验证：`packages/views/settings/components/github-tab.test.tsx`
 - 验证：`packages/views/settings/components/github-tab.tsx`
+- 验证：`packages/core/api/schemas.test.ts` 与 `packages/core` TypeScript
+- 验证：`server/internal/handler/github_test.go`
 - 验证：四个 `packages/views/locales/*/settings.json`
 
 **接口：**
 
 - 自动化输入：`@multica/views` 的单测与 TypeScript 编译。
+- 契约输入：`@multica/core` schema 单测/类型检查和 GitHub handler Go 测试。
 - 浏览器输入：本地 `github-5599` 工作区中已存在的两条模拟 installation。
 - 输出：两个独立账号行、持续可见的连接入口、两个精确断开入口；测试期间不确认断开，保留两条本地数据。
 
@@ -351,6 +374,16 @@ git diff --check
 ```
 
 预期：两个命令退出码均为 0。
+
+- [ ] **步骤 3.5：运行 API schema 与 Go handler 验证**
+
+```bash
+pnpm --filter @multica/core test
+pnpm --filter @multica/core typecheck
+go test ./internal/handler -run TestListGitHubInstallations_RoleGating -count=1
+```
+
+预期：全部退出码为 0；handler 响应包含头像与连接人，损坏 API 响应安全降级。
 
 - [ ] **步骤 4：使用 @电脑 做本地浏览器回归**
 
@@ -388,7 +421,7 @@ git diff origin/main...HEAD --stat
 git log --oneline origin/main..HEAD
 ```
 
-预期：只包含 #5599 的规格、组件、测试和四个 locale 文件；`.git-safe-ops.json` 与其他既有未跟踪文件不进入提交。
+预期：只包含 #5599 的规格、组件、核心 API schema、GitHub 列表响应、测试和四个 locale 文件；`.git-safe-ops.json` 与其他既有未跟踪文件不进入提交。
 
 - [ ] **步骤 2：运行推送安全检查并推送**
 
@@ -419,4 +452,4 @@ gh pr create \
 Closes #5599'
 ```
 
-PR 正文必须包含：问题根因、前端修复范围、权限行为、单测/类型检查/浏览器验证结果，并使用 `Closes #5599` 自动关联 issue。
+PR 正文必须包含：问题根因、设置页与列表响应契约修复范围、权限行为、单测/类型检查/浏览器验证结果，并使用 `Closes #5599` 自动关联 issue。

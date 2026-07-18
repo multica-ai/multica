@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -1964,10 +1965,12 @@ func TestListGitHubInstallations_RoleGating(t *testing.T) {
 
 	const installationID int64 = 42424242
 	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
-		WorkspaceID:    parseUUID(testWorkspaceID),
-		InstallationID: installationID,
-		AccountLogin:   "role-gating-acct",
-		AccountType:    "Organization",
+		WorkspaceID:      parseUUID(testWorkspaceID),
+		InstallationID:   installationID,
+		AccountLogin:     "role-gating-acct",
+		AccountType:      "Organization",
+		AccountAvatarUrl: pgtype.Text{String: "https://avatars.example/role-gating.png", Valid: true},
+		ConnectedByID:    parseUUID(testUserID),
 	}); err != nil {
 		t.Fatalf("CreateGitHubInstallation: %v", err)
 	}
@@ -2009,6 +2012,12 @@ func TestListGitHubInstallations_RoleGating(t *testing.T) {
 		if int64(gotID) != installationID {
 			t.Errorf("installation_id = %v, want %d", gotID, installationID)
 		}
+		if got, _ := row["account_avatar_url"].(string); got != "https://avatars.example/role-gating.png" {
+			t.Errorf("account_avatar_url = %q, want seeded avatar", got)
+		}
+		if got, _ := row["connected_by"].(string); got != handlerTestName {
+			t.Errorf("connected_by = %q, want %q", got, handlerTestName)
+		}
 	})
 
 	t.Run("owner sees installation_id + can_manage true", func(t *testing.T) {
@@ -2040,6 +2049,12 @@ func TestListGitHubInstallations_RoleGating(t *testing.T) {
 		// Display fields the read-only view still needs must round-trip.
 		if got, _ := row["account_login"].(string); got != "role-gating-acct" {
 			t.Errorf("account_login = %q, want role-gating-acct", got)
+		}
+		if got, _ := row["account_avatar_url"].(string); got != "https://avatars.example/role-gating.png" {
+			t.Errorf("account_avatar_url = %q, want seeded avatar", got)
+		}
+		if got, _ := row["connected_by"].(string); got != handlerTestName {
+			t.Errorf("connected_by = %q, want %q", got, handlerTestName)
 		}
 	})
 

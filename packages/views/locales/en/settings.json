@@ -419,6 +419,7 @@
     "connected_installations": "Connected GitHub installations for this workspace.",
     "account_type_user": "Personal account",
     "account_type_organization": "Organization",
+    "account_type_unknown": "Unknown account type",
     "connect_github": "Connect GitHub",
     "connect_another_github": "Connect another GitHub",
     "connect_opening": "Opening…",

@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
+import type { GitHubInstallation } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 
@@ -13,6 +14,7 @@ const mockInvalidate = vi.hoisted(() => vi.fn());
 const mockNavPush = vi.hoisted(() => vi.fn());
 const mockSetQueryData = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
+const mockToastError = vi.hoisted(() => vi.fn());
 
 const workspaceRef = vi.hoisted(() => ({
   current: {
@@ -29,13 +31,7 @@ const membersRef = vi.hoisted(() => ({
 }));
 const installationsRef = vi.hoisted(() => ({
   current: {
-    installations: [] as {
-      id: string;
-      account_login: string;
-      account_type: "User" | "Organization";
-      installation_id?: number;
-      connected_by?: string;
-    }[],
+    installations: [] as GitHubInstallation[],
     configured: true,
     can_manage: true as boolean,
   },
@@ -109,7 +105,7 @@ vi.mock("../../navigation", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: mockToastSuccess, error: vi.fn() },
+  toast: { success: mockToastSuccess, error: mockToastError },
 }));
 
 import { GitHubTab } from "./github-tab";
@@ -141,6 +137,7 @@ function resetFixtures() {
 
 describe("GitHubTab", () => {
   beforeEach(resetFixtures);
+  afterEach(() => vi.unstubAllGlobals());
 
   it("folds the non-dev hint into the master switch description (no separate callout)", () => {
     render(<GitHubTab />, { wrapper: I18nWrapper });
@@ -195,28 +192,46 @@ describe("GitHubTab", () => {
     });
   });
 
-  it("renders every installation separately and keeps Connect another available", () => {
+  it("renders every installation separately and keeps Connect another available", async () => {
+    class LoadedImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      referrerPolicy = "";
+      crossOrigin: string | null = null;
+
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    vi.stubGlobal("Image", LoadedImage);
+
     installationsRef.current = {
       configured: true,
       can_manage: true,
       installations: [
         {
           id: "inst-user",
+          workspace_id: "workspace-1",
           account_login: "octocat",
           account_type: "User",
+          account_avatar_url: "https://avatars.example/octocat.png",
+          created_at: "2026-07-18T00:00:00Z",
           installation_id: 41,
         },
         {
           id: "inst-org",
+          workspace_id: "workspace-1",
           account_login: "acme-org",
           account_type: "Organization",
+          account_avatar_url: null,
+          created_at: "2026-07-18T00:00:00Z",
           installation_id: 42,
           connected_by: "Jiayuan",
         },
       ],
     };
 
-    render(<GitHubTab />, { wrapper: I18nWrapper });
+    const { container } = render(<GitHubTab />, { wrapper: I18nWrapper });
 
     expect(screen.getByText("octocat")).toBeTruthy();
     expect(screen.getByText("acme-org")).toBeTruthy();
@@ -226,6 +241,34 @@ describe("GitHubTab", () => {
     expect(screen.getByRole("button", { name: "Connect another GitHub" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Disconnect octocat" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Disconnect acme-org" })).toBeTruthy();
+    expect(container.querySelectorAll('[data-slot="avatar"]')).toHaveLength(2);
+    await waitFor(() => {
+      expect(
+        container.querySelector('img[src="https://avatars.example/octocat.png"]'),
+      ).toBeTruthy();
+    });
+    expect(container.querySelectorAll('[data-slot="avatar-fallback"]')).toHaveLength(1);
+  });
+
+  it("renders an explicit fallback for a future GitHub account type", () => {
+    installationsRef.current = {
+      configured: true,
+      can_manage: true,
+      installations: [
+        {
+          id: "inst-future",
+          workspace_id: "workspace-1",
+          account_login: "future-account",
+          account_type: "Enterprise",
+          account_avatar_url: null,
+          created_at: "2026-07-18T00:00:00Z",
+        },
+      ],
+    };
+
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByText("Unknown account type")).toBeTruthy();
   });
 
   it("disconnects the selected installation row", async () => {
@@ -236,14 +279,20 @@ describe("GitHubTab", () => {
       installations: [
         {
           id: "inst-first",
+          workspace_id: "workspace-1",
           account_login: "octocat",
           account_type: "User",
+          account_avatar_url: null,
+          created_at: "2026-07-18T00:00:00Z",
           installation_id: 41,
         },
         {
           id: "inst-second",
+          workspace_id: "workspace-1",
           account_login: "acme-org",
           account_type: "Organization",
+          account_avatar_url: null,
+          created_at: "2026-07-18T00:00:00Z",
           installation_id: 42,
         },
       ],
@@ -263,6 +312,36 @@ describe("GitHubTab", () => {
     });
   });
 
+  it("keeps the selected installation dialog open when disconnect fails", async () => {
+    const user = userEvent.setup();
+    installationsRef.current = {
+      configured: true,
+      can_manage: true,
+      installations: [
+        {
+          id: "inst-failing",
+          workspace_id: "workspace-1",
+          account_login: "acme-failing",
+          account_type: "Organization",
+          account_avatar_url: null,
+          created_at: "2026-07-18T00:00:00Z",
+          installation_id: 43,
+        },
+      ],
+    };
+    mockDeleteInstallation.mockRejectedValue(new Error("disconnect failed"));
+
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("button", { name: "Disconnect acme-failing" }));
+    await user.click(screen.getByRole("button", { name: /^Disconnect$/ }));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith("disconnect failed");
+    });
+    expect(screen.getByRole("heading", { name: "Disconnect acme-failing?" })).toBeTruthy();
+  });
+
   it("Disconnect button is still visible when the master switch is off", () => {
     workspaceRef.current.settings = { github_enabled: false };
     installationsRef.current = {
@@ -271,8 +350,11 @@ describe("GitHubTab", () => {
       installations: [
         {
           id: "inst-1",
+          workspace_id: "workspace-1",
           account_login: "acme",
           account_type: "Organization",
+          account_avatar_url: null,
+          created_at: "2026-07-18T00:00:00Z",
           installation_id: 1,
         },
       ],
@@ -286,12 +368,31 @@ describe("GitHubTab", () => {
     installationsRef.current = {
       configured: true,
       can_manage: false,
-      installations: [{ id: "inst-1", account_login: "acme", account_type: "User" }],
+      installations: [
+        {
+          id: "inst-1",
+          workspace_id: "workspace-1",
+          account_login: "octocat",
+          account_type: "User",
+          account_avatar_url: null,
+          created_at: "2026-07-18T00:00:00Z",
+        },
+        {
+          id: "inst-2",
+          workspace_id: "workspace-1",
+          account_login: "acme-org",
+          account_type: "Organization",
+          account_avatar_url: null,
+          created_at: "2026-07-18T00:00:00Z",
+        },
+      ],
     };
     render(<GitHubTab />, { wrapper: I18nWrapper });
 
-    expect(screen.getByText("acme")).toBeTruthy();
+    expect(screen.getByText("octocat")).toBeTruthy();
+    expect(screen.getByText("acme-org")).toBeTruthy();
     expect(screen.getByText("Personal account")).toBeTruthy();
+    expect(screen.getByText("Organization")).toBeTruthy();
     expect(screen.getByText(/Read-only view\./i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Connect/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Disconnect/ })).toBeNull();
@@ -317,8 +418,11 @@ describe("GitHubTab", () => {
       installations: [
         {
           id: "inst-7",
+          workspace_id: "workspace-1",
           account_login: "acme",
           account_type: "Organization",
+          account_avatar_url: null,
+          created_at: "2026-07-18T00:00:00Z",
           installation_id: 7,
           connected_by: "Jiayuan",
         },

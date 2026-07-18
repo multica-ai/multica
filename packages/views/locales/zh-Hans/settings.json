@@ -418,6 +418,7 @@
     "connected_installations": "当前工作区已连接以下 GitHub App 安装。",
     "account_type_user": "个人账号",
     "account_type_organization": "组织",
+    "account_type_unknown": "未知账号类型",
     "connect_github": "连接 GitHub",
     "connect_another_github": "连接另一个 GitHub",
     "connect_opening": "正在打开…",

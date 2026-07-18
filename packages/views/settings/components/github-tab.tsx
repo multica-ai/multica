@@ -5,6 +5,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ExternalLink, GitCommitHorizontal, Link2, PanelRight } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@multica/ui/components/ui/avatar";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Label } from "@multica/ui/components/ui/label";
 import { Switch } from "@multica/ui/components/ui/switch";
@@ -168,8 +173,8 @@ export function GitHubTab() {
         <h2 className="text-sm font-semibold">{t(($) => $.github.section_connection)}</h2>
         <Card>
           <CardContent className="space-y-4">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex items-start gap-3">
+            <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
                 <GitHubMark className="h-6 w-6 mt-0.5 shrink-0" />
                 <div className="space-y-1">
                   <p className="text-sm font-medium">{t(($) => $.github.connection_title)}</p>
@@ -195,6 +200,7 @@ export function GitHubTab() {
               </div>
               {canManage && (
                 <Button
+                  className="w-full sm:w-auto"
                   size="sm"
                   onClick={handleConnect}
                   disabled={connecting || !configured}
@@ -220,22 +226,34 @@ export function GitHubTab() {
                     key={installation.id}
                     className="flex items-center justify-between gap-4 px-3 py-3"
                   >
-                    <div className="min-w-0 space-y-1">
-                      <p className="truncate text-sm font-medium">
-                        {installation.account_login}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {installation.account_type === "Organization"
-                          ? t(($) => $.github.account_type_organization)
-                          : t(($) => $.github.account_type_user)}
-                      </p>
-                      {installation.connected_by && (
-                        <p className="text-xs text-muted-foreground">
-                          {t(($) => $.github.connected_by, {
-                            name: installation.connected_by,
-                          })}
+                    <div className="flex min-w-0 items-center gap-3">
+                      <Avatar size="sm" aria-hidden="true">
+                        {installation.account_avatar_url && (
+                          <AvatarImage src={installation.account_avatar_url} alt="" />
+                        )}
+                        <AvatarFallback>
+                          <GitHubMark className="h-3.5 w-3.5" />
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 space-y-1">
+                        <p className="truncate text-sm font-medium">
+                          {installation.account_login}
                         </p>
-                      )}
+                        <p className="text-xs text-muted-foreground">
+                          {installation.account_type === "Organization"
+                            ? t(($) => $.github.account_type_organization)
+                            : installation.account_type === "User"
+                              ? t(($) => $.github.account_type_user)
+                              : t(($) => $.github.account_type_unknown)}
+                        </p>
+                        {installation.connected_by && (
+                          <p className="text-xs text-muted-foreground">
+                            {t(($) => $.github.connected_by, {
+                              name: installation.connected_by,
+                            })}
+                          </p>
+                        )}
+                      </div>
                     </div>
                     {canManage && (
                       <Button

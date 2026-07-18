@@ -411,6 +411,7 @@
     "connected_installations": "이 워크스페이스에 연결된 GitHub App 설치입니다.",
     "account_type_user": "개인 계정",
     "account_type_organization": "조직",
+    "account_type_unknown": "알 수 없는 계정 유형",
     "connect_github": "GitHub 연결",
     "connect_another_github": "다른 GitHub 연결",
     "connect_opening": "여는 중...",

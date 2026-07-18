@@ -411,6 +411,7 @@
     "connected_installations": "このワークスペースには次の GitHub App インストールが接続されています。",
     "account_type_user": "個人アカウント",
     "account_type_organization": "組織",
+    "account_type_unknown": "不明なアカウント種別",
     "connect_github": "GitHub を接続",
     "connect_another_github": "別の GitHub を接続",
     "connect_opening": "開いています…",
