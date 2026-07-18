@@ -47,6 +47,33 @@ INSERT INTO agent (
 )
 RETURNING *;
 
+-- name: GetAgentBySystemKey :one
+-- Stable lookup for integration personas (e.g. GitLab comment authors keyed as
+-- gitlab:{id}). system_key is unique per (workspace, owner, runtime) via
+-- agent_system_identity_unique; this query is the app-level identity resolve
+-- by workspace + key only.
+SELECT * FROM agent
+WHERE workspace_id = $1 AND system_key = $2
+LIMIT 1;
+
+-- name: CreateGitLabPersonaAgent :one
+-- Identity agent for a GitLab user so comments can use author_type=agent with
+-- the real name/avatar. public_to + max_concurrent_tasks=0: every workspace
+-- member can see the persona in ListAgents (for avatar/name resolution) but
+-- the claim path never dispatches runs for it. system_key holds gitlab:{id}.
+INSERT INTO agent (
+    workspace_id, name, description, avatar_url, runtime_mode,
+    runtime_config, runtime_id, visibility, permission_mode,
+    max_concurrent_tasks, owner_id, instructions, custom_env, custom_args,
+    kind, system_key
+) VALUES (
+    @workspace_id, @name, @description, sqlc.narg('avatar_url'), @runtime_mode,
+    '{}'::jsonb, @runtime_id, 'workspace', 'public_to',
+    0, @owner_id, '', '{}'::jsonb, '[]'::jsonb,
+    'user', @system_key
+)
+RETURNING *;
+
 -- name: DeleteSystemAgentByID :exec
 -- Builder sessions own their hidden execution agent. Deleting the session
 -- removes that carrier and its task rows; the kind guard prevents this cleanup

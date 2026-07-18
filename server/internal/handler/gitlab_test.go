@@ -17,6 +17,18 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+func TestGitLabUserSystemKey(t *testing.T) {
+	if got := gitlabUserSystemKey(4242, "alice"); got != "gitlab:4242" {
+		t.Fatalf("id key: got %q", got)
+	}
+	if got := gitlabUserSystemKey(0, "Alice"); got != "gitlab:u:alice" {
+		t.Fatalf("username key: got %q", got)
+	}
+	if got := gitlabUserSystemKey(0, "  "); got != "" {
+		t.Fatalf("empty key: got %q", got)
+	}
+}
+
 func TestHandleGitLabWebhook_MissingSecret(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("no database available")
@@ -355,7 +367,7 @@ func TestHandleGitLabIssueEvent_Reopen(t *testing.T) {
 }
 
 // TestHandleGitLabNoteEvent_CreatesComment tests that a Note Hook creates a
-// Multica comment prefixed with the GitLab username.
+// Multica comment authored by a persona agent matching the GitLab user.
 func TestHandleGitLabNoteEvent_CreatesComment(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("no database available")
@@ -378,6 +390,14 @@ func TestHandleGitLabNoteEvent_CreatesComment(t *testing.T) {
 		testHandler.Queries.DeleteGitLabConnection(ctx, db.DeleteGitLabConnectionParams{
 			ID: conn.ID, WorkspaceID: wsUUID,
 		})
+		// Clean persona agent created by the note path.
+		if agent, err := testHandler.Queries.GetAgentBySystemKey(ctx, db.GetAgentBySystemKeyParams{
+			WorkspaceID: wsUUID,
+			SystemKey:   pgtype.Text{String: "gitlab:4242", Valid: true},
+		}); err == nil {
+			_, _ = testPool.Exec(ctx, `DELETE FROM agent_invocation_target WHERE agent_id = $1`, agent.ID)
+			_, _ = testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agent.ID)
+		}
 	})
 
 	// Create an issue via Issue Hook first.
@@ -388,7 +408,7 @@ func TestHandleGitLabNoteEvent_CreatesComment(t *testing.T) {
 	issueReq.Header.Set("X-Gitlab-Event", "Issue Hook")
 	testHandler.HandleGitLabWebhook(httptest.NewRecorder(), issueReq)
 
-	// Fire Note Hook.
+	// Fire Note Hook with full GitLab user identity.
 	notePayload := `{
 		"object_kind": "note",
 		"object_attributes": {
@@ -399,7 +419,12 @@ func TestHandleGitLabNoteEvent_CreatesComment(t *testing.T) {
 		},
 		"project": {"path_with_namespace": "testorg-note-create/repo", "namespace": "testorg-note-create"},
 		"issue": {"iid": 20},
-		"user": {"username": "gitlabuser"}
+		"user": {
+			"id": 4242,
+			"username": "gitlabuser",
+			"name": "Git Lab User",
+			"avatar_url": "https://gitlab.example.com/uploads/user/avatar/4242/avatar.png"
+		}
 	}`
 	noteReq := httptest.NewRequest(http.MethodPost, "/api/webhooks/gitlab", strings.NewReader(notePayload))
 	noteReq.Header.Set("X-Gitlab-Token", "s")
@@ -411,11 +436,60 @@ func TestHandleGitLabNoteEvent_CreatesComment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("comment with gitlab_note_id not found: %v", err)
 	}
-	if !strings.Contains(comment.Content, "**gitlabuser** (GitLab)") {
-		t.Errorf("content attribution missing: %q", comment.Content)
+	if comment.Content != "Hello from GitLab" {
+		t.Errorf("comment body: got %q, want bare note body", comment.Content)
 	}
-	if !strings.Contains(comment.Content, "Hello from GitLab") {
-		t.Errorf("comment body missing: %q", comment.Content)
+	if comment.AuthorType != "agent" {
+		t.Fatalf("author_type: got %q, want agent", comment.AuthorType)
+	}
+
+	agent, err := testHandler.Queries.GetAgent(ctx, comment.AuthorID)
+	if err != nil {
+		t.Fatalf("persona agent not found: %v", err)
+	}
+	if agent.Name != "Git Lab User" {
+		t.Errorf("persona name: got %q, want %q", agent.Name, "Git Lab User")
+	}
+	if !agent.AvatarUrl.Valid || agent.AvatarUrl.String != "https://gitlab.example.com/uploads/user/avatar/4242/avatar.png" {
+		t.Errorf("persona avatar: got %v", agent.AvatarUrl)
+	}
+	if !agent.SystemKey.Valid || agent.SystemKey.String != "gitlab:4242" {
+		t.Errorf("persona system_key: got %v", agent.SystemKey)
+	}
+	if agent.MaxConcurrentTasks != 0 {
+		t.Errorf("persona max_concurrent_tasks: got %d, want 0", agent.MaxConcurrentTasks)
+	}
+
+	// Second note from the same GitLab user reuses the persona agent.
+	note2 := `{
+		"object_kind": "note",
+		"object_attributes": {
+			"noteable_type": "Issue",
+			"system": false,
+			"id": 778,
+			"note": "Second note"
+		},
+		"project": {"path_with_namespace": "testorg-note-create/repo", "namespace": "testorg-note-create"},
+		"issue": {"iid": 20},
+		"user": {
+			"id": 4242,
+			"username": "gitlabuser",
+			"name": "Git Lab User",
+			"avatar_url": "https://gitlab.example.com/uploads/user/avatar/4242/avatar.png"
+		}
+	}`
+	note2Req := httptest.NewRequest(http.MethodPost, "/api/webhooks/gitlab", strings.NewReader(note2))
+	note2Req.Header.Set("X-Gitlab-Token", "s")
+	note2Req.Header.Set("X-Gitlab-Event", "Note Hook")
+	testHandler.HandleGitLabWebhook(httptest.NewRecorder(), note2Req)
+
+	comment2, err := testHandler.Queries.GetCommentByGitLabNoteID(ctx, pgtype.Int8{Int64: 778, Valid: true})
+	if err != nil {
+		t.Fatalf("second comment not found: %v", err)
+	}
+	if comment2.AuthorID != comment.AuthorID {
+		t.Errorf("expected same persona agent, got %s vs %s",
+			uuidToString(comment2.AuthorID), uuidToString(comment.AuthorID))
 	}
 }
 

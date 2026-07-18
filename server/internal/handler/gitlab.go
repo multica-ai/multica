@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -361,9 +363,9 @@ type gitlabNotePayload struct {
 	ObjectKind       string `json:"object_kind"`
 	ObjectAttributes struct {
 		NoteableType string `json:"noteable_type"`
-		System      bool   `json:"system"`
-		ID          int64  `json:"id"`
-		Note        string `json:"note"`
+		System       bool   `json:"system"`
+		ID           int64  `json:"id"`
+		Note         string `json:"note"`
 	} `json:"object_attributes"`
 	Project struct {
 		PathWithNamespace string `json:"path_with_namespace"`
@@ -372,9 +374,15 @@ type gitlabNotePayload struct {
 	Issue struct {
 		IID int32 `json:"iid"`
 	} `json:"issue"`
-	User struct {
-		Username string `json:"username"`
-	} `json:"user"`
+	User gitlabNoteUser `json:"user"`
+}
+
+// gitlabNoteUser is the author identity on a GitLab Note Hook.
+type gitlabNoteUser struct {
+	ID        int64  `json:"id"`
+	Username  string `json:"username"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatar_url"`
 }
 
 func (h *Handler) handleGitLabNoteEvent(ctx context.Context, conn db.GitlabConnection, body []byte) {
@@ -417,26 +425,41 @@ func (h *Handler) handleGitLabNoteEvent(ctx context.Context, conn db.GitlabConne
 		return
 	}
 
-	// Build attributed content.
-	content := "**" + p.User.Username + "** (GitLab):\n" + p.ObjectAttributes.Note
-
-	// Resolve creator for author fields.
-	authorID, ok := h.gitlabCreatorID(ctx, conn)
-	if !ok {
-		slog.Error("gitlab: no author available for note comment", "workspace", uuidToString(conn.WorkspaceID))
-		return
-	}
-
 	issue, err := h.Queries.GetIssue(ctx, row.IssueID)
 	if err != nil {
 		slog.Warn("gitlab: issue not found for note", "issue_id", uuidToString(row.IssueID))
 		return
 	}
 
+	// Prefer a persona agent matching the GitLab author (name + avatar) so the
+	// existing agent comment UI framework renders them correctly. Fall back to
+	// the connection owner with a text attribution prefix if we cannot mint one.
+	authorType := "member"
+	authorID, ok := h.gitlabCreatorID(ctx, conn)
+	content := p.ObjectAttributes.Note
+	if agent, created, agentOK := h.ensureGitLabUserAgent(ctx, conn, p.User); agentOK {
+		authorType = "agent"
+		authorID = agent.ID
+		if created {
+			h.publish(protocol.EventAgentCreated, uuidToString(conn.WorkspaceID), "system", "", map[string]any{
+				"agent": broadcastAgentResponse(agentToResponse(agent)),
+			})
+		}
+	} else {
+		// Degraded path: no runtime / no owner — keep previous text attribution.
+		if p.User.Username != "" {
+			content = "**" + p.User.Username + "** (GitLab):\n" + p.ObjectAttributes.Note
+		}
+		if !ok {
+			slog.Error("gitlab: no author available for note comment", "workspace", uuidToString(conn.WorkspaceID))
+			return
+		}
+	}
+
 	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  "member",
+		AuthorType:  authorType,
 		AuthorID:    authorID,
 		Content:     content,
 		Type:        "comment",
@@ -453,6 +476,179 @@ func (h *Handler) handleGitLabNoteEvent(ctx context.Context, conn db.GitlabConne
 	}); err != nil {
 		slog.Warn("gitlab: failed to set gitlab_note_id on comment", "err", err)
 	}
+
+	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, uuidToString(authorID), map[string]any{
+		"comment": commentToResponse(comment, nil, nil),
+	})
+}
+
+// ensureGitLabUserAgent finds or creates a workspace agent persona for a GitLab
+// comment author so Multica can attribute the comment via author_type=agent
+// (name + avatar resolved by the existing agent list / useActorName path).
+// Returns the agent, whether it was newly created, and ok=false when no
+// persona can be minted (missing identity, no owner, or no runtime).
+func (h *Handler) ensureGitLabUserAgent(
+	ctx context.Context,
+	conn db.GitlabConnection,
+	user gitlabNoteUser,
+) (db.Agent, bool, bool) {
+	systemKey := gitlabUserSystemKey(user.ID, user.Username)
+	if systemKey == "" {
+		return db.Agent{}, false, false
+	}
+
+	if existing, err := h.Queries.GetAgentBySystemKey(ctx, db.GetAgentBySystemKeyParams{
+		WorkspaceID: conn.WorkspaceID,
+		SystemKey:   pgtype.Text{String: systemKey, Valid: true},
+	}); err == nil {
+		updated := h.syncGitLabPersonaAgent(ctx, existing, user.Name, user.Username, user.AvatarURL)
+		return updated, false, true
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("gitlab: lookup persona agent failed", "system_key", systemKey, "err", err)
+		return db.Agent{}, false, false
+	}
+
+	ownerID, ok := h.gitlabCreatorID(ctx, conn)
+	if !ok {
+		return db.Agent{}, false, false
+	}
+
+	runtimes, err := h.Queries.ListAgentRuntimes(ctx, conn.WorkspaceID)
+	if err != nil || len(runtimes) == 0 {
+		slog.Warn("gitlab: no runtime available for persona agent",
+			"workspace", uuidToString(conn.WorkspaceID), "err", err)
+		return db.Agent{}, false, false
+	}
+	runtime := runtimes[0]
+
+	displayName := strings.TrimSpace(user.Name)
+	if displayName == "" {
+		displayName = strings.TrimSpace(user.Username)
+	}
+	if displayName == "" {
+		displayName = "GitLab user"
+	}
+
+	// Prefer a clean display name; fall back to unique variants on name clash.
+	candidates := []string{
+		displayName,
+		fmt.Sprintf("%s (@%s)", displayName, strings.TrimSpace(user.Username)),
+		fmt.Sprintf("%s (GitLab)", displayName),
+		fmt.Sprintf("GitLab %s", systemKey),
+	}
+	// Dedup empty / identical candidates.
+	seen := map[string]struct{}{}
+	uniqueNames := make([]string, 0, len(candidates))
+	for _, n := range candidates {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		uniqueNames = append(uniqueNames, n)
+	}
+
+	desc := "GitLab identity for comment attribution"
+	if u := strings.TrimSpace(user.Username); u != "" {
+		desc = fmt.Sprintf("GitLab user @%s — mirrored for comment attribution", u)
+	}
+	avatar := pgtype.Text{String: strings.TrimSpace(user.AvatarURL), Valid: strings.TrimSpace(user.AvatarURL) != ""}
+
+	var created db.Agent
+	var createErr error
+	for _, name := range uniqueNames {
+		created, createErr = h.Queries.CreateGitLabPersonaAgent(ctx, db.CreateGitLabPersonaAgentParams{
+			WorkspaceID: conn.WorkspaceID,
+			Name:        name,
+			Description: desc,
+			AvatarUrl:   avatar,
+			RuntimeMode: runtime.RuntimeMode,
+			RuntimeID:   runtime.ID,
+			OwnerID:     ownerID,
+			SystemKey:   pgtype.Text{String: systemKey, Valid: true},
+		})
+		if createErr == nil {
+			break
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(createErr, &pgErr) && pgErr.Code == "23505" {
+			// Name clash or concurrent system_key insert — if the persona now
+			// exists under our system_key, reuse it; otherwise try next name.
+			if existing, err := h.Queries.GetAgentBySystemKey(ctx, db.GetAgentBySystemKeyParams{
+				WorkspaceID: conn.WorkspaceID,
+				SystemKey:   pgtype.Text{String: systemKey, Valid: true},
+			}); err == nil {
+				updated := h.syncGitLabPersonaAgent(ctx, existing, user.Name, user.Username, user.AvatarURL)
+				return updated, false, true
+			}
+			continue
+		}
+		slog.Error("gitlab: failed to create persona agent", "name", name, "err", createErr)
+		return db.Agent{}, false, false
+	}
+	if createErr != nil {
+		slog.Error("gitlab: exhausted persona agent name candidates", "system_key", systemKey, "err", createErr)
+		return db.Agent{}, false, false
+	}
+
+	// Workspace-wide public_to target so every member can resolve the persona
+	// in ListAgents / useActorName (avatar + display name on comments).
+	if err := h.Queries.CreateAgentInvocationTarget(ctx, db.CreateAgentInvocationTargetParams{
+		AgentID:    created.ID,
+		TargetType: invocationTargetWorkspace,
+		TargetID:   conn.WorkspaceID,
+		CreatedBy:  ownerID,
+	}); err != nil {
+		slog.Warn("gitlab: failed to set persona agent workspace target", "agent_id", uuidToString(created.ID), "err", err)
+	}
+
+	return created, true, true
+}
+
+// gitlabUserSystemKey builds a stable system_key for a GitLab author. Prefer
+// numeric user id; fall back to username when id is missing from the payload.
+func gitlabUserSystemKey(id int64, username string) string {
+	if id > 0 {
+		return fmt.Sprintf("gitlab:%d", id)
+	}
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return ""
+	}
+	return "gitlab:u:" + strings.ToLower(username)
+}
+
+// syncGitLabPersonaAgent refreshes name/avatar when the GitLab profile changes.
+// Name updates are best-effort: conflicts keep the existing unique name.
+func (h *Handler) syncGitLabPersonaAgent(ctx context.Context, agent db.Agent, name, username, avatarURL string) db.Agent {
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		displayName = strings.TrimSpace(username)
+	}
+	params := db.UpdateAgentParams{ID: agent.ID}
+	changed := false
+	if displayName != "" && displayName != agent.Name {
+		params.Name = pgtype.Text{String: displayName, Valid: true}
+		changed = true
+	}
+	avatarURL = strings.TrimSpace(avatarURL)
+	if avatarURL != "" && (!agent.AvatarUrl.Valid || agent.AvatarUrl.String != avatarURL) {
+		params.AvatarUrl = pgtype.Text{String: avatarURL, Valid: true}
+		changed = true
+	}
+	if !changed {
+		return agent
+	}
+	updated, err := h.Queries.UpdateAgent(ctx, params)
+	if err != nil {
+		// Name uniqueness clash or transient error — keep the existing persona.
+		slog.Debug("gitlab: persona agent sync skipped", "agent_id", uuidToString(agent.ID), "err", err)
+		return agent
+	}
+	return updated
 }
 
 // refreshGitLabToken exchanges the stored refresh token for a new access token,
@@ -589,7 +785,9 @@ func (h *Handler) postCommentToGitLab(ctx context.Context, comment db.Comment, i
 }
 
 // containsLabel reports whether the labels slice contains a label with the given title.
-func containsLabel(labels []struct{ Title string `json:"title"` }, title string) bool {
+func containsLabel(labels []struct {
+	Title string `json:"title"`
+}, title string) bool {
 	for _, l := range labels {
 		if l.Title == title {
 			return true
@@ -1342,7 +1540,7 @@ func (h *Handler) LinkGitLabIssueForIssue(w http.ResponseWriter, r *http.Request
 	}
 
 	row, err := h.Queries.InsertGitLabIssue(r.Context(), db.InsertGitLabIssueParams{
-		WorkspaceID: issue.WorkspaceID,
+		WorkspaceID:  issue.WorkspaceID,
 		ConnectionID: conn.ID,
 		ProjectPath:  body.ProjectPath,
 		GlIssueIid:   body.GlIssueIID,
