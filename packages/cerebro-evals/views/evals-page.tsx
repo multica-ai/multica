@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { createEval, createEvalBinding, deleteEval, deleteEvalBinding, updateEval } from "../api";
 import { evalBindingsOptions, evalKeys, evalRunsOptions, evalsListOptions } from "../queries";
 import { buildWriteInput, EMPTY_FORM, formFromEval, GRADER_MATCHES, type DraftTask } from "./form";
+import { RunDetail } from "./run-detail";
 import type { CerebroEval } from "../types";
 
 export function EvalsPage() {
@@ -32,11 +33,13 @@ export function EvalsPage() {
   const [bindingEvalId, setBindingEvalId] = useState("");
   const [bindingWorkflowId, setBindingWorkflowId] = useState("");
   const [selectedEvalId, setSelectedEvalId] = useState("");
+  const [selectedRunId, setSelectedRunId] = useState("");
 
   const evalsQuery = useQuery(evalsListOptions(workspaceId));
   const workflowsQuery = useQuery(cerebroWorkflowsListOptions(workspaceId));
   const bindingsQuery = useQuery(evalBindingsOptions(workspaceId));
   const runsQuery = useQuery(evalRunsOptions(workspaceId, selectedEvalId));
+  const selectedRun = useMemo(() => (runsQuery.data ?? []).find((run) => run.id === selectedRunId) ?? null, [runsQuery.data, selectedRunId]);
 
   const closeForm = () => { setForm(EMPTY_FORM); setEditing(null); setShowCreate(false); };
   const startCreate = () => { setForm(EMPTY_FORM); setEditing(null); setShowCreate(true); };
@@ -127,18 +130,20 @@ export function EvalsPage() {
                 <TableCell className="text-xs"><div>{String(item.target.kind ?? "Unknown")}</div><div className="max-w-[220px] truncate text-muted-foreground">{String(item.target.locator ?? "")}</div></TableCell>
                 <TableCell className="font-mono text-xs">{item.version}</TableCell><TableCell><Badge variant={item.status === "active" ? "default" : "secondary"}>{item.status}</Badge></TableCell>
                 <TableCell className="max-w-[220px] truncate text-xs">{String(item.source.path ?? item.source.repository ?? "Not pinned")}</TableCell>
-                <TableCell className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="ghost" onClick={() => setSelectedEvalId(item.id)}>Runs</Button><Button size="icon-sm" variant="ghost" aria-label={`Edit ${item.title}`} onClick={() => startEdit(item)}><Pencil className="size-4" /></Button><Button size="icon-sm" variant="ghost" aria-label={`Delete ${item.title}`} onClick={() => confirm(`Delete eval "${item.title}"?`) && deleteMutation.mutate(item.id)}><Trash2 className="size-4 text-destructive" /></Button></div></TableCell>
+                <TableCell className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="ghost" onClick={() => { setSelectedEvalId(item.id); setSelectedRunId(""); }}>Runs</Button><Button size="icon-sm" variant="ghost" aria-label={`Edit ${item.title}`} onClick={() => startEdit(item)}><Pencil className="size-4" /></Button><Button size="icon-sm" variant="ghost" aria-label={`Delete ${item.title}`} onClick={() => confirm(`Delete eval "${item.title}"?`) && deleteMutation.mutate(item.id)}><Trash2 className="size-4 text-destructive" /></Button></div></TableCell>
               </TableRow>)}
             </TableBody></Table>
           </section>
 
           {selectedEvalId && <section className="flex flex-col gap-3 rounded-lg border p-4">
-            <div className="flex items-center justify-between"><div><h2 className="text-sm font-semibold">Run history</h2><p className="text-xs text-muted-foreground">Latest immutable results for the selected eval version.</p></div><Button size="sm" variant="ghost" onClick={() => setSelectedEvalId("")}>Close</Button></div>
+            <div className="flex items-center justify-between"><div><h2 className="text-sm font-semibold">Run history</h2><p className="text-xs text-muted-foreground">Latest immutable results for the selected eval version. Click a run to see why it passed or failed.</p></div><Button size="sm" variant="ghost" onClick={() => { setSelectedEvalId(""); setSelectedRunId(""); }}>Close</Button></div>
             <Table><TableHeader><TableRow><TableHead>Status</TableHead><TableHead>Target version</TableHead><TableHead>Issue</TableHead><TableHead>Cost</TableHead><TableHead>Latency</TableHead><TableHead>Created</TableHead></TableRow></TableHeader><TableBody>
-              {(runsQuery.data ?? []).map((run) => <TableRow key={run.id}><TableCell><Badge variant={run.status === "passed" ? "default" : "secondary"}>{run.status}</Badge></TableCell><TableCell className="font-mono text-xs">{run.target_version || "—"}</TableCell><TableCell className="font-mono text-xs">{run.issue_id?.slice(0, 8) ?? "—"}</TableCell><TableCell className="text-xs">{run.cost_cents}¢</TableCell><TableCell className="text-xs">{run.latency_ms} ms</TableCell><TableCell className="text-xs">{new Date(run.created_at).toLocaleString()}</TableCell></TableRow>)}
+              {(runsQuery.data ?? []).map((run) => <TableRow key={run.id} className={`cursor-pointer${run.id === selectedRunId ? " bg-muted/50" : ""}`} onClick={() => setSelectedRunId(run.id === selectedRunId ? "" : run.id)}><TableCell><Badge variant={run.status === "passed" ? "default" : "secondary"}>{run.status}</Badge></TableCell><TableCell className="font-mono text-xs">{run.target_version || "—"}</TableCell><TableCell className="font-mono text-xs">{run.issue_id?.slice(0, 8) ?? "—"}</TableCell><TableCell className="text-xs">{run.cost_cents}¢</TableCell><TableCell className="text-xs">{run.latency_ms} ms</TableCell><TableCell className="text-xs">{new Date(run.created_at).toLocaleString()}</TableCell></TableRow>)}
               {(runsQuery.data ?? []).length === 0 && !runsQuery.isLoading && <TableRow><TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">No runs recorded for this eval.</TableCell></TableRow>}
             </TableBody></Table>
           </section>}
+
+          {selectedRun && <RunDetail run={selectedRun} onClose={() => setSelectedRunId("")} onOpenEvidence={(artifactId) => navigation.push(`/${workspace.slug}/documents/${artifactId}`)} />}
 
           <section className="flex flex-col gap-3 rounded-lg border p-4">
             <div><h2 className="text-sm font-semibold">Workflow gates</h2><p className="text-xs text-muted-foreground">A blocking delivery binding prevents the workflow from advancing until the latest issue-specific run passes.</p></div>
