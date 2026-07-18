@@ -284,6 +284,68 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 	return i, err
 }
 
+const createTaskInboxItemOnce = `-- name: CreateTaskInboxItemOnce :one
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title, body,
+    actor_type, actor_id, details
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT DO NOTHING
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
+`
+
+type CreateTaskInboxItemOnceParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	Type          string      `json:"type"`
+	Severity      string      `json:"severity"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	Title         string      `json:"title"`
+	Body          pgtype.Text `json:"body"`
+	ActorType     pgtype.Text `json:"actor_type"`
+	ActorID       pgtype.UUID `json:"actor_id"`
+	Details       []byte      `json:"details"`
+}
+
+// The partial unique index from migration 202 keys task_failed/task_fallback
+// rows by task, recipient, and type. RETURNING no row means the at-least-once
+// event was already delivered and callers must not publish inbox:new again.
+func (q *Queries) CreateTaskInboxItemOnce(ctx context.Context, arg CreateTaskInboxItemOnceParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, createTaskInboxItemOnce,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.Type,
+		arg.Severity,
+		arg.IssueID,
+		arg.Title,
+		arg.Body,
+		arg.ActorType,
+		arg.ActorID,
+		arg.Details,
+	)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+	)
+	return i, err
+}
+
 const getInboxItem = `-- name: GetInboxItem :one
 SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details FROM inbox_item
 WHERE id = $1

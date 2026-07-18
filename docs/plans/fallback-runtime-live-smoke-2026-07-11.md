@@ -279,3 +279,39 @@ machine-level batch claim endpoint used by current daemons did not. The shared
 claim helper now applies the same handoff contract to both endpoints, with a
 dedicated batch-claim regression test. This is why a real daemon workflow was a
 necessary PR gate rather than relying only on the original handler test.
+
+## Cooldown Recovery And Completion Audit - 2026-07-18
+
+The same isolated workspace and agent were reused after the database was
+round-tripped through the current migration set. Both QA runtimes were restored
+to online status without starting the polling daemon, allowing the server's
+real issue-enqueue path to be observed without either task being claimed.
+
+```text
+active cooldown
+issue  3c22a7bd-662e-40dc-a368-5ebc03900336  FBT-4
+task   95f0df76-87f0-43b5-8a12-ddd87babcd4c
+route  c594e70d-b835-4d5d-8ebf-eb0060167cb2  real Codex fallback
+
+expired cooldown
+issue  76096f5e-26fb-48dd-be42-5d73a98e66e4  FBT-5
+task   10454f78-bfdf-46c4-b6a9-daccb11ad723
+route  028441ee-be75-4719-921f-4fed38115ab0  primary quota fixture
+```
+
+`FBT-4` proved that a new task bypasses an actively cooled primary. The
+cooldown was then expired, and `FBT-5` proved that the primary immediately
+became eligible again. The queued proof tasks were cancelled before the daemon
+was restarted, so neither fixture performed another provider call.
+
+The final requirement audit also added or strengthened database-backed tests:
+
+- replaying one fallback failure event now produces exactly one Inbox row and
+  one `inbox:new` event per recipient;
+- a partial unique index makes that guarantee concurrency-safe for both
+  `task_failed` and `task_fallback` rows;
+- chat fallback preserves the original chat session, raises retry priority
+  ahead of newer turns, and retains the worktree;
+- squad fallback preserves the exact squad ID and leader-task role;
+- the full Go suite passes under `-race` after the migration and notification
+  compatibility fixtures were updated to model distinct historical tasks.

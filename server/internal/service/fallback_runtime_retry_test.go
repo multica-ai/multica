@@ -217,6 +217,120 @@ func TestClearFallbackCooldownRejectsStaleTaskSuccess(t *testing.T) {
 	}
 }
 
+func TestProviderFallbackPreservesChatOrderingAndSquadRole(t *testing.T) {
+	quotaReason := string(taskfailure.ReasonAgentProviderQuotaLimit)
+
+	t.Run("chat retry keeps input order and worktree", func(t *testing.T) {
+		pool := newResolveOriginatorPool(t)
+		ctx := context.Background()
+		q := db.New(pool)
+		workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+		agent, err := q.GetAgent(ctx, util.MustParseUUID(agentID))
+		if err != nil {
+			t.Fatalf("load agent: %v", err)
+		}
+		fallbackID := createFallbackTestRuntime(t, ctx, pool, workspaceID, userID, "chat-fallback")
+		if err := q.AddAgentFallbackRuntime(ctx, db.AddAgentFallbackRuntimeParams{
+			AgentID: agent.ID, RuntimeID: fallbackID, Priority: 0,
+		}); err != nil {
+			t.Fatalf("configure fallback: %v", err)
+		}
+
+		var chatID, taskID pgtype.UUID
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
+			VALUES ($1, $2, $3, 'fallback chat') RETURNING id
+		`, workspaceID, agent.ID, userID).Scan(&chatID); err != nil {
+			t.Fatalf("create chat: %v", err)
+		}
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (
+				agent_id, runtime_id, chat_session_id, status, priority, attempt, max_attempts,
+				session_id, work_dir, originator_user_id, accountable_user_id,
+				originator_source, trigger_evidence_kind, trigger_evidence_ref_id
+			) VALUES (
+				$1, $2, $3, 'running', 2, 1, 2, 'chat-provider-session',
+				'/tmp/chat-fallback-worktree', $4, $4, 'direct_human',
+				'chat', $3
+			) RETURNING id
+		`, agent.ID, agent.RuntimeID, chatID, userID).Scan(&taskID); err != nil {
+			t.Fatalf("create chat task: %v", err)
+		}
+
+		svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+		if _, err := svc.FailTask(ctx, taskID, "credits exhausted", "chat-provider-session", "/tmp/chat-fallback-worktree", quotaReason); err != nil {
+			t.Fatalf("fail chat task: %v", err)
+		}
+		child := loadOnlyRetryChild(t, ctx, pool, taskID)
+		if child.RuntimeID != fallbackID || child.ChatSessionID != chatID || child.Priority != 3 {
+			t.Fatalf("chat fallback routing/order = runtime %s chat %s priority %d", util.UUIDToString(child.RuntimeID), util.UUIDToString(child.ChatSessionID), child.Priority)
+		}
+		if child.WorkDir.String != "/tmp/chat-fallback-worktree" || child.SessionID.String != "chat-provider-session" || child.ForceFreshSession {
+			t.Fatalf("chat fallback context = workdir %q session %q force_fresh %t", child.WorkDir.String, child.SessionID.String, child.ForceFreshSession)
+		}
+	})
+
+	t.Run("squad leader retry keeps squad provenance", func(t *testing.T) {
+		pool := newResolveOriginatorPool(t)
+		ctx := context.Background()
+		q := db.New(pool)
+		workspaceID, userID, agentID, issueID := seedAttributionFixture(t, pool)
+		agent, err := q.GetAgent(ctx, util.MustParseUUID(agentID))
+		if err != nil {
+			t.Fatalf("load agent: %v", err)
+		}
+		fallbackID := createFallbackTestRuntime(t, ctx, pool, workspaceID, userID, "squad-fallback")
+		if err := q.AddAgentFallbackRuntime(ctx, db.AddAgentFallbackRuntimeParams{
+			AgentID: agent.ID, RuntimeID: fallbackID, Priority: 0,
+		}); err != nil {
+			t.Fatalf("configure fallback: %v", err)
+		}
+
+		var squadID, taskID pgtype.UUID
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO squad (workspace_id, name, leader_id, creator_id)
+			VALUES ($1, 'fallback-squad-' || gen_random_uuid(), $2, $3) RETURNING id
+		`, workspaceID, agent.ID, userID).Scan(&squadID); err != nil {
+			t.Fatalf("create squad: %v", err)
+		}
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (
+				agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts,
+				is_leader_task, squad_id, originator_user_id, accountable_user_id,
+				originator_source, trigger_evidence_kind, trigger_evidence_ref_id
+			) VALUES (
+				$1, $2, $3, 'running', 1, 1, 2, true, $4, $5, $5,
+				'direct_human', 'issue_assignment', $3
+			) RETURNING id
+		`, agent.ID, agent.RuntimeID, issueID, squadID, userID).Scan(&taskID); err != nil {
+			t.Fatalf("create squad task: %v", err)
+		}
+
+		svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+		if _, err := svc.FailTask(ctx, taskID, "monthly usage limit", "", "/tmp/squad-fallback", quotaReason); err != nil {
+			t.Fatalf("fail squad task: %v", err)
+		}
+		child := loadOnlyRetryChild(t, ctx, pool, taskID)
+		if child.RuntimeID != fallbackID || child.SquadID != squadID || !child.IsLeaderTask {
+			t.Fatalf("squad fallback provenance = runtime %s squad %s leader %t", util.UUIDToString(child.RuntimeID), util.UUIDToString(child.SquadID), child.IsLeaderTask)
+		}
+	})
+}
+
+func createFallbackTestRuntime(t *testing.T, ctx context.Context, pool *pgxpool.Pool, workspaceID, userID, name string) pgtype.UUID {
+	t.Helper()
+	var runtimeID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
+		) VALUES ($1, $2, 'cloud', 'claude', 'online', '', '{}'::jsonb, $3)
+		RETURNING id
+	`, workspaceID, name, userID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create fallback runtime: %v", err)
+	}
+	return runtimeID
+}
+
 func loadOnlyRetryChild(t *testing.T, ctx context.Context, pool *pgxpool.Pool, parentID pgtype.UUID) db.AgentTaskQueue {
 	t.Helper()
 	var childID pgtype.UUID

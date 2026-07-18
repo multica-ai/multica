@@ -739,6 +739,10 @@ func TestNotification_TaskFallbackIncludesTransition(t *testing.T) {
 		cleanupTestIssue(t, issueID)
 	})
 	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+	var inboxEvents []events.Event
+	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+		inboxEvents = append(inboxEvents, e)
+	})
 
 	payload := map[string]any{
 		"task_id": "00000000-0000-0000-0000-bbbbbbbbbbbb", "agent_id": "00000000-0000-0000-0000-aaaaaaaaaaaa",
@@ -750,21 +754,27 @@ func TestNotification_TaskFallbackIncludesTransition(t *testing.T) {
 		"destination_runtime_name": "Claude fallback",
 		"fallback_task_id":         "00000000-0000-0000-0000-cccccccccccc",
 	}
-	bus.Publish(events.Event{
+	event := events.Event{
 		Type: protocol.EventTaskFailed, WorkspaceID: testWorkspaceID,
 		ActorType: "system", Payload: payload,
-	})
+	}
+	bus.Publish(event)
+	bus.Publish(event)
 
 	items := inboxItemsForRecipient(t, queries, testUserID)
 	var fallbackItem *db.ListInboxItemsRow
+	matchingRows := 0
 	for i := range items {
 		if items[i].Type == "task_failed" && util.UUIDToString(items[i].IssueID) == issueID {
+			matchingRows++
 			fallbackItem = &items[i]
-			break
 		}
 	}
 	if fallbackItem == nil {
 		t.Fatalf("expected fallback inbox item for issue %s, got %#v", issueID, items)
+	}
+	if matchingRows != 1 || len(inboxEvents) != 1 {
+		t.Fatalf("fallback replay created rows/events = %d/%d, want 1/1", matchingRows, len(inboxEvents))
 	}
 	if fallbackItem.Severity != "info" || !fallbackItem.Body.Valid ||
 		!strings.Contains(fallbackItem.Body.String, "Codex primary") ||
@@ -1209,14 +1219,17 @@ func TestNotification_StatusChange_ArchivesStaleTaskFailed(t *testing.T) {
 
 	agentID := "00000000-0000-0000-0000-aaaaaaaaaaaa"
 
-	// Two failed runs land before the status flip.
-	for i := 0; i < 2; i++ {
+	// Two distinct failed runs land before the status flip.
+	for _, taskID := range []string{
+		"00000000-0000-0000-0000-bbbbbbbbbbb1",
+		"00000000-0000-0000-0000-bbbbbbbbbbb2",
+	} {
 		bus.Publish(events.Event{
 			Type:        protocol.EventTaskFailed,
 			WorkspaceID: testWorkspaceID,
 			ActorType:   "system",
 			Payload: map[string]any{
-				"task_id":  "00000000-0000-0000-0000-bbbbbbbbbbbb",
+				"task_id":  taskID,
 				"agent_id": agentID,
 				"issue_id": issueID,
 			},

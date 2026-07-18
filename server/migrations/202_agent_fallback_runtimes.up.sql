@@ -23,3 +23,17 @@ CREATE TABLE agent_runtime_fallback_cooldown (
 
 CREATE INDEX idx_agent_runtime_fallback_cooldown_expiry
     ON agent_runtime_fallback_cooldown(cooldown_until);
+
+-- Task lifecycle events are delivered at least once. Anchor fallback and
+-- terminal-exhaustion notifications to the failed task so a replay cannot
+-- create duplicate Inbox rows or websocket notifications for one recipient.
+CREATE UNIQUE INDEX idx_inbox_task_event_once
+    ON inbox_item (
+        workspace_id,
+        recipient_type,
+        recipient_id,
+        type,
+        ((details->>'task_id'))
+    )
+    WHERE type IN ('task_failed', 'task_fallback')
+      AND details ? 'task_id';

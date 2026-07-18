@@ -4229,13 +4229,16 @@ func (s *TaskService) notifyTaskFallbackInbox(ctx context.Context, task db.Agent
 		body = fmt.Sprintf("%s failed with %s; continuing on %s", source, reason, destination)
 	}
 	details, _ := json.Marshal(payload)
-	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+	item, err := s.Queries.CreateTaskInboxItemOnce(ctx, db.CreateTaskInboxItemOnceParams{
 		WorkspaceID: workspaceUUID, RecipientType: "member", RecipientID: recipientID,
 		Type: "task_fallback", Severity: severity, IssueID: task.IssueID,
 		Title: title, Body: pgtype.Text{String: body, Valid: body != ""},
 		ActorType: pgtype.Text{String: "agent", Valid: true}, ActorID: task.AgentID,
 		Details: details,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return
+	}
 	if err != nil {
 		slog.Warn("task fallback inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
 		return
