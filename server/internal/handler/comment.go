@@ -994,6 +994,7 @@ type CreateCommentRequest struct {
 	Content          string   `json:"content"`
 	Type             string   `json:"type"`
 	ParentID         *string  `json:"parent_id"`
+	NewThread        bool     `json:"new_thread"`
 	AttachmentIDs    []string `json:"attachment_ids"`
 	SuppressAgentIDs []string `json:"suppress_agent_ids"`
 }
@@ -1280,6 +1281,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	var parentID pgtype.UUID
 	var parentComment *db.Comment
 	if req.ParentID != nil {
+		if req.NewThread {
+			writeError(w, http.StatusBadRequest, "new_thread cannot be combined with parent_id")
+			return
+		}
 		var parsed pgtype.UUID
 		parsed, ok = parseUUIDOrBadRequest(w, *req.ParentID, "parent_id")
 		if !ok {
@@ -1308,9 +1313,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// Defense against resumed-session drift: when an agent posts from inside a
 	// comment-triggered task AND the comment is being posted on that same
-	// issue, the parent_id must exactly match the task's trigger comment.
-	// Resumed Claude sessions otherwise carry forward a previous turn's
-	// --parent UUID and silently misplace the reply.
+	// issue, the parent_id must be covered by that task unless the request
+	// explicitly asks to start a new thread. Resumed sessions otherwise carry
+	// forward a previous turn's --parent UUID or omit it by accident and
+	// silently misplace the reply.
 	//
 	// The task.IssueID scope is important: the CLI stamps X-Task-ID on every
 	// request, so an agent legitimately commenting on a different issue must
@@ -1333,10 +1339,11 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 				task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 				if err == nil && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
 					if task.TriggerCommentID.Valid {
-						if !taskCoversReplyParent(task, parentID) {
+						allowsExplicitNewThread := req.NewThread && !parentID.Valid
+						if !taskCoversReplyParent(task, parentID) && !allowsExplicitNewThread {
 							// Keep this error actionable for agents (MUL-4417 / GH #5266).
 							writeError(w, http.StatusConflict,
-								"comment-triggered tasks cannot create top-level comments; set parent_id (--parent) to "+uuidToString(task.TriggerCommentID)+" or a coalesced comment id")
+								"comment-triggered tasks cannot create top-level comments by default; set parent_id (--parent) to "+uuidToString(task.TriggerCommentID)+" or a coalesced comment id, or pass new_thread (--new-thread) to intentionally start a top-level thread")
 							return
 						}
 					}

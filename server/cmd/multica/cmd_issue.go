@@ -540,7 +540,8 @@ func init() {
 	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
 	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
-	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent task must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
+	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent task must reply under its trigger comment unless --new-thread is set")
+	issueCommentAddCmd.Flags().Bool("new-thread", false, "Explicitly create a new top-level thread from a comment-triggered task. Cannot be combined with --parent")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -1929,6 +1930,11 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		"Deliver the file itself with `multica issue comment add <issue-id> --attachment <path>` (repeatable) and drop the link."); err != nil {
 		return err
 	}
+	parentID, _ := cmd.Flags().GetString("parent")
+	newThread, _ := cmd.Flags().GetBool("new-thread")
+	if parentID != "" && newThread {
+		return fmt.Errorf("--new-thread cannot be combined with --parent")
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1971,8 +1977,11 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"content": content}
-	if parentID, _ := cmd.Flags().GetString("parent"); parentID != "" {
+	if parentID != "" {
 		body["parent_id"] = parentID
+	}
+	if newThread {
+		body["new_thread"] = true
 	}
 	if len(attachmentIDs) > 0 {
 		body["attachment_ids"] = attachmentIDs
