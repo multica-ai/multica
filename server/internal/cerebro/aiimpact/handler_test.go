@@ -555,6 +555,32 @@ func TestWorkspaceEvidenceReadModelCombinesMetricFamilyAndEvidenceStatusFilters(
 	}
 }
 
+func TestWorkspaceEvidenceReadModelRejectsUnknownFilters(t *testing.T) {
+	workspaceID := uuid.New()
+	handler := NewHandler(NewService(&recordingObservationStore{}))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	for _, path := range []string{
+		"/api/cerebro/ai-impact/evidence?metric_family=Revenue",
+		"/api/cerebro/ai-impact/evidence?evidence_status=Verified",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+				UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+				Role:   "member",
+			})
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, req.WithContext(ctx))
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("unknown evidence filter response = %d, want 400: %s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestFunctionEvidenceReadModelReturnsOnlyLatestEvidenceForRequestedFunction(t *testing.T) {
 	workspaceID := uuid.New()
 	requestedFunctionID := uuid.New()

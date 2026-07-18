@@ -201,7 +201,7 @@ func ValidateObservation(input ObservationInput) error {
 	if input.PeriodStart.IsZero() || input.PeriodEnd.IsZero() || !input.PeriodStart.Before(input.PeriodEnd) {
 		return errors.New("observation period must have an ordered start and end")
 	}
-	if input.EvidenceStatus != EvidenceMeasured && input.EvidenceStatus != EvidenceEstimated && input.EvidenceStatus != EvidenceMissing {
+	if !validEvidenceStatus(input.EvidenceStatus) {
 		return errors.New("invalid evidence status")
 	}
 	if input.Confidence < 0 || input.Confidence > 1 {
@@ -211,6 +211,15 @@ func ValidateObservation(input ObservationInput) error {
 		return errors.New("observation source and method are required")
 	}
 	return nil
+}
+
+func validEvidenceStatus(status EvidenceStatus) bool {
+	switch status {
+	case EvidenceMeasured, EvidenceEstimated, EvidenceMissing:
+		return true
+	default:
+		return false
+	}
 }
 
 type Observation struct {
