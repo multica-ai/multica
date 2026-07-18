@@ -43,7 +43,9 @@ export function RuntimePicker({
 }) {
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState<RuntimeFilter>("mine");
+  // null = the user hasn't toggled the scope yet; the default is derived below
+  // from what's actually usable.
+  const [userFilter, setUserFilter] = useState<RuntimeFilter | null>(null);
   const [search, setSearch] = useState("");
 
   const getOwnerMember = (ownerId: string | null) => {
@@ -52,6 +54,16 @@ export function RuntimePicker({
   };
 
   const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
+  // Default to "mine"; fall back to "all" only when "mine" has
+  // no usable runtime but "all" does — so the tab never opens on an empty or
+  // all-locked list.
+  const mineHasUsable =
+    !!currentUserId && runtimes.some((r) => r.owner_id === currentUserId);
+  const allHasUsable = runtimes.some((r) =>
+    isRuntimeUsableForUser(r, currentUserId),
+  );
+  const filter: RuntimeFilter =
+    userFilter ?? (!mineHasUsable && allHasUsable ? "all" : "mine");
 
   // Base list honours the mine/all toggle and drives auto-selection; it is
   // intentionally independent of the search box so typing never changes the
@@ -94,7 +106,7 @@ export function RuntimePicker({
   // effect above is a no-op in that case (correct: no usable item to pick).
   const handleFilterChange = (next: RuntimeFilter) => {
     if (next === filter) return;
-    setFilter(next);
+    setUserFilter(next);
     const nextList = computeFilteredRuntimes(runtimes, next, currentUserId);
     const firstUsable = nextList.find((r) =>
       isRuntimeUsableForUser(r, currentUserId),

@@ -153,13 +153,16 @@ describe("RuntimePicker (agent settings)", () => {
     openPicker();
     fireEvent.click(screen.getByRole("button", { name: "Back to machines" }));
 
-    // Mine scope: only my machine, with its online count.
+    // The picker defaults to Mine when "mine" has a runtime
+    // (here rt-claude), so only my machine lists up front; the All fallback
+    // only kicks in when Mine would be empty.
     expect(
       screen.getByRole("button", { name: /^Jiayuan's MacBook Pro/ }),
     ).toBeTruthy();
     expect(screen.getByText("2/2 online")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^other\.local/ })).toBeNull();
 
+    // All scope: every machine lists, including other members'.
     fireEvent.click(screen.getByRole("button", { name: "All" }));
     expect(
       screen.getByRole("button", { name: /^other\.local/ }),
@@ -242,4 +245,106 @@ describe("RuntimePicker (agent settings)", () => {
     expect(screen.getByRole("button", { name: /^Claude/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Codex/ })).toBeTruthy();
   });
+});
+
+// The default scope is a pure function of three independent inputs: do I own a
+// runtime, does another member expose a *pickable* (public) one, and is another
+// member's runtime present but locked (private). "Usable" == pickable: a locked
+// private runtime never counts toward All. This covers the full 2×2×2 product.
+describe("RuntimePicker default scope (mine/all derivation)", () => {
+  // Open the picker and normalise to the machine list — the picker auto-drills
+  // into a lone machine, so step back out when it does — then report the active
+  // scope. "none" means the scope toggle isn't rendered (no other member's
+  // runtime exists to scope against).
+  function openToMachineList(): "mine" | "all" | "none" {
+    fireEvent.click(screen.getByRole("button", { name: /^Runtime · / }));
+    const back = screen.queryByRole("button", { name: "Back to machines" });
+    if (back) fireEvent.click(back);
+    const mine = screen.queryByRole("button", { name: "Mine" });
+    const all = screen.queryByRole("button", { name: "All" });
+    if (!mine || !all) return "none";
+    return mine.className.includes("bg-background") ? "mine" : "all";
+  }
+
+  const MINE_MACHINE = /^Jiayuan's MacBook Pro/;
+  const PUBLIC_MACHINE = /^other\.local/;
+  const PRIVATE_MACHINE = /^secret\.local/;
+
+  const cases: {
+    name: string;
+    runtimes: RuntimeDevice[];
+    scope: "mine" | "all" | "none";
+    visible: RegExp[];
+    hidden: RegExp[];
+  }[] = [
+    {
+      name: "no runtimes → mine, no toggle, empty list",
+      runtimes: [],
+      scope: "none",
+      visible: [],
+      hidden: [MINE_MACHINE, PUBLIC_MACHINE, PRIVATE_MACHINE],
+    },
+    {
+      name: "mine only → mine, no toggle, my machine lists",
+      runtimes: [RT_CLAUDE],
+      scope: "none",
+      visible: [MINE_MACHINE],
+      hidden: [PUBLIC_MACHINE, PRIVATE_MACHINE],
+    },
+    {
+      name: "others' public only → all, their pickable machine lists",
+      runtimes: [RT_OTHER_PUBLIC],
+      scope: "all",
+      visible: [PUBLIC_MACHINE],
+      hidden: [MINE_MACHINE, PRIVATE_MACHINE],
+    },
+    {
+      name: "others' private only → mine, empty (locked machine hidden)",
+      runtimes: [RT_OTHER_PRIVATE],
+      scope: "mine",
+      visible: [],
+      hidden: [MINE_MACHINE, PUBLIC_MACHINE, PRIVATE_MACHINE],
+    },
+    {
+      name: "others' public + private → all, both machines list",
+      runtimes: [RT_OTHER_PUBLIC, RT_OTHER_PRIVATE],
+      scope: "all",
+      visible: [PUBLIC_MACHINE, PRIVATE_MACHINE],
+      hidden: [MINE_MACHINE],
+    },
+    {
+      name: "mine + others' public → mine, others hidden in mine scope",
+      runtimes: [RT_CLAUDE, RT_OTHER_PUBLIC],
+      scope: "mine",
+      visible: [MINE_MACHINE],
+      hidden: [PUBLIC_MACHINE, PRIVATE_MACHINE],
+    },
+    {
+      name: "mine + others' private → mine, locked machine hidden",
+      runtimes: [RT_CLAUDE, RT_OTHER_PRIVATE],
+      scope: "mine",
+      visible: [MINE_MACHINE],
+      hidden: [PUBLIC_MACHINE, PRIVATE_MACHINE],
+    },
+    {
+      name: "mine + others' public + private → mine, others hidden",
+      runtimes: [RT_CLAUDE, RT_OTHER_PUBLIC, RT_OTHER_PRIVATE],
+      scope: "mine",
+      visible: [MINE_MACHINE],
+      hidden: [PUBLIC_MACHINE, PRIVATE_MACHINE],
+    },
+  ];
+
+  for (const c of cases) {
+    it(c.name, () => {
+      renderPicker({ value: "", runtimes: c.runtimes });
+      expect(openToMachineList()).toBe(c.scope);
+      for (const re of c.visible) {
+        expect(screen.getByRole("button", { name: re })).toBeTruthy();
+      }
+      for (const re of c.hidden) {
+        expect(screen.queryByRole("button", { name: re })).toBeNull();
+      }
+    });
+  }
 });

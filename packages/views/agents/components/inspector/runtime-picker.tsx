@@ -61,7 +61,9 @@ export function RuntimePicker({
 }) {
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState<Filter>("mine");
+  // null = the user hasn't toggled the scope yet; the default is derived below
+  // from what's actually usable.
+  const [userFilter, setUserFilter] = useState<Filter | null>(null);
   // Level 2 target. `null` shows the machine list; a machine id shows that
   // machine's runtimes. Falls back to the machine list at render time when
   // the id no longer resolves (e.g. the daemon was GC'd over WS).
@@ -74,6 +76,15 @@ export function RuntimePicker({
     if (r.owner_id === currentUserId) return false;
     return r.visibility !== "public";
   };
+
+  // Default to "mine"; fall back to "all" only when "mine" has
+  // no usable runtime but "all" does — so the tab never opens on an empty or
+  // all-locked list.
+  const mineHasUsable =
+    !!currentUserId && runtimes.some((r) => r.owner_id === currentUserId);
+  const allHasUsable = runtimes.some((r) => !isDisabled(r));
+  const filter: Filter =
+    userFilter ?? (!mineHasUsable && allHasUsable ? "all" : "mine");
 
   // Machine grouping over the unfiltered list — resolves the selected
   // runtime's machine for the trigger label regardless of the Mine/All
@@ -201,7 +212,7 @@ export function RuntimePicker({
         selected && currentUserId && selected.owner_id !== currentUserId
           ? "all"
           : filter;
-      setFilter(nextFilter);
+      setUserFilter(nextFilter);
       const visible =
         nextFilter === "mine" && currentUserId
           ? buildRuntimeMachines(
@@ -334,13 +345,13 @@ export function RuntimePicker({
             <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
               <FilterButton
                 active={filter === "mine"}
-                onClick={() => setFilter("mine")}
+                onClick={() => setUserFilter("mine")}
               >
                 {t(($) => $.scope.mine)}
               </FilterButton>
               <FilterButton
                 active={filter === "all"}
-                onClick={() => setFilter("all")}
+                onClick={() => setUserFilter("all")}
               >
                 {t(($) => $.scope.all)}
               </FilterButton>

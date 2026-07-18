@@ -154,6 +154,7 @@ export function AgentCreationStudio() {
     content: string;
   } | null>(null);
   const duplicateAppliedRef = useRef(false);
+  const runtimeSeededRef = useRef(false);
   const appliedAssistantMessageRef = useRef<string | null>(null);
   const builderSessionIdRef = useRef("");
 
@@ -283,8 +284,15 @@ export function AgentCreationStudio() {
     [builderModelCatalog],
   );
 
+  // Seed a default runtime once, when usable runtimes first become available.
+  // This is a one-shot: after the initial seed, selection is owned by the
+  // RuntimePicker (scope-aware). Re-seeding on every empty draft.runtimeId
+  // would fight the picker — clearing the selection on a Mine/All switch to an
+  // empty scope would be immediately overridden, leaving a stale trigger.
   useEffect(() => {
-    if (draft.runtimeId || usableRuntimes.length === 0) return;
+    if (runtimeSeededRef.current || usableRuntimes.length === 0) return;
+    runtimeSeededRef.current = true;
+    if (draft.runtimeId) return;
     setDraft((current) => ({ ...current, runtimeId: usableRuntimes[0]?.id ?? "" }));
   }, [draft.runtimeId, usableRuntimes]);
 
