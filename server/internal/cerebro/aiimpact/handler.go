@@ -32,10 +32,70 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Post("/api/cerebro/ai-impact/project-bindings", h.CreateProjectBinding)
 	r.Get("/api/cerebro/ai-impact/metrics", h.ListMetrics)
 	r.Post("/api/cerebro/ai-impact/metrics", h.CreateMetric)
+	r.Get("/api/cerebro/ai-impact/evidence", h.ListWorkspaceEvidence)
 	r.Get("/api/cerebro/ai-impact/latest-observations", h.ListWorkspaceLatestObservations)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/latest-observations", h.ListLatestObservations)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
 	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
+}
+
+type evidenceResponse struct {
+	FunctionID        uuid.UUID       `json:"function_id"`
+	FunctionName      string          `json:"function_name"`
+	OperatingLoopID   uuid.UUID       `json:"operating_loop_id"`
+	OperatingLoopName string          `json:"operating_loop_name"`
+	MetricID          uuid.UUID       `json:"metric_id"`
+	MetricName        string          `json:"metric_name"`
+	MetricFamily      MetricFamily    `json:"metric_family"`
+	MetricUnit        string          `json:"metric_unit"`
+	MetricDirection   MetricDirection `json:"metric_direction"`
+	PeriodStart       time.Time       `json:"period_start"`
+	PeriodEnd         time.Time       `json:"period_end"`
+	Value             float64         `json:"value"`
+	EvidenceStatus    EvidenceStatus  `json:"evidence_status"`
+	Confidence        float64         `json:"confidence"`
+	Source            string          `json:"source"`
+	Method            string          `json:"method"`
+}
+
+func toEvidenceResponse(evidence EvidenceReadModel) evidenceResponse {
+	return evidenceResponse{
+		FunctionID:        evidence.Function.ID,
+		FunctionName:      evidence.Function.Name,
+		OperatingLoopID:   evidence.OperatingLoop.ID,
+		OperatingLoopName: evidence.OperatingLoop.Name,
+		MetricID:          evidence.Metric.ID,
+		MetricName:        evidence.Metric.Name,
+		MetricFamily:      evidence.Metric.Family,
+		MetricUnit:        evidence.Metric.Unit,
+		MetricDirection:   evidence.Metric.Direction,
+		PeriodStart:       evidence.Observation.PeriodStart,
+		PeriodEnd:         evidence.Observation.PeriodEnd,
+		Value:             evidence.Observation.Value,
+		EvidenceStatus:    evidence.Observation.EvidenceStatus,
+		Confidence:        evidence.Observation.Confidence,
+		Source:            evidence.Observation.Source,
+		Method:            evidence.Observation.Method,
+	}
+}
+
+// ListWorkspaceEvidence returns latest observations with their business taxonomy.
+func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, _, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+
+	evidence, err := h.service.ListWorkspaceEvidence(r.Context(), workspaceID)
+	if err != nil {
+		writeObservationError(w, http.StatusInternalServerError, "failed to list workspace evidence")
+		return
+	}
+	response := make([]evidenceResponse, 0, len(evidence))
+	for _, item := range evidence {
+		response = append(response, toEvidenceResponse(item))
+	}
+	writeObservationJSON(w, http.StatusOK, map[string]any{"evidence": response})
 }
 
 // ListWorkspaceLatestObservations returns the newest evidence for every metric period in the workspace.

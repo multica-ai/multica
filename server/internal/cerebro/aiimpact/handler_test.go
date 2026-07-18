@@ -238,3 +238,86 @@ func TestWorkspaceLatestObservationReadModelReturnsLatestAcrossMetrics(t *testin
 		t.Fatalf("workspace latest observations workspace = %s, want %s", store.listWorkspaceObservationsWorkspaceID, workspaceID)
 	}
 }
+
+func TestWorkspaceEvidenceReadModelReturnsLatestObservationWithTaxonomy(t *testing.T) {
+	workspaceID := uuid.New()
+	functionID := uuid.New()
+	operatingLoopID := uuid.New()
+	metricID := uuid.New()
+	periodStart := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.Add(24 * time.Hour)
+	store := &recordingObservationStore{
+		functions: []Function{{
+			ID: functionID, WorkspaceID: workspaceID, Name: "Customer Service", Active: true,
+		}},
+		operatingLoops: []OperatingLoop{{
+			ID: operatingLoopID, WorkspaceID: workspaceID, FunctionID: functionID,
+			Name: "Resolve customer needs", Active: true,
+		}},
+		metrics: []Metric{{
+			ID: metricID, WorkspaceID: workspaceID, OperatingLoopID: operatingLoopID,
+			Name: "Resolved needs", Family: FamilyOutcome, Unit: "needs",
+			Direction: DirectionIncrease, Source: "support", Active: true,
+		}},
+		workspaceObservations: []Observation{
+			{
+				ID: uuid.New(), MetricID: metricID, PeriodStart: periodStart, PeriodEnd: periodEnd,
+				Value: 12, EvidenceStatus: EvidenceEstimated, Confidence: 0.6,
+				Source: "support", Method: "sampled assessment", CreatedAt: periodEnd,
+			},
+			{
+				ID: uuid.New(), MetricID: metricID, PeriodStart: periodStart, PeriodEnd: periodEnd,
+				Value: 15, EvidenceStatus: EvidenceMeasured, Confidence: 0.9,
+				Source: "support", Method: "audited count", CreatedAt: periodEnd.Add(time.Hour),
+			},
+		},
+	}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cerebro/ai-impact/evidence", nil)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("workspace evidence read model status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Evidence []struct {
+			FunctionName      string         `json:"function_name"`
+			OperatingLoopName string         `json:"operating_loop_name"`
+			MetricName        string         `json:"metric_name"`
+			MetricFamily      MetricFamily   `json:"metric_family"`
+			PeriodStart       time.Time      `json:"period_start"`
+			PeriodEnd         time.Time      `json:"period_end"`
+			Value             float64        `json:"value"`
+			EvidenceStatus    EvidenceStatus `json:"evidence_status"`
+			Confidence        float64        `json:"confidence"`
+			Source            string         `json:"source"`
+			Method            string         `json:"method"`
+		} `json:"evidence"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode workspace evidence read model: %v", err)
+	}
+	if len(response.Evidence) != 1 {
+		t.Fatalf("workspace evidence count = %d, want one latest observation", len(response.Evidence))
+	}
+	evidence := response.Evidence[0]
+	if evidence.FunctionName != "Customer Service" || evidence.OperatingLoopName != "Resolve customer needs" ||
+		evidence.MetricName != "Resolved needs" || evidence.MetricFamily != FamilyOutcome ||
+		!evidence.PeriodStart.Equal(periodStart) || !evidence.PeriodEnd.Equal(periodEnd) ||
+		evidence.Value != 15 || evidence.EvidenceStatus != EvidenceMeasured || evidence.Confidence != 0.9 ||
+		evidence.Source != "support" || evidence.Method != "audited count" {
+		t.Fatalf("workspace evidence = %+v, want latest observation with full taxonomy", evidence)
+	}
+	if store.listFunctionsWorkspaceID != workspaceID || store.listLoopsWorkspaceID != workspaceID ||
+		store.listMetricsWorkspaceID != workspaceID || store.listWorkspaceObservationsWorkspaceID != workspaceID {
+		t.Fatalf("workspace evidence read model did not keep every read workspace-scoped")
+	}
+}

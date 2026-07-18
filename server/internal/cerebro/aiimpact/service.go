@@ -129,3 +129,62 @@ func (s *Service) ListWorkspaceLatestObservations(
 	}
 	return LatestObservations(observations), nil
 }
+
+// ListWorkspaceEvidence returns each latest observation with its Function, Operating Loop, and Metric.
+func (s *Service) ListWorkspaceEvidence(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+) ([]EvidenceReadModel, error) {
+	functions, err := s.store.ListFunctions(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	operatingLoops, err := s.store.ListOperatingLoops(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	metrics, err := s.store.ListMetrics(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	observations, err := s.store.ListWorkspaceObservations(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	functionsByID := make(map[uuid.UUID]Function, len(functions))
+	for _, function := range functions {
+		functionsByID[function.ID] = function
+	}
+	loopsByID := make(map[uuid.UUID]OperatingLoop, len(operatingLoops))
+	for _, operatingLoop := range operatingLoops {
+		loopsByID[operatingLoop.ID] = operatingLoop
+	}
+	metricsByID := make(map[uuid.UUID]Metric, len(metrics))
+	for _, metric := range metrics {
+		metricsByID[metric.ID] = metric
+	}
+
+	evidence := make([]EvidenceReadModel, 0, len(observations))
+	for _, observation := range LatestObservations(observations) {
+		metric, ok := metricsByID[observation.MetricID]
+		if !ok {
+			continue
+		}
+		operatingLoop, ok := loopsByID[metric.OperatingLoopID]
+		if !ok {
+			continue
+		}
+		function, ok := functionsByID[operatingLoop.FunctionID]
+		if !ok {
+			continue
+		}
+		evidence = append(evidence, EvidenceReadModel{
+			Function:      function,
+			OperatingLoop: operatingLoop,
+			Metric:        metric,
+			Observation:   observation,
+		})
+	}
+	return evidence, nil
+}

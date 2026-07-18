@@ -226,6 +226,14 @@ type Observation struct {
 	CreatedAt      time.Time
 }
 
+// EvidenceReadModel places one latest observation in its business taxonomy.
+type EvidenceReadModel struct {
+	Function      Function
+	OperatingLoop OperatingLoop
+	Metric        Metric
+	Observation   Observation
+}
+
 type GuardrailResult struct {
 	Critical bool
 	Passed   bool
