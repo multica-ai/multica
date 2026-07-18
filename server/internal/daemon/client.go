@@ -119,11 +119,31 @@ type Client struct {
 func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL:      baseURL,
-		client:       &http.Client{Timeout: 30 * time.Second, Transport: cloneDefaultTransport()},
+		client:       newControlPlaneHTTPClient(runtime.GOOS),
 		bundleClient: &http.Client{},
 		platform:     "daemon",
 		os:           normalizeGOOS(runtime.GOOS),
 	}
+}
+
+func newControlPlaneHTTPClient(goos string) *http.Client {
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: newControlPlaneTransport(goos),
+	}
+}
+
+func newControlPlaneTransport(goos string) http.RoundTripper {
+	transport := cloneDefaultTransport()
+	if transport, ok := transport.(*http.Transport); ok && goos == "darwin" {
+		// macOS self-hosted LAN setups have shown poisoned keep-alive pools
+		// after the daemon's initial registration burst. Avoid reusing
+		// control-plane sockets there; bundle downloads keep their separate
+		// long-lived client.
+		transport.DisableKeepAlives = true
+		return transport
+	}
+	return transport
 }
 
 func cloneDefaultTransport() http.RoundTripper {
@@ -140,7 +160,13 @@ func (c *Client) CloseIdleConnections() {
 	if c == nil || c.client == nil {
 		return
 	}
-	c.client.CloseIdleConnections()
+	closeIdleConnections(c.client)
+}
+
+func closeIdleConnections(client *http.Client) {
+	if client != nil {
+		client.CloseIdleConnections()
+	}
 }
 
 // normalizeGOOS maps Go's runtime.GOOS values to the protocol vocabulary
@@ -539,6 +565,7 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 
 	resp, err := c.client.Do(req)
 	if err != nil {
+		closeIdleConnections(c.client)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -954,6 +981,7 @@ func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path 
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		closeIdleConnections(httpClient)
 		return err
 	}
 	defer resp.Body.Close()
@@ -981,6 +1009,7 @@ func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
 
 	resp, err := c.client.Do(req)
 	if err != nil {
+		closeIdleConnections(c.client)
 		return err
 	}
 	defer resp.Body.Close()
