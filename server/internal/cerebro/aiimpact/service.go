@@ -189,6 +189,26 @@ func (s *Service) ListWorkspaceEvidence(
 	return evidence, nil
 }
 
+// ListMetricFamilyEvidence returns the latest workspace evidence for one metric family.
+func (s *Service) ListMetricFamilyEvidence(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	family MetricFamily,
+) ([]EvidenceReadModel, error) {
+	evidence, err := s.ListWorkspaceEvidence(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]EvidenceReadModel, 0, len(evidence))
+	for _, item := range evidence {
+		if item.Metric.Family == family {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
+
 // ListFunctionEvidence returns the latest workspace evidence for one Function.
 func (s *Service) ListFunctionEvidence(
 	ctx context.Context,
