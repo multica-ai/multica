@@ -17,6 +17,7 @@ func TestBackendImageContainsPinnedInternalBrowserRuntime(t *testing.T) {
 		"nodejs",
 		"npm install --global agent-browser@0.26.0",
 		"AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser",
+		"HOME=/home/app",
 	} {
 		if !strings.Contains(content, required) {
 			t.Errorf("backend Dockerfile is missing %q", required)
