@@ -164,4 +164,55 @@ describe("useSetIssueProperty", () => {
       "property-effort": 50000,
     });
   });
+
+  it("does not refetch a flat property window before the mutation commits", async () => {
+    const request = deferred<{ properties: Issue["properties"] }>();
+    const setIssueProperty = vi.fn(() => request.promise);
+    setApiInstance({ setIssueProperty } as unknown as ApiClient);
+    const flatKey = issueKeys.flat(
+      WS_ID,
+      "workspace:all",
+      {},
+      {
+        sort_by: "property:property-estimate",
+        properties: { "property-estimate": ["2"] },
+      },
+    );
+    qc.setQueryData(flatKey, {
+      pages: [
+        {
+          issues: [makeIssue({ "property-estimate": 1 })],
+          total: 1,
+        },
+      ],
+      pageParams: [0],
+    });
+
+    const { result } = renderHook(() => useSetIssueProperty(), {
+      wrapper: createWrapper(qc),
+    });
+    let pending!: Promise<unknown>;
+    act(() => {
+      pending = result.current.mutateAsync({
+        issueId: ISSUE_ID,
+        propertyId: "property-estimate",
+        value: 2,
+      });
+    });
+
+    await waitFor(() => {
+      const issue = qc.getQueryData<{ pages: { issues: Issue[] }[] }>(
+        flatKey,
+      )?.pages[0]?.issues[0];
+      expect(issue?.properties["property-estimate"]).toBe(2);
+    });
+    expect(qc.getQueryState(flatKey)?.isInvalidated).toBe(false);
+
+    request.resolve({ properties: { "property-estimate": 2 } });
+    await act(async () => pending);
+
+    await waitFor(() => {
+      expect(qc.getQueryState(flatKey)?.isInvalidated).toBe(true);
+    });
+  });
 });

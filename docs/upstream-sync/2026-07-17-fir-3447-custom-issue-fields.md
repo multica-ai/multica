@@ -21,9 +21,12 @@ not a full upstream sync.
   drag-to-assign/unset behavior. Filterable properties, number/date sorting,
   and card-property controls are exposed without replacing Cerebro's saved,
   date, on-behalf-of, or sub-issue controls.
-- Remaining UI slices are intentionally separate: the configurable Table,
-  Create issue field visibility/Quick create, Settings > Issue, the two default
-  DKK fields, and final polish.
+- The configurable Table is mounted on Issues, My Issues, and Projects with
+  persisted columns and widths, grouping, hierarchy, inline editing, search,
+  export, server pagination, and optimistic cache reconciliation.
+- Remaining UI slices are intentionally separate: Create issue field
+  visibility/Quick create, Settings > Issue, the two default DKK fields,
+  stacked-date parity for Table, and final browser QA/polish.
 
 ## Upstream provenance
 
@@ -32,8 +35,7 @@ not a full upstream sync.
 - `07e2d378bd6d5e6cb3aacff50a322090c01ad952`: property colors.
 - `101f21d55dd5be7e73f65645c212eb20aa7d26a3`: select labels.
 - `ea8511340e6949436c04edea00dabeeebba34233`: property icons.
-- `002ea0d87949d112d96586bd8b42c779142cf77d`: configurable Table, to be
-  ported in a later isolated slice.
+- `002ea0d87949d112d96586bd8b42c779142cf77d`: configurable Table.
 
 ## Cerebro conflict decisions
 
@@ -55,6 +57,11 @@ not a full upstream sync.
 - Did not apply upstream's generic issue-mutation reconciliation hunk because
   this fork's update mutation does not write server responses back into the
   cache; property writes keep their own authoritative single-key pipeline.
+- Mounted Table through a small Cerebro adapter instead of replacing the
+  fork's established Issues/My Issues/Project surfaces. The adapter translates
+  the existing scopes, saved filters, on-behalf-of state, sprint membership,
+  running-agent filter, progress data, and batch selection into the upstream
+  flat-window Table contract.
 - Updated the built-in issue-working skill because the public API and CLI gain
   property operations.
 
@@ -75,6 +82,9 @@ or reimplementing the feature.
 - Board controls: custom property filter/sort/group/display choices alongside
   Cerebro saved filters, date filters, on-behalf-of, and sub-issue display.
 - List: Display-selected values on rows at wide and responsive widths.
+- Table: column picker/reordering/resizing, hierarchy, grouping, search,
+  infinite pagination, inline edits, batch actions, CSV export, and empty/error
+  windows across Issues, My Issues, and Projects.
 
 The current conflict self-review preserves Cerebro's complete Settings tab set
 and reuses the existing workspace-scoped catalog/query pipeline. Fresh browser

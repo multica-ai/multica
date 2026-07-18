@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { issueKeys } from "./queries";
+import { issueKeys, type IssueFlatCache } from "./queries";
 import { labelKeys } from "../labels/queries";
 import { projectKeys } from "../projects/queries";
 import {
@@ -11,6 +11,44 @@ import { cleanupDeletedIssueCaches } from "./delete-cache";
 import type { Issue, IssueLabelsResponse, IssuePropertyValues, Label } from "../types";
 import type { ListIssuesCache } from "../types";
 
+function patchIssueInFlatCaches(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  patch: Partial<Issue>,
+) {
+  for (const [key, data] of qc.getQueriesData<IssueFlatCache>({
+    queryKey: issueKeys.flatAll(wsId),
+  })) {
+    if (!data?.pages) continue;
+    qc.setQueryData<IssueFlatCache>(key, {
+      ...data,
+      pages: data.pages.map((page) => ({
+        ...page,
+        issues: page.issues.map((issue) =>
+          issue.id === issueId ? { ...issue, ...patch } : issue,
+        ),
+      })),
+    });
+  }
+}
+
+function findIssueInFlatCaches(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+) {
+  for (const [, data] of qc.getQueriesData<IssueFlatCache>({
+    queryKey: issueKeys.flatAll(wsId),
+  })) {
+    for (const page of data?.pages ?? []) {
+      const issue = page.issues.find((candidate) => candidate.id === issueId);
+      if (issue) return issue;
+    }
+  }
+  return undefined;
+}
+
 export function onIssueCreated(
   qc: QueryClient,
   wsId: string,
@@ -20,6 +58,7 @@ export function onIssueCreated(
     if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, issue));
   }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   if (issue.project_id) {
@@ -48,9 +87,11 @@ export function onIssueUpdated(
   const listQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
   const firstListData = listQueries[0]?.[1];
   const detailData = qc.getQueryData<Issue>(issueKeys.detail(wsId, issue.id));
+  const flatIssue = findIssueInFlatCaches(qc, wsId, issue.id);
   const oldParentId =
     detailData?.parent_issue_id ??
     (firstListData ? findIssueLocation(firstListData, issue.id)?.issue.parent_issue_id : null) ??
+    flatIssue?.parent_issue_id ??
     null;
   // The NEW parent comes from the WS payload when parent_issue_id changed
   const newParentId = issue.parent_issue_id ?? null;
@@ -60,10 +101,12 @@ export function onIssueUpdated(
   for (const [key, data] of listQueries) {
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issue.id, issue));
   }
+  patchIssueInFlatCaches(qc, wsId, issue.id, issue);
   if (issue.position !== undefined) {
     qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
   }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   if (issue.status !== undefined || issue.project_id !== undefined) {
@@ -118,9 +161,21 @@ export function onIssueLabelsChanged(
   issueId: string,
   labels: Label[],
 ) {
+  patchIssueLabels(qc, wsId, issueId, labels);
+  invalidateIssueLabelDerivatives(qc, wsId);
+}
+
+/** Deterministic label snapshot patch used by optimistic mutation legs. */
+export function patchIssueLabels(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  labels: Label[],
+) {
   for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { labels }));
   }
+  patchIssueInFlatCaches(qc, wsId, issueId, { labels });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
   );
@@ -141,9 +196,22 @@ export function onIssueLabelsChanged(
     );
     qc.setQueryData<Issue[]>(key, next);
   }
+}
+
+/** Reconcile server-filtered label windows only after the write commits. */
+export function invalidateIssueLabelDerivatives(qc: QueryClient, wsId: string) {
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  qc.invalidateQueries({
+    queryKey: issueKeys.flatAll(wsId),
+    predicate: (query) =>
+      query.queryKey.some((part) => {
+        if (!part || typeof part !== "object" || Array.isArray(part)) return false;
+        const labelIds = (part as { label_ids?: unknown }).label_ids;
+        return Array.isArray(labelIds) && labelIds.length > 0;
+      }),
+  });
 }
 
 /**
@@ -164,6 +232,7 @@ export function onIssueMetadataChanged(
   for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { metadata }));
   }
+  patchIssueInFlatCaches(qc, wsId, issueId, { metadata });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, metadata } : old,
   );
@@ -181,16 +250,27 @@ export function onIssuePropertiesChanged(
   issueId: string,
   properties: IssuePropertyValues,
 ) {
-  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
-    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { properties }));
-  }
-  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
-    old ? { ...old, properties } : old,
-  );
+  patchIssueProperties(qc, wsId, issueId, properties);
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   invalidatePropertyWindowQueries(qc, wsId);
+}
+
+/** Patch deterministic entity snapshots without starting a server refetch. */
+export function patchIssueProperties(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  properties: IssuePropertyValues,
+) {
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { properties }));
+  }
+  patchIssueInFlatCaches(qc, wsId, issueId, { properties });
+  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
+    old ? { ...old, properties } : old,
+  );
 }
 
 /** Refetch issue windows whose server result depends on property values. */

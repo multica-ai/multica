@@ -202,6 +202,9 @@ const mockViewState = {
 
 vi.mock("@multica/core/issues/stores/view-store", () => ({
   useClearFiltersOnWorkspaceChange: () => {},
+  propertyIdFromViewKey: (value: string) =>
+    value.startsWith("property:") ? value.slice("property:".length) : null,
+  TABLE_SYSTEM_COLUMNS: ["title", "status", "priority"],
   viewStorePersistOptions: () => ({ name: "test", storage: undefined, partialize: (s: any) => s }),
   mergeViewStatePersisted: (_p: unknown, c: any) => c,
   viewStoreSlice: vi.fn(),

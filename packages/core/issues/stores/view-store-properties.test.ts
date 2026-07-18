@@ -51,4 +51,26 @@ describe("custom properties in issue view state", () => {
       cardPropertyIds: ["property-business-value"],
     });
   });
+
+  it("persists configurable Table columns, grouping, and hierarchy", () => {
+    const store = createViewStore();
+
+    store.getState().toggleTableColumn("priority");
+    store.getState().toggleTableColumn("property:business-value");
+    store.getState().reorderTableColumn("property:business-value", "status");
+    store.getState().setTableColumnWidth("property:business-value", 240);
+    store.getState().setTableGrouping("property:channel");
+    store.getState().toggleTableHierarchy();
+
+    const persisted = viewStorePersistOptions("test").partialize(store.getState());
+    expect(persisted).toMatchObject({
+      tableGrouping: "property:channel",
+      tableHierarchy: false,
+    });
+    expect(persisted.tableColumns).toContainEqual({
+      key: "property:business-value",
+      width: 240,
+    });
+    expect(persisted.tableColumns.some((column) => column.key === "priority")).toBe(false);
+  });
 });

@@ -74,7 +74,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const wakeupDotEnabled = useFeatureFlag("cerebro_activity_wakeup_dot"); // CEREBRO-PATCH(board-card-wakeup-dot): FIR-1521
   const timeAgo = useTimeAgo();
   const storeProperties = useViewStore((s) => s.cardProperties);
-  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
+  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds ?? []);
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery({
     ...projectListOptions(wsId),

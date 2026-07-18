@@ -19,13 +19,14 @@ import { SwimLaneView } from "../../issues/components/swimlane-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { myIssueAssigneeGroupsOptions, myIssueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
+import { myIssueAssigneeGroupsOptions, myIssueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type IssueFlatFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
 import { PageHeader } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { MyIssuesHeader } from "./my-issues-header";
+import { IssueTableSurface } from "../../issues/components/issue-table-surface";
 
 export function MyIssuesPage() {
   const { t } = useT("my-issues");
@@ -53,6 +54,7 @@ export function MyIssuesPage() {
   // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — stacked date conditions applied client-side.
   const dateFilters = useStore(myIssuesViewStore, (s) => s.dateFilters);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
+  const usesTable = viewMode === "table";
 
   const sort = useMemo(
     () => ({
@@ -131,7 +133,7 @@ export function MyIssuesPage() {
   );
   const statusIssuesQuery = useQuery({
     ...myIssueListOptions(wsId, scope, filter, user?.id, sort),
-    enabled: !usesAssigneeBoard,
+    enabled: !usesAssigneeBoard && !usesTable,
   });
   const assigneeGroupsQuery = useQuery({
     ...assigneeGroupsOptions,
@@ -144,7 +146,7 @@ export function MyIssuesPage() {
         : (statusIssuesQuery.data ?? []),
     [assigneeGroupsQuery.data, statusIssuesQuery.data, usesAssigneeBoard],
   );
-  const loading = usesAssigneeBoard
+  const loading = usesTable ? false : usesAssigneeBoard
     ? assigneeGroupsQuery.isLoading
     : statusIssuesQuery.isLoading;
 
@@ -267,7 +269,7 @@ export function MyIssuesPage() {
       <ViewStoreProvider store={myIssuesViewStore}>
         {/* Header: scope tabs (left) + controls (right) */}
         <MyIssuesHeader allIssues={myIssues} />
-        {myIssues.length === 0 ? (
+        {!usesTable && myIssues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <ListTodo className="h-10 w-10 text-muted-foreground/40" />
             <p className="text-sm">{t(($) => $.page.empty_title)}</p>
@@ -288,6 +290,15 @@ export function MyIssuesPage() {
                 myIssuesScope={scope}
                 myIssuesFilter={filter}
                 sort={sort}
+              />
+            ) : viewMode === "table" ? (
+              <IssueTableSurface
+                scope={scope}
+                baseFilter={filter as IssueFlatFilter}
+                userId={user?.id}
+                sort={sort}
+                runningIssueIds={runningIssueIds}
+                childProgressMap={childProgressMap}
               />
             ) : viewMode === "swimlane" ? (
               <SwimLaneView

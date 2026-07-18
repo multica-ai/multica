@@ -1677,6 +1677,7 @@ Approved by Jesper Hvejsel on FIR-3212 ("Vi skal kun lave agent configuration fu
 |---|---|---|
 | `create-issue-custom-properties` | `packages/views/modals/create-issue.tsx`; `packages/views/package.json` | Mount the fork-owned Create issue adapter because upstream v0.4.4 supplies Issue detail editing and the value API, but no Create issue field surface. The typed field UI and post-create writes stay isolated in `packages/cerebro-issue-properties`. |
 | `issue-property-view-label-fallback` | `packages/views/issues/components/issues-header.tsx` | Keep existing static display labels type-safe while the property-aware view-state types are present but the separate list-surface UI slice has not landed. Unknown property-backed persisted values fall back to Manual/Status instead of breaking the header. |
+| `issue-table-surface` | `packages/views/issues/components/issue-table-surface.tsx`; `packages/views/issues/components/issues-page.tsx`; `packages/views/my-issues/components/my-issues-page.tsx`; `packages/views/projects/components/project-detail.tsx` | Mount upstream's configurable Table through Cerebro's existing workspace, My Issues, project, sprint, on-behalf-of, running-agent, progress, and batch-selection seams instead of replacing those fork-owned behaviors with upstream's newer surface stack. |
 
 Approved by Jesper Hvejsel through FIR-3447 and plan artifact `019f704e-3865-7220-a109-6df596ccdf28`, 2026-07-17.
 

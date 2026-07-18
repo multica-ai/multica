@@ -2,8 +2,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { propertyKeys } from "./queries";
 import { useWorkspaceId } from "../hooks";
-import { issueKeys } from "../issues/queries";
-import { invalidatePropertyWindowQueries, onIssuePropertiesChanged } from "../issues/ws-updaters";
+import { issueKeys, type IssueFlatCache } from "../issues/queries";
+import {
+  invalidatePropertyWindowQueries,
+  onIssuePropertiesChanged,
+  patchIssueProperties,
+} from "../issues/ws-updaters";
 import { findIssueLocation } from "../issues/cache-helpers";
 import type {
   CreatePropertyRequest,
@@ -60,6 +64,14 @@ function readIssueProperties(qc: ReturnType<typeof useQueryClient>, wsId: string
     const location = findIssueLocation(data, issueId);
     if (location) return location.issue.properties ?? {};
   }
+  for (const [, data] of qc.getQueriesData<IssueFlatCache>({
+    queryKey: issueKeys.flatAll(wsId),
+  })) {
+    for (const page of data?.pages ?? []) {
+      const issue = page.issues.find((candidate) => candidate.id === issueId);
+      if (issue) return issue.properties ?? {};
+    }
+  }
   return undefined;
 }
 
@@ -94,9 +106,10 @@ export function useSetIssueProperty() {
       await Promise.all([
         qc.cancelQueries({ queryKey: issueKeys.detail(wsId, issueId) }),
         qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
+        qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
       ]);
       const prev = readIssueProperties(qc, wsId, issueId);
-      onIssuePropertiesChanged(qc, wsId, issueId, { ...(prev ?? {}), [propertyId]: value });
+      patchIssueProperties(qc, wsId, issueId, { ...(prev ?? {}), [propertyId]: value });
       return { prevValue: prev?.[propertyId], hadBag: prev !== undefined, issueId, propertyId };
     },
     onError: (_err, _vars, ctx) => {
@@ -124,12 +137,13 @@ export function useUnsetIssueProperty() {
       await Promise.all([
         qc.cancelQueries({ queryKey: issueKeys.detail(wsId, issueId) }),
         qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
+        qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
       ]);
       const prev = readIssueProperties(qc, wsId, issueId);
       if (prev) {
         const next = { ...prev };
         delete next[propertyId];
-        onIssuePropertiesChanged(qc, wsId, issueId, next);
+        patchIssueProperties(qc, wsId, issueId, next);
       }
       return { prevValue: prev?.[propertyId], hadBag: prev !== undefined, issueId, propertyId };
     },
@@ -165,7 +179,7 @@ function rollbackSingleKey(
   const next = { ...current };
   if (ctx.prevValue === undefined) delete next[ctx.propertyId];
   else next[ctx.propertyId] = ctx.prevValue;
-  onIssuePropertiesChanged(qc, wsId, ctx.issueId, next);
+  patchIssueProperties(qc, wsId, ctx.issueId, next);
 }
 
 /** Authoritative reconcile once the LAST in-flight property write settles. */

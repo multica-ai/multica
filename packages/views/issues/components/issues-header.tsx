@@ -20,6 +20,7 @@ import {
   SlidersHorizontal,
   X,
   Tag,
+  Table2,
   User,
   UserMinus,
   UserPen,
@@ -72,6 +73,7 @@ import {
   GROUPING_OPTIONS,
   SWIMLANE_GROUPINGS,
   CARD_PROPERTY_OPTIONS,
+  TABLE_SYSTEM_COLUMNS,
   propertyIdFromViewKey,
   type ActorFilterValue,
   type IssueDateField,
@@ -80,6 +82,7 @@ import {
   type SortField,
   type IssueGrouping,
   type SwimlaneGrouping,
+  type TableGrouping,
   type ViewMode,
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
@@ -174,6 +177,8 @@ const DATE_FIELD_LABEL_KEY: Record<IssueDateField, "date_field_created" | "date_
   updated_at: "date_field_updated",
   due_date: "date_field_due",
 };
+
+const NO_COUNT_ISSUES: Issue[] = [];
 
 function useIssueCounts(allIssues: Issue[]) {
   return useMemo(() => {
@@ -1318,10 +1323,12 @@ function DateSubContent({
   onChange,
   // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — due-date quick presets.
   dueDatePresets = false,
+  facetCountsExact = true,
 }: {
   value: IssueDateFilter | null;
   onChange: (filter: IssueDateFilter | null) => void;
   dueDatePresets?: boolean;
+  facetCountsExact?: boolean;
 }) {
   const { t } = useT("issues");
   const [field, setField] = useState<IssueDateField>(value?.field ?? "created_at");
@@ -1477,6 +1484,7 @@ export function IssuesHeader({
   onDateFiltersChange,
   // CEREBRO-PATCH(boards-date-filter): FIR-1724 forward due-date presets so boards match My Issues.
   dueDatePresets = false,
+  facetCountsExact = true,
 }: {
   scopedIssues: Issue[];
   referenceFilterControl?: ReactNode;
@@ -1488,6 +1496,7 @@ export function IssuesHeader({
   onDateFiltersChange?: (filters: IssueDateFilter[]) => void;
   // CEREBRO-PATCH(boards-date-filter): FIR-1724 offer the My-Issues due-date presets on boards.
   dueDatePresets?: boolean;
+  facetCountsExact?: boolean;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -1595,6 +1604,7 @@ export function IssuesHeader({
             onDateFiltersChange={onDateFiltersChange}
             // CEREBRO-PATCH(boards-date-filter): FIR-1724 pass presets through to the date filter control.
             dueDatePresets={dueDatePresets}
+            facetCountsExact={facetCountsExact}
           />
         </div>
       </div>
@@ -1609,6 +1619,7 @@ export function IssueDisplayControls({
   dateFilter = null,
   onDateFilterChange,
   dueDatePresets = false,
+  facetCountsExact = true,
   // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — stacked date builder.
   dateFilters,
   onDateFiltersChange,
@@ -1621,6 +1632,7 @@ export function IssueDisplayControls({
   // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — show Overdue/This week/No
   // due date quick presets in the date submenu (client-side My Issues filter only).
   dueDatePresets?: boolean;
+  facetCountsExact?: boolean;
   // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — when provided (My Issues),
   // the Date submenu renders the stacked multi-condition builder instead of the
   // single-range picker. The server-backed /issues page keeps onDateFilterChange.
@@ -1642,8 +1654,8 @@ export function IssueDisplayControls({
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
-  const propertyFilters = useViewStore((s) => s.propertyFilters);
-  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
+  const propertyFilters = useViewStore((s) => s.propertyFilters ?? {});
+  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds ?? []);
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 read on-behalf-of filter state.
   const onBehalfOfFilters = useViewStore((s) => s.onBehalfOfFilters);
   const sortBy = useViewStore((s) => s.sortBy);
@@ -1651,6 +1663,9 @@ export function IssueDisplayControls({
   const grouping = useViewStore((s) => s.grouping);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const cardProperties = useViewStore((s) => s.cardProperties);
+  const tableColumns = useViewStore((s) => s.tableColumns ?? []);
+  const tableGrouping = useViewStore((s) => s.tableGrouping ?? "none");
+  const tableHierarchy = useViewStore((s) => s.tableHierarchy ?? true);
   const subIssueDisplay = useViewStore((s) => s.subIssueDisplay);
   const act = useViewStoreApi().getState();
   const headerWsId = useWorkspaceId();
@@ -1676,8 +1691,19 @@ export function IssueDisplayControls({
     () => workspaceProperties.filter((property) => property.type === "select"),
     [workspaceProperties],
   );
+  const tableGroupableProperties = useMemo(
+    () =>
+      workspaceProperties.filter((property) =>
+        ["select", "multi_select", "checkbox"].includes(property.type),
+      ),
+    [workspaceProperties],
+  );
+  const visibleTableColumns = useMemo(
+    () => new Set(tableColumns.map((column) => column.key)),
+    [tableColumns],
+  );
 
-  const counts = useIssueCounts(scopedIssues);
+  const counts = useIssueCounts(facetCountsExact ? scopedIssues : NO_COUNT_ISSUES);
   const showDateFilter = !!onDateFilterChange;
   // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — My Issues passes the
   // stacked builder handler; the global page passes the single-range handler.
@@ -1710,12 +1736,14 @@ export function IssueDisplayControls({
   });
   const hasActiveFilters = activeFilterCount > 0;
 
-  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_title"> = {
+  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_status" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_updated" | "sort_title"> = {
     position: "sort_manual",
+    status: "sort_status",
     priority: "sort_priority",
     start_date: "sort_start_date",
     due_date: "sort_due_date",
     created_at: "sort_created",
+    updated_at: "sort_updated",
     title: "sort_title",
   };
   const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee"> = {
@@ -1749,12 +1777,24 @@ export function IssueDisplayControls({
     : null;
   const sortPropertyId = propertyIdFromViewKey(sortBy);
   const groupingPropertyId = propertyIdFromViewKey(grouping);
+  const tableGroupingPropertyId = propertyIdFromViewKey(tableGrouping);
   const sortLabel = sortPropertyId
     ? propertyById.get(sortPropertyId)?.name ?? t(($) => $.display.sort_manual)
     : t(($) => $.display[SORT_LABEL_KEY[sortBy as keyof typeof SORT_LABEL_KEY]]);
   const groupingLabel = groupingPropertyId
     ? propertyById.get(groupingPropertyId)?.name ?? t(($) => $.display.group_status)
     : t(($) => $.display[GROUPING_LABEL_KEY[grouping as keyof typeof GROUPING_LABEL_KEY]]);
+  const effectiveTableGrouping =
+    tableGroupingPropertyId && !propertyById.has(tableGroupingPropertyId)
+      ? "none"
+      : tableGrouping;
+  const tableGroupingLabel = tableGroupingPropertyId
+    ? propertyById.get(tableGroupingPropertyId)?.name ?? t(($) => $.table.group_none)
+    : effectiveTableGrouping === "status"
+      ? t(($) => $.table.columns.status)
+      : effectiveTableGrouping === "assignee"
+        ? t(($) => $.table.columns.assignee)
+        : t(($) => $.table.group_none);
   const swimlaneGroupingLabel = t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[swimlaneGrouping]]);
   const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
 
@@ -2167,6 +2207,69 @@ export function IssueDisplayControls({
               </div>
             )}
 
+            {viewMode === "table" && (
+              <div className="border-b px-3 py-2.5">
+                <label className="flex cursor-pointer items-center justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block text-sm">{t(($) => $.table.hierarchy)}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {t(($) => $.table.hierarchy_description)}
+                    </span>
+                  </span>
+                  <Switch
+                    size="sm"
+                    checked={tableHierarchy}
+                    onCheckedChange={() => act.toggleTableHierarchy()}
+                  />
+                </label>
+                <div className="mt-3">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {t(($) => $.table.group_label)}
+                  </span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-1.5 w-full justify-between text-xs"
+                        >
+                          {tableGroupingLabel}
+                          <ChevronDown className="size-3 text-muted-foreground" />
+                        </Button>
+                      }
+                    />
+                    <DropdownMenuContent align="start" className="w-auto min-w-48">
+                      <DropdownMenuRadioGroup
+                        value={effectiveTableGrouping}
+                        onValueChange={(value) =>
+                          act.setTableGrouping(value as TableGrouping)
+                        }
+                      >
+                        <DropdownMenuRadioItem value="none">
+                          {t(($) => $.table.group_none)}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="status">
+                          {t(($) => $.table.columns.status)}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="assignee">
+                          {t(($) => $.table.columns.assignee)}
+                        </DropdownMenuRadioItem>
+                        {tableGroupableProperties.map((property) => (
+                          <DropdownMenuRadioItem
+                            key={property.id}
+                            value={`property:${property.id}`}
+                          >
+                            {property.name}
+                          </DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            )}
+
             <div className="border-b px-3 py-2.5">
               <span className="text-xs font-medium text-muted-foreground">
                 {t(($) => $.display.ordering_section)}
@@ -2246,6 +2349,61 @@ export function IssueDisplayControls({
               </div>
             </div>
 
+            {viewMode === "table" ? (
+              <div className="max-h-80 overflow-y-auto px-3 py-2.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t(($) => $.table.columns.section)}
+                </span>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {t(($) => $.table.columns.system_section)}
+                </p>
+                <div className="mt-1.5 space-y-2">
+                  {TABLE_SYSTEM_COLUMNS.map((key) => (
+                    <label
+                      key={key}
+                      className={
+                        key === "title"
+                          ? "flex items-center justify-between"
+                          : "flex cursor-pointer items-center justify-between"
+                      }
+                    >
+                      <span className="text-sm">{t(($) => $.table.columns[key])}</span>
+                      <Switch
+                        size="sm"
+                        checked={visibleTableColumns.has(key)}
+                        disabled={key === "title"}
+                        onCheckedChange={() => act.toggleTableColumn(key)}
+                      />
+                    </label>
+                  ))}
+                </div>
+                {workspaceProperties.length > 0 && (
+                  <>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      {t(($) => $.table.columns.property_section)}
+                    </p>
+                    <div className="mt-1.5 space-y-2">
+                      {workspaceProperties.map((property) => {
+                        const key = `property:${property.id}` as const;
+                        return (
+                          <label
+                            key={property.id}
+                            className="flex cursor-pointer items-center justify-between gap-3"
+                          >
+                            <span className="min-w-0 truncate text-sm">{property.name}</span>
+                            <Switch
+                              size="sm"
+                              checked={visibleTableColumns.has(key)}
+                              onCheckedChange={() => act.toggleTableColumn(key)}
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
             <div className="px-3 py-2.5">
               <span className="text-xs font-medium text-muted-foreground">
                 {t(($) => $.display.card_properties_section)}
@@ -2279,6 +2437,7 @@ export function IssueDisplayControls({
                 ))}
               </div>
             </div>
+            )}
           </PopoverContent>
         </Popover>
 
@@ -2295,6 +2454,8 @@ export function IssueDisplayControls({
                       <Button variant="outline" size="sm" className={controlButtonClass}>
                         {viewMode === "board" ? (
                           <Columns3 className="size-3.5" />
+                        ) : viewMode === "table" ? (
+                          <Table2 className="size-3.5" />
                         ) : viewMode === "swimlane" ? (
                           <Waves className="size-3.5" />
                         ) : viewMode === "gantt" && allowGantt ? (
@@ -2305,6 +2466,8 @@ export function IssueDisplayControls({
                         <span className="hidden md:inline">
                           {viewMode === "board"
                             ? t(($) => $.view.board)
+                            : viewMode === "table"
+                            ? t(($) => $.view.table)
                             : viewMode === "swimlane"
                             ? t(($) => $.view.swimlane)
                             : viewMode === "gantt" && allowGantt
@@ -2319,6 +2482,8 @@ export function IssueDisplayControls({
               <TooltipContent side="bottom">
                 {viewMode === "board"
                   ? t(($) => $.view.tooltip_board)
+                  : viewMode === "table"
+                  ? t(($) => $.view.tooltip_table)
                   : viewMode === "swimlane"
                   ? t(($) => $.view.tooltip_swimlane)
                   : viewMode === "gantt" && allowGantt
@@ -2338,6 +2503,10 @@ export function IssueDisplayControls({
                 <DropdownMenuRadioItem value="list">
                   <List />
                   {t(($) => $.view.list)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="table">
+                  <Table2 />
+                  {t(($) => $.view.table)}
                 </DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="swimlane">
                   <Waves />
