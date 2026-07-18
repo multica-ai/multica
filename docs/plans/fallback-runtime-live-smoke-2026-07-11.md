@@ -315,3 +315,32 @@ The final requirement audit also added or strengthened database-backed tests:
 - squad fallback preserves the exact squad ID and leader-task role;
 - the full Go suite passes under `-race` after the migration and notification
   compatibility fixtures were updated to model distinct historical tasks.
+
+## Current Upstream CI Reproduction - 2026-07-18
+
+The committed branch was verified against disposable services matching the
+current upstream CI workflow: `pgvector/pgvector:pg17` and `redis:7-alpine`.
+From a fresh PostgreSQL database, the exact backend sequence completed:
+
+```text
+go build ./...
+go run ./cmd/migrate up
+go test -race ./...
+```
+
+All migrations through `202_agent_fallback_runtimes` applied and every backend
+package passed under the race detector. Frontend dependency installation was
+lockfile-clean, self-host environment derivation passed through the installed
+standalone Compose binary, and reserved-slug regeneration produced no diff.
+
+The frontend typecheck, lint, and test matrix passed for all seven non-docs,
+non-mobile packages. Its test totals included 987 core tests, 2,680 views
+tests, 108 web tests, and 329 desktop tests. Production desktop and web builds
+also passed when Next's official `NEXT_FONT_GOOGLE_MOCKED_RESPONSES` hook was
+used to isolate font transport.
+
+The unmodified local web build could not fetch the large Google Fonts response
+set for `Noto Serif SC`, despite direct curl and Node HTTPS probes succeeding.
+No source workaround was added for this machine-specific external dependency.
+The exact unmocked build therefore remains an explicit upstream-CI delivery
+gate after the approved PR branch is published.
