@@ -1,6 +1,7 @@
 import type {
   Issue,
   IssueAssigneeType,
+  IssuePriority,
   IssueStatus,
   CreateIssueRequest,
   UpdateIssueRequest,
@@ -1638,6 +1639,8 @@ export class ApiClient {
     agent_id?: string;
     squad_id?: string;
     prompt: string;
+    priority?: IssuePriority;
+    due_date?: string;
     project_id?: string | null;
     parent_issue_id?: string | null;
     // CEREBRO-PATCH(quick-create-workflow-id-client): FIR-2283 followup —

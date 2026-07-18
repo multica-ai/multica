@@ -29,6 +29,10 @@ export interface CreateIssuePropertiesHandle {
   reset: () => void;
 }
 
+interface CreateIssuePropertiesProps {
+  hiddenPropertyIds?: string[];
+}
+
 const KNOWN_TYPES = new Set([
   "text",
   "number",
@@ -40,7 +44,7 @@ const KNOWN_TYPES = new Set([
 ]);
 
 export const CreateIssueProperties = forwardRef<CreateIssuePropertiesHandle>(
-  function CreateIssueProperties(_props, ref) {
+  function CreateIssueProperties({ hiddenPropertyIds = [] }: CreateIssuePropertiesProps, ref) {
     const workspaceId = useWorkspaceId();
     const { data: catalog = [] } = useQuery(propertyListOptions(workspaceId));
     const setProperty = useSetIssueProperty();
@@ -72,7 +76,10 @@ export const CreateIssueProperties = forwardRef<CreateIssuePropertiesHandle>(
     );
 
     const visibleProperties = catalog.filter(
-      (property) => !property.archived && KNOWN_TYPES.has(property.type),
+      (property) =>
+        !property.archived &&
+        !hiddenPropertyIds.includes(property.id) &&
+        KNOWN_TYPES.has(property.type),
     );
     if (visibleProperties.length === 0) return null;
 

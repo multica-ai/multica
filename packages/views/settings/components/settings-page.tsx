@@ -21,6 +21,7 @@ import {
   Workflow,
   // CEREBRO-PATCH(settings-page-model-registry): FIR-2698 model registry tab icon
   Coins,
+  ListTodo,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -38,6 +39,7 @@ import { GitHubMark } from "./github-mark";
 import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 import { PropertiesTab } from "./properties-tab";
+import { IssueTab } from "./issue-tab";
 // CEREBRO-PATCH(settings-page-notifications): use cerebro notifications-tab (Phase 1b relocation + push UI)
 import { NotificationsTab } from "@multica/cerebro-notifications/views/notifications-tab";
 // CEREBRO-PATCH(settings-page-agent-profile): cerebro agent profile tab
@@ -61,10 +63,12 @@ import {
 } from "./cerebro-mobile-tab-nav";
 import type { MembersTabCerebroExtrasProp } from "./members-tab";
 
-const ACCOUNT_TAB_KEYS = ["profile", "preferences", "notifications", "tokens"] as const;
+// CEREBRO-PATCH(settings-page-issue-tab): FIR-3447 port of upstream create-field settings.
+const ACCOUNT_TAB_KEYS = ["profile", "preferences", "issue", "notifications", "tokens"] as const;
 const ACCOUNT_TAB_ICONS = {
   profile: User,
   preferences: SlidersHorizontal,
+  issue: ListTodo,
   notifications: Bell,
   tokens: Key,
 } as const;
@@ -400,6 +404,8 @@ export function SettingsPage({
             {/* CEREBRO-PATCH(settings-page-agent-profile-content): agent profile tab content */}
             <TabsContent value="agent-profile"><AgentProfileTab /></TabsContent>
             <TabsContent value="preferences"><PreferencesTab /></TabsContent>
+            {/* CEREBRO-PATCH(settings-page-issue-content): FIR-3447 create-field visibility controls. */}
+            <TabsContent value="issue"><IssueTab /></TabsContent>
             <TabsContent value="notifications"><NotificationsTab /></TabsContent>
             <TabsContent value="tokens"><TokensTab /></TabsContent>
             <TabsContent value="workspace"><WorkspaceTab /></TabsContent>

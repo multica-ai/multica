@@ -28,6 +28,7 @@
     "tabs": {
       "profile": "个人资料",
       "preferences": "偏好设置",
+      "issue": "Issue",
       "notifications": "通知",
       "tokens": "API Token",
       "general": "通用",
@@ -86,6 +87,16 @@
       "label": "显示系统通知",
       "hint": "App 未获得焦点时，新的收件箱条目通过操作系统弹出通知横幅。"
     }
+  },
+  "issue": {
+    "description": "选择各创建方式的工具栏中常驻显示的字段。隐藏的字段仍可从 ⋯ 菜单使用，有值时会自动显示。",
+    "quick_create_title": "通过智能体创建",
+    "quick_create_description": "快速创建工具栏中显示的字段。",
+    "manual_create_title": "手动创建",
+    "manual_create_description": "手动创建工具栏中显示的字段。",
+    "custom_properties_title": "自定义字段",
+    "custom_properties_description": "手动创建 issue 时显示的自定义字段。",
+    "fields": { "status": "状态", "priority": "优先级", "assignee": "负责人", "labels": "标签", "project": "项目", "due_date": "截止日期", "start_date": "开始日期" }
   },
   "tokens": {
     "title": "API Token",

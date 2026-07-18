@@ -28,6 +28,7 @@
     "tabs": {
       "profile": "Profile",
       "preferences": "Preferences",
+      "issue": "Issue",
       "notifications": "Notifications",
       "tokens": "API Tokens",
       "general": "General",
@@ -86,6 +87,16 @@
       "label": "Show system notifications",
       "hint": "Show a banner from your operating system for new inbox items when the app isn't focused."
     }
+  },
+  "issue": {
+    "description": "Choose which fields each create dialog keeps on its toolbar. Hidden fields stay available from the ⋯ menu and reappear while they hold a value.",
+    "quick_create_title": "Create with agent",
+    "quick_create_description": "Fields shown in the quick create toolbar.",
+    "manual_create_title": "Create manually",
+    "manual_create_description": "Fields shown in the manual create toolbar.",
+    "custom_properties_title": "Custom fields",
+    "custom_properties_description": "Custom fields shown when creating an issue manually.",
+    "fields": { "status": "Status", "priority": "Priority", "assignee": "Assignee", "labels": "Labels", "project": "Project", "due_date": "Due date", "start_date": "Start date" }
   },
   "tokens": {
     "title": "API Tokens",

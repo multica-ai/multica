@@ -1,7 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, Check, ChevronRight, Maximize2, Minimize2, X as XIcon } from "lucide-react";
+import {
+  ArrowLeftRight,
+  CalendarDays,
+  Check,
+  ChevronRight,
+  FolderKanban,
+  Maximize2,
+  Minimize2,
+  MoreHorizontal,
+  Settings2,
+  X as XIcon,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -16,6 +27,10 @@ import {
   useQuickCreateStore,
   type QuickCreateActorType,
 } from "@multica/core/issues/stores/quick-create-store";
+import {
+  useIssueCreateSettingsStore,
+  type QuickCreateField,
+} from "@multica/core/issues/stores/issue-create-settings-store";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import {
@@ -26,7 +41,7 @@ import {
 } from "@multica/core/runtimes";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
-import type { Agent, Squad } from "@multica/core/types";
+import type { Agent, IssuePriority, Squad } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
@@ -67,6 +82,14 @@ import { useWorkspacePaths } from "@multica/core/paths";
 // hook that auto-switches the modal to manual create when the picked agent's
 // daemon CLI is below the quick-create gate (instead of warning-only).
 import { useQuickCreateVersionAutoSwitch } from "@multica/cerebro-quick-create/views";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import { DueDatePicker, PriorityIcon, PriorityPicker } from "../issues/components";
 
 type ActorSelection =
   | { type: "agent"; id: string }
@@ -147,6 +170,7 @@ export function AgentCreatePanel({
   const setLastActor = useQuickCreateStore((s) => s.setLastActor);
   const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
   const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
+  const visibleFields = useIssueCreateSettingsStore((s) => s.quickCreateFields);
   const promptDraft = useQuickCreateStore((s) => s.prompt);
   const setPrompt = useQuickCreateStore((s) => s.setPrompt);
   const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
@@ -219,6 +243,13 @@ export function AgentCreatePanel({
     const seed = (data?.project_id as string | undefined) ?? lastProjectId;
     return seed ?? null;
   });
+  const [priority, setPriority] = useState<IssuePriority>(
+    (data?.priority as IssuePriority | undefined) ?? "none",
+  );
+  const [dueDate, setDueDate] = useState<string | null>(
+    (data?.due_date as string | undefined) ?? null,
+  );
+  const [fieldPickerOpen, setFieldPickerOpen] = useState<QuickCreateField | null>(null);
 
   // Parent-issue context — seeded by `openCreateSubIssue` when the modal is
   // opened from the "Add sub issue" entry on an existing issue. We carry it
@@ -369,6 +400,8 @@ export function AgentCreatePanel({
           : { squad_id: actor.id }),
         prompt: md,
         project_id: projectId ?? undefined,
+        ...(priority !== "none" ? { priority } : {}),
+        ...(dueDate ? { due_date: dueDate } : {}),
         parent_issue_id: parentIssueId,
         // CEREBRO-PATCH(quick-create-workflow-submit): FIR-2283 followup.
         workflow_id: workflowId || undefined,
@@ -465,6 +498,11 @@ export function AgentCreatePanel({
   // CEREBRO-PATCH(quick-create-version-autoswitch-call): FIR-33. Flip to manual
   // create when the picked agent's daemon CLI is too old; banner stays as backstop.
   useQuickCreateVersionAutoSwitch({ workspaceId: wsId, selectedAgent, onSwitchToManual: switchToManual });
+
+  const openFieldSettings = () => {
+    onClose();
+    router.push(`${p.settings()}?tab=issue`);
+  };
 
   return (
     <>
@@ -573,12 +611,10 @@ export function AgentCreatePanel({
           <div className="px-5 pb-2 text-xs text-destructive">{error}</div>
         )}
 
-        {/* Property toolbar — mirrors the manual panel's pill row so the
-            project pill sits in the same place across both modes. Agent mode
-            owns only the project (status / priority / assignee / due-date are
-            inferred from the prompt), so it's a single pill. The pick is
-            persisted per-workspace via useQuickCreateStore.lastProjectId so
-            users targeting one project skip retyping "in project X".
+        {/* Property toolbar — mirrors the manual panel's pill row. Settings →
+            Issue decides which supported fields stay visible; fields with a
+            value always remain visible and hidden fields stay reachable from
+            the overflow menu. The project pick is persisted per-workspace.
             When the modal was opened from "Add sub issue" on an existing
             issue, a read-only chip on the same row tells the user that the
             new issue will be filed as a sub-issue of that parent — the agent
@@ -587,12 +623,44 @@ export function AgentCreatePanel({
             it non-editable: changing the parent is a `Set parent` action on
             the parent itself, not a knob in the quick-create flow. */}
         <div className="flex items-center gap-1.5 px-4 pb-2 shrink-0 flex-wrap">
-          <ProjectPicker
-            projectId={projectId}
-            onUpdate={(u) => setProjectId(u.project_id ?? null)}
-            triggerRender={<PillButton />}
-            align="start"
-          />
+          {(visibleFields.includes("project") ||
+            projectId !== null ||
+            fieldPickerOpen === "project") && (
+            <ProjectPicker
+              projectId={projectId}
+              onUpdate={(u) => setProjectId(u.project_id ?? null)}
+              triggerRender={<PillButton />}
+              align="start"
+              open={fieldPickerOpen === "project" ? true : undefined}
+              onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
+            />
+          )}
+          {(visibleFields.includes("priority") ||
+            priority !== "none" ||
+            fieldPickerOpen === "priority") && (
+            <PriorityPicker
+              priority={priority}
+              onUpdate={(updates) => {
+                if (updates.priority) setPriority(updates.priority);
+              }}
+              triggerRender={<PillButton />}
+              align="start"
+              open={fieldPickerOpen === "priority" ? true : undefined}
+              onOpenChange={(open) => setFieldPickerOpen(open ? "priority" : null)}
+            />
+          )}
+          {(visibleFields.includes("due_date") ||
+            dueDate !== null ||
+            fieldPickerOpen === "due_date") && (
+            <DueDatePicker
+              dueDate={dueDate}
+              onUpdate={(updates) => setDueDate(updates.due_date ?? null)}
+              triggerRender={<PillButton />}
+              align="start"
+              open={fieldPickerOpen === "due_date" ? true : undefined}
+              onOpenChange={(open) => setFieldPickerOpen(open ? "due_date" : null)}
+            />
+          )}
           {/* CEREBRO-PATCH(quick-create-workflow-field): FIR-2283 followup — pick an Issue workflow to start the new issue on; renders nothing when none exist or the flag is off. */}
           <WorkflowSelectField
             workspaceId={wsId}
@@ -601,6 +669,43 @@ export function AgentCreatePanel({
             className="max-w-48"
             triggerRender={<PillButton />}
           />
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <PillButton
+                  aria-label={t(($) => $.create_issue.agent.more_fields_aria)}
+                  title={t(($) => $.create_issue.agent.more_fields_aria)}
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </PillButton>
+              }
+            />
+            <DropdownMenuContent align="start" className="w-52">
+              {!visibleFields.includes("project") && projectId === null && (
+                <DropdownMenuItem onClick={() => setFieldPickerOpen("project")}>
+                  <FolderKanban className="size-3.5 text-muted-foreground" />
+                  {t(($) => $.create_issue.agent.set_project)}
+                </DropdownMenuItem>
+              )}
+              {!visibleFields.includes("priority") && priority === "none" && (
+                <DropdownMenuItem onClick={() => setFieldPickerOpen("priority")}>
+                  <PriorityIcon priority="none" className="size-3.5" />
+                  {t(($) => $.create_issue.agent.set_priority)}
+                </DropdownMenuItem>
+              )}
+              {!visibleFields.includes("due_date") && dueDate === null && (
+                <DropdownMenuItem onClick={() => setFieldPickerOpen("due_date")}>
+                  <CalendarDays className="size-3.5 text-muted-foreground" />
+                  {t(($) => $.create_issue.agent.set_due_date)}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={openFieldSettings}>
+                <Settings2 className="size-3.5 text-muted-foreground" />
+                {t(($) => $.create_issue.agent.customize_fields)}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {parentIssueId && (
             <span
               data-testid="agent-sub-issue-chip"
