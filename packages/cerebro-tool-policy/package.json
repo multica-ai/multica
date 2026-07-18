@@ -10,7 +10,8 @@
   "exports": {
     ".": "./index.ts",
     "./core": "./core/index.ts",
-    "./views": "./views/index.ts"
+    "./views": "./views/index.ts",
+    "./data-source-scope": "./views/data-source-scope.ts"
   },
   "dependencies": {
     "@multica/cerebro-agentvault": "workspace:*",

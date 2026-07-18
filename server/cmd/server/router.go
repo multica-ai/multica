@@ -654,7 +654,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	avMod := cerebroagentvault.NewModule(pool)                                                                              // CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 per-agent Agent Vault broker at claim.
 	h.AgentVaultBroker = avMod.Service                                                                                      // CEREBRO-PATCH(cerebro-agentvault-broker-service): TECH-3196 expose grant-reconciling service.
 	h.PersonalBrowserSecrets = cerebroagentvault.NewClient(cerebroagentvault.LoadConfig(), cerebroConnectionsHandler.Store) // CEREBRO-PATCH(personal-browser-secure-fill): FIR-3006 server-only value bridge.
-	h.InternalBrowserQA = cerebrointernalbrowserqa.NewRunner(cerebrointernalbrowserqa.ExecCommander{})                      // CEREBRO-PATCH(internal-agent-browser-qa): FIR-3006 server-side *.internal browser verification.
+	// CEREBRO-PATCH(internal-agent-browser-qa): FIR-3006 run Chromium on the
+	// target's Sliplane server. A local runner remains available for development.
+	if verifierURL := strings.TrimSpace(os.Getenv("BROWSER_VERIFIER_URL")); verifierURL != "" {
+		if runner, runnerErr := cerebrointernalbrowserqa.NewRemoteRunner(verifierURL, os.Getenv("BROWSER_VERIFIER_TOKEN"), http.DefaultClient); runnerErr == nil {
+			h.InternalBrowserQA = runner
+		} else {
+			slog.Error("browser verifier runner is misconfigured", "error", runnerErr)
+		}
+	} else {
+		h.InternalBrowserQA = cerebrointernalbrowserqa.NewRunner(cerebrointernalbrowserqa.ExecCommander{})
+	}
 	// CEREBRO-PATCH(cerebro-agentvault-mirror-wire): FIR-1739 Part B project tool-policy credential grants onto the Agent Vault access table.
 	avMod.Service.SetGrantMirror(&chainCredentialGrantSource{policy: cerebrotoolpolicy.NewStore(pool), creds: cerebroQueries}, avMod.Store)
 	// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent access-table CRUD handler; FIR-2478 vault-listing resolves the "Agent Vault" connection.

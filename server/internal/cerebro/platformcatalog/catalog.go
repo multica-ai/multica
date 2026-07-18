@@ -890,9 +890,9 @@ var catalog = []Capability{
 	},
 	{
 		Key:           "manage_operating_system",
-		Title:         "Manage Rocks / Strategy",
+		Title:         "Manage Operating System",
 		Category:      CategoryProjects,
-		Description:   "Create, edit, or delete Rocks and Strategy items, connect them to other objects, and customise operating-system terminology.",
+		Description:   "Read and manage Operating System settings, goals, vision-plan content, meetings, org-chart seats, connections, and terminology.",
 		DescriptionZh: "创建、编辑或删除 Rocks 与 Strategy 项目，将其连接到其他对象，并自定义 operating-system 术语。",
 		Ops: []string{
 			"PUT /api/cerebro/operating-system/settings/",
@@ -918,6 +918,10 @@ var catalog = []Capability{
 			"POST /api/cerebro/rocks/{id}/check-ins",
 			"POST /api/cerebro/object-connections/",
 			"DELETE /api/cerebro/object-connections/{id}",
+			"PUT /api/cerebro/meetings/",
+			"POST /api/cerebro/org-chart/seats",
+			"PUT /api/cerebro/org-chart/seats/{id}",
+			"DELETE /api/cerebro/org-chart/seats/{id}",
 		},
 	},
 

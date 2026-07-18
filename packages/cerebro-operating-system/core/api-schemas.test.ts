@@ -15,6 +15,10 @@ import {
   strategyHistoryListSchema,
   visionPlanSchema,
   EMPTY_VISION_PLAN,
+  EMPTY_MEETING,
+  EMPTY_ORG_CHART,
+  meetingSchema,
+  orgChartSeatListSchema,
 } from "./api-schemas";
 
 describe("operating system API schemas", () => {
@@ -115,5 +119,21 @@ describe("operating system API schemas", () => {
     expect(parsed.sections[0]?.items[0]).toMatchObject({ part_label: "Target market", owner_name: "Lone", goal_connections: [{ goal_id: "g1" }] });
     expect(visionPlanSchema.safeParse({ sections: null }).success).toBe(false);
     expect(EMPTY_VISION_PLAN).toEqual({ sections: [] });
+  });
+
+  it("parses meeting configuration and safely downgrades new enum values", () => {
+    const parsed = meetingSchema.parse({
+      workspace_id: "w1", cadence_unit: "weekly", cadence_count: 2,
+      agenda: [{ id: "review", name: "Review", position: 0, binding: "future_data" }], available_note_types: null,
+    });
+    expect(parsed).toMatchObject({ cadence_unit: "manual", cadence_count: 2, agenda: [{ binding: "none" }], available_note_types: [] });
+    expect(EMPTY_MEETING.agenda).toEqual([]);
+  });
+
+  it("rejects malformed org chart seats instead of casting them", () => {
+    const parsed = orgChartSeatListSchema.parse({ seats: [{ id: "s1", workspace_id: "w1", name: "Operations", responsibilities: null, vacant: true }] });
+    expect(parsed.seats[0]).toMatchObject({ name: "Operations", responsibilities: [], vacant: true });
+    expect(orgChartSeatListSchema.safeParse({ seats: [{ id: 1 }] }).success).toBe(false);
+    expect(EMPTY_ORG_CHART).toEqual({ seats: [] });
   });
 });

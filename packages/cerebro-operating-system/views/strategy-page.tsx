@@ -31,9 +31,10 @@ interface PlanItemProps {
   goals: Rock[];
   ownerOptions: SearchSelectOption[];
   currentPeriodId?: string;
+  allowGoalConnections: boolean;
 }
 
-function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOptions, currentPeriodId }: PlanItemProps) {
+function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOptions, currentPeriodId, allowGoalConnections }: PlanItemProps) {
   const update = useUpdateVisionPlanItem(wsId);
   const remove = useDeleteVisionPlanItem(wsId);
   const connect = useCreateConnection(wsId);
@@ -90,7 +91,7 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
             save({ owner_type: ownerId ? ownerType as "member" | "agent" : undefined, owner_id: ownerId || undefined });
           }} clearLabel="No owner" placeholder="Process owner" />
         )}
-        <SearchSelect compact multiple label={`${item.title} Goals`} options={goals.map((goal) => ({ value: goal.id, label: goal.title }))} values={selectedGoals} onValuesChange={changeGoals} placeholder="Connect Goals" actionLabel={currentPeriodId ? "Create linked Goal" : undefined} onAction={currentPeriodId ? createLinkedGoal : undefined} />
+        {allowGoalConnections && <SearchSelect compact multiple label={`${item.title} Goals`} options={goals.map((goal) => ({ value: goal.id, label: goal.title }))} values={selectedGoals} onValuesChange={changeGoals} placeholder="Connect Goals" actionLabel={currentPeriodId ? "Create linked Goal" : undefined} onAction={currentPeriodId ? createLinkedGoal : undefined} />}
       </div>
       <div className="flex items-start gap-1 opacity-60 group-hover:opacity-100">
         <button type="button" aria-label={`Move ${item.title} up`} disabled={itemIndex === 0} onClick={() => move(-1)} className="h-8 rounded px-1.5 text-muted-foreground hover:bg-muted disabled:opacity-30">↑</button>
@@ -141,6 +142,7 @@ function PlanSection({ section, index, sections, wsId, goals, ownerOptions, curr
 
   const missingParts = section.section_type === "structured" ? MARKETING_PARTS.filter((part) => !section.items.some((item) => item.part_label === part)) : [];
   const activeItems = section.items.filter((item) => item.state === "active");
+  const allowGoalConnections = section.key === "one-year-plan";
   return (
     <section className="rounded-xl border bg-card p-4 shadow-sm">
       <header className="flex items-center gap-2 border-b pb-3">
@@ -151,7 +153,7 @@ function PlanSection({ section, index, sections, wsId, goals, ownerOptions, curr
         <button type="button" aria-label={`Delete ${section.name} section`} onClick={() => { if (window.confirm(`Delete ${section.name} and its items?`)) deleteSection.mutate(section.id); }} className="h-8 rounded px-2 text-xs text-muted-foreground hover:bg-muted hover:text-destructive">Delete</button>
       </header>
       <div className="mt-3 grid gap-2">
-        {activeItems.map((item, itemIndex) => <PlanItem key={item.id} item={item} itemIndex={itemIndex} siblingItems={activeItems} section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} />)}
+        {activeItems.map((item, itemIndex) => <PlanItem key={item.id} item={item} itemIndex={itemIndex} siblingItems={activeItems} section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} allowGoalConnections={allowGoalConnections} />)}
         {missingParts.length > 0 && <div className="flex flex-wrap gap-1.5">{missingParts.map((part) => <button key={part} type="button" onClick={() => addItem(part, part)} className="rounded-full border border-dashed px-2.5 py-1 text-xs text-muted-foreground hover:border-foreground hover:text-foreground">+ {part}</button>)}</div>}
         <input aria-label={`Add item to ${section.name}`} value={newItem} onChange={(event) => setNewItem(event.target.value)} onKeyDown={onNewItemKeyDown} placeholder={section.section_type === "process" ? "+ Add process and press Enter" : "+ Add item and press Enter"} className="h-9 rounded-md border border-dashed bg-transparent px-3 text-sm text-muted-foreground outline-none focus:border-ring focus:text-foreground" />
       </div>
@@ -196,7 +198,7 @@ export function StrategyPage() {
         </header>
         {addingSection && <div className="flex gap-2 rounded-xl border border-dashed bg-card p-3"><input autoFocus aria-label="New section name" value={sectionName} onChange={(event) => setSectionName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addSection(); }} placeholder="Section name" className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" /><button type="button" onClick={addSection} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Add</button><button type="button" onClick={() => setAddingSection(false)} className="h-10 rounded-md border px-4 text-sm">Cancel</button></div>}
         {plan.isLoading ? <p>Loading {terminology.vision_plan}…</p> : plan.isError ? <p role="alert">{terminology.vision_plan} could not be loaded</p> : <div className="grid gap-3">{sections.map((section, index) => <PlanSection key={section.id} section={section} index={index} sections={sections} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={periods.data?.periods[0]?.id} />)}</div>}
-        <footer className="rounded-xl border border-dashed bg-card px-5 py-4 text-sm text-muted-foreground"><strong className="text-foreground">One plan, shared context.</strong> Connected {terminology.rocks} stay current on both pages.</footer>
+        <footer className="rounded-xl border border-dashed bg-card px-5 py-4 text-sm text-muted-foreground"><strong className="text-foreground">One plan, shared context.</strong> Items in One-Year Plan can connect to {terminology.rocks}; the remaining sections stay focused on the written plan.</footer>
       </div>
     </main>
   );

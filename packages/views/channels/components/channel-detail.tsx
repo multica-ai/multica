@@ -3,7 +3,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Hash, MessageSquare, Settings } from "lucide-react"; // CEREBRO-PATCH(channel-settings-sheet): TECH-3698 — single gear opens the consolidated settings sheet.
+import { Hash, MessageSquare, MoreHorizontal } from "lucide-react"; // CEREBRO-PATCH(dm-header-menu): FIR-3387 — the approved 3-dot trigger replaces the settings gear.
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
@@ -322,7 +322,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
         <div className="flex items-center gap-2">
           <ChannelHeaderIcon channel={channel} />
           <ChannelTitle channel={channel} display={display} />
-          {display.otherParticipants.length > 0 && (
+          {/* CEREBRO-PATCH(dm-header-menu): FIR-3387 — a DM already renders its peer avatar as ChannelHeaderIcon. */}
+          {channel.kind !== "dm" && display.otherParticipants.length > 0 && (
             <button
               type="button"
               onClick={() => setParticipantsOpen(true)}
@@ -337,21 +338,21 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
             <ChannelMessageSearchButton active={messageSearch.open} onToggle={messageSearch.toggle} />
             {/* CEREBRO-PATCH(channel-cost-chip): FIR-39 channel-wide total cost. */}
             <ChannelCostChip channelId={channelId} />
-            {/* CEREBRO-PATCH(channel-settings-sheet): TECH-3698 — one gear opens
+            {/* CEREBRO-PATCH(dm-header-menu): FIR-3387 — one 3-dot trigger opens
                 the consolidated settings (Edit, Permissions, Agent mentions,
-                Pin, Archive). */}
+                Copy link, Pin, Archive). */}
             <Tooltip>
               <TooltipTrigger
                 render={
                   <button
                     type="button"
                     onClick={() => setSettingsOpen(true)}
-                    aria-label="Channel settings"
+                    aria-label="Conversation menu"
                     className="inline-flex size-7 items-center justify-center rounded border text-muted-foreground hover:bg-accent hover:text-foreground"
                   />
                 }
               >
-                <Settings className="size-3.5" />
+                <MoreHorizontal className="size-3.5" /> {/* CEREBRO-PATCH(dm-header-menu): FIR-3387 — approved 3-dot icon. */}
               </TooltipTrigger>
               <TooltipContent side="bottom">Settings</TooltipContent>
             </Tooltip>

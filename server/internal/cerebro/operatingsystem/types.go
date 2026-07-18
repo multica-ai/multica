@@ -261,6 +261,67 @@ type ObjectConnectionInput struct {
 	Provenance       string `json:"provenance,omitempty"`
 }
 
+type MeetingAgendaSectionInput struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Position int32  `json:"position"`
+	Binding  string `json:"binding"`
+}
+
+type MeetingAgendaSectionResponse struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Position int32  `json:"position"`
+	Binding  string `json:"binding"`
+}
+
+type MeetingNoteTypeResponse struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	CadenceUnit  string `json:"cadence_unit"`
+	CadenceCount int32  `json:"cadence_count"`
+	Enabled      bool   `json:"enabled"`
+}
+
+type MeetingConfigInput struct {
+	NoteTypeID   string                      `json:"note_type_id,omitempty"`
+	CadenceUnit  string                      `json:"cadence_unit"`
+	CadenceCount int32                       `json:"cadence_count"`
+	Agenda       []MeetingAgendaSectionInput `json:"agenda"`
+}
+
+type MeetingConfigResponse struct {
+	WorkspaceID        string                         `json:"workspace_id"`
+	NoteTypeID         string                         `json:"note_type_id,omitempty"`
+	NoteTypeName       string                         `json:"note_type_name,omitempty"`
+	CadenceUnit        string                         `json:"cadence_unit"`
+	CadenceCount       int32                          `json:"cadence_count"`
+	Agenda             []MeetingAgendaSectionResponse `json:"agenda"`
+	AvailableNoteTypes []MeetingNoteTypeResponse      `json:"available_note_types"`
+}
+
+type OrgChartSeatInput struct {
+	ParentID         string   `json:"parent_id,omitempty"`
+	Name             string   `json:"name"`
+	Responsibilities []string `json:"responsibilities"`
+	OwnerType        string   `json:"owner_type,omitempty"`
+	OwnerID          string   `json:"owner_id,omitempty"`
+	Position         int32    `json:"position"`
+}
+
+type OrgChartSeatResponse struct {
+	ID               string   `json:"id"`
+	WorkspaceID      string   `json:"workspace_id"`
+	ParentID         string   `json:"parent_id,omitempty"`
+	Name             string   `json:"name"`
+	Responsibilities []string `json:"responsibilities"`
+	OwnerType        string   `json:"owner_type,omitempty"`
+	OwnerID          string   `json:"owner_id,omitempty"`
+	OwnerName        string   `json:"owner_name,omitempty"`
+	Vacant           bool     `json:"vacant"`
+	Position         int32    `json:"position"`
+}
+
 type ObjectConnectionResponse struct {
 	ID               string `json:"id"`
 	WorkspaceID      string `json:"workspace_id"`

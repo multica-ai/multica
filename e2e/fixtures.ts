@@ -27,6 +27,7 @@ export class TestApiClient {
   private createdIssueIds: string[] = [];
   private createdInboxItemIds: string[] = [];
   private createdProjectIds: string[] = [];
+  private createdSprintIds: string[] = [];
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
@@ -245,6 +246,39 @@ export class TestApiClient {
     await this.authedFetch(`/api/projects/${id}`, { method: "DELETE" });
   }
 
+  async createProjectSprint(
+    projectId: string,
+    input: {
+      name: string;
+      start_date: string;
+      end_date: string;
+      status?: "planned" | "active" | "completed";
+      goal?: string;
+    },
+  ) {
+    const res = await this.authedFetch(
+      `/api/cerebro/projects/${projectId}/sprints`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    );
+    if (!res.ok) {
+      throw new Error(
+        `createProjectSprint failed: ${res.status} ${await res.text()}`,
+      );
+    }
+    const sprint = await res.json();
+    this.createdSprintIds.push(sprint.id);
+    return sprint;
+  }
+
+  async deleteSprint(id: string) {
+    await this.authedFetch(`/api/cerebro/sprints/${id}`, {
+      method: "DELETE",
+    });
+  }
+
   async dismissStarterContent() {
     if (!this.workspaceId) {
       throw new Error("ensureWorkspace must run before dismissStarterContent");
@@ -299,6 +333,15 @@ export class TestApiClient {
       }
     }
     this.createdIssueIds = [];
+
+    for (const id of this.createdSprintIds) {
+      try {
+        await this.deleteSprint(id);
+      } catch {
+        /* ignore — may already be deleted with its project */
+      }
+    }
+    this.createdSprintIds = [];
 
     for (const id of this.createdProjectIds) {
       try {
