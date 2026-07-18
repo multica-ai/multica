@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, FlaskConical, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, FlaskConical, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { cerebroWorkflowsListOptions } from "@multica/cerebro-workflows/core";
@@ -13,19 +13,10 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@multica/ui/components/ui/table";
-import { createEval, createEvalBinding, deleteEval, deleteEvalBinding } from "../api";
+import { createEval, createEvalBinding, deleteEval, deleteEvalBinding, updateEval } from "../api";
 import { evalBindingsOptions, evalKeys, evalRunsOptions, evalsListOptions } from "../queries";
+import { buildWriteInput, EMPTY_FORM, formFromEval, GRADER_MATCHES, type DraftTask } from "./form";
 import type { CerebroEval } from "../types";
-
-interface DraftForm {
-  key: string; title: string; version: string; objective: string; targetKind: string;
-  targetLocator: string; targetRef: string; sourceRepository: string; sourceCommit: string; sourcePath: string;
-}
-
-const EMPTY_FORM: DraftForm = {
-  key: "", title: "", version: "1.0.0", objective: "", targetKind: "workflow", targetLocator: "",
-  targetRef: "main", sourceRepository: "https://github.com/firtal-group/firtal-evals", sourceCommit: "", sourcePath: "",
-};
 
 export function EvalsPage() {
   const workflowsEnabled = useFeatureFlag("cerebro_workflows");
@@ -36,7 +27,8 @@ export function EvalsPage() {
   const workspaceId = workspace?.id ?? "";
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState<DraftForm>(EMPTY_FORM);
+  const [editing, setEditing] = useState<CerebroEval | null>(null);
+  const [form, setForm] = useState(EMPTY_FORM);
   const [bindingEvalId, setBindingEvalId] = useState("");
   const [bindingWorkflowId, setBindingWorkflowId] = useState("");
   const [selectedEvalId, setSelectedEvalId] = useState("");
@@ -46,19 +38,20 @@ export function EvalsPage() {
   const bindingsQuery = useQuery(evalBindingsOptions(workspaceId));
   const runsQuery = useQuery(evalRunsOptions(workspaceId, selectedEvalId));
 
-  const createMutation = useMutation({
-    mutationFn: () => createEval({
-      key: form.key.trim(), version: form.version.trim(), title: form.title.trim(), description: "",
-      status: "draft", owner: { team: "Firtal AI" }, objective: form.objective.trim(),
-      target: { kind: form.targetKind, locator: form.targetLocator.trim(), ref: form.targetRef.trim() },
-      datasets: [], graders: [], thresholds: [], runner: {},
-      source: { repository: form.sourceRepository.trim(), commit: form.sourceCommit.trim(), path: form.sourcePath.trim() },
-    }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: evalKeys.list(workspaceId) });
-      setForm(EMPTY_FORM);
-      setShowCreate(false);
+  const closeForm = () => { setForm(EMPTY_FORM); setEditing(null); setShowCreate(false); };
+  const startCreate = () => { setForm(EMPTY_FORM); setEditing(null); setShowCreate(true); };
+  const startEdit = (item: CerebroEval) => { setForm(formFromEval(item)); setEditing(item); setShowCreate(true); };
+
+  const addTask = () => setForm((f) => ({ ...f, tasks: [...f.tasks, { id: crypto.randomUUID(), situation: "", expected: "", critical: false }] }));
+  const updateTask = (id: string, patch: Partial<DraftTask>) => setForm((f) => ({ ...f, tasks: f.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
+  const removeTask = (id: string) => setForm((f) => ({ ...f, tasks: f.tasks.filter((t) => t.id !== id) }));
+
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      const input = buildWriteInput(form, editing ?? undefined);
+      return editing ? updateEval(editing.id, input) : createEval(input);
     },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: evalKeys.list(workspaceId) }); closeForm(); },
   });
   const deleteMutation = useMutation({ mutationFn: deleteEval, onSuccess: () => queryClient.invalidateQueries({ queryKey: evalKeys.list(workspaceId) }) });
   const bindMutation = useMutation({
@@ -74,7 +67,7 @@ export function EvalsPage() {
 
   if (!workflowsEnabled || !evalsEnabled) return null;
   if (!workspace) return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading workspace context…</div>;
-  const submit = (event: FormEvent) => { event.preventDefault(); createMutation.mutate(); };
+  const submit = (event: FormEvent) => { event.preventDefault(); saveMutation.mutate(); };
 
   return (
     <div className="flex h-full flex-col">
@@ -83,12 +76,12 @@ export function EvalsPage() {
           <Button size="icon-sm" variant="ghost" aria-label="Back to workflows" onClick={() => navigation.push(`/${workspace.slug}/workflows`)}><ArrowLeft /></Button>
           <div><h1 className="text-sm font-semibold">Evals</h1><p className="text-[11px] text-muted-foreground">Versioned quality contracts and workflow gates</p></div>
         </div>
-        <Button size="sm" onClick={() => setShowCreate((value) => !value)}><Plus className="size-4" />New eval</Button>
+        <Button size="sm" onClick={() => (showCreate ? closeForm() : startCreate())}><Plus className="size-4" />New eval</Button>
       </PageHeader>
       <div className="flex-1 overflow-y-auto p-6">
         <div className="mx-auto flex max-w-6xl flex-col gap-6">
           {showCreate && <form onSubmit={submit} className="grid gap-4 rounded-lg border bg-card p-4 md:grid-cols-2">
-            <div className="md:col-span-2"><h2 className="text-sm font-semibold">Create draft eval</h2><p className="text-xs text-muted-foreground">The draft becomes active only after datasets, graders, and thresholds are registered.</p></div>
+            <div className="md:col-span-2"><h2 className="text-sm font-semibold">{editing ? `Edit ${editing.title}` : "Create draft eval"}</h2><p className="text-xs text-muted-foreground">{editing ? "Change the eval — tasks, grader, and pass rate are all editable here." : "Add the tasks, pick a grader, and set the pass rate. Saved as a draft you can activate later."}</p></div>
             <Field label="Key"><Input required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} placeholder="customer-service-quality" /></Field>
             <Field label="Version"><Input required value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })} /></Field>
             <Field label="Title"><Input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
@@ -99,8 +92,29 @@ export function EvalsPage() {
             <Field label="Source commit"><Input value={form.sourceCommit} onChange={(e) => setForm({ ...form, sourceCommit: e.target.value })} placeholder="Pinned on activation" /></Field>
             <Field label="Source path"><Input required value={form.sourcePath} onChange={(e) => setForm({ ...form, sourcePath: e.target.value })} placeholder="evals/<id>/eval.json" /></Field>
             <Field label="Objective" className="md:col-span-2"><Textarea required value={form.objective} onChange={(e) => setForm({ ...form, objective: e.target.value })} /></Field>
-            {createMutation.isError && <p className="text-sm text-destructive md:col-span-2">{createMutation.error instanceof Error ? createMutation.error.message : "Failed to create eval"}</p>}
-            <div className="flex justify-end gap-2 md:col-span-2"><Button type="button" variant="ghost" onClick={() => setShowCreate(false)}>Cancel</Button><Button type="submit" disabled={createMutation.isPending}>Create draft</Button></div>
+
+            <div className="md:col-span-2 flex flex-col gap-2 rounded-md border p-3">
+              <div className="flex items-center justify-between"><div><h3 className="text-xs font-semibold">Tasks</h3><p className="text-[11px] text-muted-foreground">Each task is a situation the target must handle and the answer it should reach. Mark a task critical if failing it must sink the whole run.</p></div><Button type="button" size="sm" variant="ghost" onClick={addTask}><Plus className="size-4" />Add task</Button></div>
+              {form.tasks.length === 0 && <p className="text-xs text-muted-foreground">No tasks yet.</p>}
+              {form.tasks.map((task, i) => <div key={task.id} className="grid items-start gap-2 rounded-md border bg-background/50 p-2 md:grid-cols-[1fr_1fr_auto_auto]">
+                <Textarea className="min-h-9" value={task.situation} onChange={(e) => updateTask(task.id, { situation: e.target.value })} placeholder={`Situation ${i + 1}`} />
+                <Input value={task.expected} onChange={(e) => updateTask(task.id, { expected: e.target.value })} placeholder="Expected answer" />
+                <label className="flex h-9 items-center gap-1.5 whitespace-nowrap text-xs"><input type="checkbox" checked={task.critical} onChange={(e) => updateTask(task.id, { critical: e.target.checked })} />Critical</label>
+                <Button type="button" size="icon-sm" variant="ghost" aria-label={`Remove task ${i + 1}`} onClick={() => removeTask(task.id)}><Trash2 className="size-4 text-destructive" /></Button>
+              </div>)}
+            </div>
+
+            <div className="md:col-span-2 grid gap-3 rounded-md border p-3 md:grid-cols-2">
+              <Field label="Grader"><select className="h-9 rounded-md border bg-background px-3 text-sm" value={form.graderType} onChange={(e) => setForm({ ...form, graderType: e.target.value })}><option value="ai_judge">AI judge</option><option value="hard_rule">Hard rule (string match)</option></select></Field>
+              {form.graderType === "ai_judge" ? <>
+                <Field label="Judge model (optional)"><Input value={form.graderModel} onChange={(e) => setForm({ ...form, graderModel: e.target.value })} placeholder="Default judge model" /></Field>
+                <Field label="Rubric (optional)" className="md:col-span-2"><Textarea value={form.graderRubric} onChange={(e) => setForm({ ...form, graderRubric: e.target.value })} placeholder="Extra grading guidance for the judge" /></Field>
+              </> : <Field label="Match"><select className="h-9 rounded-md border bg-background px-3 text-sm" value={form.graderMatch} onChange={(e) => setForm({ ...form, graderMatch: e.target.value })}>{GRADER_MATCHES.map((m) => <option key={m} value={m}>{m}</option>)}</select></Field>}
+              <Field label="Pass rate (%)"><Input type="number" min={0} max={100} value={form.passRate} onChange={(e) => setForm({ ...form, passRate: e.target.value })} /></Field>
+              <label className="flex items-end gap-1.5 pb-2 text-xs font-medium"><input type="checkbox" checked={form.requireAllCritical} onChange={(e) => setForm({ ...form, requireAllCritical: e.target.checked })} />Every critical task must pass</label>
+            </div>
+            {saveMutation.isError && <p className="text-sm text-destructive md:col-span-2">{saveMutation.error instanceof Error ? saveMutation.error.message : "Failed to save eval"}</p>}
+            <div className="flex justify-end gap-2 md:col-span-2"><Button type="button" variant="ghost" onClick={closeForm}>Cancel</Button><Button type="submit" disabled={saveMutation.isPending}>{editing ? "Save changes" : "Create draft"}</Button></div>
           </form>}
 
           <section className="flex flex-col gap-3">
@@ -113,7 +127,7 @@ export function EvalsPage() {
                 <TableCell className="text-xs"><div>{String(item.target.kind ?? "Unknown")}</div><div className="max-w-[220px] truncate text-muted-foreground">{String(item.target.locator ?? "")}</div></TableCell>
                 <TableCell className="font-mono text-xs">{item.version}</TableCell><TableCell><Badge variant={item.status === "active" ? "default" : "secondary"}>{item.status}</Badge></TableCell>
                 <TableCell className="max-w-[220px] truncate text-xs">{String(item.source.path ?? item.source.repository ?? "Not pinned")}</TableCell>
-                <TableCell className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="ghost" onClick={() => setSelectedEvalId(item.id)}>Runs</Button><Button size="icon-sm" variant="ghost" aria-label={`Delete ${item.title}`} onClick={() => confirm(`Delete eval "${item.title}"?`) && deleteMutation.mutate(item.id)}><Trash2 className="size-4 text-destructive" /></Button></div></TableCell>
+                <TableCell className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="ghost" onClick={() => setSelectedEvalId(item.id)}>Runs</Button><Button size="icon-sm" variant="ghost" aria-label={`Edit ${item.title}`} onClick={() => startEdit(item)}><Pencil className="size-4" /></Button><Button size="icon-sm" variant="ghost" aria-label={`Delete ${item.title}`} onClick={() => confirm(`Delete eval "${item.title}"?`) && deleteMutation.mutate(item.id)}><Trash2 className="size-4 text-destructive" /></Button></div></TableCell>
               </TableRow>)}
             </TableBody></Table>
           </section>
