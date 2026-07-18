@@ -21,7 +21,7 @@ multica daemon start
 起動時にデーモンは 4 つのことを行います。
 
 1. ログイン時に保存された認証情報を読み込みます
-2. `PATH` にインストールされた AI コーディングツールを検出します（内蔵 14 種: [Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[CodeBuddy](/providers#codebuddy)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)、[Qoder](/providers#qoder)、[Trae CLI](/providers#trae)）
+2. `PATH` にインストールされた AI コーディングツールを検出します（内蔵 16 種: [Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[CodeBuddy](/providers#codebuddy)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)、[Qoder](/providers#qoder)、[Trae CLI](/providers#trae)、[DevEco Code](/providers#deveco-code)、[Grok](/providers#grok)）
 3. 検出した各ツールに対するランタイムとともに、自身をサーバーに登録します
 4. **3 秒ごと**に取得すべきタスクがないかポーリングし、**15 秒ごとにハートビートを送信**し続けます
 
@@ -60,7 +60,31 @@ graph TD
 
 ## カスタムランタイムプロファイル
 
-組み込み provider 検出は一般的なツールを対象にしていますが、Multica が対応するプロトコルファミリーで動作し、ワークスペース固有の起動コマンドが必要な AI CLI には **custom runtime profile** を定義できます。Runtimes UI か CLI で管理します。
+組み込み provider 検出は一般的なツールを対象にしています。Multica が対応するプロトコルファミリーで動作し、別の起動コマンドが必要な AI CLI には **custom runtime profile** を定義できます。たとえば、Codex の社内 wrapper、バージョンを固定した実行ファイル、モデル引数を事前設定したチーム CLI などです。
+
+Claude Code、Codex、Kimi などの組み込み provider を通常のコマンドで使うだけなら、カスタムプロファイルは不要です。デーモンが自動的に検出します。
+
+### 作成前の確認
+
+- Multica デーモンが動作する少なくとも 1 台のマシンにカスタムコマンドをインストールし、同じコマンドがそのマシンのターミナルで動くことを確認します。
+- ツールが UI に表示されるベースプロトコルファミリーのいずれかを実装していることを確認します。ファミリーの選択は Multica に通信方法を伝えるもので、互換性のない CLI を互換にするものではありません。
+- プロファイルを作成、編集、削除できるのはワークスペースの owner または admin だけです。
+
+### Runtimes UI から作成する
+
+1. **Runtimes** を開き、コマンドをインストールしたマシンを選択します。
+2. **カスタムランタイムを追加**を選択します。
+3. コマンドが実装しているベースプロトコルファミリーを選びます。
+4. 表示名と、固定引数を含むターミナルで実行するコマンドを入力します。チーム向けに用途の説明も追加できます。
+5. **ランタイムを作成**を選択します。
+
+プロファイル定義はワークスペース全体に属し、接続済みのすべてのデーモンへ同期されます。各マシンはそのコマンドを解決できる場合にだけ独自のランタイムを登録します。作成を開始したマシンには待機中の **登録中** 行が一時的に表示されます。オンラインにならない場合は、そのマシンでコマンドがインストールされ、デーモンから見えることを確認してください。
+
+プロファイルを作成しても CLI のインストール、認証、他のマシンへのコピーは行われません。このランタイムを提供する各マシンで、基盤となるツールを個別にインストールしてログインしてください。
+
+### CLI から管理する
+
+同じワークスペースプロファイルを CLI から管理できます。
 
 ```bash
 multica runtime profile list
@@ -68,6 +92,8 @@ multica runtime profile create --display-name "Composer" --protocol-family codex
 multica runtime profile update <profile-id> --command-name agent
 multica runtime profile delete <profile-id>
 ```
+
+組み込みランタイムとカスタムランタイムは同じマシン一覧に表示されます。カスタムランタイム行の操作メニューから、プロファイルを編集または削除できます。プロファイルを削除すると、デーモンの同期後に登録済みランタイムインスタンスも削除されます。エージェントがまだ依存している場合、削除はブロックされることがあります。
 
 入力するコマンドは shell 文字列ではなく argv 形式です。Multica は実行ファイル名と固定引数を保存し、デーモンは `exec.Command(command_name, fixed_args...)` で直接起動します。通常の引数、引用符、バックスラッシュエスケープは使えますが、パイプ、リダイレクト、`&&`、`;`、バッククォート、`$VAR` / `$(...)` 展開は使えません。shell の動作が必要な場合は wrapper script を使ってください。
 現在、コマンドと引数の解析は Runtimes UI が担当します。CLI の profile コマンドは profile 行とローカルのパス上書きを管理します。
@@ -131,4 +157,4 @@ Multica は 2 つの層で同時実行数の制限を適用します。
 ## 次へ
 
 - [タスク](/tasks) — デーモンがタスクを取得した後の全ライフサイクル
-- [プロバイダー対照表](/providers) — 14 種の AI コーディングツールの機能の違い
+- [プロバイダー対照表](/providers) — 16 種の AI コーディングツールの機能の違い

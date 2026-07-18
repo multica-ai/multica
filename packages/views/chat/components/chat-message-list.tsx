@@ -52,6 +52,8 @@ interface ChatMessageListProps {
   hasOlderMessages?: boolean;
   isFetchingOlderMessages?: boolean;
   onLoadOlderMessages?: () => void;
+  /** Transform assistant task text for embedded chat protocols before render/copy. */
+  transformContent?: (content: string) => string;
 }
 
 // ─── Virtuoso chrome ─────────────────────────────────────────────────────
@@ -122,6 +124,7 @@ export function ChatMessageList({
   hasOlderMessages = false,
   isFetchingOlderMessages = false,
   onLoadOlderMessages,
+  transformContent,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -130,7 +133,9 @@ export function ChatMessageList({
     scrollRef.current = node;
     setScrollContainerEl(node);
   }, []);
-  const fadeStyle = useScrollFade(scrollRef);
+  // Soft edge fade hinting more content above/below. Kept small so it barely
+  // grazes full-bleed previews (image / HTML) at the edges.
+  const fadeStyle = useScrollFade(scrollRef, 16);
 
   const pendingTaskId = pendingTask?.task_id ?? null;
 
@@ -154,8 +159,8 @@ export function ChatMessageList({
   // the array reference when a duplicate event arrives, so this recomputes
   // only when a genuinely new message lands — not on unrelated re-renders.
   const liveTimeline: ChatTimelineItem[] = useMemo(
-    () => buildTimeline(liveTaskMessages ?? []),
-    [liveTaskMessages],
+    () => transformTimeline(buildTimeline(liveTaskMessages ?? []), transformContent),
+    [liveTaskMessages, transformContent],
   );
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
   const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
@@ -189,6 +194,16 @@ export function ChatMessageList({
         customScrollParent={scrollContainerEl}
         data={messages}
         firstItemIndex={firstIndex}
+        // Open pinned to the newest message. The list is remounted per session
+        // (`key={activeSessionId}` upstream), so this initial position is
+        // re-applied on every session switch. Without it a fresh Virtuoso
+        // renders from the top and the only thing that can scroll it down is
+        // `followOutput`, which reacts to post-mount data growth — leaving the
+        // landing spot racy: cached sessions resolve synchronously and stick at
+        // the top, while fetched ones sometimes catch a growth tick and land at
+        // the bottom. `align: "end"` bottom-aligns even a last message taller
+        // than the viewport, so switching sessions always shows the latest reply.
+        initialTopMostItemIndex={{ index: "LAST", align: "end" }}
         increaseViewportBy={{ top: 400, bottom: 600 }}
         atBottomThreshold={120}
         atBottomStateChange={setIsNearBottom}
@@ -206,6 +221,7 @@ export function ChatMessageList({
             <MessageBubble
               message={msg}
               isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
+              transformContent={transformContent}
             />
           </div>
         )}
@@ -252,9 +268,11 @@ export function ChatMessageSkeleton() {
 const MessageBubble = memo(function MessageBubble({
   message,
   isPending,
+  transformContent,
 }: {
   message: ChatMessage;
   isPending: boolean;
+  transformContent?: (content: string) => string;
 }) {
   if (message.role === "user") {
     return (
@@ -277,15 +295,23 @@ const MessageBubble = memo(function MessageBubble({
     );
   }
 
-  return <AssistantMessage message={message} isPending={isPending} />;
+  return (
+    <AssistantMessage
+      message={message}
+      isPending={isPending}
+      transformContent={transformContent}
+    />
+  );
 });
 
 function AssistantMessage({
   message,
   isPending,
+  transformContent,
 }: {
   message: ChatMessage;
   isPending: boolean;
+  transformContent?: (content: string) => string;
 }) {
   const taskId = message.task_id;
   const canFetchTaskMessages = isTaskMessageTaskId(taskId);
@@ -300,8 +326,8 @@ function AssistantMessage({
 
   // Same memoization rationale as the live timeline in ChatMessageList.
   const timeline: ChatTimelineItem[] = useMemo(
-    () => buildTimeline(taskMessages ?? []),
-    [taskMessages],
+    () => transformTimeline(buildTimeline(taskMessages ?? []), transformContent),
+    [taskMessages, transformContent],
   );
 
   // Failure bubble path: when the server's FailTask wrote a failure
@@ -346,6 +372,18 @@ function AssistantMessage({
         isPending={isPending}
       />
     </div>
+  );
+}
+
+function transformTimeline(
+  timeline: ChatTimelineItem[],
+  transformContent?: (content: string) => string,
+): ChatTimelineItem[] {
+  if (!transformContent) return timeline;
+  return timeline.map((item) =>
+    item.type === "text" && item.content
+      ? { ...item, content: transformContent(item.content) }
+      : item,
   );
 }
 

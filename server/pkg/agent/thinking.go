@@ -666,6 +666,13 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"high":   true,
 		"xhigh":  true,
 	},
+	// Grok 4.5's documented --effort levels. It cannot disable reasoning and
+	// does not accept none, minimal, or xhigh.
+	"grok": {
+		"low":    true,
+		"medium": true,
+		"high":   true,
+	},
 }
 
 // IsKnownThinkingValue reports whether `value` is a recognised effort

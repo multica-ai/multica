@@ -1,7 +1,8 @@
 {
   "page": {
     "title": "Chat",
-    "select_prompt": "Pick a conversation, or start a new one with +"
+    "select_prompt": "Pick a conversation, or start a new one with +",
+    "agent_link_no_access": "You don't have access to chat with this agent."
   },
   "fab": {
     "running": "Multica is working...",
@@ -18,6 +19,7 @@
     "send_tooltip": "Send",
     "stop_tooltip": "Stop",
     "send_failed_toast": "Failed to send message",
+    "send_blocked_toast": "Message not sent — you no longer have permission to use this agent",
     "attachment_bind_failed_toast": "Message sent, but files were not attached. Please try again in a moment.",
     "add_tooltip": "Add",
     "upload_file": "Image or files"

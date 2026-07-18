@@ -20,6 +20,7 @@ import {
   Pin,
   PinOff,
   ListX,
+  AppWindow,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -56,6 +57,7 @@ import {
   type Tab,
 } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
+import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 const TAB_ICONS: Record<string, LucideIcon> = {
   Inbox,
@@ -69,6 +71,18 @@ const TAB_ICONS: Record<string, LucideIcon> = {
 
 const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
+
+// Chrome-style merged tab: the active tab shares the content surface's fill
+// and flares into it through concave bottom corners. Each flare is a small
+// square whose radial gradient carves a quarter-circle notch (shell shows
+// through), strokes a 1px arc that continues the tab's side border into the
+// content card's top ring, and fills the rest with the surface color. The
+// 0.4px stop spread anti-aliases the arc.
+const TAB_FLARE_RADIUS = 10;
+const tabFlareBackground = (side: "left" | "right") => {
+  const r = TAB_FLARE_RADIUS;
+  return `radial-gradient(circle at top ${side}, transparent ${r - 1.2}px, var(--surface-border) ${r - 0.8}px, var(--surface-border) ${r - 0.2}px, var(--page-canvas) ${r + 0.2}px)`;
+};
 
 type TabSnapshot = {
   workspaceSlug: string | null;
@@ -158,6 +172,7 @@ function SortableTabItem({
   canCloseOthers,
   isNew,
   shouldReduceMotion,
+  showSeparator,
 }: {
   tab: Tab;
   isActive: boolean;
@@ -170,11 +185,17 @@ function SortableTabItem({
   canCloseOthers: boolean;
   isNew: boolean;
   shouldReduceMotion: boolean;
+  /**
+   * Hairline on the tab's left edge — hidden next to the active tab, and
+   * faded out while either of the two tabs it divides is hovered.
+   */
+  showSeparator: boolean;
 }) {
   const setActiveTab = useTabStore((s) => s.setActiveTab);
   const closeTab = useTabStore((s) => s.closeTab);
   const closeOtherTabs = useTabStore((s) => s.closeOtherTabs);
   const togglePin = useTabStore((s) => s.togglePin);
+  const issueWindowPath = parseIssueWindowPath(tab.url);
 
   const {
     attributes,
@@ -195,7 +216,7 @@ function SortableTabItem({
     transform: CSS.Transform.toString(transform),
     transition,
     WebkitAppRegion: "no-drag",
-    zIndex: isDragging ? 10 : undefined,
+    zIndex: isDragging ? 20 : undefined,
   } as React.CSSProperties;
 
   const handleClick = () => {
@@ -215,6 +236,14 @@ function SortableTabItem({
 
   const stopDragOnAction = (e: React.PointerEvent) => {
     e.stopPropagation();
+  };
+
+  const handleOpenAsWindow = () => {
+    if (!issueWindowPath) return;
+    void window.desktopAPI.openIssueWindow({
+      path: issueWindowPath.path,
+      title: tab.title,
+    });
   };
 
   // Pinned tabs keep their full title (RFC §3 D1v-ii FINAL). The only visual
@@ -243,11 +272,11 @@ function SortableTabItem({
       title={tab.pinned ? `${tab.title} (pinned)` : undefined}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       className={cn(
-        "group flex size-full min-w-0 items-center gap-1.5 rounded-md px-2 text-xs transition-colors",
+        "group relative flex size-full min-w-0 items-center gap-1.5 px-2.5 text-xs transition-colors",
         "select-none cursor-default",
         isActive
-          ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-          : "bg-sidebar-accent/50 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          ? "font-medium text-foreground"
+          : "text-muted-foreground hover:text-sidebar-accent-foreground",
         isDragging && "opacity-60",
       )}
     >
@@ -291,18 +320,65 @@ function SortableTabItem({
       style={style}
       data-tab-frame
       data-tab-id={tab.id}
-      className="h-7 w-40 min-w-32"
+      className={cn("h-9 w-40 min-w-32", isActive && "z-10")}
     >
       <motion.div
-        className="relative size-full"
+        className="group/tab relative size-full"
         initial={isEntering ? { opacity: 0, x: 8 } : false}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: isEntering ? 0.18 : 0, ease: TAB_ENTRY_EASE }}
         onAnimationComplete={() => setIsEntering(false)}
       >
+        {isActive ? (
+          // Merged-tab chrome: a bordered cap, a borderless base whose fill
+          // runs into the content card below (covering its top ring), and two
+          // flares whose arcs hand the keyline over to the card's ring. The
+          // flares overlap the tab edge by 1px so arc and side border meet.
+          <span
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute inset-0",
+              isDragging && "opacity-60",
+            )}
+          >
+            <span className="absolute inset-x-0 top-0 bottom-2.5 rounded-t-lg border border-b-0 border-surface-border bg-page-canvas" />
+            <span className="absolute inset-x-0 bottom-0 h-2.5 bg-page-canvas" />
+            <span
+              className="absolute bottom-0 size-2.5"
+              style={{ left: -TAB_FLARE_RADIUS + 1, background: tabFlareBackground("left") }}
+            />
+            <span
+              className="absolute bottom-0 size-2.5"
+              style={{ right: -TAB_FLARE_RADIUS + 1, background: tabFlareBackground("right") }}
+            />
+          </span>
+        ) : (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1 rounded-lg bg-sidebar-accent opacity-0 transition-opacity group-hover/tab:opacity-100"
+          />
+        )}
+        {showSeparator && (
+          // Fades in step with the neighbouring hover pill: both use a bare
+          // transition-opacity, so the hairline clears exactly as the pill
+          // arrives rather than lingering 2px off its rounded edge.
+          <span
+            aria-hidden
+            className="pointer-events-none absolute left-0 top-1/2 h-4 w-px -translate-y-1/2 bg-surface-border transition-opacity group-hover/tab:opacity-0 prev-tab-hover:opacity-0"
+          />
+        )}
         <ContextMenu>
           <ContextMenuTrigger render={tabButton} />
           <ContextMenuContent>
+            {issueWindowPath && (
+              <>
+                <ContextMenuItem onClick={handleOpenAsWindow}>
+                  <AppWindow />
+                  Open as new window
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+              </>
+            )}
             <ContextMenuItem onClick={() => togglePin(tab.id)}>
               {tab.pinned ? (
                 <>
@@ -338,7 +414,7 @@ function SortableTabItem({
         {showAddedHighlight && (
           <motion.span
             aria-hidden
-            className="pointer-events-none absolute inset-0 rounded-md bg-primary/10 ring-1 ring-inset ring-primary/20"
+            className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20"
             initial={{ opacity: shouldReduceMotion ? 0.25 : 0.65 }}
             animate={{ opacity: 0 }}
             transition={{ duration: shouldReduceMotion ? 0.16 : 0.42 }}
@@ -384,7 +460,7 @@ function NewTabEdgeFeedback({
       key={`${signal.tabId}-${signal.sequence}`}
       aria-hidden
       data-new-tab-edge-feedback="true"
-      className="pointer-events-none absolute inset-y-2 right-0 z-20 w-8 rounded-r-md bg-gradient-to-l from-primary/35 via-primary/10 to-transparent"
+      className="pointer-events-none absolute top-4 bottom-1 right-0 z-20 w-8 rounded-r-lg bg-gradient-to-l from-primary/35 via-primary/10 to-transparent"
       initial={{
         opacity: shouldReduceMotion ? 0.45 : 0,
         x: shouldReduceMotion ? 0 : 4,
@@ -434,7 +510,7 @@ function NewTabButton() {
       aria-label="New tab"
       title="New tab"
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-      className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted/50 hover:text-muted-foreground"
+      className="mb-1 flex size-7 shrink-0 items-center justify-center self-end rounded-md text-muted-foreground/70 transition-colors hover:bg-muted/50 hover:text-muted-foreground"
     >
       <Plus className="size-3.5" />
     </button>
@@ -544,35 +620,48 @@ export function TabBar() {
           modifiers={[restrictToHorizontalAxis, restrictToParentElement]}
           onDragEnd={handleDragEnd}
         >
+          {/* px-4 keeps the active tab's flares inside the scroller's clip
+              (overflow clips at the padding box) and clears the content
+              card's rounded top-left corner below the first tab. */}
           <div
             ref={tabScrollRef}
             data-tab-scroll-container
-            className="no-scrollbar flex h-full min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden overscroll-x-contain"
+            className="no-scrollbar flex h-full min-w-0 flex-1 items-end overflow-x-auto overflow-y-hidden overscroll-x-contain px-4"
             style={tabFadeStyle}
           >
             <SortableContext items={tabIds} strategy={horizontalListSortingStrategy}>
-              {tabs.map((tab, index) => (
-                <Fragment key={tab.id}>
-                  <SortableTabItem
-                    tab={tab}
-                    isActive={tab.id === activeTabId}
-                    isOnly={tabs.length === 1}
-                    canCloseOthers={tabs.some(
-                      (candidate) => candidate.id !== tab.id && !candidate.pinned,
-                    )}
-                    isNew={addedTabIdSet.has(tab.id)}
-                    shouldReduceMotion={shouldReduceMotion}
-                  />
-                  {tab.pinned &&
-                    index === pinnedCount - 1 &&
-                    unpinnedCount > 0 && (
-                      <div
-                        aria-hidden
-                        className="mx-1 h-4 w-px shrink-0 bg-border"
-                      />
-                    )}
-                </Fragment>
-              ))}
+              {tabs.map((tab, index) => {
+                const previousTab = index > 0 ? tabs[index - 1] : null;
+                return (
+                  <Fragment key={tab.id}>
+                    <SortableTabItem
+                      tab={tab}
+                      isActive={tab.id === activeTabId}
+                      isOnly={tabs.length === 1}
+                      canCloseOthers={tabs.some(
+                        (candidate) => candidate.id !== tab.id && !candidate.pinned,
+                      )}
+                      isNew={addedTabIdSet.has(tab.id)}
+                      shouldReduceMotion={shouldReduceMotion}
+                      showSeparator={
+                        !!previousTab &&
+                        tab.id !== activeTabId &&
+                        previousTab.id !== activeTabId &&
+                        // the pinned-zone divider already separates this pair
+                        !(previousTab.pinned && !tab.pinned)
+                      }
+                    />
+                    {tab.pinned &&
+                      index === pinnedCount - 1 &&
+                      unpinnedCount > 0 && (
+                        <div
+                          aria-hidden
+                          className="mx-1 mb-2.5 h-4 w-px shrink-0 self-end bg-surface-border"
+                        />
+                      )}
+                  </Fragment>
+                );
+              })}
             </SortableContext>
           </div>
         </DndContext>

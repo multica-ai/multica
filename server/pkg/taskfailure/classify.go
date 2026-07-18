@@ -16,6 +16,25 @@ import (
 // startup rather than per-call matters.
 var providerHTTP5xxRe = regexp.MustCompile(`(^|[^0-9])5[0-9][0-9]([^0-9]|$)`)
 
+// httpAuthCodeRe / httpQuotaCodeRe / httpCapacityCodeRe match specific 3-digit
+// HTTP status codes only when they are NOT embedded in a longer number, using
+// the same digit-boundary guard as providerHTTP5xxRe. Without this guard the
+// bare substrings "401"/"402"/"403"/"429"/"529" fire on unrelated numbers —
+// e.g. "402913 tokens", "15290ms", "exit status 4030" — misclassifying process
+// or unknown failures as provider billing / rate-limit errors. That pollutes
+// failure observability: a genuine process crash gets filed under a provider
+// bucket, masking the real cause on failure dashboards. (A misfire here still
+// can't cause a spurious retry: the auth / quota / capacity buckets these
+// regexes guard are all non-retryable. The only agent_error.* reason on
+// internal/service/task.go's retryableReasons allowlist is provider_network
+// — MUL-4910 — and these regexes never route into it.) The 5xx bucket was
+// already anchored for exactly this reason (MUL-1949); these codes were not.
+var (
+	httpAuthCodeRe     = regexp.MustCompile(`(^|[^0-9])(401|403)([^0-9]|$)`)
+	httpQuotaCodeRe    = regexp.MustCompile(`(^|[^0-9])402([^0-9]|$)`)
+	httpCapacityCodeRe = regexp.MustCompile(`(^|[^0-9])(429|529)([^0-9]|$)`)
+)
+
 // Classify maps a free-form error string from the agent runtime / CLI
 // to one of the 14 agent_error.* sub-reasons. Always returns a valid
 // Reason; falls back to ReasonAgentUnknown when no rule matches and for
@@ -82,50 +101,49 @@ func Classify(rawError string) Reason {
 		return ReasonAgentMissingConfig
 
 	// 3. Auth / access. 401 / 403 / "Not logged in" / invalid token
-	//    / lacks access to the model.
-	case containsAny(lower,
-		"401",
-		"403",
-		"unauthorized",
-		"login required",
-		"not logged in",
-		"please login again",
-		"refresh token",
-		"invalid api key",
-		"access token",
-		"subscription access",
-		"does not have access",
-		"you may not have access",
-	):
+	//    / lacks access to the model. Status codes use a digit boundary
+	//    so "4030" / "1401ms" don't spuriously land here.
+	case httpAuthCodeRe.MatchString(lower),
+		containsAny(lower,
+			"unauthorized",
+			"login required",
+			"not logged in",
+			"please login again",
+			"refresh token",
+			"invalid api key",
+			"access token",
+			"subscription access",
+			"does not have access",
+			"you may not have access",
+		):
 		return ReasonAgentProviderAuthOrAccess
 
 	// 4. Quota / billing. 402 / insufficient balance / monthly usage
 	//    limit / credits exhausted.
-	case containsAny(lower,
-		"402",
-		"insufficient_balance",
-		"balance is too low",
-		"monthly usage limit",
-		"usage limit",
-		"you've hit your limit",
-		// Curly apostrophe variant: providers and copy-pasted error
-		// strings sometimes use U+2019 instead of ASCII '. SQL ILIKE
-		// would not match the curly form either, so this is a small
-		// in-flight improvement on top of the SQL classifier.
-		"you\u2019ve hit your limit",
-		"credits",
-		"quota",
-	):
+	case httpQuotaCodeRe.MatchString(lower),
+		containsAny(lower,
+			"insufficient_balance",
+			"balance is too low",
+			"monthly usage limit",
+			"usage limit",
+			"you've hit your limit",
+			// Curly apostrophe variant: providers and copy-pasted error
+			// strings sometimes use U+2019 instead of ASCII '. SQL ILIKE
+			// would not match the curly form either, so this is a small
+			// in-flight improvement on top of the SQL classifier.
+			"you\u2019ve hit your limit",
+			"credits",
+			"quota",
+		):
 		return ReasonAgentProviderQuotaLimit
 
 	// 5. Capacity / rate limit. 429 / 529 / overloaded / rate limit.
-	case containsAny(lower,
-		"429",
-		"rate limit",
-		"overloaded",
-		"529",
-		"no capacity available",
-	):
+	case httpCapacityCodeRe.MatchString(lower),
+		containsAny(lower,
+			"rate limit",
+			"overloaded",
+			"no capacity available",
+		):
 		return ReasonAgentProviderCapacityOrRateLimit
 
 	// 6. Provider 5xx / server error. The 5xx regex is checked here
@@ -142,9 +160,18 @@ func Classify(rawError string) Reason {
 		return ReasonAgentProviderServerError
 
 	// 7. Provider network. Stream cut, dial failures, DNS / I/O
-	//    timeout below the HTTP layer.
+	//    timeout below the HTTP layer. "connection closed" / "mid-response"
+	//    catch the Claude Code CLI's mid-stream disconnect
+	//    ("API Error: Connection closed mid-response. ...") so a transient cut
+	//    lands in the retryable provider_network bucket (with session resume)
+	//    instead of falling through to agent_error.unknown / process_failure
+	//    and terminating the task (MUL-4910). Checked before rule 13 so the
+	//    "... exited with error: exit status N ..." variant still routes here.
+	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
 	case containsAny(lower,
 		"stream disconnected",
+		"connection closed",
+		"mid-response",
 		"error sending request",
 		"unable to connect",
 		"dial tcp",

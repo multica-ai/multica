@@ -14,9 +14,11 @@
  * v1 simplifications:
  *   - No "Replied in Ns" badge under assistant bubbles (elapsed_ms is
  *     parsed but not displayed). Easy v2 add — show below the bubble.
- *   - No attachment card rendering. Attachments embedded as
- *     `![](url)` / `[name](url)` in `content` flow through the existing
- *     markdown renderer.
+ *   - Attachments bound to a message but NOT referenced inline in `content`
+ *     render as standalone cards below the bubble via `CommentAttachmentList`
+ *     (same component the comment thread uses; mirrors web reusing
+ *     `AttachmentList` in chat). Inline `![](url)` / `[name](url)` still flow
+ *     through the markdown renderer and are de-duped out of the card list.
  *
  * Interaction: long-press inside a bubble fires a native iOS
  * `ActionSheetIOS` (Copy / Select Text / Cancel). While the sheet is on
@@ -58,6 +60,10 @@ import { useChatSelectStore } from "@/data/chat-select-store";
 import { useChatMessageLongPress } from "./message-long-press";
 import { ChatEmptyState } from "./chat-empty-state";
 import { ChatTimeline } from "./chat-timeline";
+// Reuse the comment thread's standalone attachment list — same design web
+// reuses in chat (AttachmentList). Renders any bound attachment not already
+// referenced inline in the message content, with same-file dedup.
+import { CommentAttachmentList } from "@/components/issue/comment-attachment-list";
 import { StatusPill } from "./status-pill";
 import {
   Collapsible,
@@ -250,7 +256,7 @@ function MessageRow({ message }: { message: ChatMessage }) {
     const body = (
       <View
         className={cn(
-          "self-end max-w-[80%] rounded-2xl border-2 px-3.5 py-2 transition-colors",
+          "self-end max-w-[80%] gap-1.5 rounded-2xl border-2 px-3.5 py-2 transition-colors",
           isSelecting
             ? "bg-primary/5 border-primary/30"
             : longPress.isPressed
@@ -263,6 +269,10 @@ function MessageRow({ message }: { message: ChatMessage }) {
           attachments={message.attachments}
           selectable={isSelecting}
           compact
+        />
+        <CommentAttachmentList
+          attachments={message.attachments}
+          content={message.content}
         />
       </View>
     );
@@ -340,6 +350,14 @@ function AssistantRow({
           selectable={isSelecting}
         />
       )}
+      {/* Standalone attachment cards for anything not referenced inline. An
+          image-only reply is a real ('message') outcome with empty content, so
+          it flows through the else-branch above (renders nothing) and the cards
+          here ARE the reply. */}
+      <CommentAttachmentList
+        attachments={message.attachments}
+        content={message.content}
+      />
       {message.elapsed_ms != null ? (
         <ElapsedCaption
           variant={isNoResponse ? "finished" : "replied"}

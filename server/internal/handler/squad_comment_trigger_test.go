@@ -45,11 +45,13 @@ func TestCommentMentionsAnyone(t *testing.T) {
 // shouldEnqueueSquadLeaderOnCommentForTest reports whether the shared cascade
 // would wake the issue's assigned squad leader.
 func shouldEnqueueSquadLeaderOnCommentForTest(ctx context.Context, issue db.Issue, content, authorType, authorID string) bool {
-	return triggersContainIssueAssigneeSquadLeader(testHandler.computeCommentAgentTriggers(ctx, issue, content, nil, authorType, authorID, commentTriggerComputeOptions{}))
+	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, issue, content, nil, authorType, authorID, commentTriggerComputeOptions{})
+	return triggersContainIssueAssigneeSquadLeader(triggers)
 }
 
 func shouldEnqueueSquadLeaderOnReplyForTest(ctx context.Context, issue db.Issue, content string, parent *db.Comment, authorType, authorID string) bool {
-	return triggersContainIssueAssigneeSquadLeader(testHandler.computeCommentAgentTriggers(ctx, issue, content, parent, authorType, authorID, commentTriggerComputeOptions{}))
+	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, issue, content, parent, authorType, authorID, commentTriggerComputeOptions{})
+	return triggersContainIssueAssigneeSquadLeader(triggers)
 }
 
 func triggersContainIssueAssigneeSquadLeader(triggers []commentAgentTrigger) bool {

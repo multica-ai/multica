@@ -406,6 +406,9 @@ type AttachmentResponse struct {
 	ID          string `json:"id"`
 	URL         string `json:"url"`
 	DownloadURL string `json:"download_url"`
+	// MarkdownURL is the durable, persistable URL to embed in markdown bodies
+	// (chat replies, comments). Unlike DownloadURL it never carries a TTL.
+	MarkdownURL string `json:"markdown_url"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	SizeBytes   int64  `json:"size_bytes"`
@@ -464,6 +467,69 @@ func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename st
 		return "", fmt.Errorf("upload response missing attachment id")
 	}
 	return id, nil
+}
+
+// UploadChatAttachment uploads a file via multipart form to /api/upload-file
+// tagged with a chat task (task_id). The server binds the row to the assistant
+// reply that task produces on completion. Returns the full AttachmentResponse
+// (id + markdown_url) so the agent can embed the image inline in its reply.
+func (c *APIClient) UploadChatAttachment(ctx context.Context, fileData []byte, filename, taskID string) (AttachmentResponse, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	part, err := writer.CreateFormFile("file", filepath.Base(filename))
+	if err != nil {
+		return AttachmentResponse{}, fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := part.Write(fileData); err != nil {
+		return AttachmentResponse{}, fmt.Errorf("write file data: %w", err)
+	}
+	if taskID != "" {
+		if err := writer.WriteField("task_id", taskID); err != nil {
+			return AttachmentResponse{}, fmt.Errorf("write task_id field: %w", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return AttachmentResponse{}, fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/upload-file", &body)
+	if err != nil {
+		return AttachmentResponse{}, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.setHeaders(req)
+
+	// Honor a longer context deadline for large images, same as UploadFileWithURL.
+	httpClient := c.HTTPClient
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > httpClient.Timeout {
+			clientCopy := *httpClient
+			clientCopy.Timeout = remaining
+			httpClient = &clientCopy
+		}
+	}
+
+	resp, err := httpClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return AttachmentResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return AttachmentResponse{}, newHTTPError(http.MethodPost, "/api/upload-file", resp)
+	}
+
+	var result AttachmentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return AttachmentResponse{}, fmt.Errorf("decode upload response: %w", err)
+	}
+	if result.ID == "" {
+		return AttachmentResponse{}, fmt.Errorf("upload response missing attachment id")
+	}
+	return result, nil
 }
 
 // UploadFileWithURL uploads a file via multipart form to /api/upload-file

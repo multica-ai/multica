@@ -43,9 +43,21 @@ linux:
   # violates the freedesktop desktop-entry naming guidance, so GNOME /
   # Ubuntu fail to associate the running window with the `.desktop` entry
   # and fall back to the theme's default app icon (the Settings gear on
-  # Yaru). Forcing `multica` makes every Linux identity slot agree and
-  # matches `StartupWMClass=Multica` (productName-derived).
-  executableName: multica
+  # Yaru).
+  #
+  # `multica-desktop` (not `multica`) so the deb/rpm/AppImage package never
+  # installs this Electron binary as `/usr/bin/multica`. The Go CLI is a
+  # separate artifact (see CLI_INSTALL.md) that agents and scripts expect
+  # to find at `multica` on PATH; when both packages are installed on the
+  # same box, a plain electron-builder default collides the two under one
+  # name. Whichever installs later — or wins the PATH lookup order — silently
+  # shadows the other. Hitting the Electron binary from a CLI call is the
+  # worst failure mode: it exits 0 with empty stdout (its own Chromium flags
+  # eat CLI args like `--output json`), which looks like a healthy CLI that
+  # returned nothing rather than "wrong binary" (github.com/multica-ai/multica/issues/5481).
+  # `StartupWMClass=Multica` (productName-derived) is unaffected by this
+  # rename — it comes from `app.getName()`, not `executableName`.
+  executableName: multica-desktop
   # Pin StartupWMClass to the WM_CLASS Electron emits on X11. Electron
   # derives WM_CLASS from `app.getName()`, which reads the *packaged*
   # ASAR's `package.json` — `productName` if present, otherwise `name`.

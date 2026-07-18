@@ -2,11 +2,20 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/spf13/cobra"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
 )
 
@@ -60,6 +69,20 @@ func TestPrintDaemonStatusIncludesCLIVersion(t *testing.T) {
 	}
 }
 
+func TestBuildDaemonStartArgsForwardsCodexHandshakeTimeout(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Duration("codex-handshake-timeout", 0, "")
+	if err := cmd.Flags().Set("codex-handshake-timeout", "42s"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	want := []string{"daemon", "start", "--foreground", "--codex-handshake-timeout", (42 * time.Second).String()}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}
+
 // TestPrintDaemonStatusOmitsVersionWhenMissing pins the back-compat contract:
 // when the daemon doesn't report cli_version (older daemon paired with a newer
 // CLI) or reports an empty string, the CLI must skip the line entirely instead
@@ -93,6 +116,380 @@ func TestPrintDaemonStatusOmitsVersionWhenMissing(t *testing.T) {
 				t.Fatalf("daemon status output = %q, want no Version line", out.String())
 			}
 		})
+	}
+}
+
+// TestRequireDaemonAuth pins the fail-fast contract for `daemon start`: a
+// user who never ran `multica login` must get an immediate, actionable error
+// from the parent process instead of a 45s health poll against a child that
+// already died with "not authenticated".
+func TestRequireDaemonAuth(t *testing.T) {
+	t.Run("not logged in", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		err := requireDaemonAuth("")
+		if err == nil || !strings.Contains(err.Error(), "multica login") {
+			t.Fatalf("requireDaemonAuth() = %v, want error mentioning 'multica login'", err)
+		}
+	})
+
+	t.Run("not logged in with profile", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		err := requireDaemonAuth("staging")
+		if err == nil || !strings.Contains(err.Error(), "multica login --profile staging") {
+			t.Fatalf("requireDaemonAuth(staging) = %v, want error mentioning profile login hint", err)
+		}
+	})
+
+	t.Run("authenticated", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_test_token"}); err != nil {
+			t.Fatalf("SaveCLIConfig: %v", err)
+		}
+		if err := requireDaemonAuth(""); err != nil {
+			t.Fatalf("requireDaemonAuth() = %v, want nil", err)
+		}
+	})
+}
+
+// TestDaemonStartBackgroundUnauthenticatedFailsFast exercises the real
+// `daemon start` background path: without a stored token it must error out
+// before spawning the child (and long before the 45s readiness wait).
+func TestDaemonStartBackgroundUnauthenticatedFailsFast(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	cmd := &cobra.Command{Use: "start"}
+	cmd.Flags().Bool("foreground", false, "")
+	cmd.Flags().String("profile", "", "")
+	// A named profile keeps the pre-spawn health probe off the default port,
+	// so a daemon running on the developer machine can't turn this into an
+	// "already running" error.
+	if err := cmd.Flags().Set("profile", "authtest-fail-fast"); err != nil {
+		t.Fatalf("set profile flag: %v", err)
+	}
+
+	start := time.Now()
+	err := runDaemonStart(cmd, nil)
+	elapsed := time.Since(start)
+
+	if err == nil || !strings.Contains(err.Error(), "multica login --profile authtest-fail-fast") {
+		t.Fatalf("runDaemonStart() = %v, want not-logged-in error with login hint", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("runDaemonStart took %s, want fail-fast before the readiness wait", elapsed)
+	}
+}
+
+// TestReadLogTailSince pins the log-excerpt helper used when the daemon child
+// dies during startup: only content appended after the recorded offset is
+// shown, capped to the last maxLines lines.
+func TestReadLogTailSince(t *testing.T) {
+	t.Parallel()
+
+	logPath := filepath.Join(t.TempDir(), "daemon.log")
+	if err := os.WriteFile(logPath, []byte("old line 1\nold line 2\n"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("stat log: %v", err)
+	}
+	offset := info.Size()
+
+	f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open log: %v", err)
+	}
+	for i := 1; i <= 5; i++ {
+		fmt.Fprintf(f, "new line %d\n", i)
+	}
+	f.Close()
+
+	lines := readLogTailSince(logPath, offset, 3)
+	want := []string{"new line 3", "new line 4", "new line 5"}
+	if len(lines) != len(want) {
+		t.Fatalf("readLogTailSince = %q, want %q", lines, want)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Fatalf("readLogTailSince[%d] = %q, want %q", i, lines[i], want[i])
+		}
+	}
+
+	if got := readLogTailSince(logPath, 1<<40, 3); len(got) != 0 {
+		t.Fatalf("readLogTailSince(past EOF) = %q, want empty", got)
+	}
+}
+
+// TestDaemonStartupFailureError pins the friendly classification of a daemon
+// child that died during startup: the two failure modes users actually hit
+// (token rejected, server unreachable) get a one-line reason plus an
+// actionable next step instead of a raw log dump; only unrecognized failures
+// fall back to a log excerpt, and even that excerpt drops DBG/INF noise.
+// Classification reads both sinks: structured slog lines land in daemon.log,
+// while the child's final cobra "Error: ..." line and panics land in the
+// crash sink (daemon.err.log).
+func TestDaemonStartupFailureError(t *testing.T) {
+	t.Parallel()
+
+	writeLog := func(t *testing.T, name, content string) string {
+		t.Helper()
+		logPath := filepath.Join(t.TempDir(), name)
+		if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("write log: %v", err)
+		}
+		return logPath
+	}
+
+	t.Run("token rejected", func(t *testing.T) {
+		t.Parallel()
+		logPath := writeLog(t, "daemon.log", `18:29:58.416 INF authenticated component=daemon
+18:29:58.425 WRN auth token rejected by server — run 'multica login' to re-authenticate component=daemon error="POST /api/tokens/current/renew returned 401: {\"error\":\"invalid token\"}"
+list workspaces: GET /api/workspaces returned 401: {"error":"invalid token"}
+`)
+		err := daemonStartupFailureError(daemonStartupLogs{logPath: logPath}, nil, "", "http://localhost:8080")
+		msg := err.Error()
+		if !strings.Contains(msg, "rejected your login token") || !strings.Contains(msg, "multica login") {
+			t.Fatalf("error = %q, want token-rejected reason with login hint", msg)
+		}
+		if strings.Contains(msg, "component=daemon") {
+			t.Fatalf("error = %q, want no raw log lines for a classified failure", msg)
+		}
+	})
+
+	t.Run("token rejected with profile", func(t *testing.T) {
+		t.Parallel()
+		logPath := writeLog(t, "daemon.log", "WRN auth token rejected by server error=\"returned 401\"\n")
+		err := daemonStartupFailureError(daemonStartupLogs{logPath: logPath}, nil, "staging", "http://localhost:8080")
+		if !strings.Contains(err.Error(), "multica login --profile staging") {
+			t.Fatalf("error = %q, want profile-scoped login hint", err)
+		}
+	})
+
+	t.Run("server unreachable via crash sink", func(t *testing.T) {
+		t.Parallel()
+		// The detached child routes slog into daemon.log, but its final cobra
+		// error line goes to raw stderr — the crash sink. The "connection
+		// refused" reason may therefore exist ONLY there.
+		logPath := writeLog(t, "daemon.log", `18:40:46.588 DBG token renewal failed; will retry on next cycle component=daemon error="Post \"http://localhost:8080/api/tokens/current/renew\": dial tcp [::1]:8080: connect: connection refused"
+`)
+		errLogPath := writeLog(t, "daemon.err.log", `Error: list workspaces: Get "http://localhost:8080/api/workspaces": dial tcp [::1]:8080: connect: connection refused
+`)
+		err := daemonStartupFailureError(daemonStartupLogs{logPath: logPath, errLogPath: errLogPath}, nil, "", "http://localhost:8080")
+		msg := err.Error()
+		if !strings.Contains(msg, "cannot reach the Multica server at http://localhost:8080") {
+			t.Fatalf("error = %q, want server-unreachable reason with URL", msg)
+		}
+		if strings.Contains(msg, "dial tcp") || strings.Contains(msg, "component=daemon") {
+			t.Fatalf("error = %q, want no raw log lines for a classified failure", msg)
+		}
+	})
+
+	t.Run("unrecognized failure keeps filtered excerpt plus crash output", func(t *testing.T) {
+		t.Parallel()
+		logPath := writeLog(t, "daemon.log", `18:00:00.001 DBG some debug detail component=daemon
+18:00:00.002 INF starting daemon component=daemon
+18:00:00.003 ERR something exploded component=daemon
+`)
+		errLogPath := writeLog(t, "daemon.err.log", "open /nope: permission denied\n")
+		err := daemonStartupFailureError(daemonStartupLogs{logPath: logPath, errLogPath: errLogPath}, nil, "", "http://localhost:8080")
+		msg := err.Error()
+		if !strings.Contains(msg, "something exploded") || !strings.Contains(msg, "permission denied") {
+			t.Fatalf("error = %q, want WRN/ERR and crash lines kept", msg)
+		}
+		if strings.Contains(msg, "some debug detail") || strings.Contains(msg, "starting daemon") {
+			t.Fatalf("error = %q, want DBG/INF noise dropped", msg)
+		}
+		if !strings.Contains(msg, errLogPath) {
+			t.Fatalf("error = %q, want pointer to the crash sink", msg)
+		}
+	})
+
+	t.Run("empty logs", func(t *testing.T) {
+		t.Parallel()
+		logPath := writeLog(t, "daemon.log", "")
+		err := daemonStartupFailureError(daemonStartupLogs{logPath: logPath}, nil, "", "")
+		if !strings.Contains(err.Error(), "daemon exited during startup") || !strings.Contains(err.Error(), logPath) {
+			t.Fatalf("error = %q, want generic failure pointing at the log file", err)
+		}
+	})
+}
+
+// TestDaemonStartBackgroundReportsEarlyChildExit pins the fail-fast contract
+// for an authenticated `daemon start` whose child dies during preflight
+// (unreachable server, token rejected with 401, ...): the parent must notice
+// the exit and report failure immediately instead of polling the health port
+// for the full 45s readiness window and ending with a vague "check logs"
+// warning and exit code 0.
+//
+// The spawned child is stubbed to `false` via daemonExecutable so it dies
+// immediately with a non-zero status, the same shape as a failed preflight.
+func TestDaemonStartBackgroundReportsEarlyChildExit(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	falseBin, err := exec.LookPath("false")
+	if err != nil {
+		t.Skipf("false binary unavailable: %v", err)
+	}
+	orig := daemonExecutable
+	daemonExecutable = func() (string, error) { return falseBin, nil }
+	t.Cleanup(func() { daemonExecutable = orig })
+
+	const profile = "child-exit-test"
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{Token: "mul_fake"}, profile); err != nil {
+		t.Fatalf("SaveCLIConfigForProfile: %v", err)
+	}
+
+	cmd := &cobra.Command{Use: "start"}
+	cmd.Flags().Bool("foreground", false, "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("server-url", "", "")
+	if err := cmd.Flags().Set("profile", profile); err != nil {
+		t.Fatalf("set profile flag: %v", err)
+	}
+
+	start := time.Now()
+	err = runDaemonStart(cmd, nil)
+	elapsed := time.Since(start)
+
+	if err == nil || !strings.Contains(err.Error(), "daemon exited during startup") {
+		t.Fatalf("runDaemonStart() = %v, want startup failure error", err)
+	}
+	if elapsed > 15*time.Second {
+		t.Fatalf("runDaemonStart took %s, want early-exit detection well before the 45s readiness window", elapsed)
+	}
+}
+
+// TestDaemonRestartUnauthenticatedFailsBeforeStopping pins the ordering that
+// makes `daemon restart` safe when the user is not logged in: the auth check
+// must run BEFORE the stop phase. Otherwise restart kills the running daemon
+// and only then discovers it cannot start a replacement, leaving the user
+// with no daemon at all.
+func TestDaemonRestartUnauthenticatedFailsBeforeStopping(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	const profile = "restart-authtest"
+
+	// Fake running daemon on the profile's health port. Any shutdown attempt
+	// means restart touched the daemon before checking auth.
+	stopped := fakeRunningDaemon(t, profile)
+
+	err := runDaemonRestart(newRestartTestCmd(t, profile), nil)
+	if err == nil || !strings.Contains(err.Error(), "multica login --profile restart-authtest") {
+		t.Fatalf("runDaemonRestart() = %v, want not-logged-in error with login hint", err)
+	}
+	select {
+	case <-stopped:
+		t.Fatal("restart asked the running daemon to shut down before the auth check")
+	default:
+	}
+}
+
+// fakeRunningDaemon serves a fake healthy daemon on the given profile's health
+// port and reports any /shutdown request on the returned channel. The PID in
+// /health is our own so a kill-fallback would be visible as a test crash too.
+func fakeRunningDaemon(t *testing.T, profile string) <-chan struct{} {
+	t.Helper()
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", healthPortForProfile(profile)))
+	if err != nil {
+		t.Skipf("health port for profile %s unavailable: %v", profile, err)
+	}
+	stopped := make(chan struct{}, 1)
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"running","pid":%d}`, os.Getpid())))
+		case "/shutdown":
+			select {
+			case stopped <- struct{}{}:
+			default:
+			}
+		}
+	})}
+	go srv.Serve(ln)
+	t.Cleanup(func() { srv.Close() })
+	return stopped
+}
+
+func newRestartTestCmd(t *testing.T, profile string) *cobra.Command {
+	t.Helper()
+	cmd := &cobra.Command{Use: "restart"}
+	cmd.Flags().Bool("foreground", false, "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("server-url", "", "")
+	if err := cmd.Flags().Set("profile", profile); err != nil {
+		t.Fatalf("set profile flag: %v", err)
+	}
+	return cmd
+}
+
+// TestDaemonRestartRejectedTokenFailsBeforeStopping pins the restart safety
+// guarantee beyond the empty-token case: a stored token that the server
+// rejects with 401 (expired or revoked) must abort the restart BEFORE the
+// running daemon is stopped. Otherwise restart kills the working daemon and
+// the replacement child dies in preflight, leaving no daemon at all (#5165).
+func TestDaemonRestartRejectedTokenFailsBeforeStopping(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+
+	const profile = "restart-401test"
+
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer api.Close()
+
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{Token: "mul_revoked", ServerURL: api.URL}, profile); err != nil {
+		t.Fatalf("SaveCLIConfigForProfile: %v", err)
+	}
+
+	stopped := fakeRunningDaemon(t, profile)
+
+	err := runDaemonRestart(newRestartTestCmd(t, profile), nil)
+	if err == nil || !strings.Contains(err.Error(), "rejected your login token") {
+		t.Fatalf("runDaemonRestart() = %v, want token-rejected error", err)
+	}
+	if !strings.Contains(err.Error(), "multica login --profile restart-401test") {
+		t.Fatalf("runDaemonRestart() = %v, want profile login hint", err)
+	}
+	select {
+	case <-stopped:
+		t.Fatal("restart asked the running daemon to shut down despite a rejected token")
+	default:
+	}
+}
+
+// TestDaemonRestartUnreachableServerFailsBeforeStopping pins the other half of
+// the restart preflight: when the configured server cannot be reached at all,
+// restart must abort before stopping the running daemon, because the
+// replacement child would die in preflight against the same dead server.
+func TestDaemonRestartUnreachableServerFailsBeforeStopping(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+
+	const profile = "restart-unreachable-test"
+
+	// Grab a port that is guaranteed closed: listen, record, close.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	deadURL := "http://" + ln.Addr().String()
+	ln.Close()
+
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{Token: "mul_fake", ServerURL: deadURL}, profile); err != nil {
+		t.Fatalf("SaveCLIConfigForProfile: %v", err)
+	}
+
+	stopped := fakeRunningDaemon(t, profile)
+
+	err = runDaemonRestart(newRestartTestCmd(t, profile), nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot reach the Multica server") {
+		t.Fatalf("runDaemonRestart() = %v, want server-unreachable error", err)
+	}
+	select {
+	case <-stopped:
+		t.Fatal("restart asked the running daemon to shut down despite an unreachable server")
+	default:
 	}
 }
 

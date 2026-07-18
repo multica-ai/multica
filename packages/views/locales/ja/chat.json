@@ -1,7 +1,8 @@
 {
   "page": {
     "title": "チャット",
-    "select_prompt": "会話を選ぶか、＋ で新規作成してください"
+    "select_prompt": "会話を選ぶか、＋ で新規作成してください",
+    "agent_link_no_access": "このエージェントとチャットする権限がありません。"
   },
   "fab": {
     "running": "Multica が作業中です...",
@@ -17,6 +18,7 @@
     "send_tooltip": "送信",
     "stop_tooltip": "停止",
     "send_failed_toast": "メッセージを送信できませんでした",
+    "send_blocked_toast": "メッセージは送信されませんでした — このエージェントを使用する権限がありません",
     "attachment_bind_failed_toast": "メッセージは送信されましたが、ファイルを添付できませんでした。しばらくしてからもう一度お試しください。",
     "add_tooltip": "追加",
     "upload_file": "画像・ファイル"

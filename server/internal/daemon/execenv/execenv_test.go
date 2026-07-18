@@ -538,6 +538,70 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 	}
 }
 
+// TestWriteContextFilesCodebuddyNativeSkills is the regression guard for a
+// bug where CodeBuddy was treated as a drop-in alias for Claude and skills
+// were written to .claude/skills/. CodeBuddy Code is a Claude Code fork but
+// ships its own native config directory (~/.codebuddy, .codebuddy/) and does
+// NOT read .claude/skills/ by default — see
+// https://www.codebuddy.ai/docs/cli/skills ("Project-level Skills:
+// .codebuddy/skills/"). Skills must land under .codebuddy/skills/ instead.
+func TestWriteContextFilesCodebuddyNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "codebuddy-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Go Conventions",
+				Content: "Follow Go conventions.",
+				Files: []SkillFileContextForEnv{
+					{Path: "templates/example.go", Content: "package main"},
+				},
+			},
+		},
+	}
+
+	if err := writeContextFiles(dir, "codebuddy", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	// Skills should be in .codebuddy/skills/ (native discovery), NOT
+	// .claude/skills/ and NOT .agent_context/skills/.
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".codebuddy", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .codebuddy/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+
+	// Supporting files should also be under .codebuddy/skills/.
+	supportFile, err := os.ReadFile(filepath.Join(dir, ".codebuddy", "skills", "go-conventions", "templates", "example.go"))
+	if err != nil {
+		t.Fatalf("failed to read supporting file: %v", err)
+	}
+	if string(supportFile) != "package main" {
+		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
+	}
+
+	// .claude/skills/ must NOT exist — this is the exact regression this
+	// test guards against.
+	if _, err := os.Stat(filepath.Join(dir, ".claude", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .claude/skills/ to NOT exist for codebuddy provider")
+	}
+
+	// .agent_context/skills/ should NOT exist for CodeBuddy either.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for codebuddy provider")
+	}
+
+	// issue_context.md should still be in .agent_context/.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); os.IsNotExist(err) {
+		t.Error("expected .agent_context/issue_context.md to exist")
+	}
+}
+
 // TestReuseRefreshesSkillsWithoutDuplicating is the regression guard for
 // GitHub #3684: re-dispatching the same agent on the same issue goes through
 // the Reuse path, which must refresh skills in place rather than pile up
@@ -681,7 +745,7 @@ func TestReuseReclaimsManagedSkillDirWithStrayAgentFile(t *testing.T) {
 func TestReuseSkillRefreshIsCanonicalAcrossProviders(t *testing.T) {
 	t.Parallel()
 
-	for _, provider := range []string{"claude", "openclaw", "copilot", ""} {
+	for _, provider := range []string{"claude", "codebuddy", "openclaw", "copilot", ""} {
 		provider := provider
 		name := provider
 		if name == "" {
@@ -1863,14 +1927,15 @@ func TestInjectRuntimeConfigHermes(t *testing.T) {
 	if !strings.Contains(s, "Coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
-	// Hermes has no native skill discovery path wired up, so AGENTS.md must
-	// point the agent at the .agent_context/skills/ fallback — NOT claim that
-	// skills are "discovered automatically".
-	if strings.Contains(s, "discovered automatically") {
-		t.Error("AGENTS.md for Hermes should not claim native skill discovery")
+	// Hermes now discovers skills from the daemon-seeded per-task
+	// HERMES_HOME/skills (see hermes_home.go), so AGENTS.md must use the
+	// "discovered automatically" framing and must NOT point the agent at the
+	// old .agent_context/skills/ fallback it never read (issue #5242).
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md for Hermes should describe skills as discovered automatically")
 	}
-	if !strings.Contains(s, ".agent_context/skills/") {
-		t.Error("AGENTS.md for Hermes should reference .agent_context/skills/ fallback path")
+	if strings.Contains(s, ".agent_context/skills/") {
+		t.Error("AGENTS.md for Hermes should not reference the .agent_context/skills/ fallback path")
 	}
 
 	// CLAUDE.md should NOT exist.
@@ -1879,7 +1944,13 @@ func TestInjectRuntimeConfigHermes(t *testing.T) {
 	}
 }
 
-func TestWriteContextFilesHermesFallbackSkills(t *testing.T) {
+// TestWriteContextFilesHermesSkipsWorkdirSkills asserts that Hermes skills are
+// NOT materialized into the workdir. Hermes has no workspace-relative skill
+// discovery; the daemon seeds them into a per-task HERMES_HOME/skills instead
+// (see prepareHermesHome / TestPrepareHermesHome). Writing the old
+// .agent_context/skills/ fallback was pure dead weight the CLI never read
+// (issue #5242).
+func TestWriteContextFilesHermesSkipsWorkdirSkills(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -1894,14 +1965,15 @@ func TestWriteContextFilesHermesFallbackSkills(t *testing.T) {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
-	// Skills should be in the fallback .agent_context/skills/ path since
-	// Hermes has no native skills discovery directory.
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".agent_context", "skills", "go-conventions", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read .agent_context/skills/go-conventions/SKILL.md: %v", err)
+	// No skills dir should be created in the workdir for Hermes — not the old
+	// fallback, and not an empty leftover directory either.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Errorf("expected no .agent_context/skills/ for Hermes, got err=%v", err)
 	}
-	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
-		t.Error("SKILL.md missing content")
+
+	// issue_context.md should still be written under .agent_context/.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); err != nil {
+		t.Errorf("expected .agent_context/issue_context.md to exist: %v", err)
 	}
 }
 
@@ -1914,12 +1986,20 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	os.WriteFile(filepath.Join(sharedHome, "config.json"), []byte(`{"model":"o3"}`), 0o644)
 	os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model = "o3"`), 0o644)
 	os.WriteFile(filepath.Join(sharedHome, "instructions.md"), []byte("Be helpful."), 0o644)
+	os.WriteFile(filepath.Join(sharedHome, "models_cache.json"), []byte(`{"models":["gpt-test"]}`), 0o644)
 	sharedPluginCache := filepath.Join(sharedHome, "plugins", "cache")
 	if err := os.MkdirAll(filepath.Join(sharedPluginCache, "superpowers"), 0o755); err != nil {
 		t.Fatalf("create shared plugin cache: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(sharedPluginCache, "superpowers", "SKILL.md"), []byte("Use superpowers."), 0o644); err != nil {
 		t.Fatalf("write shared plugin skill: %v", err)
+	}
+	sharedMarketplace := filepath.Join(sharedHome, ".tmp", "marketplaces", "test-marketplace")
+	if err := os.MkdirAll(sharedMarketplace, 0o755); err != nil {
+		t.Fatalf("create shared marketplace cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedMarketplace, "manifest.json"), []byte(`{"name":"test"}`), 0o644); err != nil {
+		t.Fatalf("write shared marketplace manifest: %v", err)
 	}
 
 	// Point CODEX_HOME to our fake shared home.
@@ -1930,25 +2010,18 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 		t.Fatalf("prepareCodexHome failed: %v", err)
 	}
 
-	// sessions should be a symlink to the shared sessions dir.
+	// sessions should be a real, task-local directory — NOT a symlink into the
+	// shared home (MUL-4424). A fresh home gets an empty local dir.
 	sessionsPath := filepath.Join(codexHome, "sessions")
 	fi, err := os.Lstat(sessionsPath)
 	if err != nil {
 		t.Fatalf("sessions not found: %v", err)
 	}
-	sessionsIsLink := fi.Mode()&os.ModeSymlink != 0
-	if !sessionsIsLink && runtime.GOOS != "windows" {
-		t.Error("sessions should be a symlink")
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("sessions should be a task-local directory, not a symlink into the shared home")
 	}
-	if sessionsIsLink {
-		sessTarget, _ := os.Readlink(sessionsPath)
-		if sessTarget != filepath.Join(sharedHome, "sessions") {
-			t.Errorf("sessions symlink target = %q, want %q", sessTarget, filepath.Join(sharedHome, "sessions"))
-		}
-	} else if fi.IsDir() {
-		if _, err := os.Stat(sessionsPath); err != nil {
-			t.Fatalf("sessions link target should be accessible: %v", err)
-		}
+	if !fi.IsDir() {
+		t.Error("sessions should be a directory")
 	}
 
 	// auth.json should be a symlink.
@@ -2003,6 +2076,21 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 		t.Errorf("instructions.md content = %q", data)
 	}
 
+	// models_cache.json is a task-local snapshot so Codex can skip a cold model
+	// catalog refresh without letting a task mutate the user's shared cache.
+	modelsCachePath := filepath.Join(codexHome, "models_cache.json")
+	fi, err = os.Lstat(modelsCachePath)
+	if err != nil {
+		t.Fatalf("models_cache.json not found: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("models_cache.json should be copied, not symlinked")
+	}
+	data, _ = os.ReadFile(modelsCachePath)
+	if string(data) != `{"models":["gpt-test"]}` {
+		t.Errorf("models_cache.json content = %q", data)
+	}
+
 	// plugin cache should be exposed at the same relative path in codex-home.
 	pluginSkillPath := filepath.Join(codexHome, "plugins", "cache", "superpowers", "SKILL.md")
 	data, err = os.ReadFile(pluginSkillPath)
@@ -2011,6 +2099,13 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	}
 	if string(data) != "Use superpowers." {
 		t.Errorf("plugin cache skill content = %q", data)
+	}
+
+	// Marketplace checkouts contain executable plugin code and must not be
+	// linked into a task home where one task could mutate another task's state.
+	marketplacePath := filepath.Join(codexHome, ".tmp", "marketplaces")
+	if _, err := os.Lstat(marketplacePath); !os.IsNotExist(err) {
+		t.Fatalf("shared marketplace cache exposed in task home: %v", err)
 	}
 }
 
@@ -2124,7 +2219,8 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 		t.Fatalf("prepareCodexHome failed: %v", err)
 	}
 
-	// Directory should contain sessions symlink + auto-generated config.toml.
+	// Directory should contain task-local sessions, the model-cache config
+	// binding, and auto-generated config.toml.
 	entries, err := os.ReadDir(codexHome)
 	if err != nil {
 		t.Fatalf("failed to read codex-home: %v", err)
@@ -2134,7 +2230,7 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 		entryNames[e.Name()] = true
 	}
 	if !entryNames["sessions"] {
-		t.Error("expected sessions symlink")
+		t.Error("expected sessions directory")
 	}
 	if !entryNames["config.toml"] {
 		t.Error("expected config.toml (auto-generated for network access)")
@@ -2142,19 +2238,26 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	if !entryNames["plugins"] {
 		t.Error("expected plugins directory for plugin cache exposure")
 	}
+	if !entryNames[codexModelsCacheBindingFile] {
+		t.Error("expected models cache config binding")
+	}
 	for name := range entryNames {
-		if name != "sessions" && name != "config.toml" && name != "plugins" {
+		if name != "sessions" && name != "config.toml" && name != "plugins" && name != codexModelsCacheBindingFile {
 			t.Errorf("unexpected entry: %s", name)
 		}
 	}
-	// sessions should be a symlink to the shared sessions dir.
+	// sessions should be a real, task-local directory — not a symlink into the
+	// shared home (MUL-4424).
 	sessionsPath := filepath.Join(codexHome, "sessions")
 	fi, err := os.Lstat(sessionsPath)
 	if err != nil {
 		t.Fatalf("sessions not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 && runtime.GOOS != "windows" {
-		t.Error("sessions should be a symlink")
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("sessions should be a task-local directory, not a symlink")
+	}
+	if !fi.IsDir() {
+		t.Error("sessions should be a directory")
 	}
 	if _, err := os.Stat(filepath.Join(codexHome, "plugins", "cache")); err != nil {
 		t.Fatalf("missing shared plugin cache exposure should still be tolerated and created: %v", err)
@@ -2786,6 +2889,291 @@ func TestReuseRestoresCodexPluginCache(t *testing.T) {
 	}
 	if string(data) != "Use superpowers." {
 		t.Errorf("reused plugin cache skill content = %q", data)
+	}
+}
+
+func TestReusePreservesTaskLocalModelsCacheWhenSharedMissing(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-codex-model-cache-missing",
+		TaskID:         "b5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-missing"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	modelsCache := filepath.Join(env.CodexHome, "models_cache.json")
+	if err := os.WriteFile(modelsCache, []byte(`{"source":"task"}`), 0o644); err != nil {
+		t.Fatalf("write task-local models cache: %v", err)
+	}
+
+	reused := Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-missing"},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "models_cache.json"))
+	if err != nil {
+		t.Fatalf("task-local models cache removed on reuse: %v", err)
+	}
+	if string(data) != `{"source":"task"}` {
+		t.Fatalf("task-local models cache = %q, want task-generated cache", data)
+	}
+}
+
+func TestReusePreservesTaskLocalModelsCacheOverStaleSharedSnapshot(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "models_cache.json"), []byte(`{"source":"shared"}`), 0o644); err != nil {
+		t.Fatalf("write shared models cache: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-codex-model-cache-stale",
+		TaskID:         "c5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-stale"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	modelsCache := filepath.Join(env.CodexHome, "models_cache.json")
+	if err := os.WriteFile(modelsCache, []byte(`{"source":"task"}`), 0o644); err != nil {
+		t.Fatalf("refresh task-local models cache: %v", err)
+	}
+
+	reused := Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-stale"},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "models_cache.json"))
+	if err != nil {
+		t.Fatalf("read reused task-local models cache: %v", err)
+	}
+	if string(data) != `{"source":"task"}` {
+		t.Fatalf("task-local models cache = %q, want refreshed task cache", data)
+	}
+}
+
+func TestReuseInvalidatesTaskLocalModelsCacheWhenProviderConfigChanges(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	configPath := filepath.Join(sharedHome, "config.toml")
+	if err := os.WriteFile(configPath, []byte(`model_provider = "provider-a"`), 0o644); err != nil {
+		t.Fatalf("write provider A config: %v", err)
+	}
+	sharedCache := filepath.Join(sharedHome, "models_cache.json")
+	if err := os.WriteFile(sharedCache, []byte(`{"source":"shared-a"}`), 0o644); err != nil {
+		t.Fatalf("write provider A shared cache: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-codex-model-cache-provider-change",
+		TaskID:         "d5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	modelsCache := filepath.Join(env.CodexHome, "models_cache.json")
+	if err := os.WriteFile(modelsCache, []byte(`{"source":"task-a"}`), 0o644); err != nil {
+		t.Fatalf("refresh provider A task cache: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`model_provider = "provider-b"`), 0o644); err != nil {
+		t.Fatalf("write provider B config: %v", err)
+	}
+	// Even a changed shared snapshot is not safe to copy: Codex's cache format
+	// does not say which provider produced it.
+	if err := os.WriteFile(sharedCache, []byte(`{"source":"shared-b"}`), 0o644); err != nil {
+		t.Fatalf("write provider B shared cache: %v", err)
+	}
+
+	reused := Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+	if _, err := os.Lstat(modelsCache); !os.IsNotExist(err) {
+		t.Fatalf("provider A models cache survived provider change: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read provider B task config: %v", err)
+	}
+	if !strings.Contains(string(data), `model_provider = "provider-b"`) {
+		t.Fatalf("task config did not switch to provider B: %q", data)
+	}
+
+	// Once Codex refreshes the cache for provider B, another reuse with the
+	// unchanged binding must preserve it over the shared snapshot.
+	if err := os.WriteFile(modelsCache, []byte(`{"source":"task-b"}`), 0o644); err != nil {
+		t.Fatalf("write provider B task cache: %v", err)
+	}
+	if Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-provider-change"},
+	}, testLogger()) == nil {
+		t.Fatal("second Reuse returned nil")
+	}
+	data, err = os.ReadFile(modelsCache)
+	if err != nil {
+		t.Fatalf("read provider B task cache: %v", err)
+	}
+	if string(data) != `{"source":"task-b"}` {
+		t.Fatalf("provider B task cache = %q, want task-refreshed cache", data)
+	}
+}
+
+func TestReuseInvalidatesTaskLocalModelsCacheWhenModelCatalogChanges(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_catalog_json = "catalog.json"`), 0o644); err != nil {
+		t.Fatalf("write model catalog config: %v", err)
+	}
+	catalogPath := filepath.Join(sharedHome, "catalog.json")
+	if err := os.WriteFile(catalogPath, []byte(`{"models":[{"slug":"model-a"}]}`), 0o644); err != nil {
+		t.Fatalf("write model catalog A: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "models_cache.json"), []byte(`{"source":"shared"}`), 0o644); err != nil {
+		t.Fatalf("write shared cache: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-codex-model-catalog-change",
+		TaskID:         "e5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-catalog-change"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	modelsCache := filepath.Join(env.CodexHome, "models_cache.json")
+	if err := os.WriteFile(modelsCache, []byte(`{"source":"task-a"}`), 0o644); err != nil {
+		t.Fatalf("refresh task cache: %v", err)
+	}
+	if err := os.WriteFile(catalogPath, []byte(`{"models":[{"slug":"model-b"}]}`), 0o644); err != nil {
+		t.Fatalf("write model catalog B: %v", err)
+	}
+
+	reused := Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-catalog-change"},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+	if _, err := os.Lstat(modelsCache); !os.IsNotExist(err) {
+		t.Fatalf("models cache survived model catalog change: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "catalog.json"))
+	if err != nil {
+		t.Fatalf("read refreshed task model catalog: %v", err)
+	}
+	if string(data) != `{"models":[{"slug":"model-b"}]}` {
+		t.Fatalf("task model catalog = %q", data)
+	}
+}
+
+func TestReuseInvalidatesUnboundLegacyModelsCache(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_provider = "provider-a"`), 0o644); err != nil {
+		t.Fatalf("write provider config: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-codex-model-cache-legacy",
+		TaskID:         "f5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	modelsCache := filepath.Join(env.CodexHome, "models_cache.json")
+	if err := os.WriteFile(modelsCache, []byte(`{"source":"legacy"}`), 0o644); err != nil {
+		t.Fatalf("write legacy task cache: %v", err)
+	}
+	if err := os.Remove(filepath.Join(env.CodexHome, codexModelsCacheBindingFile)); err != nil {
+		t.Fatalf("remove cache binding to simulate pre-fix home: %v", err)
+	}
+
+	if Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
+	}, testLogger()) == nil {
+		t.Fatal("Reuse returned nil")
+	}
+	if _, err := os.Lstat(modelsCache); !os.IsNotExist(err) {
+		t.Fatalf("unbound legacy cache survived reuse: %v", err)
+	}
+
+	// An existing pre-fix home without a cache is still not a fresh home. Do
+	// not attach a newly observed shared snapshot to an unknown prior config.
+	if err := os.Remove(filepath.Join(env.CodexHome, codexModelsCacheBindingFile)); err != nil {
+		t.Fatalf("remove cache binding again: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "models_cache.json"), []byte(`{"source":"shared"}`), 0o644); err != nil {
+		t.Fatalf("write shared cache: %v", err)
+	}
+	if Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-legacy"},
+	}, testLogger()) == nil {
+		t.Fatal("second Reuse returned nil")
+	}
+	if _, err := os.Lstat(modelsCache); !os.IsNotExist(err) {
+		t.Fatalf("shared cache seeded into existing unbound home: %v", err)
 	}
 }
 

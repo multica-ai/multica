@@ -38,6 +38,7 @@ For the difference between token types, see [Authentication and tokens](/auth-to
 | Command | Purpose |
 |---|---|
 | `multica workspace list` | List every workspace you can access |
+| `multica workspace create --name "..." --slug "..." [--issue-prefix "..."] [--description "..."] [--context "..."]` | Create a workspace (you become its owner). `--name` and `--slug` are required; the slug is permanent. Does not switch your current workspace. |
 | `multica workspace get <slug>` | Show details for one workspace |
 | `multica workspace member list` | List members of the current workspace |
 | `multica workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | Update workspace metadata (admin/owner). Long fields accept `--description-stdin` / `--context-stdin`. |
