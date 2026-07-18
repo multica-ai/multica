@@ -102,17 +102,21 @@ type OperatingLoop struct {
 }
 
 type MetricInput struct {
-	Name          string
-	Family        MetricFamily
-	Unit          string
-	Direction     MetricDirection
-	BaselineStart time.Time
-	BaselineEnd   time.Time
-	Source        string
-	Guardrail     bool
+	OperatingLoopID uuid.UUID
+	Name            string
+	Family          MetricFamily
+	Unit            string
+	Direction       MetricDirection
+	BaselineStart   time.Time
+	BaselineEnd     time.Time
+	Source          string
+	Guardrail       bool
 }
 
 func ValidateMetric(input MetricInput) error {
+	if input.OperatingLoopID == uuid.Nil {
+		return errors.New("metric operating loop id is required")
+	}
 	if input.Name == "" || input.Unit == "" || input.Source == "" {
 		return errors.New("metric name, unit, and source are required")
 	}
@@ -126,6 +130,23 @@ func ValidateMetric(input MetricInput) error {
 		return errors.New("metric baseline must have an ordered start and end")
 	}
 	return nil
+}
+
+type Metric struct {
+	ID              uuid.UUID
+	WorkspaceID     uuid.UUID
+	OperatingLoopID uuid.UUID
+	Name            string
+	Family          MetricFamily
+	Unit            string
+	Direction       MetricDirection
+	BaselineStart   time.Time
+	BaselineEnd     time.Time
+	Source          string
+	Guardrail       bool
+	Active          bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func validMetricFamily(family MetricFamily) bool {

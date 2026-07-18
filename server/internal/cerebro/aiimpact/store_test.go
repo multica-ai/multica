@@ -76,7 +76,7 @@ func TestStoreAppendObservationIsWorkspaceScopedAndAppendOnly(t *testing.T) {
 	if function.WorkspaceID != workspaceID || function.OwnerID != ownerID || !function.Active {
 		t.Fatalf("created function = %+v", function)
 	}
-	var loopID, metricID uuid.UUID
+	var loopID uuid.UUID
 	if err := storeTestPool.QueryRow(ctx, `
 		INSERT INTO cerebro_ai_impact_operating_loop
 			(workspace_id, function_id, name)
@@ -87,14 +87,27 @@ func TestStoreAppendObservationIsWorkspaceScopedAndAppendOnly(t *testing.T) {
 
 	periodStart := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
 	periodEnd := periodStart.Add(24 * time.Hour)
-	if err := storeTestPool.QueryRow(ctx, `
-		INSERT INTO cerebro_ai_impact_metric
-			(workspace_id, operating_loop_id, name, family, unit, direction,
-			 baseline_start, baseline_end, source)
-		VALUES ($1, $2, 'Needs solved', 'Outcome', 'needs', 'increase', $3, $4, 'support')
-		RETURNING id`, workspaceID, loopID, periodStart.Add(-7*24*time.Hour), periodStart).Scan(&metricID); err != nil {
+	metricInput := MetricInput{
+		OperatingLoopID: loopID,
+		Name:            "Needs solved",
+		Family:          FamilyOutcome,
+		Unit:            "needs",
+		Direction:       DirectionIncrease,
+		BaselineStart:   periodStart.Add(-7 * 24 * time.Hour),
+		BaselineEnd:     periodStart,
+		Source:          "support",
+	}
+	metric, err := store.CreateMetric(ctx, workspaceID, metricInput)
+	if err != nil {
 		t.Fatalf("create metric: %v", err)
 	}
+	if metric.WorkspaceID != workspaceID || metric.OperatingLoopID != loopID || !metric.Active {
+		t.Fatalf("created metric = %+v", metric)
+	}
+	if _, err := store.CreateMetric(ctx, otherWorkspaceID, metricInput); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-workspace metric error = %v, want ErrNotFound", err)
+	}
+	metricID := metric.ID
 
 	input := ObservationInput{
 		MetricID:       metricID,

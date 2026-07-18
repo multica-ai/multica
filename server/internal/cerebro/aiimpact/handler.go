@@ -26,8 +26,96 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) Mount(r chi.Router) {
 	r.Post("/api/cerebro/ai-impact/functions", h.CreateFunction)
 	r.Post("/api/cerebro/ai-impact/operating-loops", h.CreateOperatingLoop)
+	r.Post("/api/cerebro/ai-impact/metrics", h.CreateMetric)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
 	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
+}
+
+type createMetricRequest struct {
+	OperatingLoopID uuid.UUID       `json:"operating_loop_id"`
+	Name            string          `json:"name"`
+	Family          MetricFamily    `json:"family"`
+	Unit            string          `json:"unit"`
+	Direction       MetricDirection `json:"direction"`
+	BaselineStart   time.Time       `json:"baseline_start"`
+	BaselineEnd     time.Time       `json:"baseline_end"`
+	Source          string          `json:"source"`
+	Guardrail       bool            `json:"guardrail"`
+}
+
+type metricResponse struct {
+	ID              uuid.UUID       `json:"id"`
+	OperatingLoopID uuid.UUID       `json:"operating_loop_id"`
+	Name            string          `json:"name"`
+	Family          MetricFamily    `json:"family"`
+	Unit            string          `json:"unit"`
+	Direction       MetricDirection `json:"direction"`
+	BaselineStart   time.Time       `json:"baseline_start"`
+	BaselineEnd     time.Time       `json:"baseline_end"`
+	Source          string          `json:"source"`
+	Guardrail       bool            `json:"guardrail"`
+	Active          bool            `json:"active"`
+}
+
+func toMetricResponse(metric Metric) metricResponse {
+	return metricResponse{
+		ID:              metric.ID,
+		OperatingLoopID: metric.OperatingLoopID,
+		Name:            metric.Name,
+		Family:          metric.Family,
+		Unit:            metric.Unit,
+		Direction:       metric.Direction,
+		BaselineStart:   metric.BaselineStart,
+		BaselineEnd:     metric.BaselineEnd,
+		Source:          metric.Source,
+		Guardrail:       metric.Guardrail,
+		Active:          metric.Active,
+	}
+}
+
+// CreateMetric creates one workspace-scoped metric.
+func (h *Handler) CreateMetric(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, role, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+
+	var request createMetricRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeObservationError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	input := MetricInput{
+		OperatingLoopID: request.OperatingLoopID,
+		Name:            request.Name,
+		Family:          request.Family,
+		Unit:            request.Unit,
+		Direction:       request.Direction,
+		BaselineStart:   request.BaselineStart,
+		BaselineEnd:     request.BaselineEnd,
+		Source:          request.Source,
+		Guardrail:       request.Guardrail,
+	}
+	if err := ValidateMetric(input); err != nil {
+		writeObservationError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	metric, err := h.service.CreateMetric(r.Context(), workspaceID, role, input)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrReadOnly):
+			writeObservationError(w, http.StatusForbidden, err.Error())
+		case errors.Is(err, ErrNotFound):
+			writeObservationError(w, http.StatusNotFound, err.Error())
+		default:
+			writeObservationError(w, http.StatusInternalServerError, "failed to create metric")
+		}
+		return
+	}
+	writeObservationJSON(w, http.StatusCreated, toMetricResponse(metric))
 }
 
 type createFunctionRequest struct {

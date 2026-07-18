@@ -101,6 +101,64 @@ func (s *Store) CreateOperatingLoop(
 	return operatingLoop, err
 }
 
+const metricColumns = `id, workspace_id, operating_loop_id, name, family, unit,
+ direction, baseline_start, baseline_end, source, guardrail, active, created_at, updated_at`
+
+func scanMetric(row pgx.Row) (Metric, error) {
+	var metric Metric
+	err := row.Scan(
+		&metric.ID,
+		&metric.WorkspaceID,
+		&metric.OperatingLoopID,
+		&metric.Name,
+		&metric.Family,
+		&metric.Unit,
+		&metric.Direction,
+		&metric.BaselineStart,
+		&metric.BaselineEnd,
+		&metric.Source,
+		&metric.Guardrail,
+		&metric.Active,
+		&metric.CreatedAt,
+		&metric.UpdatedAt,
+	)
+	return metric, err
+}
+
+func (s *Store) CreateMetric(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	input MetricInput,
+) (Metric, error) {
+	if err := ValidateMetric(input); err != nil {
+		return Metric{}, err
+	}
+
+	metric, err := scanMetric(s.pool.QueryRow(ctx, `
+		INSERT INTO cerebro_ai_impact_metric
+			(workspace_id, operating_loop_id, name, family, unit, direction,
+			 baseline_start, baseline_end, source, guardrail)
+		SELECT $1, operating_loop.id, $3, $4, $5, $6, $7, $8, $9, $10
+		FROM cerebro_ai_impact_operating_loop operating_loop
+		WHERE operating_loop.workspace_id = $1 AND operating_loop.id = $2
+		RETURNING `+metricColumns,
+		workspaceID,
+		input.OperatingLoopID,
+		input.Name,
+		input.Family,
+		input.Unit,
+		input.Direction,
+		input.BaselineStart,
+		input.BaselineEnd,
+		input.Source,
+		input.Guardrail,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Metric{}, ErrNotFound
+	}
+	return metric, err
+}
+
 const observationColumns = `id, metric_id, period_start, period_end, value,
  evidence_status, confidence, source, method, created_at`
 

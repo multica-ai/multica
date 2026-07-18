@@ -7,7 +7,7 @@ import (
 )
 
 func TestMetricValidationRequiresBusinessEvidenceContract(t *testing.T) {
-	metric := MetricInput{Name: "Needs solved", Family: FamilyOutcome, Unit: "needs", Direction: DirectionIncrease}
+	metric := MetricInput{OperatingLoopID: uuid.New(), Name: "Needs solved", Family: FamilyOutcome, Unit: "needs", Direction: DirectionIncrease}
 	if err := ValidateMetric(metric); err == nil {
 		t.Fatal("expected missing baseline and source to fail")
 	}

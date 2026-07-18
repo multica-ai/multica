@@ -44,6 +44,27 @@ func (s *recordingObservationStore) CreateOperatingLoop(
 	}, nil
 }
 
+func (s *recordingObservationStore) CreateMetric(
+	_ context.Context,
+	workspaceID uuid.UUID,
+	input MetricInput,
+) (Metric, error) {
+	return Metric{
+		ID:              uuid.New(),
+		WorkspaceID:     workspaceID,
+		OperatingLoopID: input.OperatingLoopID,
+		Name:            input.Name,
+		Family:          input.Family,
+		Unit:            input.Unit,
+		Direction:       input.Direction,
+		BaselineStart:   input.BaselineStart,
+		BaselineEnd:     input.BaselineEnd,
+		Source:          input.Source,
+		Guardrail:       input.Guardrail,
+		Active:          true,
+	}, nil
+}
+
 func (s *recordingObservationStore) AppendObservation(
 	_ context.Context,
 	_, _ uuid.UUID,
