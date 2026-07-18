@@ -306,6 +306,25 @@ func TestRunnerReturnsSafeOpenFailureClass(t *testing.T) {
 	}
 }
 
+func TestRunnerObservesStageWithOnlySafeDiagnosticFields(t *testing.T) {
+	runner := NewRunner(classifiedFailingCommander{kind: commandFailureDNS})
+	var got stageObservation
+	runner.observeStage = func(observation stageObservation) {
+		got = observation
+	}
+
+	_, err := runner.Verify(context.Background(), "customer-service", Credential{})
+	if err == nil {
+		t.Fatal("Verify succeeded, want failure")
+	}
+	if got.App != "customer-service" || got.Stage != "open" || got.TargetHost != "customer-service.internal:3456" || got.ExitClass != commandFailureDNS {
+		t.Fatalf("observation = %#v", got)
+	}
+	if got.Duration <= 0 {
+		t.Fatalf("duration = %s, want positive", got.Duration)
+	}
+}
+
 func TestRunnerSerializesConcurrentVerifications(t *testing.T) {
 	commander := &concurrentProbeCommander{}
 	runner := NewRunner(commander)

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"os/exec"
@@ -205,16 +206,29 @@ type Runner struct {
 	stageTimeout   time.Duration
 	cleanupTimeout time.Duration
 	verificationMu sync.Mutex
+	observeStage   func(stageObservation)
+}
+
+type stageObservation struct {
+	App        string
+	Stage      string
+	Duration   time.Duration
+	ExitClass  commandFailureKind
+	TargetHost string
 }
 
 func NewRunner(commander Commander) *Runner {
 	return &Runner{
 		commander: commander, openTimeout: 60 * time.Second,
 		stageTimeout: 30 * time.Second, cleanupTimeout: 30 * time.Second,
+		observeStage: func(observation stageObservation) {
+			log.Printf("internal browser diagnostic app=%s stage=%s duration_ms=%d exit_class=%s target_host=%s",
+				observation.App, observation.Stage, observation.Duration.Milliseconds(), observation.ExitClass, observation.TargetHost)
+		},
 	}
 }
 
-func (r *Runner) runStage(ctx context.Context, stage, stdin string, args ...string) ([]byte, error) {
+func (r *Runner) runStage(ctx context.Context, target Target, stage, stdin string, args ...string) ([]byte, error) {
 	stageTimeout := r.stageTimeout
 	if stage == "open" {
 		stageTimeout = r.openTimeout
@@ -228,7 +242,17 @@ func (r *Runner) runStage(ctx context.Context, stage, stdin string, args ...stri
 	}
 	stageCtx, cancel := context.WithTimeout(ctx, stageTimeout)
 	defer cancel()
+	started := time.Now()
 	output, err := r.commander.Run(stageCtx, stdin, args...)
+	exitClass := commandFailureKind("success")
+	if err != nil {
+		exitClass = safeCommandFailureKind(err)
+	}
+	if r.observeStage != nil {
+		r.observeStage(stageObservation{
+			App: target.Name, Stage: stage, Duration: time.Since(started), ExitClass: exitClass, TargetHost: target.Host(),
+		})
+	}
 	if err != nil {
 		if kind := safeCommandFailureKind(err); stage == "open" && kind != commandFailureUnknown {
 			return nil, fmt.Errorf("internal browser stage %s %s failed", stage, kind)
@@ -297,7 +321,7 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		_, _ = r.commander.Run(cleanupCtx, "", append(baseArgs, "close")...)
 	}()
 
-	if _, err := r.runStage(ctx, "open", "", append(baseArgs, "open", target.URL)...); err != nil {
+	if _, err := r.runStage(ctx, target, "open", "", append(baseArgs, "open", target.URL)...); err != nil {
 		return Result{}, err
 	}
 	if target.Vault != "" || target.SessionCookie {
@@ -321,25 +345,25 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		commands = append(commands, []string{"wait", "1500"})
 		payload, _ := json.Marshal(commands)
 		// This output is deliberately discarded: the stdin payload contains secrets.
-		if _, err := r.runStage(ctx, "auth", string(payload), append(baseArgs, "batch")...); err != nil {
+		if _, err := r.runStage(ctx, target, "auth", string(payload), append(baseArgs, "batch")...); err != nil {
 			return Result{}, err
 		}
 	}
-	if _, err := r.runStage(ctx, "reload", "", append(baseArgs, "reload")...); err != nil {
+	if _, err := r.runStage(ctx, target, "reload", "", append(baseArgs, "reload")...); err != nil {
 		return Result{}, err
 	}
-	if _, err := r.runStage(ctx, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
+	if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
 		return Result{}, err
 	}
 	if target.NavigateLinkName != "" {
-		if _, err := r.runStage(ctx, "navigation", "", append(baseArgs, "find", "role", "link", "click", "--name", target.NavigateLinkName)...); err != nil {
+		if _, err := r.runStage(ctx, target, "navigation", "", append(baseArgs, "find", "role", "link", "click", "--name", target.NavigateLinkName)...); err != nil {
 			return Result{}, err
 		}
-		if _, err := r.runStage(ctx, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
+		if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
 			return Result{}, err
 		}
 	}
-	snapshot, err := r.runStage(ctx, "snapshot", "", append(baseArgs, "snapshot")...)
+	snapshot, err := r.runStage(ctx, target, "snapshot", "", append(baseArgs, "snapshot")...)
 	if err != nil {
 		return Result{}, err
 	}
@@ -348,11 +372,11 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 			return Result{}, fmt.Errorf("internal browser stage markers failed")
 		}
 	}
-	finalURL, err := r.runStage(ctx, "url", "", append(baseArgs, "get", "url")...)
+	finalURL, err := r.runStage(ctx, target, "url", "", append(baseArgs, "get", "url")...)
 	if err != nil {
 		return Result{}, err
 	}
-	rawErrors, err := r.runStage(ctx, "errors", "", append(baseArgs, "errors")...)
+	rawErrors, err := r.runStage(ctx, target, "errors", "", append(baseArgs, "errors")...)
 	if err != nil {
 		return Result{}, err
 	}
