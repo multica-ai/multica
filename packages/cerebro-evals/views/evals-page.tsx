@@ -17,6 +17,7 @@ import { createEval, createEvalBinding, deleteEval, deleteEvalBinding, updateEva
 import { evalBindingsOptions, evalKeys, evalRunsOptions, evalsListOptions } from "../queries";
 import { buildWriteInput, EMPTY_FORM, formFromEval, GRADER_MATCHES, type DraftTask } from "./form";
 import { EVAL_TEMPLATES, duplicateForm } from "./templates";
+import { formatCost, formatDuration } from "../format";
 import { RunDetail } from "./run-detail";
 import type { CerebroEval } from "../types";
 
@@ -147,7 +148,7 @@ export function EvalsPage() {
           {selectedEvalId && <section className="flex flex-col gap-3 rounded-lg border p-4">
             <div className="flex items-center justify-between"><div><h2 className="text-sm font-semibold">Run history</h2><p className="text-xs text-muted-foreground">Latest immutable results for the selected eval version. Click a run to see why it passed or failed.</p></div><Button size="sm" variant="ghost" onClick={() => { setSelectedEvalId(""); setSelectedRunId(""); }}>Close</Button></div>
             <Table><TableHeader><TableRow><TableHead>Status</TableHead><TableHead>Target version</TableHead><TableHead>Issue</TableHead><TableHead>Cost</TableHead><TableHead>Latency</TableHead><TableHead>Created</TableHead></TableRow></TableHeader><TableBody>
-              {(runsQuery.data ?? []).map((run) => <TableRow key={run.id} className={`cursor-pointer${run.id === selectedRunId ? " bg-muted/50" : ""}`} onClick={() => setSelectedRunId(run.id === selectedRunId ? "" : run.id)}><TableCell><Badge variant={run.status === "passed" ? "default" : "secondary"}>{run.status}</Badge></TableCell><TableCell className="font-mono text-xs">{run.target_version || "—"}</TableCell><TableCell className="font-mono text-xs">{run.issue_id?.slice(0, 8) ?? "—"}</TableCell><TableCell className="text-xs">{run.cost_cents}¢</TableCell><TableCell className="text-xs">{run.latency_ms} ms</TableCell><TableCell className="text-xs">{new Date(run.created_at).toLocaleString()}</TableCell></TableRow>)}
+              {(runsQuery.data ?? []).map((run) => <TableRow key={run.id} className={`cursor-pointer${run.id === selectedRunId ? " bg-muted/50" : ""}`} onClick={() => setSelectedRunId(run.id === selectedRunId ? "" : run.id)}><TableCell><Badge variant={run.status === "passed" ? "default" : "secondary"}>{run.status}</Badge></TableCell><TableCell className="font-mono text-xs">{run.target_version || "—"}</TableCell><TableCell className="font-mono text-xs">{run.issue_key || (run.issue_id ? run.issue_id.slice(0, 8) : "—")}</TableCell><TableCell className="text-xs">{formatCost(run.cost_cents)}</TableCell><TableCell className="text-xs">{formatDuration(run.latency_ms)}</TableCell><TableCell className="text-xs">{new Date(run.created_at).toLocaleString()}</TableCell></TableRow>)}
               {(runsQuery.data ?? []).length === 0 && !runsQuery.isLoading && <TableRow><TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">No runs recorded for this eval.</TableCell></TableRow>}
             </TableBody></Table>
           </section>}

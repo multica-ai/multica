@@ -26,7 +26,7 @@ export const evalsListSchema = z.object({ evals: z.array(evalSchema).default([])
 
 export const evalRunSchema = z.object({
   id: z.string(), workspace_id: z.string(), eval_id: z.string(), eval_version: z.string(),
-  target_version: z.string().default(""), workflow_id: z.string().optional(), issue_id: z.string().optional(),
+  target_version: z.string().default(""), workflow_id: z.string().optional(), issue_id: z.string().optional(), issue_key: z.string().optional(),
   status: z.string(), results: z.record(z.string(), z.unknown()).default({}), evidence_artifact_id: z.string().optional(),
   cost_cents: z.number().default(0), latency_ms: z.number().default(0), created_at: z.string(),
 }).passthrough();

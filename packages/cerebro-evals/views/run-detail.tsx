@@ -1,6 +1,7 @@
 import { AlertTriangle, ExternalLink } from "lucide-react";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
+import { formatCost, formatDuration } from "../format";
 import { parseRunReport, passLabel } from "../report";
 import type { EvalCaseReport, EvalRun } from "../types";
 
@@ -43,8 +44,8 @@ export function RunDetail({ run, onClose, onOpenEvidence }: {
             <Summary label="Passed" value={`${report.outcome.passed}/${report.outcome.total} · ${pct(report.outcome.pass_rate)}`} />
             <Summary label="Pass rate needed" value={`${pct(report.outcome.min_pass_rate)} · ${report.outcome.threshold_met ? "met" : "not met"}`} />
             <Summary label="Critical tasks" value={report.outcome.critical_total === 0 ? "none" : `${report.outcome.critical_failed} failed · ${report.outcome.critical_rule_met ? "rule met" : "rule broken"}`} />
-            <Summary label="Cost" value={`${report.cost_cents}¢`} />
-            <Summary label="Latency" value={`${report.latency_ms} ms`} />
+            <Summary label="Cost" value={formatCost(report.cost_cents)} />
+            <Summary label="Latency" value={formatDuration(report.latency_ms)} />
           </div>
 
           <div className="flex flex-col gap-2">

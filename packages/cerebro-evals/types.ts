@@ -37,6 +37,7 @@ export interface EvalRun {
   target_version: string;
   workflow_id?: string;
   issue_id?: string;
+  issue_key?: string;
   status: EvalRunStatus;
   results: Record<string, unknown>;
   evidence_artifact_id?: string;
