@@ -43,7 +43,10 @@ const KNOWN_TYPES = new Set([
   "url",
 ]);
 
-export const CreateIssueProperties = forwardRef<CreateIssuePropertiesHandle>(
+export const CreateIssueProperties = forwardRef<
+  CreateIssuePropertiesHandle,
+  CreateIssuePropertiesProps
+>(
   function CreateIssueProperties({ hiddenPropertyIds = [] }: CreateIssuePropertiesProps, ref) {
     const workspaceId = useWorkspaceId();
     const { data: catalog = [] } = useQuery(propertyListOptions(workspaceId));

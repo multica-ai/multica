@@ -52,6 +52,7 @@ export interface ListIssuesParams {
   priorities?: IssuePriority[];
   assignee_id?: string;
   assignee_ids?: string[];
+  assignee_types?: IssueAssigneeType[];
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 filter by on-behalf-of member (user UUIDs).
   on_behalf_of_ids?: string[];
   // CEREBRO-PATCH(issue-sprint-filter): TECH-3620 filter to a sprint's members (cerebro_sprint_issue).

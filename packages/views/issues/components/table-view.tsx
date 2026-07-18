@@ -1,5 +1,6 @@
 "use client";
 
+import { IssueTableTimePicker } from "@multica/cerebro-issue-properties/views"; // CEREBRO-PATCH(table-stacked-date-times): FIR-3447 preserve Cerebro date-time parity in upstream Table.
 import {
   useCallback,
   useEffect,
@@ -560,7 +561,6 @@ function LazyLabelCell({ issue }: { issue: Issue }) {
           onOpenChange={(open) => {
             if (!open) setEditing(false);
           }}
-          triggerRender={<button type="button" className="flex max-w-full gap-1" />}
         />
       </div>
     );
@@ -948,12 +948,14 @@ export function TableView({
               return (
                 <div onClick={stopRowNavigation}>
                   <StartDatePicker startDate={issue.start_date} onUpdate={onUpdate} />
+                  <IssueTableTimePicker issueId={issue.id} kind="start" date={issue.start_date} />
                 </div>
               );
             case "due_date":
               return (
                 <div onClick={stopRowNavigation}>
                   <DueDatePicker dueDate={issue.due_date} onUpdate={onUpdate} />
+                  <IssueTableTimePicker issueId={issue.id} kind="due" date={issue.due_date} />
                 </div>
               );
             case "created_at":
@@ -984,7 +986,7 @@ export function TableView({
                   <ActorAvatar
                     actorType={issue.creator_type}
                     actorId={issue.creator_id}
-                    size="sm"
+                    size={16}
                   />
                   <span className="truncate">
                     {getActorName(issue.creator_type, issue.creator_id)}

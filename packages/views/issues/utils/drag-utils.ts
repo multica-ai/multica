@@ -88,6 +88,21 @@ export function computePosition(ids: string[], activeId: string, issueMap: Map<s
   return (getPos(ids[idx - 1]!) + getPos(ids[idx + 1]!)) / 2;
 }
 
+/** Insert an issue at the slot implied by its ascending position. */
+export function insertIdByPosition(
+  ids: string[],
+  id: string,
+  position: number,
+  issueMap: Map<string, Issue>,
+): string[] {
+  const index = ids.findIndex((existing) => {
+    const existingPosition = issueMap.get(existing)?.position;
+    return existingPosition !== undefined && existingPosition > position;
+  });
+  if (index === -1) return [...ids, id];
+  return [...ids.slice(0, index), id, ...ids.slice(index)];
+}
+
 export function findColumn(
   columns: Record<string, string[]>,
   id: string,

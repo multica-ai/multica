@@ -1,4 +1,10 @@
 {
+  "auto_save": {
+    "saving": "Saving…",
+    "saved": "Saved",
+    "failed": "Couldn't save",
+    "toast_saved": "Changes saved"
+  },
   "preferences": {
     "theme": {
       "title": "Theme",

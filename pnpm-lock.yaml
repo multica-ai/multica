@@ -3239,6 +3239,12 @@ importers:
 
   packages/cerebro-issue-properties:
     dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
+      '@multica/cerebro-issue-datetime':
+        specifier: workspace:*
+        version: link:../cerebro-issue-datetime
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -3258,9 +3264,18 @@ importers:
       '@multica/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
+      jsdom:
+        specifier: 'catalog:'
+        version: 29.1.1(@noble/hashes@1.8.0)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -4282,12 +4297,12 @@ importers:
 
   packages/cerebro-sessions:
     dependencies:
-      '@multica/cerebro-tool-policy':
-        specifier: workspace:*
-        version: link:../cerebro-tool-policy
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
+      '@multica/cerebro-tool-policy':
+        specifier: workspace:*
+        version: link:../cerebro-tool-policy
       '@multica/core':
         specifier: workspace:*
         version: link:../core

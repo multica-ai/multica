@@ -1,4 +1,10 @@
 {
+  "auto_save": {
+    "saving": "正在保存…",
+    "saved": "已保存",
+    "failed": "保存失败",
+    "toast_saved": "更改已保存"
+  },
   "preferences": {
     "theme": {
       "title": "主题",

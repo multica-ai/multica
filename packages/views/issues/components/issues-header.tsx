@@ -905,7 +905,7 @@ function DateConditionEditor({
       <DropdownMenuSeparator />
       <DropdownMenuItem closeOnClick={false} onClick={onRemove} className="text-destructive">
         <X className="size-3.5" />
-        Remove
+        {t(($) => $.filters.date_remove)}
       </DropdownMenuItem>
     </>
   );
@@ -951,7 +951,7 @@ function DateBuilderSubContent({
         // inside a Group or Base UI throws #31 and white-screens the page.
         <DropdownMenuGroup>
           <DropdownMenuLabel className="font-normal text-muted-foreground">
-            No date filters yet
+            {t(($) => $.filters.date_empty)}
           </DropdownMenuLabel>
         </DropdownMenuGroup>
       )}
@@ -986,12 +986,12 @@ function DateBuilderSubContent({
       <DropdownMenuSeparator />
       <DropdownMenuItem closeOnClick={false} onClick={add}>
         <Plus className="size-3.5" />
-        Add date filter
+        {t(($) => $.filters.date_add_filter)}
       </DropdownMenuItem>
       {value.length > 0 && (
         <DropdownMenuItem closeOnClick={false} onClick={() => onChange([])} className="text-muted-foreground">
           <X className="size-3.5" />
-          Clear all dates
+          {t(($) => $.filters.date_clear_all)}
         </DropdownMenuItem>
       )}
     </>
@@ -1323,12 +1323,10 @@ function DateSubContent({
   onChange,
   // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — due-date quick presets.
   dueDatePresets = false,
-  facetCountsExact = true,
 }: {
   value: IssueDateFilter | null;
   onChange: (filter: IssueDateFilter | null) => void;
   dueDatePresets?: boolean;
-  facetCountsExact?: boolean;
 }) {
   const { t } = useT("issues");
   const [field, setField] = useState<IssueDateField>(value?.field ?? "created_at");
@@ -2324,7 +2322,7 @@ export function IssueDisplayControls({
 
             <div className="border-b px-3 py-2.5">
               <span className="text-xs font-medium text-muted-foreground">
-                Sub-issues
+                {t(($) => $.detail.sub_issues_label)}
               </span>
               <div className="mt-2 flex gap-1">
                 {([

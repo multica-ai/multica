@@ -28,7 +28,6 @@ function makeIssue(id: string, overrides: Partial<Issue> = {}): Issue {
     parent_issue_id: null,
     project_id: null,
     position: number,
-    stage: null,
     start_date: null,
     due_date: null,
     labels: [],
@@ -37,6 +36,7 @@ function makeIssue(id: string, overrides: Partial<Issue> = {}): Issue {
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,
+    kind: overrides.kind ?? "issue",
   };
 }
 

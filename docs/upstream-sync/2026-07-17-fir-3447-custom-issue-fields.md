@@ -24,9 +24,10 @@ not a full upstream sync.
 - The configurable Table is mounted on Issues, My Issues, and Projects with
   persisted columns and widths, grouping, hierarchy, inline editing, search,
   export, server pagination, and optimistic cache reconciliation.
-- Remaining UI slices are intentionally separate: Create issue field
-  visibility/Quick create, Settings > Issue, the two default DKK fields,
-  stacked-date parity for Table, and final browser QA/polish.
+- Create issue field visibility/Quick create, Settings > Issue, the two default
+  DKK fields, and Cerebro's stacked date/time parity in Table are present.
+- The remaining delivery gate is fresh independent browser QA/polish for the
+  current revision.
 
 ## Upstream provenance
 
@@ -85,6 +86,9 @@ or reimplementing the feature.
 - Table: column picker/reordering/resizing, hierarchy, grouping, search,
   infinite pagination, inline edits, batch actions, CSV export, and empty/error
   windows across Issues, My Issues, and Projects.
+- Table date cells: Start date and Due date retain Cerebro's optional time
+  control when `cerebro_issue_date_times` is enabled, with no time control when
+  the flag is off or the date is empty.
 
 The current conflict self-review preserves Cerebro's complete Settings tab set
 and reuses the existing workspace-scoped catalog/query pipeline. Fresh browser

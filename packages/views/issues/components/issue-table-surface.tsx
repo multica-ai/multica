@@ -15,6 +15,7 @@ import {
 } from "@multica/core/issues/queries";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { projectListOptions } from "@multica/core/projects";
+import type { Project } from "@multica/core/types";
 import type { ChildProgress } from "./list-row";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { TableView } from "./table-view";
@@ -103,17 +104,28 @@ export function IssueTableSurface({
   );
   const resolveExportLookups = useCallback(
     async ({ projects, childProgress }: { projects: boolean; childProgress: boolean }) => {
-      const [projectRows, progress] = await Promise.all([
+      const [projectResponse, progressResponse] = await Promise.all([
         projects
           ? queryClient.fetchQuery(projectListOptions(wsId))
-          : Promise.resolve([]),
+          : Promise.resolve(null),
         childProgress
           ? queryClient.fetchQuery(childIssueProgressOptions(wsId))
-          : Promise.resolve(new Map<string, ChildProgress>()),
+          : Promise.resolve(null),
       ]);
+      const projectMap = new Map<string, Project>();
+      for (const project of projectResponse?.projects ?? []) {
+        projectMap.set(project.id, project);
+      }
+      const childProgressMap = new Map<string, ChildProgress>();
+      for (const progress of progressResponse?.progress ?? []) {
+        childProgressMap.set(progress.parent_issue_id, {
+          done: progress.done,
+          total: progress.total,
+        });
+      }
       return {
-        projectMap: new Map(projectRows.map((project) => [project.id, project])),
-        childProgressMap: progress,
+        projectMap,
+        childProgressMap,
       };
     },
     [queryClient, wsId],
