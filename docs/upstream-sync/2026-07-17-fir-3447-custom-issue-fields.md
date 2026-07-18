@@ -11,8 +11,14 @@ not a full upstream sync.
 - Core client/cache/realtime slice: defensive API schemas, workspace-scoped
   query keys, optimistic single-property writes, single-key rollback,
   property-filter/sort persistence, and websocket reconciliation are present.
-- UI slices remain intentionally separate: Issue detail/Create issue, then
-  list/Table/Settings, then filters/sort/polish.
+- Issue detail and manual Create issue expose the active property catalog with
+  typed editors.
+- Settings > Properties now exposes the upstream catalog UI, including
+  admin-only definition changes, archive/restore, icons, and option colors.
+- Board cards and List rows now render the custom fields selected in Display.
+- Remaining UI slices are intentionally separate: property grouping, the
+  configurable Table, Create issue field visibility/Quick create, and final
+  filter/sort polish.
 
 ## Upstream provenance
 
@@ -38,6 +44,9 @@ not a full upstream sync.
   filters, sub-issue display state, and external realtime handler registration
   while adding property filters, sorting, cache reconciliation, and reconnect
   invalidation.
+- Added Properties to Cerebro's existing desktop/mobile Settings navigation
+  without replacing its Agent Profile, Groups, Accounts, Status models,
+  Auth & Permissions, Model registry, or Documentation tabs.
 - Did not apply upstream's generic issue-mutation reconciliation hunk because
   this fork's update mutation does not write server responses back into the
   cache; property writes keep their own authoritative single-key pipeline.
@@ -48,3 +57,16 @@ The change deliberately carries no `CEREBRO-PATCH` marker: it is an exact,
 documented sync-down of upstream behavior with conflict resolution at the fork
 seams. A later full upstream sync should use this provenance to avoid stacking
 or reimplementing the feature.
+
+## Current-revision QA list derived from changed UI files
+
+- Settings navigation: desktop sidebar and responsive selector with Properties.
+- Settings > Properties: empty state, admin create/edit/archive flow, member
+  read-only state, option colors, and property icons.
+- Board: Display-selected number/select/date values on cards.
+- List: Display-selected values on rows at wide and responsive widths.
+
+The current conflict self-review preserves Cerebro's complete Settings tab set
+and reuses the existing workspace-scoped catalog/query pipeline. Fresh browser
+evidence is still required for the revision that completes Table and grouping;
+prior Issue detail/Create issue screenshots are not reused for that revision.

@@ -24,5 +24,13 @@
     "error_already_bound": "该飞书账号已绑定到其他 Multica 用户。账户转移需要先显式解绑。",
     "error_not_member": "你登录的 Multica 账号不是当前工作区成员。",
     "error_unknown": "出现未知错误。请稍后再试，如反复失败请联系工作区管理员。"
+  },
+  "color_picker": {
+    "saturation": "饱和度与明度",
+    "hue": "色相",
+    "hex": "十六进制颜色",
+    "eyedropper": "从屏幕取色",
+    "presets": "预设颜色",
+    "random": "随机"
   }
 }

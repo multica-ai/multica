@@ -24,5 +24,13 @@
     "error_already_bound": "이 Lark 계정은 이미 다른 Multica 사용자에 연결되어 있습니다. 계정 이전은 먼저 명시적으로 연결을 해제해야 합니다.",
     "error_not_member": "현재 로그인한 Multica 계정이 이 워크스페이스의 멤버가 아닙니다.",
     "error_unknown": "문제가 발생했어요. 다시 시도해 보고, 계속되면 워크스페이스 관리자에게 문의하세요."
+  },
+  "color_picker": {
+    "saturation": "채도와 명도",
+    "hue": "색조",
+    "hex": "16진수 색상",
+    "eyedropper": "화면에서 색상 선택",
+    "presets": "프리셋",
+    "random": "무작위"
   }
 }
