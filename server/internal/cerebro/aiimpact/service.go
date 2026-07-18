@@ -207,3 +207,22 @@ func (s *Service) ListFunctionEvidence(
 	}
 	return result, nil
 }
+
+// ListOperatingLoopEvidence returns the latest workspace evidence for one Operating Loop.
+func (s *Service) ListOperatingLoopEvidence(
+	ctx context.Context,
+	workspaceID, operatingLoopID uuid.UUID,
+) ([]EvidenceReadModel, error) {
+	evidence, err := s.ListWorkspaceEvidence(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]EvidenceReadModel, 0, len(evidence))
+	for _, item := range evidence {
+		if item.OperatingLoop.ID == operatingLoopID {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}

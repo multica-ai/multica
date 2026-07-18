@@ -34,6 +34,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Post("/api/cerebro/ai-impact/metrics", h.CreateMetric)
 	r.Get("/api/cerebro/ai-impact/evidence", h.ListWorkspaceEvidence)
 	r.Get("/api/cerebro/ai-impact/functions/{functionId}/evidence", h.ListFunctionEvidence)
+	r.Get("/api/cerebro/ai-impact/operating-loops/{operatingLoopId}/evidence", h.ListOperatingLoopEvidence)
 	r.Get("/api/cerebro/ai-impact/latest-observations", h.ListWorkspaceLatestObservations)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/latest-observations", h.ListLatestObservations)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
@@ -114,6 +115,30 @@ func (h *Handler) ListFunctionEvidence(w http.ResponseWriter, r *http.Request) {
 	evidence, err := h.service.ListFunctionEvidence(r.Context(), workspaceID, functionID)
 	if err != nil {
 		writeObservationError(w, http.StatusInternalServerError, "failed to list function evidence")
+		return
+	}
+	response := make([]evidenceResponse, 0, len(evidence))
+	for _, item := range evidence {
+		response = append(response, toEvidenceResponse(item))
+	}
+	writeObservationJSON(w, http.StatusOK, map[string]any{"evidence": response})
+}
+
+// ListOperatingLoopEvidence returns latest observations for one Operating Loop.
+func (h *Handler) ListOperatingLoopEvidence(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, _, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+	operatingLoopID, err := uuid.Parse(chi.URLParam(r, "operatingLoopId"))
+	if err != nil {
+		writeObservationError(w, http.StatusBadRequest, "invalid operating_loop_id")
+		return
+	}
+
+	evidence, err := h.service.ListOperatingLoopEvidence(r.Context(), workspaceID, operatingLoopID)
+	if err != nil {
+		writeObservationError(w, http.StatusInternalServerError, "failed to list operating loop evidence")
 		return
 	}
 	response := make([]evidenceResponse, 0, len(evidence))
