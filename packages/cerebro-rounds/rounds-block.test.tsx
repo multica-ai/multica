@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IssueRoundsSectionView, RoundsBlock } from "./rounds-block";
 import type { RoundStatus } from "./schemas";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const status = (handled = false, active = true): RoundStatus => ({
   round: { id: "round-1", workspace_id: "ws", owner_id: "owner", name: "Daily", created_at: "", updated_at: "" },
@@ -141,25 +144,43 @@ describe("RoundsBlock", () => {
     expect(screen.getByRole("button", { name: "Play Daily" })).toBeInTheDocument();
   });
 
-  it("turns a completed active Round into green Play and shows a success alert", () => {
-    const onStart = vi.fn();
+  it("keeps green Pause available on a completed Round so it can be closed immediately", () => {
+    const onPause = vi.fn();
     const completed = status(true);
     completed.active_cycle!.items = completed.active_cycle!.items.map((item) => ({
       ...item,
       handled_at: "2026-07-14T12:01:00Z",
     }));
 
-    render(<RoundsBlock statuses={[completed]} {...props} onStart={onStart} />);
+    render(<RoundsBlock statuses={[completed]} {...props} onPause={onPause} />);
 
     expect(screen.getByText("Complete")).toBeInTheDocument();
-    const play = screen.getByRole("button", { name: "Play Daily" });
-    expect(play).toHaveClass("bg-success");
+    const pause = screen.getByRole("button", { name: "Pause Daily" });
+    expect(pause).toHaveClass("bg-success");
 
     fireEvent.click(screen.getByRole("button", { name: "Expand Daily" }));
     expect(screen.getByRole("alert")).toHaveTextContent("All ready messages handled.");
 
-    fireEvent.click(play);
-    expect(onStart).toHaveBeenCalledWith("round-1");
+    fireEvent.click(pause);
+    expect(onPause).toHaveBeenCalledWith("round-1");
+  });
+
+  it("automatically closes a completed Round after one minute", () => {
+    vi.useFakeTimers();
+    const onPause = vi.fn();
+    const completed = status(true);
+    completed.active_cycle!.items = completed.active_cycle!.items.map((item) => ({
+      ...item,
+      handled_at: "2026-07-14T12:01:00Z",
+    }));
+
+    render(<RoundsBlock statuses={[completed]} {...props} onPause={onPause} />);
+
+    act(() => vi.advanceTimersByTime(59_999));
+    expect(onPause).not.toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(onPause).toHaveBeenCalledWith("round-1");
   });
 });
 

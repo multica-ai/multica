@@ -100,7 +100,7 @@ test("Pause folds the Round and returns an unanswered message to the next Play",
   await expect(block.getByText(MESSAGE, { exact: false }).first()).toBeVisible();
 });
 
-test("answering the final Ready message shows a completed Round with green Play", async ({ page }) => {
+test("answering the final Ready message shows green Pause and allows closing the Round", async ({ page }) => {
   const issue = await api.createIssue(MESSAGE, { allow_duplicate: true });
   await api.insertInboxItem({ type: "mentioned", route: "inbox", title: MESSAGE, issueId: issue.id });
 
@@ -126,8 +126,15 @@ test("answering the final Ready message shows a completed Round with green Play"
 
   await api.createComment(issue.id, "Handled in this Round");
 
-  const replay = block.getByRole("button", { name: `Play ${ROUND}` });
-  await expect(replay).toHaveClass(/bg-success/);
+  const completedPause = block.getByRole("button", { name: `Pause ${ROUND}` });
+  await expect(completedPause).toHaveClass(/bg-success/);
   await expect(block.getByRole("alert")).toHaveText("All ready messages handled.");
   await expect(block.getByText("Complete", { exact: true })).toBeVisible();
+
+  const [pauseResponse] = await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith(`/api/cerebro/rounds/${roundId}/pause`) && response.request().method() === "POST"),
+    completedPause.click(),
+  ]);
+  expect(pauseResponse.status()).toBe(204);
+  await expect(block.getByRole("button", { name: `Play ${ROUND}` })).toBeVisible();
 });
