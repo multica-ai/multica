@@ -47,6 +47,13 @@ export {
   CerebroTestAsUserMenuItem,
   CerebroTestAsUserDialogHost,
 } from "./cerebro-test-as-user-menu";
+export {
+  useDataSourceScopeConfig,
+  useScopeOptions,
+  groupByFolder,
+  type ScopeOption,
+  type ScopeConfig,
+} from "./data-source-scope";
 export { PermissionDetailPage } from "./permission-detail-page";
 export { permissionDetailPath } from "./permission-detail-path";
 export {

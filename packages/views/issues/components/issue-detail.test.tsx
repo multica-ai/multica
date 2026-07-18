@@ -1199,6 +1199,12 @@ describe("IssueDetail (shared)", () => {
       renderIssueDetailWithHighlight("comment-2");
 
       await waitFor(() => {
+        expect(
+          document.getElementById("comment-comment-2"),
+        ).not.toBeNull();
+      });
+
+      await waitFor(() => {
         const latestButton = screen.getByRole("button", { name: "Latest" });
         expect(latestButton).toHaveClass("opacity-0");
         expect(latestButton).toHaveClass("pointer-events-none");
