@@ -46,13 +46,16 @@ type EvalInput struct {
 }
 
 type EvalRun struct {
-	ID                 uuid.UUID       `json:"id"`
-	WorkspaceID        uuid.UUID       `json:"workspace_id"`
-	EvalID             uuid.UUID       `json:"eval_id"`
-	EvalVersion        string          `json:"eval_version"`
-	TargetVersion      string          `json:"target_version"`
-	WorkflowID         *uuid.UUID      `json:"workflow_id,omitempty"`
-	IssueID            *uuid.UUID      `json:"issue_id,omitempty"`
+	ID            uuid.UUID  `json:"id"`
+	WorkspaceID   uuid.UUID  `json:"workspace_id"`
+	EvalID        uuid.UUID  `json:"eval_id"`
+	EvalVersion   string     `json:"eval_version"`
+	TargetVersion string     `json:"target_version"`
+	WorkflowID    *uuid.UUID `json:"workflow_id,omitempty"`
+	IssueID       *uuid.UUID `json:"issue_id,omitempty"`
+	// IssueKey is the human-readable case key (e.g. "MUL-123") resolved from the
+	// issue's number and the workspace prefix. Computed on read, not a column.
+	IssueKey           string          `json:"issue_key,omitempty"`
 	Status             string          `json:"status"`
 	Results            json.RawMessage `json:"results"`
 	EvidenceArtifactID *uuid.UUID      `json:"evidence_artifact_id,omitempty"`

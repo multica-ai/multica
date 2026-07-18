@@ -53,6 +53,12 @@ func TestRemoteRunnerRequiresHTTPSOutsideTests(t *testing.T) {
 	}
 }
 
+func TestRemoteRunnerAllowsPrivateSliplaneInternalURL(t *testing.T) {
+	if _, err := NewRemoteRunner("http://browser-verifier-runner.internal:8080", "token", http.DefaultClient); err != nil {
+		t.Fatalf("private Sliplane verifier URL was rejected: %v", err)
+	}
+}
+
 func TestRunnerHTTPHandlerRejectsWrongTokenBeforeBrowserExecution(t *testing.T) {
 	handler := NewRunnerHTTPHandler("correct-token", NewRunner(failingCommander{}))
 	req := httptest.NewRequest(http.MethodPost, "/verify", strings.NewReader(`{"app":"registry","credential":{"username":"u","password":"p"}}`))

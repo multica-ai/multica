@@ -28,8 +28,13 @@ type RemoteRunner struct {
 
 func NewRemoteRunner(endpoint, token string, client *http.Client) (*RemoteRunner, error) {
 	parsed, err := url.Parse(strings.TrimSpace(endpoint))
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Hostname() != "127.0.0.1" && parsed.Hostname() != "localhost") {
-		return nil, fmt.Errorf("browser verifier URL must use HTTPS")
+	if err != nil || parsed.Host == "" {
+		return nil, fmt.Errorf("browser verifier URL must use HTTPS or a private Sliplane internal host")
+	}
+	hostname := strings.ToLower(parsed.Hostname())
+	privateHTTP := parsed.Scheme == "http" && (hostname == "127.0.0.1" || hostname == "localhost" || hostname == "::1" || strings.HasSuffix(hostname, ".internal"))
+	if parsed.Scheme != "https" && !privateHTTP {
+		return nil, fmt.Errorf("browser verifier URL must use HTTPS or a private Sliplane internal host")
 	}
 	if strings.TrimSpace(token) == "" {
 		return nil, fmt.Errorf("browser verifier token is required")

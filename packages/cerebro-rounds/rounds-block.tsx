@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, ChevronDown, ChevronRight, Pause, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@multica/ui/components/ui/dropdown-menu";
@@ -15,6 +15,54 @@ import { roundMembershipLabel, type RoundStatus } from "./schemas";
 import type { RoundInput } from "./api";
 
 type RoundView = "ready" | "handled" | "all";
+
+const COMPLETED_ROUND_PAUSE_MS = 60_000;
+
+function RoundAction({
+  roundName,
+  activeCycleId,
+  complete,
+  onStart,
+  onPause,
+}: {
+  roundName: string;
+  activeCycleId?: string;
+  complete: boolean;
+  onStart: () => void;
+  onPause: () => void;
+}) {
+  const requestedCycleId = useRef<string | null>(null);
+  const onPauseRef = useRef(onPause);
+  onPauseRef.current = onPause;
+
+  useEffect(() => {
+    if (!activeCycleId || !complete) {
+      requestedCycleId.current = null;
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      if (requestedCycleId.current === activeCycleId) return;
+      requestedCycleId.current = activeCycleId;
+      onPauseRef.current();
+    }, COMPLETED_ROUND_PAUSE_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeCycleId, complete]);
+
+  if (activeCycleId) {
+    return <Button size="sm" variant="ghost" onClick={() => {
+      requestedCycleId.current = activeCycleId;
+      onPause();
+    }} className={complete ? "bg-success text-success-foreground hover:bg-success/90 hover:text-success-foreground" : undefined} aria-label={`Pause ${roundName}`}>
+      <Pause className="size-3.5" /><span className="sr-only">Pause</span>
+    </Button>;
+  }
+
+  return <Button size="sm" variant="ghost" onClick={onStart} aria-label={`Play ${roundName}`}>
+    <Play className="size-3.5" /><span className="sr-only">Play</span>
+  </Button>;
+}
 
 export function RoundsBlock({
   statuses,
@@ -119,19 +167,25 @@ export function RoundsBlock({
           <span className="truncate text-sm font-medium">{s.round.name}</span>
           <span className="ml-auto text-xs text-muted-foreground">{summary}</span>
         </button>
-        {s.active_cycle && !complete ? <Button size="sm" variant="ghost" onClick={() => {
-          setViews((current) => ({ ...current, [s.round.id]: "ready" }));
-          setExpandedIds((current) => {
-            const next = new Set(current);
-            next.delete(s.round.id);
-            return next;
-          });
-          onPause(s.round.id);
-        }} aria-label={`Pause ${s.round.name}`}><Pause className="size-3.5" /><span className="sr-only">Pause</span></Button> : <Button size="sm" variant="ghost" onClick={() => {
-          setViews((current) => ({ ...current, [s.round.id]: "ready" }));
-          setExpandedIds((current) => new Set([...current, s.round.id]));
-          onStart(s.round.id);
-        }} className={complete ? "bg-success text-success-foreground hover:bg-success/90 hover:text-success-foreground" : undefined} aria-label={`Play ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Play</span></Button>}
+        <RoundAction
+          roundName={s.round.name}
+          activeCycleId={s.active_cycle?.id}
+          complete={complete}
+          onPause={() => {
+            setViews((current) => ({ ...current, [s.round.id]: "ready" }));
+            setExpandedIds((current) => {
+              const next = new Set(current);
+              next.delete(s.round.id);
+              return next;
+            });
+            onPause(s.round.id);
+          }}
+          onStart={() => {
+            setViews((current) => ({ ...current, [s.round.id]: "ready" }));
+            setExpandedIds((current) => new Set([...current, s.round.id]));
+            onStart(s.round.id);
+          }}
+        />
       </div>
       {open && <>
         <div className="flex gap-1 border-t border-border/50 px-3 py-2" role="group" aria-label={`${s.round.name} view`}>

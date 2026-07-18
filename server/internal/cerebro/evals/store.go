@@ -3,6 +3,7 @@ package evals
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -112,19 +113,44 @@ func scanRun(row pgx.Row) (EvalRun, error) {
 	return value, err
 }
 
+// formatIssueKey builds a case key ("MUL-123") from the workspace prefix and the
+// issue number. Both come from a LEFT JOIN, so either may be absent (a run with
+// no issue, or a drifted row); in that case it returns "" and the UI falls back
+// to the raw id.
+func formatIssueKey(prefix *string, number *int32) string {
+	if prefix == nil || number == nil || *prefix == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s-%d", *prefix, *number)
+}
+
 func (s *Store) ListRuns(ctx context.Context, workspaceID, evalID uuid.UUID) ([]EvalRun, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+runColumns+` FROM cerebro_eval_run
-        WHERE workspace_id=$1 AND eval_id=$2 ORDER BY created_at DESC LIMIT 100`, workspaceID, evalID)
+	rows, err := s.pool.Query(ctx, `SELECT
+        r.id, r.workspace_id, r.eval_id, r.eval_version, r.target_version, r.workflow_id,
+        r.issue_id, r.status, r.results, r.evidence_artifact_id, r.cost_cents, r.latency_ms,
+        r.created_by_id, r.created_by_type, r.started_at, r.completed_at, r.created_at,
+        i.number, w.issue_prefix
+      FROM cerebro_eval_run r
+      LEFT JOIN issue i ON i.id = r.issue_id
+      LEFT JOIN workspace w ON w.id = r.workspace_id
+      WHERE r.workspace_id=$1 AND r.eval_id=$2 ORDER BY r.created_at DESC LIMIT 100`, workspaceID, evalID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	runs := make([]EvalRun, 0)
 	for rows.Next() {
-		run, err := scanRun(rows)
-		if err != nil {
+		var run EvalRun
+		var number *int32
+		var prefix *string
+		if err := rows.Scan(&run.ID, &run.WorkspaceID, &run.EvalID, &run.EvalVersion,
+			&run.TargetVersion, &run.WorkflowID, &run.IssueID, &run.Status, &run.Results,
+			&run.EvidenceArtifactID, &run.CostCents, &run.LatencyMS, &run.CreatedByID,
+			&run.CreatedByType, &run.StartedAt, &run.CompletedAt, &run.CreatedAt,
+			&number, &prefix); err != nil {
 			return nil, err
 		}
+		run.IssueKey = formatIssueKey(prefix, number)
 		runs = append(runs, run)
 	}
 	return runs, rows.Err()

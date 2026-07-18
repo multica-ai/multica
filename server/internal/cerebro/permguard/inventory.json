@@ -917,6 +917,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/cerebro/evals/{id}/run",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/cerebro/evals/{id}/runs",
       "gate": "workspace_member"
     },

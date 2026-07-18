@@ -924,6 +924,7 @@ type CerebroEval struct {
 	CreatedByType string             `json:"created_by_type"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	EvalFamilyID  pgtype.UUID        `json:"eval_family_id"`
 }
 
 type CerebroEvalRun struct {

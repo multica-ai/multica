@@ -16,7 +16,7 @@ describe("HooksPage", () => {
       { ...base, id: "on", name: "Live policy", mode: "enforce" },
       { ...base, id: "managed", name: "Managed policy", mode: "managed" },
     ]} />);
-    expect(screen.getAllByText("This hook runs when the selected event occurs for the selected work, every time, will allow it to continue, and will take no follow-up action.")).toHaveLength(4);
+    expect(screen.getAllByText("This hook runs when the selected event occurs for the selected work, every time, will let it continue with guidance, and will take no follow-up action.")).toHaveLength(4);
     expect(screen.getByText("Off")).toBeInTheDocument();
     expect(screen.getByText("Dry run")).toBeInTheDocument();
     expect(screen.getByText("Enforced")).toBeInTheDocument();
