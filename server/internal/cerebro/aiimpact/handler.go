@@ -29,6 +29,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/cerebro/ai-impact/operating-loops", h.ListOperatingLoops)
 	r.Post("/api/cerebro/ai-impact/operating-loops", h.CreateOperatingLoop)
 	r.Post("/api/cerebro/ai-impact/project-bindings", h.CreateProjectBinding)
+	r.Get("/api/cerebro/ai-impact/metrics", h.ListMetrics)
 	r.Post("/api/cerebro/ai-impact/metrics", h.CreateMetric)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
 	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
@@ -152,6 +153,25 @@ func toMetricResponse(metric Metric) metricResponse {
 		Guardrail:       metric.Guardrail,
 		Active:          metric.Active,
 	}
+}
+
+// ListMetrics returns workspace-scoped metrics.
+func (h *Handler) ListMetrics(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, _, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+
+	metrics, err := h.service.ListMetrics(r.Context(), workspaceID)
+	if err != nil {
+		writeObservationError(w, http.StatusInternalServerError, "failed to list metrics")
+		return
+	}
+	response := make([]metricResponse, 0, len(metrics))
+	for _, metric := range metrics {
+		response = append(response, toMetricResponse(metric))
+	}
+	writeObservationJSON(w, http.StatusOK, map[string]any{"metrics": response})
 }
 
 // CreateMetric creates one workspace-scoped metric.

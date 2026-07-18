@@ -248,6 +248,28 @@ func (s *Store) CreateMetric(
 	return metric, err
 }
 
+func (s *Store) ListMetrics(ctx context.Context, workspaceID uuid.UUID) ([]Metric, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+metricColumns+`
+		FROM cerebro_ai_impact_metric
+		WHERE workspace_id = $1
+		ORDER BY name, id`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	metrics := make([]Metric, 0)
+	for rows.Next() {
+		metric, err := scanMetric(rows)
+		if err != nil {
+			return nil, err
+		}
+		metrics = append(metrics, metric)
+	}
+	return metrics, rows.Err()
+}
+
 const observationColumns = `id, metric_id, period_start, period_end, value,
  evidence_status, confidence, source, method, created_at`
 

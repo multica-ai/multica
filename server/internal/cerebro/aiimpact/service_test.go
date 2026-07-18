@@ -13,8 +13,10 @@ type recordingObservationStore struct {
 	observations             []Observation
 	functions                []Function
 	operatingLoops           []OperatingLoop
+	metrics                  []Metric
 	listFunctionsWorkspaceID uuid.UUID
 	listLoopsWorkspaceID     uuid.UUID
+	listMetricsWorkspaceID   uuid.UUID
 }
 
 func (s *recordingObservationStore) ListFunctions(
@@ -83,6 +85,14 @@ func (s *recordingObservationStore) CreateMetric(
 		Guardrail:       input.Guardrail,
 		Active:          true,
 	}, nil
+}
+
+func (s *recordingObservationStore) ListMetrics(
+	_ context.Context,
+	workspaceID uuid.UUID,
+) ([]Metric, error) {
+	s.listMetricsWorkspaceID = workspaceID
+	return append([]Metric(nil), s.metrics...), nil
 }
 
 func (s *recordingObservationStore) CreateProjectBinding(

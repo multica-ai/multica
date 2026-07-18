@@ -304,6 +304,73 @@ func TestMetricHTTPSeamAllowsOwnerAdminCreateAndKeepsMemberReadOnly(t *testing.T
 	}
 }
 
+func TestMetricHTTPSeamLetsMemberListWorkspaceMetrics(t *testing.T) {
+	workspaceID := uuid.New()
+	metricID := uuid.New()
+	operatingLoopID := uuid.New()
+	baselineStart := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	baselineEnd := time.Date(2026, time.July, 8, 0, 0, 0, 0, time.UTC)
+	store := &recordingObservationStore{metrics: []Metric{{
+		ID:              metricID,
+		WorkspaceID:     workspaceID,
+		OperatingLoopID: operatingLoopID,
+		Name:            "Needs solved",
+		Family:          FamilyOutcome,
+		Unit:            "needs",
+		Direction:       DirectionIncrease,
+		BaselineStart:   baselineStart,
+		BaselineEnd:     baselineEnd,
+		Source:          "support",
+		Guardrail:       false,
+		Active:          true,
+	}}}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cerebro/ai-impact/metrics", nil)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("member list metrics status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Metrics []struct {
+			ID              uuid.UUID       `json:"id"`
+			OperatingLoopID uuid.UUID       `json:"operating_loop_id"`
+			Name            string          `json:"name"`
+			Family          MetricFamily    `json:"family"`
+			Unit            string          `json:"unit"`
+			Direction       MetricDirection `json:"direction"`
+			BaselineStart   time.Time       `json:"baseline_start"`
+			BaselineEnd     time.Time       `json:"baseline_end"`
+			Source          string          `json:"source"`
+			Guardrail       bool            `json:"guardrail"`
+			Active          bool            `json:"active"`
+		} `json:"metrics"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode member list metrics response: %v", err)
+	}
+	if len(response.Metrics) != 1 || response.Metrics[0].ID != metricID ||
+		response.Metrics[0].OperatingLoopID != operatingLoopID ||
+		response.Metrics[0].Name != "Needs solved" || response.Metrics[0].Family != FamilyOutcome ||
+		response.Metrics[0].Unit != "needs" || response.Metrics[0].Direction != DirectionIncrease ||
+		!response.Metrics[0].BaselineStart.Equal(baselineStart) ||
+		!response.Metrics[0].BaselineEnd.Equal(baselineEnd) || response.Metrics[0].Source != "support" ||
+		response.Metrics[0].Guardrail || !response.Metrics[0].Active {
+		t.Fatalf("member list metrics response = %+v", response.Metrics)
+	}
+	if store.listMetricsWorkspaceID != workspaceID {
+		t.Fatalf("list metrics workspace = %s, want %s", store.listMetricsWorkspaceID, workspaceID)
+	}
+}
+
 func TestProjectBindingHTTPSeamAllowsOwnerAdminCreateAndKeepsMemberReadOnly(t *testing.T) {
 	store := &recordingObservationStore{}
 	handler := NewHandler(NewService(store))
