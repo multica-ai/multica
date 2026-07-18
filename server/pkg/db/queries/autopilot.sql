@@ -316,9 +316,50 @@ RETURNING *;
 
 -- name: UpdateAutopilotRunCompleted :one
 UPDATE autopilot_run
-SET status = 'completed', completed_at = now(), result = sqlc.narg('result')
+SET status = 'completed',
+    completed_at = now(),
+    result = sqlc.narg('result'),
+    recovered_at = CASE
+        WHEN status = 'failed' AND failure_reason = 'issue blocked' THEN now()
+        ELSE recovered_at
+    END
 WHERE id = $1
+  AND (status <> 'failed' OR failure_reason = 'issue blocked')
 RETURNING *;
+
+-- name: ReconcileRecoveredIssueRuns :many
+-- Repairs a missed issue:updated event for create_issue runs. Recovery is
+-- intentionally narrow: the same linked issue must now be successful and the
+-- run must have failed only because that issue was temporarily blocked. Real
+-- dispatch/task failures and cancelled issues remain terminal failures.
+UPDATE autopilot_run AS r
+SET status = 'completed',
+    completed_at = now(),
+    recovered_at = now()
+FROM issue AS i
+WHERE r.autopilot_id = $1
+  AND r.issue_id = i.id
+  AND i.origin_type = 'autopilot'
+  AND i.status IN ('done', 'in_review')
+  AND r.status = 'failed'
+  AND r.failure_reason = 'issue blocked'
+RETURNING r.*;
+
+-- name: ReconcileAllRecoveredIssueRuns :many
+-- Periodic health reconciliation for the same state-machine edge as
+-- ReconcileRecoveredIssueRuns. This runs before failure-rate evaluation so a
+-- recovered workflow cannot contribute a stale execution failure.
+UPDATE autopilot_run AS r
+SET status = 'completed',
+    completed_at = now(),
+    recovered_at = now()
+FROM issue AS i
+WHERE r.issue_id = i.id
+  AND i.origin_type = 'autopilot'
+  AND i.status IN ('done', 'in_review')
+  AND r.status = 'failed'
+  AND r.failure_reason = 'issue blocked'
+RETURNING r.*;
 
 -- name: UpdateAutopilotRunFailed :one
 UPDATE autopilot_run
