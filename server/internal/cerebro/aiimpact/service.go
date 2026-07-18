@@ -226,3 +226,22 @@ func (s *Service) ListOperatingLoopEvidence(
 	}
 	return result, nil
 }
+
+// ListMetricEvidence returns the latest workspace evidence for one Metric.
+func (s *Service) ListMetricEvidence(
+	ctx context.Context,
+	workspaceID, metricID uuid.UUID,
+) ([]EvidenceReadModel, error) {
+	evidence, err := s.ListWorkspaceEvidence(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]EvidenceReadModel, 0, len(evidence))
+	for _, item := range evidence {
+		if item.Metric.ID == metricID {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
