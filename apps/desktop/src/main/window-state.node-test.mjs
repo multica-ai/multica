@@ -126,8 +126,10 @@ describe("isVisibleOnSomeDisplay", () => {
 });
 
 describe("resolveWindowOptions", () => {
+  const displays = [{ x: 0, y: 0, width: 1920, height: 1080 }];
+
   test("defaults when empty", () => {
-    assert.deepEqual(resolveWindowOptions({}, false), {
+    assert.deepEqual(resolveWindowOptions({}, displays), {
       width: DEFAULT_WINDOW_WIDTH,
       height: DEFAULT_WINDOW_HEIGHT,
       isMaximized: false,
@@ -135,17 +137,71 @@ describe("resolveWindowOptions", () => {
     });
   });
   test("clamps below-minimum sizes", () => {
-    const opts = resolveWindowOptions({ width: 100, height: 50 }, false);
+    const opts = resolveWindowOptions({ width: 100, height: 50 }, displays);
     assert.equal(opts.width, MIN_WINDOW_WIDTH);
     assert.ok(opts.height >= 600);
   });
-  test("includes position only when usePosition is true", () => {
-    const withPos = resolveWindowOptions({ x: 40, y: 50, width: 1200, height: 800 }, true);
-    assert.equal(withPos.x, 40);
-    assert.equal(withPos.y, 50);
-    const noPos = resolveWindowOptions({ x: 40, y: 50, width: 1200, height: 800 }, false);
-    assert.equal(noPos.x, undefined);
-    assert.equal(noPos.y, undefined);
+  test("keeps an intersecting saved position", () => {
+    const opts = resolveWindowOptions({ x: 40, y: 50, width: 1200, height: 800 }, displays);
+    assert.equal(opts.x, 40);
+    assert.equal(opts.y, 50);
+  });
+  test("clamps a one-pixel intersection fully inside the work area", () => {
+    const opts = resolveWindowOptions(
+      { x: 1919, y: 1079, width: 1200, height: 800 },
+      displays,
+    );
+    assert.deepEqual(
+      { x: opts.x, y: opts.y, width: opts.width, height: opts.height },
+      { x: 720, y: 280, width: 1200, height: 800 },
+    );
+  });
+  test("clamps position when restoring onto a smaller display", () => {
+    const opts = resolveWindowOptions(
+      { x: 500, y: 300, width: 900, height: 600 },
+      [{ x: 0, y: 0, width: 1024, height: 768 }],
+    );
+    assert.deepEqual(
+      { x: opts.x, y: opts.y, width: opts.width, height: opts.height },
+      { x: 124, y: 168, width: 900, height: 600 },
+    );
+  });
+  test("shrinks saved dimensions to fit the selected work area", () => {
+    const opts = resolveWindowOptions(
+      { x: 100, y: 100, width: 1600, height: 1000 },
+      [{ x: 0, y: 0, width: 1024, height: 768 }],
+    );
+    assert.deepEqual(
+      { x: opts.x, y: opts.y, width: opts.width, height: opts.height },
+      { x: 0, y: 0, width: 1024, height: 768 },
+    );
+  });
+  test("selects the work area with the largest intersection", () => {
+    const opts = resolveWindowOptions(
+      { x: 1800, y: 100, width: 1000, height: 800 },
+      [
+        { x: 0, y: 0, width: 1920, height: 1080 },
+        { x: 1920, y: 0, width: 1280, height: 1024 },
+      ],
+    );
+    assert.deepEqual(
+      { x: opts.x, y: opts.y, width: opts.width, height: opts.height },
+      { x: 1920, y: 100, width: 1000, height: 800 },
+    );
+  });
+  test("omits coordinates when saved bounds are completely off-screen", () => {
+    assert.deepEqual(
+      resolveWindowOptions(
+        { x: 5000, y: 0, width: 1200, height: 800, isMaximized: true },
+        displays,
+      ),
+      {
+        width: 1200,
+        height: 800,
+        isMaximized: true,
+        isFullScreen: false,
+      },
+    );
   });
 });
 

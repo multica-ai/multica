@@ -106,22 +106,23 @@ export function isVisibleOnSomeDisplay(
 }
 
 export function rectanglesIntersect(a: Rectangle, b: Rectangle): boolean {
-  return (
-    a.x < b.x + b.width &&
-    a.x + a.width > b.x &&
-    a.y < b.y + b.height &&
-    a.y + a.height > b.y
-  );
+  return intersectionArea(a, b) > 0;
+}
+
+function intersectionArea(a: Rectangle, b: Rectangle): number {
+  const width = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const height = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  return width * height;
 }
 
 /**
- * Clamp width/height to the app minimums and fall back to defaults when
- * missing or invalid. Position is only applied when `usePosition` is true
- * (caller must validate visibility).
+ * Resolve persisted geometry against the connected display work areas.
+ * Intersecting bounds are resized and repositioned to remain fully visible;
+ * disconnected bounds keep their size and state flags but omit coordinates.
  */
 export function resolveWindowOptions(
   saved: WindowState,
-  usePosition: boolean,
+  displays: DisplayWorkArea[],
 ): {
   width: number;
   height: number;
@@ -138,10 +139,42 @@ export function resolveWindowOptions(
     MIN_WINDOW_HEIGHT,
     typeof saved.height === "number" && saved.height > 0 ? saved.height : DEFAULT_WINDOW_HEIGHT,
   );
+
+  const savedBounds =
+    saved.x != null &&
+    saved.y != null &&
+    saved.width != null &&
+    saved.height != null &&
+    saved.width > 0 &&
+    saved.height > 0
+      ? { x: saved.x, y: saved.y, width: saved.width, height: saved.height }
+      : null;
+  const workArea = savedBounds
+    ? displays.reduce<DisplayWorkArea | null>((best, candidate) => {
+        if (candidate.width <= 0 || candidate.height <= 0) return best;
+        const candidateArea = intersectionArea(savedBounds, candidate);
+        if (candidateArea === 0) return best;
+        return !best || candidateArea > intersectionArea(savedBounds, best) ? candidate : best;
+      }, null)
+    : null;
+
+  const resolvedWidth = workArea ? Math.min(width, workArea.width) : width;
+  const resolvedHeight = workArea ? Math.min(height, workArea.height) : height;
   return {
-    width,
-    height,
-    ...(usePosition && saved.x != null && saved.y != null ? { x: saved.x, y: saved.y } : {}),
+    width: resolvedWidth,
+    height: resolvedHeight,
+    ...(workArea && savedBounds
+      ? {
+          x: Math.min(
+            Math.max(savedBounds.x, workArea.x),
+            workArea.x + workArea.width - resolvedWidth,
+          ),
+          y: Math.min(
+            Math.max(savedBounds.y, workArea.y),
+            workArea.y + workArea.height - resolvedHeight,
+          ),
+        }
+      : {}),
     isMaximized: saved.isMaximized === true,
     isFullScreen: saved.isFullScreen === true,
   };

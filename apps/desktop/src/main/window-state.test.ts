@@ -108,8 +108,10 @@ describe("isVisibleOnSomeDisplay", () => {
 });
 
 describe("resolveWindowOptions", () => {
+  const displays = [{ x: 0, y: 0, width: 1920, height: 1080 }];
+
   it("uses defaults when saved state is empty", () => {
-    expect(resolveWindowOptions({}, false)).toEqual({
+    expect(resolveWindowOptions({}, displays)).toEqual({
       width: DEFAULT_WINDOW_WIDTH,
       height: DEFAULT_WINDOW_HEIGHT,
       isMaximized: false,
@@ -118,23 +120,67 @@ describe("resolveWindowOptions", () => {
   });
 
   it("clamps below-minimum sizes", () => {
-    const opts = resolveWindowOptions({ width: 100, height: 50 }, false);
+    const opts = resolveWindowOptions({ width: 100, height: 50 }, displays);
     expect(opts.width).toBe(MIN_WINDOW_WIDTH);
     expect(opts.height).toBeGreaterThanOrEqual(600);
   });
 
-  it("includes position only when usePosition is true", () => {
-    const withPos = resolveWindowOptions({ x: 40, y: 50, width: 1200, height: 800 }, true);
-    expect(withPos.x).toBe(40);
-    expect(withPos.y).toBe(50);
+  it("keeps an intersecting saved position", () => {
+    const opts = resolveWindowOptions({ x: 40, y: 50, width: 1200, height: 800 }, displays);
+    expect(opts.x).toBe(40);
+    expect(opts.y).toBe(50);
+  });
 
-    const noPos = resolveWindowOptions({ x: 40, y: 50, width: 1200, height: 800 }, false);
-    expect(noPos.x).toBeUndefined();
-    expect(noPos.y).toBeUndefined();
+  it("clamps a one-pixel intersection fully inside the work area", () => {
+    const opts = resolveWindowOptions(
+      { x: 1919, y: 1079, width: 1200, height: 800 },
+      displays,
+    );
+    expect(opts).toMatchObject({ x: 720, y: 280, width: 1200, height: 800 });
+  });
+
+  it("clamps position when restoring onto a smaller display", () => {
+    const opts = resolveWindowOptions(
+      { x: 500, y: 300, width: 900, height: 600 },
+      [{ x: 0, y: 0, width: 1024, height: 768 }],
+    );
+    expect(opts).toMatchObject({ x: 124, y: 168, width: 900, height: 600 });
+  });
+
+  it("shrinks saved dimensions to fit the selected work area", () => {
+    const opts = resolveWindowOptions(
+      { x: 100, y: 100, width: 1600, height: 1000 },
+      [{ x: 0, y: 0, width: 1024, height: 768 }],
+    );
+    expect(opts).toMatchObject({ x: 0, y: 0, width: 1024, height: 768 });
+  });
+
+  it("selects the work area with the largest intersection", () => {
+    const opts = resolveWindowOptions(
+      { x: 1800, y: 100, width: 1000, height: 800 },
+      [
+        { x: 0, y: 0, width: 1920, height: 1080 },
+        { x: 1920, y: 0, width: 1280, height: 1024 },
+      ],
+    );
+    expect(opts).toMatchObject({ x: 1920, y: 100, width: 1000, height: 800 });
+  });
+
+  it("omits coordinates when saved bounds are completely off-screen", () => {
+    const opts = resolveWindowOptions(
+      { x: 5000, y: 0, width: 1200, height: 800, isMaximized: true },
+      displays,
+    );
+    expect(opts).toEqual({
+      width: 1200,
+      height: 800,
+      isMaximized: true,
+      isFullScreen: false,
+    });
   });
 
   it("restores maximized / fullscreen flags", () => {
-    const opts = resolveWindowOptions({ isMaximized: true, isFullScreen: true }, false);
+    const opts = resolveWindowOptions({ isMaximized: true, isFullScreen: true }, displays);
     expect(opts.isMaximized).toBe(true);
     expect(opts.isFullScreen).toBe(true);
   });

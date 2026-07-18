@@ -29,7 +29,6 @@ import {
   clearFreezeBreadcrumb,
 } from "./freeze-breadcrumb";
 import {
-  isVisibleOnSomeDisplay,
   loadWindowState,
   resolveWindowOptions,
   saveWindowStateToFile,
@@ -162,14 +161,14 @@ function createWindow(): void {
   const systemLocale = getSystemLocale();
   lastKnownSystemLocale = systemLocale;
 
-  // Restore prior size/position/maximized/fullscreen (#5244). Position is
-  // only applied when the saved bounds still intersect a connected display
-  // so an unplugged external monitor does not open the window off-screen.
+  // Restore prior size/position/maximized/fullscreen (#5244), constraining
+  // intersecting bounds to the selected display's work area.
   const stateFile = windowStateFilePath(app.getPath("userData"));
   const savedWindowState = loadWindowState(stateFile);
-  const displays = screen.getAllDisplays().map((d) => d.workArea);
-  const useSavedPosition = isVisibleOnSomeDisplay(savedWindowState, displays);
-  const windowOpts = resolveWindowOptions(savedWindowState, useSavedPosition);
+  const windowOpts = resolveWindowOptions(
+    savedWindowState,
+    screen.getAllDisplays().map((d) => d.workArea),
+  );
 
   mainWindow = new BrowserWindow({
     width: windowOpts.width,
