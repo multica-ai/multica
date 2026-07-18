@@ -43,13 +43,13 @@
   margin: 0;
 }
 
-/* Editing mode: the read-only preview is replaced by form controls that write
-   back to the node attributes. The container stays a bordered panel so the
-   block is still visually recognizable while both fields are exposed. */
-.rich-text-editor .details-block--editing {
+/* Editing mode: the block keeps the native <details> chrome (collapsed by
+   default, caret toggle) but the summary text is replaced by an inline <input>
+   and the expanded region holds a body source <textarea>; both write back to
+   the node attributes. */
+.rich-text-editor .details-block--editing > .details-block-summary {
   display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+  align-items: center;
 }
 
 .rich-text-editor .details-block-summary-input,
@@ -64,10 +64,18 @@
 }
 
 .rich-text-editor .details-block-summary-input {
+  flex: 1;
+  min-width: 0;
+  width: auto;
   font-weight: 500;
+  /* The summary disables text selection for the caret toggle; re-enable it in
+     the field so the summary text stays selectable while editing. */
+  user-select: text;
 }
 
 .rich-text-editor .details-block-body-input {
+  display: block;
+  margin-top: 0.5rem;
   resize: vertical;
   min-height: 4.5rem;
   font-family: var(--font-mono, ui-monospace, monospace);

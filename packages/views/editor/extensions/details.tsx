@@ -25,14 +25,20 @@
  * block on an issue looks identical to the autopilot view.
  *
  * Editing: the node stays an `atom`, but in an editable editor the NodeView
- * swaps its read-only preview for form controls — an inline `<input>` for the
- * summary and a source-edit `<textarea>` for the body — that write straight
- * back to the `summary`/`body` attributes via `updateAttributes`. Because the
- * attributes remain the verbatim source of truth, an edit still round-trips to
- * `<details>` markdown unchanged. Keeping the body as a markdown source field
- * (rather than promoting it to real ProseMirror content) is deliberate: it
- * preserves that verbatim round-trip for arbitrary bodies (code fences, lists),
- * which real ProseMirror content could not guarantee.
+ * keeps the native `<details>` chrome and puts form controls inside it — an
+ * inline `<input>` in the `<summary>` and a source-edit `<textarea>` in the
+ * expanded region — that write straight back to the `summary`/`body`
+ * attributes via `updateAttributes`. Because the attributes remain the
+ * verbatim source of truth, an edit still round-trips to `<details>` markdown
+ * unchanged. Keeping the body as a markdown source field (rather than
+ * promoting it to real ProseMirror content) is deliberate: it preserves that
+ * verbatim round-trip for arbitrary bodies (code fences, lists), which real
+ * ProseMirror content could not guarantee.
+ *
+ * The collapse state is local UI state initialized from the `open` attribute:
+ * the block renders collapsed by default (expanded only when authored as
+ * `<details open>`), and folding/unfolding never writes back to the document,
+ * so merely peeking inside a block does not dirty the description.
  *
  * Known limitation: a `<details>` nested inside another `<details>` is not parsed
  * as collapsible — the tokenizer declines it (the inner block's `</details>`
@@ -40,6 +46,7 @@
  * rendering rather than breaking the round-trip.
  */
 
+import { useState } from "react";
 import { Node, mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
@@ -53,10 +60,12 @@ const DETAILS_BLOCK_RE =
   /^<details((?:\s[^>]*)?)>\s*<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>[ \t]*(?:\n|$)/;
 
 // ---------------------------------------------------------------------------
-// React NodeView. When the editor is read-only it renders a native <details>
-// so the browser handles the collapse, with the body rendered through the
-// shared ReadonlyContent markdown renderer. When the editor is editable it
-// swaps in form controls that write edits back to the node attributes.
+// React NodeView. Both modes render a native <details> so the block stays
+// collapsible. When the editor is read-only the summary is plain text and the
+// body renders through the shared ReadonlyContent markdown renderer. When the
+// editor is editable the summary becomes an inline <input> and the body a
+// source <textarea> that write edits back to the node attributes; the fold
+// itself is local UI state so toggling it never dirties the doc.
 // ---------------------------------------------------------------------------
 
 export function DetailsBlockView({ node, updateAttributes, editor }: NodeViewProps) {
@@ -64,6 +73,12 @@ export function DetailsBlockView({ node, updateAttributes, editor }: NodeViewPro
   const body = String(node.attrs.body ?? "");
   const open = Boolean(node.attrs.open);
   const editable = editor?.isEditable ?? false;
+
+  // Fold state is local UI state, initialized from the stored `open` attr so
+  // a block authored as `<details open>` starts expanded. Toggling must NOT
+  // write `open` back through updateAttributes — merely folding/unfolding the
+  // block would otherwise mark the description as modified.
+  const [expanded, setExpanded] = useState(open);
 
   if (!editable) {
     return (
@@ -94,17 +109,28 @@ export function DetailsBlockView({ node, updateAttributes, editor }: NodeViewPro
       className="details-block-node"
       data-type="detailsBlock"
     >
-      <div className="details-block details-block--editing" contentEditable={false}>
-        <input
-          className="details-block-summary-input"
-          type="text"
-          value={summary}
-          placeholder="Details"
-          aria-label="Summary"
-          onChange={(e) => updateAttributes({ summary: e.target.value })}
-          onKeyDown={stop}
-          onMouseDown={stop}
-        />
+      <details
+        className="details-block details-block--editing"
+        open={expanded}
+        onToggle={(e) => setExpanded(e.currentTarget.open)}
+        contentEditable={false}
+      >
+        <summary className="details-block-summary">
+          <input
+            className="details-block-summary-input"
+            type="text"
+            value={summary}
+            placeholder="Details"
+            aria-label="Summary"
+            onChange={(e) => updateAttributes({ summary: e.target.value })}
+            onKeyDown={stop}
+            onMouseDown={stop}
+            // Clicking anywhere in a <summary> toggles the <details>; swallow
+            // the click's default action so focusing the field doesn't fold
+            // the block. (Focus itself happens on mousedown, unaffected.)
+            onClick={(e) => e.preventDefault()}
+          />
+        </summary>
         <textarea
           className="details-block-body-input"
           value={body}
@@ -115,7 +141,7 @@ export function DetailsBlockView({ node, updateAttributes, editor }: NodeViewPro
           onKeyDown={stop}
           onMouseDown={stop}
         />
-      </div>
+      </details>
     </NodeViewWrapper>
   );
 }
