@@ -189,6 +189,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 			qwenHome = filepath.Join(home, ".qwen")
 		}
 		providerRoot = filepath.Join(qwenHome, "skills")
+	case "devin":
+		providerRoot = filepath.Join(home, ".config", "devin", "skills")
 	default:
 		return nil, false, nil
 	}
