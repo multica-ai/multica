@@ -59,6 +59,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { labelListOptions } from "@multica/core/labels/queries";
+import { propertyListOptions } from "@multica/core/properties";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 on-behalf-of member filter submenu.
@@ -71,6 +72,7 @@ import {
   GROUPING_OPTIONS,
   SWIMLANE_GROUPINGS,
   CARD_PROPERTY_OPTIONS,
+  propertyIdFromViewKey,
   type ActorFilterValue,
   type IssueDateField,
   type IssueDateFilter,
@@ -110,7 +112,7 @@ import {
   type IssuesScope,
 } from "@multica/core/issues/stores/issues-scope-store";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import type { Issue } from "@multica/core/types";
+import type { Issue, IssueProperty } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
@@ -135,6 +137,7 @@ function getActiveFilterCount(state: {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  propertyFilters?: Record<string, string[]>;
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 count on-behalf-of filter.
   onBehalfOfFilters: string[];
   dateFilter?: IssueDateFilter | null;
@@ -148,6 +151,9 @@ function getActiveFilterCount(state: {
   if (state.creatorFilters.length > 0) count++;
   if (state.projectFilters.length > 0 || state.includeNoProject) count++;
   if (state.labelFilters.length > 0) count++;
+  for (const selected of Object.values(state.propertyFilters ?? {})) {
+    if (selected.length > 0) count++;
+  }
   if ((state.onBehalfOfFilters ?? []).length > 0) count++;
   if (state.dateFilter) count++;
   count += (state.dateFilters ?? []).length;
@@ -177,6 +183,7 @@ function useIssueCounts(allIssues: Issue[]) {
     const creator = new Map<string, number>();
     const project = new Map<string, number>();
     const label = new Map<string, number>();
+    const property = new Map<string, Map<string, number>>();
     let noAssignee = 0;
     let noProject = 0;
 
@@ -205,9 +212,29 @@ function useIssueCounts(allIssues: Issue[]) {
           label.set(l.id, (label.get(l.id) ?? 0) + 1);
         }
       }
+
+      for (const [propertyId, value] of Object.entries(issue.properties ?? {})) {
+        const optionKeys =
+          typeof value === "string"
+            ? [value]
+            : Array.isArray(value)
+              ? value
+              : typeof value === "boolean"
+                ? [String(value)]
+                : [];
+        if (optionKeys.length === 0) continue;
+        let perOption = property.get(propertyId);
+        if (!perOption) {
+          perOption = new Map<string, number>();
+          property.set(propertyId, perOption);
+        }
+        for (const key of optionKeys) {
+          perOption.set(key, (perOption.get(key) ?? 0) + 1);
+        }
+      }
     }
 
-    return { status, priority, assignee, creator, noAssignee, project, noProject, label };
+    return { status, priority, assignee, creator, noAssignee, project, noProject, label, property };
   }, [allIssues]);
 }
 
@@ -541,6 +568,62 @@ function LabelSubContent({
           </div>
         )}
       </div>
+    </>
+  );
+}
+
+function PropertyFilterOptions({
+  property,
+  counts,
+  selected,
+  onToggle,
+}: {
+  property: IssueProperty;
+  counts: Map<string, number> | undefined;
+  selected: string[];
+  onToggle: (optionId: string) => void;
+}) {
+  const { t } = useT("issues");
+  const options =
+    property.type === "checkbox"
+      ? [
+          { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined },
+          { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined },
+        ]
+      : (property.config.options ?? []).map((option) => ({
+          id: option.id,
+          name: option.name,
+          color: option.color as string | undefined,
+        }));
+
+  return (
+    <>
+      {options.map((option) => {
+        const checked = selected.includes(option.id);
+        const count = counts?.get(option.id) ?? 0;
+        return (
+          <DropdownMenuCheckboxItem
+            key={option.id}
+            checked={checked}
+            onCheckedChange={() => onToggle(option.id)}
+            className={FILTER_ITEM_CLASS}
+          >
+            <HoverCheck checked={checked} />
+            {option.color && (
+              <span
+                className="size-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: option.color }}
+              />
+            )}
+            <span className="truncate">{option.name}</span>
+            {count > 0 && (
+              <span className="ml-auto text-xs text-muted-foreground">
+                {count}
+              </span>
+            )}
+          </DropdownMenuCheckboxItem>
+        );
+      })}
     </>
   );
 }
@@ -1559,6 +1642,8 @@ export function IssueDisplayControls({
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const propertyFilters = useViewStore((s) => s.propertyFilters);
+  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 read on-behalf-of filter state.
   const onBehalfOfFilters = useViewStore((s) => s.onBehalfOfFilters);
   const sortBy = useViewStore((s) => s.sortBy);
@@ -1568,6 +1653,29 @@ export function IssueDisplayControls({
   const cardProperties = useViewStore((s) => s.cardProperties);
   const subIssueDisplay = useViewStore((s) => s.subIssueDisplay);
   const act = useViewStoreApi().getState();
+  const headerWsId = useWorkspaceId();
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(headerWsId));
+  const propertyById = useMemo(
+    () => new Map(workspaceProperties.map((property) => [property.id, property])),
+    [workspaceProperties],
+  );
+  const filterableProperties = useMemo(
+    () =>
+      workspaceProperties.filter((property) =>
+        property.type === "select" ||
+        property.type === "multi_select" ||
+        property.type === "checkbox",
+      ),
+    [workspaceProperties],
+  );
+  const sortableProperties = useMemo(
+    () => workspaceProperties.filter((property) => property.type === "number" || property.type === "date"),
+    [workspaceProperties],
+  );
+  const groupableProperties = useMemo(
+    () => workspaceProperties.filter((property) => property.type === "select"),
+    [workspaceProperties],
+  );
 
   const counts = useIssueCounts(scopedIssues);
   const showDateFilter = !!onDateFilterChange;
@@ -1577,6 +1685,14 @@ export function IssueDisplayControls({
   const activeDateFilters = dateFilters ?? [];
   // CEREBRO-PATCH(my-issues-date-builder): FIR-1812 — reference-aligned builder.
   const dateFilterV2 = useFeatureFlag("cerebro_date_filter_v2");
+  const effectivePropertyFilters = useMemo(() => {
+    const activeIds = new Set(filterableProperties.map((property) => property.id));
+    return Object.fromEntries(
+      Object.entries(propertyFilters).filter(
+        ([id, selected]) => selected.length > 0 && activeIds.has(id),
+      ),
+    );
+  }, [filterableProperties, propertyFilters]);
 
   const activeFilterCount = getActiveFilterCount({
     statusFilters,
@@ -1587,6 +1703,7 @@ export function IssueDisplayControls({
     projectFilters,
     includeNoProject,
     labelFilters,
+    propertyFilters: effectivePropertyFilters,
     onBehalfOfFilters,
     dateFilter: showDateFilter ? dateFilter : null,
     dateFilters: showDateBuilder ? activeDateFilters : [],
@@ -1630,28 +1747,14 @@ export function IssueDisplayControls({
             : `${shortDateLabel(dateFilter.from)} - ${shortDateLabel(dateFilter.to)}`
       }`
     : null;
-  // CEREBRO-PATCH(issue-property-view-label-fallback): FIR-3447 — preserve the
-  // existing static labels until the later list-surface property slice lands.
-  const sortLabel = t(
-    ($) =>
-      $.display[
-        SORT_LABEL_KEY[
-          sortBy.startsWith("property:")
-            ? "position"
-            : (sortBy as keyof typeof SORT_LABEL_KEY)
-        ]
-      ],
-  );
-  const groupingLabel = t(
-    ($) =>
-      $.display[
-        GROUPING_LABEL_KEY[
-          grouping.startsWith("property:")
-            ? "status"
-            : (grouping as keyof typeof GROUPING_LABEL_KEY)
-        ]
-      ],
-  );
+  const sortPropertyId = propertyIdFromViewKey(sortBy);
+  const groupingPropertyId = propertyIdFromViewKey(grouping);
+  const sortLabel = sortPropertyId
+    ? propertyById.get(sortPropertyId)?.name ?? t(($) => $.display.sort_manual)
+    : t(($) => $.display[SORT_LABEL_KEY[sortBy as keyof typeof SORT_LABEL_KEY]]);
+  const groupingLabel = groupingPropertyId
+    ? propertyById.get(groupingPropertyId)?.name ?? t(($) => $.display.group_status)
+    : t(($) => $.display[GROUPING_LABEL_KEY[grouping as keyof typeof GROUPING_LABEL_KEY]]);
   const swimlaneGroupingLabel = t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[swimlaneGrouping]]);
   const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
 
@@ -1921,6 +2024,32 @@ export function IssueDisplayControls({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
+            {filterableProperties.length > 0 && <DropdownMenuSeparator />}
+            {filterableProperties.map((property) => {
+              const selected = propertyFilters[property.id] ?? [];
+              return (
+                <DropdownMenuSub key={property.id}>
+                  <DropdownMenuSubTrigger>
+                    <SlidersHorizontal className="size-3.5" />
+                    <span className="flex-1 truncate">{property.name}</span>
+                    {selected.length > 0 && (
+                      <span className="text-xs text-primary font-medium">
+                        {selected.length}
+                      </span>
+                    )}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-auto min-w-44 p-1">
+                    <PropertyFilterOptions
+                      property={property}
+                      counts={counts.property.get(property.id)}
+                      selected={selected}
+                      onToggle={(optionId) => act.togglePropertyFilter(property.id, optionId)}
+                    />
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              );
+            })}
+
             {/* Reset */}
             {hasActiveFilters && (
               <>
@@ -1991,6 +2120,11 @@ export function IssueDisplayControls({
                             {t(($) => $.display[GROUPING_LABEL_KEY[opt.value]])}
                           </DropdownMenuRadioItem>
                         ))}
+                        {groupableProperties.map((property) => (
+                          <DropdownMenuRadioItem key={property.id} value={`property:${property.id}`}>
+                            {property.name}
+                          </DropdownMenuRadioItem>
+                        ))}
                       </DropdownMenuRadioGroup>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -2055,7 +2189,12 @@ export function IssueDisplayControls({
                     <DropdownMenuRadioGroup value={sortBy} onValueChange={(v) => act.setSortBy(v as SortField)}>
                       {SORT_OPTIONS.map((opt) => (
                         <DropdownMenuRadioItem key={opt.value} value={opt.value}>
-                          {t(($) => $.display[SORT_LABEL_KEY[opt.value]])}
+                          {t(($) => $.display[SORT_LABEL_KEY[opt.value as keyof typeof SORT_LABEL_KEY]])}
+                        </DropdownMenuRadioItem>
+                      ))}
+                      {sortableProperties.map((property) => (
+                        <DropdownMenuRadioItem key={property.id} value={`property:${property.id}`}>
+                          {property.name}
                         </DropdownMenuRadioItem>
                       ))}
                     </DropdownMenuRadioGroup>
@@ -2122,6 +2261,19 @@ export function IssueDisplayControls({
                       size="sm"
                       checked={cardProperties[opt.key]}
                       onCheckedChange={() => act.toggleCardProperty(opt.key)}
+                    />
+                  </label>
+                ))}
+                {workspaceProperties.map((property) => (
+                  <label
+                    key={property.id}
+                    className="flex cursor-pointer items-center justify-between"
+                  >
+                    <span className="truncate text-sm">{property.name}</span>
+                    <Switch
+                      size="sm"
+                      checked={cardPropertyIds.includes(property.id)}
+                      onCheckedChange={() => act.toggleCardPropertyId(property.id)}
                     />
                   </label>
                 ))}

@@ -3,6 +3,7 @@
 // CEREBRO-PATCH(board-view-cerebro): cerebro modification of upstream file
 
 import { useState, useCallback, useMemo, useEffect, useRef, memo } from "react";
+import { useQuery, type QueryKey } from "@tanstack/react-query";
 import {
   DndContext,
   DragOverlay,
@@ -13,13 +14,27 @@ import {
   type DragEndEvent,
   type DragOverEvent,
 } from "@dnd-kit/core";
-import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
-import type { Issue, IssueAssigneeGroup, IssueStatus } from "@multica/core/types";
+import { toast } from "sonner";
+import type {
+  Issue,
+  IssueAssigneeGroup,
+  IssueProperty,
+  IssueStatus,
+} from "@multica/core/types";
 import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { AssigneeGroupedIssuesFilter, IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
-import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
+import {
+  propertyIdFromViewKey,
+  type IssueGrouping,
+} from "@multica/core/issues/stores/view-store";
+import {
+  propertyListOptions,
+  useSetIssueProperty,
+  useUnsetIssueProperty,
+} from "@multica/core/properties";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-column";
 import { BoardCardContent } from "./board-card";
@@ -35,8 +50,10 @@ import {
   buildColumns,
   computePosition,
   findColumn,
+  insertIdByPosition,
   issueMatchesGroup,
   getMoveUpdates,
+  propertyGroupId,
 } from "../utils/drag-utils";
 
 function isStatusGroup(
@@ -51,6 +68,8 @@ function buildGroups(
   grouping: IssueGrouping,
   getActorName: (type: string, id: string) => string,
   noAssigneeLabel: string,
+  groupingProperty: IssueProperty | null,
+  noValueLabel: string,
 ): BoardColumnGroup[] {
   if (grouping === "status") {
     return visibleStatuses.map((status) => ({
@@ -59,6 +78,25 @@ function buildGroups(
       status,
       createData: { status },
     }));
+  }
+
+  if (groupingProperty) {
+    const columns: BoardColumnGroup[] = (
+      groupingProperty.config.options ?? []
+    ).map((option) => ({
+      id: propertyGroupId(groupingProperty.id, option.id),
+      title: option.name,
+      propertyId: groupingProperty.id,
+      propertyOptionId: option.id,
+      propertyOptionColor: option.color,
+    }));
+    columns.push({
+      id: propertyGroupId(groupingProperty.id, null),
+      title: noValueLabel,
+      propertyId: groupingProperty.id,
+      propertyOptionId: null,
+    });
+    return columns;
   }
 
   const groups = new Map<string, BoardColumnGroup>();
@@ -144,11 +182,74 @@ export function BoardView({
   projectId?: string;
 }) {
   const { t } = useT("issues");
-  const grouping = useViewStore((s) => s.grouping);
+  const storeGrouping = useViewStore((s) => s.grouping);
   const sortBy = useViewStore((s) => s.sortBy);
+  const boardWsId = useWorkspaceId();
+  const { data: workspaceProperties = [] } = useQuery(
+    propertyListOptions(boardWsId),
+  );
+  const groupingPropertyId = propertyIdFromViewKey(storeGrouping);
+  const groupingProperty = groupingPropertyId
+    ? workspaceProperties.find(
+        (property) =>
+          property.id === groupingPropertyId && property.type === "select",
+      ) ?? null
+    : null;
+  const grouping: IssueGrouping =
+    groupingPropertyId && !groupingProperty ? "status" : storeGrouping;
+  const groupingOptionIds = useMemo(
+    () =>
+      groupingProperty
+        ? new Set(
+            (groupingProperty.config.options ?? []).map((option) => option.id),
+          )
+        : undefined,
+    [groupingProperty],
+  );
+  const setIssuePropertyMutation = useSetIssueProperty();
+  const unsetIssuePropertyMutation = useUnsetIssueProperty();
+  const applyPropertyGroupValue = useCallback(
+    (group: BoardColumnGroup, issueId: string) => {
+      if (group.propertyId === undefined) return;
+      const onError = (error: unknown) => {
+        toast.error(
+          error instanceof Error && error.message
+            ? error.message
+            : t(($) => $.page.move_failed),
+        );
+      };
+      if (group.propertyOptionId === null) {
+        unsetIssuePropertyMutation.mutate(
+          { issueId, propertyId: group.propertyId },
+          { onError },
+        );
+      } else if (group.propertyOptionId !== undefined) {
+        setIssuePropertyMutation.mutate(
+          {
+            issueId,
+            propertyId: group.propertyId,
+            value: group.propertyOptionId,
+          },
+          { onError },
+        );
+      }
+    },
+    [setIssuePropertyMutation, t, unsetIssuePropertyMutation],
+  );
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
+  const sortPropertyId = propertyIdFromViewKey(sortBy);
   const sortLabel = sortBy !== "position"
-    ? t(($) => $.board.ordered_by, { field: t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]) })
+    ? t(($) => $.board.ordered_by, {
+        field: sortPropertyId
+          ? workspaceProperties.find((property) => property.id === sortPropertyId)
+              ?.name ?? ""
+          : t(
+              ($) =>
+                $.display[
+                  `sort_${sortFieldKey}` as keyof typeof $.display
+                ],
+            ),
+      })
     : null;
   const { getActorName } = useActorName();
   const myIssuesOpts = myIssuesScope
@@ -200,8 +301,18 @@ export function BoardView({
         grouping,
         getActorName,
         t(($) => $.filters.no_assignee),
+        groupingProperty,
+        t(($) => $.board.no_value),
       ),
-    [hydratedAssigneeGroups, issues, visibleStatuses, grouping, getActorName, t],
+    [
+      hydratedAssigneeGroups,
+      issues,
+      visibleStatuses,
+      grouping,
+      getActorName,
+      groupingProperty,
+      t,
+    ],
   );
   const groupIds = useMemo(
     () => new Set(groups.map((group) => group.id)),
@@ -226,16 +337,18 @@ export function BoardView({
   // Between drags: follows TQ via useEffect.
   // During drag: local-only, driven by onDragOver/onDragEnd.
   const [columns, setColumns] = useState<Record<string, string[]>>(() =>
-    buildColumns(groupedIssues, groups, grouping),
+    buildColumns(groupedIssues, groups, grouping, groupingOptionIds),
   );
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
 
   useEffect(() => {
     if (!isDraggingRef.current && !isSettlingRef.current) {
-      setColumns(buildColumns(groupedIssues, groups, grouping));
+      setColumns(
+        buildColumns(groupedIssues, groups, grouping, groupingOptionIds),
+      );
     }
-  }, [groupedIssues, groups, grouping, settleVersion]);
+  }, [groupedIssues, groups, grouping, groupingOptionIds, settleVersion]);
 
   // After a cross-column move, lock for one animation frame so dnd-kit's
   // collision detection can stabilize before processing the next move.
@@ -311,7 +424,9 @@ export function BoardView({
       setActiveIssue(null);
 
       const resetColumns = () =>
-        setColumns(buildColumns(groupedIssues, groups, grouping));
+        setColumns(
+          buildColumns(groupedIssues, groups, grouping, groupingOptionIds),
+        );
 
       if (!over) {
         resetColumns();
@@ -364,11 +479,28 @@ export function BoardView({
           resetColumns();
           return;
         }
+        setColumns((previous) => {
+          const sourceIds = (previous[activeCol] ?? []).filter(
+            (candidateId) => candidateId !== activeId,
+          );
+          const targetIds = insertIdByPosition(
+            previous[overCol] ?? [],
+            activeId,
+            currentIssue.position,
+            map,
+          );
+          return {
+            ...previous,
+            [activeCol]: sourceIds,
+            [overCol]: targetIds,
+          };
+        });
         isSettlingRef.current = true;
         onMoveIssue(activeId, getMoveUpdates(finalGroup, currentIssue.position), () => {
           isSettlingRef.current = false;
           setSettleVersion((v) => v + 1);
         });
+        applyPropertyGroupValue(finalGroup, activeId);
         return;
       }
 
@@ -388,8 +520,19 @@ export function BoardView({
       onMoveIssue(activeId, getMoveUpdates(finalGroup, newPosition), () => {
         isSettlingRef.current = false;
       });
+      applyPropertyGroupValue(finalGroup, activeId);
     },
-    [groupedIssues, groups, grouping, onMoveIssue, groupIds, groupMap, sortBy],
+    [
+      groupedIssues,
+      groups,
+      grouping,
+      groupingOptionIds,
+      onMoveIssue,
+      groupIds,
+      groupMap,
+      sortBy,
+      applyPropertyGroupValue,
+    ],
   );
 
   return (
@@ -449,6 +592,14 @@ export function BoardView({
               )
             ),
           )
+        )}
+
+        {groupingProperty && (
+          <PropertyBoardPoolLoader
+            statuses={visibleStatuses}
+            myIssuesOpts={myIssuesOpts}
+            sort={sort}
+          />
         )}
 
         {grouping === "status" && hiddenStatuses.length > 0 && (
@@ -568,6 +719,47 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
     />
   );
 });
+
+function PropertyBoardPoolLoader({
+  statuses,
+  myIssuesOpts,
+  sort,
+}: {
+  statuses: IssueStatus[];
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  sort?: IssueSortParam;
+}) {
+  return (
+    <div className="col-span-full flex justify-center py-1">
+      {statuses.map((status) => (
+        <PropertyBoardPoolSentinel
+          key={status}
+          status={status}
+          myIssuesOpts={myIssuesOpts}
+          sort={sort}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PropertyBoardPoolSentinel({
+  status,
+  myIssuesOpts,
+  sort,
+}: {
+  status: IssueStatus;
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  sort?: IssueSortParam;
+}) {
+  const { loadMore, hasMore, isLoading } = useLoadMoreByStatus(
+    status,
+    myIssuesOpts,
+    sort,
+  );
+  if (!hasMore) return null;
+  return <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />;
+}
 
 /**
  * Board-view-specific row that pulls the server-aggregated total from

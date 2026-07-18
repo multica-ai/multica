@@ -16,9 +16,14 @@ not a full upstream sync.
 - Settings > Properties now exposes the upstream catalog UI, including
   admin-only definition changes, archive/restore, icons, and option colors.
 - Board cards and List rows now render the custom fields selected in Display.
-- Remaining UI slices are intentionally separate: property grouping, the
-  configurable Table, Create issue field visibility/Quick create, and final
-  filter/sort polish.
+- Board Display now offers active select properties as grouping choices, with
+  option columns, a No value column, complete paginated issue loading, and
+  drag-to-assign/unset behavior. Filterable properties, number/date sorting,
+  and card-property controls are exposed without replacing Cerebro's saved,
+  date, on-behalf-of, or sub-issue controls.
+- Remaining UI slices are intentionally separate: the configurable Table,
+  Create issue field visibility/Quick create, Settings > Issue, the two default
+  DKK fields, and final polish.
 
 ## Upstream provenance
 
@@ -64,6 +69,11 @@ or reimplementing the feature.
 - Settings > Properties: empty state, admin create/edit/archive flow, member
   read-only state, option colors, and property icons.
 - Board: Display-selected number/select/date values on cards.
+- Board grouping: select-property option and No value columns, empty columns,
+  stale saved definitions/options, cross-column drag writes, and full loading
+  beyond the first status page.
+- Board controls: custom property filter/sort/group/display choices alongside
+  Cerebro saved filters, date filters, on-behalf-of, and sub-issue display.
 - List: Display-selected values on rows at wide and responsive widths.
 
 The current conflict self-review preserves Cerebro's complete Settings tab set
