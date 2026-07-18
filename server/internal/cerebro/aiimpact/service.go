@@ -177,6 +177,9 @@ func (s *Service) listWorkspaceEvidence(
 	evidence := make([]EvidenceReadModel, 0, len(observations))
 	filteredObservations := make([]Observation, 0, len(observations))
 	for _, observation := range observations {
+		if filter.Source != "" && observation.Source != filter.Source {
+			continue
+		}
 		if !filter.PeriodStart.IsZero() && observation.PeriodStart.Before(filter.PeriodStart) {
 			continue
 		}
@@ -212,6 +215,7 @@ func (s *Service) listWorkspaceEvidence(
 type EvidenceFilter struct {
 	MetricFamily   MetricFamily
 	EvidenceStatus EvidenceStatus
+	Source         string
 	PeriodStart    time.Time
 	PeriodEnd      time.Time
 }
