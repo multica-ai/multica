@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -87,5 +88,71 @@ func TestObservationHTTPSeamAllowsOwnerWriteAndMemberReadOnly(t *testing.T) {
 	handler.AppendObservation(readOnlyRecorder, request(http.MethodPost, "member", strings.NewReader(body)))
 	if readOnlyRecorder.Code != http.StatusForbidden {
 		t.Fatalf("member append status = %d, want 403: %s", readOnlyRecorder.Code, readOnlyRecorder.Body.String())
+	}
+}
+
+func TestLatestObservationReadModelDoesNotDoubleCountMetricPeriod(t *testing.T) {
+	workspaceID := uuid.New()
+	metricID := uuid.New()
+	periodStart := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.Add(24 * time.Hour)
+	store := &recordingObservationStore{observations: []Observation{
+		{
+			ID:             uuid.New(),
+			MetricID:       metricID,
+			PeriodStart:    periodStart,
+			PeriodEnd:      periodEnd,
+			Value:          12,
+			EvidenceStatus: EvidenceEstimated,
+			Confidence:     0.6,
+			Source:         "support",
+			Method:         "sampled assessment",
+			CreatedAt:      periodEnd,
+		},
+		{
+			ID:             uuid.New(),
+			MetricID:       metricID,
+			PeriodStart:    periodStart,
+			PeriodEnd:      periodEnd,
+			Value:          15,
+			EvidenceStatus: EvidenceMeasured,
+			Confidence:     0.9,
+			Source:         "support",
+			Method:         "audited count",
+			CreatedAt:      periodEnd.Add(time.Hour),
+		},
+	}}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/cerebro/ai-impact/metrics/"+metricID.String()+"/latest-observations",
+		nil,
+	)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("latest observation read model status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Observations []struct {
+			Value          float64        `json:"value"`
+			EvidenceStatus EvidenceStatus `json:"evidence_status"`
+			Source         string         `json:"source"`
+		} `json:"observations"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode latest observation read model: %v", err)
+	}
+	if len(response.Observations) != 1 || response.Observations[0].Value != 15 ||
+		response.Observations[0].EvidenceStatus != EvidenceMeasured || response.Observations[0].Source != "support" {
+		t.Fatalf("latest observation read model = %+v, want only the newest measured value", response.Observations)
 	}
 }

@@ -32,8 +32,33 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Post("/api/cerebro/ai-impact/project-bindings", h.CreateProjectBinding)
 	r.Get("/api/cerebro/ai-impact/metrics", h.ListMetrics)
 	r.Post("/api/cerebro/ai-impact/metrics", h.CreateMetric)
+	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/latest-observations", h.ListLatestObservations)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
 	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
+}
+
+// ListLatestObservations returns the newest evidence for each period of one metric.
+func (h *Handler) ListLatestObservations(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, _, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+	metricID, ok := observationMetricID(w, r)
+	if !ok {
+		return
+	}
+
+	observations, err := h.service.ListObservations(r.Context(), workspaceID, metricID)
+	if err != nil {
+		writeObservationError(w, http.StatusInternalServerError, "failed to list latest observations")
+		return
+	}
+	latest := LatestObservations(observations)
+	response := make([]observationResponse, 0, len(latest))
+	for _, observation := range latest {
+		response = append(response, toObservationResponse(observation))
+	}
+	writeObservationJSON(w, http.StatusOK, map[string]any{"observations": response})
 }
 
 // ListFunctions returns workspace-scoped organizational functions.
