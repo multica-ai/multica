@@ -727,6 +727,14 @@ func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntim
 			}); err != nil {
 				slog.Warn("legacy runtime merge: record legacy daemon_id failed", "legacy_daemon_id", legacyID, "error", err)
 			}
+			if err := h.Queries.DeleteFallbackCooldownsForRuntimeTeardown(r.Context(), old.ID); err != nil {
+				slog.Warn("legacy runtime merge: cleanup fallback cooldowns failed", "old_runtime_id", oldID, "error", err)
+				continue
+			}
+			if err := h.Queries.DeleteFallbackRuntimesForRuntimeTeardown(r.Context(), old.ID); err != nil {
+				slog.Warn("legacy runtime merge: cleanup fallback runtimes failed", "old_runtime_id", oldID, "error", err)
+				continue
+			}
 			if err := h.Queries.DeleteAgentRuntime(r.Context(), old.ID); err != nil {
 				slog.Warn("legacy runtime merge: delete old runtime failed", "old_runtime_id", oldID, "error", err)
 				continue

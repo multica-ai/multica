@@ -29,8 +29,8 @@ func TestProviderExhaustionWalksFallbackChainAndCoolsRuntimes(t *testing.T) {
 		var id pgtype.UUID
 		if err := pool.QueryRow(ctx, `
 			INSERT INTO agent_runtime (
-				workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
-			) VALUES ($1, $2, 'cloud', $3, 'online', '', '{}'::jsonb, $4)
+				workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
+			) VALUES ($1, 'fallback-test-daemon', $2, 'cloud', $3, 'online', '', '{}'::jsonb, $4)
 			RETURNING id
 		`, workspaceID, name, provider, userID).Scan(&id); err != nil {
 			t.Fatalf("create runtime %s: %v", name, err)
@@ -217,6 +217,57 @@ func TestClearFallbackCooldownRejectsStaleTaskSuccess(t *testing.T) {
 	}
 }
 
+func TestProviderFallbackDoesNotOfferHostLocalWorktreeToAnotherDaemon(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, issueID := seedAttributionFixture(t, pool)
+	agent, err := q.GetAgent(ctx, util.MustParseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+
+	var fallbackID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
+		) VALUES ($1, 'another-daemon', 'remote-fallback', 'cloud', 'claude', 'online', '', '{}'::jsonb, $2)
+		RETURNING id
+	`, workspaceID, userID).Scan(&fallbackID); err != nil {
+		t.Fatalf("create remote fallback: %v", err)
+	}
+	if err := q.AddAgentFallbackRuntime(ctx, db.AddAgentFallbackRuntimeParams{
+		AgentID: agent.ID, RuntimeID: fallbackID, Priority: 0,
+	}); err != nil {
+		t.Fatalf("configure remote fallback: %v", err)
+	}
+
+	var taskID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, attempt, max_attempts, work_dir,
+			originator_user_id, accountable_user_id, originator_source,
+			trigger_evidence_kind, trigger_evidence_ref_id
+		) VALUES ($1, $2, $3, 'running', 1, 2, '/tmp/local-only-worktree',
+			$4, $4, 'direct_human', 'issue_assignment', $3)
+		RETURNING id
+	`, agent.ID, agent.RuntimeID, issueID, userID).Scan(&taskID); err != nil {
+		t.Fatalf("create running task: %v", err)
+	}
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	if _, err := svc.FailTask(ctx, taskID, "quota exceeded", "", "/tmp/local-only-worktree", string(taskfailure.ReasonAgentProviderQuotaLimit)); err != nil {
+		t.Fatalf("fail task: %v", err)
+	}
+	var children int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE parent_task_id = $1`, taskID).Scan(&children); err != nil {
+		t.Fatalf("count retry children: %v", err)
+	}
+	if children != 0 {
+		t.Fatalf("created %d retry tasks on a daemon that cannot access the worktree", children)
+	}
+}
+
 func TestProviderFallbackPreservesChatOrderingAndSquadRole(t *testing.T) {
 	quotaReason := string(taskfailure.ReasonAgentProviderQuotaLimit)
 
@@ -322,8 +373,8 @@ func createFallbackTestRuntime(t *testing.T, ctx context.Context, pool *pgxpool.
 	var runtimeID pgtype.UUID
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
-		) VALUES ($1, $2, 'cloud', 'claude', 'online', '', '{}'::jsonb, $3)
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
+		) VALUES ($1, 'fallback-test-daemon', $2, 'cloud', 'claude', 'online', '', '{}'::jsonb, $3)
 		RETURNING id
 	`, workspaceID, name, userID).Scan(&runtimeID); err != nil {
 		t.Fatalf("create fallback runtime: %v", err)

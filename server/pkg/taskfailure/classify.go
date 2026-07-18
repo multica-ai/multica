@@ -130,8 +130,11 @@ func Classify(rawError string) Reason {
 			// would not match the curly form either, so this is a small
 			// in-flight improvement on top of the SQL classifier.
 			"you\u2019ve hit your limit",
-			"credits",
-			"quota",
+			"credits exhausted",
+			"credits remaining",
+			"credit balance",
+			"quota exceeded",
+			"quota has been exceeded",
 		):
 		return ReasonAgentProviderQuotaLimit
 

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY idx_inbox_task_event_once ON inbox_item (workspace_id, recipient_type, recipient_id, type, ((details->>'task_id'))) WHERE type IN ('task_failed', 'task_fallback') AND details ? 'task_id';

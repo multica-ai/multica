@@ -125,8 +125,19 @@ RETURNING *;
 -- Builder sessions own their hidden execution agent. Deleting the session
 -- removes that carrier and its task rows; the kind guard prevents this cleanup
 -- path from ever deleting a user-authored agent.
-DELETE FROM agent
-WHERE id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%';
+WITH target AS (
+    SELECT agent.id FROM agent
+    WHERE agent.id = $1 AND agent.kind = 'system' AND agent.system_key LIKE 'agent_builder:%'
+),
+cleared_fallback_cooldowns AS (
+    DELETE FROM agent_runtime_fallback_cooldown
+    WHERE agent_runtime_fallback_cooldown.agent_id IN (SELECT target.id FROM target)
+),
+cleared_fallback_runtimes AS (
+    DELETE FROM agent_fallback_runtime
+    WHERE agent_fallback_runtime.agent_id IN (SELECT target.id FROM target)
+)
+DELETE FROM agent WHERE agent.id IN (SELECT target.id FROM target);
 
 -- name: UpdateAgent :one
 -- composio_toolkit_allowlist is set wholesale: the API layer is responsible
@@ -430,11 +441,16 @@ next_runtime AS (
     FROM agent_task_queue parent
     JOIN agent_fallback_runtime afr ON afr.agent_id = parent.agent_id
     JOIN agent_runtime runtime ON runtime.id = afr.runtime_id AND runtime.status = 'online'
+    -- Retry children inherit parent.work_dir. Only another provider runtime on
+    -- the same registered daemon can truthfully access that host-local path.
+    JOIN agent_runtime parent_runtime ON parent_runtime.id = parent.runtime_id
     LEFT JOIN agent_runtime_fallback_cooldown cooldown
       ON cooldown.agent_id = afr.agent_id
      AND cooldown.runtime_id = afr.runtime_id
      AND cooldown.cooldown_until > now()
     WHERE parent.id = sqlc.arg(id)
+      AND runtime.daemon_id IS NOT NULL
+      AND runtime.daemon_id = parent_runtime.daemon_id
       AND cooldown.agent_id IS NULL
       AND NOT EXISTS (
           SELECT 1 FROM retry_ancestry attempted

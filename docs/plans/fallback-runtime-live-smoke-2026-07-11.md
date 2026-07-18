@@ -328,7 +328,7 @@ go run ./cmd/migrate up
 go test -race ./...
 ```
 
-All migrations through `202_agent_fallback_runtimes` applied and every backend
+All migrations through `208_inbox_task_event_once_index` applied and every backend
 package passed under the race detector. Frontend dependency installation was
 lockfile-clean, self-host environment derivation passed through the installed
 standalone Compose binary, and reserved-slug regeneration produced no diff.
@@ -344,3 +344,28 @@ set for `Noto Serif SC`, despite direct curl and Node HTTPS probes succeeding.
 No source workaround was added for this machine-specific external dependency.
 The exact unmocked build therefore remains an explicit upstream-CI delivery
 gate after the approved PR branch is published.
+
+## Independent Reliability Review - 2026-07-19
+
+A bounded read-only review with `gpt-5.6-terra` identified four release
+blockers, all resolved before publication:
+
+- fallback runtimes now pass the same public/private ownership gate as the
+  primary runtime on both agent create and update;
+- quota classification requires provider-shaped phrases such as `quota
+  exceeded` or `credits exhausted`; ordinary issue text mentioning quota or
+  credits remains non-retryable;
+- fallback tables intentionally have no foreign keys, their indexes are split
+  into one `CREATE INDEX CONCURRENTLY` statement per migration, and runtime,
+  system-agent, and workspace teardown paths remove their app-owned rows;
+- in-flight fallback retries only cross provider runtimes registered to the
+  same daemon, because only that destination can access the inherited absolute
+  worktree. A regression test proves a runtime on another daemon is not handed
+  a host-local path. Fresh tasks may still select a cooled-primary fallback on
+  another host because they carry no prior worktree.
+
+The post-review backend proof used a fresh PostgreSQL 17 database and Redis 7:
+all migrations `001` through `208`, `go build ./...`, and `go test -race ./...`
+passed. Focused tests additionally cover private-runtime rejection, negative
+quota-language classification, same-daemon cross-provider continuation, and
+cross-daemon retry refusal.

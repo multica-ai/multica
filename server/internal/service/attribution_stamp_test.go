@@ -33,7 +33,9 @@ func seedAttributionFixture(t *testing.T, pool *pgxpool.Pool) (workspaceID, user
 		fmt.Sprintf("attr-%d", suffix)).Scan(&workspaceID); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
-	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID) })
+	t.Cleanup(func() {
+		_ = db.New(pool).DeleteWorkspace(context.Background(), util.MustParseUUID(workspaceID))
+	})
 
 	if _, err := pool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`,
 		workspaceID, userID); err != nil {
@@ -42,8 +44,8 @@ func seedAttributionFixture(t *testing.T, pool *pgxpool.Pool) (workspaceID, user
 
 	var runtimeID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id)
-		VALUES ($1, 'attr-runtime', 'cloud', 'codex', 'online', '', '{}'::jsonb, $2)
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id)
+		VALUES ($1, 'fallback-test-daemon', 'attr-runtime', 'cloud', 'codex', 'online', '', '{}'::jsonb, $2)
 		RETURNING id`, workspaceID, userID).Scan(&runtimeID); err != nil {
 		t.Fatalf("seed runtime: %v", err)
 	}

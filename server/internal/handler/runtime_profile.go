@@ -481,6 +481,14 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to clean up chat draft restores")
 			return
 		}
+		if err := qtx.DeleteFallbackCooldownsForRuntimeTeardown(r.Context(), rid); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clean up fallback cooldowns")
+			return
+		}
+		if err := qtx.DeleteFallbackRuntimesForRuntimeTeardown(r.Context(), rid); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clean up fallback runtimes")
+			return
+		}
 		if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rid); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 			return

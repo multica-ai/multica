@@ -142,14 +142,25 @@ func TestAutopilotRunOnlyProviderFallbackKeepsRunOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load fixture agent: %v", err)
 	}
+	var originalDaemonID pgtype.Text
+	if err := testPool.QueryRow(ctx, `SELECT daemon_id FROM agent_runtime WHERE id = $1`, agent.RuntimeID).Scan(&originalDaemonID); err != nil {
+		t.Fatalf("load primary daemon id: %v", err)
+	}
+	const fallbackDaemonID = "autopilot-fallback-test-daemon"
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET daemon_id = $2 WHERE id = $1`, agent.RuntimeID, fallbackDaemonID); err != nil {
+		t.Fatalf("pin primary runtime to fallback test daemon: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `UPDATE agent_runtime SET daemon_id = $2 WHERE id = $1`, agent.RuntimeID, originalDaemonID)
+	})
 
 	var fallbackRuntimeID pgtype.UUID
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
-		) VALUES ($1, 'autopilot-fallback', 'cloud', 'claude', 'online', '', '{}'::jsonb, $2)
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
+		) VALUES ($1, $3, 'autopilot-fallback', 'cloud', 'claude', 'online', '', '{}'::jsonb, $2)
 		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&fallbackRuntimeID); err != nil {
+	`, testWorkspaceID, testUserID, fallbackDaemonID).Scan(&fallbackRuntimeID); err != nil {
 		t.Fatalf("create fallback runtime: %v", err)
 	}
 	if err := queries.AddAgentFallbackRuntime(ctx, db.AddAgentFallbackRuntimeParams{

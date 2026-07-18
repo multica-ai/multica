@@ -216,6 +216,70 @@ func TestCreateAgent_AllowsPublicRuntimeForPlainMember(t *testing.T) {
 	}
 }
 
+func TestAgentFallbacksRejectAnotherMembersPrivateRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	privateRuntimeID, _, plainMemberID := runtimeVisibilityFixture(t)
+	ctx := context.Background()
+	var publicRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, name, runtime_mode, provider, status, device_info,
+			metadata, owner_id, visibility, last_seen_at
+		) VALUES ($1, 'Fallback Primary', 'cloud', 'codex', 'online', '',
+			'{}'::jsonb, $2, 'public', now())
+		RETURNING id
+	`, testWorkspaceID, plainMemberID).Scan(&publicRuntimeID); err != nil {
+		t.Fatalf("create public primary runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_fallback_runtime WHERE runtime_id IN ($1, $2)`, publicRuntimeID, privateRuntimeID)
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, publicRuntimeID)
+	})
+
+	createBody := map[string]any{
+		"name":                 "private-fallback-create-test",
+		"description":          "",
+		"runtime_id":           publicRuntimeID,
+		"fallback_runtime_ids": []string{privateRuntimeID},
+		"visibility":           "private",
+		"max_concurrent_tasks": 1,
+	}
+	w := httptest.NewRecorder()
+	testHandler.CreateAgent(w, newRequestAs(plainMemberID, http.MethodPost, "/api/agents", createBody))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateAgent with another member's private fallback: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility,
+			max_concurrent_tasks, owner_id, instructions, custom_env, custom_args
+		) VALUES ($1, 'private-fallback-update-test', 'cloud', '{}'::jsonb, $2,
+			'private', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, publicRuntimeID, plainMemberID).Scan(&agentID); err != nil {
+		t.Fatalf("create update test agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_fallback_runtime WHERE agent_id = $1`, agentID)
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	w = httptest.NewRecorder()
+	req := newRequestAs(plainMemberID, http.MethodPut, "/api/agents/"+agentID, map[string]any{
+		"fallback_runtime_ids": []string{privateRuntimeID},
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("UpdateAgent with another member's private fallback: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestUpdateAgent_RejectsRebindToPrivateRuntime is the regression for the
 // "update can bypass create" backdoor — without this gate a plain member
 // could create an agent on a public runtime, then re-bind it onto someone

@@ -195,7 +195,9 @@ func (h *Handler) enrichAgentResponseWithFallbacks(ctx context.Context, resp *Ag
 	return nil
 }
 
-func (h *Handler) validateFallbackRuntimes(ctx context.Context, workspaceID, primaryRuntimeID pgtype.UUID, runtimeIDs []string) error {
+var errFallbackRuntimeForbidden = errors.New("fallback runtime is private")
+
+func (h *Handler) validateFallbackRuntimes(ctx context.Context, member db.Member, workspaceID, primaryRuntimeID pgtype.UUID, runtimeIDs []string) error {
 	seen := make(map[string]struct{}, len(runtimeIDs))
 	for _, id := range runtimeIDs {
 		var runtimeID pgtype.UUID
@@ -209,10 +211,14 @@ func (h *Handler) validateFallbackRuntimes(ctx context.Context, workspaceID, pri
 			return fmt.Errorf("duplicate fallback runtime %q", id)
 		}
 		seen[id] = struct{}{}
-		if _, err := h.Queries.GetAgentRuntimeForWorkspace(ctx, db.GetAgentRuntimeForWorkspaceParams{
+		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(ctx, db.GetAgentRuntimeForWorkspaceParams{
 			ID: runtimeID, WorkspaceID: workspaceID,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("fallback runtime %q is not in this workspace", id)
+		}
+		if !canUseRuntimeForAgent(member, runtime) {
+			return fmt.Errorf("%w: %q can only be used by its owner or a workspace admin", errFallbackRuntimeForbidden, id)
 		}
 	}
 	return nil
@@ -1121,8 +1127,12 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
 		return
 	}
-	if err := h.validateFallbackRuntimes(r.Context(), wsUUID, runtime.ID, req.FallbackRuntimeIDs); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if err := h.validateFallbackRuntimes(r.Context(), member, wsUUID, runtime.ID, req.FallbackRuntimeIDs); err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, errFallbackRuntimeForbidden) {
+			status = http.StatusForbidden
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 
@@ -1642,6 +1652,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// runtime to validate a thinking_level change. Resolve once and reuse.
 	targetRuntimeID := existing.RuntimeID
 	targetProvider := ""
+	var runtimeMember db.Member
+	if req.RuntimeID != nil || req.FallbackRuntimeIDs != nil {
+		var ok bool
+		runtimeMember, ok = h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
+		if !ok {
+			return
+		}
+	}
 	if req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
@@ -1658,11 +1676,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		// Same gate as CreateAgent — prevents UpdateAgent from being used to
 		// re-bind an agent onto someone else's private runtime, which would
 		// otherwise be a quiet end-run around the CreateAgent check.
-		member, ok := h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
-		if !ok {
-			return
-		}
-		if !canUseRuntimeForAgent(member, runtime) {
+		if !canUseRuntimeForAgent(runtimeMember, runtime) {
 			writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can move agents onto it")
 			return
 		}
@@ -1672,8 +1686,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		targetProvider = runtime.Provider
 	}
 	if req.FallbackRuntimeIDs != nil {
-		if err := h.validateFallbackRuntimes(r.Context(), existing.WorkspaceID, targetRuntimeID, *req.FallbackRuntimeIDs); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+		if err := h.validateFallbackRuntimes(r.Context(), runtimeMember, existing.WorkspaceID, targetRuntimeID, *req.FallbackRuntimeIDs); err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, errFallbackRuntimeForbidden) {
+				status = http.StatusForbidden
+			}
+			writeError(w, status, err.Error())
 			return
 		}
 	}
