@@ -101,6 +101,51 @@ func (s *Store) CreateOperatingLoop(
 	return operatingLoop, err
 }
 
+const projectBindingColumns = `id, workspace_id, project_id, operating_loop_id,
+ active, created_at, updated_at`
+
+func scanProjectBinding(row pgx.Row) (ProjectBinding, error) {
+	var binding ProjectBinding
+	err := row.Scan(
+		&binding.ID,
+		&binding.WorkspaceID,
+		&binding.ProjectID,
+		&binding.OperatingLoopID,
+		&binding.Active,
+		&binding.CreatedAt,
+		&binding.UpdatedAt,
+	)
+	return binding, err
+}
+
+func (s *Store) CreateProjectBinding(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	input ProjectBindingInput,
+) (ProjectBinding, error) {
+	if err := ValidateProjectBinding(input); err != nil {
+		return ProjectBinding{}, err
+	}
+
+	binding, err := scanProjectBinding(s.pool.QueryRow(ctx, `
+		INSERT INTO cerebro_ai_impact_project_binding
+			(workspace_id, project_id, operating_loop_id)
+		SELECT $1, project.id, operating_loop.id
+		FROM project
+		JOIN cerebro_ai_impact_operating_loop operating_loop
+			ON operating_loop.workspace_id = $1 AND operating_loop.id = $3
+		WHERE project.workspace_id = $1 AND project.id = $2
+		RETURNING `+projectBindingColumns,
+		workspaceID,
+		input.ProjectID,
+		input.OperatingLoopID,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ProjectBinding{}, ErrNotFound
+	}
+	return binding, err
+}
+
 const metricColumns = `id, workspace_id, operating_loop_id, name, family, unit,
  direction, baseline_start, baseline_end, source, guardrail, active, created_at, updated_at`
 

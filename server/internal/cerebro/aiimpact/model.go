@@ -101,6 +101,31 @@ type OperatingLoop struct {
 	UpdatedAt   time.Time
 }
 
+type ProjectBindingInput struct {
+	ProjectID       uuid.UUID
+	OperatingLoopID uuid.UUID
+}
+
+func ValidateProjectBinding(input ProjectBindingInput) error {
+	if input.ProjectID == uuid.Nil {
+		return errors.New("project binding project id is required")
+	}
+	if input.OperatingLoopID == uuid.Nil {
+		return errors.New("project binding operating loop id is required")
+	}
+	return nil
+}
+
+type ProjectBinding struct {
+	ID              uuid.UUID
+	WorkspaceID     uuid.UUID
+	ProjectID       uuid.UUID
+	OperatingLoopID uuid.UUID
+	Active          bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 type MetricInput struct {
 	OperatingLoopID uuid.UUID
 	Name            string

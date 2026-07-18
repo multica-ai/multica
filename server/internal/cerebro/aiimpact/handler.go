@@ -26,9 +26,69 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) Mount(r chi.Router) {
 	r.Post("/api/cerebro/ai-impact/functions", h.CreateFunction)
 	r.Post("/api/cerebro/ai-impact/operating-loops", h.CreateOperatingLoop)
+	r.Post("/api/cerebro/ai-impact/project-bindings", h.CreateProjectBinding)
 	r.Post("/api/cerebro/ai-impact/metrics", h.CreateMetric)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
 	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
+}
+
+type createProjectBindingRequest struct {
+	ProjectID       uuid.UUID `json:"project_id"`
+	OperatingLoopID uuid.UUID `json:"operating_loop_id"`
+}
+
+type projectBindingResponse struct {
+	ID              uuid.UUID `json:"id"`
+	ProjectID       uuid.UUID `json:"project_id"`
+	OperatingLoopID uuid.UUID `json:"operating_loop_id"`
+	Active          bool      `json:"active"`
+}
+
+func toProjectBindingResponse(binding ProjectBinding) projectBindingResponse {
+	return projectBindingResponse{
+		ID:              binding.ID,
+		ProjectID:       binding.ProjectID,
+		OperatingLoopID: binding.OperatingLoopID,
+		Active:          binding.Active,
+	}
+}
+
+// CreateProjectBinding binds one workspace project to an operating loop.
+func (h *Handler) CreateProjectBinding(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, role, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+
+	var request createProjectBindingRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeObservationError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	input := ProjectBindingInput{
+		ProjectID:       request.ProjectID,
+		OperatingLoopID: request.OperatingLoopID,
+	}
+	if err := ValidateProjectBinding(input); err != nil {
+		writeObservationError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	binding, err := h.service.CreateProjectBinding(r.Context(), workspaceID, role, input)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrReadOnly):
+			writeObservationError(w, http.StatusForbidden, err.Error())
+		case errors.Is(err, ErrNotFound):
+			writeObservationError(w, http.StatusNotFound, err.Error())
+		default:
+			writeObservationError(w, http.StatusInternalServerError, "failed to create project binding")
+		}
+		return
+	}
+	writeObservationJSON(w, http.StatusCreated, toProjectBindingResponse(binding))
 }
 
 type createMetricRequest struct {

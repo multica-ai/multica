@@ -12,6 +12,7 @@ var ErrReadOnly = errors.New("AI Impact is read-only for workspace members")
 type ServiceStore interface {
 	CreateFunction(ctx context.Context, workspaceID uuid.UUID, input FunctionInput) (Function, error)
 	CreateOperatingLoop(ctx context.Context, workspaceID uuid.UUID, input OperatingLoopInput) (OperatingLoop, error)
+	CreateProjectBinding(ctx context.Context, workspaceID uuid.UUID, input ProjectBindingInput) (ProjectBinding, error)
 	CreateMetric(ctx context.Context, workspaceID uuid.UUID, input MetricInput) (Metric, error)
 	AppendObservation(
 		ctx context.Context,
@@ -20,6 +21,18 @@ type ServiceStore interface {
 		input ObservationInput,
 	) (Observation, error)
 	ListObservations(ctx context.Context, workspaceID, metricID uuid.UUID) ([]Observation, error)
+}
+
+func (s *Service) CreateProjectBinding(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	role string,
+	input ProjectBindingInput,
+) (ProjectBinding, error) {
+	if !CanConfigure(role) {
+		return ProjectBinding{}, ErrReadOnly
+	}
+	return s.store.CreateProjectBinding(ctx, workspaceID, input)
 }
 
 func (s *Service) CreateMetric(

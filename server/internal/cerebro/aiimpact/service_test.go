@@ -65,6 +65,20 @@ func (s *recordingObservationStore) CreateMetric(
 	}, nil
 }
 
+func (s *recordingObservationStore) CreateProjectBinding(
+	_ context.Context,
+	workspaceID uuid.UUID,
+	input ProjectBindingInput,
+) (ProjectBinding, error) {
+	return ProjectBinding{
+		ID:              uuid.New(),
+		WorkspaceID:     workspaceID,
+		ProjectID:       input.ProjectID,
+		OperatingLoopID: input.OperatingLoopID,
+		Active:          true,
+	}, nil
+}
+
 func (s *recordingObservationStore) AppendObservation(
 	_ context.Context,
 	_, _ uuid.UUID,

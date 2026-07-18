@@ -199,3 +199,57 @@ func TestMetricHTTPSeamAllowsOwnerAdminCreateAndKeepsMemberReadOnly(t *testing.T
 		t.Fatalf("member create metric status = %d, want 403: %s", readOnlyRecorder.Code, readOnlyRecorder.Body.String())
 	}
 }
+
+func TestProjectBindingHTTPSeamAllowsOwnerAdminCreateAndKeepsMemberReadOnly(t *testing.T) {
+	store := &recordingObservationStore{}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	workspaceID := uuid.New()
+	actorID := uuid.New()
+	projectID := uuid.New()
+	operatingLoopID := uuid.New()
+	body := `{
+		"project_id":"` + projectID.String() + `",
+		"operating_loop_id":"` + operatingLoopID.String() + `"
+	}`
+
+	request := func(role string) *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/api/cerebro/ai-impact/project-bindings", strings.NewReader(body))
+		ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+			UserID: pgtype.UUID{Bytes: [16]byte(actorID), Valid: true},
+			Role:   role,
+		})
+		return req.WithContext(ctx)
+	}
+
+	for _, role := range []string{"owner", "admin"} {
+		t.Run(role, func(t *testing.T) {
+			createdRecorder := httptest.NewRecorder()
+			router.ServeHTTP(createdRecorder, request(role))
+			if createdRecorder.Code != http.StatusCreated {
+				t.Fatalf("%s create project binding status = %d, want 201: %s", role, createdRecorder.Code, createdRecorder.Body.String())
+			}
+			var created struct {
+				ID              string `json:"id"`
+				ProjectID       string `json:"project_id"`
+				OperatingLoopID string `json:"operating_loop_id"`
+				Active          bool   `json:"active"`
+			}
+			if err := json.NewDecoder(createdRecorder.Body).Decode(&created); err != nil {
+				t.Fatalf("decode create project binding response: %v", err)
+			}
+			if created.ID == "" || created.ProjectID != projectID.String() ||
+				created.OperatingLoopID != operatingLoopID.String() || !created.Active {
+				t.Fatalf("create project binding response = %+v", created)
+			}
+		})
+	}
+
+	readOnlyRecorder := httptest.NewRecorder()
+	router.ServeHTTP(readOnlyRecorder, request("member"))
+	if readOnlyRecorder.Code != http.StatusForbidden {
+		t.Fatalf("member create project binding status = %d, want 403: %s", readOnlyRecorder.Code, readOnlyRecorder.Body.String())
+	}
+}
