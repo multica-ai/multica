@@ -26,7 +26,7 @@ function NavigationProviderInner({
     // syncs usePathname/useSearchParams from it (supported since 14.1) with no
     // round-trip and no re-render.
     replaceSilent: (path: string) => {
-      window.history.replaceState(null, "", path);
+      window.history.replaceState(window.history.state, "", path);
     },
     back: router.back,
     pathname,

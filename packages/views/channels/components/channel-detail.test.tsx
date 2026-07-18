@@ -253,11 +253,41 @@ describe("ChannelDetail thread header", () => {
     expect(screen.getByTestId("avatar-lando")).toBeInTheDocument();
   });
 
-  // CEREBRO-PATCH(channel-settings-sheet): TECH-3698 — Pin/Archive moved from
-  // the header into the gear-opened settings sheet; open it first.
+  // CEREBRO-PATCH(dm-header-menu): FIR-3387 — actions live behind the shared
+  // 3-dot conversation menu; open it first.
   const openSettings = async (user: ReturnType<typeof userEvent.setup>) => {
-    await user.click(screen.getByLabelText("Channel settings"));
+    await user.click(screen.getByLabelText("Conversation menu"));
   };
+
+  it("shows the peer avatar only once in a direct message header", () => {
+    const dm: Channel = {
+      ...baseChannel,
+      kind: "dm",
+      title: "alice",
+      participants: [
+        { user_type: "member", user_id: "me" },
+        { user_type: "member", user_id: "alice" },
+      ],
+    };
+
+    render(<ChannelDetail channelId="c1" initialChannel={dm} />);
+
+    expect(screen.getAllByTestId("avatar-alice")).toHaveLength(1);
+    expect(screen.queryByLabelText("Open participants")).not.toBeInTheDocument();
+  });
+
+  it("copies the current conversation link from the conversation menu", async () => {
+    const user = userEvent.setup();
+    const writeText = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockResolvedValue(undefined);
+    render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
+
+    await openSettings(user);
+    await user.click(screen.getByRole("button", { name: "Copy link" }));
+
+    expect(writeText).toHaveBeenCalledWith(window.location.href);
+  });
   it("gives the composer the chat-style divider line + top gap (border-t pt-2)", () => {
     render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
     const shell = screen.getByTestId("comment-input").parentElement;
