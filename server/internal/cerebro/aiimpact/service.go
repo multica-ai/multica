@@ -3,6 +3,7 @@ package aiimpact
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -135,6 +136,14 @@ func (s *Service) ListWorkspaceEvidence(
 	ctx context.Context,
 	workspaceID uuid.UUID,
 ) ([]EvidenceReadModel, error) {
+	return s.listWorkspaceEvidence(ctx, workspaceID, EvidenceFilter{})
+}
+
+func (s *Service) listWorkspaceEvidence(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	filter EvidenceFilter,
+) ([]EvidenceReadModel, error) {
 	functions, err := s.store.ListFunctions(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -166,7 +175,18 @@ func (s *Service) ListWorkspaceEvidence(
 	}
 
 	evidence := make([]EvidenceReadModel, 0, len(observations))
-	for _, observation := range LatestObservations(observations) {
+	filteredObservations := make([]Observation, 0, len(observations))
+	for _, observation := range observations {
+		if !filter.PeriodStart.IsZero() && observation.PeriodStart.Before(filter.PeriodStart) {
+			continue
+		}
+		if !filter.PeriodEnd.IsZero() && observation.PeriodEnd.After(filter.PeriodEnd) {
+			continue
+		}
+		filteredObservations = append(filteredObservations, observation)
+	}
+
+	for _, observation := range LatestObservations(filteredObservations) {
 		metric, ok := metricsByID[observation.MetricID]
 		if !ok {
 			continue
@@ -192,6 +212,8 @@ func (s *Service) ListWorkspaceEvidence(
 type EvidenceFilter struct {
 	MetricFamily   MetricFamily
 	EvidenceStatus EvidenceStatus
+	PeriodStart    time.Time
+	PeriodEnd      time.Time
 }
 
 // ListFilteredEvidence returns latest workspace evidence matching every supplied filter.
@@ -200,7 +222,7 @@ func (s *Service) ListFilteredEvidence(
 	workspaceID uuid.UUID,
 	filter EvidenceFilter,
 ) ([]EvidenceReadModel, error) {
-	evidence, err := s.ListWorkspaceEvidence(ctx, workspaceID)
+	evidence, err := s.listWorkspaceEvidence(ctx, workspaceID, filter)
 	if err != nil {
 		return nil, err
 	}

@@ -91,6 +91,20 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 
 	metricFamily := MetricFamily(r.URL.Query().Get("metric_family"))
 	evidenceStatus := EvidenceStatus(r.URL.Query().Get("evidence_status"))
+	periodStart, err := parseEvidencePeriod(r.URL.Query().Get("period_start"))
+	if err != nil {
+		writeObservationError(w, http.StatusBadRequest, "invalid period_start")
+		return
+	}
+	periodEnd, err := parseEvidencePeriod(r.URL.Query().Get("period_end"))
+	if err != nil {
+		writeObservationError(w, http.StatusBadRequest, "invalid period_end")
+		return
+	}
+	if !periodStart.IsZero() && !periodEnd.IsZero() && periodStart.After(periodEnd) {
+		writeObservationError(w, http.StatusBadRequest, "period_start must not follow period_end")
+		return
+	}
 	if metricFamily != "" && !validMetricFamily(metricFamily) {
 		writeObservationError(w, http.StatusBadRequest, "invalid metric_family")
 		return
@@ -102,6 +116,8 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 	evidence, err := h.service.ListFilteredEvidence(r.Context(), workspaceID, EvidenceFilter{
 		MetricFamily:   metricFamily,
 		EvidenceStatus: evidenceStatus,
+		PeriodStart:    periodStart,
+		PeriodEnd:      periodEnd,
 	})
 	if err != nil {
 		writeObservationError(w, http.StatusInternalServerError, "failed to list workspace evidence")
@@ -112,6 +128,13 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 		response = append(response, toEvidenceResponse(item))
 	}
 	writeObservationJSON(w, http.StatusOK, map[string]any{"evidence": response})
+}
+
+func parseEvidencePeriod(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, value)
 }
 
 // ListFunctionEvidence returns latest observations for one Function.

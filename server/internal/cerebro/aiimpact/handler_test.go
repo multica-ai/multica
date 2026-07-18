@@ -581,6 +581,71 @@ func TestWorkspaceEvidenceReadModelRejectsUnknownFilters(t *testing.T) {
 	}
 }
 
+func TestWorkspaceEvidenceReadModelFiltersBeforeSelectingLatestObservation(t *testing.T) {
+	workspaceID := uuid.New()
+	functionID := uuid.New()
+	operatingLoopID := uuid.New()
+	metricID := uuid.New()
+	windowStart := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	windowEnd := windowStart.Add(48 * time.Hour)
+	store := &recordingObservationStore{
+		functions: []Function{
+			{ID: functionID, WorkspaceID: workspaceID, Name: "Customer Service", Active: true},
+		},
+		operatingLoops: []OperatingLoop{
+			{ID: operatingLoopID, WorkspaceID: workspaceID, FunctionID: functionID, Name: "Resolve customer needs", Active: true},
+		},
+		metrics: []Metric{
+			{ID: metricID, WorkspaceID: workspaceID, OperatingLoopID: operatingLoopID, Name: "Resolved needs", Family: FamilyOutcome, Unit: "needs", Direction: DirectionIncrease, Source: "support", Active: true},
+		},
+		workspaceObservations: []Observation{
+			{
+				ID: uuid.New(), MetricID: metricID, PeriodStart: windowStart, PeriodEnd: windowEnd,
+				Value: 15, EvidenceStatus: EvidenceMeasured, Confidence: 0.9,
+				Source: "support", Method: "audited count", CreatedAt: windowEnd,
+			},
+			{
+				ID: uuid.New(), MetricID: metricID, PeriodStart: windowEnd.Add(24 * time.Hour), PeriodEnd: windowEnd.Add(48 * time.Hour),
+				Value: 20, EvidenceStatus: EvidenceMeasured, Confidence: 0.9,
+				Source: "support", Method: "audited count", CreatedAt: windowEnd.Add(48 * time.Hour),
+			},
+		},
+	}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	path := "/api/cerebro/ai-impact/evidence?period_start=" + windowStart.Format(time.RFC3339) +
+		"&period_end=" + windowEnd.Format(time.RFC3339)
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("period-filtered evidence response = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Evidence []struct {
+			MetricID    uuid.UUID `json:"metric_id"`
+			PeriodStart time.Time `json:"period_start"`
+			PeriodEnd   time.Time `json:"period_end"`
+			Value       float64   `json:"value"`
+		} `json:"evidence"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode period-filtered evidence response: %v", err)
+	}
+	if len(response.Evidence) != 1 || response.Evidence[0].MetricID != metricID ||
+		!response.Evidence[0].PeriodStart.Equal(windowStart) || !response.Evidence[0].PeriodEnd.Equal(windowEnd) ||
+		response.Evidence[0].Value != 15 {
+		t.Fatalf("period-filtered evidence response = %+v, want latest observation inside requested period", response.Evidence)
+	}
+}
+
 func TestFunctionEvidenceReadModelReturnsOnlyLatestEvidenceForRequestedFunction(t *testing.T) {
 	workspaceID := uuid.New()
 	requestedFunctionID := uuid.New()
