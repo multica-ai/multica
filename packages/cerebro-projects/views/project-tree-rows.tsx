@@ -36,6 +36,9 @@ interface CerebroProjectTreeRowsProps {
   renderSprintLink: (sprint: WorkspaceSprint, children: ReactNode) => ReactNode;
 }
 
+const EMPTY_EXPANDED_PROJECTS: Record<string, boolean> = {};
+const EMPTY_COMPLETED_SPRINTS: Record<string, boolean> = {};
+
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(
     new Date(`${value}T00:00:00Z`),
@@ -191,10 +194,10 @@ function CompletedToggleRow({
 
 export function CerebroProjectTreeRows(props: CerebroProjectTreeRowsProps) {
   const expandedProjects = useProjectsTreeStore(
-    (state) => state.expandedProjectsByWorkspace[props.workspaceId] ?? {},
+    (state) => state.expandedProjectsByWorkspace[props.workspaceId] ?? EMPTY_EXPANDED_PROJECTS,
   );
   const showCompletedSprints = useProjectsTreeStore(
-    (state) => state.showCompletedSprintsByWorkspace[props.workspaceId] ?? {},
+    (state) => state.showCompletedSprintsByWorkspace[props.workspaceId] ?? EMPTY_COMPLETED_SPRINTS,
   );
   const toggleProject = useProjectsTreeStore((state) => state.toggleProject);
   const toggleCompletedSprints = useProjectsTreeStore((state) => state.toggleCompletedSprints);
