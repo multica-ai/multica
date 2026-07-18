@@ -472,6 +472,89 @@ func TestWorkspaceEvidenceReadModelFiltersByEvidenceStatus(t *testing.T) {
 	}
 }
 
+func TestWorkspaceEvidenceReadModelCombinesMetricFamilyAndEvidenceStatusFilters(t *testing.T) {
+	workspaceID := uuid.New()
+	functionID := uuid.New()
+	operatingLoopID := uuid.New()
+	qualityMeasuredMetricID := uuid.New()
+	qualityEstimatedMetricID := uuid.New()
+	outcomeMeasuredMetricID := uuid.New()
+	periodStart := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.Add(24 * time.Hour)
+	store := &recordingObservationStore{
+		functions: []Function{{
+			ID: functionID, WorkspaceID: workspaceID, Name: "Customer Service", Active: true,
+		}},
+		operatingLoops: []OperatingLoop{{
+			ID: operatingLoopID, WorkspaceID: workspaceID, FunctionID: functionID,
+			Name: "Resolve customer needs", Active: true,
+		}},
+		metrics: []Metric{
+			{
+				ID: qualityMeasuredMetricID, WorkspaceID: workspaceID, OperatingLoopID: operatingLoopID,
+				Name: "Reopened needs", Family: FamilyQuality, Unit: "needs",
+				Direction: DirectionDecrease, Source: "support", Active: true,
+			},
+			{
+				ID: qualityEstimatedMetricID, WorkspaceID: workspaceID, OperatingLoopID: operatingLoopID,
+				Name: "Frustration-free", Family: FamilyQuality, Unit: "percent",
+				Direction: DirectionIncrease, Source: "support", Active: true,
+			},
+			{
+				ID: outcomeMeasuredMetricID, WorkspaceID: workspaceID, OperatingLoopID: operatingLoopID,
+				Name: "Resolved needs", Family: FamilyOutcome, Unit: "needs",
+				Direction: DirectionIncrease, Source: "support", Active: true,
+			},
+		},
+		workspaceObservations: []Observation{
+			{
+				ID: uuid.New(), MetricID: qualityMeasuredMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd,
+				Value: 2, EvidenceStatus: EvidenceMeasured, Confidence: 0.9,
+				Source: "support", Method: "audited count", CreatedAt: periodEnd,
+			},
+			{
+				ID: uuid.New(), MetricID: qualityEstimatedMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd,
+				Value: 92, EvidenceStatus: EvidenceEstimated, Confidence: 0.6,
+				Source: "support", Method: "sampled assessment", CreatedAt: periodEnd,
+			},
+			{
+				ID: uuid.New(), MetricID: outcomeMeasuredMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd,
+				Value: 15, EvidenceStatus: EvidenceMeasured, Confidence: 0.9,
+				Source: "support", Method: "audited count", CreatedAt: periodEnd,
+			},
+		},
+	}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cerebro/ai-impact/evidence?metric_family=Quality&evidence_status=Measured", nil)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("combined evidence filters response = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Evidence []struct {
+			MetricID       uuid.UUID      `json:"metric_id"`
+			MetricFamily   MetricFamily   `json:"metric_family"`
+			EvidenceStatus EvidenceStatus `json:"evidence_status"`
+		} `json:"evidence"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode combined evidence filters response: %v", err)
+	}
+	if len(response.Evidence) != 1 || response.Evidence[0].MetricID != qualityMeasuredMetricID ||
+		response.Evidence[0].MetricFamily != FamilyQuality || response.Evidence[0].EvidenceStatus != EvidenceMeasured {
+		t.Fatalf("combined evidence filters response = %+v, want only latest measured Quality evidence", response.Evidence)
+	}
+}
+
 func TestFunctionEvidenceReadModelReturnsOnlyLatestEvidenceForRequestedFunction(t *testing.T) {
 	workspaceID := uuid.New()
 	requestedFunctionID := uuid.New()

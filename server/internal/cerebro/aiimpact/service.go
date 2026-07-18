@@ -189,11 +189,16 @@ func (s *Service) ListWorkspaceEvidence(
 	return evidence, nil
 }
 
-// ListMetricFamilyEvidence returns the latest workspace evidence for one metric family.
-func (s *Service) ListMetricFamilyEvidence(
+type EvidenceFilter struct {
+	MetricFamily   MetricFamily
+	EvidenceStatus EvidenceStatus
+}
+
+// ListFilteredEvidence returns latest workspace evidence matching every supplied filter.
+func (s *Service) ListFilteredEvidence(
 	ctx context.Context,
 	workspaceID uuid.UUID,
-	family MetricFamily,
+	filter EvidenceFilter,
 ) ([]EvidenceReadModel, error) {
 	evidence, err := s.ListWorkspaceEvidence(ctx, workspaceID)
 	if err != nil {
@@ -202,11 +207,24 @@ func (s *Service) ListMetricFamilyEvidence(
 
 	result := make([]EvidenceReadModel, 0, len(evidence))
 	for _, item := range evidence {
-		if item.Metric.Family == family {
-			result = append(result, item)
+		if filter.MetricFamily != "" && item.Metric.Family != filter.MetricFamily {
+			continue
 		}
+		if filter.EvidenceStatus != "" && item.Observation.EvidenceStatus != filter.EvidenceStatus {
+			continue
+		}
+		result = append(result, item)
 	}
 	return result, nil
+}
+
+// ListMetricFamilyEvidence returns the latest workspace evidence for one metric family.
+func (s *Service) ListMetricFamilyEvidence(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	family MetricFamily,
+) ([]EvidenceReadModel, error) {
+	return s.ListFilteredEvidence(ctx, workspaceID, EvidenceFilter{MetricFamily: family})
 }
 
 // ListEvidenceStatusEvidence returns the latest workspace evidence for one evidence status.
@@ -215,18 +233,7 @@ func (s *Service) ListEvidenceStatusEvidence(
 	workspaceID uuid.UUID,
 	status EvidenceStatus,
 ) ([]EvidenceReadModel, error) {
-	evidence, err := s.ListWorkspaceEvidence(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]EvidenceReadModel, 0, len(evidence))
-	for _, item := range evidence {
-		if item.Observation.EvidenceStatus == status {
-			result = append(result, item)
-		}
-	}
-	return result, nil
+	return s.ListFilteredEvidence(ctx, workspaceID, EvidenceFilter{EvidenceStatus: status})
 }
 
 // ListFunctionEvidence returns the latest workspace evidence for one Function.
