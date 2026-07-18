@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -18,7 +19,6 @@ type mention struct {
 	Type string // "member", "agent", "issue", or "all"
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
-
 
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
@@ -78,19 +78,19 @@ var parentBubbleNotifTypes = map[string]bool{
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
 // group. Types not in this map are always delivered (not configurable).
 var notifTypeToGroup = map[string]string{
-	"issue_assigned":  "assignments",
-	"unassigned":      "assignments",
-	"assignee_changed": "assignments",
-	"status_changed":  "status_changes",
-	"new_comment":     "comments",
-	"mentioned":       "comments",
-	"priority_changed": "updates",
+	"issue_assigned":     "assignments",
+	"unassigned":         "assignments",
+	"assignee_changed":   "assignments",
+	"status_changed":     "status_changes",
+	"new_comment":        "comments",
+	"mentioned":          "comments",
+	"priority_changed":   "updates",
 	"start_date_changed": "updates",
-	"due_date_changed": "updates",
-	"task_completed":  "agent_activity",
-	"task_failed":     "agent_activity",
-	"agent_blocked":   "agent_activity",
-	"agent_completed": "agent_activity",
+	"due_date_changed":   "updates",
+	"task_completed":     "agent_activity",
+	"task_failed":        "agent_activity",
+	"agent_blocked":      "agent_activity",
+	"agent_completed":    "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -907,6 +907,21 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			exclude[agentID] = true
 		}
 
+		details, _ := json.Marshal(payload)
+		body := ""
+		severity := "action_required"
+		if destinationID, _ := payload["destination_runtime_id"].(string); destinationID != "" {
+			severity = "info"
+			reason, _ := payload["failure_reason"].(string)
+			source, _ := payload["source_runtime_name"].(string)
+			destination, _ := payload["destination_runtime_name"].(string)
+			body = fmt.Sprintf("%s failed with %s; continuing on %s", source, reason, destination)
+		} else if exhausted, _ := payload["fallback_exhausted"].(bool); exhausted {
+			reason, _ := payload["failure_reason"].(string)
+			source, _ := payload["source_runtime_name"].(string)
+			body = fmt.Sprintf("%s failed with %s; no eligible fallback runtime remains", source, reason)
+		}
+
 		notifySubscribers(ctx, queries, bus, issueID, issue.Status, e.WorkspaceID,
 			events.Event{
 				Type:        e.Type,
@@ -914,9 +929,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				ActorType:   "agent",
 				ActorID:     agentID,
 			},
-			exclude, "task_failed", "action_required",
-			issue.Title, "",
-			emptyDetails)
+			exclude, "task_failed", severity,
+			issue.Title, body,
+			details)
 	})
 }
 

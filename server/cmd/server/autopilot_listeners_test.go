@@ -122,6 +122,117 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 	}
 }
 
+func TestAutopilotRunOnlyProviderFallbackKeepsRunOpen(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	registerAutopilotListeners(bus, autopilotSvc)
+
+	var agent db.Agent
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 AND archived_at IS NULL
+		ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&agent.ID); err != nil {
+		t.Fatalf("load fixture agent id: %v", err)
+	}
+	var err error
+	agent, err = queries.GetAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	var fallbackRuntimeID pgtype.UUID
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
+		) VALUES ($1, 'autopilot-fallback', 'cloud', 'claude', 'online', '', '{}'::jsonb, $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&fallbackRuntimeID); err != nil {
+		t.Fatalf("create fallback runtime: %v", err)
+	}
+	if err := queries.AddAgentFallbackRuntime(ctx, db.AddAgentFallbackRuntimeParams{
+		AgentID: agent.ID, RuntimeID: fallbackRuntimeID, Priority: 0,
+	}); err != nil {
+		t.Fatalf("configure fallback runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime_fallback_cooldown WHERE agent_id = $1`, agent.ID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_fallback_runtime WHERE agent_id = $1 AND runtime_id = $2`, agent.ID, fallbackRuntimeID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, fallbackRuntimeID)
+	})
+
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID: parseUUID(testWorkspaceID), Title: "Run-only provider fallback",
+		Description:  pgtype.Text{String: "quota fallback regression", Valid: true},
+		AssigneeType: "agent", AssigneeID: agent.ID, Status: "active", ExecutionMode: "run_only",
+		CreatedByType: "member", CreatedByID: parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("create autopilot: %v", err)
+	}
+	t.Cleanup(func() { _, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID) })
+
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil || !run.TaskID.Valid {
+		t.Fatalf("dispatch run-only autopilot: run=%#v err=%v", run, err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+			DELETE FROM inbox_item
+			WHERE type = 'task_fallback' AND details->>'task_id' = $1::uuid::text
+		`, run.TaskID)
+	})
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status='dispatched', dispatched_at=now() WHERE id=$1`, run.TaskID); err != nil {
+		t.Fatalf("dispatch task: %v", err)
+	}
+	primaryTask, err := queries.StartAgentTask(ctx, run.TaskID)
+	if err != nil {
+		t.Fatalf("start primary task: %v", err)
+	}
+	if _, err := taskSvc.FailTask(ctx, primaryTask.ID, "monthly usage limit", "primary-session", "/tmp/autopilot-fallback", "agent_error.provider_quota_limit"); err != nil {
+		t.Fatalf("fail primary task: %v", err)
+	}
+
+	updatedRun, err := queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("load run after fallback: %v", err)
+	}
+	if updatedRun.Status == "failed" || updatedRun.Status == "completed" {
+		t.Fatalf("run finalized while fallback child was active: %q", updatedRun.Status)
+	}
+	var childID pgtype.UUID
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_task_queue WHERE parent_task_id=$1`, primaryTask.ID).Scan(&childID); err != nil {
+		t.Fatalf("load fallback child: %v", err)
+	}
+	child, err := queries.GetAgentTask(ctx, childID)
+	if err != nil {
+		t.Fatalf("load fallback child task: %v", err)
+	}
+	if child.RuntimeID != fallbackRuntimeID || child.AutopilotRunID != run.ID {
+		t.Fatalf("fallback child lost runtime/run provenance: %#v", child)
+	}
+
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status='dispatched', dispatched_at=now() WHERE id=$1`, child.ID); err != nil {
+		t.Fatalf("dispatch fallback child: %v", err)
+	}
+	child, err = queries.StartAgentTask(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("start fallback child: %v", err)
+	}
+	if _, err := taskSvc.CompleteTask(ctx, child.ID, []byte(`{"output":"fallback done"}`), "fallback-session", "/tmp/autopilot-fallback"); err != nil {
+		t.Fatalf("complete fallback child: %v", err)
+	}
+	updatedRun, err = queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("load completed run: %v", err)
+	}
+	if updatedRun.Status != "completed" || !strings.Contains(string(updatedRun.Result), "fallback done") {
+		t.Fatalf("completed fallback did not complete run: status=%q result=%s", updatedRun.Status, updatedRun.Result)
+	}
+}
+
 // linkedIssueAutopilotFixture is the starting state every create_issue
 // linked-issue listener test shares: a dispatched create_issue run sitting in
 // issue_created with exactly one issue task that carries no autopilot_run_id

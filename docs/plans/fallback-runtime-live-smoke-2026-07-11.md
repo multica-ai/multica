@@ -229,3 +229,53 @@ The only caveat is operational rather than a functional blocker: fallback
 runtimes must heartbeat actively, because the sweeper can fail queued fallback
 tasks once the selected fallback runtime is stale. That should be called out in
 the PR description or daemon/operator docs.
+
+## Quota And Context Handoff Rerun - 2026-07-18
+
+The earlier smoke used real server and daemon lifecycle calls, but simulated
+both runtime outcomes. This rerun exercised a current-branch daemon and a real
+Codex provider against a freshly migrated PostgreSQL database. It copied the
+read-only scenario from real workspace issue `SER-839` into isolated local
+issue `FBT-3`; the cloud workspace and source issue were not mutated.
+
+The primary runtime was a test-only OpenCode-protocol executable that emitted a
+deterministic provider exhaustion event. The fallback runtime was the locally
+authenticated Codex app-server (`codex-cli 0.144.1`). This distinction matters:
+the exhaustion trigger was controlled, while the continuation was executed by
+a real provider-backed Multica agent through the normal batch claim, workdir,
+task-token, transcript, issue-comment, and completion paths.
+
+```text
+workspace  3e640f06-6217-453b-b095-009c236e507f  Fallback Runtime Battle Test
+agent      5e4c4fb7-0225-4986-88ec-c76700dc6770  Fallback Battle-Test Agent
+issue      21b18757-8e2d-4ad7-8e99-27ff1c1b6734  FBT-3
+attempt 1  0f5c95ca-44be-4add-948c-267d5192d512  quota fixture  failed
+attempt 2  bb8d0ee4-6ff4-4c2e-a7e5-cdb51477be44  real Codex     completed
+```
+
+Observed guarantees:
+
+- Attempt 1 was classified as `agent_error.provider_quota_limit` and persisted
+  a 15-minute cooldown for the primary runtime.
+- Attempt 2 was created immediately on the configured Codex fallback. There
+  were exactly two tasks, two distinct runtimes, and no attempt above the
+  configured bound.
+- The fallback reused the source workdir but started a fresh provider session.
+- The source transcript was materialized at
+  `.multica/fallback-context/0f5c95ca-44be-4add-948c-267d5192d512/transcript.jsonl`
+  with mode `0444`.
+- Generated runtime briefs contained only that relative file pointer and source
+  task ID. The provider error text was not prompt-injected.
+- The real Codex agent read the JSONL file, posted a bounded implementation and
+  verification plan to `FBT-3`, and explicitly confirmed the canonical source
+  failure category before the fallback task completed.
+- Issue activity and Inbox history recorded source and destination runtime
+  names/providers, canonical failure reason, attempts, and cooldown. Persisted
+  history omitted the raw provider error.
+
+The live run also found and fixed a claim-path gap before this proof succeeded:
+the legacy per-runtime claim endpoint hydrated fallback transcripts, but the
+machine-level batch claim endpoint used by current daemons did not. The shared
+claim helper now applies the same handoff contract to both endpoints, with a
+dedicated batch-claim regression test. This is why a real daemon workflow was a
+necessary PR gate rather than relying only on the original handler test.

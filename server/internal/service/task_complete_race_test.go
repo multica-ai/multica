@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // mockRow implements pgx.Row, returning either a scanned task or pgx.ErrNoRows.
@@ -254,6 +255,8 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		// Transient mid-stream provider disconnect (MUL-4910): retryable, and
 		// resume-safe so the retry continues the truncated conversation.
 		{reason: "agent_error.provider_network", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
+		{reason: "agent_error.provider_quota_limit", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
+		{reason: "agent_error.provider_capacity_or_rate_limit", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
 		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
@@ -276,5 +279,40 @@ func TestTaskFailureClassifiers(t *testing.T) {
 				t.Fatalf("retryableReasons[%q] = %v, want %v", tc.reason, got, tc.wantRetry)
 			}
 		})
+	}
+}
+
+func TestProviderExhaustionFallbackPolicy(t *testing.T) {
+	quota := string(taskfailure.ReasonAgentProviderQuotaLimit)
+	capacity := string(taskfailure.ReasonAgentProviderCapacityOrRateLimit)
+	for _, reason := range []string{quota, capacity} {
+		if !providerExhaustionFallbackReason(reason) {
+			t.Fatalf("%q should require a cross-runtime fallback", reason)
+		}
+	}
+	for _, reason := range []string{
+		"agent_error", "agent_error.unknown", "agent_error.process_failure",
+		"agent_error.provider_auth_or_access", "api_invalid_request",
+	} {
+		if providerExhaustionFallbackReason(reason) {
+			t.Fatalf("%q must not require a provider fallback", reason)
+		}
+		if retryableReasons[reason] {
+			t.Fatalf("%q must remain outside the retry allowlist", reason)
+		}
+	}
+	if got := providerFallbackCooldown(quota); got != providerQuotaCooldown {
+		t.Fatalf("quota cooldown = %s, want %s", got, providerQuotaCooldown)
+	}
+	if got := providerFallbackCooldown(capacity); got != providerCapacityCooldown {
+		t.Fatalf("capacity cooldown = %s, want %s", got, providerCapacityCooldown)
+	}
+
+	autopilotTask := db.AgentTaskQueue{
+		Attempt: 1, MaxAttempts: 2,
+		AutopilotRunID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+	}
+	if !retryEligible(quota, autopilotTask) {
+		t.Fatal("run-only autopilot task should be eligible for provider fallback")
 	}
 }

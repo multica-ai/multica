@@ -326,6 +326,7 @@
     "description_updated": "설명을 업데이트했습니다",
     "task_completed_other": "작업을 완료했습니다({{count}}회)",
     "task_failed_other": "작업이 실패했습니다({{count}}회)",
+    "task_fallback": "{{reason}} 후 작업을 {{source}}에서 {{destination}}(으)로 이동했습니다",
     "squad_leader_evaluated": "스쿼드 트리거를 평가했습니다",
     "squad_leader_action": "평가 후 작업을 수행했습니다",
     "squad_leader_action_reason": "평가 후 작업을 수행했습니다: {{reason}}",

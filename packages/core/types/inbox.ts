@@ -16,6 +16,7 @@ export type InboxItemType =
   | "review_requested"
   | "task_completed"
   | "task_failed"
+  | "task_fallback"
   | "agent_blocked"
   | "agent_completed"
   | "reaction_added"

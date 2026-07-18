@@ -740,7 +740,7 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	}
 	if ctx.FallbackTranscript != nil && len(ctx.FallbackTranscript.Messages) > 0 {
 		b.WriteString("## Previous Runtime Transcript\n\n")
-		fmt.Fprintf(&b, "The previous runtime's provider-neutral transcript is available at `%s` (source task `%s`). Read it only if prior execution details are needed; it is not injected into your prompt.\n\n", fallbackTranscriptRelPath(ctx.FallbackTranscript), ctx.FallbackTranscript.SourceTaskID)
+		fmt.Fprintf(&b, "The previous runtime's provider-neutral transcript is available at `%s` (source task `%s`). Read it only if prior execution details are needed; its contents are not injected into your prompt.\n\n", fallbackTranscriptRelPath(ctx.FallbackTranscript), ctx.FallbackTranscript.SourceTaskID)
 		if ctx.FallbackTranscript.Truncated {
 			b.WriteString("The file is size-bounded and contains the most recent available entries from the retry chain; older entries were omitted.\n\n")
 		}

@@ -1514,6 +1514,17 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			// the reclaim path.
 			continue
 		}
+		transcript, transcriptErr := h.fallbackTranscriptForClaim(r.Context(), task, rt)
+		if transcriptErr != nil {
+			slog.Error("batch claim: failed to load fallback transcript; requeueing claim",
+				"task_id", uuidToString(task.ID), "error", transcriptErr)
+			if _, rerr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), task); rerr != nil {
+				slog.Error("batch claim: requeue after fallback transcript failure failed",
+					"task_id", uuidToString(task.ID), "error", rerr)
+			}
+			continue
+		}
+		resp.FallbackTranscript = transcript
 		if !rt.OwnerID.Valid {
 			slog.Error("batch claim: runtime owner missing; cancelling task to avoid unscoped agent credentials",
 				"task_id", uuidToString(task.ID), "runtime_id", uuidToString(task.RuntimeID))
@@ -1566,6 +1577,16 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			"total_ms", time.Since(start).Milliseconds())
 	}
 	writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": out})
+}
+
+// fallbackTranscriptForClaim keeps the legacy per-runtime and machine-level
+// batch claim paths aligned. Automatic cross-runtime retries receive the
+// provider-neutral parent transcript; fresh/manual runs do not.
+func (h *Handler) fallbackTranscriptForClaim(ctx context.Context, task db.AgentTaskQueue, runtime db.AgentRuntime) (*FallbackTranscriptData, error) {
+	if task.ForceFreshSession || !task.ParentTaskID.Valid {
+		return nil, nil
+	}
+	return h.loadFallbackTranscript(ctx, task, runtime)
 }
 
 // claimBuildFailure captures a pre-response failure from
@@ -2499,17 +2520,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// persisted provider-neutral transcript so the claiming daemon can expose
 	// it as a read-only file. Manual reruns remain truly fresh, and transcript
 	// data never crosses runtime-owner boundaries.
-	if !task.ForceFreshSession && task.ParentTaskID.Valid {
-		transcript, err := h.loadFallbackTranscript(r.Context(), *task, runtime)
-		if err != nil {
-			outcome = "error_fallback_transcript"
-			slog.Error("task claim: failed to load fallback transcript", "task_id", uuidToString(task.ID), "error", err)
-			requeueFailedClaim("fallback_transcript")
-			writeError(w, http.StatusInternalServerError, "failed to prepare fallback transcript")
-			return
-		}
-		resp.FallbackTranscript = transcript
+	transcript, transcriptErr := h.fallbackTranscriptForClaim(r.Context(), *task, runtime)
+	if transcriptErr != nil {
+		outcome = "error_fallback_transcript"
+		slog.Error("task claim: failed to load fallback transcript", "task_id", uuidToString(task.ID), "error", transcriptErr)
+		requeueFailedClaim("fallback_transcript")
+		writeError(w, http.StatusInternalServerError, "failed to prepare fallback transcript")
+		return
 	}
+	resp.FallbackTranscript = transcript
 	// Mint a task-scoped `mat_` token bound to (agent, task, workspace,
 	// owner). The daemon will inject this as MULTICA_TOKEN into the agent
 	// process instead of its own credential, so any API call the agent

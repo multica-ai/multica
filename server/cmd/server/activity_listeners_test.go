@@ -329,10 +329,11 @@ func TestActivityTaskFailed(t *testing.T) {
 		ActorType:   "system",
 		ActorID:     "",
 		Payload: map[string]any{
-			"task_id":  "00000000-0000-0000-0000-000000000002",
-			"agent_id": agentID,
-			"issue_id": issueID,
-			"status":   "failed",
+			"task_id": "00000000-0000-0000-0000-000000000002", "agent_id": agentID,
+			"issue_id": issueID, "status": "failed",
+			"failure_reason":         "agent_error.provider_quota_limit",
+			"source_runtime_id":      "00000000-0000-0000-0000-111111111111",
+			"destination_runtime_id": "00000000-0000-0000-0000-222222222222",
 		},
 	})
 
@@ -342,5 +343,13 @@ func TestActivityTaskFailed(t *testing.T) {
 	}
 	if activities[0].Action != "task_failed" {
 		t.Fatalf("expected action 'task_failed', got %q", activities[0].Action)
+	}
+	var details map[string]any
+	if err := json.Unmarshal(activities[0].Details, &details); err != nil {
+		t.Fatalf("decode activity details: %v", err)
+	}
+	if details["failure_reason"] != "agent_error.provider_quota_limit" ||
+		details["destination_runtime_id"] != "00000000-0000-0000-0000-222222222222" {
+		t.Fatalf("activity fallback details = %#v", details)
 	}
 }

@@ -320,8 +320,8 @@ type ConnectedAppData = runtimeapps.ConnectedApp
 
 // FallbackTranscriptData is a provider-neutral transcript from the failed
 // parent task. It is sent only when an automatic retry moves to a different
-// runtime owned by the same user; the daemon materialises it as a file instead
-// of injecting it into the model prompt.
+// runtime owned by the same user; the daemon materialises it as a file and
+// injects only the file pointer, never the transcript contents, into the brief.
 type FallbackTranscriptData struct {
 	SourceTaskID string                        `json:"source_task_id"`
 	Messages     []protocol.TaskMessagePayload `json:"messages"`

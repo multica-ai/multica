@@ -260,6 +260,13 @@ function formatActivity(
     case "task_completed":
       return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
     case "task_failed":
+      if (details.destination_runtime_name) {
+        return t(($) => $.activity.task_fallback, {
+          source: details.source_runtime_name ?? "?",
+          destination: details.destination_runtime_name,
+          reason: details.failure_reason ?? details.reason ?? "?",
+        });
+      }
       return t(($) => $.activity.task_failed, { count: entry.coalesced_count ?? 1 });
     case "squad_leader_evaluated": {
       const reason = details.reason?.trim();

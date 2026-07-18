@@ -3235,6 +3235,68 @@ func TestClaimTask_CrossRuntimeRetryIncludesParentTranscript(t *testing.T) {
 	}
 }
 
+func TestClaimTasksByRuntime_CrossRuntimeRetryIncludesParentTranscript(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	oldRuntimeID := createRuntimeGuardRuntime(t, ctx, "claude")
+
+	var issueID, parentTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'batch cross runtime transcript fixture', 'in_progress', 'none', $2, 'member', 81220, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at)
+		VALUES ($1, $2, $3, 'failed', 0, now(), now())
+		RETURNING id
+	`, agentID, oldRuntimeID, issueID).Scan(&parentTaskID); err != nil {
+		t.Fatalf("create parent task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_message (task_id, seq, type, content)
+		VALUES ($1, 1, 'error', 'provider quota exhausted')
+	`, parentTaskID); err != nil {
+		t.Fatalf("create parent transcript: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, parent_task_id, attempt)
+		VALUES ($1, $2, $3, 'queued', 0, $4, 2)
+	`, agentID, runtimeID, issueID, parentTaskID); err != nil {
+		t.Fatalf("create fallback task: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/claim", map[string]any{
+		"daemon_id":   daemonID,
+		"runtime_ids": []string{runtimeID},
+		"max_tasks":   1,
+	}, testWorkspaceID, daemonID)
+	testHandler.ClaimTasksByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTasksByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Tasks []claimRuntimeGuardTask `json:"tasks"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Tasks) != 1 || resp.Tasks[0].FallbackTranscript == nil {
+		t.Fatalf("batch claim missing fallback transcript: %#v", resp.Tasks)
+	}
+	transcript := resp.Tasks[0].FallbackTranscript
+	if transcript.SourceTaskID != parentTaskID || len(transcript.Messages) != 1 || transcript.Messages[0].Content != "provider quota exhausted" {
+		t.Fatalf("batch claim fallback transcript = %#v", transcript)
+	}
+}
+
 func TestCompactFallbackMessageBoundsOversizedFields(t *testing.T) {
 	message := protocol.TaskMessagePayload{
 		Type:    "tool_result",

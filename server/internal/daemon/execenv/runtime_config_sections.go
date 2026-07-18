@@ -173,7 +173,7 @@ func writeFallbackTranscriptPointer(b *strings.Builder, ctx TaskContextForEnv) {
 		return
 	}
 	b.WriteString("## Previous Runtime Transcript\n\n")
-	fmt.Fprintf(b, "A failed run on another runtime left a provider-neutral transcript at `%s` (source task `%s`). Read that file only when prior execution details would help; its contents are deliberately not injected into this prompt.\n\n", fallbackTranscriptRelPath(ctx.FallbackTranscript), ctx.FallbackTranscript.SourceTaskID)
+	fmt.Fprintf(b, "A failed run on another runtime left a provider-neutral transcript at `%s` (source task `%s`). Read that file only when prior execution details would help; its contents are not injected into your prompt.\n\n", fallbackTranscriptRelPath(ctx.FallbackTranscript), ctx.FallbackTranscript.SourceTaskID)
 	if ctx.FallbackTranscript.Truncated {
 		b.WriteString("The handover file is size-bounded and contains the most recent available entries from the retry chain; older entries were omitted.\n\n")
 	}

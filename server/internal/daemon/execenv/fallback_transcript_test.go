@@ -48,7 +48,7 @@ func TestWriteContextFilesMaterializesReadOnlyFallbackTranscript(t *testing.T) {
 	}
 
 	brief := buildMetaSkillContent("codex", ctx)
-	for _, want := range []string{relPath, "source task `parent-task-1`", "not injected into this prompt"} {
+	for _, want := range []string{relPath, "source task `parent-task-1`", "contents are not injected into your prompt"} {
 		if !strings.Contains(brief, want) {
 			t.Errorf("runtime brief missing %q:\n%s", want, brief)
 		}

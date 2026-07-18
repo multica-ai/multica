@@ -45,6 +45,7 @@
     "review_requested": "レビューを依頼",
     "task_completed": "タスク完了",
     "task_failed": "タスク失敗",
+    "task_fallback": "タスクをフォールバックランタイムに移動",
     "agent_blocked": "エージェントがブロック",
     "agent_completed": "エージェントが完了",
     "reaction_added": "リアクションあり",

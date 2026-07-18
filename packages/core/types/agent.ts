@@ -168,15 +168,32 @@ export interface UpdateRuntimeProfileRequest {
   enabled?: boolean;
 }
 
-// Coarse classifier set by the backend when a task transitions to "failed".
-// Mirrors the migration-055 enum in agent_task_queue.failure_reason. Used by
-// the agent presence derivation and the UI failure-message lookup.
+// Failure classifier set by the backend when a task transitions to "failed".
+// Includes legacy coarse values plus the canonical refined taxonomy.
 export type TaskFailureReason =
   | "agent_error"
+  | "queued_expired"
   | "timeout"
   | "codex_semantic_inactivity"
   | "runtime_offline"
   | "runtime_recovery"
+  | "iteration_limit"
+  | "agent_blocked"
+  | "api_invalid_request"
+  | "agent_error.provider_auth_or_access"
+  | "agent_error.provider_quota_limit"
+  | "agent_error.provider_capacity_or_rate_limit"
+  | "agent_error.provider_server_error"
+  | "agent_error.provider_network"
+  | "agent_error.process_failure"
+  | "agent_error.empty_or_unparseable_output"
+  | "agent_error.agent_timeout"
+  | "agent_error.context_overflow"
+  | "agent_error.missing_config"
+  | "agent_error.model_not_found_or_unavailable"
+  | "agent_error.runtime_version_unsupported"
+  | "agent_error.runtime_missing_executable"
+  | "agent_error.unknown"
   | "manual";
 
 // One daily bucket for the Agents-list ACTIVITY sparkline. The back-end

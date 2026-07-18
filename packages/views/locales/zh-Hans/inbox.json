@@ -45,6 +45,7 @@
     "review_requested": "请求审阅",
     "task_completed": "task 已完成",
     "task_failed": "task 失败",
+    "task_fallback": "task 已转移到后备运行时",
     "agent_blocked": "智能体被阻塞",
     "agent_completed": "智能体已完成",
     "reaction_added": "添加了表情反应",
