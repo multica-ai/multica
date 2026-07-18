@@ -99,6 +99,19 @@ func TestValidateMeetingInput(t *testing.T) {
 	}
 }
 
+func TestApplyMeetingNoteTypeUsesRecurringNoteCadence(t *testing.T) {
+	response := MeetingConfigResponse{
+		NoteTypeID: "note-weekly", CadenceUnit: "month", CadenceCount: 3,
+	}
+	applyMeetingNoteType(&response, []MeetingNoteTypeResponse{{
+		ID: "note-weekly", Name: "Business Review", CadenceUnit: "week", CadenceCount: 1, Enabled: true,
+	}})
+
+	if response.NoteTypeName != "Business Review" || response.CadenceUnit != "week" || response.CadenceCount != 1 {
+		t.Fatalf("meeting timing did not follow recurring note: %#v", response)
+	}
+}
+
 func TestValidateOrgChartSeatInput(t *testing.T) {
 	valid := OrgChartSeatInput{Name: "Operations", Responsibilities: []string{"Run the weekly plan"}}
 	if err := ValidateOrgChartSeatInput(valid); err != nil {

@@ -75,6 +75,10 @@ describe("Vision Plan", () => {
       }] }),
       section({ id: "marketing", key: "marketing-strategy", name: "Marketing Strategy", section_type: "structured", position: 1 }),
       section({ id: "processes", key: "core-processes", name: "Core Processes", section_type: "process", position: 2 }),
+      section({ id: "one-year", key: "one-year-plan", name: "One-Year Plan", position: 3, items: [{
+        id: "annual-goal", workspace_id: "workspace-1", section_id: "one-year", title: "Reach 100m revenue", description: "",
+        position: 0, state: "active", goal_connections: [], created_at: "", updated_at: "",
+      }] }),
     ];
     for (const fn of [state.createItem, state.updateItem, state.deleteItem, state.createSection, state.updateSection, state.deleteSection, state.createConnection, state.deleteConnection]) fn.mockReset();
   });
@@ -111,5 +115,13 @@ describe("Vision Plan", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Move Core Values down" }));
     expect(state.updateSection).toHaveBeenCalledWith(expect.objectContaining({ id: "values", input: expect.objectContaining({ position: 1 }) }));
+  });
+
+  it("offers Goal connections only for One-Year Plan items", () => {
+    render(<StrategyPage />);
+
+    expect(screen.queryByRole("button", { name: "Own the outcome Goals" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Care deeply Goals" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reach 100m revenue Goals" })).toBeInTheDocument();
   });
 });

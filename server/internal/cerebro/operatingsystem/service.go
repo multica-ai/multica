@@ -557,12 +557,30 @@ func (s *Service) meetingNoteTypes(ctx context.Context, workspaceID pgtype.UUID)
 	}
 	out := make([]MeetingNoteTypeResponse, 0, len(rows))
 	for _, row := range rows {
+		if !row.Enabled || row.CadenceUnit == "manual" {
+			continue
+		}
 		out = append(out, MeetingNoteTypeResponse{
 			ID: util.UUIDToString(row.ID), Name: row.Name,
 			CadenceUnit: row.CadenceUnit, CadenceCount: row.CadenceCount, Enabled: row.Enabled,
 		})
 	}
 	return out, nil
+}
+
+func applyMeetingNoteType(response *MeetingConfigResponse, noteTypes []MeetingNoteTypeResponse) {
+	if response.NoteTypeID == "" {
+		return
+	}
+	for _, noteType := range noteTypes {
+		if noteType.ID != response.NoteTypeID {
+			continue
+		}
+		response.NoteTypeName = noteType.Name
+		response.CadenceUnit = noteType.CadenceUnit
+		response.CadenceCount = noteType.CadenceCount
+		return
+	}
 }
 
 func parseMeetingAgenda(raw []byte) ([]MeetingAgendaSectionResponse, error) {
@@ -590,14 +608,9 @@ func (s *Service) meetingResponse(ctx context.Context, workspaceID pgtype.UUID, 
 		response.CadenceCount = row.CadenceCount
 		if row.NoteTypeID.Valid {
 			response.NoteTypeID = util.UUIDToString(row.NoteTypeID)
-			for _, noteType := range noteTypes {
-				if noteType.ID == response.NoteTypeID {
-					response.NoteTypeName = noteType.Name
-					break
-				}
-			}
 		}
 	}
+	applyMeetingNoteType(&response, noteTypes)
 	return response, nil
 }
 
@@ -627,6 +640,8 @@ func (s *Service) UpdateMeeting(ctx context.Context, workspaceID pgtype.UUID, in
 		return MeetingConfigResponse{}, err
 	}
 	noteTypeID := pgtype.UUID{}
+	cadenceUnit := input.CadenceUnit
+	cadenceCount := input.CadenceCount
 	if input.NoteTypeID != "" {
 		parsed, err := util.ParseUUID(input.NoteTypeID)
 		if err != nil {
@@ -642,7 +657,12 @@ func (s *Service) UpdateMeeting(ctx context.Context, workspaceID pgtype.UUID, in
 		if noteType.WorkspaceID != workspaceID {
 			return MeetingConfigResponse{}, pgx.ErrNoRows
 		}
+		if !noteType.Enabled || noteType.CadenceUnit == "manual" {
+			return MeetingConfigResponse{}, errors.New("note_type_id must reference an enabled recurring note")
+		}
 		noteTypeID = parsed
+		cadenceUnit = noteType.CadenceUnit
+		cadenceCount = noteType.CadenceCount
 	}
 	agenda := make([]MeetingAgendaSectionResponse, 0, len(input.Agenda))
 	for _, section := range input.Agenda {
@@ -656,8 +676,8 @@ func (s *Service) UpdateMeeting(ctx context.Context, workspaceID pgtype.UUID, in
 		return MeetingConfigResponse{}, err
 	}
 	row, err := s.queries.UpsertOperatingMeeting(ctx, cerebrodb.UpsertOperatingMeetingParams{
-		WorkspaceID: workspaceID, NoteTypeID: noteTypeID, CadenceUnit: input.CadenceUnit,
-		CadenceCount: input.CadenceCount, Agenda: rawAgenda,
+		WorkspaceID: workspaceID, NoteTypeID: noteTypeID, CadenceUnit: cadenceUnit,
+		CadenceCount: cadenceCount, Agenda: rawAgenda,
 	})
 	if err != nil {
 		return MeetingConfigResponse{}, err

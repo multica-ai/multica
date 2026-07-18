@@ -7,8 +7,6 @@ import { meetingOptions, useUpdateMeeting } from "../core/queries";
 import type { MeetingAgendaSection, MeetingCadenceUnit, MeetingConfig } from "../core/types";
 import { SearchSelect } from "./search-select";
 
-const cadenceOptions = ["manual", "day", "week", "month", "quarter"] as const;
-const cadenceLabels: Record<MeetingCadenceUnit, string> = { manual: "Manual", day: "Daily", week: "Weekly", month: "Monthly", quarter: "Quarterly" };
 const bindingOptions = [
   { value: "none", label: "Free text" },
   { value: "scorecard", label: "Scorecard" },
@@ -18,6 +16,15 @@ const bindingOptions = [
 
 function agendaFingerprint(config?: MeetingConfig) {
   return config ? `${config.note_type_id ?? ""}|${config.cadence_unit}|${config.cadence_count}|${config.agenda.map((item) => `${item.id}:${item.name}:${item.position}:${item.binding}`).join("|")}` : "";
+}
+
+function cadenceSummary(unit: MeetingCadenceUnit, count: number) {
+  if (unit === "manual") return "No recurring timing";
+  const labels: Record<Exclude<MeetingCadenceUnit, "manual">, [string, string]> = {
+    day: ["day", "days"], week: ["week", "weeks"], month: ["month", "months"], quarter: ["quarter", "quarters"],
+  };
+  const [singular, plural] = labels[unit];
+  return count === 1 ? `Every ${singular}` : `Every ${count} ${plural}`;
 }
 
 export function MeetingsPage() {
@@ -36,7 +43,12 @@ export function MeetingsPage() {
   if (meeting.isError) return <div role="alert" className="mx-auto max-w-4xl p-6 text-sm text-destructive">Meeting settings could not be loaded.</div>;
   const config = draft;
 
-  const noteTypeOptions = config.available_note_types.map((noteType) => ({ value: noteType.id, label: noteType.name, hint: `${cadenceLabels[noteType.cadence_unit]} · every ${noteType.cadence_count}` }));
+  const availableNoteTypes = config.available_note_types.filter((noteType) => noteType.enabled && noteType.cadence_unit !== "manual");
+  const selectedNoteType = availableNoteTypes.find((noteType) => noteType.id === config.note_type_id);
+  const noteTypeOptions = availableNoteTypes.map((noteType) => ({ value: noteType.id, label: noteType.name, hint: cadenceSummary(noteType.cadence_unit, noteType.cadence_count) }));
+  const cadenceUnit = selectedNoteType?.cadence_unit ?? (config.note_type_id ? config.cadence_unit : "manual");
+  const cadenceCount = selectedNoteType?.cadence_count ?? (config.note_type_id ? config.cadence_count : 1);
+  const timingSourceName = selectedNoteType?.name ?? config.note_type_name;
 
   function updateAgenda(index: number, changes: Partial<MeetingAgendaSection>) {
     setDraft({ ...config, agenda: config.agenda.map((section, current) => current === index ? { ...section, ...changes } : section) });
@@ -64,7 +76,7 @@ export function MeetingsPage() {
   }
 
   function submit() {
-    save.mutate({ note_type_id: config.note_type_id, cadence_unit: config.cadence_unit, cadence_count: Math.max(1, config.cadence_count), agenda: config.agenda.map((section, position) => ({ ...section, name: section.name.trim(), position })) });
+    save.mutate({ note_type_id: config.note_type_id, cadence_unit: cadenceUnit, cadence_count: cadenceCount, agenda: config.agenda.map((section, position) => ({ ...section, name: section.name.trim(), position })) });
   }
 
   return (
@@ -72,13 +84,24 @@ export function MeetingsPage() {
       <div><h1 className="text-2xl font-semibold">{config.note_type_name || "Meetings"}</h1><p className="mt-1 text-sm text-muted-foreground">Choose the recurring note that represents this meeting and shape its agenda around the live operating-system data.</p></div>
       <section className="grid gap-4 rounded-xl border bg-card p-5">
         <h2 className="font-semibold">Meeting setup</h2>
-        <div className="grid gap-4 md:grid-cols-3">
-          <label className="grid gap-1 text-sm md:col-span-2">Recurring note type
-            <SearchSelect label="Recurring note type" options={noteTypeOptions} value={config.note_type_id ?? ""} onChange={(value) => setDraft({ ...config, note_type_id: value || undefined })} clearLabel="No note type selected" placeholder="Choose a recurring note" />
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
+          <label className="grid gap-1 text-sm">Recurring note type
+            <SearchSelect label="Recurring note type" options={noteTypeOptions} value={config.note_type_id ?? ""} onChange={(value) => {
+              const noteType = availableNoteTypes.find((candidate) => candidate.id === value);
+              setDraft({
+                ...config,
+                note_type_id: noteType?.id,
+                note_type_name: noteType?.name,
+                cadence_unit: noteType?.cadence_unit ?? "manual",
+                cadence_count: noteType?.cadence_count ?? 1,
+              });
+            }} clearLabel="No note type selected" placeholder="Choose a recurring note" />
           </label>
-          <label className="grid gap-1 text-sm">Repeat every
-            <div className="flex gap-2"><input aria-label="Cadence count" type="number" min={1} value={config.cadence_count} onChange={(event) => setDraft({ ...config, cadence_count: Number(event.target.value) || 1 })} className="h-10 w-20 rounded-md border bg-background px-3" /><SearchSelect label="Cadence" compact options={cadenceOptions.map((value) => ({ value, label: cadenceLabels[value] }))} value={config.cadence_unit} onChange={(value) => setDraft({ ...config, cadence_unit: value as MeetingCadenceUnit })} /></div>
-          </label>
+          <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Timing</p>
+            <p className="mt-0.5 text-sm font-semibold">{cadenceSummary(cadenceUnit, cadenceCount)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{timingSourceName ? `Timing is controlled by ${timingSourceName} in recurring Notes.` : "Choose a recurring Note to control this meeting's timing."}</p>
+          </div>
         </div>
       </section>
       <section className="grid gap-4 rounded-xl border bg-card p-5">
