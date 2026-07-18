@@ -32,9 +32,29 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Post("/api/cerebro/ai-impact/project-bindings", h.CreateProjectBinding)
 	r.Get("/api/cerebro/ai-impact/metrics", h.ListMetrics)
 	r.Post("/api/cerebro/ai-impact/metrics", h.CreateMetric)
+	r.Get("/api/cerebro/ai-impact/latest-observations", h.ListWorkspaceLatestObservations)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/latest-observations", h.ListLatestObservations)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
 	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
+}
+
+// ListWorkspaceLatestObservations returns the newest evidence for every metric period in the workspace.
+func (h *Handler) ListWorkspaceLatestObservations(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, _, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+
+	observations, err := h.service.ListWorkspaceLatestObservations(r.Context(), workspaceID)
+	if err != nil {
+		writeObservationError(w, http.StatusInternalServerError, "failed to list workspace latest observations")
+		return
+	}
+	response := make([]observationResponse, 0, len(observations))
+	for _, observation := range observations {
+		response = append(response, toObservationResponse(observation))
+	}
+	writeObservationJSON(w, http.StatusOK, map[string]any{"observations": response})
 }
 
 // ListLatestObservations returns the newest evidence for each period of one metric.

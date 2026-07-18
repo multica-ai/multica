@@ -25,6 +25,7 @@ type ServiceStore interface {
 		input ObservationInput,
 	) (Observation, error)
 	ListObservations(ctx context.Context, workspaceID, metricID uuid.UUID) ([]Observation, error)
+	ListWorkspaceObservations(ctx context.Context, workspaceID uuid.UUID) ([]Observation, error)
 }
 
 func (s *Service) ListFunctions(ctx context.Context, workspaceID uuid.UUID) ([]Function, error) {
@@ -116,4 +117,15 @@ func (s *Service) ListObservations(
 	workspaceID, metricID uuid.UUID,
 ) ([]Observation, error) {
 	return s.store.ListObservations(ctx, workspaceID, metricID)
+}
+
+func (s *Service) ListWorkspaceLatestObservations(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+) ([]Observation, error) {
+	observations, err := s.store.ListWorkspaceObservations(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return LatestObservations(observations), nil
 }

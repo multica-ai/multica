@@ -382,3 +382,25 @@ func (s *Store) ListObservations(ctx context.Context, workspaceID, metricID uuid
 	}
 	return observations, rows.Err()
 }
+
+func (s *Store) ListWorkspaceObservations(ctx context.Context, workspaceID uuid.UUID) ([]Observation, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+observationColumns+`
+		FROM cerebro_ai_impact_observation
+		WHERE workspace_id = $1
+		ORDER BY created_at, id`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	observations := make([]Observation, 0)
+	for rows.Next() {
+		observation, err := scanObservation(rows)
+		if err != nil {
+			return nil, err
+		}
+		observations = append(observations, observation)
+	}
+	return observations, rows.Err()
+}

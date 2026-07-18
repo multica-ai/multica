@@ -10,15 +10,25 @@ import (
 )
 
 type recordingObservationStore struct {
-	observations             []Observation
-	functions                []Function
-	operatingLoops           []OperatingLoop
-	projectBindings          []ProjectBinding
-	metrics                  []Metric
-	listFunctionsWorkspaceID uuid.UUID
-	listLoopsWorkspaceID     uuid.UUID
-	listBindingsWorkspaceID  uuid.UUID
-	listMetricsWorkspaceID   uuid.UUID
+	observations                         []Observation
+	workspaceObservations                []Observation
+	functions                            []Function
+	operatingLoops                       []OperatingLoop
+	projectBindings                      []ProjectBinding
+	metrics                              []Metric
+	listFunctionsWorkspaceID             uuid.UUID
+	listLoopsWorkspaceID                 uuid.UUID
+	listBindingsWorkspaceID              uuid.UUID
+	listMetricsWorkspaceID               uuid.UUID
+	listWorkspaceObservationsWorkspaceID uuid.UUID
+}
+
+func (s *recordingObservationStore) ListWorkspaceObservations(
+	_ context.Context,
+	workspaceID uuid.UUID,
+) ([]Observation, error) {
+	s.listWorkspaceObservationsWorkspaceID = workspaceID
+	return append([]Observation(nil), s.workspaceObservations...), nil
 }
 
 func (s *recordingObservationStore) ListFunctions(
