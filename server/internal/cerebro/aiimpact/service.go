@@ -209,6 +209,26 @@ func (s *Service) ListMetricFamilyEvidence(
 	return result, nil
 }
 
+// ListEvidenceStatusEvidence returns the latest workspace evidence for one evidence status.
+func (s *Service) ListEvidenceStatusEvidence(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	status EvidenceStatus,
+) ([]EvidenceReadModel, error) {
+	evidence, err := s.ListWorkspaceEvidence(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]EvidenceReadModel, 0, len(evidence))
+	for _, item := range evidence {
+		if item.Observation.EvidenceStatus == status {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
+
 // ListFunctionEvidence returns the latest workspace evidence for one Function.
 func (s *Service) ListFunctionEvidence(
 	ctx context.Context,

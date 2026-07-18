@@ -90,12 +90,15 @@ func (h *Handler) ListWorkspaceEvidence(w http.ResponseWriter, r *http.Request) 
 	}
 
 	metricFamily := MetricFamily(r.URL.Query().Get("metric_family"))
+	evidenceStatus := EvidenceStatus(r.URL.Query().Get("evidence_status"))
 	var evidence []EvidenceReadModel
 	var err error
-	if metricFamily == "" {
-		evidence, err = h.service.ListWorkspaceEvidence(r.Context(), workspaceID)
-	} else {
+	if metricFamily != "" {
 		evidence, err = h.service.ListMetricFamilyEvidence(r.Context(), workspaceID, metricFamily)
+	} else if evidenceStatus != "" {
+		evidence, err = h.service.ListEvidenceStatusEvidence(r.Context(), workspaceID, evidenceStatus)
+	} else {
+		evidence, err = h.service.ListWorkspaceEvidence(r.Context(), workspaceID)
 	}
 	if err != nil {
 		writeObservationError(w, http.StatusInternalServerError, "failed to list workspace evidence")
