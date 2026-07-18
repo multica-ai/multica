@@ -212,7 +212,7 @@ func TestPreflightAuth_RenewsBeforeWorkspaceSyncOnExpiredToken(t *testing.T) {
 	if seen[0] != "/api/tokens/current/renew" {
 		t.Fatalf("renew must be the first API call so the WARN fires before the sync 401s; got order %v", seen)
 	}
-	if seen[1] != "/api/workspaces" {
+	if seen[1] != "/api/daemon/workspaces" {
 		t.Fatalf("workspace sync should follow renew; got order %v", seen)
 	}
 	out := buf.String()
@@ -238,7 +238,7 @@ func TestPreflightAuth_SyncProceedsWhenRenewIsNoOp(t *testing.T) {
 				"expires_at": "2099-01-02T03:04:05Z",
 				"renewed":    false,
 			})
-		case "/api/workspaces":
+		case "/api/daemon/workspaces":
 			syncCalled.Store(true)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[]`))
@@ -271,7 +271,7 @@ func TestPreflightAuth_TransientRenewFailureDoesNotBlockStartup(t *testing.T) {
 		case "/api/tokens/current/renew":
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(`{"error":"db down"}`))
-		case "/api/workspaces":
+		case "/api/daemon/workspaces":
 			syncCalled.Store(true)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[]`))

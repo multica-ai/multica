@@ -47,14 +47,24 @@ export function BatchActionToolbar({
   const selection = useIssueSurfaceSelection();
   const selectedIds = selection.selectedIds;
   const clear = selection.clear;
-  const count = selectedIds.size;
+
+  // The authoritative selection is selectedIds ∩ the visible universe. Acting
+  // on raw selectedIds while other consumers (Export selected, common fields)
+  // intersect lets one "N selected" mean different sets — e.g. a realtime
+  // update drops a selected row from the window, batch still mutates it but
+  // export omits it. Count, pickers, and every action below share this set.
+  const selectedIssues = useMemo(
+    () => issues.filter((i) => selectedIds.has(i.id)),
+    [issues, selectedIds],
+  );
+  const count = selectedIssues.length;
 
   // Reflect the real shared value of the selected issues in each picker; fall
   // back to an empty (no-checkmark) state when the selection is mixed, instead
   // of asserting a hardcoded default.
   const common = useMemo(
-    () => commonIssueFields(issues.filter((i) => selectedIds.has(i.id))),
-    [issues, selectedIds],
+    () => commonIssueFields(selectedIssues),
+    [selectedIssues],
   );
 
   const [statusOpen, setStatusOpen] = useState(false);
@@ -70,7 +80,7 @@ export function BatchActionToolbar({
 
   if (count === 0) return null;
 
-  const ids = Array.from(selectedIds);
+  const ids = selectedIssues.map((issue) => issue.id);
 
   const handleBatchUpdate = async (updates: Partial<UpdateIssueRequest>) => {
     try {
@@ -109,10 +119,8 @@ export function BatchActionToolbar({
       // issue is in backlog the confirm modal would only render an empty "won't
       // start" box — apply directly, matching handleBatchStatus's backlog short-
       // circuit. A mixed selection still routes through the modal: the non-backlog
-      // issues will trigger and need confirmation. An empty intersection (selected
-      // ids not in `issues`) falls through to the modal — safer than skipping.
-      const selected = issues.filter((i) => selectedIds.has(i.id));
-      const allBacklog = selected.length > 0 && selected.every((i) => i.status === "backlog");
+      // issues will trigger and need confirmation.
+      const allBacklog = selectedIssues.every((i) => i.status === "backlog");
       if (!allBacklog) {
         openModal("issue-run-confirm", {
           issueIds: ids,

@@ -19,6 +19,14 @@
     "loading": "불러오는 중…",
     "load_failed": "이미지를 불러오지 못했어요"
   },
+  "color_picker": {
+    "saturation": "채도와 명도",
+    "hue": "색조",
+    "hex": "16진수 색상",
+    "eyedropper": "화면에서 색상 선택",
+    "presets": "프리셋",
+    "random": "무작위"
+  },
   "save": "저장",
   "cancel": "취소",
   "delete": "삭제",

@@ -6,6 +6,30 @@ import { useWorkspaceId } from "../hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "./queries";
 import { resolvePublicFileUrl } from "./avatar-url";
 
+/**
+ * Pure actor-name resolution over explicit directory snapshots. Async flows
+ * (e.g. CSV export) must resolve names from directories they have awaited
+ * themselves — a hook-bound getActorName closes over whatever the queries
+ * held at render time, silently naming everyone "Unknown*" while the
+ * directories are still loading.
+ */
+export function buildActorNameResolver(directories: {
+  members: readonly { user_id: string; name: string }[];
+  agents: readonly { id: string; name: string }[];
+  squads: readonly { id: string; name: string }[];
+}) {
+  const memberNames = new Map(directories.members.map((m) => [m.user_id, m.name]));
+  const agentNames = new Map(directories.agents.map((a) => [a.id, a.name]));
+  const squadNames = new Map(directories.squads.map((s) => [s.id, s.name]));
+  return (type: string, id: string) => {
+    if (type === "member") return memberNames.get(id) ?? "Unknown";
+    if (type === "agent") return agentNames.get(id) ?? "Unknown Agent";
+    if (type === "squad") return squadNames.get(id) ?? "Unknown Squad";
+    if (type === "system") return "Multica";
+    return "System";
+  };
+}
+
 export function useActorName() {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -27,13 +51,10 @@ export function useActorName() {
     return s?.name ?? "Unknown Squad";
   }, [squads]);
 
-  const getActorName = useCallback((type: string, id: string) => {
-    if (type === "member") return getMemberName(id);
-    if (type === "agent") return getAgentName(id);
-    if (type === "squad") return getSquadName(id);
-    if (type === "system") return "Multica";
-    return "System";
-  }, [getAgentName, getMemberName, getSquadName]);
+  const getActorName = useMemo(
+    () => buildActorNameResolver({ members, agents, squads }),
+    [agents, members, squads],
+  );
 
   const getActorInitials = useCallback((type: string, id: string) => {
     const name = getActorName(type, id);

@@ -10,7 +10,11 @@ export {
 } from "./title-editor";
 export { ReadonlyContent } from "./readonly-content";
 export { useFileDropZone } from "./use-file-drop-zone";
+export { useUploadGate, type UploadGate } from "./use-upload-gate";
+export { useEditorUpload } from "./use-editor-upload";
 export { FileDropOverlay } from "./file-drop-overlay";
+export { useLazyEditor, type LazyEditorHandle, type LazyFocusTarget } from "./use-lazy-editor";
+export { anchorFromPoint, type TextAnchor } from "./text-anchor";
 export { useDownloadAttachment } from "./use-download-attachment";
 export { AttachmentDownloadProvider } from "./attachment-download-context";
 export {

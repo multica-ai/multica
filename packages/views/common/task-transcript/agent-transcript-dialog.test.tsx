@@ -3,7 +3,8 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
-import type { AgentTask } from "@multica/core/types/agent";
+import { api } from "@multica/core/api";
+import type { AgentRuntime, AgentTask } from "@multica/core/types/agent";
 import { useTranscriptViewStore } from "@multica/core/agents/stores";
 import { renderWithI18n } from "../../test/i18n";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
@@ -131,6 +132,33 @@ const baseTask: AgentTask = {
   created_at: "2026-06-08T08:00:00Z",
 };
 
+const liveTask: AgentTask = {
+  ...baseTask,
+  runtime_id: "runtime-1",
+  status: "running",
+  completed_at: null,
+};
+
+function runtimeFor(provider: string): AgentRuntime {
+  return {
+    id: "runtime-1",
+    workspace_id: "workspace-1",
+    daemon_id: "daemon-1",
+    name: `${provider} runtime`,
+    runtime_mode: "local",
+    provider,
+    launch_header: "",
+    status: "online",
+    device_info: "",
+    metadata: {},
+    owner_id: "owner-1",
+    visibility: "private",
+    last_seen_at: null,
+    created_at: "2026-06-08T08:00:00Z",
+    updated_at: "2026-06-08T08:00:00Z",
+  };
+}
+
 const items: TimelineItem[] = [
   {
     seq: 1,
@@ -150,20 +178,25 @@ const items: TimelineItem[] = [
   },
 ];
 
-function renderDialog(dialogItems: TimelineItem[] = items) {
+function renderDialog(
+  dialogItems: TimelineItem[] = items,
+  options: { task?: AgentTask; isLive?: boolean } = {},
+) {
   return renderWithI18n(
     <AgentTranscriptDialog
       open
       onOpenChange={vi.fn()}
-      task={baseTask}
+      task={options.task ?? baseTask}
       items={dialogItems}
       agentName="Codex"
+      isLive={options.isLive}
     />,
   );
 }
 
 beforeEach(() => {
   cleanup();
+  vi.mocked(api.listRuntimes).mockResolvedValue([]);
   useTranscriptViewStore.setState({
     sortDirection: "chronological",
     preserveFilters: false,
@@ -177,6 +210,28 @@ afterEach(() => {
 });
 
 describe("AgentTranscriptDialog", () => {
+  it("explains unavailable live events for an empty Antigravity transcript", async () => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("antigravity")]);
+
+    renderDialog([], { task: liveTask, isLive: true });
+
+    expect(
+      await screen.findByText(
+        "Antigravity does not currently provide live execution events. The transcript will be available after the task completes.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Waiting for events...")).not.toBeInTheDocument();
+  });
+
+  it("keeps waiting for live events from other runtimes", async () => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("hermes")]);
+
+    renderDialog([], { task: liveTask, isLive: true });
+
+    await screen.findByText("hermes runtime");
+    expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
+  });
+
   it("preserves selected filters across dialog remounts when enabled", () => {
     const first = renderDialog();
 

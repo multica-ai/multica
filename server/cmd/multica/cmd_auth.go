@@ -430,7 +430,7 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 		return err
 	}
 
-	serverURL := resolveServerURL(cmd)
+	serverURL := resolveLoginTokenServerURL(cmd)
 	client := cli.NewAPIClient(serverURL, "", token)
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -449,6 +449,9 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 	cfg.WorkspaceID = ""
 	cfg.Token = token
 	cfg.ServerURL = serverURL
+	if cfg.AppURL == "" && serverURL == defaultCloudServerURL {
+		cfg.AppURL = defaultCloudAppURL
+	}
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}

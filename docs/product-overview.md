@@ -291,7 +291,7 @@ Agent 是 Multica 的灵魂。几乎所有功能都围绕"如何让一个 agent 
 
 `multica` CLI 在用户的机器上启动一个后台进程（macOS launchd / Linux systemd / Windows 服务风格），它：
 
-1. **自动探测** `$PATH` 上安装的 coding CLI（`claude`, `codex`, `opencode`, `openclaw`, `hermes`, `gemini`, `pi`, `cursor-agent`, `kimi`, `kiro-cli`, `qodercli`）
+1. **自动探测** `$PATH` 上安装的 coding CLI（`claude`, `codex`, `opencode`, `openclaw`, `hermes`, `pi`, `cursor-agent`, `kimi`, `kiro-cli`, `qodercli`, `traecli`, `grok`）
 2. 向 server **注册** 为一组 runtime（一个 CLI = 一个 runtime）
 3. 每 3 秒 **轮询** 一次 server，有任务就认领
 4. 每 15 秒 **心跳**（keepalive），报告自己还活着

@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -43,6 +43,14 @@ vi.mock("@multica/core/runtimes", () => ({
   parseRuntimeProfileBoundConflict: () => null,
   useDeleteRuntimeProfile: () => ({
     mutate: vi.fn(),
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
+  useCreateRuntimeProfile: () => ({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
+  useUpdateRuntimeProfile: () => ({
     isPending: false,
     mutateAsync: vi.fn(),
   }),
@@ -194,6 +202,25 @@ describe("runtime list row menu", () => {
       ),
     );
     expect(screen.getByLabelText("Row actions")).toBeInTheDocument();
+  });
+
+  it("opens custom runtime editing from the unified row menu", () => {
+    const profile = makeProfile();
+    renderActionsCell(
+      makeRow(
+        makeRuntime({ runtime_mode: "local", profile_id: profile.id }),
+        true,
+        profile,
+      ),
+    );
+
+    fireEvent.click(screen.getByLabelText("Row actions"));
+    fireEvent.click(screen.getByText("Edit custom runtime"));
+
+    expect(
+      screen.getByRole("heading", { name: "Edit custom runtime" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Display name")).toHaveValue("Custom Codex");
   });
 
   it("hides the kebab menu when the caller lacks delete permission", () => {

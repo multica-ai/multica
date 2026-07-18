@@ -57,14 +57,16 @@ var modelAliasRules = []struct {
 	re       *regexp.Regexp
 	priceKey string
 }{
-	// Anchored exact-match (like gpt-5.5 below): the effort is carried in a
-	// separate field, so the model id is the bare slug. Anchoring to `$`
-	// keeps unknown variants (`gpt-5.6-luna-pro`, `gpt-5.6-luna/x`) out of
-	// these rows so they surface as unmapped instead of silently borrowing a
-	// tier — matching the frontend's exact-match resolver in utils.ts.
-	{regexp.MustCompile(`(^|/|:)gpt-5[.-]6-sol$`), "openai:gpt-5.6-sol"},
-	{regexp.MustCompile(`(^|/|:)gpt-5[.-]6-terra$`), "openai:gpt-5.6-terra"},
-	{regexp.MustCompile(`(^|/|:)gpt-5[.-]6-luna$`), "openai:gpt-5.6-luna"},
+	// Anchored exact-match: the effort is carried in a separate field, so the
+	// model id is the bare slug. Anchoring to `$` keeps unknown variants
+	// (`gpt-5.6-luna-pro`, `gpt-5.6-luna/x`) out of these rows. The `.` is a
+	// LITERAL dot, not the `[.-]` class the older rows use — the real Codex
+	// slug is always dotted (`gpt-5.6-luna`), and the frontend resolver in
+	// utils.ts does NOT dash-normalize, so a dashed `gpt-5-6-luna` must surface
+	// as unmapped on both sides rather than silently borrowing a tier here.
+	{regexp.MustCompile(`(^|/|:)gpt-5\.6-sol$`), "openai:gpt-5.6-sol"},
+	{regexp.MustCompile(`(^|/|:)gpt-5\.6-terra$`), "openai:gpt-5.6-terra"},
+	{regexp.MustCompile(`(^|/|:)gpt-5\.6-luna$`), "openai:gpt-5.6-luna"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]5$|^gpt-5-5$`), "openai:gpt-5.5"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]4($|-2026-03-05|-xhigh)`), "openai:gpt-5.4"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]4-mini($|[^a-z0-9])`), "openai:gpt-5.4-mini"},

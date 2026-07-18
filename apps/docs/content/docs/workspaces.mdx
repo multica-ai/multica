@@ -19,10 +19,10 @@ Three things get decided when you create a workspace:
 **Avoid changing the issue prefix.** Issue numbers are rendered with the current prefix — change it and `MUL-5` instantly becomes `NEW-5`. Every external link, Slack mention, and historical reference in comments breaks against the old number. Treat the issue prefix as "set at creation, never touched."
 </Callout>
 
-You can create a workspace from the web UI or from the command line:
+You can create a workspace from the web UI, or from the command line. Both `--name` and `--slug` are required, and creating a workspace does **not** switch your current one — run `multica workspace switch <slug>` afterward if you want to work in it:
 
 ```bash
-multica workspace create
+multica workspace create --name "Support Team" --slug support-team --issue-prefix SUP
 ```
 
 ## Issue numbers

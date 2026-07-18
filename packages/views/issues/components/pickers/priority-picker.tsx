@@ -4,19 +4,11 @@ import { useState } from "react";
 import type { IssuePriority, UpdateIssueRequest } from "@multica/core/types";
 import { PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { PriorityIcon } from "../priority-icon";
-import { PropertyPicker, PickerItem } from "./property-picker";
+import { DeferredPopup } from "../../../common/deferred-popup";
+import { PropertyPicker, PickerItem, PICKER_TRIGGER_CLASS } from "./property-picker";
 import { useT } from "../../../i18n";
 
-export function PriorityPicker({
-  priority,
-  onUpdate,
-  trigger: customTrigger,
-  triggerRender,
-  open: controlledOpen,
-  onOpenChange: controlledOnOpenChange,
-  align,
-  defaultOpen = false,
-}: {
+interface PriorityPickerProps {
   /**
    * The currently-selected priority, used to check the matching row. `null`
    * means "no single current value" (e.g. a batch selection spanning several
@@ -26,14 +18,54 @@ export function PriorityPicker({
   priority: IssuePriority | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
-  triggerRender?: React.ReactElement;
+  triggerRender?: React.ReactElement<Record<string, unknown>>;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
   /** Open the picker on first mount. Used by progressive-disclosure
    *  sidebars so a newly-added field immediately enters edit state. */
   defaultOpen?: boolean;
-}) {
+}
+
+/**
+ * Uncontrolled callers that bring their own trigger content (board cards,
+ * list rows) get a deferred lookalike trigger; the popover machinery mounts
+ * on first interaction. See `DeferredPopup` for why.
+ */
+export function PriorityPicker(props: PriorityPickerProps) {
+  const hasDeferredTriggerContent =
+    props.trigger !== undefined || props.triggerRender?.props.children != null;
+  const canDefer =
+    props.open === undefined &&
+    props.onOpenChange === undefined &&
+    !props.defaultOpen &&
+    hasDeferredTriggerContent;
+  if (!canDefer) {
+    return <PriorityPickerImpl {...props} />;
+  }
+  return (
+    <DeferredPopup
+      trigger={props.trigger}
+      triggerRender={props.triggerRender}
+      triggerClassName={PICKER_TRIGGER_CLASS}
+    >
+      {(open, onOpenChange) => (
+        <PriorityPickerImpl {...props} open={open} onOpenChange={onOpenChange} />
+      )}
+    </DeferredPopup>
+  );
+}
+
+function PriorityPickerImpl({
+  priority,
+  onUpdate,
+  trigger: customTrigger,
+  triggerRender,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  align,
+  defaultOpen = false,
+}: PriorityPickerProps) {
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;

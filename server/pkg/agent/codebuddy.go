@@ -163,11 +163,16 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		}
 
 		startTime := time.Now()
-		var output strings.Builder
+		var lastAssistantText string
+		var finalResultText string
+		sawResult := false
+		resultIsError := false
 		var sessionID string
-		finalStatus := "completed"
-		var finalError string
 		usage := make(map[string]TokenUsage)
+		eventCount := 0
+		invalidEventCount := 0
+		assistantEventCount := 0
+		toolUseCount := 0
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
@@ -187,12 +192,23 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 			var msg codebuddySDKMessage
 			if err := json.Unmarshal([]byte(line), &msg); err != nil {
+				invalidEventCount++
 				continue
 			}
+			eventCount++
 
 			switch msg.Type {
 			case "assistant":
-				b.handleAssistant(msg, msgCh, &output, usage)
+				assistantEventCount++
+				assistantText, tools := b.handleAssistant(msg, msgCh, usage)
+				toolUseCount += tools
+				if tools == 0 {
+					lastAssistantText = assistantText
+				} else {
+					// A turn that invokes a tool is intermediate even when it also
+					// contains narration. Do not use it as an empty-result fallback.
+					lastAssistantText = ""
+				}
 			case "user":
 				b.handleUser(msg, msgCh)
 			case "system":
@@ -201,17 +217,12 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
+				sawResult = true
+				finalResultText = msg.ResultText
+				resultIsError = msg.IsError
 				sessionID = msg.SessionID
-				if msg.ResultText != "" {
-					output.Reset()
-					output.WriteString(msg.ResultText)
-				}
 				if resultUsage := codebuddyResultUsage(msg, opts.Model); len(resultUsage) > 0 {
 					usage = resultUsage
-				}
-				if msg.IsError {
-					finalStatus = "failed"
-					finalError = msg.ResultText
 				}
 				closeStdin()
 			case "log":
@@ -226,6 +237,12 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				b.handleControlRequest(msg, stdin)
 			}
 		}
+		scanErr := scanner.Err()
+		if scanErr != nil {
+			// Stop a malformed/oversized writer from blocking cmd.Wait after the
+			// scanner has stopped consuming stdout.
+			_ = stdout.Close()
+		}
 
 		closeStdin()
 
@@ -237,27 +254,42 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		// broken pipe, or been unblocked by the kill that ended cmd.
 		writeErr := <-writeDone
 
-		switch {
-		case runCtx.Err() == context.DeadlineExceeded:
-			finalStatus = "timeout"
-			finalError = fmt.Sprintf("codebuddy timed out after %s", timeout)
-		case runCtx.Err() == context.Canceled:
-			finalStatus = "aborted"
-			finalError = "execution cancelled"
-		case writeErr != nil && finalStatus == "completed" && sessionID == "":
-			// No result event landed and the prompt write failed — codebuddy
-			// died before reading the prompt. Surface the write error; the
-			// stderr tail attached below carries the real reason.
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("write codebuddy input: %v", writeErr)
-		case exitErr != nil && finalStatus == "completed":
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("codebuddy exited with error: %v", exitErr)
-		}
+		finalStatus, finalOutput, finalError := finalizeStreamResult(
+			"codebuddy",
+			timeout,
+			runCtx.Err(),
+			writeErr,
+			exitErr,
+			sessionID,
+			streamTerminalState{
+				lastAssistantText: lastAssistantText,
+				finalResultText:   finalResultText,
+				sawResult:         sawResult,
+				resultIsError:     resultIsError,
+				scanErr:           scanErr,
+			},
+			"",
+		)
 
 		if finalError != "" {
 			finalError = withAgentStderr(finalError, "codebuddy", stderrBuf.Tail())
 		}
+		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
+			provider:                   "codebuddy",
+			cliVersion:                 b.cfg.CLIVersion,
+			model:                      opts.Model,
+			exitCode:                   streamProcessExitCode(exitErr),
+			eventCount:                 eventCount,
+			invalidEventCount:          invalidEventCount,
+			assistantEventCount:        assistantEventCount,
+			toolUseCount:               toolUseCount,
+			sawResult:                  sawResult,
+			resultIsError:              resultIsError,
+			resultBytes:                len(finalResultText),
+			lastAssistantBytes:         len(lastAssistantText),
+			scannerError:               scanErr != nil,
+			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
+		})
 
 		b.cfg.Logger.Info("codebuddy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
@@ -271,7 +303,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 		resCh <- Result{
 			Status:     finalStatus,
-			Output:     output.String(),
+			Output:     finalOutput,
 			Error:      finalError,
 			DurationMs: duration.Milliseconds(),
 			SessionID:  reportedSessionID,
@@ -282,11 +314,13 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage) {
+func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Message, usage map[string]TokenUsage) (string, int) {
 	var content codebuddyMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
-		return
+		return "", 0
 	}
+	var assistantText strings.Builder
+	toolUseCount := 0
 
 	// Accumulate token usage per model.
 	if content.Usage != nil && content.Model != "" {
@@ -302,7 +336,7 @@ func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Me
 		switch block.Type {
 		case "text":
 			if block.Text != "" {
-				output.WriteString(block.Text)
+				assistantText.WriteString(block.Text)
 				trySend(ch, Message{Type: MessageText, Content: block.Text})
 			}
 		case "thinking":
@@ -310,6 +344,7 @@ func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Me
 				trySend(ch, Message{Type: MessageThinking, Content: block.Text})
 			}
 		case "tool_use":
+			toolUseCount++
 			var input map[string]any
 			if block.Input != nil {
 				_ = json.Unmarshal(block.Input, &input)
@@ -322,6 +357,7 @@ func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Me
 			})
 		}
 	}
+	return assistantText.String(), toolUseCount
 }
 
 func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message) {
@@ -418,7 +454,7 @@ type codebuddySDKMessage struct {
 
 	// result fields
 	ResultText string                               `json:"result,omitempty"`
-	IsError    bool                                  `json:"is_error,omitempty"`
+	IsError    bool                                 `json:"is_error,omitempty"`
 	DurationMs float64                              `json:"duration_ms,omitempty"`
 	NumTurns   int                                  `json:"num_turns,omitempty"`
 	Usage      *codebuddyUsage                      `json:"usage,omitempty"`

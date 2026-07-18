@@ -43,6 +43,10 @@ export function useInboxRealtime() {
         ws.on("inbox:new", invalidate),
         ws.on("inbox:read", invalidate),
         ws.on("inbox:archived", invalidate),
+        // Mobile has no archived view yet (web/desktop only, MUL-3736), but an
+        // unarchive there restores the item to THIS list — without refetching,
+        // mobile keeps showing the pre-restore list.
+        ws.on("inbox:unarchived", invalidate),
         ws.on("inbox:batch-read", invalidate),
         ws.on("inbox:batch-archived", invalidate),
 

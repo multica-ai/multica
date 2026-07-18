@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   HoverCard,
@@ -14,7 +14,10 @@ import { cn } from "@multica/ui/lib/utils";
 import type { AvatarSize } from "@multica/ui/lib/avatar-size";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { AgentActivityHoverContent } from "../../agents/components/agent-activity-hover-content";
+import { selectIssueTasks, type IssueTaskGroups } from "../surface/activity";
 import { useT } from "../../i18n";
+
+const EMPTY_GROUPS: IssueTaskGroups = { running: [], queued: [] };
 
 interface IssueAgentActivityIndicatorProps {
   issueId: string;
@@ -44,8 +47,14 @@ interface IssueAgentActivityIndicatorProps {
  * with status dot + duration. No link rows — the card itself is the
  * navigation target for issue detail.
  *
- * Re-renders on every snapshot invalidation (WS task:* events drive it
- * via use-realtime-sync). 30s staleTime is the offline fallback only.
+ * Subscribes to the one shared workspace snapshot query but narrows it to
+ * this issue's tasks with a `select`. React Query's structural sharing keeps
+ * that selected value referentially stable when this issue's tasks are
+ * unchanged, so a snapshot invalidation (WS task:* events, driven by
+ * use-realtime-sync) only re-renders the rows whose own tasks actually moved
+ * — not the whole list. This is the de-amplification that keeps large issue
+ * lists cheap when agents are busy (MUL-4474). 30s staleTime is the offline
+ * fallback only.
  */
 export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndicator({
   issueId,
@@ -53,41 +62,29 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
 }: IssueAgentActivityIndicatorProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const select = useCallback(
+    (snapshot: AgentTask[]) => selectIssueTasks(snapshot, issueId),
+    [issueId],
+  );
+  const { data: groups = EMPTY_GROUPS } = useQuery({
+    ...agentTaskSnapshotOptions(wsId),
+    select,
+  });
 
-  const { runningTasks, queuedTasks, agentIds, opacity } = useMemo(() => {
-    const running: AgentTask[] = [];
-    const queued: AgentTask[] = [];
-    for (const task of snapshot) {
-      if (task.issue_id !== issueId) continue;
-      if (task.status === "running") running.push(task);
-      else if (
-        task.status === "queued" ||
-        task.status === "dispatched" ||
-        // waiting_local_directory is the daemon-parked variant of "queued"
-        // — the agent is still actively waiting on a path lock, so it
-        // belongs in the active hover stack rather than dropping out.
-        task.status === "waiting_local_directory"
-      )
-        queued.push(task);
-      // Terminal statuses are intentionally ignored — they belong on the
-      // issue history, not the live indicator.
-    }
+  const { agentIds, opacity } = useMemo(() => {
     // Stack heads: prefer running. If 0 running, fall back to queued.
     // Each case is visually distinct (running gets shimmer, queued gets
     // muted text) so the indicator always offers a face to hover.
-    const primary = running.length > 0 ? running : queued;
+    const primary = groups.running.length > 0 ? groups.running : groups.queued;
     const uniqueAgents = [...new Set(primary.map((t) => t.agent_id))];
     return {
-      runningTasks: running,
-      queuedTasks: queued,
       agentIds: uniqueAgents,
-      opacity: (running.length > 0 ? "full" : "half") as "full" | "half",
+      opacity: (groups.running.length > 0 ? "full" : "half") as "full" | "half",
     };
-  }, [snapshot, issueId]);
+  }, [groups]);
 
   if (agentIds.length === 0) return null;
-  const hoverTasks = [...runningTasks, ...queuedTasks];
+  const hoverTasks = [...groups.running, ...groups.queued];
   const isRunning = opacity === "full";
 
   return (

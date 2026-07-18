@@ -2,6 +2,8 @@
 
 本文档定义 Multica 的视觉语言和交互规范。所有 UI 开发以此为准。
 
+页面级信息架构、布局组合与一致性治理见 [`ui-consistency-audit.md`](./ui-consistency-audit.md)。
+
 ---
 
 ## 1. 设计哲学
@@ -18,14 +20,34 @@
 
 基于 OKLCh 色彩空间，通过 CSS 变量定义。所有颜色使用 shadcn token，**禁止硬编码 Tailwind 色值**（如 `text-gray-500`、`bg-blue-600`）。
 
-### 2.1 中性色阶梯
+### 2.1 Surface 层级
+
+Surface 系统描述的是容器之间的关系，不是把每一段内容都包进卡片。基础 token 定义在 `packages/ui/styles/tokens.css`，并同时覆盖 light / dark mode。
+
+| 层级 | Token / Class | 用途 | 不应用于 |
+|------|---------------|------|----------|
+| App Shell | `app-shell` / `bg-app-shell` | 窗口最外层、sidebar 与 page canvas 之间的留白 | 页面正文、表单组 |
+| Page Canvas | `page-canvas` / `bg-page-canvas` | 页面主体；list、board、chat 等持续滚动的内容区 | 独立设置组、弹窗 |
+| Surface / Card | `surface`、`surface-border`、`--surface-shadow` | 有独立边界的表单组、设置组、摘要卡 | 每一行列表、每一列 board、整页正文 |
+| Floating Surface | `surface-raised`、`--floating-shadow` | dialog、dropdown、popover、sheet、浮动 chat | 常驻页面布局 |
+
+规则：
+
+- Page Canvas 是默认内容面。需要分组时先用间距和分割线，只有独立操作或独立信息块才使用 Surface。
+- 浅色模式中，`app-shell` 与 sidebar 使用 `#f3f3f4`，`page-canvas` 使用 `#fbfbfb`，Card 使用 `#ffffff`；不能只靠 border 区分设置组和页面背景。三者形成接近 Linear 的克制层级，由外向内逐步变亮。
+- Card 使用 `bg-surface border-surface-border shadow-[var(--surface-shadow)]`；浮层使用 `bg-surface-raised ring-surface-border shadow-[var(--floating-shadow)]`。
+- `surface-hover` 只表示指针经过；`surface-selected` 表示持续选中，并保持中性灰，不额外叠加 brand 色。选中项 hover 时必须保留 `surface-selected`，不能退回 hover 状态。
+- focus 一律使用 `focus-visible` ring。不要用阴影、尺寸变化或品牌大面积填充代替键盘焦点。
+- 不为 light / dark mode 手写一组平行 class。基础 surface token 已按主题解析，并通过 `color-scheme` 同步原生控件。
+
+### 2.2 中性色阶梯
 
 界面 90% 的面积由中性色构成。灰度等级即信息层级：
 
 | 角色 | Light Token | Dark Token | 用途 |
 |------|-------------|------------|------|
-| 背景 | `background` | `background` | 页面底色 |
-| 卡片/浮层 | `card` / `popover` | `card` / `popover` | 容器表面 |
+| 背景 | `page-canvas` / `background` | `page-canvas` / `background` | 页面主体 |
+| 卡片/浮层 | `surface` / `surface-raised` | `surface` / `surface-raised` | 有边界的内容组与临时覆盖层 |
 | 次级表面 | `muted` / `secondary` | `muted` / `secondary` | hover 背景、标签底色 |
 | 边框 | `border` | `border` | 分隔线、输入框边框 |
 | 输入框边框 | `input` | `input` | 比 border 略重 |
@@ -35,7 +57,7 @@
 
 **规则：** 同一屏幕内，文字颜色最多使用 3 个层级（`foreground` / `muted-foreground` / 某个语义色）。超过 3 级说明层次设计有问题。
 
-### 2.2 语义色
+### 2.3 语义色
 
 颜色只用于传递含义，不做装饰：
 
@@ -52,7 +74,7 @@
 - 语义色主要用于小面积元素（badge、icon、border）。大面积着色用该色的 10%-20% 透明度变体（如 `bg-destructive/10`）。
 - 每屏同时出现的语义色不宜超过 2-3 种。如果一个界面同时有红黄绿蓝紫，说明信息密度过高，需要重新组织。
 
-### 2.3 暗色模式
+### 2.4 暗色模式
 
 暗色模式不是简单的反转。它是独立设计的一套配色：
 
@@ -127,7 +149,7 @@
 
 1. **仅间距** — 增大两个区域的间距（首选）
 2. **单条分割线** — 一根细线 `border-border`
-3. **背景色变化** — 一个区域用 `bg-muted` 或 `bg-card`
+3. **背景色变化** — 一个区域用 `bg-surface-hover` 或 `bg-surface`
 4. **完整卡片** — border + radius + padding（最重手段）
 
 用最轻的工具完成分隔。
@@ -162,7 +184,7 @@ Hover 是"我注意到你了"，视觉变化应该轻微、即时：
 **规则：**
 - hover 时不改变尺寸（无 `scale`）、不加阴影（无 `shadow`）。
 - hover 的背景色永远比 selected/active 更淡。这样用户能区分"悬停"和"已选中"。
-- 所有 hover 使用 `transition-colors` 或 `transition-all`，时长由 Tailwind 默认值（150ms）处理，不需要自定义。
+- 所有 hover 使用 `transition-colors`、`transition-shadow` 或列出具体属性；不要使用 `transition-all`。时长由 Tailwind 默认值（150ms）处理，不需要自定义。
 
 ### 5.3 Active / Selected 状态
 

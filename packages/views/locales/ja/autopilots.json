@@ -74,6 +74,12 @@
     "running": "実行中...",
     "toast_triggered": "オートパイロットを実行しました",
     "toast_trigger_failed": "オートパイロットを実行できませんでした",
+    "run_blocked_invocation_not_allowed": "実行されませんでした — このオートパイロットのエージェントを使用する権限がありません",
+    "run_blocked_runtime_offline": "実行されませんでした — エージェントのランタイムがオフラインです",
+    "run_blocked_target_unavailable": "実行されませんでした — エージェントを利用できません",
+    "run_blocked_attribution": "実行されませんでした — 実行の責任者を特定できませんでした",
+    "run_blocked_already_active": "実行されませんでした — 直近の実行が本件をカバーしています",
+    "run_blocked_generic": "実行されませんでした — 実行がブロックされました",
     "section_properties": "プロパティ",
     "section_triggers": "トリガー",
     "section_run_history": "実行履歴",
@@ -203,6 +209,8 @@
       "received_at": "受信",
       "last_attempt_at": "最終試行",
       "attempt_count": "試行回数",
+      "dispatch_attempts": "ディスパッチ試行回数",
+      "available_at": "次回ディスパッチ",
       "response_status": "レスポンス",
       "dedupe_key": "重複排除キー",
       "dedupe_source": "重複排除ソース",
@@ -295,7 +303,6 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_hint": "これらのイベントに一致する Webhook のみを処理します。空にするとすべて許可します。",
     "schedule_disabled_reason": "このオートパイロットには複数のスケジュールがあります。詳細ページで編集してください。",
-    "next_run_label": "次回実行:",
     "output_modes": {
       "create_issue": {
         "label": "イシューを作成",
@@ -305,32 +312,20 @@
         "label": "実行のみ",
         "description": "イシューを作成せず、静かに実行します"
       }
-    },
-    "frequency_long": {
-      "hourly": "毎時",
-      "daily": "毎日",
-      "weekdays": "平日ごと",
-      "weekly": "毎週",
-      "custom": "カスタム cron"
-    },
-    "days": {
-      "sunday": "日曜日",
-      "monday": "月曜日",
-      "tuesday": "火曜日",
-      "wednesday": "水曜日",
-      "thursday": "木曜日",
-      "friday": "金曜日",
-      "saturday": "土曜日"
     }
   },
-  "trigger_config": {
-    "frequencies": {
-      "hourly": "毎時",
-      "daily": "毎日",
-      "weekdays": "平日",
-      "weekly": "曜日",
-      "custom": "カスタム"
-    },
+  "schedule_editor": {
+    "time_label": "時刻",
+    "time_at": "時刻指定",
+    "time_every": "間隔指定",
+    "every_prefix": "毎",
+    "unit_hours": "時間",
+    "unit_minutes": "分",
+    "days_label": "日",
+    "days_every": "毎日",
+    "days_weekly": "曜日指定",
+    "days_monthly": "日付指定",
+    "monthly_short_month_hint": "{{day}} 日が存在しない月はスキップされます。",
     "days_short": {
       "sun": "日",
       "mon": "月",
@@ -340,32 +335,69 @@
       "fri": "金",
       "sat": "土"
     },
-    "cron_label": "Cron 式",
-    "cron_hint": "標準の 5 フィールド cron(分 時 日 月 曜日)",
-    "minute_label": "分",
-    "time_label": "時刻",
     "timezone_label": "タイムゾーン",
-    "days_label": "曜日",
-    "summary": {
-      "hourly": "毎時 · :{{min}}",
-      "daily": "毎日 {{time}}",
-      "weekdays": "平日 {{time}}",
-      "weekly": "{{days}} {{time}}",
-      "custom": "カスタム cron",
-      "no_days": "—"
-    },
+    "cron_toggle": "Cron",
+    "cron_click_to_edit": "クリックして編集",
+    "cron_hint": "標準 5 フィールド cron（分 時 日 月 曜日）",
+    "cron_invalid": "この cron 式は無効です。",
+    "timezone_invalid": "このタイムゾーンはサーバーで認識できません。",
+    "advanced_hint": "この式にはビジュアルエディタで表現できない機能が含まれています。cron テキストを直接編集するか、式を簡略化してください。",
+    "advanced_unverified": "サーバーに接続できず、この式を検証できませんでした。コントロールは無効のままです。保存する前に cron テキストを確認してください。",
+    "advanced_checking": "この式をサーバーで検証しています。結果が返るまでコントロールは無効のままです。",
+    "next_runs_label": "次回以降の実行",
+    "next_in": "{{countdown}}後",
+    "preview_unavailable": "次回実行時刻を取得できません。",
+    "no_upcoming_runs": "この式に該当する今後の実行はありません。",
     "describe": {
-      "hourly": "毎時 :{{min}} に実行",
-      "daily": "毎日 {{time}} {{offset}} に実行",
-      "weekdays": "平日 {{time}} {{offset}} に実行",
-      "weekly": "毎週 {{days}} {{time}} {{offset}} に実行",
-      "custom": "カスタムスケジュール: {{cron}}"
+      "days_every": "毎日",
+      "days_monthly": "毎月 {{day}} 日",
+      "days_long": {
+        "sun": "日曜",
+        "mon": "月曜",
+        "tue": "火曜",
+        "wed": "水曜",
+        "thu": "木曜",
+        "fri": "金曜",
+        "sat": "土曜"
+      },
+      "days_range": "{{from}}〜{{to}}",
+      "days_join": "、",
+      "time_at": "{{time}}",
+      "time_every_hour": "毎時 {{minute}} 分",
+      "time_every_hours": "{{interval}} 時間ごと（毎時 {{minute}} 分）",
+      "time_every_hour_window": "毎時",
+      "time_every_hours_window": "{{interval}} 時間ごと",
+      "time_every_minute": "毎分",
+      "time_every_minutes": "{{interval}} 分ごと",
+      "window": "{{from}}–{{to}}"
     },
     "countdown": {
-      "days_hours": "{{days}} 日 {{hours}} 時間",
-      "hours_minutes": "{{hours}} 時間 {{minutes}} 分",
-      "minutes": "{{minutes}} 分",
-      "less_than_minute": "1 分未満"
+      "days_hours": "{{days}}日 {{hours}}時間 {{minutes}}分",
+      "hours_minutes": "{{hours}}時間 {{minutes}}分",
+      "minutes": "{{minutes}}分",
+      "less_than_minute": "1分未満"
+    },
+    "a11y": {
+      "fixed_hour": "時",
+      "fixed_minute": "分",
+      "interval": "間隔",
+      "interval_unit": "間隔の単位",
+      "window_start_hour": "時間帯の開始（時）",
+      "window_start_minute": "時間帯の開始（分）",
+      "window_end_hour": "時間帯の終了（時）",
+      "window_end_minute": "時間帯の終了（分）",
+      "day_pattern": "日付の指定方法",
+      "day_of_month": "毎月の日",
+      "timezone": "タイムゾーン",
+      "days_full": {
+        "sun": "日曜日",
+        "mon": "月曜日",
+        "tue": "火曜日",
+        "wed": "水曜日",
+        "thu": "木曜日",
+        "fri": "金曜日",
+        "sat": "土曜日"
+      }
     }
   },
   "agent_picker": {

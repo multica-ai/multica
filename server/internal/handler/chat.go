@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -80,7 +82,29 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := h.Queries.CreateChatSession(r.Context(), db.CreateChatSessionParams{
+	// Create inside a tx that first takes a FOR KEY SHARE lock on the workspace
+	// row: it conflicts with DeleteWorkspace's FOR UPDATE, so a session cannot be
+	// created into a workspace whose delete is in progress and then be orphaned by
+	// the finalizer after the delete's sweep (#5219 create/delete protocol; see
+	// LockWorkspaceForChatSessionCreate).
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(r.Context(), workspaceUUID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+		return
+	}
+
+	session, err := qtx.CreateChatSession(r.Context(), db.CreateChatSessionParams{
 		WorkspaceID: workspaceUUID,
 		AgentID:     agentID,
 		CreatorID:   parseUUID(userID),
@@ -88,6 +112,11 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create chat session")
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit chat session create")
 		return
 	}
 
@@ -146,7 +175,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				Status:      s.Status,
 				HasUnread:   s.UnreadCount > 0,
 				UnreadCount: int(s.UnreadCount),
-				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason),
+				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
 				Pinned:      s.PinnedAt.Valid,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
@@ -175,7 +204,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				Status:      s.Status,
 				HasUnread:   s.UnreadCount > 0,
 				UnreadCount: int(s.UnreadCount),
-				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason),
+				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
 				Pinned:      s.PinnedAt.Valid,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
@@ -366,6 +395,17 @@ type SetChatSessionArchivedRequest struct {
 // user's history (behind the "Archived" entry) and the conversation becomes
 // read-only — SendChatMessage refuses status='archived'. Hard delete is only
 // offered from the archived list, so nothing is destroyed in one hover click.
+//
+// Archiving also severs any external-channel binding. The web send path already
+// treats status='archived' as read-only, but the channel engine (Feishu/Slack)
+// resolves inbound traffic through channel_chat_session_binding without checking
+// session status, so a bound session kept accumulating agent replies — and a
+// stuck unread badge — after the user archived it (MUL-4372). Dropping the
+// binding in the same tx makes the next inbound message for that external chat
+// create a fresh chat_session under a new binding (see EnsureSession) instead of
+// reviving this archived one. Unarchive deliberately does NOT recreate the
+// binding: if later traffic already forked a new session, that session owns the
+// channel now, and restoring the old binding would steal it back.
 func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -385,12 +425,33 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	updated, err := h.Queries.SetChatSessionArchived(r.Context(), db.SetChatSessionArchivedParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	updated, err := qtx.SetChatSessionArchived(r.Context(), db.SetChatSessionArchivedParams{
 		ID:       session.ID,
 		Archived: req.Archived,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update chat session")
+		return
+	}
+
+	if req.Archived {
+		if err := qtx.DeleteChannelChatSessionBindingBySession(r.Context(), session.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clear chat session channel binding")
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Warn("commit chat session archive failed", "session_id", sessionID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to commit chat session update")
 		return
 	}
 
@@ -466,12 +527,30 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete chat session outbound cards")
 		return
 	}
+	// chat_draft_restore is keyed by chat_session_id with no FK either, so its
+	// pending restores are pruned here rather than by a DB cascade (#5219). The
+	// LockChatSessionForDelete above doubles as the deleter half of the
+	// draft-restore protocol: FinalizeDeferredCancelledChat takes the same
+	// chat_session lock before inserting a restore, so it cannot slip one past
+	// this sweep (see LockChatSessionForTask in chat.sql).
+	if err := qtx.DeleteChatDraftRestoresBySession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat session draft restores")
+		return
+	}
 
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,
 		WorkspaceID: session.WorkspaceID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete chat session")
+		return
+	}
+	if err := qtx.DeleteAgentLabelAssignmentsByAgent(r.Context(), session.AgentID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove chat session agent label assignments")
+		return
+	}
+	if err := qtx.DeleteSystemAgentByID(r.Context(), session.AgentID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up chat session agent")
 		return
 	}
 
@@ -587,6 +666,21 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Re-run the INVOKE gate on every send, not just the softer view gate in
+	// gateChatSessionForUser (MUL-4525). canAccessPrivateAgent lets a workspace
+	// admin keep reading a transcript, but sending a message enqueues a run and
+	// must satisfy canInvokeAgent — which has no admin bypass. A session created
+	// while the user could invoke the agent must stop enqueuing work the instant
+	// that permission is revoked (agent flipped private, ownership moved, target
+	// removed from the allow-list), and it must fail BEFORE we persist the user
+	// message / attachments / task. Blocked returns a structured, enumeration-safe
+	// reason so the composer can explain it without leaking private-agent details.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
+		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+		return
+	}
+
 	// Detect whether this is the very first human message in the session,
 	// BEFORE we insert the new row. This scopes LLM auto-titling (MUL-4295) to
 	// the opening turn: we upgrade the default/original title exactly once, off
@@ -598,70 +692,32 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		hadUserMessage = existed
 	}
 
-	// Create the user message first so the daemon can always find it.
-	msg, err := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
-		ChatSessionID: session.ID,
-		Role:          "user",
-		Content:       req.Content,
-	})
+	// Persist the whole turn atomically (MUL-4351): the owning task, the user
+	// message bound to that task (so it belongs to the task's immutable input
+	// batch the instant it exists), attachment bindings, and the session touch
+	// all commit together, and the daemon is only notified after the commit. For
+	// web chat the sender is the authenticated request user (sessions are
+	// creator-only), so they are the task initiator — surfaced to the agent
+	// under `## Task Initiator`. actorType/actorID were resolved above for the
+	// invoke gate.
+	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create chat message")
+		writeError(w, http.StatusInternalServerError, "failed to send chat message: "+err.Error())
 		return
 	}
+	msg := sent.Message
+	task := sent.Task
 
-	// Back-fill chat_message_id on attachments the sender uploaded while
-	// composing. New clients upload workspace-scoped unattached rows and bind
-	// them here; older clients may still upload against the chat_session_id.
-	// The query accepts both shapes, but only for this workspace, this actor,
-	// and rows that are not already linked to an issue/comment/message.
+	// AttachmentIDs actually bound by the server. Requested-but-unbound ids are
+	// surfaced to the client so it can warn the user (see SendChatMessageResponse).
 	var boundAttachmentIDs []string
 	if len(attachmentIDs) > 0 {
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
-		bound, err := h.Queries.LinkAttachmentsToChatMessage(r.Context(), db.LinkAttachmentsToChatMessageParams{
-			ChatMessageID: msg.ID,
-			ChatSessionID: session.ID,
-			WorkspaceID:   session.WorkspaceID,
-			UploaderType:  actorType,
-			UploaderID:    parseUUID(actorID),
-			AttachmentIds: attachmentIDs,
-		})
-		if err != nil {
-			// Don't fail the send — the message content is already saved and
-			// the attachments remain on the session (still downloadable).
-			slog.Warn("link chat attachments failed", "error", err, "message_id", uuidToString(msg.ID))
-		}
-		boundAttachmentIDs = make([]string, 0, len(bound))
-		for _, id := range bound {
+		boundAttachmentIDs = make([]string, 0, len(sent.BoundAttachmentIDs))
+		for _, id := range sent.BoundAttachmentIDs {
 			boundAttachmentIDs = append(boundAttachmentIDs, uuidToString(id))
 		}
 	}
 
-	// Enqueue a chat task after the message exists. For web chat the sender is
-	// the authenticated request user (sessions are creator-only), so they are
-	// the task initiator — surfaced to the agent under `## Task Initiator`.
-	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, parseUUID(userID), false)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task: "+err.Error())
-		return
-	}
-	if err := h.Queries.LinkChatMessageToTask(r.Context(), db.LinkChatMessageToTaskParams{
-		ID:     msg.ID,
-		TaskID: task.ID,
-	}); err != nil {
-		// Don't fail the send: the task already exists and the user message
-		// is persisted. The link is only needed for precise empty-cancel
-		// cleanup; older/unlinked rows simply keep the historical behavior.
-		slog.Warn("link user chat message to task failed",
-			"message_id", uuidToString(msg.ID),
-			"task_id", uuidToString(task.ID),
-			"error", err,
-		)
-	}
-
-	// Touch session updated_at.
-	if err := h.Queries.TouchChatSession(r.Context(), session.ID); err != nil {
-		slog.Warn("failed to touch chat session", "session_id", sessionID, "error", err)
-	}
 	taskContext := h.TaskService.AnalyticsContextForTask(r.Context(), task)
 	platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
 	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.ChatMessageSent(
@@ -882,6 +938,156 @@ func (h *Handler) MarkChatSessionRead(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// Deferred-cancellation draft restores (#5219)
+// ---------------------------------------------------------------------------
+
+// ChatDraftRestoreResponse is one recoverable composer draft: a deferred
+// cancellation settled as empty-transcript after the cancel HTTP response
+// returned, so the deleted prompt is persisted server-side until the
+// creator's client applies and consumes it. Attachments are resolved from
+// the stored ids at read time so they carry the normal handler URL policy.
+type ChatDraftRestoreResponse struct {
+	ID            string               `json:"id"`
+	ChatSessionID string               `json:"chat_session_id"`
+	TaskID        string               `json:"task_id"`
+	Content       string               `json:"content"`
+	Attachments   []AttachmentResponse `json:"attachments,omitempty"`
+	CreatedAt     string               `json:"created_at"`
+}
+
+type ChatDraftRestoresResponse struct {
+	Restores []ChatDraftRestoreResponse `json:"restores"`
+}
+
+// ListChatDraftRestores returns the session's pending draft restores.
+// Creator-only via loadChatSessionForUser — deliberately not the
+// private-agent gate: the content is the caller's own deleted prompt, and
+// losing agent access must not strand it server-side forever.
+func (h *Handler) ListChatDraftRestores(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+
+	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+
+	rows, err := h.Queries.ListChatDraftRestoresBySession(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list draft restores")
+		return
+	}
+
+	var attachmentIDs []pgtype.UUID
+	for _, row := range rows {
+		attachmentIDs = append(attachmentIDs, row.AttachmentIds...)
+	}
+	attachmentsByID := map[string]AttachmentResponse{}
+	if len(attachmentIDs) > 0 {
+		attRows, err := h.Queries.ListAttachmentsByIDs(r.Context(), db.ListAttachmentsByIDsParams{
+			AttachmentIds: attachmentIDs,
+			WorkspaceID:   session.WorkspaceID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load draft restore attachments")
+			return
+		}
+		for _, a := range attRows {
+			attachmentsByID[uuidToString(a.ID)] = h.attachmentToResponse(a)
+		}
+	}
+
+	resp := ChatDraftRestoresResponse{Restores: make([]ChatDraftRestoreResponse, 0, len(rows))}
+	for _, row := range rows {
+		item := ChatDraftRestoreResponse{
+			ID:            uuidToString(row.ID),
+			ChatSessionID: uuidToString(row.ChatSessionID),
+			TaskID:        uuidToString(row.TaskID),
+			Content:       row.Content,
+			CreatedAt:     timestampToString(row.CreatedAt),
+		}
+		for _, attID := range row.AttachmentIds {
+			if a, ok := attachmentsByID[uuidToString(attID)]; ok {
+				item.Attachments = append(item.Attachments, a)
+			}
+		}
+		resp.Restores = append(resp.Restores, item)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ConsumeChatDraftRestore deletes one draft restore after the creator's
+// client applied it. Idempotent: consuming an already-consumed (or never
+// existing) restore still returns 204, so a retried consume after a lost
+// response can't fail the client.
+func (h *Handler) ConsumeChatDraftRestore(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+
+	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+	restoreUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "restoreId"), "restore id")
+	if !ok {
+		return
+	}
+
+	if _, err := h.Queries.DeleteChatDraftRestore(r.Context(), db.DeleteChatDraftRestoreParams{
+		ID:            restoreUUID,
+		ChatSessionID: session.ID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to consume draft restore")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// pruneRuntimeAgentChatDraftRestores drops the pending draft restores of every
+// chat_session a runtime teardown is about to remove through the agent cascade
+// (chat_session.agent_id is ON DELETE CASCADE, migration 033). chat_draft_restore
+// has no FK (MUL-3515) and no reaper, so a restore left behind keeps the user's
+// prompt text forever, unreachable and undeletable.
+//
+// Every runtime/agent teardown path must call this in its own transaction and
+// BEFORE deleting the agent rows — the queries join through them. includeSystemAgents
+// mirrors whether the caller also runs DeleteSystemAgentsByRuntime: the
+// runtime-profile teardown deletes only archived agents, and pruning system-agent
+// sessions there would destroy restores whose session survives.
+//
+// The sessions are locked before the sweep: that is the deleter half of the
+// mutual-exclusion protocol with FinalizeDeferredCancelledChat, which would
+// otherwise insert a restore this sweep can no longer see (see LockChatSession*
+// in chat.sql).
+//
+// The workspace teardown has its own copy of this shape (locks, then sweeps
+// inside the DeleteWorkspace CTE) because that statement's prune must stay in
+// the same statement as the workspace row it commits with.
+func pruneRuntimeAgentChatDraftRestores(ctx context.Context, q *db.Queries, runtimeID pgtype.UUID, includeSystemAgents bool) error {
+	if _, err := q.LockChatSessionsByArchivedRuntimeAgents(ctx, runtimeID); err != nil {
+		return err
+	}
+	if err := q.DeleteChatDraftRestoresByArchivedRuntimeAgents(ctx, runtimeID); err != nil {
+		return err
+	}
+	if !includeSystemAgents {
+		return nil
+	}
+	if _, err := q.LockChatSessionsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
+		return err
+	}
+	return q.DeleteChatDraftRestoresBySystemRuntimeAgents(ctx, runtimeID)
 }
 
 // PendingChatTasksResponse is the aggregate view consumed by the FAB.
@@ -1138,7 +1344,9 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cancelled, err := h.TaskService.CancelTaskWithResult(r.Context(), taskUUID)
+	cancelled, err := h.TaskService.CancelTaskWithResult(r.Context(), taskUUID, service.CancelTaskOptions{
+		ClientSupportsDraftRestore: requestHasClientCapability(r, protocol.AppCapabilityChatDraftRestoreV1),
+	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1147,6 +1355,7 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 	resp := CancelTaskByUserResponse{
 		AgentTaskResponse: taskToResponse(cancelled.Task, workspaceID),
 	}
+	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.AgentTaskResponse.Attribution})
 	if cancelled.CancelledChatMessage != nil {
 		attachments := make([]AttachmentResponse, 0, len(cancelled.CancelledChatMessage.Attachments))
 		for _, a := range cancelled.CancelledChatMessage.Attachments {
@@ -1195,11 +1404,15 @@ type ChatLastMessage struct {
 	Role          string  `json:"role"`
 	CreatedAt     string  `json:"created_at"`
 	FailureReason *string `json:"failure_reason"`
+	// MessageKind is 'message' (default) or 'no_response'. Lets the session
+	// list render a localized preview for a no-text-reply turn instead of the
+	// English fallback content the server stores (MUL-4351).
+	MessageKind string `json:"message_kind"`
 }
 
 // buildChatLastMessage assembles the preview from list-row columns; returns nil
 // when there is no last message (the LEFT JOIN produced a NULL timestamp).
-func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure pgtype.Text) *ChatLastMessage {
+func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure pgtype.Text, kind string) *ChatLastMessage {
 	if !at.Valid {
 		return nil
 	}
@@ -1208,6 +1421,7 @@ func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure p
 		Role:          role,
 		CreatedAt:     timestampToString(at),
 		FailureReason: textToPtr(failure),
+		MessageKind:   normalizeMessageKind(kind),
 	}
 }
 
@@ -1224,6 +1438,10 @@ type ChatMessageResponse struct {
 	// ElapsedMs is the wall-clock duration from task creation to terminal
 	// state. Drives "Replied in 38s" / "Failed after 12s" captions.
 	ElapsedMs *int64 `json:"elapsed_ms"`
+	// MessageKind is 'message' (default) or 'no_response' — a completed
+	// direct-chat turn that produced no text reply (MUL-4351). Additive:
+	// clients that don't understand it fall back to the non-empty content.
+	MessageKind string `json:"message_kind"`
 	// Attachments linked to this message via chat_message_id. The chat
 	// bubble renders file cards from these, and the daemon claim path
 	// (daemon.go) pulls structured metadata from the same source so the
@@ -1256,6 +1474,19 @@ func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) C
 		CreatedAt:     timestampToString(m.CreatedAt),
 		FailureReason: textToPtr(m.FailureReason),
 		ElapsedMs:     int8ToPtr(m.ElapsedMs),
+		MessageKind:   normalizeMessageKind(m.MessageKind),
 		Attachments:   attachments,
+	}
+}
+
+// normalizeMessageKind maps a stored chat_message.message_kind to the value the
+// API exposes. Unknown / empty kinds degrade to 'message' so a future kind
+// never surprises an older client into a broken render (MUL-4351).
+func normalizeMessageKind(kind string) string {
+	switch kind {
+	case protocol.ChatMessageKindNoResponse:
+		return protocol.ChatMessageKindNoResponse
+	default:
+		return protocol.ChatMessageKindMessage
 	}
 }

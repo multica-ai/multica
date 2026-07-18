@@ -20,6 +20,19 @@ There is no per-issue setup. The whole flow is identifier-driven.
 
 Only the PR itself is mirrored. Commits, branch refs without an open PR, and CI check states are **not** modeled. The integration is intentionally narrow.
 
+## Multiple workspaces
+
+One GitHub App installation can be connected in **several** workspaces at once — for example when different teams in the same organization run separate workspaces. When it is, every connected workspace receives each repository's `pull_request` events **independently**:
+
+- Each workspace mirrors the PR and auto-links it against **its own** [issue prefix](/workspaces) and GitHub feature switches. A PR that references `MUL-1` and `ENG-2` links `MUL-1` in the workspace whose prefix is `MUL` and `ENG-2` in the one whose prefix is `ENG` — neither sees the other's issues.
+- Disconnecting the installation from one workspace only stops **that** workspace from receiving events; the others keep working.
+
+Repository scope is whatever you granted the GitHub App (all repositories, or a chosen subset). Connecting the installation in a workspace is itself the subscription — there is no separate per-repository selection inside Multica.
+
+<Callout type="warning">
+**Upgrading a self-host deployment:** event delivery is keyed on the GitHub connection, not on a workspace's code-repository list. If a workspace previously received a repo's PRs *without* connecting GitHub in that workspace (by listing the repo in its code-repositories entry alone), it will stop receiving events after this upgrade. To restore delivery, **connect the same GitHub installation** in that workspace under **Settings → GitHub**.
+</Callout>
+
 ## How identifiers are matched
 
 The webhook extracts identifiers from three fields, in this order: **PR head branch**, **PR title**, **PR body**. The matcher is:

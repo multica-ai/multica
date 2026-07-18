@@ -93,9 +93,11 @@ export function TimezoneSelect({
   const options = timezoneOptions(value);
   const render = (tz: string) =>
     tz === browser ? `${tz}${browserSuffix}` : tz;
+  const items = options.map((value) => ({ value, label: render(value) }));
 
   return (
     <Select
+      items={items}
       value={value}
       disabled={disabled}
       onValueChange={(next) => {
@@ -109,9 +111,9 @@ export function TimezoneSelect({
         <SelectValue>{render(value)}</SelectValue>
       </SelectTrigger>
       <SelectContent align="start" className="max-h-72">
-        {options.map((tz) => (
-          <SelectItem key={tz} value={tz} className="font-mono text-xs">
-            {render(tz)}
+        {items.map((item) => (
+          <SelectItem key={item.value} value={item.value} className="font-mono text-xs">
+            {item.label}
           </SelectItem>
         ))}
       </SelectContent>

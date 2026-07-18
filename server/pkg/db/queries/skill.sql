@@ -80,13 +80,13 @@ DELETE FROM skill_file WHERE skill_id = $1;
 -- name: ListAgentSkills :many
 SELECT s.* FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
-WHERE ask.agent_id = $1
+WHERE ask.agent_id = $1 AND ask.enabled = TRUE
 ORDER BY s.name ASC;
 
 -- name: ListAgentSkillSummaries :many
 -- Summary variant for the agent skills list endpoint — omits `content` for
 -- the same reason as ListSkillSummariesByWorkspace.
-SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at
+SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at, ask.enabled
 FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
@@ -97,12 +97,18 @@ SELECT ask.agent_id, s.name
 FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE ask.agent_id = ANY(sqlc.arg('agent_ids')::uuid[])
+  AND ask.enabled = TRUE
 ORDER BY ask.agent_id, s.name ASC;
 
 -- name: AddAgentSkill :exec
 INSERT INTO agent_skill (agent_id, skill_id)
 VALUES ($1, $2)
 ON CONFLICT DO NOTHING;
+
+-- name: SetAgentSkillEnabled :execrows
+UPDATE agent_skill
+SET enabled = $3
+WHERE agent_id = $1 AND skill_id = $2;
 
 -- name: RemoveAgentSkill :exec
 DELETE FROM agent_skill
@@ -112,7 +118,7 @@ WHERE agent_id = $1 AND skill_id = $2;
 DELETE FROM agent_skill WHERE agent_id = $1;
 
 -- name: ListAgentSkillsByWorkspace :many
-SELECT ask.agent_id, s.id, s.name, s.description
+SELECT ask.agent_id, s.id, s.name, s.description, ask.enabled
 FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE s.workspace_id = $1

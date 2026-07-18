@@ -19,10 +19,10 @@ import { Callout } from "fumadocs-ui/components/callout";
 **イシュー接頭辞は変更しないでください。** イシュー番号は現在の接頭辞でレンダリングされるため、接頭辞を変更すると `MUL-5` がただちに `NEW-5` になります。すべての外部リンク、Slack のメンション、コメント内の過去の参照が古い番号と合わなくなります。イシュー接頭辞は「作成時に決め、決して触らない」値として扱ってください。
 </Callout>
 
-ワークスペースは Web UI から作成することも、コマンドラインから作成することもできます。
+ワークスペースは Web UI から作成することも、コマンドラインから作成することもできます。`--name` と `--slug` はどちらも必須で、作成しても現在のワークスペースは**切り替わりません**。作成したワークスペースで作業したい場合は、続けて `multica workspace switch <slug>` を実行してください。
 
 ```bash
-multica workspace create
+multica workspace create --name "Support Team" --slug support-team --issue-prefix SUP
 ```
 
 ## イシュー番号

@@ -24,7 +24,7 @@ func TestCLIConfig_BackwardCompat_OldFileLoadsWithNilBackends(t *testing.T) {
 	}
 	historical := `{
   "server_url": "https://api.multica.ai",
-  "app_url": "https://app.multica.ai",
+  "app_url": "https://multica.ai",
   "workspace_id": "ws-123",
   "token": "mul_abcdef"
 }`
@@ -177,7 +177,7 @@ func TestCLIConfig_ProfileCommandOverrides_RoundTrip(t *testing.T) {
 
 	original := CLIConfig{
 		ServerURL:   "https://api.multica.ai",
-		AppURL:      "https://app.multica.ai",
+		AppURL:      "https://multica.ai",
 		WorkspaceID: "ws-123",
 		Token:       "mul_xyz",
 		Backends: &BackendOverrides{
@@ -295,5 +295,44 @@ func TestCLIConfig_UnknownFieldsArePreserved(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(cfgDir, "config.json"))
 	if !strings.Contains(string(data), "future_backend_xyz") {
 		t.Error("unknown field future_backend_xyz was dropped on round-trip")
+	}
+}
+
+// TestCLIConfig_DaemonKnobs_RoundTrip verifies that every persisted
+// daemon knob added on top of #3824 survives a Save -> Load cycle,
+// including the tri-state AgentTimeout pointer (an explicit "0s" is
+// distinguishable from "not set"). If a future refactor accidentally
+// drops one of these fields from the schema, this test fails at write
+// time instead of silently losing the operator's config on restart.
+func TestCLIConfig_DaemonKnobs_RoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	zero := "0s"
+	original := CLIConfig{
+		HeartbeatInterval:              "5s",
+		AgentTimeout:                   &zero,
+		CodexSemanticInactivityTimeout: "15m",
+		CodexHandshakeTimeout:          "45s",
+		DisableAutoUpdate:              true,
+		AutoUpdateCheckInterval:        "12h",
+	}
+	if err := SaveCLIConfig(original); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadCLIConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.HeartbeatInterval != "5s" ||
+		loaded.CodexSemanticInactivityTimeout != "15m" ||
+		loaded.CodexHandshakeTimeout != "45s" ||
+		!loaded.DisableAutoUpdate ||
+		loaded.AutoUpdateCheckInterval != "12h" {
+		t.Errorf("scalar knobs lost on round-trip: %+v", loaded)
+	}
+	if loaded.AgentTimeout == nil || *loaded.AgentTimeout != "0s" {
+		t.Errorf("AgentTimeout tri-state lost: got %v, want &\"0s\"", loaded.AgentTimeout)
 	}
 }

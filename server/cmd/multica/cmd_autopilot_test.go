@@ -281,6 +281,56 @@ func TestRunAutopilotUpdateSendsProjectIDChanges(t *testing.T) {
 	})
 }
 
+func TestRunAutopilotUpdateAgentSwitchesAssigneeType(t *testing.T) {
+	const (
+		autopilotID = "33333333-3333-3333-3333-333333333333"
+		agentID     = "11111111-1111-1111-1111-111111111111"
+	)
+
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/agents":
+			json.NewEncoder(w).Encode([]map[string]any{{"id": agentID, "name": "Codex Agent"}})
+		case "/api/autopilots/" + autopilotID:
+			if r.Method != http.MethodPatch {
+				t.Errorf("method = %s, want PATCH", r.Method)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			if body["assignee_type"] != "agent" {
+				http.Error(w, "squad not found", http.StatusBadRequest)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":            autopilotID,
+				"assignee_type": body["assignee_type"],
+				"assignee_id":   body["assignee_id"],
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newAutopilotUpdateTestCmd()
+	_ = cmd.Flags().Set("agent", "Codex Agent")
+	if err := runAutopilotUpdate(cmd, []string{autopilotID}); err != nil {
+		t.Fatalf("runAutopilotUpdate: %v", err)
+	}
+	if got := body["assignee_id"]; got != agentID {
+		t.Fatalf("assignee_id = %#v, want %q", got, agentID)
+	}
+	if got := body["assignee_type"]; got != "agent" {
+		t.Fatalf("assignee_type = %#v, want agent", got)
+	}
+}
+
 func TestRunAutopilotUpdateSendsSubscriberReplacement(t *testing.T) {
 	const (
 		autopilotID = "33333333-3333-3333-3333-333333333333"

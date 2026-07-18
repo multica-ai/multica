@@ -103,3 +103,22 @@ describe("inline code paste rule", () => {
     expect(editor.getMarkdown().trim()).toBe("abcd`123`");
   });
 });
+
+describe("fenced code language", () => {
+  it("keeps a newly-created unlabelled code block unlabelled in Markdown", () => {
+    editor = makeProductionEditor();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "codeBlock",
+          content: [{ type: "text", text: "const answer = 42;" }],
+        },
+      ],
+    });
+
+    expect(editor.getMarkdown().trim()).toBe(
+      ["```", "const answer = 42;", "```"].join("\n"),
+    );
+  });
+});

@@ -316,6 +316,65 @@ func TestNotification_StatusChanged(t *testing.T) {
 	}
 }
 
+// TestNotification_StatusChanged_Muted verifies that status_changes="muted"
+// prevents a new Inbox row without affecting other subscribers.
+func TestNotification_StatusChanged_Muted(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	mutedEmail := "notif-muted-status@multica.ai"
+	mutedID := createTestUser(t, mutedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mutedEmail) })
+
+	normalEmail := "notif-normal-status@multica.ai"
+	normalID := createTestUser(t, normalEmail)
+	t.Cleanup(func() { cleanupTestUser(t, normalEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO notification_preference (workspace_id, user_id, preferences)
+		VALUES ($1, $2, '{"status_changes":"muted"}'::jsonb)
+	`, testWorkspaceID, mutedID); err != nil {
+		t.Fatalf("seed muted notification preference: %v", err)
+	}
+
+	addTestSubscriber(t, issueID, "member", mutedID, "commenter")
+	addTestSubscriber(t, issueID, "member", normalID, "commenter")
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "muted status test issue",
+				Status:      "in_progress",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+			},
+			"assignee_changed": false,
+			"status_changed":   true,
+			"prev_status":      "todo",
+		},
+	})
+
+	if items := inboxItemsForRecipient(t, queries, mutedID); len(items) != 0 {
+		t.Fatalf("expected muted subscriber to receive 0 items, got %d", len(items))
+	}
+	if items := inboxItemsForRecipient(t, queries, normalID); len(items) != 1 {
+		t.Fatalf("expected normal subscriber to receive 1 item, got %d", len(items))
+	}
+}
+
 // TestNotification_CommentCreated verifies that all subscribers except the
 // commenter receive a "new_comment" notification.
 func TestNotification_CommentCreated(t *testing.T) {
@@ -538,8 +597,8 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 				AssigneeType: &newAssigneeType,
 				AssigneeID:   &newAssigneeID,
 			},
-			"assignee_changed":  true,
-			"status_changed":    false,
+			"assignee_changed":   true,
+			"status_changed":     false,
 			"prev_assignee_type": &oldAssigneeType,
 			"prev_assignee_id":   &oldAssigneeID,
 		},

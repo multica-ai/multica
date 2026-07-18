@@ -465,6 +465,7 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		"invitation_id": uuidToString(accepted.ID),
 		"member":        memberResp,
 	})
+	h.notifyDaemonWorkspacesChanged(userID)
 
 	// days_since_invite rounds down to whole days so the funnel segments
 	// "accepted same day" cleanly from "accepted later". inv.CreatedAt is

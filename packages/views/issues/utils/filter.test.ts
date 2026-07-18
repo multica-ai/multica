@@ -39,6 +39,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     start_date: null,
     due_date: null,
     metadata: {},
+    properties: {},
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
     ...overrides,
@@ -381,5 +382,74 @@ describe("filterAssigneeGroups", () => {
       runningIssueIds: new Set(["C"]),
     });
     expect(result).toEqual([]);
+  });
+});
+
+describe("property filters", () => {
+  const sevId = "prop-severity";
+  const platId = "prop-platforms";
+  const doneId = "prop-done";
+  const critical = makeIssue({ id: "P1", properties: { [sevId]: "opt-critical" } });
+  const minor = makeIssue({ id: "P2", properties: { [sevId]: "opt-minor", [platId]: ["opt-ios", "opt-web"] } });
+  const unset = makeIssue({ id: "P3" });
+  const checked = makeIssue({ id: "P4", properties: { [doneId]: true } });
+
+  it("select values match by option id (OR within the definition)", () => {
+    const result = filterIssues([critical, minor, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-critical", "opt-minor"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1", "P2"]);
+  });
+
+  it("issues without a value never match a filtered definition", () => {
+    const result = filterIssues([critical, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-critical"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1"]);
+  });
+
+  it("multi_select matches on intersection", () => {
+    const result = filterIssues([critical, minor], {
+      ...NO_FILTER,
+      propertyFilters: { [platId]: ["opt-web"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P2"]);
+  });
+
+  it("checkbox values match the true/false pseudo-options", () => {
+    const result = filterIssues([checked, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [doneId]: ["true"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P4"]);
+  });
+
+  it("ANDs across definitions", () => {
+    const result = filterIssues([critical, minor], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-minor"], [platId]: ["opt-ios"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P2"]);
+  });
+
+  it("empty selections are inert", () => {
+    const result = filterIssues([critical, minor, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: [] },
+    });
+    expect(result).toHaveLength(3);
+  });
+
+  it("filterAssigneeGroups applies property filters per group", () => {
+    const groups: IssueAssigneeGroup[] = [
+      { id: "assignee:member:u-1", assignee_type: "member", assignee_id: "u-1", issues: [critical, minor], total: 2 },
+    ];
+    const result = filterAssigneeGroups(groups, {
+      propertyFilters: { [sevId]: ["opt-critical"] },
+    });
+    expect(result?.[0]?.issues.map((i) => i.id)).toEqual(["P1"]);
+    expect(result?.[0]?.total).toBe(1);
   });
 });

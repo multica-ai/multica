@@ -75,7 +75,10 @@ func TestRedisLocalSkillListStore_CreateGetComplete(t *testing.T) {
 			FileCount:   2,
 		},
 	}
-	if err := store.Complete(ctx, req.ID, skills, true); err != nil {
+	mcpServers := []RuntimeLocalMcpServerSummary{
+		{Name: "fetch", Transport: "stdio", Source: "User config", Enabled: true},
+	}
+	if err := store.Complete(ctx, req.ID, skills, true, mcpServers, true); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 
@@ -88,6 +91,9 @@ func TestRedisLocalSkillListStore_CreateGetComplete(t *testing.T) {
 	}
 	if len(got.Skills) != 1 || got.Skills[0].Key != "review-helper" {
 		t.Fatalf("skills not persisted: %+v", got.Skills)
+	}
+	if !got.McpSupported || len(got.McpServers) != 1 || got.McpServers[0].Name != "fetch" {
+		t.Fatalf("MCP inventory not persisted: %+v", got.McpServers)
 	}
 }
 

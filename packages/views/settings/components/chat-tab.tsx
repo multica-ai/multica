@@ -2,7 +2,14 @@
 
 import { Switch } from "@multica/ui/components/ui/switch";
 import { useChatStore } from "@multica/core/chat";
+import { toast } from "sonner";
 import { useT } from "../../i18n";
+import {
+  SettingsCard,
+  SettingsRow,
+  SettingsSection,
+  SettingsTab,
+} from "./settings-layout";
 
 /**
  * Chat settings — its own tab under "My Account". Currently just the
@@ -17,19 +24,26 @@ export function ChatTab() {
   const setEnabled = useChatStore((s) => s.setFloatingChatEnabled);
 
   return (
-    <div className="space-y-8">
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold">{t(($) => $.chat.floating_title)}</h2>
-        <label className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5 pr-4">
-            <p className="text-sm font-medium">{t(($) => $.chat.floating_label)}</p>
-            <p className="text-xs text-muted-foreground">
-              {t(($) => $.chat.floating_hint)}
-            </p>
-          </div>
-          <Switch checked={enabled} onCheckedChange={setEnabled} />
-        </label>
-      </section>
-    </div>
+    <SettingsTab title={t(($) => $.page.tabs.chat)}>
+      <SettingsSection title={t(($) => $.chat.floating_title)}>
+        <SettingsCard>
+          <SettingsRow
+            label={t(($) => $.chat.floating_label)}
+            description={t(($) => $.chat.floating_hint)}
+          >
+          <Switch
+            checked={enabled}
+            onCheckedChange={(checked) => {
+              setEnabled(checked);
+              toast.success(t(($) => $.auto_save.toast_saved), {
+                id: "settings-auto-save",
+              });
+            }}
+            aria-label={t(($) => $.chat.floating_label)}
+          />
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
+    </SettingsTab>
   );
 }

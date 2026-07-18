@@ -38,6 +38,7 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 | 命令 | 用途 |
 |---|---|
 | `multica workspace list` | 列出你有权访问的所有工作区 |
+| `multica workspace create --name "..." --slug "..." [--issue-prefix "..."] [--description "..."] [--context "..."]` | 创建工作区（你会成为 owner）。`--name` 和 `--slug` 必填，slug 创建后不可修改；不会切换你当前的工作区。 |
 | `multica workspace get <slug>` | 查看一个工作区的详情 |
 | `multica workspace member list` | 列出当前工作区的成员 |
 | `multica workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | 修改 workspace 元数据（admin/owner 权限）。长文本可用 `--description-stdin` / `--context-stdin`。 |

@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Plus } from "lucide-react";
+import { ChevronDown, Cpu, Loader2, Plus } from "lucide-react";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
 import {
   PickerItem,
   PropertyPicker,
@@ -30,6 +31,8 @@ export function ModelPicker({
   runtimeOnline,
   value,
   canEdit = true,
+  variant = "chip",
+  showLabel = true,
   onChange,
 }: {
   runtimeId: string | null;
@@ -37,6 +40,8 @@ export function ModelPicker({
   value: string;
   /** When false, render a static read-only display and skip the popover. */
   canEdit?: boolean;
+  variant?: "chip" | "field";
+  showLabel?: boolean;
   onChange: (next: string) => Promise<void> | void;
 }) {
   const { t } = useT("agents");
@@ -80,6 +85,23 @@ export function ModelPicker({
   };
 
   if (!supported && !modelsQuery.isLoading) {
+    if (variant === "field") {
+      const control = (
+        <div className="flex min-h-10 items-center gap-2 rounded-lg border border-dashed border-input bg-input/50 px-3 text-sm text-muted-foreground">
+          <Cpu className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="truncate italic">
+            {t(($) => $.pickers.model_managed_by_runtime)}
+          </span>
+        </div>
+      );
+      if (!showLabel) return control;
+      return (
+        <div className="flex min-w-0 flex-col">
+          <Label>{t(($) => $.inspector.prop_model)}</Label>
+          <div className="mt-1.5">{control}</div>
+        </div>
+      );
+    }
     return (
       <span className="truncate italic text-muted-foreground">
         {t(($) => $.pickers.model_managed_by_runtime)}
@@ -88,6 +110,21 @@ export function ModelPicker({
   }
 
   if (!canEdit) {
+    if (variant === "field") {
+      const control = (
+        <div className="flex min-h-10 items-center gap-2 rounded-lg border border-input bg-input/50 px-3 text-sm text-muted-foreground">
+          <Cpu className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate font-mono">{triggerLabel}</span>
+        </div>
+      );
+      if (!showLabel) return control;
+      return (
+        <div className="flex min-w-0 flex-col">
+          <Label>{t(($) => $.inspector.prop_model)}</Label>
+          <div className="mt-1.5">{control}</div>
+        </div>
+      );
+    }
     return (
       <span
         className="min-w-0 truncate px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
@@ -98,29 +135,62 @@ export function ModelPicker({
     );
   }
 
-  return (
+  const picker = (
     <PropertyPicker
       open={open}
       onOpenChange={setOpen}
-      width="w-auto min-w-[16rem] max-w-md"
+      width={
+        variant === "field"
+          ? "w-[var(--anchor-width)] min-w-[16rem] max-w-md"
+          : "w-auto min-w-[16rem] max-w-md"
+      }
       align="start"
       tooltip={triggerTitle}
       triggerRender={
         <button
           type="button"
-          className={CHIP_CLASS}
+          className={
+            variant === "field"
+              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
+              : CHIP_CLASS
+          }
           aria-label={triggerTitle}
         />
       }
       trigger={
-        <span className="min-w-0 truncate font-mono text-[11px]">
-          {triggerLabel}
-        </span>
+        <>
+          {variant === "field" ? (
+            <Cpu
+              className="h-4 w-4 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
+          ) : null}
+          <span
+            className={
+              variant === "field"
+                ? "min-w-0 flex-1 truncate font-mono"
+                : "min-w-0 truncate font-mono text-[11px]"
+            }
+          >
+            {triggerLabel}
+          </span>
+          {variant === "field" ? (
+            <ChevronDown
+              className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                open ? "rotate-180" : ""
+              }`}
+              aria-hidden="true"
+            />
+          ) : null}
+        </>
       }
       header={
         <div className="p-1.5">
           <Input
             autoFocus
+            name="agent-model-search"
+            autoComplete="off"
+            aria-label={t(($) => $.pickers.model_search_placeholder)}
             placeholder={t(($) => $.pickers.model_search_placeholder)}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -131,7 +201,10 @@ export function ModelPicker({
     >
       {modelsQuery.isLoading && (
         <div className="flex items-center gap-2 p-3 text-xs text-muted-foreground">
-          <Loader2 className="h-3 w-3 animate-spin" />
+          <Loader2
+            className="h-3 w-3 animate-spin motion-reduce:animate-none"
+            aria-hidden="true"
+          />
           {t(($) => $.pickers.model_discovering)}
         </div>
       )}
@@ -196,4 +269,16 @@ export function ModelPicker({
       )}
     </PropertyPicker>
   );
+
+  if (variant === "field") {
+    if (!showLabel) return picker;
+    return (
+      <div className="flex min-w-0 flex-col">
+        <Label>{t(($) => $.inspector.prop_model)}</Label>
+        {picker}
+      </div>
+    );
+  }
+
+  return picker;
 }

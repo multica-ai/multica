@@ -19,6 +19,14 @@
     "loading": "読み込み中…",
     "load_failed": "画像を読み込めませんでした"
   },
+  "color_picker": {
+    "saturation": "彩度と明度",
+    "hue": "色相",
+    "hex": "16進カラー",
+    "eyedropper": "画面から色を取得",
+    "presets": "プリセット",
+    "random": "ランダム"
+  },
   "save": "保存",
   "cancel": "キャンセル",
   "delete": "削除",

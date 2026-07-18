@@ -19,6 +19,14 @@
     "loading": "Loading…",
     "load_failed": "Couldn't load image"
   },
+  "color_picker": {
+    "saturation": "Saturation and brightness",
+    "hue": "Hue",
+    "hex": "Hex color",
+    "eyedropper": "Pick a color from the screen",
+    "presets": "Presets",
+    "random": "Random"
+  },
   "save": "Save",
   "cancel": "Cancel",
   "delete": "Delete",

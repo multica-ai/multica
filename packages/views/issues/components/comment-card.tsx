@@ -23,17 +23,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
-import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
+import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider, useUploadGate, useEditorUpload } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { api } from "@multica/core/api";
+import { api, dispatchReasonCode } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
@@ -278,7 +276,15 @@ function TaskCommentRetryButton({
     try {
       await api.rerunIssue(issueId, taskId);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
+      // Rerun re-checks the operator's invoke permission (MUL-4525); a
+      // structured 403 is a permission block, not a transient failure.
+      toast.error(
+        dispatchReasonCode(e) === "invocation_not_allowed"
+          ? t(($) => $.execution_log.retry_blocked)
+          : e instanceof Error
+            ? e.message
+            : t(($) => $.execution_log.retry_failed),
+      );
     } finally {
       setRetrying(false);
     }
@@ -315,10 +321,14 @@ function useEditAttachmentState(
   onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => Promise<void>,
 ) {
   const { t } = useT("issues");
-  const { uploadWithToast } = useFileUpload(api);
+  const { t: tEditor } = useT("editor");
+  const { uploadWithToast } = useEditorUpload();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const editorRef = useRef<ContentEditorRef>(null);
+  // Saving mid-upload would persist the edit without the file the user just
+  // pasted in — same failure as posting a new comment.
+  const uploadGate = useUploadGate(editorRef);
   const cancelledRef = useRef(false);
   const savingRef = useRef(false);
   const [content, setContent] = useState(entry.content ?? "");
@@ -404,6 +414,8 @@ function useEditAttachmentState(
 
   const saveEdit = async () => {
     if (cancelledRef.current || savingRef.current) return;
+    // Submit-time re-read — Cmd+Enter bypasses the Save button entirely.
+    if (uploadGate.isBlocked()) return;
     const trimmed = editorRef.current
       ?.getMarkdown()
       ?.replace(/(\n\s*)+$/, "")
@@ -447,12 +459,16 @@ function useEditAttachmentState(
   return {
     editing,
     saving,
+    uploading: uploadGate.uploading,
+    onUploadingChange: uploadGate.onUploadingChange,
+    uploadingLabel: tEditor(($) => $.upload.in_progress),
     editorRef,
     editorAttachments,
     handleUpload,
     isDragOver,
     dropZoneProps,
     triggerPreview,
+    content,
     suppressedAgentIds,
     toggleSuppressedAgent,
     draftKey,
@@ -625,6 +641,7 @@ function CommentRow({
               }}
               onSubmit={edit.saveEdit}
               onUploadFile={edit.handleUpload}
+              onUploadingChange={edit.onUploadingChange}
               debounceMs={100}
               currentIssueId={issueId}
               attachments={edit.editorAttachments}
@@ -647,6 +664,8 @@ function CommentRow({
             <div className="min-w-0 flex-1">
               <CommentTriggerChips
                 agents={edit.triggerPreview.agents}
+                blocked={edit.triggerPreview.blocked}
+                draftContent={edit.content}
                 suppressedAgentIds={edit.suppressedAgentIds}
                 onToggle={edit.toggleSuppressedAgent}
               />
@@ -658,9 +677,16 @@ function CommentRow({
                 onSelect={(file) => edit.editorRef.current?.uploadFile(file)}
               />
               <Button size="sm" variant="ghost" onClick={edit.cancelEdit} disabled={edit.saving}>{t(($) => $.comment.cancel_edit)}</Button>
-              <Button size="sm" variant="outline" onClick={edit.saveEdit} disabled={edit.saving}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={edit.saveEdit}
+                disabled={edit.saving || edit.uploading}
+                aria-disabled={edit.uploading || undefined}
+                aria-busy={edit.uploading || undefined}
+              >
                 {edit.saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                {t(($) => $.comment.save_action)}
+                {edit.uploading ? edit.uploadingLabel : t(($) => $.comment.save_action)}
               </Button>
             </div>
           </div>
@@ -718,7 +744,10 @@ function CommentCardImpl({
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
   const open = !isCollapsed;
-  const handleOpenChange = useCallback((_open: boolean) => toggleCollapse(issueId, entry.id), [toggleCollapse, issueId, entry.id]);
+  const handleToggle = useCallback(
+    () => toggleCollapse(issueId, entry.id),
+    [toggleCollapse, issueId, entry.id],
+  );
 
   const edit = useEditAttachmentState(issueId, entry, onEdit);
 
@@ -779,8 +808,7 @@ function CommentCardImpl({
           {t(($) => $.comment.resolve.collapse)}
         </button>
       )}
-      <Collapsible open={open} onOpenChange={handleOpenChange}>
-        {/* root-section — the sticky header's containing block. It wraps ONLY
+      {/* root-section — the sticky header's containing block. It wraps ONLY
             the header + root body, so the header releases the moment you scroll
             past the body into the replies (which render OUTSIDE this wrapper).
             That is what keeps exactly one header pinned at a time: without this
@@ -794,9 +822,15 @@ function CommentCardImpl({
             className="px-4 py-3"
           >
             <div className="flex items-center gap-2.5">
-              <CollapsibleTrigger className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
+              <button
+                type="button"
+                aria-expanded={open}
+                aria-controls={`comment-body-${entry.id}`}
+                onClick={handleToggle}
+                className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
                 <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
-              </CollapsibleTrigger>
+              </button>
               <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size="md" enableHoverCard showStatusDot />
               <span className="shrink-0 cursor-pointer text-sm font-medium">
                 {getActorName(entry.actor_type, entry.actor_id)}
@@ -893,10 +927,11 @@ function CommentCardImpl({
             </div>
           </StickyHeaderShell>
 
-        {/* Collapsible body */}
-        <CollapsibleContent>
-          {/* Parent comment body */}
-          <div className="px-4 pt-1 pb-3">
+        {/* Root comment body. Avoid Base UI's Panel here: every mounted panel
+            probes computed styles to detect animations, forcing a style
+            recalculation across long issue-detail documents. */}
+        {open && (
+          <div id={`comment-body-${entry.id}`} className="px-4 pt-1 pb-3">
             {edit.editing ? (
               <div
                 {...edit.dropZoneProps}
@@ -915,6 +950,7 @@ function CommentCardImpl({
                     }}
                     onSubmit={edit.saveEdit}
                     onUploadFile={edit.handleUpload}
+                    onUploadingChange={edit.onUploadingChange}
                     debounceMs={100}
                     currentIssueId={issueId}
                     attachments={edit.editorAttachments}
@@ -937,6 +973,8 @@ function CommentCardImpl({
                       )}
                     <CommentTriggerChips
                       agents={edit.triggerPreview.agents}
+                      blocked={edit.triggerPreview.blocked}
+                      draftContent={edit.content}
                       suppressedAgentIds={edit.suppressedAgentIds}
                       onToggle={edit.toggleSuppressedAgent}
                     />
@@ -948,9 +986,16 @@ function CommentCardImpl({
                   </div>
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="ghost" onClick={edit.cancelEdit} disabled={edit.saving}>{t(($) => $.comment.cancel_edit)}</Button>
-                    <Button size="sm" variant="outline" onClick={edit.saveEdit} disabled={edit.saving}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={edit.saveEdit}
+                      disabled={edit.saving || edit.uploading}
+                      aria-disabled={edit.uploading || undefined}
+                      aria-busy={edit.uploading || undefined}
+                    >
                       {edit.saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      {t(($) => $.comment.save_action)}
+                      {edit.uploading ? edit.uploadingLabel : t(($) => $.comment.save_action)}
                     </Button>
                   </div>
                 </div>
@@ -979,7 +1024,7 @@ function CommentCardImpl({
               </>
             )}
           </div>
-        </CollapsibleContent>
+        )}
         </div>
 
         {/* Replies + reply input — rendered OUTSIDE root-section so the root
@@ -1077,7 +1122,6 @@ function CommentCardImpl({
           )}
           </>
         )}
-      </Collapsible>
     </Card>
   );
 }

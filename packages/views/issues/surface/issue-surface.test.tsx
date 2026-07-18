@@ -23,6 +23,21 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => mockWsId.current,
 }));
 
+// The list/board virtualize their rows via react-virtuoso; jsdom has no layout
+// so the real Virtuoso renders nothing (and throws on its resize plumbing).
+// Render items inline so these surface-level loading-semantics assertions still
+// see the issues the virtualized list would show.
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: ({ data, itemContent, components }: any) => (
+    <div data-testid="virtuoso-mock">
+      {(data ?? []).map((item: any, i: number) => (
+        <div key={i}>{itemContent(i, item)}</div>
+      ))}
+      {components?.Footer ? <components.Footer /> : null}
+    </div>
+  ),
+}));
+
 const mockAuthUser = { id: "user-1", email: "test@test.com", name: "Test User" };
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
@@ -37,7 +52,8 @@ vi.mock("@multica/core/auth", () => ({
 }));
 
 vi.mock("../../i18n", () => ({
-  useT: () => ({ t: () => "translated" }),
+  // TableView also reads `i18n.language` for its date formatting.
+  useT: () => ({ t: () => "translated", i18n: { language: "en" } }),
   useTimeAgo: () => () => "now",
 }));
 
@@ -83,6 +99,7 @@ function makeIssue(id: string, title: string, projectId: string): Issue {
     due_date: null,
     labels: [],
     metadata: {},
+    properties: {},
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   };
@@ -227,5 +244,115 @@ describe("IssueSurface — scope switch loading semantics", () => {
 
     expect(screen.getByTestId("surface-loading")).toBeInTheDocument();
     expect(screen.queryByText("WS1 issue")).not.toBeInTheDocument();
+  });
+});
+
+describe("IssueSurface — table pagination ownership", () => {
+  let qc: QueryClient;
+  let listIssues: ReturnType<
+    typeof vi.fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>
+  >;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    listIssues = vi.fn(() => never<ListIssuesResponse>());
+    pruneIssueSurfaceViewStates([]);
+    mockWsId.current = "ws-1";
+    // jsdom has no IntersectionObserver; the table footer sentinel constructs
+    // one on mount. A stub that never fires keeps the sentinel inert, so the
+    // structure loop is the only automatic pagination driver under test.
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+  });
+
+  afterEach(() => {
+    cleanup();
+    qc.clear();
+    pruneIssueSurfaceViewStates([]);
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("requests each offset exactly once while the agents-working filter is on", async () => {
+    // With the filter on, the working window IS the main table window (same
+    // query key). The data hook's chip loop and TableView's structure loop
+    // used to both answer the same render snapshot with fetchNextPage(),
+    // and the default cancel/restart semantics doubled every offset's HTTP
+    // request (round-6 review R1). Ownership now belongs to the structure
+    // loop alone, and all auto callers use cancelRefetch: false.
+    const { getIssueSurfaceViewStore } = await import(
+      "@multica/core/issues/stores/surface-view-store"
+    );
+    const store = getIssueSurfaceViewStore("project:pt");
+    store.getState().setViewMode("table");
+    if (!store.getState().agentRunningFilter) {
+      store.getState().toggleAgentRunningFilter();
+    }
+
+    const runningIssues = Array.from({ length: 250 }, (_, index) => ({
+      ...makeIssue(`run-${index}`, `Running ${index}`, "pt"),
+      status: "in_progress" as const,
+    }));
+    const idsOffsets: number[] = [];
+    listIssues.mockImplementation((params?: ListIssuesParams) => {
+      // A PRESENT-but-empty ids facet is the pre-snapshot state and returns
+      // an empty window (server semantics) — only the real running-set key's
+      // offsets count toward the uniqueness assertion.
+      if (params?.ids && params.ids.length > 0) {
+        const offset = params.offset ?? 0;
+        idsOffsets.push(offset);
+        return Promise.resolve({
+          issues: runningIssues.slice(offset, offset + 100),
+          total: runningIssues.length,
+        });
+      }
+      return Promise.resolve({ issues: [], total: 0 });
+    });
+    setApiInstance({
+      listIssues,
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      getAgentTaskSnapshot: vi.fn(() =>
+        Promise.resolve(
+          runningIssues.map((issue, index) => ({
+            id: `task-${index}`,
+            agent_id: `agent-${index}`,
+            issue_id: issue.id,
+            status: "running",
+          })) as unknown as AgentTask[],
+        ),
+      ),
+      getChildIssueProgress: vi.fn(() => never()),
+      listProperties: vi.fn(() => never()),
+      listMembers: vi.fn(() => never()),
+      listAgents: vi.fn(() => never()),
+      listSquads: vi.fn(() => never()),
+    } as unknown as ApiClient);
+
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "pt" }}
+          modes={["table"]}
+          renderHeader={() => null}
+          renderLoading={() => <div data-testid="surface-loading" />}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+
+    // The structure loop (hierarchy is on by default, 250 ≤ ceiling)
+    // materializes the window without user interaction.
+    await waitFor(() => expect(idsOffsets).toContain(200), { timeout: 5000 });
+    // Let any straggling (buggy) second responder fire before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect([...idsOffsets].sort((a, b) => a - b)).toEqual([0, 100, 200]);
   });
 });

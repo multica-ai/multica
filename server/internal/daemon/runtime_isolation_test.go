@@ -63,336 +63,6 @@ func TestRuntimeSetWatcherFanOut(t *testing.T) {
 	}
 }
 
-// TestRunRuntimePollerIsolatesSlowRuntime is the regression test for
-// MUL-1744's main symptom: a slow ClaimTask on one runtime must not delay
-// claims on any other runtime. The pre-refactor pollLoop's serial round-
-// robin made every runtime wait behind the slow one's HTTP roundtrip.
-//
-// MaxConcurrentTasks=4 leaves headroom so each runtime gets its own slot.
-// The poller does acquire a slot before claiming (see runRuntimePoller for
-// why), so this test deliberately uses a capacity that fits both runtimes
-// concurrently — that's the case where slot-before-claim still gives full
-// isolation.
-func TestRunRuntimePollerIsolatesSlowRuntime(t *testing.T) {
-	t.Parallel()
-
-	var fastClaims atomic.Int64
-	slowEntered := make(chan struct{}, 1)
-	releaseSlow := make(chan struct{})
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		switch {
-		case strings.HasSuffix(path, "/runtimes/runtime-slow/tasks/claim"):
-			select {
-			case slowEntered <- struct{}{}:
-			default:
-			}
-			select {
-			case <-releaseSlow:
-			case <-r.Context().Done():
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"task":null}`))
-		case strings.HasSuffix(path, "/runtimes/runtime-fast/tasks/claim"):
-			fastClaims.Add(1)
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"task":null}`))
-		default:
-			http.Error(w, "unexpected path: "+path, http.StatusNotFound)
-		}
-	}))
-	defer srv.Close()
-	defer close(releaseSlow)
-
-	d := New(Config{
-		ServerBaseURL:      srv.URL,
-		HeartbeatInterval:  time.Hour, // disable WS-suppression effects
-		PollInterval:       50 * time.Millisecond,
-		MaxConcurrentTasks: 4,
-	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
-	var taskWG sync.WaitGroup
-
-	slowCtx, slowCancel := context.WithCancel(ctx)
-	defer slowCancel()
-	go d.runRuntimePoller(slowCtx, ctx, "runtime-slow", sem, make(chan struct{}, 1), &taskWG)
-
-	fastCtx, fastCancel := context.WithCancel(ctx)
-	defer fastCancel()
-	go d.runRuntimePoller(fastCtx, ctx, "runtime-fast", sem, make(chan struct{}, 1), &taskWG)
-
-	// Wait for the slow handler to actually enter (so we know its claim is
-	// in flight) before checking fast-runtime progress.
-	select {
-	case <-slowEntered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("slow runtime claim never entered server handler")
-	}
-
-	// Within a short window, the fast runtime should issue several claims.
-	// Pre-isolation, it would be stuck behind the still-blocked slow claim.
-	deadline := time.After(2 * time.Second)
-	for fastClaims.Load() < 3 {
-		select {
-		case <-deadline:
-			t.Fatalf("fast runtime made only %d claims while slow runtime blocked; expected ≥3", fastClaims.Load())
-		case <-time.After(20 * time.Millisecond):
-		}
-	}
-}
-
-// TestRunRuntimePollerSkipsClaimWhenAtCapacity pins the slot-before-claim
-// invariant: when no execution slots are available, the poller must NOT
-// call ClaimTask. Pre-claiming and then waiting for a slot would let the
-// task pile up in server-side `dispatched` state and race the 5-minute
-// `dispatchTimeoutSeconds` sweeper, recreating the exact failure mode this
-// issue is fixing.
-func TestRunRuntimePollerSkipsClaimWhenAtCapacity(t *testing.T) {
-	t.Parallel()
-
-	var claimAttempts atomic.Int64
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/tasks/claim") {
-			claimAttempts.Add(1)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"task":null}`))
-	}))
-	defer srv.Close()
-
-	d := New(Config{
-		ServerBaseURL:      srv.URL,
-		HeartbeatInterval:  time.Hour,
-		PollInterval:       20 * time.Millisecond,
-		MaxConcurrentTasks: 1,
-	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Drain the only slot to simulate a long-running handleTask occupying
-	// capacity. The poller must observe an empty sem and skip ClaimTask.
-	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
-	<-sem // hold it: never returned during this test
-
-	var taskWG sync.WaitGroup
-	go d.runRuntimePoller(ctx, ctx, "runtime-busy", sem, make(chan struct{}, 1), &taskWG)
-
-	// Give the poller several PollInterval ticks to race against the empty
-	// sem. With slot-before-claim it must report zero claim attempts; the
-	// older "claim first" path would have hammered ClaimTask each tick.
-	time.Sleep(200 * time.Millisecond)
-
-	if got := claimAttempts.Load(); got != 0 {
-		t.Fatalf("poller called ClaimTask %d times while at capacity; want 0 — pre-claiming risks server-side dispatch_timeout", got)
-	}
-}
-
-func TestRunRuntimePollerClaimsWhenSlotBecomesAvailable(t *testing.T) {
-	t.Parallel()
-
-	var claimAttempts atomic.Int64
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/tasks/claim") {
-			claimAttempts.Add(1)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"task":null}`))
-	}))
-	defer srv.Close()
-
-	d := New(Config{
-		ServerBaseURL:      srv.URL,
-		HeartbeatInterval:  time.Hour,
-		PollInterval:       time.Hour,
-		MaxConcurrentTasks: 1,
-	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
-	slot := <-sem
-
-	var taskWG sync.WaitGroup
-	wakeup := make(chan struct{}, 1)
-	go d.runRuntimePoller(ctx, ctx, "runtime-waiting", sem, wakeup, &taskWG)
-	wakeup <- struct{}{}
-
-	time.Sleep(100 * time.Millisecond)
-	if got := claimAttempts.Load(); got != 0 {
-		t.Fatalf("poller claimed before a slot was available; got %d claims", got)
-	}
-
-	sem <- slot
-
-	deadline := time.After(2 * time.Second)
-	for claimAttempts.Load() < 1 {
-		select {
-		case <-deadline:
-			t.Fatal("poller did not claim after a slot became available")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
-// TestPollLoopShutdownWaitsForPollersBeforeTaskWG is a race-detector
-// regression for the WaitGroup misuse GPT-Boy flagged: pollLoop must not
-// call taskWG.Wait while a poller goroutine could still execute
-// taskWG.Add(1). The supervisor uses a separate pollerWG that this test
-// implicitly exercises by running shutdown concurrently with a task being
-// dispatched.
-func TestPollLoopShutdownWaitsForPollersBeforeTaskWG(t *testing.T) {
-	t.Parallel()
-
-	taskID := "00000000-0000-0000-0000-000000000001"
-	releaseClaim := make(chan struct{})
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.HasSuffix(path, "/tasks/claim"):
-			// Block until the test releases. When released, return a real task
-			// so the poller proceeds into the slot/dispatch path — exactly the
-			// window where taskWG.Add(1) races with shutdown's taskWG.Wait.
-			select {
-			case <-releaseClaim:
-			case <-r.Context().Done():
-				w.Write([]byte(`{"task":null}`))
-				return
-			}
-			w.Write([]byte(`{"task":{"id":"` + taskID + `","runtime_id":"runtime-1","issue_id":"issue-1","agent":{"name":"test"}}}`))
-		case strings.HasSuffix(path, "/start"):
-			w.Write([]byte(`{}`))
-		case strings.HasSuffix(path, "/fail"):
-			w.Write([]byte(`{}`))
-		case strings.HasSuffix(path, "/complete"):
-			w.Write([]byte(`{}`))
-		case strings.HasSuffix(path, "/progress"):
-			w.Write([]byte(`{}`))
-		default:
-			w.Write([]byte(`{}`))
-		}
-	}))
-	defer srv.Close()
-
-	d := New(Config{
-		ServerBaseURL:      srv.URL,
-		HeartbeatInterval:  time.Hour,
-		PollInterval:       50 * time.Millisecond,
-		MaxConcurrentTasks: 1,
-	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
-	d.workspaces["ws-1"] = &workspaceState{
-		workspaceID: "ws-1",
-		runtimeIDs:  []string{"runtime-1"},
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	pollDone := make(chan error, 1)
-	go func() {
-		pollDone <- d.pollLoop(ctx, nil)
-	}()
-
-	// Let the poller enter ClaimTask, then trigger shutdown right as the
-	// claim is about to return a task. The race is the window between
-	// ClaimTask returning and taskWG.Add(1) executing.
-	time.Sleep(100 * time.Millisecond)
-	close(releaseClaim)
-	cancel()
-
-	select {
-	case <-pollDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("pollLoop did not return within shutdown deadline")
-	}
-}
-
-func TestPollLoopTargetsRuntimeWakeup(t *testing.T) {
-	t.Parallel()
-
-	var fastClaims atomic.Int64
-	var slowClaims atomic.Int64
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		switch {
-		case strings.HasSuffix(path, "/runtimes/runtime-fast/tasks/claim"):
-			fastClaims.Add(1)
-		case strings.HasSuffix(path, "/runtimes/runtime-slow/tasks/claim"):
-			slowClaims.Add(1)
-		default:
-			http.Error(w, "unexpected path: "+path, http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"task":null}`))
-	}))
-	defer srv.Close()
-
-	d := New(Config{
-		ServerBaseURL:      srv.URL,
-		HeartbeatInterval:  time.Hour,
-		PollInterval:       time.Hour,
-		MaxConcurrentTasks: 4,
-	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
-	d.workspaces["ws-1"] = &workspaceState{
-		workspaceID: "ws-1",
-		runtimeIDs:  []string{"runtime-fast", "runtime-slow"},
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	taskWakeups := make(chan taskWakeup, 1)
-	pollDone := make(chan error, 1)
-	go func() {
-		pollDone <- d.pollLoop(ctx, taskWakeups)
-	}()
-
-	taskWakeups <- taskWakeup{}
-
-	deadline := time.After(2 * time.Second)
-	for fastClaims.Load() < 1 || slowClaims.Load() < 1 {
-		select {
-		case <-deadline:
-			t.Fatalf("initial poll did not claim both runtimes; fast=%d slow=%d", fastClaims.Load(), slowClaims.Load())
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-
-	fastClaims.Store(0)
-	slowClaims.Store(0)
-	taskWakeups <- taskWakeup{runtimeID: "runtime-fast"}
-
-	deadline = time.After(2 * time.Second)
-	for fastClaims.Load() < 1 {
-		select {
-		case <-deadline:
-			t.Fatal("targeted wakeup did not wake runtime-fast")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-
-	time.Sleep(100 * time.Millisecond)
-	if got := slowClaims.Load(); got != 0 {
-		t.Fatalf("targeted wakeup woke runtime-slow %d times; want 0", got)
-	}
-
-	cancel()
-	select {
-	case <-pollDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("pollLoop did not stop")
-	}
-}
-
 // TestRunRuntimeHeartbeatIsolatesSlowRuntime is the heartbeat-side mirror of
 // the poll-isolation test: a slow SendHeartbeat for one runtime must not
 // block other runtimes' heartbeats.
@@ -461,3 +131,290 @@ func TestRunRuntimeHeartbeatIsolatesSlowRuntime(t *testing.T) {
 type noopWriter struct{}
 
 func (noopWriter) Write(p []byte) (int, error) { return len(p), nil }
+
+// TestRunBatchPollerClaimsAcrossRuntimes pins the machine-level cutover
+// (MUL-4257): a single batch poller issues one claim across ALL of the daemon's
+// runtimes (HTTP fallback here, since no WS is attached) and dispatches each
+// returned task to its runtime.
+func TestRunBatchPollerClaimsAcrossRuntimes(t *testing.T) {
+	t.Parallel()
+
+	var claimCalls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/api/daemon/tasks/claim") {
+			if claimCalls.Add(1) == 1 {
+				w.Write([]byte(`{"tasks":[
+					{"id":"t1","runtime_id":"rt-1","issue_id":"i1","agent":{"name":"a"}},
+					{"id":"t2","runtime_id":"rt-2","issue_id":"i2","agent":{"name":"b"}}
+				]}`))
+				return
+			}
+			w.Write([]byte(`{"tasks":[]}`))
+			return
+		}
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	d := New(Config{
+		ServerBaseURL:      srv.URL,
+		HeartbeatInterval:  time.Hour,
+		PollInterval:       20 * time.Millisecond,
+		MaxConcurrentTasks: 4,
+	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1", runtimeIDs: []string{"rt-1", "rt-2"}}
+	d.cancelPollInterval = time.Hour // no server-side cancellation polling in this test
+
+	var mu sync.Mutex
+	dispatched := map[string]int{}
+	d.runner = taskRunnerFunc(func(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error) {
+		mu.Lock()
+		dispatched[task.RuntimeID]++
+		mu.Unlock()
+		return TaskResult{Status: "completed"}, nil
+	})
+
+	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
+	var taskWG sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.runBatchPoller(ctx, ctx, sem, make(chan struct{}, 1), &taskWG)
+
+	deadline := time.After(3 * time.Second)
+	for {
+		mu.Lock()
+		got1, got2 := dispatched["rt-1"], dispatched["rt-2"]
+		mu.Unlock()
+		if got1 >= 1 && got2 >= 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("batch poller did not dispatch both runtimes; got rt-1=%d rt-2=%d", got1, got2)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	cancel()
+	taskWG.Wait()
+}
+
+// TestRunBatchPollerWakesAfterTaskExit guards the gap where a queued task is
+// temporarily unclaimable (for example, because the same agent/issue task is
+// still running), the batch claim returns empty, and the poller goes to sleep
+// for PollInterval. Finishing the active task must wake that sleep locally;
+// relying only on the enqueue-time websocket hint can leave the successor
+// queued for the full default 30 seconds.
+func TestRunBatchPollerWakesAfterTaskExit(t *testing.T) {
+	t.Parallel()
+	testRunBatchPollerTaskExitWakeup(t, 2, 50*time.Millisecond)
+}
+
+// The max-concurrency=1 shape takes a different sleep branch: after the
+// two-second slot wait expires, the poller parks on the five-second capacity
+// backoff. A returned semaphore slot alone does not wake that sleep, so the
+// explicit completion signal is required there too.
+func TestRunBatchPollerWakesFromCapacityBackoffAfterTaskExit(t *testing.T) {
+	t.Parallel()
+	testRunBatchPollerTaskExitWakeup(t, 1, taskSlotWaitTimeout+250*time.Millisecond)
+}
+
+func testRunBatchPollerTaskExitWakeup(t *testing.T, maxConcurrent int, releaseDelay time.Duration) {
+	t.Helper()
+
+	var firstCompleted atomic.Bool
+	var secondServed atomic.Bool
+	var claimCalls atomic.Int64
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondStarted := make(chan struct{})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/api/daemon/tasks/claim"):
+			claimCalls.Add(1)
+			switch {
+			case !firstCompleted.Load():
+				w.Write([]byte(`{"tasks":[{"id":"t1","runtime_id":"rt-1","issue_id":"i1","agent":{"name":"a"}}]}`))
+			case secondServed.CompareAndSwap(false, true):
+				w.Write([]byte(`{"tasks":[{"id":"t2","runtime_id":"rt-1","issue_id":"i1","agent":{"name":"a"}}]}`))
+			default:
+				w.Write([]byte(`{"tasks":[]}`))
+			}
+		case strings.HasSuffix(r.URL.Path, "/api/daemon/tasks/t1/complete"):
+			firstCompleted.Store(true)
+			w.Write([]byte(`{}`))
+		default:
+			w.Write([]byte(`{}`))
+		}
+	}))
+	defer srv.Close()
+
+	d := New(Config{
+		ServerBaseURL:      srv.URL,
+		HeartbeatInterval:  time.Hour,
+		PollInterval:       time.Hour,
+		MaxConcurrentTasks: maxConcurrent,
+	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1", runtimeIDs: []string{"rt-1"}}
+	d.runtimeIndex["rt-1"] = Runtime{ID: "rt-1"}
+	d.cancelPollInterval = time.Hour
+	d.runner = taskRunnerFunc(func(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error) {
+		switch task.ID {
+		case "t1":
+			close(firstStarted)
+			select {
+			case <-releaseFirst:
+			case <-ctx.Done():
+				return TaskResult{Status: "cancelled"}, ctx.Err()
+			}
+		case "t2":
+			close(secondStarted)
+		}
+		return TaskResult{Status: "completed"}, nil
+	})
+
+	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
+	wakeup := make(chan struct{}, 1)
+	var taskWG sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
+	pollDone := make(chan struct{})
+	go func() {
+		defer close(pollDone)
+		d.runBatchPoller(ctx, ctx, sem, wakeup, &taskWG)
+	}()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-pollDone
+		t.Fatal("first task was not dispatched")
+	}
+
+	// Give the poller time to enter the sleep branch under test. No websocket
+	// wakeup is sent; only the task-exit signal may resume the poller.
+	time.Sleep(releaseDelay)
+	close(releaseFirst)
+
+	select {
+	case <-secondStarted:
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-pollDone
+		t.Fatalf("successor was not dispatched after predecessor exit; claim calls=%d", claimCalls.Load())
+	}
+
+	cancel()
+	<-pollDone
+	taskWG.Wait()
+}
+
+func TestSignalPollerWakeupCoalescesAndIsNilSafe(t *testing.T) {
+	t.Parallel()
+	wakeup := make(chan struct{}, 1)
+	signalPollerWakeup(wakeup)
+	signalPollerWakeup(wakeup)
+	if got := len(wakeup); got != 1 {
+		t.Fatalf("coalesced wakeup count = %d, want 1", got)
+	}
+
+	// A nil channel models a poller that has no local wakeup transport. The
+	// non-blocking helper must return instead of hanging a finishing task.
+	done := make(chan struct{})
+	go func() {
+		signalPollerWakeup(nil)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("nil poller wakeup blocked")
+	}
+}
+
+// TestRunBatchPollerSkipsClaimWhenAtCapacity pins slot-before-claim for the
+// batch poller: with no free execution slots it must NOT claim, so tasks never
+// pile up server-side `dispatched` and race the dispatch-timeout sweeper.
+func TestRunBatchPollerSkipsClaimWhenAtCapacity(t *testing.T) {
+	t.Parallel()
+
+	var claimAttempts atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/claim") {
+			claimAttempts.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tasks":[]}`))
+	}))
+	defer srv.Close()
+
+	d := New(Config{
+		ServerBaseURL:      srv.URL,
+		HeartbeatInterval:  time.Hour,
+		PollInterval:       20 * time.Millisecond,
+		MaxConcurrentTasks: 1,
+	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1", runtimeIDs: []string{"rt-1"}}
+
+	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
+	<-sem // hold the only slot for the whole test
+
+	var taskWG sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
+	go d.runBatchPoller(ctx, ctx, sem, make(chan struct{}, 1), &taskWG)
+
+	time.Sleep(200 * time.Millisecond)
+	if got := claimAttempts.Load(); got != 0 {
+		t.Fatalf("batch poller claimed %d times while at capacity; want 0", got)
+	}
+	cancel()
+}
+
+// TestPollLoopBatchShutdown pins that pollLoop stops its single batch poller and
+// returns promptly on ctx cancel even with a task in flight.
+func TestPollLoopBatchShutdown(t *testing.T) {
+	t.Parallel()
+
+	releaseRun := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/api/daemon/tasks/claim") {
+			w.Write([]byte(`{"tasks":[{"id":"t1","runtime_id":"rt-1","issue_id":"i1","agent":{"name":"a"}}]}`))
+			return
+		}
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	defer close(releaseRun)
+
+	d := New(Config{
+		ServerBaseURL:      srv.URL,
+		HeartbeatInterval:  time.Hour,
+		PollInterval:       20 * time.Millisecond,
+		MaxConcurrentTasks: 1,
+	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1", runtimeIDs: []string{"rt-1"}}
+	d.cancelPollInterval = time.Hour
+	d.runner = taskRunnerFunc(func(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error) {
+		// Block until the test releases or the run ctx is cancelled by shutdown.
+		select {
+		case <-releaseRun:
+		case <-ctx.Done():
+		}
+		return TaskResult{Status: "completed"}, nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	pollDone := make(chan error, 1)
+	go func() { pollDone <- d.pollLoop(ctx, nil) }()
+
+	time.Sleep(150 * time.Millisecond) // let it claim + enter the in-flight run
+	cancel()
+	select {
+	case <-pollDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pollLoop did not return within shutdown deadline")
+	}
+}

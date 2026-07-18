@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import { onInboxIssueDeleted, onInboxIssueStatusChanged, onInboxSummaryInvalidate } from "./ws-updaters";
+import {
+  onInboxInvalidate,
+  onInboxIssueDeleted,
+  onInboxIssueStatusChanged,
+  onInboxSummaryInvalidate,
+} from "./ws-updaters";
 import { inboxKeys } from "./queries";
 import type { InboxItem } from "../types";
 
@@ -49,10 +54,53 @@ describe("onInboxIssueDeleted", () => {
     expect(after?.map((i) => i.id)).toEqual(["i3", "i4"]);
   });
 
+  it("also strips the issue from the archived list", () => {
+    // Deleting an issue removes its rows whether they were archived or not, so
+    // leaving them in the archived cache would render a row that 404s on tap.
+    const qc = new QueryClient();
+    qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), [
+      makeItem("a1", "issue-a", { archived: true }),
+      makeItem("a2", "issue-b", { archived: true }),
+    ]);
+
+    onInboxIssueDeleted(qc, wsId, "issue-a");
+
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.archived(wsId))?.map((i) => i.id),
+    ).toEqual(["a2"]);
+  });
+
   it("is a no-op when the inbox cache is empty", () => {
     const qc = new QueryClient();
     expect(() => onInboxIssueDeleted(qc, wsId, "issue-a")).not.toThrow();
     expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))).toBeUndefined();
+  });
+});
+
+describe("onInboxInvalidate", () => {
+  it("invalidates the workspace prefix, covering both the main and archived lists", () => {
+    // Every inbox event can move an item across the two lists, so they are
+    // always refreshed together (MUL-3736).
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+
+    onInboxInvalidate(qc, wsId);
+
+    expect(spy).toHaveBeenCalledWith({ queryKey: inboxKeys.all(wsId) });
+  });
+
+  it("does not reach the account-level summary key", () => {
+    // The summary is keyed ["inbox", "unread-summary"], NOT under the
+    // workspace prefix — its own updater owns it.
+    const qc = new QueryClient();
+    qc.setQueryData(inboxKeys.unreadSummary(), [{ workspace_id: wsId, count: 3 }]);
+    const summaryQuery = qc
+      .getQueryCache()
+      .find({ queryKey: inboxKeys.unreadSummary() });
+
+    onInboxInvalidate(qc, wsId);
+
+    expect(summaryQuery?.state.isInvalidated).toBe(false);
   });
 });
 
@@ -92,5 +140,18 @@ describe("onInboxIssueStatusChanged", () => {
     const after = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
     expect(after?.find((i) => i.id === "i1")?.issue_status).toBe("done");
     expect(after?.find((i) => i.id === "i2")?.issue_status).toBe("todo");
+  });
+
+  it("patches archived rows too, which render the same status icon", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), [
+      makeItem("a1", "issue-a", { archived: true, issue_status: "todo" }),
+    ]);
+
+    onInboxIssueStatusChanged(qc, wsId, "issue-a", "done");
+
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.archived(wsId))?.[0]?.issue_status,
+    ).toBe("done");
   });
 });

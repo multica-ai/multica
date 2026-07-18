@@ -94,7 +94,11 @@ import type {
   ProjectStatus,
   UpdateProjectRequest,
 } from "@multica/core/types";
-import { PageHeader } from "../../layout/page-header";
+import {
+  CollectionPageHeader,
+  CollectionPageHeaderAction,
+  CollectionPageState,
+} from "../../layout/collection-page";
 import { ProjectIcon } from "./project-icon";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -913,36 +917,29 @@ export function ProjectsPage() {
   return (
     // relative: positioning anchor for the page-centered batch toolbar.
     <div className="relative flex flex-1 min-h-0 flex-col">
-      <PageHeader className="justify-between px-5">
-        <div className="flex items-center gap-2">
-          <FolderKanban className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
-          {projects.length > 0 && (
-            <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-              {projects.length}
-            </span>
-          )}
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-          aria-label={t(($) => $.page.new_project)}
-          onClick={openCreateProject}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">{t(($) => $.page.new_project)}</span>
-        </Button>
-      </PageHeader>
+      <CollectionPageHeader
+        icon={FolderKanban}
+        title={t(($) => $.page.title)}
+        count={projects.length}
+        actions={
+          <CollectionPageHeaderAction
+            icon={Plus}
+            label={t(($) => $.page.new_project)}
+            onClick={openCreateProject}
+          />
+        }
+      />
 
       {showEmpty ? (
-        <div className="flex flex-1 flex-col items-center justify-center py-24 text-muted-foreground">
-          <FolderKanban className="mb-3 h-10 w-10 opacity-30" />
-          <p className="text-sm">{t(($) => $.page.empty)}</p>
-          <Button size="sm" variant="outline" className="mt-3" onClick={openCreateProject}>
-            {t(($) => $.page.create_first)}
-          </Button>
-        </div>
+        <CollectionPageState
+          icon={FolderKanban}
+          title={t(($) => $.page.empty)}
+          actions={
+            <Button size="sm" variant="outline" onClick={openCreateProject}>
+              {t(($) => $.page.create_first)}
+            </Button>
+          }
+        />
       ) : (
         <>
           {/* Toolbar */}
@@ -953,6 +950,7 @@ export function ProjectsPage() {
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
+                  aria-label={t(($) => $.page.search_placeholder)}
                   placeholder={t(($) => $.page.search_placeholder)}
                   className="h-8 w-56 pl-8 text-sm"
                 />

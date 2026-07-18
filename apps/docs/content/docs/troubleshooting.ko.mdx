@@ -279,9 +279,12 @@ netstat -ano | findstr :8080    # Windows
 | 구성 요소 | 위치 | 명령 |
 |---|---|---|
 | **데몬** | `~/.multica/daemon.log`(백그라운드 모드) 또는 포그라운드 stdout | `multica daemon logs -f --lines 100` |
+| **데몬(크래시)** | `~/.multica/daemon.err.log` | 직접 열기 — 패닉/초기 시작 오류가 여기에 기록됩니다 |
 | **서버(Docker)** | 컨테이너 stdout | `docker logs -f <container>` |
 | **서버(systemd)** | journal | `journalctl -u multica-server -f` |
 | **프런트엔드(dev)** | `pnpm dev`를 실행 중인 터미널 | 직접 확인 |
 | **프런트엔드(브라우저)** | DevTools → Console | `F12`를 누르세요 |
 
-더 자세한 데몬 로그가 필요하면, 데몬을 백그라운드에서 포그라운드로 옮기세요: `multica daemon stop && multica daemon start --foreground`.
+백그라운드 모드에서 `daemon.log`는 크기 기준으로 로테이션되므로(기본값 20MB × gzip 백업 5개; `MULTICA_DAEMON_LOG_MAX_SIZE_MB` / `_MAX_BACKUPS` / `_MAX_AGE_DAYS`로 조정 가능) 열 수 없을 만큼 커지지 않습니다. Go 런타임 패닉과 logger 초기화 이전 오류는 별도의 상한이 있는 `daemon.err.log`에 기록됩니다.
+
+더 자세한 데몬 로그가 필요하면, 데몬을 백그라운드에서 포그라운드로 옮기세요: `multica daemon stop && multica daemon start --foreground`. 포그라운드로 실행하면 로그가 로테이션 파일이 아니라 터미널에 실시간으로 출력됩니다.

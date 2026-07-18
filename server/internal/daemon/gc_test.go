@@ -304,6 +304,142 @@ func TestGcWorkspace_CleansEmptyWorkspaceDir(t *testing.T) {
 	}
 }
 
+func TestGCWorkspace_BatchesAndDeduplicatesIssueChecks(t *testing.T) {
+	doneID := "77777777-7777-7777-7777-777777777771"
+	openID := "77777777-7777-7777-7777-777777777772"
+	var batchRequests, legacyRequests int
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/ws-batch/issues/gc-check", func(w http.ResponseWriter, r *http.Request) {
+		batchRequests++
+		if r.Method != http.MethodPost {
+			t.Fatalf("batch method = %s, want POST", r.Method)
+		}
+		var body struct {
+			IssueIDs []string `json:"issue_ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode batch request: %v", err)
+		}
+		if got, want := strings.Join(body.IssueIDs, ","), doneID+","+openID; got != want {
+			t.Fatalf("batch issue_ids = %q, want %q", got, want)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"issues": []map[string]any{
+			{"id": doneID, "found": true, "status": "done", "updated_at": time.Now().Add(-10 * 24 * time.Hour)},
+			{"id": openID, "found": true, "status": "in_progress", "updated_at": time.Now()},
+		}})
+	})
+	mux.HandleFunc("/api/daemon/issues/", func(w http.ResponseWriter, r *http.Request) {
+		legacyRequests++
+		http.Error(w, "legacy endpoint must not be called", http.StatusInternalServerError)
+	})
+
+	d := newGCTestDaemon(t, mux)
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-batch")
+	doneA := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-batch", "done-a", &execenv.GCMeta{
+		IssueID: doneID, WorkspaceID: "ws-batch", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+	doneB := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-batch", "done-b", &execenv.GCMeta{
+		IssueID: doneID, WorkspaceID: "ws-batch", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+	open := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-batch", "open", &execenv.GCMeta{
+		IssueID: openID, WorkspaceID: "ws-batch", CompletedAt: time.Now(),
+	})
+
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+
+	if batchRequests != 1 || legacyRequests != 0 {
+		t.Fatalf("requests: batch=%d legacy=%d, want batch=1 legacy=0", batchRequests, legacyRequests)
+	}
+	for _, dir := range []string{doneA, doneB} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("done task dir %s was not removed", dir)
+		}
+	}
+	if _, err := os.Stat(open); err != nil {
+		t.Fatalf("open task dir should remain: %v", err)
+	}
+	if stats.cleaned != 2 || stats.skipped != 1 {
+		t.Fatalf("stats = cleaned:%d skipped:%d, want 2/1", stats.cleaned, stats.skipped)
+	}
+}
+
+func TestGCWorkspace_OldServerFallbackIsCached(t *testing.T) {
+	issueA := "77777777-7777-7777-7777-777777777773"
+	issueB := "77777777-7777-7777-7777-777777777774"
+	var batchRequests, legacyRequests int
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/", func(w http.ResponseWriter, r *http.Request) {
+		batchRequests++
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("/api/daemon/issues/", func(w http.ResponseWriter, r *http.Request) {
+		legacyRequests++
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "done", "updated_at": time.Now().Add(-10 * 24 * time.Hour),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	for i, tc := range []struct {
+		workspace string
+		issueID   string
+	}{{"ws-legacy-a", issueA}, {"ws-legacy-b", issueB}} {
+		wsDir := filepath.Join(d.cfg.WorkspacesRoot, tc.workspace)
+		taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, tc.workspace, fmt.Sprintf("task-%d", i), &execenv.GCMeta{
+			IssueID: tc.issueID, WorkspaceID: tc.workspace, CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+		})
+		d.gcWorkspace(context.Background(), wsDir, &gcStats{byPattern: map[string]int{}})
+		if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+			t.Fatalf("legacy fallback did not clean %s", taskDir)
+		}
+	}
+
+	if batchRequests != 1 {
+		t.Fatalf("batch requests = %d, want 1 capability probe", batchRequests)
+	}
+	if legacyRequests != 2 {
+		t.Fatalf("legacy requests = %d, want 2", legacyRequests)
+	}
+}
+
+func TestGCWorkspace_BatchFailureDoesNotFanOutOrClean(t *testing.T) {
+	issueID := "77777777-7777-7777-7777-777777777775"
+	var batchRequests, legacyRequests int
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/ws-fail/issues/gc-check", func(w http.ResponseWriter, r *http.Request) {
+		batchRequests++
+		http.Error(w, "temporary failure", http.StatusInternalServerError)
+	})
+	mux.HandleFunc("/api/daemon/issues/", func(w http.ResponseWriter, r *http.Request) {
+		legacyRequests++
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "done", "updated_at": time.Now().Add(-10 * 24 * time.Hour),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-fail")
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-fail", "task", &execenv.GCMeta{
+		IssueID: issueID, WorkspaceID: "ws-fail", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+
+	if batchRequests != 1 || legacyRequests != 0 {
+		t.Fatalf("requests: batch=%d legacy=%d, want batch=1 legacy=0", batchRequests, legacyRequests)
+	}
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Fatalf("task dir must remain on batch failure: %v", err)
+	}
+	if stats.cleaned != 0 || stats.orphaned != 0 || stats.skipped != 1 {
+		t.Fatalf("unexpected stats after failure: %+v", stats)
+	}
+}
+
 func TestShouldCleanTaskDir_OpenIssueArtifactCleanup(t *testing.T) {
 	t.Parallel()
 	issueID := "88888888-8888-8888-8888-888888888888"
@@ -627,6 +763,34 @@ func TestActiveEnvRootRefcount(t *testing.T) {
 	if d.isActiveEnvRoot(root) {
 		t.Fatal("expected inactive after both unmarks")
 	}
+}
+
+func TestReserveEnvRootForGCIsExclusive(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	root := "/tmp/fake/gc-reservation"
+
+	d.markActiveEnvRoot(root)
+	if _, ok := d.reserveEnvRootForGC(root); ok {
+		t.Fatal("GC reservation must fail while a task is active")
+	}
+	d.unmarkActiveEnvRoot(root)
+
+	release, ok := d.reserveEnvRootForGC(root)
+	if !ok {
+		t.Fatal("expected GC reservation for inactive env root")
+	}
+	if _, ok := d.reserveEnvRootForGC(root); ok {
+		t.Fatal("second GC reservation must fail while the first is held")
+	}
+	release()
+
+	release, ok = d.reserveEnvRootForGC(root)
+	if !ok {
+		t.Fatal("expected GC reservation after release")
+	}
+	release()
 }
 
 func TestIsBareRepo(t *testing.T) {

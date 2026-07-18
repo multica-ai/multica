@@ -32,6 +32,11 @@ pre.rich-text-editor {
   border-radius: var(--radius);
   padding: 0.75rem 1rem;
   margin: 0.75rem 0;
+  /* Long lines wrap, matching the editable code block (its NodeViewContent
+     sets an inline pre-wrap). Without this, readonly blocks scroll while
+     editable blocks wrap and the same document changes shape between the
+     two renderers. overflow-x stays as a fallback for unbreakable tokens. */
+  white-space: pre-wrap;
   overflow-x: auto;
 }
 

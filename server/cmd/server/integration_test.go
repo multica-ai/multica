@@ -848,6 +848,233 @@ func TestInboxUnreadSummaryThroughRouter(t *testing.T) {
 	}
 }
 
+// ---- Archived inbox (MUL-3736) ----
+
+type inboxItemJSON struct {
+	ID       string  `json:"id"`
+	IssueID  *string `json:"issue_id"`
+	Title    string  `json:"title"`
+	Read     bool    `json:"read"`
+	Archived bool    `json:"archived"`
+}
+
+// seedArchivedFixtureIssue creates an issue owned by the test user and returns
+// its id, registering the cleanup that cascades to its inbox_item rows.
+//
+// `number` is taken from the workspace counter the way the real create path
+// does it (see IncrementIssueCounter). Letting it default to 0 works only for a
+// test that seeds ONE issue — a second one collides on uq_issue_workspace_number.
+func seedArchivedFixtureIssue(t *testing.T, title string) string {
+	t.Helper()
+	ctx := context.Background()
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		WITH bumped AS (
+			UPDATE workspace SET issue_counter = issue_counter + 1
+			WHERE id = $1
+			RETURNING issue_counter
+		)
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id, number)
+		SELECT $1, $2, 'member', $3, bumped.issue_counter FROM bumped
+		RETURNING id
+	`, testWorkspaceID, title, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+	return issueID
+}
+
+func listArchivedInbox(t *testing.T) []inboxItemJSON {
+	t.Helper()
+	resp := authRequest(t, "GET", "/api/inbox/archived", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("ListArchivedInbox: expected 200, got %d", resp.StatusCode)
+	}
+	var items []inboxItemJSON
+	readJSON(t, resp, &items)
+	if items == nil {
+		t.Fatal("expected non-nil archived items array")
+	}
+	return items
+}
+
+func TestArchivedInboxThroughRouter(t *testing.T) {
+	issueID := seedArchivedFixtureIssue(t, "Archived fixture")
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, archived)
+		VALUES ($1, 'member', $2, 'new_comment', 'archived one', $3, true)
+	`, testWorkspaceID, testUserID, issueID); err != nil {
+		t.Fatalf("failed to seed inbox item: %v", err)
+	}
+
+	var found bool
+	for _, item := range listArchivedInbox(t) {
+		if item.Title == "archived one" {
+			found = true
+			if !item.Archived {
+				t.Fatalf("archived list returned a non-archived item: %+v", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected the archived item in GET /api/inbox/archived")
+	}
+}
+
+// The main inbox and the archived list must stay mutually exclusive per issue.
+// Archiving is issue-level, so a NEW notification on an already-archived issue
+// leaves old archived rows sitting next to a fresh active one — without the
+// query's NOT EXISTS guard the issue would render in BOTH lists.
+func TestArchivedInboxExcludesIssuesWithActiveItems(t *testing.T) {
+	ctx := context.Background()
+	revivedIssue := seedArchivedFixtureIssue(t, "Revived fixture")
+	quietIssue := seedArchivedFixtureIssue(t, "Quiet fixture")
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, archived, created_at)
+		VALUES
+			-- Archived a while ago, then a new notification arrived: back in the
+			-- main inbox, so it must NOT appear in the archive.
+			($1, 'member', $2, 'new_comment',    'revived-old', $3, true,  now() - interval '2 hours'),
+			($1, 'member', $2, 'status_changed', 'revived-new', $3, false, now()),
+			-- Archived with no follow-up: belongs in the archive.
+			($1, 'member', $2, 'new_comment',    'quiet-old',   $4, true,  now() - interval '2 hours')
+	`, testWorkspaceID, testUserID, revivedIssue, quietIssue); err != nil {
+		t.Fatalf("failed to seed inbox items: %v", err)
+	}
+
+	var sawRevived, sawQuiet bool
+	for _, item := range listArchivedInbox(t) {
+		if item.IssueID == nil {
+			continue
+		}
+		if *item.IssueID == revivedIssue {
+			sawRevived = true
+		}
+		if *item.IssueID == quietIssue {
+			sawQuiet = true
+		}
+	}
+	if sawRevived {
+		t.Fatal("an issue with an active inbox item must not appear in the archived list")
+	}
+	if !sawQuiet {
+		t.Fatal("an issue whose items are all archived must appear in the archived list")
+	}
+}
+
+// Unarchive restores the whole issue group (mirroring issue-level archive) and
+// leaves `read` alone. Restoring an item that was archived while unread raises
+// the unread badge again — that is correct, not a regression: the unread count
+// only ever included non-archived rows.
+func TestUnarchiveInboxPreservesUnread(t *testing.T) {
+	ctx := context.Background()
+	issueID := seedArchivedFixtureIssue(t, "Unarchive fixture")
+
+	var unreadItemID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, archived, created_at)
+		VALUES ($1, 'member', $2, 'new_comment', 'archived unread', $3, false, true, now())
+		RETURNING id
+	`, testWorkspaceID, testUserID, issueID).Scan(&unreadItemID); err != nil {
+		t.Fatalf("failed to seed inbox item: %v", err)
+	}
+	// A read sibling on the same issue: the restore is issue-level, so it must
+	// come back too — and come back READ, not reset.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, archived, created_at)
+		VALUES ($1, 'member', $2, 'status_changed', 'archived read', $3, true, true, now() - interval '1 hour')
+	`, testWorkspaceID, testUserID, issueID); err != nil {
+		t.Fatalf("failed to seed sibling inbox item: %v", err)
+	}
+
+	resp := authRequest(t, "POST", "/api/inbox/"+unreadItemID+"/unarchive", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("UnarchiveInboxItem: expected 200, got %d", resp.StatusCode)
+	}
+	var restored inboxItemJSON
+	readJSON(t, resp, &restored)
+	if restored.Archived {
+		t.Fatalf("expected the restored item to be un-archived, got %+v", restored)
+	}
+	if restored.Read {
+		t.Fatalf("unarchive must not mark an unread item read, got %+v", restored)
+	}
+
+	// Both siblings are back, each with its original read state.
+	rows, err := testPool.Query(ctx, `
+		SELECT title, read, archived FROM inbox_item WHERE issue_id = $1 ORDER BY title
+	`, issueID)
+	if err != nil {
+		t.Fatalf("failed to read back inbox items: %v", err)
+	}
+	defer rows.Close()
+	got := map[string][2]bool{}
+	for rows.Next() {
+		var title string
+		var read, archived bool
+		if err := rows.Scan(&title, &read, &archived); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got[title] = [2]bool{read, archived}
+	}
+	if want := ([2]bool{false, false}); got["archived unread"] != want {
+		t.Fatalf("unread item: expected read=false archived=false, got read=%v archived=%v",
+			got["archived unread"][0], got["archived unread"][1])
+	}
+	if want := ([2]bool{true, false}); got["archived read"] != want {
+		t.Fatalf("read sibling: expected read=true archived=false, got read=%v archived=%v",
+			got["archived read"][0], got["archived read"][1])
+	}
+
+	// The restored unread item now counts toward the badge again.
+	resp = authRequest(t, "GET", "/api/inbox/unread-count", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("CountUnreadInbox: expected 200, got %d", resp.StatusCode)
+	}
+	var count struct {
+		Count int64 `json:"count"`
+	}
+	readJSON(t, resp, &count)
+	if count.Count < 1 {
+		t.Fatal("expected the restored unread item to raise the unread count")
+	}
+}
+
+// An inbox item belonging to someone else must not be unarchivable, even with a
+// valid session — the loader resolves the item within the caller's workspace and
+// recipient scope.
+func TestUnarchiveInboxRejectsForeignItem(t *testing.T) {
+	ctx := context.Background()
+	var foreignItemID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, archived)
+		VALUES ($1, 'member', gen_random_uuid(), 'issue_assigned', 'someone else', true)
+		RETURNING id
+	`, testWorkspaceID).Scan(&foreignItemID); err != nil {
+		t.Fatalf("failed to seed foreign inbox item: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE id = $1`, foreignItemID)
+	})
+
+	resp := authRequest(t, "POST", "/api/inbox/"+foreignItemID+"/unarchive", nil)
+	if resp.StatusCode == 200 {
+		t.Fatal("expected unarchive of another recipient's item to be rejected")
+	}
+
+	var archived bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT archived FROM inbox_item WHERE id = $1`, foreignItemID).Scan(&archived); err != nil {
+		t.Fatalf("failed to read back foreign item: %v", err)
+	}
+	if !archived {
+		t.Fatal("another recipient's item must stay archived")
+	}
+}
+
 // An issue's inbox notifications are deduplicated per issue: opening the issue
 // marks only the NEWEST item read, leaving older siblings unread. The summary
 // must mirror the inbox UI (issue is read when its newest item is read), so a

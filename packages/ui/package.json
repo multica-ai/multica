@@ -27,7 +27,9 @@
   "dependencies": {
     "@base-ui/react": "^1.3.0",
     "@emoji-mart/data": "^1.2.1",
+    "@number-flow/react": "^0.6.1",
     "@tanstack/react-table": "catalog:",
+    "@tanstack/react-virtual": "catalog:",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
     "cmdk": "^1.1.1",

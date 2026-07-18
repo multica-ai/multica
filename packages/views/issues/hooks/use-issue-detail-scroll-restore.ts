@@ -48,6 +48,11 @@ export function useIssueDetailScrollRestore({
     restoredKeyRef.current = restoreKey;
 
     const target = scrollPositions.get(restoreKey) ?? 0;
+    if (target <= 1) {
+      scrollContainerEl.scrollTop = target;
+      return;
+    }
+
     return restoreScrollTopWithRetry(scrollContainerEl, target);
   }, [scrollContainerEl, restoreKey, ready, disabled]);
 }
@@ -66,20 +71,30 @@ function saveScrollPosition(restoreKey: string, scrollTop: number) {
 function restoreScrollTopWithRetry(el: HTMLElement, target: number) {
   let cancelled = false;
   let attempts = 0;
+  let stableFrames = 0;
   const maxAttempts = 30;
+  const requiredStableFrames = 2;
 
   el.scrollTop = target;
-  if (Math.abs(el.scrollTop - target) <= 1) return () => {};
 
   let frameId: number;
 
   const tick = () => {
     if (cancelled || !el.isConnected) return;
 
-    el.scrollTop = target;
     attempts += 1;
 
-    if (Math.abs(el.scrollTop - target) <= 1 || attempts >= maxAttempts) {
+    if (Math.abs(el.scrollTop - target) <= 1) {
+      stableFrames += 1;
+    } else {
+      stableFrames = 0;
+      el.scrollTop = target;
+    }
+
+    // A virtualized timeline initializes after the parent's layout effect and
+    // may reset a synchronous scroll write. Requiring stability across frames
+    // keeps the restore alive long enough to outlast that initialization.
+    if (stableFrames >= requiredStableFrames || attempts >= maxAttempts) {
       return;
     }
 

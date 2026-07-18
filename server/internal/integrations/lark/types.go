@@ -122,7 +122,7 @@ const (
 )
 
 // BindingTokenTTL caps the lifetime of a member-binding token. The DB
-// CHECK on lark_binding_token (`expires_at <= created_at + INTERVAL '15
+// CHECK on channel_binding_token (`expires_at <= created_at + INTERVAL '15
 // minutes'`) enforces the same bound at the storage layer, so a
 // misconfigured caller or a hand-inserted SQL row cannot exceed it.
 // Keep these two values in sync if the product value changes.

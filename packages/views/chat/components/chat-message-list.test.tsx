@@ -98,4 +98,35 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
     await screen.findByText("3 steps");
     expect(screen.queryByText("Bash")).not.toBeInTheDocument();
   });
+
+  it("applies an embedded surface content transform to streamed text", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "text", {
+        content:
+          "Draft ready.\n<agent_draft>{\"name\":\"Hidden protocol\"}</agent_draft>",
+      }),
+    ]);
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={{ task_id: TASK_ID, status: "running" }}
+            availability="online"
+            transformContent={(content) =>
+              content.replace(
+                /<agent_draft>[\s\S]*?<\/agent_draft>/g,
+                "",
+              )
+            }
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("Draft ready.")).toBeInTheDocument();
+    expect(screen.queryByText(/Hidden protocol/)).not.toBeInTheDocument();
+  });
 });

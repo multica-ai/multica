@@ -106,7 +106,10 @@ vi.mock("../../../common/actor-avatar", () => ({
 
 // Import after mocks.
 import { IssueActionsDropdown } from "../issue-actions-dropdown";
-import { IssueActionsContextMenu } from "../issue-actions-context-menu";
+import {
+  IssueActionsContextMenu,
+  IssueContextMenuProvider,
+} from "../issue-actions-context-menu";
 
 const mockIssue: Issue = {
   id: "issue-1",
@@ -256,9 +259,11 @@ describe("IssueActionsContextMenu", () => {
   it("renders the menu when the wrapped element receives a contextmenu event", async () => {
     render(
       wrap(
-        <IssueActionsContextMenu issue={mockIssue}>
-          <div data-testid="row">Row</div>
-        </IssueActionsContextMenu>,
+        <IssueContextMenuProvider>
+          <IssueActionsContextMenu issue={mockIssue}>
+            <div data-testid="row">Row</div>
+          </IssueActionsContextMenu>
+        </IssueContextMenuProvider>,
       ),
     );
 

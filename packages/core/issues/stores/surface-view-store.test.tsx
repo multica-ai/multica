@@ -82,6 +82,58 @@ describe("issue surface view store registry", () => {
     expect(parsed.state.surfaces["project:b"]).toBeUndefined();
   });
 
+  it("persists table columns, order, widths, grouping, and calculation per surface", async () => {
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    const projectA = getIssueSurfaceViewStore("project:table-a");
+    const projectB = getIssueSurfaceViewStore("project:table-b");
+
+    projectA.getState().setViewMode("table");
+    projectA.getState().toggleTableColumn("identifier");
+    projectA.getState().toggleTableColumn("property:estimate");
+    projectA
+      .getState()
+      .reorderTableColumn("property:estimate", "identifier");
+    projectA.getState().setTableColumnWidth("property:estimate", 184);
+    projectA.getState().setTableGrouping("status");
+    projectA.getState().setTableCalculation("average");
+
+    expect(projectA.getState().viewMode).toBe("table");
+    expect(
+      projectA.getState().tableColumns.map((column) => column.key),
+    ).toEqual([
+      "title",
+      "status",
+      "priority",
+      "assignee",
+      "due_date",
+      "labels",
+      "property:estimate",
+      "identifier",
+    ]);
+    expect(
+      projectA
+        .getState()
+        .tableColumns.find((column) => column.key === "property:estimate")
+        ?.width,
+    ).toBe(184);
+    expect(projectA.getState().tableGrouping).toBe("status");
+    expect(projectA.getState().tableCalculation).toBe("average");
+
+    expect(projectB.getState().viewMode).toBe("board");
+    expect(
+      projectB.getState().tableColumns.some((column) =>
+        column.key.startsWith("property:"),
+      ),
+    ).toBe(false);
+
+    const raw = localStorage.getItem(`${ISSUE_SURFACE_VIEW_STORAGE_KEY}:acme`);
+    const parsed = JSON.parse(raw as string);
+    expect(
+      parsed.state.surfaces["project:table-a"].state.tableColumns,
+    ).toContainEqual({ key: "property:estimate", width: 184 });
+  });
+
   it("rehydrates existing surface stores when the workspace changes", async () => {
     setCurrentWorkspace("acme", "ws_a");
     await flush();

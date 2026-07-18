@@ -241,6 +241,7 @@ describe("resolveBuildMatrix", () => {
       ),
     ).toEqual([
       { platform: "mac", arch: "arm64" },
+      { platform: "mac", arch: "x64" },
       { platform: "win", arch: "x64" },
       { platform: "win", arch: "arm64" },
       { platform: "linux", arch: "x64" },
@@ -319,6 +320,58 @@ describe("builderArgsForTarget", () => {
       "--publish",
       "always",
       "-c.directories.output=dist/win-x64",
+    ]);
+  });
+
+  it("isolates the macOS x64 feed and platform floor", () => {
+    expect(
+      builderArgsForTarget(
+        { platform: "mac", arch: "x64" },
+        {
+          allPlatforms: false,
+          sharedArgs: ["--publish", "always"],
+          platformTargets: { mac: ["dmg", "zip"], win: [], linux: [] },
+          requestedPlatforms: ["mac"],
+          requestedArchs: ["x64"],
+        },
+        "1.2.3",
+        { hostPlatform: "darwin", useScopedOutputDir: true },
+      ),
+    ).toEqual([
+      "-c.extraMetadata.version=1.2.3",
+      "--mac",
+      "dmg",
+      "zip",
+      "--x64",
+      "--publish",
+      "always",
+      "-c.directories.output=dist/mac-x64",
+      "-c.mac.minimumSystemVersion=12.0.0",
+      "-c.publish.channel=latest-x64",
+    ]);
+  });
+
+  it("keeps macOS arm64 on the existing latest-mac update channel", () => {
+    expect(
+      builderArgsForTarget(
+        { platform: "mac", arch: "arm64" },
+        {
+          allPlatforms: false,
+          sharedArgs: ["--publish", "always"],
+          platformTargets: { mac: [], win: [], linux: [] },
+          requestedPlatforms: ["mac"],
+          requestedArchs: ["arm64"],
+        },
+        "1.2.3",
+        { hostPlatform: "darwin", useScopedOutputDir: true },
+      ),
+    ).toEqual([
+      "-c.extraMetadata.version=1.2.3",
+      "--mac",
+      "--arm64",
+      "--publish",
+      "always",
+      "-c.directories.output=dist/mac-arm64",
     ]);
   });
 

@@ -24,6 +24,8 @@ func configureProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr.Setpgid = true
 }
 
+func codexInitializeRetrySupported() bool { return true }
+
 // signalProcessGroup sends sig to the whole process group led by p (when the
 // command was started with configureProcessGroup), falling back to the single
 // process if the group send fails. Targeting the group (negative pid) reaches

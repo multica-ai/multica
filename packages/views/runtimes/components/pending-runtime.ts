@@ -7,6 +7,7 @@ const PENDING_RUNTIME_ID_PREFIX = "pending-runtime-profile:";
 interface PendingRuntimeMetadata extends Record<string, unknown> {
   pending_custom_runtime: true;
   runtime_profile_id: string;
+  runtime_profile_enabled: boolean;
   command_name: string;
   pending_since: string;
 }
@@ -22,6 +23,13 @@ export function pendingRuntimeId(profileId: string): string {
 
 export function isPendingCustomRuntime(runtime: AgentRuntime): boolean {
   return runtime.metadata?.pending_custom_runtime === true;
+}
+
+export function isDisabledCustomRuntime(runtime: AgentRuntime): boolean {
+  return (
+    isPendingCustomRuntime(runtime) &&
+    runtime.metadata?.runtime_profile_enabled === false
+  );
 }
 
 export function pendingRuntimeCommandName(runtime: AgentRuntime): string | null {
@@ -72,6 +80,7 @@ export function pendingRuntimeFromProfile({
   const metadata: PendingRuntimeMetadata = {
     pending_custom_runtime: true,
     runtime_profile_id: profile.id,
+    runtime_profile_enabled: profile.enabled,
     command_name: profile.command_name,
     pending_since: pendingSince,
   };
@@ -87,7 +96,7 @@ export function pendingRuntimeFromProfile({
     status: "offline",
     device_info: machineName,
     metadata,
-    owner_id: ownerId ?? null,
+    owner_id: ownerId ?? profile.created_by ?? null,
     visibility: "private",
     profile_id: profile.id,
     last_seen_at: pendingSince,

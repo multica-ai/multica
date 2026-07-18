@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/selfexec"
 )
 
 // ChecksumManifestName is the asset name GoReleaser publishes for the
@@ -291,7 +293,7 @@ func MatchKnownBrewPrefix(path string) string {
 
 // IsBrewInstall checks whether the running multica binary was installed via Homebrew.
 func IsBrewInstall() bool {
-	exePath, err := os.Executable()
+	exePath, err := selfexec.Resolve()
 	if err != nil {
 		return false
 	}
@@ -361,7 +363,7 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 // UpdateViaDownloadWithTimeout downloads the latest release binary with a caller-selected timeout.
 func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Duration) (string, error) {
 	// Determine current binary path.
-	exePath, err := os.Executable()
+	exePath, err := selfexec.Resolve()
 	if err != nil {
 		return "", fmt.Errorf("resolve executable path: %w", err)
 	}

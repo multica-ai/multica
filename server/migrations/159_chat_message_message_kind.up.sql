@@ -1,0 +1,17 @@
+-- Explicit terminal outcome kind for chat messages (MUL-4351).
+--
+-- 'message'      — an ordinary user/assistant message (the default; every
+--                  existing row and every legacy client sees this).
+-- 'no_response'  — the agent completed a direct-chat turn without any text
+--                  reply. This is a visible, deliberate terminal outcome: the
+--                  turn boundary is now owned by chat_input_task_id, not by the
+--                  presence of an assistant row, so we no longer need to fake a
+--                  blank bubble to advance the conversation. The frontend
+--                  renders a localized "no text reply this turn" state while old
+--                  clients fall back to the non-empty English content we still
+--                  store on the row.
+--
+-- Additive and app-validated: no CHECK constraint / FK / cascade so new kinds
+-- can be introduced without a migration and unknown values degrade to 'message'
+-- on older readers.
+ALTER TABLE chat_message ADD COLUMN IF NOT EXISTS message_kind TEXT NOT NULL DEFAULT 'message';

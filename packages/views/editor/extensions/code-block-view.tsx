@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Code as CodeIcon, Copy, Check, Eye } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { useDebouncedValue } from "../../common/use-debounced-value";
 import { useT } from "../../i18n";
 import { MermaidDiagram } from "../mermaid-diagram";
 import { CodeBlockIframe } from "../code-block-iframe";
@@ -20,15 +21,6 @@ import { CodeBlockIframe } from "../code-block-iframe";
 const PREVIEW_DEBOUNCE_MS = 200;
 
 const HTML_PREVIEW_HEIGHT = "h-[480px]";
-
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(id);
-  }, [value, delayMs]);
-  return debounced;
-}
 
 function CodeBlockView({ node }: NodeViewProps) {
   const { t } = useT("editor");
@@ -65,7 +57,7 @@ function CodeBlockView({ node }: NodeViewProps) {
     setView((v) => (v === "preview" ? "source" : "preview"));
 
   return (
-    <NodeViewWrapper className="code-block-wrapper group/code relative my-2">
+    <NodeViewWrapper className="code-block-wrapper group/code relative my-3">
       {isMermaid && debouncedChart.trim() && (
         <div
           contentEditable={false}
@@ -88,7 +80,7 @@ function CodeBlockView({ node }: NodeViewProps) {
       )}
       <div
         contentEditable={false}
-        className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100"
+        className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100 focus-within:opacity-100"
       >
         {language && (
           <span className="text-xs text-muted-foreground select-none">
@@ -123,6 +115,7 @@ function CodeBlockView({ node }: NodeViewProps) {
           onClick={handleCopy}
           className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           title={t(($) => $.code_block.copy_code)}
+          aria-label={t(($) => $.code_block.copy_code)}
         >
           {copied ? (
             <Check className="h-3.5 w-3.5" />

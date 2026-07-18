@@ -26,6 +26,16 @@
  *   box-decoration-break: clone on inline code.
  */
 
+/* Long unbreakable tokens (paths, URLs, identifiers) wrap mid-word instead
+   of overflowing. Tiptap injects the legacy alias `word-wrap: break-word`
+   on .ProseMirror, so the editable render already behaves this way; without
+   this rule the readonly render keeps such tokens on one line and the two
+   renders wrap the same text differently (machine-diffed: inline code and
+   code blocks gained 1-2 lines in the editor only). */
+.rich-text-editor {
+  overflow-wrap: break-word;
+}
+
 /* Headings — compact but with clear visual hierarchy */
 .rich-text-editor h1 {
   font-size: 1.375rem;
@@ -261,6 +271,11 @@
 }
 
 .rich-text-editor table {
+  /* `width`, not just `min-width`: Tiptap stamps an inline
+     `style="min-width: NNpx"` on its tables, which would override a
+     class-level min-width and let editor tables shrink to content while
+     readonly tables stretch full width. */
+  width: 100%;
   min-width: 100%;
   border-collapse: collapse;
 }
@@ -269,12 +284,22 @@
   display: none;
 }
 
-.rich-text-editor thead {
+/* Header-row background. Two structures produce header rows: readonly
+   (react-markdown) emits a real <thead>; Tiptap keeps the <th> row inside
+   <tbody>, so the tr:has(> th) arm covers the editable table. */
+.rich-text-editor thead,
+.rich-text-editor tr:has(> th) {
   background: color-mix(in srgb, var(--muted) 50%, transparent);
 }
 
 .rich-text-editor tbody tr {
   border-top: 1px solid var(--border);
+}
+
+/* Tiptap tables have no <thead>, so their header row is tbody's first row —
+   without this it draws a border-top right against the wrapper's own border. */
+.rich-text-editor table > tbody:first-child > tr:first-child {
+  border-top: 0;
 }
 
 .rich-text-editor tr:hover td {
@@ -287,6 +312,11 @@
   text-align: left;
   padding: 0.625rem 1rem;
   font-size: 0.875rem;
+  /* Match body-paragraph line-height. Tiptap wraps cell content in <p>
+     (which carries 1.625); the readonly render keeps bare text in the cell,
+     which otherwise inherits the host's text-sm line-height (~1.43) and
+     makes every readonly cell 2.5px shorter per line. */
+  line-height: 1.625;
 }
 
 .rich-text-editor th {

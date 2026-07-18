@@ -145,7 +145,8 @@ INSERT INTO channel_binding_token (
     token_hash, workspace_id, installation_id, channel_type,
     channel_user_id, expires_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5,
+    LEAST($6::timestamptz, now() + INTERVAL '15 minutes')
 )
 RETURNING token_hash, workspace_id, installation_id, channel_type, channel_user_id, expires_at, consumed_at, created_at
 `
@@ -164,7 +165,9 @@ type CreateChannelBindingTokenParams struct {
 // =====================
 // Mints a single-use binding token for an unbound platform user. TTL cap
 // (15 min) enforced by the table CHECK in lockstep with
-// channel.BindingTokenTTL. The HASH is stored, never the raw token.
+// channel.BindingTokenTTL. Clamp against the database clock so small clock
+// skew between an app node and Postgres cannot reject an otherwise valid
+// 15-minute token. The HASH is stored, never the raw token.
 func (q *Queries) CreateChannelBindingToken(ctx context.Context, arg CreateChannelBindingTokenParams) (ChannelBindingToken, error) {
 	row := q.db.QueryRow(ctx, createChannelBindingToken,
 		arg.TokenHash,

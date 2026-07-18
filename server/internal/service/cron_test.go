@@ -160,3 +160,54 @@ func TestNextOccurrenceAdvancesPastFiredSlot(t *testing.T) {
 		t.Fatalf("next occurrence %s must be strictly after the fired slot %s", got, fired)
 	}
 }
+
+// TestParseCronScheduleTimezonePrefix pins the parser's handling of robfig's
+// "TZ=" / "CRON_TZ=" expression prefix — the grammar contract the schedule
+// editor's extraction (cron-mapping.ts) is written against.
+func TestParseCronScheduleTimezonePrefix(t *testing.T) {
+	t.Run("prefix without a schedule errors instead of panicking", func(t *testing.T) {
+		// robfig v3.0.1 slices up to the first space and panics when there is
+		// none (parser.go:99). The guard must turn that into a parse error.
+		for _, expr := range []string{"TZ=UTC", "CRON_TZ=Asia/Tokyo", "TZ="} {
+			if _, _, err := parseCronSchedule(expr, "UTC"); err == nil {
+				t.Fatalf("expected error for %q", expr)
+			}
+		}
+	})
+	t.Run("embedded timezone overrides the timezone argument", func(t *testing.T) {
+		after := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+		got, err := NextOccurrenceAfterUTC("CRON_TZ=Asia/Tokyo 0 9 * * *", "UTC", after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// 09:00 in Tokyo, not 09:00 UTC. `after` is exactly 09:00 Tokyo and
+		// Next is strictly after, so the answer is the following day's slot.
+		want := time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)
+		if !got.Equal(want) {
+			t.Fatalf("got %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
+		}
+	})
+	t.Run("prefix and column are equivalent spellings", func(t *testing.T) {
+		after := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+		embedded, err := NextOccurrenceAfterUTC("CRON_TZ=Asia/Tokyo 0 9 * * *", "UTC", after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		column, err := NextOccurrenceAfterUTC("0 9 * * *", "Asia/Tokyo", after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !embedded.Equal(column) {
+			t.Fatalf("embedded %s != column %s", embedded, column)
+		}
+	})
+	t.Run("prefix detection is exact", func(t *testing.T) {
+		// Lowercase and leading-space forms are NOT prefixes to robfig: the
+		// token lands in the fields and the expression is a field-count error.
+		for _, expr := range []string{"tz=UTC 0 9 * * *", " TZ=UTC 0 9 * * *"} {
+			if _, _, err := parseCronSchedule(expr, "UTC"); err == nil {
+				t.Fatalf("expected error for %q", expr)
+			}
+		}
+	})
+}

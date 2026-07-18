@@ -10,8 +10,12 @@ const patterns: { re: RegExp; replacement: string }[] = [
   { re: /(?:aws_secret_access_key|secret_?access_?key)\s*[=:]\s*[A-Za-z0-9/+=]{40}/gi, replacement: "[REDACTED AWS SECRET]" },
   // PEM private keys
   { re: /-----BEGIN[A-Z\s]*PRIVATE KEY-----[\s\S]*?-----END[A-Z\s]*PRIVATE KEY-----/g, replacement: "[REDACTED PRIVATE KEY]" },
-  // GitHub tokens
+  // GitHub OAuth / classic tokens (ghp_/gho_/ghu_/ghs_/ghr_)
   { re: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,255}\b/g, replacement: "[REDACTED GITHUB TOKEN]" },
+  // GitHub fine-grained PATs (github_pat_…, recommended since 2022)
+  { re: /\bgithub_pat_[A-Za-z0-9_]{20,255}\b/g, replacement: "[REDACTED GITHUB TOKEN]" },
+  // Google API keys (AIza…, e.g. Gemini / Maps / Firebase)
+  { re: /\bAIza[0-9A-Za-z_-]{35}([^0-9A-Za-z_-]|$)/g, replacement: "[REDACTED GOOGLE API KEY]$1" },
   // GitLab personal access tokens
   { re: /\bglpat-[A-Za-z0-9_-]{20,}\b/g, replacement: "[REDACTED GITLAB TOKEN]" },
   // OpenAI / Anthropic API keys

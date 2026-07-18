@@ -7,6 +7,15 @@ ORDER BY created_at ASC;
 SELECT * FROM agent_runtime
 WHERE id = $1;
 
+-- name: GetAgentRuntimes :many
+-- Batch variant of GetAgentRuntime (MUL-4257): loads every runtime in the
+-- input set in one round trip so the machine-level batch claim handler can
+-- resolve+authorize all of a daemon's runtimes without one point query per
+-- runtime. Rows are returned only for ids that exist; the caller matches them
+-- back by id and skips any that are missing.
+SELECT * FROM agent_runtime
+WHERE id = ANY(@ids::uuid[]);
+
 -- name: LockAgentRuntime :one
 -- Acquires a row-level exclusive lock on the runtime row. Used at the
 -- top of the cascade-delete transaction so that:
@@ -271,6 +280,12 @@ RETURNING *;
 
 -- name: DeleteAgentRuntime :exec
 DELETE FROM agent_runtime WHERE id = $1;
+
+-- name: DeleteSystemAgentsByRuntime :exec
+-- System agents are invisible execution infrastructure (for example the Agent
+-- Builder). Remove them before deleting their runtime so the RESTRICT runtime
+-- FK cannot block an otherwise dependency-free delete.
+DELETE FROM agent WHERE runtime_id = $1 AND kind = 'system';
 
 -- name: CountActiveAgentsByRuntime :one
 SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL;

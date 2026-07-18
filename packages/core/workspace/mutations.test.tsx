@@ -9,7 +9,7 @@ import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import { defaultStorage } from "../platform/storage";
 import type { Workspace } from "../types";
-import { useDeleteWorkspace } from "./mutations";
+import { useCreateWorkspace, useDeleteWorkspace } from "./mutations";
 import { workspaceKeys } from "./queries";
 import {
   isWorkspaceDeletePending,
@@ -34,6 +34,66 @@ const makeWorkspace = (id: string, slug: string): Workspace => ({
   avatar_url: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+});
+
+describe("useCreateWorkspace", () => {
+  let qc: QueryClient;
+  let createWorkspace: ReturnType<
+    typeof vi.fn<(data: { name: string; slug: string }) => Promise<Workspace>>
+  >;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    createWorkspace = vi.fn();
+    setApiInstance({ createWorkspace } as unknown as ApiClient);
+    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [
+      makeWorkspace("ws-1", "existing"),
+    ]);
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("seeds the successful response without invalidating the workspace list", async () => {
+    const created = makeWorkspace("ws-2", "created");
+    createWorkspace.mockResolvedValue(created);
+    const { result } = renderHook(() => useCreateWorkspace(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ name: "Created", slug: "created" });
+    });
+
+    expect(
+      qc
+        .getQueryData<Workspace[]>(workspaceKeys.list())
+        ?.map((workspace) => workspace.id),
+    ).toEqual(["ws-1", "ws-2"]);
+    expect(qc.getQueryState(workspaceKeys.list())?.isInvalidated).toBe(false);
+  });
+
+  it("invalidates the workspace list when create fails", async () => {
+    createWorkspace.mockRejectedValue(new Error("response lost"));
+    const { result } = renderHook(() => useCreateWorkspace(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({ name: "Created", slug: "created" }),
+      ).rejects.toThrow("response lost");
+    });
+
+    expect(qc.getQueryState(workspaceKeys.list())?.isInvalidated).toBe(true);
+    expect(
+      qc
+        .getQueryData<Workspace[]>(workspaceKeys.list())
+        ?.map((workspace) => workspace.id),
+    ).toEqual(["ws-1"]);
+  });
 });
 
 describe("useDeleteWorkspace", () => {

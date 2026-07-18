@@ -107,10 +107,29 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	var outputMu sync.Mutex
 	var output strings.Builder
 	var streamingCurrentTurn atomic.Bool
-	var sawCompletedGoalComplete atomic.Bool
-	var sawCompletedIssueComment atomic.Bool
+	// Completion-preservation state for the -32603 close-handshake guard.
+	//
+	// Kiro raises `session/prompt -32603 "failed to generate a response"`
+	// when the model fails to produce its closing turn AFTER the task has
+	// already done its work. We keep such a run "completed" only when we
+	// have POSITIVE proof the finishing step succeeded — never from the mere
+	// absence of a result. A mid-command crash or internal session failure
+	// produces the very same "tool use, no result, -32603" shape, and
+	// treating that as success would mark a genuinely-unfinished task
+	// completed (see the review on #5511 / MUL-4860).
+	//
+	// The only positive proof available at this layer is a terminal
+	// ToolResult with status=="completed" for a finishing tool
+	// (goal_complete or `multica issue comment add`). We record the status
+	// of the MOST RECENT such result (ordered, keyed per CallID) so a later
+	// failed delivery correctly overrides an earlier success — e.g.
+	// "progress comment completed → final comment failed → -32603" must stay
+	// failed, while "first attempt failed → retry completed → -32603" is a
+	// real completion.
 	var goalCompleteCallIDs sync.Map
 	var issueCommentCallIDs sync.Map
+	var finishingMu sync.Mutex
+	var lastFinishingResultStatus string // "", "completed", or "failed"
 
 	promptDone := make(chan hermesPromptResult, 1)
 
@@ -131,16 +150,28 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				if msg.Tool == "goal_complete" && msg.CallID != "" {
 					goalCompleteCallIDs.Store(msg.CallID, struct{}{})
 				}
+				// Recognize `multica issue comment add` by its command
+				// payload regardless of how the adapter titled the tool.
+				// GPT-5.6 Sol may label the shell tool something other than
+				// the aliases kiroToolNameFromTitle folds into "terminal"
+				// (e.g. "execute"/"run"), so gating on msg.Tool=="terminal"
+				// here would miss it entirely (issue #5509). We still require
+				// a CallID so the tool use can be correlated to its result.
 				if msg.CallID != "" && isKiroIssueCommentAddTool(msg) {
 					issueCommentCallIDs.Store(msg.CallID, struct{}{})
 				}
 			}
 			if msg.Type == MessageToolResult {
-				if _, ok := goalCompleteCallIDs.LoadAndDelete(msg.CallID); ok {
-					sawCompletedGoalComplete.Store(msg.Status == "completed")
-				}
-				if _, ok := issueCommentCallIDs.LoadAndDelete(msg.CallID); ok {
-					sawCompletedIssueComment.Store(msg.Status == "completed")
+				_, isGoal := goalCompleteCallIDs.LoadAndDelete(msg.CallID)
+				_, isComment := issueCommentCallIDs.LoadAndDelete(msg.CallID)
+				if isGoal || isComment {
+					// Record this finishing tool's terminal outcome. The
+					// most recent result wins, so the guard sees the final
+					// delivery attempt's status and a later failure
+					// overrides an earlier success.
+					finishingMu.Lock()
+					lastFinishingResultStatus = msg.Status
+					finishingMu.Unlock()
 				}
 			}
 			if msg.Type == MessageText {
@@ -333,8 +364,18 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kiro session/prompt failed: %v", err)
-				if (sawCompletedGoalComplete.Load() || sawCompletedIssueComment.Load()) && isKiroGoalCompleteCloseError(err) {
-					b.cfg.Logger.Warn("kiro session/prompt failed after completed task result; preserving completed task status", "error", err)
+				// Preserve completion only on POSITIVE proof: the most
+				// recent finishing-tool ToolResult we observed was
+				// status=="completed", paired with the specific -32603 close
+				// handshake. A missing result is NOT proof — a mid-command
+				// crash produces the same result-less shape (Must-fix #1) —
+				// and because we key on the most recent outcome, a later
+				// failed delivery overrides an earlier success (Must-fix #2).
+				finishingMu.Lock()
+				lastFinishing := lastFinishingResultStatus
+				finishingMu.Unlock()
+				if lastFinishing == "completed" && isKiroGoalCompleteCloseError(err) {
+					b.cfg.Logger.Warn("kiro session/prompt failed after a completed finishing-tool result; preserving completed task status", "error", err)
 					finalStatus = "completed"
 					finalError = ""
 				} else if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
@@ -431,10 +472,14 @@ func isKiroGoalCompleteCloseError(err error) bool {
 	return strings.Contains(strings.ToLower(rpcErr.Data), "failed to generate a response")
 }
 
+// isKiroIssueCommentAddTool reports whether a tool-use message is a
+// `multica issue comment add` invocation. It keys purely off the command
+// payload, not the normalized tool name: GPT-5.6 Sol adapters may title the
+// shell tool with a name that doesn't fold into "terminal" (the earlier
+// msg.Tool=="terminal" gate silently dropped those and left completed tasks
+// marked failed — see #5509). isKiroIssueCommentAddCommand is strict enough
+// that no non-shell tool's input will accidentally match.
 func isKiroIssueCommentAddTool(msg Message) bool {
-	if msg.Tool != "terminal" {
-		return false
-	}
 	command, _ := msg.Input["command"].(string)
 	return isKiroIssueCommentAddCommand(command)
 }

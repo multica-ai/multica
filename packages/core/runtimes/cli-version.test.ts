@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   checkQuickCreateCliVersion,
+  checkQuickCreateFieldsCliVersion,
   handoffSupported,
   MIN_HANDOFF_CLI_VERSION,
 } from "./cli-version";
@@ -26,6 +27,14 @@ describe("checkQuickCreateCliVersion", () => {
     expect(checkQuickCreateCliVersion("v0.2.15-235-gdaf0e935").state).toBe("ok");
     expect(checkQuickCreateCliVersion("v0.2.15-235-gdaf0e935-dirty").state).toBe("ok");
     expect(checkQuickCreateCliVersion("0.1.0-1-gabc1234").state).toBe("ok");
+  });
+});
+
+describe("checkQuickCreateFieldsCliVersion", () => {
+  it("requires the first daemon release that transports explicit fields", () => {
+    expect(checkQuickCreateFieldsCliVersion("0.4.2").state).toBe("too_old");
+    expect(checkQuickCreateFieldsCliVersion("0.4.3").state).toBe("ok");
+    expect(checkQuickCreateFieldsCliVersion("v0.4.3-1-gabc1234").state).toBe("ok");
   });
 });
 

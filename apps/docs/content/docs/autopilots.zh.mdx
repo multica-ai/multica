@@ -59,9 +59,11 @@ Autopilot 也可以由入站 HTTP webhook 触发。在详情页添加一个 **We
 https://<你的 Multica host>/api/webhooks/autopilots/awt_…
 ```
 
-向这个 URL POST 任意 JSON——Multica 会记录一条 `source = webhook` 的
-run，把请求体保存为 run 的 `trigger_payload`，然后按和 schedule 触发器
-完全一致的方式派发给智能体。
+向这个 URL POST 任意 JSON。Multica 会先持久化投递，并同步准入一条
+幂等 run，返回带有 `status = accepted | skipped` 和 `run_id` 的 `200 OK`。
+数据库 worker 随后恢复 accepted run，把请求体保存为 run 的
+`trigger_payload`，再按和 schedule 触发器完全一致的方式派发给智能体。
+接收与派发之间即使服务重启，已排队的投递也不会丢失。
 
 ```bash
 curl -X POST "$MULTICA_WEBHOOK_URL" \
@@ -97,6 +99,10 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
 
 配置 GitHub 之类的来源时，请把 content type 设为 `application/json`——
 表单编码的 webhook payload 在 v1 里不接受。
+
+GitHub 投递用 `X-GitHub-Delivery` 去重；通用发送方可以提供
+`Idempotency-Key`。同一个 key 的重试会复用原来的排队投递和 run。不带
+这两个 header 时，因为没有稳定的事件标识，投递只能提供尽力而为的语义。
 
 ### 事件过滤
 
@@ -198,7 +204,7 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
   -H 'X-GitHub-Event: workflow_run' \
   -H 'Content-Type: application/json' \
   -d '{"action":"completed"}'
-# → 200 {"status":"accepted", ...}
+# → 200 {"status":"accepted", "delivery_id":"…", "run_id":"…", ...}
 
 # 被过滤 —— 同样的事件，但 action 不在白名单
 curl -X POST "$MULTICA_WEBHOOK_URL" \
@@ -223,14 +229,18 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
 
 ### 状态码语义
 
-正常的 no-op 路径都返回 `200 OK` 加 `status` 字段，避免外部 webhook 重试
-机制反复打：
+有效且活跃的投递只有在投递和幂等 run 都持久化后才会确认：
 
-- `{"status":"accepted","run_id":"…","autopilot_id":"…","trigger_id":"…"}`
-  —— 已派发一次 run。
-- `{"status":"skipped","run_id":"…","reason":"agent runtime is offline at dispatch time"}`
-  —— 对 `run_only` Autopilot，受派智能体的 runtime 离线且不会入队；
-  `create_issue` Autopilot 仍会创建可追踪 issue，等 runtime 回来后继续认领。
+- `200 {"status":"accepted","delivery_id":"…","run_id":"…","autopilot_id":"…","trigger_id":"…"}`
+  —— 准入成功，后续派发由 worker 接管并可恢复。
+- `200 {"status":"skipped","delivery_id":"…","run_id":"…","reason":"…"}`
+  —— 准入生成了持久化的 skipped run，例如负责人运行时离线。
+
+正常 no-op 和去重路径返回 `200 OK`，避免外部 webhook 无限重试：
+
+- `{"status":"duplicate","delivery_id":"…","run_id":"…"}` —— 发送方的
+  幂等 key 已经接收。只有原请求在 run 准入前中断时才不带 `run_id`；worker
+  会恢复它。
 - `{"status":"ignored","reason":"trigger_disabled"}` —— 触发器已禁用。
 - `{"status":"ignored","reason":"autopilot_paused"}` —— Autopilot 已暂停。
 - `{"status":"ignored","reason":"autopilot_archived"}` —— Autopilot 已归档。
@@ -238,9 +248,12 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
 非 2xx 是真正的失败：
 
 - `400` —— 无效 JSON、scalar body、空 body。
+- `401` —— 已配置的 webhook 签名缺失或无效。
 - `404` —— 未知 token（`{"error":"webhook not found"}`）。
 - `413` —— 请求体超过 256 KiB。
-- `429` —— 单 token 速率限制（默认 60 次 / 分钟）。
+- `429` —— 命中高位 IP 绝对上限，或者该 IP 累积了过多未知 token / 无效
+  签名请求；响应会带 `Retry-After`。worker 的单触发器预算不会拒绝已经接收的
+  有效投递，只会让它继续排队，等预算恢复后再派发。
 
 ### 自托管：配置公开 URL
 

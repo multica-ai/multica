@@ -140,3 +140,33 @@ describe("ChatThreadList archive delegation", () => {
     expect(archiveMutate).not.toHaveBeenCalled();
   });
 });
+
+describe("ChatThreadList no_response preview (MUL-4351)", () => {
+  it("shows a localized 'no text reply' preview instead of the fallback body", () => {
+    const session = makeSession({
+      id: "nr1",
+      last_message: {
+        content: "The agent finished this turn without a text reply.",
+        role: "assistant",
+        created_at: "2026-07-08T03:00:00Z",
+        message_kind: "no_response",
+      },
+    });
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatThreadList
+          sessions={[session]}
+          agents={[agent]}
+          activeSessionId={null}
+          onSelectSession={vi.fn()}
+          onArchive={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+    expect(screen.getByText(enChat.list.no_response_preview)).toBeInTheDocument();
+    // The stored English fallback body must not leak into the preview.
+    expect(
+      screen.queryByText("The agent finished this turn without a text reply."),
+    ).not.toBeInTheDocument();
+  });
+});

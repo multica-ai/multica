@@ -77,6 +77,14 @@ spec:
             periodSeconds: 5
           resources:
             {{- toYaml .Values.postgres.resources | nindent 12 }}
+      {{- with .Values.postgres.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgres.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         - name: data
           persistentVolumeClaim:

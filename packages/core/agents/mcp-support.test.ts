@@ -15,6 +15,7 @@ describe("providerSupportsMcpConfig", () => {
     expect(providerSupportsMcpConfig("openclaw")).toBe(true);
     expect(providerSupportsMcpConfig("qoder")).toBe(true);
     expect(providerSupportsMcpConfig("traecli")).toBe(true);
+    expect(providerSupportsMcpConfig("grok")).toBe(true);
   });
 
   it("rejects providers whose runtime ignores mcp_config", () => {

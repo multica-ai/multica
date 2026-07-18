@@ -82,7 +82,12 @@ function pickMarkdownLink(att: Attachment): string {
 
 export function useFileUpload(
   api: ApiClient,
-  onError?: (error: Error) => void,
+  // Receives the failing `file` alongside the error so hosts can name it in
+  // the failure toast. `uploadWithToast` swallows the rejection after this
+  // fires, so a host that passes nothing reports nothing — the upload
+  // placeholder still disappears, which on its own reads as "my file
+  // silently vanished" (MUL-4808).
+  onError?: (error: Error, file: File) => void,
 ) {
   // In-flight counter, NOT a single boolean. Callers fire multiple uploads
   // concurrently (drag-drop of N files, paste with multiple images) and the
@@ -125,7 +130,7 @@ export function useFileUpload(
       try {
         return await upload(file, ctx);
       } catch (err) {
-        onError?.(err instanceof Error ? err : new Error("Upload failed"));
+        onError?.(err instanceof Error ? err : new Error("Upload failed"), file);
         return null;
       }
     },

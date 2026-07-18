@@ -37,7 +37,10 @@ Common resource types:
 multica project list --output json
 multica project get <project-id> --output json
 multica project create --title "<title>" --repo <github-url> --output json
+multica project create --title "<title>" --start-date 2026-03-01 --due-date 2026-03-31 --output json
 multica project update <project-id> --title "<title>" --output json
+multica project update <project-id> --due-date 2026-04-15 --output json
+multica project update <project-id> --start-date "" --output json   # clear the start date
 multica project status <project-id> in_progress --output json
 multica project resource list <project-id> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --output json
@@ -49,6 +52,8 @@ multica project resource remove <project-id> <resource-id> --output json
 ```
 
 For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default checkout branch/tag/SHA for future tasks in that project. JSON `--ref '<json>'` remains the escape hatch for full payloads or resource types not covered by shortcuts.
+
+`--start-date` / `--due-date` are optional calendar days (`YYYY-MM-DD`, like issue dates). On `project update`, pass an empty string (`--start-date ""`) to clear a date; an unset flag leaves it untouched.
 
 ## When to add a resource
 

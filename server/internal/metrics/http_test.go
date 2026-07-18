@@ -49,6 +49,40 @@ func TestHTTPMiddlewareUsesRoutePatternLabels(t *testing.T) {
 	}
 }
 
+func TestHTTPMiddlewareRecordsDaemonWorkspaceResponseSizeByStatus(t *testing.T) {
+	registry := NewRegistry(RegistryOptions{})
+
+	r := chi.NewRouter()
+	r.Use(registry.HTTP.Middleware)
+	r.Get(daemonWorkspaceRoutePattern, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") != "" {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	})
+
+	for _, etag := range []string{"", `W/"workspace-v1"`} {
+		req := httptest.NewRequest(http.MethodGet, daemonWorkspaceRoutePattern, nil)
+		req.Header.Set("If-None-Match", etag)
+		r.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	metricsRec := httptest.NewRecorder()
+	NewHandler(registry.Gatherer).ServeHTTP(metricsRec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := metricsRec.Body.String()
+	for _, want := range []string{
+		`multica_http_daemon_workspace_response_size_bytes_count{status="200"} 1`,
+		`multica_http_daemon_workspace_response_size_bytes_sum{status="200"} 2`,
+		`multica_http_daemon_workspace_response_size_bytes_count{status="304"} 1`,
+		`multica_http_daemon_workspace_response_size_bytes_sum{status="304"} 0`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics body missing %q\n%s", want, body)
+		}
+	}
+}
+
 func TestMetricsHandlerOnlyServesMetricsPath(t *testing.T) {
 	registry := NewRegistry(RegistryOptions{})
 	handler := NewHandler(registry.Gatherer)

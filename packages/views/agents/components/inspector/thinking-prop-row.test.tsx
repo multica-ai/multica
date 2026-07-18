@@ -60,6 +60,25 @@ const NO_THINKING_MODEL: RuntimeModel = {
   default: true,
 };
 
+// Codex flagship: flagged Default and advertises the widest catalog
+// (up to `ultra`). For an empty (follow-config) codex model the row must NOT
+// borrow this entry's levels — that's the MUL-4347 fix.
+const CODEX_DEFAULT_MODEL: RuntimeModel = {
+  id: "gpt-5.6-sol",
+  label: "GPT-5.6 Sol",
+  default: true,
+  thinking: {
+    supported_levels: [
+      { value: "low", label: "Low" },
+      { value: "medium", label: "Medium" },
+      { value: "high", label: "High" },
+      { value: "max", label: "Max" },
+      { value: "ultra", label: "Ultra" },
+    ],
+    default_level: "high",
+  },
+};
+
 function listResult(models: RuntimeModel[]): RuntimeModelListRequest {
   return {
     id: "req-1",
@@ -90,6 +109,7 @@ function renderRow(
           <ThinkingPropRow
             runtimeId="runtime-1"
             runtimeOnline
+            provider="claude"
             model="claude-sonnet-4-6"
             value=""
             canEdit
@@ -188,6 +208,64 @@ describe("ThinkingPropRow", () => {
     await screen.findByText("Thinking");
     // Empty value means Multica omits --effort, so the local CLI's
     // config decides — chip + tooltip both read "Follow CLI config".
+    expect((await screen.findAllByText("Follow CLI config")).length).toBeGreaterThan(0);
+  });
+
+  it("hides the picker for an empty codex model — it must not borrow the Default's catalog (MUL-4347)", async () => {
+    // Empty model on codex follows config.toml, which can resolve to any
+    // installed model. Previewing gpt-5.6-sol's levels (the flagged Default,
+    // the only one with `ultra`) would offer a level the real model may not
+    // support. With no persisted value the row hides entirely.
+    mockInitiateListModels.mockResolvedValue(
+      listResult([CODEX_DEFAULT_MODEL]),
+    );
+    mockGetListModelsResult.mockResolvedValue(
+      listResult([CODEX_DEFAULT_MODEL]),
+    );
+    renderRow({ provider: "codex", model: "", value: "" });
+
+    await waitFor(() => {
+      expect(mockInitiateListModels).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Thinking")).toBeNull();
+    });
+    // Crucially, `Ultra` from the Default entry is never offered.
+    expect(screen.queryByText("Ultra")).toBeNull();
+  });
+
+  it("still surfaces a persisted level on an empty codex model so it can be cleared", async () => {
+    // The clear-stale path must survive: an already-persisted `ultra` (set
+    // before the model was cleared) renders the row so the user can drop it,
+    // even though the picker offers no per-model levels.
+    mockInitiateListModels.mockResolvedValue(
+      listResult([CODEX_DEFAULT_MODEL]),
+    );
+    mockGetListModelsResult.mockResolvedValue(
+      listResult([CODEX_DEFAULT_MODEL]),
+    );
+    const { onChange } = renderRow({
+      provider: "codex",
+      model: "",
+      value: "ultra",
+    });
+
+    await screen.findByText("Thinking");
+    expect(await screen.findByText("ultra")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button"));
+    const clearButton = await screen.findByTitle(/Clear the override/i);
+    fireEvent.click(clearButton);
+    expect(onChange).toHaveBeenCalledWith("");
+  });
+
+  it("still previews the Default model's levels for an empty non-codex model", async () => {
+    // Non-codex providers keep the existing behavior: an empty model previews
+    // the flagged Default entry's catalog. Only codex is fenced off, because
+    // only its empty-model resolution is config-driven and unknowable here.
+    renderRow({ provider: "claude", model: "", value: "" });
+
+    await screen.findByText("Thinking");
+    // CLAUDE_MODEL (Default) advertises Low/Medium/High — the picker shows them.
     expect((await screen.findAllByText("Follow CLI config")).length).toBeGreaterThan(0);
   });
 });

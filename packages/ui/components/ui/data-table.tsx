@@ -6,6 +6,7 @@ import {
   type Row,
   type Table as TanstackTable,
 } from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import * as React from "react";
 
 // We deliberately use the lower-level shadcn primitives (TableHeader /
@@ -38,6 +39,17 @@ interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   // a detail page on row click without nesting an <a> around <tr>,
   // which is invalid HTML.
   onRowClick?: (row: Row<TData>) => void;
+  // Optional escape hatch for semantic rows such as collapsible group
+  // headers. Return null/undefined to use the standard data row renderer.
+  renderRow?: (row: Row<TData>) => React.ReactNode;
+  // A caller-supplied <tfoot> (summary / quick-create rows, for example).
+  footer?: React.ReactNode;
+  // Render only the visible row window for large tables. Callers should use
+  // this when their rows have a stable height; the footer remains part of the
+  // same scroll surface and is reachable after the virtual row space.
+  virtualizeRows?: boolean;
+  virtualRowHeight?: number;
+  virtualOverscan?: number;
 }
 
 // Headless data-table shell — adapted from Dice UI's data-table
@@ -62,6 +74,11 @@ export function DataTable<TData>({
   actionBar,
   emptyMessage = "No results.",
   onRowClick,
+  renderRow,
+  footer,
+  virtualizeRows = false,
+  virtualRowHeight = 41,
+  virtualOverscan = 10,
   className,
   ...props
 }: DataTableProps<TData>) {
@@ -157,12 +174,95 @@ export function DataTable<TData>({
     [hasExplicitSize, setColumnWidth],
   );
 
+  const scrollRef = React.useRef<HTMLDivElement | null>(null);
+  const rows = table.getRowModel().rows;
+  const getVirtualRowKey = React.useCallback(
+    (index: number) => rows[index]?.id ?? index,
+    [rows],
+  );
+  const rowVirtualizer = useVirtualizer({
+    count: virtualizeRows ? rows.length : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => virtualRowHeight,
+    getItemKey: getVirtualRowKey,
+    overscan: virtualOverscan,
+  });
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const firstVirtualItem = virtualItems[0];
+  const lastVirtualItem = virtualItems[virtualItems.length - 1];
+  const virtualPaddingTop = firstVirtualItem?.start ?? 0;
+  const virtualPaddingBottom = lastVirtualItem
+    ? rowVirtualizer.getTotalSize() - lastVirtualItem.end
+    : 0;
+
+  const renderDataRow = (row: Row<TData>) => {
+    const customRow = renderRow?.(row);
+    if (customRow != null) {
+      return <React.Fragment key={row.id}>{customRow}</React.Fragment>;
+    }
+    return (
+      <TableRow
+        key={row.id}
+        data-state={row.getIsSelected() && "selected"}
+        onClick={onRowClick ? () => onRowClick(row) : undefined}
+        // `group` lets pinned cells track row hover via group-hover (their bg
+        // is in className, not on the row, so they stay opaque enough to cover
+        // content scrolling beneath them).
+        className={cn("group", onRowClick && "cursor-pointer")}
+      >
+        {row.getVisibleCells().map((cell) => {
+          const isPinned = cell.column.getIsPinned();
+          const columnHasExplicitSize = hasExplicitSize(cell.column.id);
+          return (
+            <TableCell
+              key={cell.id}
+              // px-4 across the board so cell content aligns with the
+              // surrounding toolbar's px-4. Narrow trailing columns
+              // (chevron / actions) declare enough width for icon + padding.
+              // Pinned cells need an opaque bg + group-hover so they cover
+              // content scrolling beneath them and follow row hover state.
+              className={cn(
+                "overflow-hidden px-4 py-2",
+                isPinned &&
+                  "bg-background group-hover:bg-[color-mix(in_oklab,var(--muted)_50%,var(--background))]",
+              )}
+              style={getCellStyle(cell.column, {
+                withBorder: true,
+                hasExplicitSize: columnHasExplicitSize,
+              })}
+            >
+              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+            </TableCell>
+          );
+        })}
+      </TableRow>
+    );
+  };
+
+  const renderVirtualSpacer = (position: "top" | "bottom", height: number) =>
+    height > 0 ? (
+      <TableRow
+        key={`virtual-spacer-${position}`}
+        aria-hidden
+        className="pointer-events-none border-0 hover:bg-transparent"
+      >
+        <TableCell
+          colSpan={table.getVisibleLeafColumns().length}
+          className="p-0"
+          style={{ height: `${height}px` }}
+        />
+      </TableRow>
+    ) : null;
+
   return (
     <div
       className={cn("flex min-h-0 flex-1 flex-col", className)}
       {...props}
     >
-      <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-background">
+      <div
+        ref={scrollRef}
+        className="flex min-h-0 flex-1 flex-col overflow-auto bg-background"
+      >
         <table
           className="w-full table-fixed caption-bottom text-sm"
           style={{ minWidth: `${table.getTotalSize()}px` }}
@@ -194,12 +294,14 @@ export function DataTable<TData>({
                       // exceeds column.size. Tooltip / dropdown /
                       // hover-card bodies are portaled, so they are
                       // unaffected.
-                      // Pinned header cell uses muted/30 so it blends
-                      // into the header strip rather than appearing as
-                      // a white block under sticky scroll.
+                      // Pinned cells must be opaque: translucent backgrounds
+                      // reveal horizontally scrolled columns underneath. Mix
+                      // muted with background to preserve the same visual tone
+                      // as muted/30 without introducing alpha.
                       className={cn(
                         "relative h-8 overflow-hidden px-4 py-2 text-xs uppercase tracking-wider text-muted-foreground",
-                        isPinned && "bg-muted/30 backdrop-blur",
+                        isPinned &&
+                          "bg-[color-mix(in_oklab,var(--muted)_30%,var(--background))]",
                       )}
                       style={getCellStyle(header.column, {
                         withBorder: true,
@@ -246,58 +348,19 @@ export function DataTable<TData>({
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  data-state={row.getIsSelected() && "selected"}
-                  onClick={
-                    onRowClick ? () => onRowClick(row) : undefined
-                  }
-                  // `group` lets pinned cells track row hover via
-                  // group-hover (their bg is in className, not on the
-                  // row, so they stay opaque enough to cover content
-                  // scrolling beneath them).
-                  className={cn(
-                    "group",
-                    onRowClick && "cursor-pointer",
-                  )}
-                >
-                  {row.getVisibleCells().map((cell) => {
-                    const isPinned = cell.column.getIsPinned();
-                    const columnHasExplicitSize = hasExplicitSize(
-                      cell.column.id,
-                    );
-                    return (
-                      <TableCell
-                        key={cell.id}
-                        // px-4 across the board so cell content
-                        // aligns with the surrounding toolbar's
-                        // px-4. Narrow trailing columns (chevron /
-                        // actions) declare a column.size large enough
-                        // to fit the icon plus 16+16 padding.
-                        // Pinned cells need an opaque bg + group-
-                        // hover so they cover content scrolling
-                        // beneath them and follow row hover state.
-                        className={cn(
-                          "overflow-hidden px-4 py-2",
-                          isPinned &&
-                            "bg-background group-hover:bg-muted/50",
-                        )}
-                        style={getCellStyle(cell.column, {
-                          withBorder: true,
-                          hasExplicitSize: columnHasExplicitSize,
-                        })}
-                      >
-                        {flexRender(
-                          cell.column.columnDef.cell,
-                          cell.getContext(),
-                        )}
-                      </TableCell>
-                    );
+            {rows.length ? (
+              virtualizeRows ? (
+                <>
+                  {renderVirtualSpacer("top", virtualPaddingTop)}
+                  {virtualItems.map((virtualItem) => {
+                    const row = rows[virtualItem.index];
+                    return row ? renderDataRow(row) : null;
                   })}
-                </TableRow>
-              ))
+                  {renderVirtualSpacer("bottom", virtualPaddingBottom)}
+                </>
+              ) : (
+                rows.map(renderDataRow)
+              )
             ) : (
               <TableRow>
                 <TableCell
@@ -309,6 +372,7 @@ export function DataTable<TData>({
               </TableRow>
             )}
           </TableBody>
+          {footer}
         </table>
       </div>
       {actionBar &&

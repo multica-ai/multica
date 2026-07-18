@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // CancelTaskByUser (POST /api/tasks/{taskId}/cancel) used to key cancellation
@@ -138,6 +141,140 @@ func cancelTaskByUserRequest(t *testing.T, userID, taskID string) *http.Request 
 	req := newRequestAs(userID, "POST", "/api/tasks/"+taskID+"/cancel", nil)
 	req = withURLParam(req, "taskId", taskID)
 	return withChatTestWorkspaceCtx(t, req)
+}
+
+// createStartedEmptyChatTask seeds the exact shape the deferred cancel is about:
+// a chat task the daemon has already started (started_at set) whose transcript is
+// still empty, plus the user message that triggered it.
+func createStartedEmptyChatTask(t *testing.T, sessionID, agentID, content string) (taskID, userMessageID string) {
+	t.Helper()
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, chat_session_id, started_at)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'running', 0, NULL, $2, now())
+		RETURNING id
+	`, agentID, sessionID).Scan(&taskID); err != nil {
+		t.Fatalf("create started chat task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO chat_message (chat_session_id, role, content, task_id)
+		VALUES ($1, 'user', $2, $3)
+		RETURNING id
+	`, sessionID, content, taskID).Scan(&userMessageID); err != nil {
+		t.Fatalf("create linked user chat message: %v", err)
+	}
+	return taskID, userMessageID
+}
+
+func chatFinalizeDeferredAt(t *testing.T, taskID string) *time.Time {
+	t.Helper()
+	var at *time.Time
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT chat_finalize_deferred_at FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&at); err != nil {
+		t.Fatalf("read chat_finalize_deferred_at: %v", err)
+	}
+	return at
+}
+
+// Rollout compatibility (#5219). Clients and server do not upgrade together, and
+// a started-but-empty cancel is the one case where the prompt does NOT come back
+// in the cancel response — it is deferred and later published as a durable
+// draft-restore row, which only a client that knows about chat:cancel_finalized
+// and the draft-restores endpoint can collect. An installed desktop build that
+// predates all of that would read the empty response as "nothing to restore" and
+// silently drop the user's input, so deferral is gated on the client advertising
+// AppCapabilityChatDraftRestoreV1.
+func TestCancelTaskByUser_StartedEmptyChat_WithDraftRestoreCapability_Defers(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "CancelChatDeferCapableAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID, userMessageID := createStartedEmptyChatTask(t, sessionID, agentID, "defer this prompt")
+
+	req := cancelTaskByUserRequest(t, testUserID, taskID)
+	req.Header.Set("X-Client-Capabilities", protocol.AppCapabilityChatDraftRestoreV1)
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp CancelTaskByUserResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode cancel response: %v", err)
+	}
+	if resp.CancelledChatMessage != nil {
+		t.Fatalf("capable client must get no synchronous restore, got %#v", resp.CancelledChatMessage)
+	}
+	if chatFinalizeDeferredAt(t, taskID) == nil {
+		t.Fatal("expected the finalize-deferred marker to be set")
+	}
+
+	// The judgment is deferred, so the user message must still be there for the
+	// daemon ack / sweeper to settle.
+	var count int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM chat_message WHERE id = $1`, userMessageID).Scan(&count); err != nil {
+		t.Fatalf("count user chat message: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected the user message to survive the deferral, got %d rows", count)
+	}
+}
+
+func TestCancelTaskByUser_StartedEmptyChat_LegacyClient_StillGetsSynchronousRestore(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "CancelChatDeferLegacyAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	const userContent = "an old client must not lose this"
+	taskID, userMessageID := createStartedEmptyChatTask(t, sessionID, agentID, userContent)
+
+	// No X-Client-Capabilities: a build that predates the durable restore.
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(w, cancelTaskByUserRequest(t, testUserID, taskID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp CancelTaskByUserResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode cancel response: %v", err)
+	}
+	if resp.CancelledChatMessage == nil {
+		t.Fatal("legacy client must still get the synchronous restore payload")
+	}
+	if resp.CancelledChatMessage.MessageID != userMessageID ||
+		resp.CancelledChatMessage.Content != userContent ||
+		!resp.CancelledChatMessage.RestoreToInput {
+		t.Fatalf("restore payload mismatch: %#v", resp.CancelledChatMessage)
+	}
+	if at := chatFinalizeDeferredAt(t, taskID); at != nil {
+		t.Fatalf("legacy cancel must not defer, marker set at %v", at)
+	}
+
+	// Legacy semantics all the way: the message is settled synchronously, and no
+	// durable restore row is written for a client that could never read it.
+	var messages int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM chat_message WHERE id = $1`, userMessageID).Scan(&messages); err != nil {
+		t.Fatalf("count user chat message: %v", err)
+	}
+	if messages != 0 {
+		t.Fatalf("expected the user message to be deleted synchronously, got %d rows", messages)
+	}
+	var restores int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM chat_draft_restore WHERE chat_session_id = $1`, sessionID).Scan(&restores); err != nil {
+		t.Fatalf("count draft restores: %v", err)
+	}
+	if restores != 0 {
+		t.Fatalf("expected no durable restore for a legacy cancel, got %d", restores)
+	}
 }
 
 // TestCancelTaskByUser_RunOnlyAutopilot_Succeeds is the core MUL-2827 fix: a

@@ -146,12 +146,12 @@ Agent-specific overrides:
 | `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
 | `MULTICA_HERMES_MODEL` | Override the Hermes model used |
-| `MULTICA_GEMINI_PATH` | Custom path to the `gemini` binary |
-| `MULTICA_GEMINI_MODEL` | Override the Gemini model used |
 | `MULTICA_PI_PATH` | Custom path to the `pi` binary |
 | `MULTICA_PI_MODEL` | Override the Pi model used |
 | `MULTICA_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
 | `MULTICA_CURSOR_MODEL` | Override the Cursor Agent model used |
+| `MULTICA_GROK_PATH` | Custom path to the `grok` binary |
+| `MULTICA_GROK_MODEL` | Override the Grok model used (e.g. `grok-4.5`) |
 
 ## Database Setup
 

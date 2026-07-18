@@ -5,8 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Tag, Plus, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import type { Label } from "@multica/core/types";
-import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import {
   labelListOptions,
   issueLabelsOptions,
@@ -15,7 +15,7 @@ import {
   useCreateLabel,
 } from "@multica/core/labels";
 import { LabelChip } from "../../../labels/label-chip";
-import { LabelsPanel } from "../labels-panel";
+import { useNavigation } from "../../../navigation";
 import {
   PropertyPicker,
   PickerItem,
@@ -83,9 +83,9 @@ function pickInlineColor(name: string): string {
  * label with a hash-derived color and selects it in one motion. The created
  * label is a real workspace label in both modes; only the attach step differs.
  *
- * A "Manage labels" item at the bottom opens a dialog with the full
- * workspace label management panel (rename, recolor, delete) — keeping
- * users in context without forcing them to navigate away.
+ * A "Manage labels" item at the bottom opens the workspace Labels settings
+ * page, which is the single management surface for issue, agent, and skill
+ * label catalogs.
  */
 export function LabelPicker({
   issueId,
@@ -102,7 +102,8 @@ export function LabelPicker({
   const open = controlledOpen ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
   const [filter, setFilter] = useState("");
-  const [manageOpen, setManageOpen] = useState(false);
+  const navigation = useNavigation();
+  const paths = useWorkspacePaths();
 
   // Synchronous lock to prevent double-submit on rapid Enter / click. React
   // state (create.isPending, filter) isn't visible until the next render, so
@@ -197,7 +198,7 @@ export function LabelPicker({
 
   const openManage = () => {
     setOpen(false);
-    setManageOpen(true);
+    navigation.push(`${paths.settings()}?tab=labels`);
   };
 
   const hasLabels = selectedLabels.length > 0;
@@ -288,13 +289,6 @@ export function LabelPicker({
           </PickerItem>
         )}
       </PropertyPicker>
-
-      <Dialog open={manageOpen} onOpenChange={setManageOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogTitle className="text-lg font-semibold">{t(($) => $.pickers.label.manage_dialog_title)}</DialogTitle>
-          <LabelsPanel />
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

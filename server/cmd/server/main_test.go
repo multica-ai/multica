@@ -79,6 +79,29 @@ func TestNewNamedRedisClient_DisableClientName_InvalidValue(t *testing.T) {
 	}
 }
 
+// TestNormalizeServerVersion covers the router-config wiring path (not just
+// a hand-set handler.Config field): an unstamped "dev" build must not leak
+// into /api/config's server_version, or the Help popover would render
+// "Server version dev" instead of hiding the row.
+func TestNormalizeServerVersion(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"unstamped_dev_default_becomes_empty", "dev", ""},
+		{"already_empty_stays_empty", "", ""},
+		{"stamped_release_tag_passes_through", "v0.4.0", "v0.4.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeServerVersion(tt.in); got != tt.want {
+				t.Errorf("normalizeServerVersion(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEnvBool(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -366,6 +366,7 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 		if resolveErr != nil {
 			return fmt.Errorf("resolve agent: %w", resolveErr)
 		}
+		body["assignee_type"] = "agent"
 		body["assignee_id"] = agentID
 	}
 	if cmd.Flags().Changed("project") {

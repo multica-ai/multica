@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -47,6 +48,38 @@ func signBody(secret string, body []byte) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
+func installWebhookAcknowledgementFailure(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	functionName := fmt.Sprintf("webhook_ack_fail_fn_%d", suffix)
+	triggerName := fmt.Sprintf("webhook_ack_fail_%d", suffix)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, fmt.Sprintf(`DROP TRIGGER IF EXISTS %s ON webhook_delivery`, triggerName))
+		testPool.Exec(ctx, fmt.Sprintf(`DROP FUNCTION IF EXISTS %s()`, functionName))
+	})
+
+	if _, err := testPool.Exec(ctx, fmt.Sprintf(`
+CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	IF NEW.event = 'test.ack_failure' AND NEW.response_status = 200 THEN
+		RAISE EXCEPTION 'forced webhook acknowledgement metadata failure';
+	END IF;
+	RETURN NEW;
+END;
+$$;
+`, functionName)); err != nil {
+		t.Fatalf("install acknowledgement failure function: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, fmt.Sprintf(`
+CREATE TRIGGER %s
+BEFORE UPDATE ON webhook_delivery
+FOR EACH ROW EXECUTE FUNCTION %s();
+`, triggerName, functionName)); err != nil {
+		t.Fatalf("install acknowledgement failure trigger: %v", err)
+	}
+}
+
 // listDeliveries calls ListAutopilotDeliveries and decodes the body.
 func listDeliveries(t *testing.T, apID string) []map[string]any {
 	t.Helper()
@@ -74,17 +107,7 @@ func TestWebhookHandler_PersistsDeliveryOnAccept(t *testing.T) {
 	trig := createWebhookTriggerViaHandler(t, apID)
 
 	w := postWebhook(t, *trig.WebhookToken, map[string]any{"hello": "world"}, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d body=%s", w.Code, w.Body.String())
-	}
-	var resp map[string]any
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["delivery_id"] == nil {
-		t.Fatal("response should include delivery_id")
-	}
-	if resp["status"] != "accepted" {
-		t.Fatalf("status: %v", resp["status"])
-	}
+	processQueuedWebhookDelivery(t, requireAcceptedWebhookResponse(t, w))
 
 	deliveries := listDeliveries(t, apID)
 	if len(deliveries) != 1 {
@@ -97,8 +120,38 @@ func TestWebhookHandler_PersistsDeliveryOnAccept(t *testing.T) {
 	if d["autopilot_run_id"] == nil {
 		t.Fatal("delivery should link to run")
 	}
+	if got := int(d["response_status"].(float64)); got != http.StatusOK {
+		t.Fatalf("terminal delivery must retain ingress 200 acknowledgement, got %d", got)
+	}
+	if got := int(d["dispatch_attempts"].(float64)); got != 1 {
+		t.Fatalf("expected one worker dispatch attempt, got %d", got)
+	}
 	if d["signature_status"] != "not_required" {
 		t.Fatalf("expected signature_status=not_required, got %v", d["signature_status"])
+	}
+}
+
+func TestWebhookHandler_AcknowledgementMetadataFailureStillReturns200(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "AckMetadataFailure Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+	installWebhookAcknowledgementFailure(t)
+
+	w := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "test.ack_failure"}, map[string]string{
+		"Idempotency-Key": "ack-metadata-failure",
+	})
+	deliveryID := requireAcceptedWebhookResponse(t, w)
+	delivery, err := testHandler.Queries.GetWebhookDelivery(context.Background(), parseUUID(deliveryID))
+	if err != nil {
+		t.Fatalf("load durably queued delivery: %v", err)
+	}
+	if delivery.ResponseStatus.Valid || delivery.ResponseBody.Valid {
+		t.Fatalf("forced acknowledgement metadata write unexpectedly succeeded: %#v", delivery)
+	}
+
+	completed := processQueuedWebhookDelivery(t, deliveryID)
+	if completed.Status != deliveryStatusDispatched || !completed.AutopilotRunID.Valid {
+		t.Fatalf("durable delivery did not dispatch after metadata failure: status=%s run=%v", completed.Status, completed.AutopilotRunID.Valid)
 	}
 }
 
@@ -111,18 +164,18 @@ func TestWebhookHandler_DedupeViaIdempotencyKey(t *testing.T) {
 	headers := map[string]string{"Idempotency-Key": "demo-key-1"}
 
 	w1 := postWebhook(t, *trig.WebhookToken, body, headers)
-	if w1.Code != http.StatusOK {
-		t.Fatalf("first: %d body=%s", w1.Code, w1.Body.String())
-	}
+	firstDeliveryID := requireAcceptedWebhookResponse(t, w1)
 	var r1 map[string]any
-	json.Unmarshal(w1.Body.Bytes(), &r1)
-	if r1["status"] != "accepted" {
-		t.Fatalf("first status: %v", r1["status"])
+	if err := json.Unmarshal(w1.Body.Bytes(), &r1); err != nil {
+		t.Fatalf("decode first response: %v", err)
 	}
-	firstDeliveryID := r1["delivery_id"].(string)
-	firstRunID := r1["run_id"].(string)
+	firstRunID, ok := r1["run_id"].(string)
+	if !ok || firstRunID == "" {
+		t.Fatalf("first response missing run_id: %s", w1.Body.String())
+	}
 
-	// Second identical delivery should be a duplicate.
+	// Retry before the worker processes the queued delivery. The admitted run
+	// must already be discoverable so the duplicate returns the same run_id.
 	w2 := postWebhook(t, *trig.WebhookToken, body, headers)
 	if w2.Code != http.StatusOK {
 		t.Fatalf("second: %d body=%s", w2.Code, w2.Body.String())
@@ -137,6 +190,10 @@ func TestWebhookHandler_DedupeViaIdempotencyKey(t *testing.T) {
 	}
 	if r2["run_id"] != firstRunID {
 		t.Fatalf("duplicate run_id mismatch: %v != %v", r2["run_id"], firstRunID)
+	}
+	firstDelivery := processQueuedWebhookDelivery(t, firstDeliveryID)
+	if got := uuidToString(firstDelivery.AutopilotRunID); got != firstRunID {
+		t.Fatalf("processed delivery run_id mismatch: %v != %v", got, firstRunID)
 	}
 
 	// Only one delivery should exist; attempt_count must be 2.
@@ -162,14 +219,7 @@ func TestWebhookHandler_DedupeViaGitHubDelivery(t *testing.T) {
 	}
 
 	w1 := postWebhook(t, *trig.WebhookToken, body, headers)
-	if w1.Code != http.StatusOK {
-		t.Fatalf("first: %d", w1.Code)
-	}
-	var r1 map[string]any
-	json.Unmarshal(w1.Body.Bytes(), &r1)
-	if r1["status"] != "accepted" {
-		t.Fatalf("first status: %v", r1["status"])
-	}
+	processQueuedWebhookDelivery(t, requireAcceptedWebhookResponse(t, w1))
 
 	w2 := postWebhook(t, *trig.WebhookToken, body, headers)
 	var r2 map[string]any
@@ -257,14 +307,7 @@ func TestWebhookHandler_ValidSignatureDispatches(t *testing.T) {
 	w := postWebhook(t, *trig.WebhookToken, bodyBytes, map[string]string{
 		"X-Hub-Signature-256": sig,
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
-	}
-	var resp map[string]any
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["status"] != "accepted" {
-		t.Fatalf("status: %v", resp["status"])
-	}
+	processQueuedWebhookDelivery(t, requireAcceptedWebhookResponse(t, w))
 	deliveries := listDeliveries(t, apID)
 	if len(deliveries) != 1 {
 		t.Fatalf("expected 1 delivery, got %d", len(deliveries))
@@ -333,9 +376,7 @@ func TestSigningSecret_EmptyClearsSecret(t *testing.T) {
 	}
 	// Unsigned request should now go through (back to not_required).
 	post := postWebhook(t, *trig.WebhookToken, map[string]any{"x": 1}, nil)
-	if post.Code != http.StatusOK {
-		t.Fatalf("post after clear: %d body=%s", post.Code, post.Body.String())
-	}
+	requireAcceptedWebhookResponse(t, post)
 }
 
 func TestReplay_CreatesNewDeliveryAndDispatchesRun(t *testing.T) {
@@ -347,13 +388,9 @@ func TestReplay_CreatesNewDeliveryAndDispatchesRun(t *testing.T) {
 	w := postWebhook(t, *trig.WebhookToken, map[string]any{"hello": "world"}, map[string]string{
 		"Idempotency-Key": "replay-original",
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("original: %d body=%s", w.Code, w.Body.String())
-	}
-	var orig map[string]any
-	json.Unmarshal(w.Body.Bytes(), &orig)
-	originalID := orig["delivery_id"].(string)
-	originalRunID := orig["run_id"].(string)
+	originalID := requireAcceptedWebhookResponse(t, w)
+	originalDelivery := processQueuedWebhookDelivery(t, originalID)
+	originalRunID := uuidToString(originalDelivery.AutopilotRunID)
 
 	// Replay the original.
 	wr := httptest.NewRecorder()
@@ -417,12 +454,7 @@ func TestGetDelivery_ReturnsFullPayload(t *testing.T) {
 	trig := createWebhookTriggerViaHandler(t, apID)
 
 	w := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "demo", "eventPayload": map[string]any{"answer": 42}}, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("seed: %d", w.Code)
-	}
-	var seed map[string]any
-	json.Unmarshal(w.Body.Bytes(), &seed)
-	deliveryID := seed["delivery_id"].(string)
+	deliveryID := requireAcceptedWebhookResponse(t, w)
 
 	// List response should NOT include raw_body / selected_headers.
 	wList := httptest.NewRecorder()
@@ -541,9 +573,10 @@ func TestWebhookHandler_RunOnlyDedupeOnGitHubDelivery(t *testing.T) {
 	}
 	body := map[string]any{"action": "opened"}
 
+	first := postWebhook(t, *trig.WebhookToken, body, headers)
 	postWebhook(t, *trig.WebhookToken, body, headers)
 	postWebhook(t, *trig.WebhookToken, body, headers)
-	postWebhook(t, *trig.WebhookToken, body, headers)
+	processQueuedWebhookDelivery(t, requireAcceptedWebhookResponse(t, first))
 
 	// Count autopilot_run rows linked to this trigger.
 	rows, err := testHandler.Queries.ListAutopilotRuns(context.Background(), db.ListAutopilotRunsParams{
@@ -563,20 +596,268 @@ func TestWebhookHandler_RunOnlyDedupeOnGitHubDelivery(t *testing.T) {
 	if runCount != 1 {
 		t.Fatalf("expected exactly 1 run from 3 retried deliveries, got %d", runCount)
 	}
+	deliveries := listDeliveries(t, apID)
+	if len(deliveries) != 1 || deliveries[0]["status"] != deliveryStatusDispatched {
+		t.Fatalf("queued duplicate should be dispatched exactly once: %#v", deliveries)
+	}
+	if got := int(deliveries[0]["attempt_count"].(float64)); got != 3 {
+		t.Fatalf("redeliveries should bump attempt_count to 3, got %d", got)
+	}
+}
+
+func TestWebhookDeliveryWorker_PerTriggerLimitDefersWithoutDropping(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WorkerPacing Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	prev := testHandler.WebhookRateLimiter
+	testHandler.WebhookRateLimiter = NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 1, Window: time.Minute})
+	t.Cleanup(func() { testHandler.WebhookRateLimiter = prev })
+
+	firstID := requireAcceptedWebhookResponse(t, postWebhook(t, *trig.WebhookToken, map[string]any{"n": 1}, map[string]string{
+		"Idempotency-Key": "worker-pacing-1",
+	}))
+	secondID := requireAcceptedWebhookResponse(t, postWebhook(t, *trig.WebhookToken, map[string]any{"n": 2}, map[string]string{
+		"Idempotency-Key": "worker-pacing-2",
+	}))
+
+	worked, err := testHandler.WebhookDeliveryWorker.ProcessNext(context.Background())
+	if err != nil || !worked {
+		t.Fatalf("first dispatch: worked=%v err=%v", worked, err)
+	}
+	deliveries := make([]db.WebhookDelivery, 2)
+	for i, id := range []string{firstID, secondID} {
+		deliveries[i], err = testHandler.Queries.GetWebhookDelivery(context.Background(), parseUUID(id))
+		if err != nil {
+			t.Fatalf("load delivery %s: %v", id, err)
+		}
+	}
+	queuedIndex := -1
+	for i, delivery := range deliveries {
+		if delivery.Status == deliveryStatusQueued {
+			queuedIndex = i
+		}
+	}
+	if queuedIndex < 0 {
+		t.Fatalf("expected one delivery to remain queued: %#v", deliveries)
+	}
+
+	worked, err = testHandler.WebhookDeliveryWorker.ProcessNext(context.Background())
+	if err != nil || !worked {
+		t.Fatalf("defer paced delivery: worked=%v err=%v", worked, err)
+	}
+	deferred, err := testHandler.Queries.GetWebhookDelivery(context.Background(), deliveries[queuedIndex].ID)
+	if err != nil {
+		t.Fatalf("load deferred delivery: %v", err)
+	}
+	if deferred.Status != deliveryStatusQueued || deferred.DispatchAttempts != 0 {
+		t.Fatalf("pacing must preserve queued work without counting an attempt: status=%s attempts=%d", deferred.Status, deferred.DispatchAttempts)
+	}
+	if deferred.LeaseToken.Valid || deferred.LeaseExpiresAt.Valid || !deferred.AvailableAt.Valid || !deferred.AvailableAt.Time.After(time.Now()) {
+		t.Fatalf("paced delivery was not released with a future availability: %#v", deferred)
+	}
+
+	var runCount, dispatchedRunCount int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*), count(task_id)
+		FROM autopilot_run
+		WHERE webhook_delivery_id IN ($1, $2)
+	`, firstID, secondID).Scan(&runCount, &dispatchedRunCount); err != nil {
+		t.Fatalf("count paced runs: %v", err)
+	}
+	if runCount != 2 || dispatchedRunCount != 1 {
+		t.Fatalf("pacing should admit both runs but dispatch only one: runs=%d dispatched=%d", runCount, dispatchedRunCount)
+	}
+}
+
+func TestWebhookDeliveryWorker_DispatchesRunAdmittedBeforePause(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WorkerAdmittedBeforePause Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	post := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "accepted.before_pause"}, nil)
+	deliveryID := requireAcceptedWebhookResponse(t, post)
+	if _, err := testPool.Exec(context.Background(), `UPDATE autopilot SET status = 'paused' WHERE id = $1`, apID); err != nil {
+		t.Fatalf("pause admitted autopilot: %v", err)
+	}
+
+	delivery := processQueuedWebhookDelivery(t, deliveryID)
+	if delivery.Status != deliveryStatusDispatched || !delivery.AutopilotRunID.Valid {
+		t.Fatalf("accepted delivery was stranded after pause: status=%s run=%v", delivery.Status, delivery.AutopilotRunID.Valid)
+	}
+	run, err := testHandler.Queries.GetAutopilotRun(context.Background(), delivery.AutopilotRunID)
+	if err != nil {
+		t.Fatalf("load admitted run: %v", err)
+	}
+	if !run.TaskID.Valid {
+		t.Fatalf("accepted run was not dispatched after pause: %#v", run)
+	}
+}
+
+func TestWebhookDeliveryWorker_RecoversExpiredLeaseAndReusesRun(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WorkerRecovery Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	post := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "recovery"}, map[string]string{
+		"Idempotency-Key": "worker-recovery",
+	})
+	deliveryID := requireAcceptedWebhookResponse(t, post)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE webhook_delivery
+		SET lease_token = gen_random_uuid(), lease_expires_at = now() - interval '1 second'
+		WHERE id = $1
+	`, deliveryID); err != nil {
+		t.Fatalf("seed expired lease: %v", err)
+	}
+
+	first := processQueuedWebhookDelivery(t, deliveryID)
+	if first.Status != deliveryStatusDispatched || !first.AutopilotRunID.Valid {
+		t.Fatalf("expired lease was not recovered: status=%s run=%v", first.Status, first.AutopilotRunID.Valid)
+	}
+	firstRunID := uuidToString(first.AutopilotRunID)
+
+	// Simulate a crash after the run/task side effect committed but before a
+	// delivery terminal update was durable. Requeueing must reuse the run's
+	// webhook_delivery_id anchor and must not create a second task.
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE webhook_delivery
+		SET status = 'queued', autopilot_run_id = NULL, available_at = now(),
+		    lease_token = NULL, lease_expires_at = NULL
+		WHERE id = $1
+	`, deliveryID); err != nil {
+		t.Fatalf("requeue delivery: %v", err)
+	}
+	second := processQueuedWebhookDelivery(t, deliveryID)
+	if got := uuidToString(second.AutopilotRunID); got != firstRunID {
+		t.Fatalf("worker did not reuse idempotent run: got %s want %s", got, firstRunID)
+	}
+
+	var runCount, taskCount int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM autopilot_run WHERE webhook_delivery_id = $1
+	`, deliveryID).Scan(&runCount); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM agent_task_queue WHERE autopilot_run_id = $1
+	`, firstRunID).Scan(&taskCount); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if runCount != 1 || taskCount != 1 {
+		t.Fatalf("recovery duplicated side effects: runs=%d tasks=%d", runCount, taskCount)
+	}
+}
+
+func TestWebhookDeliveryWorker_LeaseOwnershipChangeIsBenign(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WorkerLeaseChange Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	post := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "lease-change"}, map[string]string{
+		"Idempotency-Key": "worker-lease-change",
+	})
+	deliveryID := requireAcceptedWebhookResponse(t, post)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE webhook_delivery
+		SET lease_token = gen_random_uuid(), lease_expires_at = now() + interval '2 minutes'
+		WHERE id = $1
+	`, deliveryID); err != nil {
+		t.Fatalf("seed first lease: %v", err)
+	}
+	staleClaim, err := testHandler.Queries.GetWebhookDelivery(context.Background(), parseUUID(deliveryID))
+	if err != nil {
+		t.Fatalf("load first lease: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE webhook_delivery SET lease_token = gen_random_uuid() WHERE id = $1
+	`, deliveryID); err != nil {
+		t.Fatalf("replace lease owner: %v", err)
+	}
+
+	worker := NewWebhookDeliveryWorker(testHandler)
+	if err := worker.complete(context.Background(), staleClaim, deliveryStatusDispatched, pgtype.UUID{}, ""); err != nil {
+		t.Fatalf("stale complete should be benign: %v", err)
+	}
+	if err := worker.retryOrFail(context.Background(), staleClaim, fmt.Errorf("forced transient failure")); err != nil {
+		t.Fatalf("stale retry should be benign: %v", err)
+	}
+	current, err := testHandler.Queries.GetWebhookDelivery(context.Background(), parseUUID(deliveryID))
+	if err != nil {
+		t.Fatalf("load current owner: %v", err)
+	}
+	if current.Status != deliveryStatusQueued || current.LeaseToken == staleClaim.LeaseToken {
+		t.Fatalf("stale worker mutated the new owner's delivery: %#v", current)
+	}
+}
+
+func TestWebhookDeliveryWorker_RunStopsBoundedPool(t *testing.T) {
+	worker := NewWebhookDeliveryWorker(testHandler)
+	ctx, cancel := context.WithCancel(context.Background())
+	go worker.Run(ctx)
+	cancel()
+	if !worker.WaitWithTimeout(time.Second) {
+		t.Fatal("bounded worker pool did not stop after cancellation")
+	}
+}
+
+func TestWebhookDeliveryWorker_RepairsCreateIssueTaskCrashWindow(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WorkerIssueRecovery Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "create_issue")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	post := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "issue-recovery"}, map[string]string{
+		"Idempotency-Key": "worker-issue-recovery",
+	})
+	deliveryID := requireAcceptedWebhookResponse(t, post)
+	first := processQueuedWebhookDelivery(t, deliveryID)
+	run, err := testHandler.Queries.GetAutopilotRun(context.Background(), first.AutopilotRunID)
+	if err != nil || !run.IssueID.Valid {
+		t.Fatalf("load create_issue run: run=%#v err=%v", run, err)
+	}
+	issueID := uuidToString(run.IssueID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// Remove the task to model a process exit after the issue/run transaction
+	// but before task enqueue, then make the delivery recoverable again.
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID); err != nil {
+		t.Fatalf("remove issue task: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE webhook_delivery
+		SET status = 'queued', autopilot_run_id = NULL, available_at = now(),
+		    lease_token = NULL, lease_expires_at = NULL
+		WHERE id = $1
+	`, deliveryID); err != nil {
+		t.Fatalf("requeue delivery: %v", err)
+	}
+	second := processQueuedWebhookDelivery(t, deliveryID)
+	if got := uuidToString(second.AutopilotRunID); got != uuidToString(first.AutopilotRunID) {
+		t.Fatalf("repair should reuse run: got %s want %s", got, uuidToString(first.AutopilotRunID))
+	}
+	var taskCount int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, issueID).Scan(&taskCount); err != nil {
+		t.Fatalf("count repaired task: %v", err)
+	}
+	if taskCount != 1 {
+		t.Fatalf("expected one repaired issue task, got %d", taskCount)
+	}
 }
 
 func TestWebhookHandler_InvalidSignatureCountsAgainstRateLimit(t *testing.T) {
-	// A stream of bad-signature attempts must not let an attacker bypass
-	// per-token rate limiting; the limiter increment happens before
-	// signature check.
+	// Only requests classified as bad credentials consume the shared-IP debt
+	// budget; valid traffic behind the same NAT does not.
 	agentID := createWebhookTestAgent(t, "SigRateLimit Agent")
 	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
 	trig := createWebhookTriggerViaHandler(t, apID)
 	setSigningSecretViaHandler(t, apID, trig.ID, testSigningSecret)
 
-	prev := testHandler.WebhookRateLimiter
-	testHandler.WebhookRateLimiter = NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 2, Window: 60_000_000_000})
-	t.Cleanup(func() { testHandler.WebhookRateLimiter = prev })
+	prev := testHandler.WebhookIPRateLimiter
+	testHandler.WebhookIPRateLimiter = NewMemoryWebhookIPRateLimiter(WebhookRateLimit{Limit: 2, Window: 60_000_000_000})
+	t.Cleanup(func() { testHandler.WebhookIPRateLimiter = prev })
 
 	bad := map[string]string{"X-Hub-Signature-256": "sha256=baad"}
 	for i := 0; i < 2; i++ {
@@ -588,6 +869,9 @@ func TestWebhookHandler_InvalidSignatureCountsAgainstRateLimit(t *testing.T) {
 	w := postWebhook(t, *trig.WebhookToken, map[string]any{"i": "third"}, bad)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("third request expected 429 (rate-limited despite bad sig), got %d", w.Code)
+	}
+	if w.Header().Get("Retry-After") == "" {
+		t.Fatal("429 must include Retry-After")
 	}
 }
 

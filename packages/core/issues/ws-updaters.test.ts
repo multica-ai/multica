@@ -11,7 +11,10 @@ import {
   onIssueDeleted,
   onIssueLabelsChanged,
   onIssueMetadataChanged,
+  onIssuePropertiesChanged,
   onIssueUpdated,
+  patchIssueLabels,
+  patchIssueProperties,
 } from "./ws-updaters";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
@@ -76,6 +79,7 @@ const baseIssue: Issue = {
   start_date: null,
   due_date: null,
   metadata: {},
+  properties: {},
   labels: [labelA],
   created_at: "2025-01-01T00:00:00Z",
   updated_at: "2025-01-01T00:00:00Z",
@@ -180,6 +184,25 @@ describe("onIssueLabelsChanged", () => {
       labelA,
     ]);
   });
+
+  it("defers label-filtered flat-window invalidation until commit", () => {
+    const flatKey = issueKeys.flat(
+      WS_ID,
+      "workspace:all",
+      { label_ids: [labelB.id] },
+      { sort_by: "position" },
+    );
+    qc.setQueryData(flatKey, {
+      pages: [{ issues: [baseIssue], total: 1 }],
+      pageParams: [0],
+    });
+
+    patchIssueLabels(qc, WS_ID, ISSUE_ID, [labelB]);
+    expect(qc.getQueryState(flatKey)?.isInvalidated).toBe(false);
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
+    expectInvalidated(qc, flatKey);
+  });
 });
 
 describe("onIssueMetadataChanged", () => {
@@ -216,6 +239,34 @@ describe("onIssueMetadataChanged", () => {
 
     expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.list(WS_ID))).toBeUndefined();
+  });
+});
+
+describe("issue property snapshots", () => {
+  it("keeps optimistic patches local, then invalidates property windows after commit", () => {
+    const qc = new QueryClient();
+    const flatKey = issueKeys.flat(
+      WS_ID,
+      "workspace:all",
+      {},
+      { sort_by: "property:estimate", properties: { estimate: ["3"] } },
+    );
+    qc.setQueryData(flatKey, {
+      pages: [{ issues: [baseIssue], total: 1 }],
+      pageParams: [0],
+    });
+
+    patchIssueProperties(qc, WS_ID, ISSUE_ID, { estimate: 3 });
+
+    expect(qc.getQueryState(flatKey)?.isInvalidated).toBe(false);
+    expect(
+      qc.getQueryData<{ pages: { issues: Issue[] }[] }>(flatKey)?.pages[0]
+        ?.issues[0]?.properties,
+    ).toEqual({ estimate: 3 });
+
+    onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, { estimate: 4 });
+
+    expectInvalidated(qc, flatKey);
   });
 });
 
@@ -260,6 +311,23 @@ describe("project progress invalidation", () => {
     });
 
     expectInvalidated(qc, projectKeys.list(WS_ID));
+  });
+});
+
+describe("onIssueCreated — carries the label snapshot into list cache", () => {
+  it("keeps the created issue's labels so members other than the creator render it already labeled", () => {
+    // The backend now attaches labels in the create transaction and echoes
+    // them on the issue:created event. Guard that the cache insert doesn't
+    // strip them — otherwise online members would see the new issue blank
+    // until a refetch (staleTime: Infinity means no self-heal).
+    const qc = new QueryClient();
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), makeListCache());
+
+    onIssueCreated(qc, WS_ID, { ...baseIssue, labels: [labelA, labelB] });
+
+    const cache = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
+    const cached = cache?.byStatus.todo?.issues.find((i) => i.id === ISSUE_ID);
+    expect(cached?.labels).toEqual([labelA, labelB]);
   });
 });
 

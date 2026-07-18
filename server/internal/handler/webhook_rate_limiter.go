@@ -33,13 +33,44 @@ func DefaultWebhookIPRateLimit() WebhookRateLimit {
 	return WebhookRateLimit{Limit: 30, Window: time.Minute}
 }
 
+// DefaultWebhookAbsoluteIPRateLimit is the high emergency ceiling applied to
+// every webhook request before token lookup. Normal valid traffic should sit
+// far below this budget; unlike the lower bad-credential debt limiter it is
+// intentionally consumed by successful deliveries too.
+func DefaultWebhookAbsoluteIPRateLimit() WebhookRateLimit {
+	return WebhookRateLimit{Limit: 600, Window: time.Minute}
+}
+
 // WebhookRateLimiter is the contract implemented by both the in-memory and
 // Redis-backed limiters.
 //
-// Allow returns true when the request is within budget for the given key,
-// false when it should be rejected (HTTP 429).
+// Check is non-consuming and is used to reject an IP that has already built
+// up bad-credential debt. Allow consumes one unit. RetryAfter returns a safe
+// client retry interval after either gate rejects.
 type WebhookRateLimiter interface {
 	Allow(ctx context.Context, key string) bool
+	// Implementations may also satisfy webhookRateLimiterInspector. Keeping
+	// the base contract at Allow preserves compatibility with billing and
+	// tests that inject simple one-method safety gates.
+}
+
+type webhookRateLimiterInspector interface {
+	Check(ctx context.Context, key string) bool
+	RetryAfter(ctx context.Context, key string) time.Duration
+}
+
+func webhookLimiterCheck(ctx context.Context, limiter WebhookRateLimiter, key string) bool {
+	if inspector, ok := limiter.(webhookRateLimiterInspector); ok {
+		return inspector.Check(ctx, key)
+	}
+	return true
+}
+
+func webhookLimiterRetryAfter(ctx context.Context, limiter WebhookRateLimiter, key string) time.Duration {
+	if inspector, ok := limiter.(webhookRateLimiterInspector); ok {
+		return inspector.RetryAfter(ctx, key)
+	}
+	return time.Minute
 }
 
 // ── In-memory implementation ────────────────────────────────────────────────
@@ -59,6 +90,14 @@ func NewMemoryWebhookRateLimiter(cfg WebhookRateLimit) WebhookRateLimiter {
 }
 
 func (l *memoryWebhookRateLimiter) Allow(_ context.Context, key string) bool {
+	return l.evaluate(key, true)
+}
+
+func (l *memoryWebhookRateLimiter) Check(_ context.Context, key string) bool {
+	return l.evaluate(key, false)
+}
+
+func (l *memoryWebhookRateLimiter) evaluate(key string, consume bool) bool {
 	if l.cfg.Limit <= 0 {
 		return true
 	}
@@ -80,9 +119,28 @@ func (l *memoryWebhookRateLimiter) Allow(_ context.Context, key string) bool {
 		l.hit[key] = keep
 		return false
 	}
-	keep = append(keep, now)
+	if consume {
+		keep = append(keep, now)
+	}
 	l.hit[key] = keep
 	return true
+}
+
+func (l *memoryWebhookRateLimiter) RetryAfter(_ context.Context, key string) time.Duration {
+	if l.cfg.Limit <= 0 {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	hits := l.hit[key]
+	if len(hits) == 0 {
+		return l.cfg.Window
+	}
+	retry := time.Until(hits[0].Add(l.cfg.Window))
+	if retry <= 0 {
+		return time.Second
+	}
+	return retry
 }
 
 // ── Redis implementation ────────────────────────────────────────────────────
@@ -94,8 +152,9 @@ func (l *memoryWebhookRateLimiter) Allow(_ context.Context, key string) bool {
 // same nanosecond would otherwise collide on an identical member, ZADD would
 // update-in-place instead of inserting, and the window would under-count.
 const (
-	webhookLimiterKeyPrefix   = "mul:webhook:rate:"
-	webhookIPLimiterKeyPrefix = "mul:webhook:ip:"
+	webhookLimiterKeyPrefix           = "mul:webhook:rate:"
+	webhookIPLimiterKeyPrefix         = "mul:webhook:ip:"
+	webhookAbsoluteIPLimiterKeyPrefix = "mul:webhook:absolute-ip:"
 )
 
 // webhookLimiterAllowSrc runs the slide-window check atomically on Redis:
@@ -131,6 +190,20 @@ return 1
 
 var webhookLimiterAllowScript = redis.NewScript(webhookLimiterAllowSrc)
 
+const webhookLimiterCheckSrc = `
+local key = KEYS[1]
+local cutoff = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+redis.call('ZREMRANGEBYSCORE', key, '-inf', cutoff)
+local count = redis.call('ZCARD', key)
+if count >= limit then
+    return 0
+end
+return 1
+`
+
+var webhookLimiterCheckScript = redis.NewScript(webhookLimiterCheckSrc)
+
 // webhookLimiterAllowSource exposes the script body for tests that want to
 // assert structural invariants (e.g. trim before count before insert)
 // without spinning up a real Redis. Lower-cased "Source" makes the
@@ -153,10 +226,18 @@ func NewRedisWebhookIPRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) Webho
 	return &redisWebhookRateLimiter{cfg: cfg, rdb: rdb, keyPrefix: webhookIPLimiterKeyPrefix}
 }
 
+func NewRedisWebhookAbsoluteIPRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) WebhookRateLimiter {
+	return &redisWebhookRateLimiter{cfg: cfg, rdb: rdb, keyPrefix: webhookAbsoluteIPLimiterKeyPrefix}
+}
+
 // NewMemoryWebhookIPRateLimiter is the in-memory per-IP variant used when no
 // Redis client is configured. Same per-key semantics as the per-token memory
 // limiter — single-node only.
 func NewMemoryWebhookIPRateLimiter(cfg WebhookRateLimit) WebhookRateLimiter {
+	return NewMemoryWebhookRateLimiter(cfg)
+}
+
+func NewMemoryWebhookAbsoluteIPRateLimiter(cfg WebhookRateLimit) WebhookRateLimiter {
 	return NewMemoryWebhookRateLimiter(cfg)
 }
 
@@ -191,4 +272,34 @@ func (l *redisWebhookRateLimiter) Allow(ctx context.Context, key string) bool {
 		return true
 	}
 	return res == 1
+}
+
+func (l *redisWebhookRateLimiter) Check(ctx context.Context, key string) bool {
+	if l.cfg.Limit <= 0 || l.rdb == nil {
+		return true
+	}
+	cutoff := time.Now().Add(-l.cfg.Window).UnixNano()
+	prefix := l.keyPrefix
+	if prefix == "" {
+		prefix = webhookLimiterKeyPrefix
+	}
+	res, err := webhookLimiterCheckScript.Run(
+		ctx,
+		l.rdb,
+		[]string{prefix + key},
+		cutoff, l.cfg.Limit,
+	).Int()
+	if err != nil {
+		return true
+	}
+	return res == 1
+}
+
+func (l *redisWebhookRateLimiter) RetryAfter(_ context.Context, _ string) time.Duration {
+	if l.cfg.Window <= 0 {
+		return time.Second
+	}
+	// A full window is conservative and remains correct across replicas even
+	// if the oldest ZSET member changes between rejection and this response.
+	return l.cfg.Window
 }

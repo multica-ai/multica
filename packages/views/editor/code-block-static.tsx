@@ -14,12 +14,10 @@
  */
 
 import { useMemo } from "react";
-import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
 import { cn } from "@multica/ui/lib/utils";
+import { highlightCode } from "./syntax-highlight";
 import "./styles/code.css";
-
-const lowlight = createLowlight(common);
 
 interface CodeBlockStaticProps {
   language: string | undefined;
@@ -31,13 +29,10 @@ export function CodeBlockStatic({ language, body, className }: CodeBlockStaticPr
   const html = useMemo(() => {
     const code = body.replace(/\n$/, "");
     try {
-      const tree = language
-        ? lowlight.highlight(language, code)
-        : lowlight.highlightAuto(code);
+      const tree = highlightCode(code, language);
       return toHtml(tree) as string;
     } catch {
-      // Unknown language tag — fall back to escaped plain text so we don't
-      // crash on an esoteric extension.
+      // Keep an unexpected highlighter failure from breaking the preview.
       return escapeHtml(code);
     }
   }, [body, language]);

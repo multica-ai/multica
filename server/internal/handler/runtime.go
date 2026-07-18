@@ -772,8 +772,25 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to clean up chat pins")
 		return
 	}
+	// agent_to_label has no agent_id FK, so clear the runtime's agents' label
+	// links before those agents are hard-deleted below; otherwise they survive
+	// as invisible orphan rows once resource labels are enabled.
+	if err := qtx.DeleteAgentLabelAssignmentsByRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up agent label assignments")
+		return
+	}
+	// The agent deletes below cascade away these agents' chat_sessions, and
+	// chat_draft_restore has no FK to follow them (#5219). Prune first.
+	if err := pruneRuntimeAgentChatDraftRestores(r.Context(), qtx, rt.ID, true); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up chat draft restores")
+		return
+	}
 	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
+		return
+	}
+	if err := qtx.DeleteSystemAgentsByRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up system agents")
 		return
 	}
 
@@ -1028,8 +1045,25 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "failed to clean up chat pins")
 		return
 	}
+	// agent_to_label has no agent_id FK, so clear the runtime's agents' label
+	// links before those agents are hard-deleted below; otherwise they survive
+	// as invisible orphan rows once resource labels are enabled.
+	if err := qtx.DeleteAgentLabelAssignmentsByRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up agent label assignments")
+		return
+	}
+	// The agent deletes below cascade away these agents' chat_sessions, and
+	// chat_draft_restore has no FK to follow them (#5219). Prune first.
+	if err := pruneRuntimeAgentChatDraftRestores(r.Context(), qtx, rt.ID, true); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up chat draft restores")
+		return
+	}
 	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
+		return
+	}
+	if err := qtx.DeleteSystemAgentsByRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up system agents")
 		return
 	}
 

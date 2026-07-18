@@ -70,6 +70,35 @@ func (q *Queries) ListNotificationPreferencesByUsers(ctx context.Context, arg Li
 	return items, nil
 }
 
+const patchNotificationPreference = `-- name: PatchNotificationPreference :one
+INSERT INTO notification_preference (workspace_id, user_id, preferences)
+VALUES ($1, $2, $3)
+ON CONFLICT (workspace_id, user_id)
+DO UPDATE SET
+    preferences = notification_preference.preferences || EXCLUDED.preferences,
+    updated_at = now()
+RETURNING id, workspace_id, user_id, preferences, updated_at
+`
+
+type PatchNotificationPreferenceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	Preferences []byte      `json:"preferences"`
+}
+
+func (q *Queries) PatchNotificationPreference(ctx context.Context, arg PatchNotificationPreferenceParams) (NotificationPreference, error) {
+	row := q.db.QueryRow(ctx, patchNotificationPreference, arg.WorkspaceID, arg.UserID, arg.Preferences)
+	var i NotificationPreference
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Preferences,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const upsertNotificationPreference = `-- name: UpsertNotificationPreference :one
 INSERT INTO notification_preference (workspace_id, user_id, preferences)
 VALUES ($1, $2, $3)

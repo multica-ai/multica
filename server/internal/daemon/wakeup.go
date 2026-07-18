@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -18,7 +19,19 @@ import (
 
 var errRuntimeSetChanged = errors.New("runtime set changed")
 
-const taskWakeupMaxBackoff = 30 * time.Second
+const (
+	taskWakeupMaxBackoff = 30 * time.Second
+
+	// The authenticated control connection carries tasks.claim RPC responses,
+	// not only small wakeup hints. One response can contain up to 32 complete
+	// Task payloads, including agent instructions, project/workspace context,
+	// comments, resources, and skill references. The old 64 KiB ceiling was
+	// smaller than a valid single-task response: the server could commit a
+	// claim, then the daemon would reject its response and correctly refuse an
+	// unsafe HTTP re-claim, leaving the task dispatched but never started.
+	// Keep reads bounded while leaving headroom for the current batch contract.
+	taskWakeupReadLimit int64 = 64 << 20
+)
 
 var (
 	taskWakeupPongWait          = 60 * time.Second
@@ -37,13 +50,6 @@ func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- taskWake
 
 	for {
 		runtimeIDs := d.allRuntimeIDs()
-		if len(runtimeIDs) == 0 {
-			if err := sleepWithContextOrRuntimeChange(ctx, 5*time.Second, runtimeSetCh); err != nil {
-				return
-			}
-			continue
-		}
-
 		connectedFor, err := d.runTaskWakeupConnection(ctx, runtimeIDs, taskWakeups, runtimeSetCh)
 		if ctx.Err() != nil {
 			return
@@ -109,6 +115,9 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	if d.client.os != "" {
 		headers.Set("X-Client-OS", d.client.os)
 	}
+	// Advertise the same capabilities as the HTTP path so a claim built over
+	// this WS connection gets identical capability gating (MUL-4257).
+	headers.Set("X-Client-Capabilities", daemonClientCapabilities())
 
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
 	conn, _, err := dialer.DialContext(ctx, wsURL, headers)
@@ -127,10 +136,11 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	// signalTaskWakeup only wakes idle ClaimTask pollers. In-flight tasks and
 	// the workspace sync loop park on coarse tickers (5s and 30s) that do not
 	// observe the wakeup channel, so anything the server changed during the
-	// WS gap — task cancellation, runtime/repo updates — stays invisible to
-	// them until the next tick. The reconcile broadcaster nudges those loops
-	// to re-check immediately. broadcast() debounces back-to-back calls so a
-	// flapping connection cannot fan out into a request stampede.
+	// WS gap — task cancellation or runtime updates — stays invisible to
+	// them until the next tick. Repository bindings and workspace settings
+	// refresh when a checkout needs them. The reconcile broadcaster nudges
+	// those loops to re-check immediately. broadcast() debounces back-to-back
+	// calls so a flapping connection cannot fan out into a request stampede.
 	if d.reconcile != nil {
 		d.reconcile.broadcast()
 	}
@@ -146,9 +156,33 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	if 2*len(runtimeIDs) > writeBufSize {
 		writeBufSize = 2 * len(runtimeIDs)
 	}
-	writes := make(chan []byte, writeBufSize)
+	writes := make(chan *wsOutbound, writeBufSize)
 	writerDone := make(chan struct{})
 	go d.runWSWriter(conn, writes, writerDone)
+
+	// Attach the generic WS RPC sender (MUL-4257) to this connection's write
+	// channel. Guarded so a Call racing teardown never sends on the closed
+	// `writes` channel: teardown flips sendClosed under sendMu before
+	// close(writes), and the sender holds sendMu across its non-blocking send.
+	var sendMu sync.Mutex
+	sendClosed := false
+	wsRPCGeneration := d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		if sendClosed {
+			return nil, errWSRPCUnavailable
+		}
+		item := &wsOutbound{data: frame}
+		select {
+		case writes <- item:
+			return item, nil
+		default:
+			return nil, errWSRPCWriteBufferFull
+		}
+	})
+	// A (re)connect may be a freshly-upgraded server: re-probe the batch claim
+	// route rather than staying on the legacy fallback forever (MUL-4257).
+	d.batchClaimUnsupported.Store(false)
 
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	hbDone := make(chan struct{})
@@ -159,7 +193,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- d.readTaskWakeupMessages(conn, taskWakeups)
+		errCh <- d.readTaskWakeupMessagesForConnection(conn, taskWakeups, wsRPCGeneration)
 	}()
 
 	// Defer cleanup must shut goroutines down in this order:
@@ -173,6 +207,22 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	// LIFO defer order would close writes before the sender stops, so the
 	// teardown is folded into a single deferred function instead.
 	defer func() {
+		// Close the socket FIRST, before failing pending RPCs. Otherwise a
+		// queued tasks.claim frame would still be flushed to the (on a normal
+		// runtimeSetCh reconnect) still-alive socket AFTER attach(nil) has made
+		// the RPC fall over to HTTP — the server would then commit that WS
+		// claim on top of the HTTP fallback, double-claiming the same free
+		// slots (MUL-4257, Sol-Boy review). With the conn closed here,
+		// runWSWriter's next write errors and it DISCARDS the queue instead of
+		// delivering it.
+		conn.Close()
+		// Detach RPC (fails pending → HTTP fallback, now safe since the queued
+		// frame will be dropped), and flip the send-closed flag under sendMu so
+		// any in-flight guarded send finishes before we close writes.
+		d.wsRPC.attach(nil)
+		sendMu.Lock()
+		sendClosed = true
+		sendMu.Unlock()
 		cancelHeartbeat()
 		<-hbDone
 		close(writes)
@@ -192,11 +242,17 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 // runWSWriter funnels writes from the heartbeat sender (and any future
 // daemon-initiated message) into a single goroutine. gorilla/websocket
 // requires that all WriteMessage calls happen from the same goroutine.
-func (d *Daemon) runWSWriter(conn *websocket.Conn, writes <-chan []byte, done chan<- struct{}) {
+func (d *Daemon) runWSWriter(conn *websocket.Conn, writes <-chan *wsOutbound, done chan<- struct{}) {
 	defer close(done)
-	for frame := range writes {
+	for item := range writes {
+		// Skip frames whose RPC caller already gave up: delivering them after a
+		// fallback would double-claim (MUL-4257). beginWrite also marks the
+		// frame sent so a racing cancel() can no longer reclaim it.
+		if !item.beginWrite() {
+			continue
+		}
 		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		if err := conn.WriteMessage(websocket.TextMessage, frame); err != nil {
+		if err := conn.WriteMessage(websocket.TextMessage, item.data); err != nil {
 			d.logger.Debug("task wakeup websocket write failed", "error", err)
 			conn.Close()
 			// Drain remaining frames so the producers don't block forever
@@ -214,7 +270,7 @@ func (d *Daemon) runWSWriter(conn *websocket.Conn, writes <-chan []byte, done ch
 // to the writer; if the queue is full the heartbeat is dropped (the
 // freshness window is short enough that one missed beat just means HTTP will
 // pick it up next tick).
-func (d *Daemon) runWSHeartbeatSender(ctx context.Context, runtimeIDs []string, writes chan<- []byte) {
+func (d *Daemon) runWSHeartbeatSender(ctx context.Context, runtimeIDs []string, writes chan<- *wsOutbound) {
 	d.sendWSHeartbeats(ctx, runtimeIDs, writes)
 	interval := d.cfg.HeartbeatInterval
 	if interval <= 0 {
@@ -232,7 +288,7 @@ func (d *Daemon) runWSHeartbeatSender(ctx context.Context, runtimeIDs []string, 
 	}
 }
 
-func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writes chan<- []byte) {
+func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writes chan<- *wsOutbound) {
 	for _, rid := range runtimeIDs {
 		if ctx.Err() != nil {
 			return
@@ -246,7 +302,7 @@ func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writ
 			continue
 		}
 		select {
-		case writes <- frame:
+		case writes <- &wsOutbound{data: frame}:
 		case <-ctx.Done():
 			return
 		default:
@@ -278,6 +334,10 @@ func marshalRaw(v any) json.RawMessage {
 // handleRuntimeGone uses the daemon root context for its register call, so
 // this function can safely pass any caller context here.
 func (d *Daemon) handleWSHeartbeatAck(ctx context.Context, ack *HeartbeatResponse) {
+	d.handleWSHeartbeatAckForConnection(ctx, ack, d.wsRPC.currentGeneration())
+}
+
+func (d *Daemon) handleWSHeartbeatAckForConnection(ctx context.Context, ack *HeartbeatResponse, wsRPCGeneration uint64) {
 	if ack == nil || ack.RuntimeID == "" {
 		return
 	}
@@ -285,11 +345,21 @@ func (d *Daemon) handleWSHeartbeatAck(ctx context.Context, ack *HeartbeatRespons
 		go d.handleRuntimeGone(ack.RuntimeID)
 		return
 	}
+	for _, capability := range ack.ServerCapabilities {
+		if capability == protocol.DaemonCapabilityRPCV1 {
+			d.wsRPC.markRPCV1Supported(wsRPCGeneration)
+			break
+		}
+	}
 	d.recordWSHeartbeatAck(ack.RuntimeID)
 	d.handleHeartbeatActions(ctx, ack.RuntimeID, ack)
 }
 
 func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<- taskWakeup) error {
+	return d.readTaskWakeupMessagesForConnection(conn, taskWakeups, d.wsRPC.currentGeneration())
+}
+
+func (d *Daemon) readTaskWakeupMessagesForConnection(conn *websocket.Conn, taskWakeups chan<- taskWakeup, wsRPCGeneration uint64) error {
 	d.configureTaskWakeupReadLiveness(conn)
 	for {
 		_, raw, err := conn.ReadMessage()
@@ -328,19 +398,30 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				continue
 			}
 			go d.handleRuntimeProfilesChanged(payload)
+		case protocol.EventDaemonWorkspacesChanged:
+			if d.workspaceChanges != nil {
+				d.workspaceChanges.broadcast()
+			}
 		case protocol.EventDaemonHeartbeatAck:
 			var ack HeartbeatResponse
 			if err := json.Unmarshal(msg.Payload, &ack); err != nil {
 				d.logger.Debug("ws heartbeat ack invalid payload", "error", err)
 				continue
 			}
-			d.handleWSHeartbeatAck(context.Background(), &ack)
+			d.handleWSHeartbeatAckForConnection(context.Background(), &ack, wsRPCGeneration)
+		case protocol.EventDaemonRPCResponse:
+			var resp protocol.RPCResponsePayload
+			if err := json.Unmarshal(msg.Payload, &resp); err != nil {
+				d.logger.Debug("ws rpc response invalid payload", "error", err)
+				continue
+			}
+			d.wsRPC.deliver(resp)
 		}
 	}
 }
 
 func (d *Daemon) configureTaskWakeupReadLiveness(conn *websocket.Conn) {
-	conn.SetReadLimit(64 * 1024)
+	conn.SetReadLimit(taskWakeupReadLimit)
 	if err := d.extendTaskWakeupReadDeadline(conn); err != nil {
 		d.logger.Debug("task wakeup websocket read deadline failed", "error", err)
 	}
@@ -398,7 +479,9 @@ func taskWakeupURL(baseURL string, runtimeIDs []string) (string, error) {
 	q := u.Query()
 	ids := append([]string(nil), runtimeIDs...)
 	sort.Strings(ids)
-	q.Set("runtime_ids", strings.Join(ids, ","))
+	if len(ids) > 0 {
+		q.Set("runtime_ids", strings.Join(ids, ","))
+	}
 	u.RawQuery = q.Encode()
 	u.Fragment = ""
 	return u.String(), nil

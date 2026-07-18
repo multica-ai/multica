@@ -62,8 +62,9 @@ export function setupLocalDirectory(
 ): void {
   ipcMain.handle(
     "local-directory:pick",
-    async (_event, defaultPath?: string): Promise<PickDirectoryResult> => {
-      const win = windowGetter();
+    async (event, defaultPath?: string): Promise<PickDirectoryResult> => {
+      const win =
+        BrowserWindow.fromWebContents(event.sender) ?? windowGetter();
       if (!win) return { ok: false, reason: "no_window" };
       try {
         const result = await dialog.showOpenDialog(win, {

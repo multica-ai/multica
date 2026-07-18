@@ -96,7 +96,7 @@ interface HeroContent {
 
 type HeroDict = ReturnType<typeof useLocale>["t"]["download"]["hero"];
 
-function resolveContent(
+export function resolveContent(
   detected: DetectResult | null,
   assets: DownloadAssets,
   versionUnavailable: boolean,
@@ -111,17 +111,28 @@ function resolveContent(
   if (detected.os === "mac") {
     // Only Chromium high-entropy returns arch confidently. Safari
     // always reports Intel even on Apple Silicon, so we treat
-    // "non-confident" as arm64 + add a small Intel disclaimer.
+    // "non-confident" as arm64 + point Intel users to the matrix below.
     if (detected.arch === "x64" && detected.archConfident) {
+      const dmg = assets.macX64Dmg;
+      const zip = assets.macX64Zip;
       return {
         title: d.macIntel.title,
         sub: d.macIntel.sub,
-        primary: {
-          href: "#cli",
-          label: d.macIntel.disabledCta,
-          disabled: true,
-        },
-        hint: d.macIntel.intelHint,
+        primary: dmg
+          ? {
+              href: dmg,
+              label: d.macIntel.primary,
+              disabled: false,
+            }
+          : versionUnavailable
+            ? { href: "#", label: d.macIntel.primary, disabled: true }
+            : undefined,
+        alt: zip
+          ? {
+              href: zip,
+              label: d.macIntel.altZip,
+            }
+          : undefined,
       };
     }
     const dmg = assets.macArm64Dmg;

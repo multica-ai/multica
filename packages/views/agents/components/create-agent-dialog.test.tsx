@@ -334,7 +334,8 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
 
     // New copy replaces the old one.
     expect(screen.getByText("Only you can run this agent")).toBeInTheDocument();
-    expect(screen.getByText("Choose who can run this agent")).toBeInTheDocument();
+    expect(screen.getByText("Entire workspace")).toBeInTheDocument();
+    expect(screen.getByText("Specific people")).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
       target: { value: "Access Agent" },
@@ -372,10 +373,7 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
     expect(payload.invocation_targets).toEqual([]);
   });
 
-  it("collapses an empty public_to (no workspace, no members) back to private on submit", async () => {
-    // MUL-3963 normalisation: a public_to with zero grants is a no-op share.
-    // The AccessPicker emits it as private; the create dialog does the same
-    // so the backend never sees a bogus "public with nothing" request.
+  it("does not create when specific-people scope has no member", async () => {
     configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
     const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
     const { onCreate } = renderDialog([mine]);
@@ -383,18 +381,11 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
     fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
       target: { value: "Empty Public Agent" },
     });
-    // Uncheck the workspace target — no members are ticked either.
-    // Checkbox order inside AccessSection when Public is selected:
-    // [0] "Everyone in workspace", [1..] member allow-list (ME excluded).
-    const boxes = screen.getAllByRole("checkbox");
-    fireEvent.click(boxes[0]!);
+    fireEvent.click(screen.getByRole("radio", { name: /^Specific people/i }));
     fireEvent.click(screen.getByText("Create"));
     await new Promise((r) => setTimeout(r, 0));
 
-    const payload = onCreate.mock.calls[0]?.[0];
-    expect(payload).toBeDefined();
-    expect(payload.permission_mode).toBe("private");
-    expect(payload.invocation_targets).toEqual([]);
+    expect(onCreate).not.toHaveBeenCalled();
   });
 
   it("includes ticked members in the invocation_targets payload", async () => {
@@ -405,19 +396,15 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
     fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
       target: { value: "Shared Agent" },
     });
-    // Only "Other" (excluding the current user Me) appears in the member
-    // list, so it's always the second checkbox after the workspace toggle.
-    const boxes = screen.getAllByRole("checkbox");
-    fireEvent.click(boxes[1]!);
+    fireEvent.click(screen.getByRole("radio", { name: /^Specific people/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Other/ }));
     fireEvent.click(screen.getByText("Create"));
     await new Promise((r) => setTimeout(r, 0));
 
     const payload = onCreate.mock.calls[0]?.[0];
     expect(payload).toBeDefined();
     expect(payload.permission_mode).toBe("public_to");
-    // Order: workspace target first (still on by default), member target after.
     expect(payload.invocation_targets).toEqual([
-      { target_type: "workspace" },
       { target_type: "member", target_id: OTHER },
     ]);
   });

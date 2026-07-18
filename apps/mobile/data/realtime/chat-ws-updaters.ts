@@ -100,6 +100,14 @@ export function flipSessionUnread(
  * Older servers (pre-#2123 in web's commit history) sent only chat_session_id
  * + task_id. Detect that and fall back to invalidate; we'll refetch the
  * messages list and accept a one-frame window with no bubble.
+ *
+ * The inline patch never carries attachments: `ChatDonePayload` has no
+ * attachments field by contract, yet an assistant reply may have images/files
+ * bound to it server-side. So after the inline patch we ALWAYS invalidate the
+ * messages list to refetch the authoritative rows (which include
+ * `attachments`). Mirrors web's `use-realtime-sync.ts`, which invalidates
+ * unconditionally after its inline patch. The patch is kept purely for the
+ * instant, flicker-free bubble; the refetch is what makes attachments appear.
  */
 export function applyChatDoneToCache(
   qc: QueryClient,
@@ -114,6 +122,10 @@ export function applyChatDoneToCache(
       task_id: payload.task_id,
       created_at: payload.created_at,
       elapsed_ms: payload.elapsed_ms ?? null,
+      // Mirror web's applyChatDoneToCache: carry the kind so a no_response turn
+      // renders its notice inline; missing → "message" for older servers
+      // (MUL-4351).
+      message_kind: payload.message_kind ?? "message",
     };
     qc.setQueryData<ChatMessage[]>(
       chatKeys.messages(payload.chat_session_id),
@@ -124,11 +136,12 @@ export function applyChatDoneToCache(
         return [...old, assistantMsg];
       },
     );
-  } else {
-    qc.invalidateQueries({
-      queryKey: chatKeys.messages(payload.chat_session_id),
-    });
   }
+  // Refetch the authoritative message list so any attachments bound to the
+  // assistant reply (absent from the event payload) are pulled in.
+  qc.invalidateQueries({
+    queryKey: chatKeys.messages(payload.chat_session_id),
+  });
   // Clear in-flight pointer in the same tick so StatusPill unmounts and
   // the AssistantMessage owns the rendering.
   qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});

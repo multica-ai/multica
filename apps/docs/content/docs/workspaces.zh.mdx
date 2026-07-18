@@ -19,10 +19,10 @@ import { Callout } from "fumadocs-ui/components/callout";
 **尽量不要修改 issue 前缀。** 系统在展示 issue 编号时会用当前的前缀——改了之后，`MUL-5` 会立刻变成 `NEW-5`。所有外部链接、Slack 提及、评论里的历史引用都会对不上旧编号。把 issue 前缀当成"创建后不改"的设计来对待。
 </Callout>
 
-你可以通过 Web 界面创建工作区，也可以用命令行：
+你可以通过 Web 界面创建工作区，也可以用命令行。`--name` 和 `--slug` 都是必填项，创建后**不会**切换你当前的工作区——如果想进去操作，创建后再执行 `multica workspace switch <slug>`：
 
 ```bash
-multica workspace create
+multica workspace create --name "Support Team" --slug support-team --issue-prefix SUP
 ```
 
 ## Issue 编号

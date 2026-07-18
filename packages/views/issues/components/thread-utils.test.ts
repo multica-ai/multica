@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineEntry } from "@multica/core/types";
-import { collectThreadReplies } from "./thread-utils";
+import {
+  collectThreadReplies,
+  resolvedThreadRootIds,
+  rootCommentIds,
+} from "./thread-utils";
 
 function comment(id: string, createdAt: string, parentId: string | null): TimelineEntry {
   return {
@@ -59,5 +63,67 @@ describe("collectThreadReplies", () => {
     const out = collectThreadReplies("root", bucketByParent([b, a]));
 
     expect(out.map((e) => e.id)).toEqual(["a", "b"]);
+  });
+});
+
+function activity(id: string, createdAt: string): TimelineEntry {
+  return {
+    type: "activity",
+    id,
+    actor_type: "member",
+    actor_id: "user-1",
+    action: "status_changed",
+    created_at: createdAt,
+  } as TimelineEntry;
+}
+
+describe("rootCommentIds", () => {
+  it("returns top-level comments only, skipping replies and activities", () => {
+    const entries = [
+      activity("act-1", "2026-06-11T09:00:00Z"),
+      comment("root-1", "2026-06-11T10:00:00Z", null),
+      comment("reply-1", "2026-06-11T10:05:00Z", "root-1"),
+      comment("root-2", "2026-06-11T11:00:00Z", null),
+    ];
+
+    expect(rootCommentIds(entries)).toEqual(["root-1", "root-2"]);
+  });
+});
+
+describe("resolvedThreadRootIds", () => {
+  it("includes root-resolved and reply-resolved threads, excludes unresolved", () => {
+    const rootResolved = {
+      ...comment("root-resolved", "2026-06-11T10:00:00Z", null),
+      resolved_at: "2026-06-11T12:00:00Z",
+    };
+    const replyResolvedRoot = comment("root-reply-resolved", "2026-06-11T10:10:00Z", null);
+    const resolutionReply = {
+      ...comment("reply-resolution", "2026-06-11T10:20:00Z", "root-reply-resolved"),
+      resolved_at: "2026-06-11T12:30:00Z",
+    };
+    const openRoot = comment("root-open", "2026-06-11T10:30:00Z", null);
+    const openReply = comment("reply-open", "2026-06-11T10:40:00Z", "root-open");
+
+    const ids = resolvedThreadRootIds([
+      activity("act-1", "2026-06-11T09:00:00Z"),
+      rootResolved,
+      replyResolvedRoot,
+      resolutionReply,
+      openRoot,
+      openReply,
+    ]);
+
+    expect(ids).toEqual(["root-resolved", "root-reply-resolved"]);
+  });
+
+  it("detects a resolution on a nested reply", () => {
+    const root = comment("root", "2026-06-11T10:00:00Z", null);
+    const reply = comment("reply", "2026-06-11T10:05:00Z", "root");
+    const nested = {
+      ...comment("nested", "2026-06-11T10:10:00Z", "reply"),
+      resolved_at: "2026-06-11T12:00:00Z",
+    };
+
+    expect(resolvedThreadRootIds([root, reply, nested])).toEqual(["root"]);
   });
 });

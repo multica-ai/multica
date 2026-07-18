@@ -34,8 +34,8 @@ func TestCreateIssue_AgentCreate_StampsActingTaskOrigin(t *testing.T) {
 	// validates this (agent, task) pair before the handler trusts X-Task-ID.
 	var taskID string
 	if err := testPool.QueryRow(ctx,
-		`INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, originator_user_id)
-		 VALUES ($1, $2, 'running', 0, $3) RETURNING id`,
+		`INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, originator_user_id, accountable_user_id)
+		 VALUES ($1, $2, 'running', 0, $3, $3) RETURNING id`,
 		agentID, runtimeID, testUserID,
 	).Scan(&taskID); err != nil {
 		t.Fatalf("seed acting task: %v", err)

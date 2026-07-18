@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
 import {
   PENDING_RUNTIME_WARNING_MS,
+  isDisabledCustomRuntime,
   isPendingCustomRuntime,
   isPendingCustomRuntimeWarning,
   pendingRuntimeCommandName,
@@ -66,6 +67,7 @@ describe("pending custom runtime rows", () => {
     expect(pending.daemon_id).toBe("daemon-1");
     expect(pending.profile_id).toBe("profile-1");
     expect(pending.provider).toBe("codex");
+    expect(pending.owner_id).toBe("user-1");
     expect(isPendingCustomRuntime(pending)).toBe(true);
     expect(pendingRuntimeCommandName(pending)).toBe("team-codex");
   });
@@ -119,5 +121,15 @@ describe("pending custom runtime rows", () => {
         createdAt + PENDING_RUNTIME_WARNING_MS,
       ),
     ).toBe(true);
+  });
+
+  it("keeps disabled profiles visible without treating them as registering", () => {
+    const pending = pendingRuntimeFromProfile({
+      profile: profile({ enabled: false }),
+      createdAt: Date.parse("2026-01-01T00:00:00Z"),
+    });
+
+    expect(isPendingCustomRuntime(pending)).toBe(true);
+    expect(isDisabledCustomRuntime(pending)).toBe(true);
   });
 });

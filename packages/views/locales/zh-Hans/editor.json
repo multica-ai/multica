@@ -79,11 +79,31 @@
   "file_card": {
     "uploading": "正在上传 {{filename}}"
   },
+  "upload": {
+    "failed": "{{filename}} 上传失败：{{reason}}",
+    "in_progress": "上传中…"
+  },
   "title_editor": {
     "title_aria_label": "标题"
   },
   "mermaid": {
     "render_error": "无法渲染 Mermaid 图。",
-    "rendering": "渲染中…"
+    "rendering": "渲染中…",
+    "viewer_title": "图表",
+    "canvas_label": "图表画布,拖动可平移,滚动可缩放。",
+    "open_viewer": "打开图表查看器",
+    "close_viewer": "关闭",
+    "copy_source": "复制图表源码",
+    "show_source": "显示源码",
+    "show_diagram": "显示图表",
+    "zoom_in": "放大",
+    "zoom_out": "缩小",
+    "zoom_fit": "适应窗口",
+    "zoom_actual": "实际大小",
+    "reset_view": "重置视图",
+    "export": "导出",
+    "export_png": "下载 PNG",
+    "export_svg": "下载 SVG",
+    "export_source": "下载 .mmd"
   }
 }

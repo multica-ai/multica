@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
 
 // ---------------------------------------------------------------------------
 // In-page find (Cmd/Ctrl+F) for the issue detail page.
@@ -271,8 +273,8 @@ export function useInPageFind(options: {
   useEffect(() => {
     if (!enabled) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
-      if (e.key !== "f" && e.key !== "F") return;
+      if (e.defaultPrevented || e.repeat || isImeComposing(e)) return;
+      if (!shortcutMatchesEvent(getShortcut("findInIssue"), e)) return;
       if (!isElementVisible(containerRef.current)) return;
       e.preventDefault();
       setOpen(true);

@@ -14,9 +14,9 @@ import (
 
 // TestProfileSetSignature_StableUnderReorder ensures the digest only
 // captures the *content* of the profile set, not the order the server
-// happened to return profiles in. Without this property the
-// workspaceSyncLoop would re-register on every tick whenever the server
-// shuffled rows (which the API contract does not forbid).
+// happened to return profiles in. Without this property duplicate change
+// notifications could re-register whenever the server shuffled rows (which
+// the API contract does not forbid).
 func TestProfileSetSignature_StableUnderReorder(t *testing.T) {
 	a := []RuntimeProfile{
 		{ID: "p-a", ProtocolFamily: "codex", CommandName: "a", Enabled: true},
@@ -204,11 +204,91 @@ func newDriftFixture(t *testing.T, initial []RuntimeProfile) *driftFixture {
 	return fx
 }
 
+// TestSyncWorkspacesSkipsRuntimeProfileRefreshOnExistingWorkspace pins the
+// on-demand contract: the periodic workspace sync may discover workspaces and
+// recover missing runtimes, but it must not poll the runtime-profiles endpoint
+// for a healthy workspace. Profile create/update/delete notifications arrive
+// through the daemon WebSocket and call refreshWorkspaceRuntimeProfiles
+// directly.
+func TestSyncWorkspacesSkipsRuntimeProfileRefreshOnExistingWorkspace(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-1"
+	var profileCalls atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/daemon/workspaces":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]WorkspaceInfo{{ID: workspaceID, Name: "ws"}})
+		case "/api/daemon/workspaces/" + workspaceID + "/runtime-profiles":
+			profileCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(RuntimeProfilesResponse{WorkspaceID: workspaceID})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := freshDaemon(srv.URL)
+	d.workspaces[workspaceID] = newWorkspaceState(workspaceID, []string{"rt-1"}, "", nil, nil)
+	d.workspaces[workspaceID].profileSetSig = profileSetSignature(nil)
+	d.runtimeIndex["rt-1"] = Runtime{ID: "rt-1", Provider: "codex"}
+
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	if got := profileCalls.Load(); got != 0 {
+		t.Fatalf("workspace sync polled runtime-profiles %d times, want 0", got)
+	}
+}
+
+// TestSyncWorkspacesRefreshesRuntimeProfilesOnReconcile preserves the
+// reliability backstop for a profile mutation that happened while the daemon
+// WebSocket was disconnected. The reconnect broadcast must make one on-demand
+// request for each tracked workspace; otherwise removing the ticker polling
+// would leave the daemon permanently stale until it restarted.
+func TestSyncWorkspacesRefreshesRuntimeProfilesOnReconcile(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-1"
+	var profileCalls atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/daemon/workspaces":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]WorkspaceInfo{{ID: workspaceID, Name: "ws"}})
+		case "/api/daemon/workspaces/" + workspaceID + "/runtime-profiles":
+			profileCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(RuntimeProfilesResponse{WorkspaceID: workspaceID})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := freshDaemon(srv.URL)
+	d.workspaces[workspaceID] = newWorkspaceState(workspaceID, []string{"rt-1"}, "", nil, nil)
+	d.workspaces[workspaceID].profileSetSig = profileSetSignature(nil)
+	d.runtimeIndex["rt-1"] = Runtime{ID: "rt-1", Provider: "codex"}
+
+	if err := d.syncWorkspacesFromAPI(context.Background(), true); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	if got := profileCalls.Load(); got != 1 {
+		t.Fatalf("reconcile fetched runtime-profiles %d times, want 1", got)
+	}
+}
+
 // TestRefreshWorkspaceRuntimeProfiles_NoDrift_DoesNotReregister verifies the
 // hot-path: when the server's profile set has not changed since the daemon
-// last registered the workspace, the sync tick must NOT fire a re-register.
-// Without this guarantee every quiet sync tick would cost an extra Register
-// HTTP call per workspace.
+// last registered the workspace, a duplicate notification must NOT fire a
+// re-register.
 func TestRefreshWorkspaceRuntimeProfiles_NoDrift_DoesNotReregister(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	stubLookPath(t, map[string]string{"company-codex": "/opt/bin/company-codex"})
@@ -246,8 +326,8 @@ func TestRefreshWorkspaceRuntimeProfiles_NoDrift_DoesNotReregister(t *testing.T)
 
 // TestRefreshWorkspaceRuntimeProfiles_NewProfileTriggersReregister verifies
 // the user-visible fix for MUL-3332: a profile created via the web UI on an
-// already-tracked workspace becomes a registered runtime within one
-// workspaceSyncLoop tick — no daemon restart required.
+// already-tracked workspace becomes a registered runtime when the daemon
+// receives the server's change notification — no daemon restart required.
 func TestRefreshWorkspaceRuntimeProfiles_NewProfileTriggersReregister(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	stubLookPath(t, map[string]string{
@@ -450,7 +530,7 @@ func TestRefreshWorkspaceRuntimeProfiles_DisableConvergesCustomOnlyDaemon(t *tes
 		t.Errorf("runtimeIndex must drop the previously-tracked runtime %q after convergence-to-zero", initialRuntimeID)
 	}
 	if gotSig != profileSetSignature(nil) {
-		t.Errorf("converged signature must match the empty-profile-list digest so the next sync tick is a no-op; got %q want %q", gotSig, profileSetSignature(nil))
+		t.Errorf("converged signature must match the empty-profile-list digest so duplicate notifications are no-ops; got %q want %q", gotSig, profileSetSignature(nil))
 	}
 
 	// Server-side cleanup: the daemon must Deregister the orphaned runtime
@@ -574,8 +654,7 @@ func TestRefreshWorkspaceRuntimeProfiles_DisableOneOfManyDeregistersDroppedID(t 
 
 // TestRefreshWorkspaceRuntimeProfiles_FetchErrorIsBestEffort verifies that
 // a network blip or older server (404) does NOT clear the cached signature
-// or trigger a spurious re-register. Without this, a transient 5xx during
-// the workspace sync loop would loop the daemon into re-registering forever.
+// or trigger a spurious re-register.
 func TestRefreshWorkspaceRuntimeProfiles_FetchErrorIsBestEffort(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	stubLookPath(t, map[string]string{"company-codex": "/opt/bin/company-codex"})

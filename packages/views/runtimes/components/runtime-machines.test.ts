@@ -53,6 +53,30 @@ describe("runtime machine grouping", () => {
     });
   });
 
+  it("uses the online daemon CLI version instead of a stale offline report", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          id: "rt-online",
+          provider: "claude",
+          metadata: { cli_version: "0.4.0", launched_by: "desktop" },
+        }),
+        makeRuntime({
+          id: "rt-stale",
+          provider: "copilot",
+          status: "offline",
+          last_seen_at: new Date(NOW - 4 * 24 * 60 * 60_000).toISOString(),
+          metadata: { cli_version: "0.3.17", launched_by: "desktop" },
+        }),
+      ],
+      { now: NOW },
+    );
+
+    expect(machines).toHaveLength(1);
+    expect(machines[0]?.cliVersion).toBe("0.4.0");
+    expect(machines[0]?.launchedBy).toBe("desktop");
+  });
+
   it("uses a machine-wide custom name as the machine title, over the local name", () => {
     const machines = buildRuntimeMachines(
       [

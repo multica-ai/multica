@@ -68,3 +68,4 @@ server/server
 data/
 .kilo
 .idea
+.gstack/

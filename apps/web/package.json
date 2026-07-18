@@ -75,6 +75,7 @@
   "devDependencies": {
     "@multica/eslint-config": "workspace:*",
     "@tailwindcss/postcss": "catalog:",
+    "postcss": "catalog:",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@testing-library/user-event": "catalog:",

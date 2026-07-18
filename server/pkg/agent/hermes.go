@@ -25,8 +25,132 @@ import (
 // overridden by user-configured custom_args. `acp` is the protocol
 // subcommand that drives the ACP JSON-RPC transport; overriding it
 // would break the daemon↔Hermes communication contract.
+//
+// `-p`/`--profile` are NOT stripped unconditionally: a skill-less Hermes task
+// has no overlay, so its profile selection must pass through to Hermes
+// unchanged. The daemon strips the selected occurrence via StripHermesProfileArgs
+// only when it actually built the per-task overlay (see the daemon's launch-arg
+// handling), so the flag can't re-point HERMES_HOME past the overlay while
+// leaving no-overlay tasks' behavior untouched.
 var hermesBlockedArgs = map[string]blockedArgMode{
 	"acp": blockedStandalone,
+}
+
+// hermesArgProfileRe mirrors the space-form guard in Hermes'
+// hermes_cli.main._apply_profile_override step 1b: a `-p <value>` whose value
+// doesn't match the profile-id shape is not a profile selection at all (e.g.
+// pytest's `-p no:xdist`), so it is ignored rather than consumed. The inline
+// `--profile=<value>` form is NOT guarded here — Hermes forwards it verbatim to
+// resolve_profile_env, which validates and hard-fails on an invalid value; that
+// validation lives in the daemon-side resolver (execenv.ResolveHermesProfile).
+var hermesArgProfileRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// hermesValueFlags and hermesOptionalValueFlags mirror the value-taking flags
+// Hermes skips while scanning argv for -p/--profile, so a value like the `coder`
+// in `-m coder -p research` is never misread as the profile. Kept in sync with
+// _apply_profile_override.value_flags / optional_value_flags.
+var hermesValueFlags = map[string]struct{}{
+	"-z": {}, "--oneshot": {}, "-m": {}, "--model": {}, "--provider": {},
+	"-t": {}, "--toolsets": {}, "-r": {}, "--resume": {}, "-s": {},
+	"--skills": {}, "--usage-file": {},
+}
+var hermesOptionalValueFlags = map[string]struct{}{"-c": {}, "--continue": {}}
+
+// HermesProfileSelection is the profile selection parsed out of custom_args by
+// ParseHermesProfileArgs. It carries the exact argv occurrence to consume so the
+// daemon-side resolver and the launch-arg stripping act on one authoritative
+// parse instead of each re-approximating Hermes' argv handling.
+type HermesProfileSelection struct {
+	Name    string // the selected value; "" for the empty inline `--profile=` value
+	Found   bool   // a -p/--profile selection with a value was matched
+	Inline  bool   // matched the `--profile=<value>` form (value validated downstream)
+	ArgFrom int    // index of the first token to strip, or -1 when nothing matched
+	ArgLen  int    // tokens to strip: 2 for `-p <value>`, 1 for `--profile=<value>`
+}
+
+// ParseHermesProfileArgs finds the first Hermes profile selection in custom_args,
+// mirroring hermes_cli.main._apply_profile_override step 1/1b: it scans for the
+// first `-p`/`--profile <value>` or `--profile=<value>`, skipping value-taking
+// flags and stopping at a `--` sentinel or an `mcp add --args` command-argv
+// passthrough region. A space-form value that fails the profile-id shape is
+// ignored (matches Hermes discarding it). Args are unquoted with the same helper
+// as filterCustomArgs so quoting is handled consistently.
+func ParseHermesProfileArgs(args []string) HermesProfileSelection {
+	none := HermesProfileSelection{ArgFrom: -1}
+	i := 0
+	for i < len(args) {
+		arg := unshellQuoteArg(args[i])
+		if arg == "--" {
+			break
+		}
+		if arg == "--args" && hermesInsideMcpAdd(args, i) {
+			break
+		}
+		if arg == "-p" || arg == "--profile" {
+			if i+1 < len(args) {
+				val := unshellQuoteArg(args[i+1])
+				if !hermesArgProfileRe.MatchString(val) {
+					return none // step 1b: not a valid profile value, ignore
+				}
+				return HermesProfileSelection{Name: val, Found: true, ArgFrom: i, ArgLen: 2}
+			}
+			return none // trailing flag with no value
+		}
+		if v, ok := strings.CutPrefix(arg, "--profile="); ok {
+			return HermesProfileSelection{Name: v, Found: true, Inline: true, ArgFrom: i, ArgLen: 1}
+		}
+		if _, ok := hermesValueFlags[arg]; ok && i+1 < len(args) {
+			i += 2
+			continue
+		}
+		if _, ok := hermesOptionalValueFlags[arg]; ok && i+1 < len(args) &&
+			!strings.HasPrefix(unshellQuoteArg(args[i+1]), "-") {
+			i += 2
+			continue
+		}
+		i++
+	}
+	return none
+}
+
+// hermesInsideMcpAdd reports whether argv position index sits inside an
+// `mcp add ... --args <child argv>` passthrough region, where flags belong to
+// the child MCP command and must not be read as Hermes' own profile selector.
+func hermesInsideMcpAdd(args []string, index int) bool {
+	mcp := -1
+	for j := 0; j < index; j++ {
+		if unshellQuoteArg(args[j]) == "mcp" {
+			mcp = j
+			break
+		}
+	}
+	if mcp < 0 {
+		return false
+	}
+	for j := mcp + 1; j < index; j++ {
+		if unshellQuoteArg(args[j]) == "add" {
+			return true
+		}
+	}
+	return false
+}
+
+// StripHermesProfileArgs removes exactly the argv occurrence ParseHermesProfileArgs
+// selected. The daemon calls this only when it built the per-task overlay, so
+// Hermes uses the overlay's HERMES_HOME instead of re-resolving the profile —
+// while a skill-less task keeps its flags untouched.
+func StripHermesProfileArgs(args []string, sel HermesProfileSelection) []string {
+	if !sel.Found || sel.ArgFrom < 0 || sel.ArgLen <= 0 {
+		return args
+	}
+	end := sel.ArgFrom + sel.ArgLen
+	if end > len(args) {
+		end = len(args)
+	}
+	out := make([]string, 0, len(args)-(end-sel.ArgFrom))
+	out = append(out, args[:sel.ArgFrom]...)
+	out = append(out, args[end:]...)
+	return out
 }
 
 // hermesBackend implements Backend by spawning `hermes acp` and communicating
@@ -462,6 +586,10 @@ type hermesClient struct {
 	sessionID    string
 	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
+	// onActivity observes accepted ACP session updates. Grok uses it to
+	// retain a short post-response drain window; other ACP backends leave it
+	// nil and keep their existing lifecycle behavior.
+	onActivity func()
 	// acceptNotification can drop ACP session updates before dispatching to
 	// handlers that mutate client state such as usage or pending tool calls.
 	acceptNotification func(updateType string) bool
@@ -555,10 +683,12 @@ func (c *hermesClient) handleLine(line string) {
 	}
 
 	// Agent → client request: has id + method (no result / error yet).
-	// Kimi uses this for session/request_permission; if we don't answer,
-	// the agent blocks for 300s and the task hangs. Hermes doesn't send
-	// these when launched with HERMES_YOLO_MODE=1, but we still handle
-	// the case generically for any future ACP backend we bolt on.
+	// Kimi and Hermes both use session/request_permission; if we don't
+	// answer, the agent blocks for its internal timeout and the task
+	// hangs. HERMES_YOLO_MODE=1 only suppresses Hermes' dangerous-shell-
+	// command prompts (tools/approval.py); its ACP edit-approval guard
+	// (acp_adapter/edit_approval.py) still asks before every file write,
+	// so we must handle these requests for Hermes too.
 	if _, hasID := raw["id"]; hasID {
 		if _, hasResult := raw["result"]; hasResult {
 			c.handleResponse(raw)
@@ -583,10 +713,22 @@ func (c *hermesClient) handleLine(line string) {
 // handleAgentRequest replies to JSON-RPC requests the agent sends
 // us (agent → client direction). The only one we care about today is
 // `session/request_permission`: the daemon is headless and cannot
-// actually prompt a user, so we auto-approve every action. Using
-// `approve_for_session` rather than `approve` means subsequent
-// identical actions (every Shell invocation, every file write) don't
-// round-trip through us — the agent remembers them locally.
+// actually prompt a user, so we answer it ourselves — granting when a
+// safe option is offered, otherwise declining just this action or
+// failing closed (see below).
+//
+// The reply MUST select one of the optionIds the agent actually
+// offered — the ACP permission contract is "pick from these options",
+// and an id the agent never offered is treated as a denial. Hermes'
+// edit-approval path offers only ["allow_once","deny"] and rejects
+// anything but exactly "allow_once" (acp_adapter/edit_approval.py), so
+// the previous hardcoded "approve_for_session" silently blocked every
+// file write on the Hermes ACP runtime (GitHub multica#5300).
+// selectACPPermissionOption picks an option the agent offered — a safe
+// grant when one exists, otherwise an offered single-use reject to deny
+// just this action — and we fail closed with a protocol error when the
+// request offers nothing safely selectable, never a permanent grant or a
+// whole-turn "cancelled".
 func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
@@ -599,17 +741,44 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
-		resp = map[string]any{
-			"jsonrpc": "2.0",
-			"id":      json.RawMessage(rawID),
-			"result": map[string]any{
-				"outcome": map[string]any{
-					"outcome":  "selected",
-					"optionId": "approve_for_session",
+		optionID, grant, ok := selectACPPermissionOption(raw["params"])
+		if ok {
+			// Select an offered option — either a safe grant (approve) or,
+			// when no safe grant exists, an offered reject_once (deny THIS
+			// action). Both are ACP "selected" outcomes; we deliberately do
+			// NOT reply "cancelled" here, which means the whole prompt turn
+			// was cancelled — other ACP backends sharing this client (kimi,
+			// kiro, ...) would abort the entire task, not just this action.
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"result": map[string]any{
+					"outcome": map[string]any{
+						"outcome":  "selected",
+						"optionId": optionID,
+					},
 				},
-			},
+			}
+			if grant {
+				c.cfg.Logger.Debug("auto-approved agent permission request", "method", method, "optionId", optionID)
+			} else {
+				c.cfg.Logger.Warn("no safe grant offered; selecting offered reject option", "method", method, "optionId", optionID)
+			}
+		} else {
+			// The request offered nothing we can safely select: no safe grant
+			// and no single-use reject_once (empty, malformed, permanent-only,
+			// or reject_always-only). Return a protocol error rather than
+			// fabricate an un-offered id or a whole-turn "cancelled".
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"error": map[string]any{
+					"code":    -32603,
+					"message": "no auto-selectable permission option offered",
+				},
+			}
+			c.cfg.Logger.Warn("no safely selectable permission option offered; returning error", "method", method)
 		}
-		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method)
 	default:
 		// Unknown agent→client method — reply with standard "method
 		// not found" so the agent doesn't block waiting for us. Better
@@ -633,6 +802,102 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	data = append(data, '\n')
 	if err := c.writeLine(data); err != nil {
 		c.cfg.Logger.Warn("write agent-request response", "method", method, "error", err)
+	}
+}
+
+// acpPermissionOption is one entry in a session/request_permission
+// request's `options` array. `kind` is the ACP-level classification
+// (allow_once / allow_always / reject_once / reject_always); `optionId`
+// is the agent-defined opaque string we echo back to select that option.
+type acpPermissionOption struct {
+	OptionID string `json:"optionId"`
+	Kind     string `json:"kind"`
+}
+
+// ACP v1 PermissionOptionKind values. Only the two allow kinds grant;
+// any other or unknown kind is treated as non-granting so a future or
+// abnormal kind can never be auto-approved. reject_once denies a single
+// action (the only reject we auto-select — reject_always would persist a
+// denial the way allow_always persists a grant).
+// https://agentclientprotocol.com/protocol/v1/schema#permissionoptionkind
+const (
+	acpKindAllowOnce   = "allow_once"
+	acpKindAllowAlways = "allow_always"
+	acpKindRejectOnce  = "reject_once"
+)
+
+// acpSessionScopedOptionIDs are optionIds known to grant for the current
+// session only, without persisting a decision. Both Hermes' "allow_session"
+// and its permanent "allow_always" option carry ACP kind "allow_always"
+// (ACP has no session-scoped kind), so kind alone cannot tell them apart —
+// we recognise the session-scoped ones by id. "approve_for_session" is the
+// equivalent id other ACP backends use.
+var acpSessionScopedOptionIDs = []string{"allow_session", "approve_for_session"}
+
+// selectACPPermissionOption decides how to auto-answer a
+// session/request_permission. It returns the offered optionId to select,
+// whether that selection grants (true) or denies (false) the action, and
+// ok=false when the request offers nothing safely selectable (the caller
+// then returns a protocol error rather than fabricate an outcome).
+//
+// It only ever returns an id the agent actually offered. Per review of
+// GitHub multica#5300 it refuses to auto-select a permanent "allow_always"
+// grant — on Hermes that persists to the runtime owner's on-disk allowlist
+// and would outlive the task (ACP v1 allow_always "remembers the choice").
+// Grant nature is decided purely by the explicit ACP kind, never by the
+// opaque optionId, so unknown kinds fail closed. Order of preference:
+//
+//  1. a known session-scoped grant id;
+//  2. any single-use (kind=allow_once) grant;
+//  3. an offered single-use reject_once — deny just this action rather than
+//     reply "cancelled", which other ACP backends read as cancelling the
+//     whole prompt turn.
+func selectACPPermissionOption(params json.RawMessage) (optionID string, grant bool, ok bool) {
+	var p struct {
+		Options []acpPermissionOption `json:"options"`
+	}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return "", false, false
+		}
+	}
+
+	// 1. A known session-scoped grant id, if actually offered with a grant kind.
+	for _, want := range acpSessionScopedOptionIDs {
+		for _, opt := range p.Options {
+			if opt.OptionID == want && isACPGrantKind(opt.Kind) {
+				return opt.OptionID, true, true
+			}
+		}
+	}
+	// 2. Any single-use grant. kind=allow_once is inherently scoped to this
+	//    one action, so it is safe regardless of the (opaque) optionId — this
+	//    also covers agents that use non-standard option ids.
+	for _, opt := range p.Options {
+		if opt.OptionID != "" && strings.EqualFold(strings.TrimSpace(opt.Kind), acpKindAllowOnce) {
+			return opt.OptionID, true, true
+		}
+	}
+	// 3. No safe grant: deny THIS action by selecting an offered reject_once.
+	for _, opt := range p.Options {
+		if opt.OptionID != "" && strings.EqualFold(strings.TrimSpace(opt.Kind), acpKindRejectOnce) {
+			return opt.OptionID, false, true
+		}
+	}
+	// 4. Nothing safely selectable (empty, malformed, permanent-only, or
+	//    reject_always-only). Signal the caller to return a protocol error.
+	return "", false, false
+}
+
+// isACPGrantKind reports whether an ACP PermissionOptionKind grants the
+// action. Only the two current allow kinds qualify; every other or unknown
+// value is non-granting, so grant detection fails closed.
+func isACPGrantKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case acpKindAllowOnce, acpKindAllowAlways:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -773,6 +1038,9 @@ func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 	updateType, updateData := normalizeACPUpdate(params.Update)
 	if c.acceptNotification != nil && !c.acceptNotification(updateType) {
 		return
+	}
+	if c.onActivity != nil {
+		c.onActivity()
 	}
 
 	switch updateType {
@@ -935,8 +1203,8 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 		RawInput   map[string]any    `json:"rawInput"`
 		Input      map[string]any    `json:"input"`
 		Parameters map[string]any    `json:"parameters"`
-		RawOutput  string            `json:"rawOutput"`
-		Output     string            `json:"output"`
+		RawOutput  json.RawMessage   `json:"rawOutput"`
+		Output     json.RawMessage   `json:"output"`
 		Content    []json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -972,9 +1240,9 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 	pending := c.takePendingTool(msg.ToolCallID)
 	c.emitDeferredToolUse(pending, msg.ToolCallID, title, msg.Kind, rawInput)
 
-	output := msg.RawOutput
+	output := acpRawText(msg.RawOutput)
 	if output == "" {
-		output = msg.Output
+		output = acpRawText(msg.Output)
 	}
 	if output == "" {
 		output = extractACPToolCallText(msg.Content)
@@ -1099,6 +1367,27 @@ func parseToolArgsJSON(argsText string) map[string]any {
 //     as a minimal unified-diff header so the UI distinguishes writes
 //     from reads without needing a diff viewer.
 //
+// acpRawText renders an ACP output field (rawOutput / output) that may arrive
+// as either a JSON string or a structured value. Some model adapters — notably
+// Kiro's GPT-5.6 Sol path — send the completed tool_call_update's rawOutput as
+// an object like {"items":[{"Json":{...}}]} rather than a string. Declaring
+// that field as a Go string made json.Unmarshal fail, which made
+// handleToolCallUpdate return early and silently DROP the entire update —
+// including its status:"completed" — so the completion signal was lost and the
+// task was wrongly marked failed (issue #5509 / MUL-4860). Accept both shapes.
+func acpRawText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	// Non-string (object / array / number): keep the raw JSON as text so the
+	// output is preserved rather than discarded.
+	return string(raw)
+}
+
 // Terminal blocks ({type:"terminal", terminalId}) reference a remote
 // terminal the client would normally subscribe to via terminal/output;
 // we don't advertise terminal capability so we never receive those in
@@ -1271,6 +1560,32 @@ func extractACPSessionID(result json.RawMessage) string {
 		return ""
 	}
 	return r.SessionID
+}
+
+// extractACPAuthMethods returns the `authMethods` ids advertised in an ACP
+// `initialize` response, in the order the agent listed them. Agents that
+// require authentication (e.g. xAI's Grok Build) enumerate the accepted
+// methods here; per the ACP flow the client MUST send `authenticate` with one
+// of these ids before `session/new` / `session/load`. Agents that need no
+// explicit auth omit the field, so an empty slice means "skip authenticate".
+// A malformed response degrades to an empty slice (fail open on parsing so we
+// don't wedge agents that never needed the step).
+func extractACPAuthMethods(result json.RawMessage) []string {
+	var r struct {
+		AuthMethods []struct {
+			ID string `json:"id"`
+		} `json:"authMethods"`
+	}
+	if err := json.Unmarshal(result, &r); err != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(r.AuthMethods))
+	for _, m := range r.AuthMethods {
+		if id := strings.TrimSpace(m.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // extractACPCurrentModelID pulls the model selected by the ACP runtime out of

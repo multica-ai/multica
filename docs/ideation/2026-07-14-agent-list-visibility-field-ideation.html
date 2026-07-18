@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideation: Agents 列表页 · 可见性/访问范围字段</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #5b6470; --faint: #8a93a0;
+    --border: #e3e7ec; --surface: #f7f8fa; --accent: #2f6feb; --accent-soft: #eaf1fd;
+    --warn-soft: #fdf3e7; --warn-text: #9a6a1a; --good-soft: #eaf6ee; --good-text: #2a7a45;
+    --code-bg: #f2f4f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a; --fg: #e7e9ee; --muted: #9aa3b0; --faint: #6b7480;
+      --border: #2a2f37; --surface: #1b1f25; --accent: #7aa2f7; --accent-soft: #1f2a3d;
+      --warn-soft: #3a2f1d; --warn-text: #d8a45a; --good-soft: #1d3a28; --good-text: #7fc594;
+      --code-bg: #20242b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 15.5px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 96px; }
+  header.eyebrow { color: var(--faint); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 8px; }
+  h1 { font-size: 30px; line-height: 1.25; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .meta { color: var(--muted); font-size: 13.5px; margin: 0 0 8px; }
+  .meta code { font-size: 12.5px; }
+  h2 { font-size: 20px; margin: 44px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 17px; margin: 30px 0 4px; }
+  p { margin: 10px 0; }
+  code { background: var(--code-bg); padding: 1.5px 5px; border-radius: 4px; font-size: 13px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  a { color: var(--accent); }
+  strong { color: inherit; }
+  .axis-line { font-family: ui-monospace, Menlo, monospace; font-size: 13.5px; }
+  article.idea { border: 1px solid var(--border); border-radius: 10px; padding: 20px 22px; margin: 18px 0; background: var(--bg); }
+  article.idea > h3 { margin-top: 0; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .id-chip { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--accent-soft); color: var(--accent); padding: 2px 8px; border-radius: 999px; }
+  .pill { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+  dl.fields { display: grid; grid-template-columns: 92px 1fr; gap: 4px 14px; margin: 12px 0 4px; }
+  dl.fields dt { color: var(--faint); font-size: 12.5px; letter-spacing: 0.04em; text-transform: uppercase; padding-top: 3px; }
+  dl.fields dd { margin: 0; font-size: 14.5px; }
+  .jumplist { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 2px; }
+  .jumplist a { font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 8px 0; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .callout { background: var(--warn-soft); border-radius: 8px; padding: 12px 16px; margin: 14px 0; font-size: 14px; }
+  .callout .label { color: var(--warn-text); font-weight: 600; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; display: block; margin-bottom: 4px; }
+  .diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin: 16px 0; }
+  .diagram svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  .diagram figcaption { text-align: center; color: var(--muted); font-size: 12.5px; margin-top: 10px; }
+  footer.composition-signal { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--faint); font-size: 12.5px; }
+  footer.composition-signal code { font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">Ideation · repo-grounded</div>
+  <h1>Agents 列表页：可见性 / 访问范围字段</h1>
+  <p class="meta">
+    <time datetime="2026-07-14">2026-07-14</time> ·
+    topic: <code>agent-list-visibility-field</code> ·
+    mode: <code>repo-grounded</code>（聚焦一轮：3 视角 / 4 存活）
+  </p>
+  <p class="meta">focus: 在 <code>agents</code> 列表页加一个"可见性范围"字段，是否更方便？</p>
+
+  <section id="grounding">
+    <h2>Grounding Context（代码库上下文）</h2>
+    <ul>
+      <li><strong>页面</strong>：<code>packages/views/agents/components/agents-page.tsx</code>（1209 行）。现有列：<em>agent / status / owner / runtime / last_active / runs / model / created</em>。<strong>没有</strong>可见性/访问列。<code>visibility</code> 仅在 :319 行算成 <code>isPrivate</code>，作行内小锁标记。</li>
+      <li><strong>列系统</strong>：<code>AgentColumnKey</code> + <code>COLUMN_WIDTHS</code>（:108）+ <code>hiddenColumns</code>/<code>toggleColumn</code>（<code>useAgentsViewStore</code>）。<u>加一列是机械工作</u>。</li>
+      <li><strong>权限模型——两个独立概念（核心）</strong>：<code>visibility</code>（private|workspace，谁能<em>看见</em>，<code>canAccessPrivateAgent</code> agent_access.go:120）是<strong>派生字段</strong>，由 <code>permission_mode</code>（private|public_to）+ <code>invocation_targets</code> 派生（agent.ts:10-15）。<code>permission_mode</code>+<code>invocation_targets</code> 才是<em>触发/调用</em>的权威门槛（<code>canInvokeAgent</code> agent_access.go:48）。public_to+workspace = 任意成员/agent/system 可调用；private = 仅所有者（无 admin/A2A 旁路）。</li>
+      <li><strong>编辑面</strong>：<code>agent-access-settings.tsx</code> / <code>AccessPicker</code>，<strong>逐个 agent，全 UI 无任何批量入口</strong>。</li>
+      <li><strong>实测运营痛点（直接证据）</strong>：① 一眼看不出私有 vs 工作区 → 写原生 SQL 盘点；② 不能批量改 → 对 5 个工作区 70 个 agent 跑了 <code>UPDATE+INSERT</code>；③ 私有 agent 被 autopilot <code>run_only</code> 的 @mention <strong>静默丢弃</strong>（originator 为 NULL）—— 上游 <a href="https://github.com/multica-ai/multica/issues/5230">#5230</a>，列表页零信号。</li>
+      <li><strong>规模/语义</strong>：5 工作区、~81 agent；每工作区 ~14 业务 agent（工作区可调用）+ 3 内置（零号机 / Claude Code / Codex，刻意仅所有者私有）。</li>
+      <li><strong>已确认存在的基础设施</strong>：<code>AgentBatchToolbar</code>+<code>runBatch</code>（:646/:668，现仅用于归档/恢复）；<code>AgentListFilters</code> 四维（view-store.ts:41）；<code>AccessPicker</code> 可复用。</li>
+    </ul>
+  </section>
+
+  <section id="axes">
+    <h2>Topic Axes</h2>
+    <p class="axis-line">1. what-to-show — 展示哪些权限/可见性数据</p>
+    <p class="axis-line">2. how-to-display — 列 vs 徽标 vs tooltip；消解 view/invoke 混淆</p>
+    <p class="axis-line">3. find-and-organize — 按访问范围筛选/分组/排序</p>
+    <p class="axis-line">4. manage-and-act — 行内/批量编辑、新 agent 默认值</p>
+  </section>
+
+  <section id="ranked">
+    <h2>Ranked Ideas</h2>
+    <nav class="jumplist">
+      <a href="#i1">1. 有效访问列</a>
+      <a href="#i2">2. 批量改访问范围</a>
+      <a href="#i3">3. 访问筛选维度</a>
+      <a href="#i4">4. 新 agent 默认访问范围</a>
+    </nav>
+
+    <article class="idea" id="i1">
+      <h3><span class="id-chip">1</span> 有效访问列（三态），而非裸 visibility <span class="pill">what-to-show + how-to-display</span></h3>
+      <p>加一列显示<strong>有效的调用范围</strong>——"工作区 / 指定人员 / 仅所有者"，由 <code>permission_mode</code>+<code>invocation_targets</code> 合成，<strong>不</strong>读派生的 <code>visibility</code>。其中"仅所有者"这一态同时承担"自动化/autopilot 无法调用此 agent"的信号（#5230），通过 tooltip/副标说明。</p>
+
+      <figure class="diagram">
+        <svg viewBox="0 0 720 230" width="720" height="230" role="img" aria-label="visibility 派生映射 vs 有效访问三态">
+          <defs>
+            <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#8a93a0"/></marker>
+          </defs>
+          <!-- left: effective access (3 states) -->
+          <text x="30" y="24" font-size="13" font-weight="700" fill="#1a1a1a">有效访问（3 态）</text>
+          <rect x="20" y="40" width="200" height="40" rx="6" fill="#eaf6ee" stroke="#2a7a45"/>
+          <text x="32" y="65" font-size="13" fill="#2a7a45">工作区 · 任意成员/agent 可调用</text>
+          <rect x="20" y="92" width="200" height="40" rx="6" fill="#eaf1fd" stroke="#2f6feb"/>
+          <text x="32" y="117" font-size="13" fill="#2f6feb">指定人员 · public_to + member</text>
+          <rect x="20" y="144" width="200" height="40" rx="6" fill="#fdf3e7" stroke="#9a6a1a"/>
+          <text x="32" y="169" font-size="13" fill="#9a6a1a">仅所有者 · 自动化无法触发</text>
+          <!-- arrow -->
+          <line x1="240" y1="112" x2="360" y2="112" stroke="#8a93a0" stroke-width="1.5" marker-end="url(#arr)"/>
+          <text x="252" y="104" font-size="11.5" fill="#5b6470">派生折叠（丢信息）</text>
+          <!-- right: raw visibility (2 states) -->
+          <text x="400" y="24" font-size="13" font-weight="700" fill="#1a1a1a">裸 visibility（2 态）</text>
+          <rect x="390" y="62" width="210" height="40" rx="6" fill="#eaf6ee" stroke="#2a7a45"/>
+          <text x="404" y="87" font-size="13" fill="#2a7a45">"workspace"</text>
+          <rect x="390" y="124" width="210" height="62" rx="6" fill="#f2f4f7" stroke="#8a93a0"/>
+          <text x="404" y="150" font-size="13" fill="#5b6470">"private"</text>
+          <text x="404" y="170" font-size="11.5" fill="#9a6a1a">↑ 指定人员 + 仅所有者 被合并</text>
+        </svg>
+        <figcaption>问题核心：<code>public_to + member</code> 目标的 agent 会被折叠成 <code>visibility:"private"</code>，与"仅所有者"无法区分。三态列保留了这个区分。</figcaption>
+      </figure>
+
+      <dl class="fields">
+        <dt>Basis</dt><dd><code>direct:</code> <code>packages/core/types/agent.ts:10-15</code>——"<span>a public_to agent WITH a workspace target maps to visibility:'workspace'; everything else (private, or public_to scoped only to member/team targets) maps to visibility:'private'</span>"。即裸 visibility 把"仅所有者"与"指定人员"合并成同一标签。<code>agent_access.go:48-65</code> 的 <code>canInvokeAgent</code> 对 private / public_to 有截然不同的分支。</dd>
+        <dt>Rationale</dt><dd>用户字面诉求（加"可见性列"）若照搬 <code>visibility</code> 会<strong>主动误导</strong>——一个 public_to+member 的 agent 会显示 "private"，但特定成员其实能运行它。有效访问列一次建立正确心智，且"仅所有者"态把 #5230 的静默丢弃风险提前到最早可见的触点。</dd>
+        <dt>Downsides</dt><dd>第 8 列增加横向滚动；建议默认隐藏或同时作为排序/筛选键。标签计算是纯前端、字段已在列表 payload 里。</dd>
+        <dt>Confidence</dt><dd>92%</dd>
+        <dt>Complexity</dt><dd><span class="pill">Low–Medium</span></dd>
+      </dl>
+    </article>
+
+    <article class="idea" id="i2">
+      <h3><span class="id-chip">2</span> 经现有批量工具栏批量改访问范围 <span class="pill">manage-and-act</span></h3>
+      <p>在 <code>AgentBatchToolbar</code>（agents-page.tsx:646，现仅归档/恢复）增加"设置访问范围…"动作，用既有 <code>runBatch</code>（:668）逐个套用 <code>AccessPicker</code> 的选择。把"筛选 → 全选 → 设为工作区"变成几秒钟的事，直接移除我们刚被逼着写的 SQL。</p>
+      <dl class="fields">
+        <dt>Basis</dt><dd><code>direct:</code> <code>agents-page.tsx:668</code> 的 <code>runBatch</code> 是带失效处理的通用顺序执行器；<code>:661</code> <code>allManageable</code> 已做行级权限门控；<code>agent-access-settings.tsx</code> 的 <code>AccessPicker</code> 发出 <code>onChange(next)</code> 补丁，逐行可复用。痛点 #2（跨 5 工作区 70 agent 的 <code>UPDATE+INSERT</code>）正是因 UI 无此路径才发生。</dd>
+        <dt>Rationale</dt><dd>杠杆最高。此后每次访问范围重组（团队入职、把私有 agent 开放给工作区）都从"有风险、不可重放、需管理员"的 SQL 变成 30 秒、可审计、非管理员可用的 UI 操作。基础设施 100% 复用。</dd>
+        <dt>Downsides</dt><dd>需确认对话框护栏（访问范围是安全敏感字段）；"指定人员"批量极易出错，建议批量只开放"工作区 / 仅所有者"两档。</dd>
+        <dt>Confidence</dt><dd>90%</dd>
+        <dt>Complexity</dt><dd><span class="pill">Medium</span></dd>
+      </dl>
+    </article>
+
+    <article class="idea" id="i3">
+      <h3><span class="id-chip">3</span> 访问筛选维度 <span class="pill">find-and-organize</span></h3>
+      <p>给 <code>AgentListFilters</code>（view-store.ts:41）加一个 <code>access</code> 多选维度，取值与列一致（工作区/指定人员/仅所有者）。一键隔离某一类，而非扫 80 行或跑 SQL。它也是想法 2 的发现机制——筛选 → 全选 → 批量改。</p>
+      <dl class="fields">
+        <dt>Basis</dt><dd><code>direct:</code> view-store.ts:41-54 已有四维（availability/runtimes/owners/models），<code>agents-page.tsx</code> 行筛选是纯前端按字段匹配，加第五维机械一致。痛点 #1（"写 SQL 盘点哪些是私有"）本质就是缺这个筛选。</dd>
+        <dt>Rationale</dt><dd>对"盘点"任务，筛选 > 列：列只能逐行扫，筛选直接隔离目标集。也是想法 2 批量流的前置发现步骤。改动极小。</dd>
+        <dt>Downsides</dt><dd>取值粒度（二态 vs 三态）需与列保持一致，需团队拍板。</dd>
+        <dt>Confidence</dt><dd>90%</dd>
+        <dt>Complexity</dt><dd><span class="pill">Low</span></dd>
+      </dl>
+    </article>
+
+    <article class="idea" id="i4">
+      <h3><span class="id-chip">4</span> 工作区级"新 agent 默认访问范围" <span class="pill">manage-and-act / default</span></h3>
+      <p>工作区设置里设新建用户 agent 的默认 <code>permission_mode</code>（自动化重的工作区可默认 public_to+workspace），内置 agent 显式钉为私有。从源头消除"每个新工作区都要重做一次 70 agent 清理"的积压。</p>
+      <div class="callout"><span class="label">Scope-adjacent（范围相邻）</span>这是一个<strong>工作区设置</strong>，不是列表页字段；可经由列表页暴露（如横幅提示），但落地在工作区设置。用户聚焦在列表页字段，故此条标记为相邻、可选。</div>
+      <dl class="fields">
+        <dt>Basis</dt><dd><code>reasoned:</code> 批量 SQL 是症状，根因是默认值与意图不符——若每工作区 ~14 业务 agent 按意图都该是工作区可调用，则 private-by-default 迫使每个 agent 都要 opt-in。<code>external:</code> GitHub 仓库默认 public、Slack 频道默认工作区可见——协作工具默认共享、私有是 opt-out。</dd>
+        <dt>Rationale</dt><dd>唯一能阻止痛点<em>复发</em>的想法。想法 2 是"治理"，本条是"预防"。</dd>
+        <dt>Downsides</dt><dd>默认值放工作区级还是所有者级需设计；内置 agent 必须豁免；离开列表页表面。</dd>
+        <dt>Confidence</dt><dd>70%</dd>
+        <dt>Complexity</dt><dd><span class="pill">Medium</span></dd>
+      </dl>
+    </article>
+  </section>
+
+  <section id="rejections">
+    <h2>Rejection Summary</h2>
+    <table>
+      <thead><tr><th>#</th><th>想法</th><th>剔除理由</th></tr></thead>
+      <tbody>
+        <tr><td>—</td><td>裸 <code>visibility</code> 列（用户字面诉求，照搬）</td><td>会误导：<code>visibility</code> 是派生的 2 态投影（agent.ts:10-15），<code>public_to+member</code> 的 agent 会显示 "private"。被想法 1 取代。</td></tr>
+        <tr><td>—</td><td>独立的"自动化不可达"告警标记</td><td>并入想法 1——"仅所有者"态已承载该后果。</td></tr>
+        <tr><td>—</td><td>行内快切（kebab / 单元格 popover）</td><td>被想法 2（批量）+ 现有逐 agent inspector 覆盖；杠杆较低的便利项。</td></tr>
+        <tr><td>—</td><td>按访问范围排序</td><td>被想法 3（筛选即可分组）吸收；增量价值低。</td></tr>
+        <tr><td>—</td><td>访问范围分布计数 chip 条</td><td>与想法 3 及既有 <code>scopeCounts</code> 重叠；价值较低。</td></tr>
+        <tr><td>—</td><td>axis 覆盖</td><td>4 个存活已覆盖全部 4 个轴；无空轴。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="composition-signal">
+    Composed 2026-07-14 by ce-ideate (focused pass) · repo <code>multica-ai/multica</code> · scratch <code>/tmp/compound-engineering/ce-ideate/42e47e33</code>
+  </footer>
+
+</div>
+</body>
+</html>

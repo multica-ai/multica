@@ -25,7 +25,11 @@ export function useCreateWorkspace() {
     onSuccess: (newWs) => {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] = []) => [...old, newWs]);
     },
-    onSettled: () => {
+    // A failed create should not have changed server state, but invalidate the
+    // list once to reconcile ambiguous transport failures where the server may
+    // have committed before the client lost the response. Keep this off the
+    // success path so the canonical response seeded above is not fetched again.
+    onError: () => {
       qc.invalidateQueries({ queryKey: workspaceKeys.list() });
     },
   });

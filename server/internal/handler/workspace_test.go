@@ -209,6 +209,17 @@ VALUES ($1, 123456789, 'multica-ai', 'multica', 3366, 987654321, 'abc123', 15368
 `, wsID); err != nil {
 		t.Fatalf("create pending check suite: %v", err)
 	}
+	var propertyID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO issue_property (workspace_id, name, type)
+VALUES ($1, 'Delete cleanup property', 'text')
+RETURNING id
+`, wsID).Scan(&propertyID); err != nil {
+		t.Fatalf("create issue property: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue_property WHERE id = $1`, propertyID)
+	})
 
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
@@ -233,6 +244,14 @@ VALUES ($1, 123456789, 'multica-ai', 'multica', 3366, 987654321, 'abc123', 15368
 	}
 	if pendingCount != 0 {
 		t.Fatalf("pending check suites were not cleaned up for deleted workspace: %d", pendingCount)
+	}
+
+	var propertyCount int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM issue_property WHERE id = $1`, propertyID).Scan(&propertyCount); err != nil {
+		t.Fatalf("verify issue property cleanup: %v", err)
+	}
+	if propertyCount != 0 {
+		t.Fatalf("issue properties were not cleaned up for deleted workspace: %d", propertyCount)
 	}
 }
 

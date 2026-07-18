@@ -47,6 +47,41 @@ func TestRedactGitHubToken(t *testing.T) {
 	}
 }
 
+// asm joins fragments into a credential-shaped test fixture. The token is kept
+// split across fragments so the full value never appears as a contiguous
+// literal in source — otherwise secret scanners (including GitHub push
+// protection) flag these redaction-test fixtures as real credentials. The
+// runtime string is identical, so the patterns are exercised exactly the same.
+func asm(parts ...string) string { return strings.Join(parts, "") }
+
+// TestRedactGitHubFineGrainedToken guards the github_pat_ prefix used by
+// GitHub fine-grained personal access tokens. The classic-token pattern only
+// covers ghp_/gho_/ghu_/ghs_/ghr_, so before the dedicated pattern was added a
+// fine-grained PAT reached the DB / WS broadcast unredacted.
+func TestRedactGitHubFineGrainedToken(t *testing.T) {
+	t.Parallel()
+	input := "cloning with token " + asm("github_", "pat_", "11ABCDE0Q0abcdefghijkl_MNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCD")
+	got := Text(input)
+	if strings.Contains(got, asm("github_", "pat_", "11ABCDE0Q0")) {
+		t.Fatalf("fine-grained GitHub PAT not redacted: %s", got)
+	}
+	if !strings.Contains(got, "[REDACTED GITHUB TOKEN]") {
+		t.Fatalf("expected [REDACTED GITHUB TOKEN] placeholder, got: %s", got)
+	}
+}
+
+func TestRedactGoogleAPIKeyEndingWithDash(t *testing.T) {
+	t.Parallel()
+	input := `the config file still had "` + asm("AIza", "SyB1cD3fGhIjKlMnOpQrStUvWxYz012345-") + `" in it`
+	got := Text(input)
+	if strings.Contains(got, asm("AIza", "SyB1cD3f")) {
+		t.Fatalf("Google API key ending with dash not redacted: %s", got)
+	}
+	if !strings.Contains(got, `"[REDACTED GOOGLE API KEY]" in it`) {
+		t.Fatalf("expected delimiter to be preserved, got: %s", got)
+	}
+}
+
 func TestRedactOpenAIKey(t *testing.T) {
 	t.Parallel()
 	input := "OPENAI_API_KEY=sk-proj-abc123def456ghi789jkl012mno345"
@@ -62,6 +97,55 @@ func TestRedactSlackToken(t *testing.T) {
 	got := Text(input)
 	if strings.Contains(got, "xoxb-") {
 		t.Fatalf("Slack token not redacted: %s", got)
+	}
+}
+
+// TestRedactSlackAppAndConfigTokens guards the xapp- (app-level) and xoxe-
+// (config/refresh) prefixes that the original xox[bporas]- rule did not cover.
+func TestRedactSlackAppAndConfigTokens(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, in, leak string }{
+		{"app-level xapp-", "connecting with " + asm("xa", "pp-1-A0000000000-1111111111-abcdefdeadbeefcafe") + " now", asm("xa", "pp-1-A0000000000")},
+		{"config xoxe-", "refresh with " + asm("xo", "xe-1-My0abcdefghijklmnopqrstuvwx") + " now", asm("xo", "xe-1-My0abcdef")},
+	} {
+		got := Text(tc.in)
+		if strings.Contains(got, tc.leak) {
+			t.Fatalf("%s not redacted: %s", tc.name, got)
+		}
+		if !strings.Contains(got, "[REDACTED SLACK TOKEN]") {
+			t.Fatalf("%s: expected [REDACTED SLACK TOKEN], got: %s", tc.name, got)
+		}
+	}
+}
+
+// TestRedactGoogleAPIKey guards the AIza-prefixed Google API key format, which
+// no prior pattern covered.
+func TestRedactGoogleAPIKey(t *testing.T) {
+	t.Parallel()
+	input := "calling gemini with " + asm("AIza", "SyD1234567890abcdefghijklmnopqrstuv") + " now"
+	got := Text(input)
+	if strings.Contains(got, asm("AIza", "SyD1234567890")) {
+		t.Fatalf("Google API key not redacted: %s", got)
+	}
+	if !strings.Contains(got, "[REDACTED GOOGLE API KEY]") {
+		t.Fatalf("expected [REDACTED GOOGLE API KEY], got: %s", got)
+	}
+}
+
+// TestRedactStripeLiveKey guards Stripe secret/restricted live keys, which use
+// an underscore (sk_live_) and so are missed by the hyphen-form sk- rule.
+// Publishable keys (pk_live_) are intentionally NOT redacted — they are public.
+func TestRedactStripeLiveKey(t *testing.T) {
+	t.Parallel()
+	if got := Text("STRIPE_SECRET_KEY=" + asm("sk_", "live_", "51Abcdef0000000000000000")); strings.Contains(got, asm("sk_", "live_51Abcdef")) {
+		t.Fatalf("Stripe live key not redacted: %s", got)
+	}
+	if got := Text("restricted " + asm("rk_", "live_", "51Abcdef0000000000000000")); !strings.Contains(got, "[REDACTED STRIPE KEY]") {
+		t.Fatalf("Stripe restricted key not redacted: %s", got)
+	}
+	// Publishable keys are public and must survive untouched.
+	if got := Text(asm("pk_", "live_", "51Abcdef0000000000000000")); !strings.Contains(got, asm("pk_", "live_51Abcdef")) {
+		t.Fatalf("publishable key should NOT be redacted: %s", got)
 	}
 }
 

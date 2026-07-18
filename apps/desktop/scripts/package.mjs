@@ -66,6 +66,7 @@ const ARCH_FLAGS = new Map([
 const SUPPORTED_CLI_ARCHS = new Set(["x64", "arm64"]);
 const MAC_ALL_PLATFORM_TARGETS = [
   { platform: "mac", arch: "arm64" },
+  { platform: "mac", arch: "x64" },
   { platform: "win", arch: "x64" },
   { platform: "win", arch: "arm64" },
   { platform: "linux", arch: "x64" },
@@ -338,17 +339,20 @@ export function builderArgsForTarget(
       `-c.directories.output=dist/${target.platform}-${target.arch}`,
     );
   }
-  // electron-builder's update metadata file is `latest.yml` for Windows
-  // regardless of arch (only Linux gets an arch suffix automatically — see
-  // app-builder-lib's getArchPrefixForUpdateFile). Without an explicit
-  // channel override, building Windows x64 and arm64 in two invocations
-  // makes both publish `latest.yml` to the same GitHub Release, so the
-  // second upload overwrites the first and one of the two architectures
-  // ends up with no auto-update metadata. Route Windows arm64 to its own
-  // channel so x64 keeps `latest.yml` and arm64 ships `latest-arm64.yml`;
-  // the renderer-side updater pins the matching channel per arch.
+  // electron-builder only adds an architecture suffix to Linux update
+  // metadata. Windows x64/arm64 would both publish `latest.yml`, while macOS
+  // arm64/x64 would both publish `latest-mac.yml`. Keep the established x64
+  // Windows and arm64 macOS feeds unchanged for installed clients, and route
+  // the additional architectures to explicit channels. updater.ts pins the
+  // matching channel at runtime.
   if (target.platform === "win" && target.arch === "arm64") {
     builderArgs.push("-c.publish.channel=latest-arm64");
+  }
+  if (target.platform === "mac" && target.arch === "x64") {
+    // Scope the Electron 39 platform floor to the new Intel package so this
+    // change does not rewrite established Apple Silicon bundle metadata.
+    builderArgs.push("-c.mac.minimumSystemVersion=12.0.0");
+    builderArgs.push("-c.publish.channel=latest-x64");
   }
   return builderArgs;
 }

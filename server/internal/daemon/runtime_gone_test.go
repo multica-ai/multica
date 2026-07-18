@@ -312,12 +312,20 @@ func TestHandleWSHeartbeatAck_NormalAckRecordsFreshness(t *testing.T) {
 	t.Parallel()
 
 	d := freshDaemon("")
-	d.handleWSHeartbeatAck(context.Background(), &HeartbeatResponse{
-		RuntimeID: "rt-1",
-		Status:    "ok",
+	d.wsRPC = newWSRPCClient(wsRPCResponseGrace)
+	generation := d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+		return &wsOutbound{data: frame}, nil
 	})
+	d.handleWSHeartbeatAckForConnection(context.Background(), &HeartbeatResponse{
+		RuntimeID:          "rt-1",
+		Status:             "ok",
+		ServerCapabilities: []string{"rpc-v1"},
+	}, generation)
 	if !d.wsHeartbeatRecentlyAcked("rt-1") {
 		t.Fatalf("normal ack should record WS freshness for rt-1")
+	}
+	if !d.wsRPC.supportsRPCV1() {
+		t.Fatal("rpc-v1 heartbeat acknowledgement should enable WS RPC")
 	}
 }
 

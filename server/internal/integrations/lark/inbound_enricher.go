@@ -2,8 +2,10 @@ package lark
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,6 +34,22 @@ const defaultMaxForwardChildren = 100
 // ACK budget (one list call, page_size 10).
 const DefaultRecentContextSize = 10
 
+const (
+	recentContextEndpoint         = "im/v1/messages.list"
+	recentContextMaxFetchAttempts = 2
+
+	recentContextFailureUnknown          = "unknown"
+	recentContextFailureChannelUnbound   = "channel_unbound"
+	recentContextFailureTimeout          = "timeout"
+	recentContextFailurePermissionDenied = "permission_denied"
+	recentContextFailureMessageDeleted   = "message_deleted"
+	recentContextFailureRateLimited      = "rate_limited"
+	recentContextFailureTokenExpired     = "token_expired"
+	recentContextFailureTemporary        = "temporary"
+)
+
+var errRecentContextChannelUnbound = errors.New("lark enricher: missing chat_id for recent context")
+
 // Enricher expands an inbound message's body with context the user
 // EXPLICITLY attached — a quoted reply or a merged-and-forwarded bundle
 // — by calling back into Lark's IM API. It runs after the (fast,
@@ -40,9 +58,9 @@ const DefaultRecentContextSize = 10
 // conversation inline.
 //
 // It is best-effort by contract: every fetch failure degrades to a
-// visible placeholder block and Enrich NEVER returns an error or blocks
-// ingestion. A message with nothing to expand (no parent_id, not a
-// merge_forward) is returned untouched without any network call.
+// readable note or placeholder and Enrich NEVER returns an error or
+// blocks ingestion. A message with nothing to expand (no parent_id, not
+// a merge_forward) is returned untouched without any network call.
 type Enricher interface {
 	Enrich(ctx context.Context, msg InboundMessage, creds InstallationCredentials) InboundMessage
 }
@@ -190,7 +208,7 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 	var b strings.Builder
 	if wantRecent {
 		if recentErr != nil {
-			b.WriteString(recentContextErrorBlock())
+			b.WriteString(recentContextUnavailableLine(classifyRecentContextFetchError(recentErr).category))
 		} else if len(recentItems) > 0 {
 			b.WriteString(e.renderRecentContextBlock(recentItems, names))
 		}
@@ -275,21 +293,60 @@ func (e *inboundEnricher) resolveNames(ctx context.Context, creds InstallationCr
 // oldest-first. The window is anchored to the trigger message's time so
 // it captures the conversation up to the @-mention rather than whatever
 // is newest by the time this fetch runs. A fetch failure is returned to
-// the caller (which renders the documented placeholder); it never blocks
-// ingestion.
+// the caller (which renders a safe, readable degradation note); it never
+// blocks ingestion.
 func (e *inboundEnricher) fetchRecentItems(ctx context.Context, creds InstallationCredentials, msg InboundMessage) ([]LarkMessage, error) {
-	items, err := e.client.ListChatMessages(ctx, creds, ListMessagesParams{
+	if msg.ChatID == "" {
+		classified := classifyRecentContextFetchError(errRecentContextChannelUnbound)
+		e.logRecentContextFetchFailure(msg, errRecentContextChannelUnbound, classified, 0)
+		return nil, errRecentContextChannelUnbound
+	}
+
+	params := ListMessagesParams{
 		ChatID:   msg.ChatID,
 		PageSize: e.recentContextSize,
 		// Lark sends create_time as epoch millis; end_time wants seconds. A
 		// missing/unparseable time yields 0, which the client treats as
 		// "no end_time" (newest N).
 		EndTime: parseLarkMillis(msg.CreateTime) / 1000,
-	})
-	if err != nil {
-		e.logger.Warn("lark enricher: recent context fetch failed",
-			"chat_id", string(msg.ChatID), "err", err)
-		return nil, err
+	}
+	var items []LarkMessage
+	var err error
+	for attempt := 1; attempt <= recentContextMaxFetchAttempts; attempt++ {
+		items, err = e.client.ListChatMessages(ctx, creds, params)
+		if err == nil {
+			if attempt > 1 {
+				e.logger.Info("lark enricher: recent context fetch recovered after retry",
+					"layer", "lark_inbound_enricher",
+					"endpoint", recentContextEndpoint,
+					"status", "recovered",
+					"attempts", attempt,
+					"chat_id", string(msg.ChatID),
+					"message_id", msg.MessageID)
+			}
+			break
+		}
+		classified := classifyRecentContextFetchError(err)
+		// A retry only helps while the shared enrichment budget still has
+		// time left. Both attempts reuse one ctx (ws_connector caps the
+		// whole Enrich at EnrichTimeout, ~2s), so once ctx is done a second
+		// call fails immediately — degrade now instead of burning a doomed
+		// request. This is why a first-attempt deadline never "recovers".
+		if !classified.retryable || attempt == recentContextMaxFetchAttempts || ctx.Err() != nil {
+			e.logRecentContextFetchFailure(msg, err, classified, attempt)
+			return nil, err
+		}
+		e.logger.Warn("lark enricher: recent context fetch failed; retrying",
+			"layer", "lark_inbound_enricher",
+			"endpoint", recentContextEndpoint,
+			"status", "retrying",
+			"category", classified.category,
+			"retryable", classified.retryable,
+			"attempt", attempt,
+			"next_attempt", attempt+1,
+			"chat_id", string(msg.ChatID),
+			"message_id", msg.MessageID,
+			"err", err)
 	}
 
 	exclude := map[string]bool{msg.MessageID: true}
@@ -310,6 +367,19 @@ func (e *inboundEnricher) fetchRecentItems(ctx context.Context, creds Installati
 		return parseLarkMillis(kept[i].CreateTime) < parseLarkMillis(kept[j].CreateTime)
 	})
 	return kept, nil
+}
+
+func (e *inboundEnricher) logRecentContextFetchFailure(msg InboundMessage, err error, classified recentContextFetchClassification, attempts int) {
+	e.logger.Warn("lark enricher: recent context fetch failed",
+		"layer", "lark_inbound_enricher",
+		"endpoint", recentContextEndpoint,
+		"status", "failed",
+		"category", classified.category,
+		"retryable", classified.retryable,
+		"attempts", attempts,
+		"chat_id", string(msg.ChatID),
+		"message_id", msg.MessageID,
+		"err", err)
 }
 
 // renderRecentContextBlock renders the surrounding conversation as a
@@ -337,8 +407,90 @@ func (e *inboundEnricher) renderRecentContextBlock(kept []LarkMessage, names map
 		len(kept), strings.Join(lines, "\n"))
 }
 
-func recentContextErrorBlock() string {
-	return "<recent_context type=\"error\">[unable to fetch recent context]</recent_context>"
+type recentContextFetchClassification struct {
+	category  string
+	retryable bool
+}
+
+func classifyRecentContextFetchError(err error) recentContextFetchClassification {
+	if err == nil {
+		return recentContextFetchClassification{category: recentContextFailureUnknown}
+	}
+	if errors.Is(err, errRecentContextChannelUnbound) {
+		return recentContextFetchClassification{category: recentContextFailureChannelUnbound}
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return classifyRecentContextAPIError(apiErr.Code, apiErr.Msg)
+	}
+	var netErr net.Error
+	if errors.Is(err, context.DeadlineExceeded) ||
+		(errors.As(err, &netErr) && netErr.Timeout()) {
+		return recentContextFetchClassification{category: recentContextFailureTimeout, retryable: true}
+	}
+
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "missing chat_id") || strings.Contains(msg, "missing chat id"):
+		return recentContextFetchClassification{category: recentContextFailureChannelUnbound}
+	case containsAny(msg, "code=99991002", "code=230001", "no permission", "permission denied", "insufficient permissions", "forbidden", "http 403"):
+		return recentContextFetchClassification{category: recentContextFailurePermissionDenied}
+	case containsAny(msg, "code=230110", "code=230011", "code=230050", "deleted", "recalled", "not visible", "invisible"):
+		return recentContextFetchClassification{category: recentContextFailureMessageDeleted}
+	case containsAny(msg, "code=99991663", "code=99991664"):
+		return recentContextFetchClassification{category: recentContextFailureTokenExpired, retryable: true}
+	case containsAny(msg, "code=230020", "rate limit", "rate_limit", "http 429"):
+		// Not retryable: the client drops Retry-After, and an immediate
+		// second call within the same budget almost always re-hits the
+		// limit while doubling list load on an already-throttled tenant.
+		return recentContextFetchClassification{category: recentContextFailureRateLimited}
+	case containsAny(msg, "deadline exceeded", "timeout", "timed out"):
+		return recentContextFetchClassification{category: recentContextFailureTimeout, retryable: true}
+	case containsAny(msg, "http 500", "http 502", "http 503", "http 504", "connection reset", "connection refused", "temporary"):
+		return recentContextFetchClassification{category: recentContextFailureTemporary, retryable: true}
+	default:
+		return recentContextFetchClassification{category: recentContextFailureUnknown}
+	}
+}
+
+func classifyRecentContextAPIError(code int, msg string) recentContextFetchClassification {
+	switch {
+	case code == 99991002 || code == 230001:
+		return recentContextFetchClassification{category: recentContextFailurePermissionDenied}
+	case code == 230110 || code == 230011 || code == 230050:
+		return recentContextFetchClassification{category: recentContextFailureMessageDeleted}
+	case isTokenError(code):
+		return recentContextFetchClassification{category: recentContextFailureTokenExpired, retryable: true}
+	case code == 230020:
+		// See classifyRecentContextFetchError: rate limits degrade rather
+		// than retry, since the client drops Retry-After.
+		return recentContextFetchClassification{category: recentContextFailureRateLimited}
+	}
+	return classifyRecentContextFetchError(errors.New(msg))
+}
+
+func containsAny(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func recentContextUnavailableLine(category string) string {
+	switch category {
+	case recentContextFailureChannelUnbound:
+		return "[Recent Lark context unavailable: chat binding is missing. Continuing with the latest message.]"
+	case recentContextFailurePermissionDenied:
+		return "[Recent Lark context unavailable: the bot cannot read this chat history. Continuing with the latest message.]"
+	case recentContextFailureMessageDeleted:
+		return "[Recent Lark context unavailable: the referenced chat history is deleted or no longer visible. Continuing with the latest message.]"
+	case recentContextFailureTimeout, recentContextFailureRateLimited, recentContextFailureTokenExpired, recentContextFailureTemporary:
+		return "[Recent Lark context temporarily unavailable; continuing with the latest message.]"
+	default:
+		return "[Recent Lark context unavailable; continuing with the latest message.]"
+	}
 }
 
 // renderQuotedBlock renders a <quoted_message> block from the already-

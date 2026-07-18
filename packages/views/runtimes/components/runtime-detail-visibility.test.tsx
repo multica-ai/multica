@@ -118,10 +118,9 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
   }),
 }));
 
-// Stubbing ProviderLogo / UsageSection / UpdateSection avoids dragging in
-// chart libs and additional query keys we don't care about here.
+// Stubbing ProviderLogo / UsageSection avoids dragging in chart libs and
+// additional query keys we don't care about here.
 vi.mock("./provider-logo", () => ({ ProviderLogo: () => null }));
-vi.mock("./update-section", () => ({ UpdateSection: () => null }));
 vi.mock("./usage-section", () => ({ UsageSection: () => null }));
 vi.mock("./shared", () => ({ HealthBadge: () => null }));
 vi.mock("../../agents/presence", () => ({
@@ -201,6 +200,24 @@ describe("RuntimeDetail visibility section", () => {
     expect(screen.getByText("Public")).toBeInTheDocument();
   });
 
+  it("keeps daemon CLI version details without rendering update controls", () => {
+    renderDetail(
+      makeRuntime({
+        metadata: { cli_version: "0.3.17" },
+        runtime_mode: "local",
+      }),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Technical details" }),
+    );
+
+    expect(screen.getByText("0.3.17")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Update" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("flips visibility to public when the owner clicks the Public choice", async () => {
     renderDetail(makeRuntime({ owner_id: "user-me", visibility: "private" }));
     fireEvent.click(screen.getByText("Public"));
@@ -262,9 +279,18 @@ describe("RuntimeDetail visibility section", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Delete runtime/i }));
-    expect(screen.getByText("Delete custom runtime?")).toBeInTheDocument();
+    expect(
+      screen.getByText("Delete custom runtime from workspace?"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("alertdialog", {
+        name: "Delete custom runtime from workspace?",
+      }),
+    ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete from workspace" }),
+    );
     await waitFor(() =>
       expect(mockDeleteRuntimeProfile).toHaveBeenCalledWith(profile.id),
     );

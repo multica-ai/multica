@@ -38,6 +38,7 @@ type TxStarter interface {
 type SessionQueries interface {
 	WithTx(tx pgx.Tx) SessionQueries
 	GetChannelChatSessionBinding(ctx context.Context, arg db.GetChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error)
+	LockWorkspaceForChatSessionCreate(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	CreateChatSession(ctx context.Context, arg db.CreateChatSessionParams) (db.ChatSession, error)
 	CreateChannelChatSessionBinding(ctx context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error)
 	CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error)
@@ -57,6 +58,9 @@ func (a dbSessionQueries) WithTx(tx pgx.Tx) SessionQueries {
 }
 func (a dbSessionQueries) GetChannelChatSessionBinding(ctx context.Context, arg db.GetChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error) {
 	return a.q.GetChannelChatSessionBinding(ctx, arg)
+}
+func (a dbSessionQueries) LockWorkspaceForChatSessionCreate(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	return a.q.LockWorkspaceForChatSessionCreate(ctx, id)
 }
 func (a dbSessionQueries) CreateChatSession(ctx context.Context, arg db.CreateChatSessionParams) (db.ChatSession, error) {
 	return a.q.CreateChatSession(ctx, arg)
@@ -188,6 +192,13 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.q.WithTx(tx)
+
+	// FOR KEY SHARE on the workspace row before creating the session — the creator
+	// half of the #5219 delete/create protocol, so a channel session cannot be
+	// created into a workspace mid-delete (see LockWorkspaceForChatSessionCreate).
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(ctx, in.WorkspaceID); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("lock workspace for chat session create: %w", err)
+	}
 
 	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
 		WorkspaceID: in.WorkspaceID,

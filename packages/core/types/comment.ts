@@ -30,6 +30,25 @@ export interface Comment {
   resolved_by_type: CommentAuthorType | null;
   resolved_by_id: string | null;
   source_task_id?: string | null;
+  // Per-target result of every explicit @agent / @squad mention in this comment
+  // (MUL-4525 §2). Present only on create/edit responses; older servers omit it.
+  trigger_outcomes?: CommentTriggerOutcome[];
+}
+
+// The domain result of one explicitly-mentioned trigger target. Success-shaped
+// statuses (queued/coalesced/deferred) mean the mention was handled; `blocked`
+// means it was refused with an enumeration-safe reason_code.
+export type CommentTriggerStatus =
+  | "queued"
+  | "coalesced"
+  | "deferred"
+  | "blocked";
+
+export interface CommentTriggerOutcome {
+  target_type: string; // "agent" | "squad"
+  target_id: string;
+  status: CommentTriggerStatus | string;
+  reason_code: string;
 }
 
 export type CommentTriggerSource =
@@ -47,4 +66,7 @@ export interface CommentTriggerPreviewAgent {
 
 export interface CommentTriggerPreview {
   agents: CommentTriggerPreviewAgent[];
+  // Explicit @agent / @squad mentions that will NOT trigger if posted as-is
+  // (MUL-4525 §2). Additive: older servers omit it.
+  blocked?: CommentTriggerOutcome[];
 }

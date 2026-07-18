@@ -6,6 +6,15 @@ export interface ChatPinnedAgent {
   position: number;
 }
 
+/**
+ * Kind of a chat message. Additive (MUL-4351): the server always sends a
+ * concrete value, but treat a missing/unknown value as "message" so an older
+ * server or a future kind never breaks rendering.
+ * - "message"     — an ordinary user/assistant message.
+ * - "no_response" — a completed direct-chat turn that produced no text reply.
+ */
+export type ChatMessageKind = "message" | "no_response";
+
 /** Preview of a session's most recent message, for the IM-style list. */
 export interface ChatLastMessage {
   content: string;
@@ -13,6 +22,8 @@ export interface ChatLastMessage {
   created_at: string;
   /** Present when the last message is a failed assistant reply. */
   failure_reason?: string | null;
+  /** "message" (default) or "no_response". Optional for older servers. */
+  message_kind?: ChatMessageKind;
 }
 
 export interface ChatSession {
@@ -88,6 +99,12 @@ export interface ChatMessage {
    * and on legacy assistant messages predating migration 063.
    */
   elapsed_ms?: number | null;
+  /**
+   * "message" (default) or "no_response" — a completed direct-chat turn that
+   * produced no text reply (MUL-4351). Optional/additive: absent on older
+   * servers and on user messages; treat a missing value as "message".
+   */
+  message_kind?: ChatMessageKind;
 }
 
 export interface ChatMessagesCursor {
@@ -135,6 +152,32 @@ export interface CancelledChatMessage {
 
 export interface CancelTaskResponse extends AgentTask {
   cancelled_chat_message?: CancelledChatMessage;
+}
+
+/**
+ * One durable draft restore from GET /api/chat/sessions/{id}/draft-restores
+ * (#5219): a deferred cancellation settled as empty-transcript after the
+ * cancel HTTP response had returned, so the deleted prompt is held
+ * server-side until the creator's client applies it to the composer and
+ * consumes it (DELETE, idempotent). The chat:cancel_finalized event is only
+ * an invalidation hint for this fetch.
+ */
+export interface ChatDraftRestore {
+  /** The deleted user chat message id — stable dedup and consume key. */
+  id: string;
+  chat_session_id: string;
+  task_id?: string;
+  content: string;
+  /**
+   * Attachments detached from the deleted message so a restored draft can
+   * re-bind them on re-send.
+   */
+  attachments?: import("./attachment").Attachment[];
+  created_at?: string;
+}
+
+export interface ChatDraftRestoresResponse {
+  restores: ChatDraftRestore[];
 }
 
 /**

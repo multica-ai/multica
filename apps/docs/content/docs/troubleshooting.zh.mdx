@@ -278,9 +278,12 @@ netstat -ano | findstr :8080    # Windows
 | 组件 | 位置 | 命令 |
 |---|---|---|
 | **守护进程** | `~/.multica/daemon.log`（后台模式）或前台 stdout | `multica daemon logs -f --lines 100` |
+| **守护进程（崩溃）** | `~/.multica/daemon.err.log` | 直接打开——panic / 启动早期错误会写到这里 |
 | **服务器（Docker）** | container stdout | `docker logs -f <container>` |
 | **服务器（systemd）** | journal | `journalctl -u multica-server -f` |
 | **前端（dev）** | `pnpm dev` 所在终端 | 直接看 |
 | **前端（browser）** | DevTools → Console | 按 `F12` |
 
-需要更详细的 daemon 日志，把它从后台挪到前台跑：`multica daemon stop && multica daemon start --foreground`。
+后台模式下 `daemon.log` 会按大小轮转（默认 20MB × 5 份 gzip 备份；可用 `MULTICA_DAEMON_LOG_MAX_SIZE_MB` / `_MAX_BACKUPS` / `_MAX_AGE_DAYS` 调整），所以文件不会大到打不开。Go 运行时 panic 和 logger 建立前的错误会写到独立且有上限的 `daemon.err.log`。
+
+需要更详细的 daemon 日志，把它从后台挪到前台跑：`multica daemon stop && multica daemon start --foreground`。前台运行会把日志实时打到终端，而不是写入轮转文件。

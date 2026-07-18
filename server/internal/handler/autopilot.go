@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -141,16 +142,22 @@ type AutopilotTriggerResponse struct {
 }
 
 type AutopilotRunResponse struct {
-	ID             string  `json:"id"`
-	AutopilotID    string  `json:"autopilot_id"`
-	TriggerID      *string `json:"trigger_id"`
-	Source         string  `json:"source"`
-	Status         string  `json:"status"`
-	IssueID        *string `json:"issue_id"`
-	TaskID         *string `json:"task_id"`
-	TriggeredAt    string  `json:"triggered_at"`
-	CompletedAt    *string `json:"completed_at"`
-	FailureReason  *string `json:"failure_reason"`
+	ID            string  `json:"id"`
+	AutopilotID   string  `json:"autopilot_id"`
+	TriggerID     *string `json:"trigger_id"`
+	Source        string  `json:"source"`
+	Status        string  `json:"status"`
+	IssueID       *string `json:"issue_id"`
+	TaskID        *string `json:"task_id"`
+	TriggeredAt   string  `json:"triggered_at"`
+	CompletedAt   *string `json:"completed_at"`
+	FailureReason *string `json:"failure_reason"`
+	// ReasonCode is a stable, localizable, enumeration-safe classification of a
+	// non-success run (skipped/failed), derived from FailureReason. The "run now"
+	// UI localizes it instead of echoing the raw English reason (which may name a
+	// private assignee agent). Additive: nil for success-path runs and ignored by
+	// old clients (MUL-4525).
+	ReasonCode     *string `json:"reason_code,omitempty"`
 	TriggerPayload any     `json:"trigger_payload"`
 	Result         any     `json:"result"`
 	CreatedAt      string  `json:"created_at"`
@@ -268,16 +275,20 @@ func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
 		json.Unmarshal(r.Result, &result)
 	}
 	return AutopilotRunResponse{
-		ID:             uuidToString(r.ID),
-		AutopilotID:    uuidToString(r.AutopilotID),
-		TriggerID:      uuidToPtr(r.TriggerID),
-		Source:         r.Source,
-		Status:         r.Status,
-		IssueID:        uuidToPtr(r.IssueID),
-		TaskID:         uuidToPtr(r.TaskID),
-		TriggeredAt:    timestampToString(r.TriggeredAt),
-		CompletedAt:    timestampToPtr(r.CompletedAt),
-		FailureReason:  textToPtr(r.FailureReason),
+		ID:            uuidToString(r.ID),
+		AutopilotID:   uuidToString(r.AutopilotID),
+		TriggerID:     uuidToPtr(r.TriggerID),
+		Source:        r.Source,
+		Status:        r.Status,
+		IssueID:       uuidToPtr(r.IssueID),
+		TaskID:        uuidToPtr(r.TaskID),
+		TriggeredAt:   timestampToString(r.TriggeredAt),
+		CompletedAt:   timestampToPtr(r.CompletedAt),
+		FailureReason: textToPtr(r.FailureReason),
+		// ReasonCode is left unset here: it is a decision-time value the manual
+		// "run now" handler injects from the typed dispatch outcome (MUL-4525).
+		// Persisted rows (list/history) surface the human failure_reason instead
+		// of a code reverse-engineered from that text.
 		TriggerPayload: payload,
 		Result:         result,
 		CreatedAt:      timestampToString(r.CreatedAt),
@@ -676,6 +687,14 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Creating an autopilot IS a substantive publish: append rule-version v1 with
+	// the creating member as publisher, so every autopilot has an accountable
+	// human at dispatch time (MUL-4302 §3.4).
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, autopilot, "member", parseUUID(userID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
+		return
+	}
+
 	for _, uid := range subscriberUUIDs {
 		if err := qtx.AddAutopilotSubscriber(r.Context(), db.AddAutopilotSubscriberParams{
 			AutopilotID: autopilot.ID,
@@ -887,6 +906,29 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A substantive change (target / enabled-state / execution mode) republishes the
+	// rule: append a new version with THIS member as publisher, so a later run
+	// attributes to whoever last changed what the rule does — not the original
+	// creator. Cosmetic edits (title / description / template) write no version and
+	// leave accountability with the previous publisher (MUL-4302 §3.4).
+	if autopilotRuleSubstantiveChange(prev, autopilot) {
+		if err := h.recordAutopilotRuleVersion(r.Context(), qtx, autopilot, "member", parseUUID(userID)); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+			return
+		}
+		// An autopilot-level substantive edit governs every trigger, so responsibility
+		// for each firing trigger transfers to this editor (source=trigger_owner). A
+		// trigger-scoped edit re-stamps only its own row (see UpdateAutopilotTrigger).
+		if err := qtx.SetAutopilotTriggerPublishersByAutopilot(r.Context(), db.SetAutopilotTriggerPublishersByAutopilotParams{
+			AutopilotID:     autopilot.ID,
+			PublishedByType: pgtype.Text{String: "member", Valid: true},
+			PublishedByID:   parseUUID(userID),
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+			return
+		}
+	}
+
 	if replaceSubscribers {
 		if err := qtx.DeleteAutopilotSubscribersForAutopilot(r.Context(), autopilot.ID); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update subscribers")
@@ -916,6 +958,45 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	resp := autopilotToResponse(autopilot, subs)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// autopilotRuleSubstantiveChange reports whether a substantive (publish-worthy)
+// field of the autopilot ROW changed between prev and next — a change that alters
+// WHAT the automation instructs the agent to do, or WHO / WHETHER it runs, and so
+// transfers accountability to the editor (MUL-4302 §3.4; boundary pinned with Elon):
+//
+//   - assignee_type / assignee_id — who (agent / squad leader) executes;
+//   - status — enabled state (active / paused / archived);
+//   - execution_mode — run_only vs create_issue;
+//   - description — the product surfaces this as the run PROMPT, i.e. the task
+//     instruction itself, so editing it must transfer responsibility (the gap Elon
+//     flagged: a fresh publisher of the instructions is the accountable human);
+//   - issue_title_template — templates the created issue in create_issue mode; part
+//     of the instruction / output spec the run produces.
+//
+// Deliberately NOT substantive (cosmetic / routing — they change neither the
+// instruction nor the executor): title (display label) and project_id (which project
+// created issues are filed under). The comparison is faithful because UpdateAutopilot
+// seeds every param from prev, so an omitted field round-trips unchanged.
+//
+// Trigger-table edits (cron / timezone / enabled / event_filters) are substantive PER
+// TRIGGER and handled in UpdateAutopilotTrigger; archive and system-pause republish in
+// their own paths.
+func autopilotRuleSubstantiveChange(prev, next db.Autopilot) bool {
+	return prev.AssigneeType != next.AssigneeType ||
+		prev.AssigneeID != next.AssigneeID ||
+		prev.Status != next.Status ||
+		prev.ExecutionMode != next.ExecutionMode ||
+		prev.Description != next.Description ||
+		prev.IssueTitleTemplate != next.IssueTitleTemplate
+}
+
+// recordAutopilotRuleVersion appends one rule-version snapshot for a substantive
+// publish (MUL-4302 §3.4). Thin handler wrapper over service.RecordAutopilotRuleVersion
+// (shared with the failure monitor); callers pass their tx-scoped Queries so the
+// version is atomic with the autopilot write.
+func (h *Handler) recordAutopilotRuleVersion(ctx context.Context, q *db.Queries, ap db.Autopilot, publishedByType string, publishedByID pgtype.UUID) error {
+	return service.RecordAutopilotRuleVersion(ctx, q, ap, publishedByType, publishedByID)
 }
 
 func (h *Handler) parseAutopilotProjectID(
@@ -974,7 +1055,26 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 	// Product "delete" is archival: stop future triggers and hide the
 	// autopilot from default lists while preserving runs, tasks, webhook
 	// deliveries, subscribers, and collaborators as execution history.
-	if err := h.Queries.ArchiveAutopilot(r.Context(), idUUID); err != nil {
+	// Archiving is a substantive status change (MUL-4302 §3.4), so republish the
+	// rule version with this member as publisher, atomically with the archive.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if err := qtx.ArchiveAutopilot(r.Context(), idUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
+	ap.Status = "archived" // reflect the post-archive state in the version snapshot
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", parseUUID(userID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
 		return
 	}
@@ -1113,6 +1213,17 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
 		return
 	}
+	// A new trigger changes what / when the rule fires — a substantive publish, so
+	// the acting member republishes the rule version ATOMICALLY with the trigger
+	// create (MUL-4302 §3.4). Resolved here so both the webhook and schedule create
+	// paths can write the version inside the same tx as the INSERT — a failed
+	// version write must roll the trigger back, never leave future dispatches
+	// attributed to the previous publisher.
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	publisherID := parseUUID(userID)
 
 	var req CreateAutopilotTriggerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1211,13 +1322,12 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, "failed to encode event_filters")
 			return
 		}
-		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap.ID, ptrToText(req.Label), provider, eventFiltersBytes)
+		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap, ptrToText(req.Label), provider, eventFiltersBytes, publisherID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to create trigger")
 			return
 		}
 		resp := h.triggerToResponse(trigger)
-		userID, _ := requireUserID(w, r)
 		h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 			"autopilot_id": uuidToString(ap.ID),
 			"trigger":      resp,
@@ -1226,7 +1336,16 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	trigger, err := h.Queries.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
+	// Schedule create: write the trigger and republish the rule version atomically.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create trigger")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	trigger, err := qtx.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
 		AutopilotID:    ap.ID,
 		Kind:           req.Kind,
 		Enabled:        true,
@@ -1235,14 +1354,26 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		NextRunAt:      nextRunAt,
 		Label:          ptrToText(req.Label),
 		WebhookToken:   webhookToken,
+		// Seed the responsible publisher = creator; a later substantive edit re-stamps
+		// it to the editor so runs attribute to whoever last shaped this trigger
+		// (source=trigger_owner, MUL-4302).
+		PublishedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
+		PublishedByID:   publisherID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create trigger")
 		return
 	}
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", publisherID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create trigger")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create trigger")
+		return
+	}
 
 	resp := h.triggerToResponse(trigger)
-	userID, _ := requireUserID(w, r)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
 		"trigger":      resp,
@@ -1256,35 +1387,60 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 // kind=webhook row with NULL webhook_token visible in the UI if the second
 // statement failed.
 //
-// Retries on the unique-index collision case so a vanishingly-rare RNG
+// Each attempt runs in its OWN transaction so the trigger INSERT and the
+// rule-version republish (a webhook trigger is a substantive change to what fires,
+// MUL-4302 §3.4, published by publisherID) commit together — a version-write failure
+// rolls the trigger back rather than leaving future dispatches attributed to the
+// previous publisher. Retries on the unique-index collision case with a fresh token
+// (the collided attempt's tx is already rolled back), so a vanishingly-rare RNG
 // collision turns into a clean retry rather than a 500.
 func (h *Handler) createWebhookTriggerWithMintedToken(
 	r *http.Request,
-	autopilotID pgtype.UUID,
+	ap db.Autopilot,
 	label pgtype.Text,
 	provider string,
 	eventFilters []byte,
+	publisherID pgtype.UUID,
 ) (db.AutopilotTrigger, error) {
+	ctx := r.Context()
 	for attempt := 0; attempt < 3; attempt++ {
 		token, err := generateWebhookToken()
 		if err != nil {
 			return db.AutopilotTrigger{}, err
 		}
-		trigger, err := h.Queries.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
-			AutopilotID:  autopilotID,
+		tx, err := h.TxStarter.Begin(ctx)
+		if err != nil {
+			return db.AutopilotTrigger{}, err
+		}
+		qtx := h.Queries.WithTx(tx)
+		trigger, err := qtx.CreateAutopilotTrigger(ctx, db.CreateAutopilotTriggerParams{
+			AutopilotID:  ap.ID,
 			Kind:         "webhook",
 			Enabled:      true,
 			Label:        label,
 			WebhookToken: pgtype.Text{String: token, Valid: true},
 			Provider:     pgtype.Text{String: provider, Valid: provider != ""},
 			EventFilters: eventFilters,
+			// Seed the responsible publisher = creator; re-stamped to the editor on a
+			// later substantive edit (source=trigger_owner, MUL-4302).
+			PublishedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
+			PublishedByID:   publisherID,
 		})
-		if err == nil {
-			return trigger, nil
-		}
-		if !isUniqueViolation(err) {
+		if err != nil {
+			tx.Rollback(ctx)
+			if isUniqueViolation(err) {
+				continue // token collision: retry with a fresh token
+			}
 			return db.AutopilotTrigger{}, err
 		}
+		if err := h.recordAutopilotRuleVersion(ctx, qtx, ap, "member", publisherID); err != nil {
+			tx.Rollback(ctx)
+			return db.AutopilotTrigger{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return db.AutopilotTrigger{}, err
+		}
+		return trigger, nil
 	}
 	return db.AutopilotTrigger{}, fmt.Errorf("could not mint unique webhook token")
 }
@@ -1484,14 +1640,59 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		params.NextRunAt = pgtype.Timestamptz{Time: t, Valid: true}
 	}
 
-	trigger, err := h.Queries.UpdateAutopilotTrigger(r.Context(), params)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update trigger")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	trigger, err := qtx.UpdateAutopilotTrigger(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update trigger")
 		return
 	}
 
+	// Only a substantive edit republishes the rule version and transfers this
+	// trigger's accountability to the editor. cron / timezone / enabled / event_filters
+	// change WHAT or WHEN the trigger fires; label is a cosmetic display field, and a
+	// no-op PATCH changes nothing — neither should move responsibility (MUL-4302; the
+	// over-transfer Elon flagged). Comparing the persisted before/after rows captures a
+	// real change and ignores label-only / no-op PATCHes (next_run_at is derived from
+	// cron/timezone, so it is not an independent signal).
+	triggerSubstantiveChange := prev.Enabled != trigger.Enabled ||
+		prev.CronExpression != trigger.CronExpression ||
+		prev.Timezone != trigger.Timezone ||
+		!bytes.Equal(prev.EventFilters, trigger.EventFilters)
+	if triggerSubstantiveChange {
+		if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", parseUUID(userID)); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update trigger")
+			return
+		}
+		// Responsibility for THIS trigger's runs transfers to the editor. Scoped to the
+		// single row so editing one trigger never reassigns another's accountability —
+		// the per-firing-trigger granularity the autopilot-scoped rule_version can't give.
+		if err := qtx.SetAutopilotTriggerPublisher(r.Context(), db.SetAutopilotTriggerPublisherParams{
+			ID:              trigger.ID,
+			PublishedByType: pgtype.Text{String: "member", Valid: true},
+			PublishedByID:   parseUUID(userID),
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update trigger")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update trigger")
+		return
+	}
+
 	resp := h.triggerToResponse(trigger)
-	userID, _ := requireUserID(w, r)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
 		"trigger":      resp,
@@ -1540,7 +1741,26 @@ func (h *Handler) DeleteAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.Queries.DeleteAutopilotTrigger(r.Context(), triggerUUID); err != nil {
+	// Removing a trigger changes what fires — a substantive publish (MUL-4302 §3.4).
+	// Republish the rule version with this member as publisher, atomically with the
+	// delete.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete trigger")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if err := qtx.DeleteAutopilotTrigger(r.Context(), triggerUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete trigger")
+		return
+	}
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", parseUUID(userID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete trigger")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete trigger")
 		return
 	}
@@ -1788,11 +2008,29 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := h.AutopilotService.DispatchAutopilot(r.Context(), autopilot, pgtype.UUID{}, "manual", nil)
+	// A manual "run now" is a direct human action, so the run is attributed
+	// direct_human to the triggering member (MUL-4302 §4). Resolve the actor the
+	// same way assign/promote does; only a member actor is a human — an agent
+	// triggering via A2A yields an invalid actor and falls back to rule_owner.
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+	run, reasonCode, err := h.AutopilotService.DispatchAutopilotManual(r.Context(), autopilot, pgtype.UUID{}, nil, memberActorUserID(actorType, actorID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, runToResponse(*run))
+	// Carry the typed admission reason (decided at its source, MUL-4525) straight
+	// into the response — no reverse-engineering from failure_reason text. The
+	// UI branches on run status + this code for the "run now" toast.
+	resp := runToResponse(*run)
+	if reasonCode != "" {
+		c := string(reasonCode)
+		resp.ReasonCode = &c
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

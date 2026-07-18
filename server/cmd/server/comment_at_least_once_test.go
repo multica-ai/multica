@@ -222,8 +222,8 @@ func TestMergeCommentIntoPendingTask_RecomputesOriginatorAndSkipsDispatched(t *t
 	}
 	// Seed a queued task originated by testUserID and triggered by cidA.
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, originator_user_id)
-		VALUES ($1, $2, $3, $4, 'queued', 0, $5)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, originator_user_id, accountable_user_id)
+		VALUES ($1, $2, $3, $4, 'queued', 0, $5, $5)
 	`, agentID, runtimeID, issueID, cidA, testUserID); err != nil {
 		t.Fatalf("seed queued task: %v", err)
 	}
@@ -234,11 +234,12 @@ func TestMergeCommentIntoPendingTask_RecomputesOriginatorAndSkipsDispatched(t *t
 	// A DIFFERENT originator (userB) now MERGES (no gate): trigger repointed to
 	// cidB, originator re-stamped to userB, cidA preserved as coalesced.
 	if _, err := queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
-		IssueID:             pgIssue,
-		AgentID:             pgAgent,
-		NewTriggerCommentID: toPgUUID(t, cidB),
-		NewOriginatorUserID: toPgUUID(t, otherUserID),
-		NewTriggerSummary:   pgtype.Text{String: "second, folds in", Valid: true},
+		IssueID:              pgIssue,
+		AgentID:              pgAgent,
+		NewTriggerCommentID:  toPgUUID(t, cidB),
+		NewOriginatorUserID:  toPgUUID(t, otherUserID),
+		NewAccountableUserID: toPgUUID(t, otherUserID),
+		NewTriggerSummary:    pgtype.Text{String: "second, folds in", Valid: true},
 	}); err != nil {
 		t.Fatalf("recompute merge should succeed for a different originator, got %v", err)
 	}
@@ -260,11 +261,12 @@ func TestMergeCommentIntoPendingTask_RecomputesOriginatorAndSkipsDispatched(t *t
 	}
 	cidC := insertCommentAt(t, issueID, "member", testUserID, "third, arrives after dispatch", now)
 	if _, err := queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
-		IssueID:             pgIssue,
-		AgentID:             pgAgent,
-		NewTriggerCommentID: toPgUUID(t, cidC),
-		NewOriginatorUserID: toPgUUID(t, testUserID),
-		NewTriggerSummary:   pgtype.Text{String: "third", Valid: true},
+		IssueID:              pgIssue,
+		AgentID:              pgAgent,
+		NewTriggerCommentID:  toPgUUID(t, cidC),
+		NewOriginatorUserID:  toPgUUID(t, testUserID),
+		NewAccountableUserID: toPgUUID(t, testUserID),
+		NewTriggerSummary:    pgtype.Text{String: "third", Valid: true},
 	}); err != pgx.ErrNoRows {
 		t.Fatalf("merge into a dispatched task must return pgx.ErrNoRows, got %v", err)
 	}
@@ -365,11 +367,12 @@ func TestMergeCommentIntoPendingTask_TargetsQueuedNotDeferred(t *testing.T) {
 	}
 
 	row, err := queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
-		IssueID:             toPgUUID(t, issueID),
-		AgentID:             toPgUUID(t, agentID),
-		NewTriggerCommentID: toPgUUID(t, cidNew),
-		NewOriginatorUserID: toPgUUID(t, testUserID),
-		NewTriggerSummary:   pgtype.Text{String: "new comment", Valid: true},
+		IssueID:              toPgUUID(t, issueID),
+		AgentID:              toPgUUID(t, agentID),
+		NewTriggerCommentID:  toPgUUID(t, cidNew),
+		NewOriginatorUserID:  toPgUUID(t, testUserID),
+		NewAccountableUserID: toPgUUID(t, testUserID),
+		NewTriggerSummary:    pgtype.Text{String: "new comment", Valid: true},
 	})
 	if err != nil {
 		t.Fatalf("merge should target the queued task, got %v", err)

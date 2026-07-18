@@ -104,6 +104,14 @@ spec:
             periodSeconds: 30
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
+      {{- with .Values.backend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- if .Values.backend.uploads.persistence.enabled }}
       volumes:
         - name: uploads

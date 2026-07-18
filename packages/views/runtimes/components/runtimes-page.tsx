@@ -1,86 +1,54 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useDefaultLayout } from "react-resizable-panels";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ChevronRight,
   Cloud,
   Monitor,
-  Pencil,
   Plus,
-  Search,
   Server,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
+import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
-import { useUpdatableRuntimeIds } from "@multica/core/runtimes/hooks";
 import { useWSEvent } from "@multica/core/realtime";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import { memberListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
-import { Input } from "@multica/ui/components/ui/input";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@multica/ui/components/ui/resizable";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { cn } from "@multica/ui/lib/utils";
+import {
+  CollectionPageHeader,
+  CollectionPageHeaderAction,
+  CollectionPageState,
+} from "../../layout/collection-page";
 import { PageHeader } from "../../layout/page-header";
+import { AppLink } from "../../navigation";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
-import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
-import { RenameMachineDialog } from "./rename-machine-dialog";
 import { ProviderLogo } from "./provider-logo";
-import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
-import {
-  pendingRuntimesForProfiles,
-  type PendingRuntimeProfile,
-} from "./pending-runtime";
-import {
-  buildRuntimeMachines,
-  filterRuntimeMachines,
-  runtimeMachineCounts,
-  sharedCustomName,
-  type RuntimeMachine,
-  type RuntimeMachineFilter,
-} from "./runtime-machines";
+import { buildWorkloadIndex, RuntimeList } from "./runtime-list";
+import { pendingRuntimeFromProfile } from "./pending-runtime";
+import { buildRuntimeMachines, type RuntimeMachine } from "./runtime-machines";
 import { HealthDot, HealthIcon, useHealthLabel } from "./shared";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
+import { daemonRuntimesDocsHref } from "./runtime-docs";
 
-const MACHINE_FILTERS: RuntimeMachineFilter[] = ["all", "online", "issues"];
-
-interface RuntimesPageProps {
-  /** Desktop-only daemon id used to mark the row for this Mac. */
+export interface RuntimesPageProps {
+  /** Desktop-only daemon id used to identify this device. */
   localDaemonId?: string | null;
   /** Desktop-only friendly device name for the local daemon. */
   localMachineName?: string | null;
-  /** Desktop-only controls shown when the local machine is selected. */
-  localMachineActions?: React.ReactNode;
-  /**
-   * Desktop-only signal: this host always owns a local machine, even
-   * when no runtime is currently registered (daemon stopped, not yet
-   * started, or runtime GC'd). When true, a placeholder local row is
-   * synthesized so `localMachineActions` (the daemon Start button) is
-   * always reachable. Web omits this.
-   */
+  /** Keep the local device visible even before its first runtime registers. */
   hasLocalMachine?: boolean;
-  /**
-   * Desktop-only signal: the bundled daemon is still booting / hasn't
-   * registered with the server yet. Forwarded so the empty state can show
-   * a "starting" indicator instead of the static "register a runtime" hint
-   * during the boot window. Web omits this.
-   */
+  /** The bundled daemon is starting but has not registered yet. */
   bootstrapping?: boolean;
-  /** Web SaaS-only Cloud Runtime entrypoint. Defaults off for self-hosted builds. */
+  /** Web SaaS-only Cloud Runtime entrypoint. */
   cloudRuntimeEnabled?: boolean;
 }
 
-// Re-render every 30s so derived health (recently_lost → offline transitions)
-// catches up even when no underlying query data has changed.
 function useNowTick(intervalMs = 30_000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -93,110 +61,39 @@ function useNowTick(intervalMs = 30_000): number {
 export function RuntimesPage({
   localDaemonId,
   localMachineName,
-  localMachineActions,
   hasLocalMachine,
   bootstrapping,
   cloudRuntimeEnabled = false,
 }: RuntimesPageProps = {}) {
-  const isLoading = useAuthStore((s) => s.isLoading);
-  const { t } = useT("runtimes");
-  const pendingMachineName = t(($) => $.machine.pending_custom_runtimes);
-  const currentUserId = useAuthStore((s) => s.user?.id);
+  const isAuthLoading = useAuthStore((state) => state.isLoading);
+  const currentUserId = useAuthStore((state) => state.user?.id);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
-  const [machineFilter, setMachineFilter] =
-    useState<RuntimeMachineFilter>("all");
-  const [machineSearch, setMachineSearch] = useState("");
-  const [selectedMachineId, setSelectedMachineId] = useState<string | null>(
-    null,
-  );
-  // Tracks whether the user has explicitly picked a machine. Until then,
-  // auto-default keeps preferring the Local section (which on desktop may
-  // appear later than remotes — `localDaemonId` is fetched async).
-  const userSelectedRef = useRef(false);
-  const handleSelectMachine = useCallback((id: string) => {
-    userSelectedRef.current = true;
-    setSelectedMachineId(id);
-  }, []);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
-  const [pendingProfiles, setPendingProfiles] = useState<PendingRuntimeProfile[]>(
-    [],
-  );
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "multica_runtimes_layout",
-  });
-  const isMobile = useIsMobile();
 
-  const { data: runtimes = [], isLoading: fetching } = useQuery(
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
     runtimeListOptions(wsId),
+  );
+  const { data: runtimeProfiles = [], isLoading: profilesLoading } = useQuery(
+    runtimeProfileListOptions(wsId),
   );
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-
-  // Custom runtime management is an admin-only affordance, gated the same
-  // way the runtime list gates delete: workspace owner/admin role.
-  const currentMember = currentUserId
-    ? members.find((m) => m.user_id === currentUserId)
-    : null;
-  const canManageProfiles =
-    currentMember?.role === "owner" || currentMember?.role === "admin";
-  const [showProfilesDialog, setShowProfilesDialog] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
 
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
   }, [qc, wsId]);
   useWSEvent("daemon:register", handleDaemonEvent);
 
-  const updatableIds = useUpdatableRuntimeIds(wsId);
-  const now = useNowTick();
-
-  useEffect(() => {
-    if (pendingProfiles.length === 0) return;
-    const registeredProfileIds = new Set(
-      runtimes
-        .map((runtime) => runtime.profile_id)
-        .filter((profileId): profileId is string => !!profileId),
-    );
-    if (registeredProfileIds.size === 0) return;
-    setPendingProfiles((current) => {
-      const next = current.filter(
-        ({ profile }) => !registeredProfileIds.has(profile.id),
-      );
-      return next.length === current.length ? current : next;
-    });
-  }, [pendingProfiles.length, runtimes]);
-
-  const visibleRuntimes = useMemo(
-    () =>
-      pendingRuntimesForProfiles({
-        pendingProfiles,
-        runtimes,
-        ownerId: currentUserId,
-        localDaemonId,
-        localMachineName,
-        fallbackMachineName: pendingMachineName,
-      }),
-    [
-      pendingProfiles,
-      runtimes,
-      currentUserId,
-      localDaemonId,
-      localMachineName,
-      pendingMachineName,
-    ],
-  );
-
   const workloadIndex = useMemo(
     () => buildWorkloadIndex(agents, snapshot),
     [agents, snapshot],
   );
-
+  const now = useNowTick();
   const machines = useMemo(
     () =>
-      buildRuntimeMachines(visibleRuntimes, {
+      buildRuntimeMachines(runtimes, {
         now,
         localDaemonId,
         localMachineName,
@@ -205,7 +102,7 @@ export function RuntimesPage({
         ensureLocalMachine: hasLocalMachine,
       }),
     [
-      visibleRuntimes,
+      runtimes,
       now,
       localDaemonId,
       localMachineName,
@@ -214,144 +111,58 @@ export function RuntimesPage({
       hasLocalMachine,
     ],
   );
+  const orphanProfileRuntimes = useMemo(() => {
+    if (machines.some((machine) => machine.mode === "local")) return [];
+    return runtimeProfiles.map((profile) => {
+      const createdAt = Date.parse(profile.created_at);
+      return pendingRuntimeFromProfile({
+        profile,
+        createdAt: Number.isFinite(createdAt) ? createdAt : 0,
+        fallbackMachineName: "Unassigned",
+      });
+    });
+  }, [machines, runtimeProfiles]);
 
-  const machineCounts = useMemo(() => runtimeMachineCounts(machines), [machines]);
+  if (isAuthLoading || runtimesLoading || profilesLoading) {
+    return <RuntimesPageSkeleton />;
+  }
 
-  const filteredMachines = useMemo(
-    () => filterRuntimeMachines(machines, machineSearch, machineFilter),
-    [machines, machineSearch, machineFilter],
-  );
-
-  useEffect(() => {
-    if (filteredMachines.length === 0) {
-      if (selectedMachineId !== null) setSelectedMachineId(null);
-      return;
-    }
-    const stillValid =
-      !!selectedMachineId &&
-      filteredMachines.some((m) => m.id === selectedMachineId);
-    // Honor an explicit user pick. Otherwise re-evaluate the default so the
-    // Local machine wins as soon as it shows up, even if a remote was the
-    // first-paint default.
-    if (userSelectedRef.current && stillValid) return;
-    const local = filteredMachines.find((m) => m.section === "local");
-    const nextId = local?.id ?? filteredMachines[0]?.id ?? null;
-    if (nextId !== selectedMachineId) setSelectedMachineId(nextId);
-  }, [filteredMachines, selectedMachineId]);
-
-  const selectedMachine =
-    machines.find((machine) => machine.id === selectedMachineId) ??
-    filteredMachines[0] ??
-    null;
-
-  // Rename is a machine-level action: it names the whole machine (all runtimes
-  // on the daemon). Pick a runtime on the selected machine the current user is
-  // allowed to edit — admins can use any; others must own it — and derive the
-  // machine's current custom name (shared across its runtimes when named).
-  const renameTarget = useMemo(() => {
-    const m = selectedMachine;
-    if (!m || m.runtimes.length === 0) return null;
-    const editable = canManageProfiles
-      ? m.runtimes[0]
-      : m.runtimes.find((r) => r.owner_id === currentUserId);
-    if (!editable) return null;
-    // Pre-fill only a real machine name — the same rule the machine title uses
-    // (every runtime shares one non-empty custom_name). A lone per-runtime
-    // custom name must NOT masquerade as the machine's current name.
-    const currentName = sharedCustomName(m.runtimes) ?? "";
-    return { runtimeId: editable.id, currentName };
-  }, [selectedMachine, canManageProfiles, currentUserId]);
-
-  if (isLoading || fetching) return <RuntimesPageSkeleton />;
-
-  const totalCount = visibleRuntimes.length;
-  // Desktop always has a synthesized local machine row, so the
-  // "register a runtime" empty state would hide the Start button.
-  const showEmpty = totalCount === 0 && !bootstrapping && !hasLocalMachine;
+  const showEmpty =
+    machines.length === 0 &&
+    orphanProfileRuntimes.length === 0 &&
+    !bootstrapping &&
+    hasLocalMachine !== true;
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <PageHeaderBar
-        totalCount={totalCount}
+        totalCount={machines.length}
         onConnectRemote={() => setShowConnectDialog(true)}
         cloudRuntimeEnabled={cloudRuntimeEnabled}
         onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
-        canManageProfiles={canManageProfiles}
-        onAddRuntime={() => setShowProfilesDialog(true)}
       />
 
       {showEmpty ? (
         <div className="flex flex-1 items-center justify-center p-6">
           <EmptyState onConnectRemote={() => setShowConnectDialog(true)} />
         </div>
-      ) : isMobile ? (
-        <div className="flex min-h-0 flex-1 flex-col bg-background">
-          <MachineSidebar
-            machines={filteredMachines}
-            totalMachines={machines.length}
-            counts={machineCounts}
-            selectedMachineId={selectedMachine?.id ?? null}
-            search={machineSearch}
-            setSearch={setMachineSearch}
-            filter={machineFilter}
-            setFilter={setMachineFilter}
-            onSelect={handleSelectMachine}
-          />
-          <MachineDetail
-            machine={selectedMachine}
-            updatableIds={updatableIds}
-            now={now}
-            bootstrapping={bootstrapping}
-            canRename={!!renameTarget}
-            onRename={() => setRenameOpen(true)}
-            actions={
-              selectedMachine?.isCurrent ? localMachineActions : undefined
-            }
-          />
-        </div>
       ) : (
-        <div className="min-h-0 flex-1 bg-background">
-          <ResizablePanelGroup
-            orientation="horizontal"
-            className="min-h-0 flex-1"
-            defaultLayout={defaultLayout}
-            onLayoutChanged={onLayoutChanged}
-          >
-            <ResizablePanel
-              id="machines"
-              defaultSize={300}
-              minSize={240}
-              maxSize={420}
-              groupResizeBehavior="preserve-pixel-size"
-            >
-              <MachineSidebar
-                machines={filteredMachines}
-                totalMachines={machines.length}
-                counts={machineCounts}
-                selectedMachineId={selectedMachine?.id ?? null}
-                search={machineSearch}
-                setSearch={setMachineSearch}
-                filter={machineFilter}
-                setFilter={setMachineFilter}
-                onSelect={handleSelectMachine}
-                className="h-full border-b-0 border-r"
-              />
-            </ResizablePanel>
-            <ResizableHandle />
-            <ResizablePanel id="detail" minSize="45%">
-              <MachineDetail
-                machine={selectedMachine}
-                updatableIds={updatableIds}
-                now={now}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-[1440px] flex-col p-4 sm:p-6">
+            {(machines.length > 0 || bootstrapping) && (
+              <MachineList
+                machines={machines}
                 bootstrapping={bootstrapping}
-                canRename={!!renameTarget}
-                onRename={() => setRenameOpen(true)}
-                actions={
-                  selectedMachine?.isCurrent ? localMachineActions : undefined
-                }
               />
-            </ResizablePanel>
-          </ResizablePanelGroup>
+            )}
+            {orphanProfileRuntimes.length > 0 && (
+              <OrphanRuntimeProfiles
+                runtimes={orphanProfileRuntimes}
+                now={now}
+                hasMachines={machines.length > 0}
+              />
+            )}
+          </div>
         </div>
       )}
 
@@ -361,336 +172,198 @@ export function RuntimesPage({
       {cloudRuntimeEnabled && showCloudRuntimeDialog && (
         <CloudRuntimeDialog onClose={() => setShowCloudRuntimeDialog(false)} />
       )}
-      {canManageProfiles && showProfilesDialog && (
-        <RuntimeProfilesDialog
-          wsId={wsId}
-          onProfileCreated={(profile) =>
-            setPendingProfiles((current) => [
-              ...current.filter((item) => item.profile.id !== profile.id),
-              { profile, createdAt: Date.now() },
-            ])
-          }
-          onClose={() => setShowProfilesDialog(false)}
-        />
-      )}
-      {renameTarget && (
-        <RenameMachineDialog
-          open={renameOpen}
-          onOpenChange={setRenameOpen}
-          wsId={wsId}
-          runtimeId={renameTarget.runtimeId}
-          currentName={renameTarget.currentName}
-        />
-      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Header bar — minimal: only icon + title + count, matching Skills.
-// Page-level actions (Search, scope, filter) live in the card below.
-// ---------------------------------------------------------------------------
+function OrphanRuntimeProfiles({
+  runtimes,
+  now,
+  hasMachines,
+}: {
+  runtimes: ReturnType<typeof pendingRuntimeFromProfile>[];
+  now: number;
+  hasMachines: boolean;
+}) {
+  const { t } = useT("runtimes");
+  return (
+    <section className={hasMachines ? "mt-6" : undefined}>
+      <div className="mb-3">
+        <h2 className="text-sm font-semibold">
+          {t(($) => $.profiles.unassigned_title)}
+        </h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {t(($) => $.profiles.unassigned_description)}
+        </p>
+      </div>
+      <div className="overflow-hidden rounded-lg border bg-card">
+        <RuntimeList runtimes={runtimes} now={now} />
+      </div>
+    </section>
+  );
+}
 
 function PageHeaderBar({
   totalCount,
   onConnectRemote,
   cloudRuntimeEnabled,
   onOpenCloudRuntime,
-  canManageProfiles,
-  onAddRuntime,
 }: {
   totalCount: number;
   onConnectRemote: () => void;
   cloudRuntimeEnabled: boolean;
   onOpenCloudRuntime: () => void;
-  canManageProfiles: boolean;
-  onAddRuntime: () => void;
 }) {
-  const { t } = useT("runtimes");
+  const { t, i18n } = useT("runtimes");
   return (
-    <PageHeader className="justify-between px-5">
-      <div className="flex items-center gap-2">
-        <Server className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
-        {totalCount > 0 && (
-          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-            {totalCount}
-          </span>
-        )}
-      </div>
-      {/* Quiet chrome buttons (outline, icon-only below md) — primary is
-          reserved for the empty state's CTA. All three share the same
-          dimensions, padding, and responsive icon-only behavior so the
-          header reads as a single, consistent action group. */}
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-        {canManageProfiles && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-            aria-label={t(($) => $.profiles.cta)}
-            onClick={onAddRuntime}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">
-              {t(($) => $.profiles.cta)}
-            </span>
-          </Button>
-        )}
-        {cloudRuntimeEnabled && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-            aria-label={t(($) => $.cloud_runtime.action)}
-            onClick={onOpenCloudRuntime}
-          >
-            <Cloud className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">
-              {t(($) => $.cloud_runtime.action)}
-            </span>
-          </Button>
-        )}
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-          aria-label={t(($) => $.page.connect_remote)}
-          onClick={onConnectRemote}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">
-            {t(($) => $.page.connect_remote)}
-          </span>
-        </Button>
-      </div>
-    </PageHeader>
+    <CollectionPageHeader
+      icon={Server}
+      title={t(($) => $.page.title)}
+      count={totalCount}
+      description={t(($) => $.page.tagline)}
+      learnMore={{
+        href: daemonRuntimesDocsHref(i18n.language),
+        label: t(($) => $.page.learn_more),
+      }}
+      actions={
+        <>
+          {cloudRuntimeEnabled && (
+            <CollectionPageHeaderAction
+              icon={Cloud}
+              label={t(($) => $.cloud_runtime.action)}
+              onClick={onOpenCloudRuntime}
+            />
+          )}
+          <CollectionPageHeaderAction
+            icon={Plus}
+            label={t(($) => $.page.connect_remote)}
+            onClick={onConnectRemote}
+          />
+        </>
+      }
+    />
   );
 }
 
-function MachineSidebar({
+function MachineList({
   machines,
-  totalMachines,
-  counts,
-  selectedMachineId,
-  search,
-  setSearch,
-  filter,
-  setFilter,
-  onSelect,
-  className,
+  bootstrapping,
 }: {
   machines: RuntimeMachine[];
-  totalMachines: number;
-  counts: { all: number; online: number; issues: number };
-  selectedMachineId: string | null;
-  search: string;
-  setSearch: (value: string) => void;
-  filter: RuntimeMachineFilter;
-  setFilter: (value: RuntimeMachineFilter) => void;
-  onSelect: (id: string) => void;
-  className?: string;
+  bootstrapping?: boolean;
 }) {
   const { t } = useT("runtimes");
-  const sections = [
-    {
-      key: "local" as const,
-      label: t(($) => $.machine.section_local),
-      machines: machines.filter((machine) => machine.section === "local"),
-    },
-    {
-      key: "remote" as const,
-      label: t(($) => $.machine.section_remote),
-      machines: machines.filter((machine) => machine.section === "remote"),
-    },
-    {
-      key: "cloud" as const,
-      label: t(($) => $.machine.section_cloud),
-      machines: machines.filter((machine) => machine.section === "cloud"),
-    },
-  ].filter((section) => section.machines.length > 0);
+  if (machines.length === 0) {
+    return (
+      <CollectionPageState
+        icon={Server}
+        title={
+          bootstrapping
+            ? t(($) => $.page.bootstrapping.title)
+            : t(($) => $.page.empty.title)
+        }
+        description={
+          bootstrapping
+            ? t(($) => $.page.bootstrapping.hint)
+            : t(($) => $.page.empty.hint)
+        }
+      />
+    );
+  }
 
   return (
-    <aside
-      className={cn(
-        "flex min-h-0 shrink-0 flex-col border-b bg-muted/20",
-        className,
-      )}
-    >
-      <div className="shrink-0 border-b bg-background p-3">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={t(($) => $.machine.search_placeholder)}
-            className="h-9 pl-8 text-sm"
-          />
-        </div>
-        <div className="mt-2 flex items-center gap-1.5 overflow-x-auto">
-          {MACHINE_FILTERS.map((key) => (
-            <MachineFilterChip
-              key={key}
-              active={filter === key}
-              onClick={() => setFilter(key)}
-              label={t(($) => $.machine.filters[key])}
-              count={counts[key]}
-              tone={key}
-            />
-          ))}
-        </div>
+    <div className="overflow-hidden rounded-lg border bg-card">
+      <div className="divide-y">
+        {machines.map((machine) => (
+          <MachineRow key={machine.id} machine={machine} />
+        ))}
       </div>
-
-      <div className="min-h-0 flex-1 overflow-auto py-2">
-        {sections.length > 0 ? (
-          sections.map((section) => (
-            <div key={section.key} className="mb-3 last:mb-0">
-              <div className="mb-1 flex items-center gap-2 px-4 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                <span>{section.label}</span>
-                <span className="h-px flex-1 bg-border" />
-              </div>
-              <div>
-                {section.machines.map((machine) => (
-                  <MachineRow
-                    key={machine.id}
-                    machine={machine}
-                    active={machine.id === selectedMachineId}
-                    onClick={() => onSelect(machine.id)}
-                  />
-                ))}
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-            <Search className="h-8 w-8 text-muted-foreground/40" />
-            <p className="mt-3 text-sm font-medium">
-              {t(($) => $.machine.no_matches_title)}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {totalMachines > 0
-                ? t(($) => $.machine.no_matches_hint)
-                : t(($) => $.page.bootstrapping.hint)}
-            </p>
-          </div>
-        )}
-      </div>
-    </aside>
+    </div>
   );
 }
 
-function MachineFilterChip({
-  active,
-  onClick,
-  label,
-  count,
-  tone,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  count: number;
-  tone: RuntimeMachineFilter;
-}) {
-  const dotClass =
-    tone === "online"
-      ? "bg-success"
-      : tone === "issues"
-        ? "bg-warning"
-        : "bg-muted-foreground/40";
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={onClick}
-      className={cn(
-        "h-7 gap-1.5 px-2 text-xs",
-        active
-          ? "bg-accent text-accent-foreground hover:bg-accent/80"
-          : "bg-background text-muted-foreground",
-      )}
-    >
-      {tone !== "all" && <span className={cn("h-1.5 w-1.5 rounded-full", dotClass)} />}
-      <span>{label}</span>
-      <span className="font-mono tabular-nums text-muted-foreground/70">
-        {count}
-      </span>
-    </Button>
-  );
-}
-
-function MachineRow({
-  machine,
-  active,
-  onClick,
-}: {
-  machine: RuntimeMachine;
-  active: boolean;
-  onClick: () => void;
-}) {
+function MachineRow({ machine }: { machine: RuntimeMachine }) {
   const { t } = useT("runtimes");
+  const healthLabel = useHealthLabel();
+  const timeAgo = useTimeAgo();
+  const paths = useWorkspacePaths();
   const Icon = machine.section === "cloud" ? Cloud : Monitor;
+  const locator = machine.id;
   const busyCount = machine.runningCount + machine.queuedCount;
-  const runtimeCount = t(($) => $.machine.runtime_count, {
-    count: machine.runtimes.length,
-  });
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "group flex w-full min-w-0 items-start gap-3 px-4 py-2.5 text-left transition-colors",
-        active ? "bg-accent" : "hover:bg-accent/50",
-      )}
-    >
-      <span className="relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
-        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+  const body = (
+    <>
+      <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-background">
+        <Icon aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
         <HealthDot
           health={machine.health}
           className="absolute -bottom-0.5 -right-0.5 ring-2 ring-background"
         />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span
-            className="truncate text-sm font-medium"
-            title={
-              machine.daemonId
-                ? `daemon ${machine.daemonId}`
-                : (machine.subtitle ?? undefined)
-            }
-          >
-            {machine.title}
+        <span className="block truncate text-sm font-medium">
+          {machine.title}
+        </span>
+        <span className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <span className="truncate">
+            {machine.subtitle ??
+              (machine.section === "cloud"
+                ? t(($) => $.machine.metrics.cloud_worker)
+                : t(($) => $.machine.metrics.local_daemon))}
           </span>
           {machine.isCurrent && (
-            <span className="shrink-0 rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background">
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               {t(($) => $.machine.this_machine)}
             </span>
           )}
         </span>
-        <span className="mt-1.5 flex min-w-0 items-center gap-1.5">
-          <ProviderIconStack providers={machine.providerNames} />
-          {busyCount > 0 ? (
-            <span className="ml-auto shrink-0 text-xs font-medium text-primary">
-              {t(($) => $.machine.busy_count, { count: busyCount })}
-            </span>
-          ) : (
-            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-              {runtimeCount}
-            </span>
-          )}
-        </span>
       </span>
-    </button>
+
+      <span className="hidden w-36 shrink-0 items-center gap-1.5 text-xs md:flex">
+        <HealthIcon health={machine.health} />
+        <span>{healthLabel(machine.health)}</span>
+      </span>
+      <span className="hidden w-40 shrink-0 flex-col gap-1 lg:flex">
+        <span className="text-xs text-muted-foreground">
+          {t(($) => $.machine.runtime_count, {
+            count: machine.runtimes.length,
+          })}
+        </span>
+        <ProviderIconStack providers={machine.providerNames} />
+      </span>
+      <span className="hidden w-36 shrink-0 text-xs text-muted-foreground xl:block">
+        {busyCount > 0
+          ? t(($) => $.machine.metrics.workload_hint, {
+              running: machine.runningCount,
+              queued: machine.queuedCount,
+            })
+          : t(($) => $.machine.metrics.workload_idle)}
+      </span>
+      <span className="hidden w-28 shrink-0 text-right text-xs text-muted-foreground lg:block">
+        {machine.lastSeenAt ? timeAgo(machine.lastSeenAt) : "—"}
+      </span>
+      {locator && (
+        <ChevronRight
+          aria-hidden="true"
+          className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground"
+        />
+      )}
+    </>
+  );
+
+  return (
+    <AppLink
+      href={paths.runtimeDetail(locator)}
+      className="group flex min-w-0 items-center gap-3 px-4 py-3.5 transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    >
+      {body}
+    </AppLink>
   );
 }
 
 function ProviderIconStack({ providers }: { providers: string[] }) {
   const visible = providers.slice(0, 4);
   const extra = providers.length - visible.length;
+  if (visible.length === 0) return null;
   return (
     <span className="flex min-w-0 items-center -space-x-1">
       {visible.map((provider) => (
@@ -710,213 +383,42 @@ function ProviderIconStack({ providers }: { providers: string[] }) {
   );
 }
 
-function MachineDetail({
-  machine,
-  updatableIds,
-  now,
-  bootstrapping,
-  canRename,
-  onRename,
-  actions,
-}: {
-  machine: RuntimeMachine | null;
-  updatableIds: Set<string>;
-  now: number;
-  bootstrapping?: boolean;
-  canRename?: boolean;
-  onRename?: () => void;
-  actions?: React.ReactNode;
-}) {
-  const { t } = useT("runtimes");
-  const healthLabel = useHealthLabel();
-
-  if (!machine) {
-    return (
-      <main className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-        {bootstrapping ? (
-          <>
-            <Server className="h-8 w-8 animate-pulse text-muted-foreground/40" />
-            <p className="mt-3 text-sm text-muted-foreground">
-              {t(($) => $.page.bootstrapping.title)}
-            </p>
-            <p className="mt-1 max-w-xs text-xs text-muted-foreground/70">
-              {t(($) => $.page.bootstrapping.hint)}
-            </p>
-          </>
-        ) : (
-          <>
-            <Monitor className="h-8 w-8 text-muted-foreground/40" />
-            <p className="mt-3 text-sm text-muted-foreground">
-              {t(($) => $.machine.select_machine)}
-            </p>
-          </>
-        )}
-      </main>
-    );
-  }
-
-  const runtimeTotal = machine.runtimes.length;
-  const busyCount = machine.runningCount + machine.queuedCount;
-  const workloadLabel =
-    busyCount > 0
-      ? t(($) => $.machine.metrics.workload_hint, {
-          running: machine.runningCount,
-          queued: machine.queuedCount,
-        })
-      : t(($) => $.machine.metrics.workload_idle);
-  const runtimesMeta = t(($) => $.machine.metrics.runtimes_hint, {
-    count: machine.onlineCount,
-  });
-  // Single inline meta strip replaces the old 4-card grid. Health is already
-  // shown as a chip in the title row; CLI / daemon id are scanning-grade
-  // info, not headline numbers — they belong in muted secondary text.
-  const metaParts: React.ReactNode[] = [
-    <span key="runtimes">
-      <span className="font-medium tabular-nums text-foreground">
-        {t(($) => $.machine.runtime_count, { count: runtimeTotal })}
-      </span>
-      {runtimeTotal > 0 && <> · {runtimesMeta}</>}
-    </span>,
-    <span key="workload" className={busyCount > 0 ? "text-primary" : undefined}>
-      {workloadLabel}
-    </span>,
-  ];
-  if (machine.cliVersion) {
-    metaParts.push(
-      <span key="cli" className="font-mono">
-        {machine.cliVersion}
-      </span>,
-    );
-  }
-  if (machine.subtitle) {
-    metaParts.push(
-      <span key="subtitle" className="truncate font-mono">
-        {machine.subtitle}
-      </span>,
-    );
-  }
-
-  return (
-    <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="shrink-0 border-b bg-background px-5 py-4">
-        <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h2 className="truncate text-xl font-semibold tracking-tight">
-                {machine.title}
-              </h2>
-              {canRename && onRename && (
-                <button
-                  type="button"
-                  onClick={onRename}
-                  aria-label={t(($) => $.machine.rename)}
-                  title={t(($) => $.machine.rename)}
-                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
-              )}
-              <span className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-xs text-muted-foreground">
-                <HealthIcon health={machine.health} />
-                {healthLabel(machine.health)}
-              </span>
-              {machine.isCurrent && (
-                <span className="rounded-md bg-foreground px-2 py-0.5 text-xs font-medium text-background">
-                  {t(($) => $.machine.local_badge)}
-                </span>
-              )}
-            </div>
-            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              {metaParts.map((part, idx) => (
-                <React.Fragment key={idx}>
-                  {idx > 0 && (
-                    <span className="text-muted-foreground/40">·</span>
-                  )}
-                  {part}
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-          {actions && <div className="shrink-0">{actions}</div>}
-        </div>
-      </div>
-
-      <RuntimeList
-        runtimes={machine.runtimes}
-        updatableIds={updatableIds}
-        now={now}
-      />
-    </main>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Empty state — shown when zero runtimes have ever registered in this
-// workspace.
-// ---------------------------------------------------------------------------
-
 function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
   const { t } = useT("runtimes");
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-        <Server className="h-6 w-6 text-muted-foreground" />
-      </div>
-      <h2 className="mt-4 text-base font-semibold">{t(($) => $.page.empty.title)}</h2>
-      <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        {t(($) => $.page.empty.hint)}
-      </p>
-      <Button
-        type="button"
-        size="sm"
-        onClick={onConnectRemote}
-        className="mt-5"
-      >
-        <Plus className="h-3 w-3" />
-        {t(($) => $.page.connect_remote)}
-      </Button>
-    </div>
+    <CollectionPageState
+      icon={Server}
+      title={t(($) => $.page.empty.title)}
+      description={t(($) => $.page.empty.hint)}
+      actions={
+        <Button type="button" size="sm" onClick={onConnectRemote}>
+          <Plus aria-hidden="true" className="size-3" />
+          {t(($) => $.page.connect_remote)}
+        </Button>
+      }
+    />
   );
 }
 
-// ---------------------------------------------------------------------------
-// Loading skeleton — laid out like the split runtime page so the layout
-// does not jump on first paint.
-// ---------------------------------------------------------------------------
-
 function RuntimesPageSkeleton() {
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader className="justify-between px-5">
         <Skeleton className="h-4 w-24" />
       </PageHeader>
-      <div className="flex min-h-0 flex-1">
-        <div className="hidden w-[300px] shrink-0 border-r p-3 md:block">
-          <Skeleton className="h-9 w-full rounded-md" />
-          <div className="mt-3 flex gap-2">
-            <Skeleton className="h-7 w-16 rounded-md" />
-            <Skeleton className="h-7 w-20 rounded-md" />
-            <Skeleton className="h-7 w-20 rounded-md" />
-          </div>
-          <div className="mt-5 space-y-2">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-20 w-full rounded-lg" />
-            ))}
-          </div>
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="border-b p-5">
-            <Skeleton className="h-6 w-64 rounded-md" />
-            <Skeleton className="mt-3 h-4 w-full max-w-md rounded-md" />
-          </div>
-          <div className="h-12 border-b px-4 py-2">
-            <Skeleton className="h-8 w-40 rounded-full" />
-          </div>
-          <div className="space-y-2 p-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-14 w-full rounded-md" />
-            ))}
-          </div>
+      <div className="mx-auto w-full max-w-[1440px] p-6">
+        <div className="overflow-hidden rounded-lg border">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <div key={index} className="flex h-[76px] items-center gap-3 border-b px-4 last:border-b-0">
+              <Skeleton className="h-10 w-10 rounded-lg" />
+              <div className="flex-1">
+                <Skeleton className="h-4 w-44" />
+                <Skeleton className="mt-2 h-3 w-28" />
+              </div>
+              <Skeleton className="hidden h-4 w-24 md:block" />
+              <Skeleton className="hidden h-4 w-28 lg:block" />
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -924,4 +426,3 @@ function RuntimesPageSkeleton() {
 }
 
 export default RuntimesPage;
-export type { RuntimesPageProps };

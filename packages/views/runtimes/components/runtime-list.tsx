@@ -6,10 +6,12 @@ import {
   Globe,
   Loader2,
   MoreHorizontal,
+  Pencil,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
+import { CurrencyNumberFlow } from "@multica/ui/components/ui/number-flow";
 import type {
   Agent,
   AgentRuntime,
@@ -55,19 +57,20 @@ import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
+import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import {
   computeCostInWindow,
-  formatLastSeen,
   pctChange,
 } from "../utils";
 import { splitRuntimeName } from "./runtime-machines";
 import {
   customRuntimeRegistrationFailure,
+  isDisabledCustomRuntime,
   isPendingCustomRuntime,
   isPendingCustomRuntimeWarning,
   pendingRuntimeCommandName,
 } from "./pending-runtime";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
 
 // The machine detail's runtimes table on the shared ListGrid. Paradigm
 // pieces are taken À LA CARTE here: subgrid template + var-width tracks +
@@ -226,6 +229,13 @@ function RuntimeKindBadge({ runtime }: { runtime: AgentRuntime }) {
 function PendingRuntimeBadge({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
   if (!isPendingCustomRuntime(runtime)) return null;
+  if (isDisabledCustomRuntime(runtime)) {
+    return (
+      <span className="inline-flex shrink-0 items-center rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground">
+        {t(($) => $.list.badge_disabled)}
+      </span>
+    );
+  }
   return (
     <span className="inline-flex shrink-0 items-center rounded bg-warning/10 px-1 text-[10px] font-medium text-warning">
       {t(($) => $.list.badge_registering)}
@@ -274,6 +284,16 @@ function HealthCell({
   const { t } = useT("runtimes");
   const { t: tAgents } = useT("agents");
   const labelOf = useHealthLabel();
+  const timeAgo = useTimeAgo();
+  if (isDisabledCustomRuntime(runtime)) {
+    return (
+      <ListGridCell>
+        <span className="text-xs text-muted-foreground">
+          {t(($) => $.list.pending_health_disabled)}
+        </span>
+      </ListGridCell>
+    );
+  }
   const registrationFailure = customRuntimeRegistrationFailure(runtime);
   if (registrationFailure) {
     return (
@@ -308,7 +328,7 @@ function HealthCell({
 
   const health = deriveRuntimeHealth(runtime, now);
   const offline = health === "offline" || health === "about_to_gc";
-  const lastSeen = formatLastSeen(runtime.last_seen_at);
+  const lastSeen = runtime.last_seen_at ? timeAgo(runtime.last_seen_at) : null;
   const active = workload.runningCount + workload.queuedCount;
 
   return (
@@ -316,7 +336,7 @@ function HealthCell({
       <HealthIcon health={health} />
       <span className="block min-w-0 truncate text-xs">
         {labelOf(health)}
-        {health !== "online" && runtime.last_seen_at && (
+        {health !== "online" && lastSeen && (
           <span className="text-muted-foreground"> · {lastSeen}</span>
         )}
         {!offline && active > 0 && (
@@ -341,8 +361,9 @@ function HealthCell({
 const COST_CELL_DAYS = 14;
 
 export function CostCell({ runtimeId }: { runtimeId: string }) {
-  const { t } = useT("runtimes");
+  const { t, i18n } = useT("runtimes");
   const tz = useViewingTimezone();
+  const locales = i18n.resolvedLanguage ?? i18n.language;
   const { data: usage = [] } = useQuery(
     runtimeUsageOptions(runtimeId, COST_CELL_DAYS, tz),
   );
@@ -377,7 +398,12 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
         : `${delta > 0 ? "↑" : "↓"}${Math.abs(delta)}%`;
   return (
     <div className="flex w-full flex-col items-end leading-tight">
-      <span className="text-sm font-medium tabular-nums">{fmt}</span>
+      <CurrencyNumberFlow
+        value={cost7d}
+        locales={locales}
+        aria-label={fmt}
+        className="text-sm font-medium"
+      />
       {deltaLabel && (
         <span className={`text-[11px] tabular-nums ${deltaTone}`}>
           {deltaLabel}
@@ -438,8 +464,8 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
   // The separate `cli_version` is the shared multica daemon CLI, identical
   // for every runtime on one machine; surfacing it here made all agents
   // show the same number (#3838). The daemon CLI version and its update
-  // prompt belong to the machine — they live in the machine meta strip and
-  // the detail page's UpdateSection, not on a per-agent row.
+  // prompt belong to the machine — they live in the machine header, not on a
+  // per-agent row.
   const version =
     meta && typeof meta.version === "string" ? meta.version : null;
 
@@ -502,6 +528,7 @@ export function RuntimeRowMenu({
 }) {
   const { t } = useT("runtimes");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const isCustomRuntime = !!runtime.profile_id;
   // Delete is currently the only row action; if the row can't run it, drop
   // the kebab entirely so the column doesn't render an empty popover. We
@@ -523,23 +550,39 @@ export function RuntimeRowMenu({
             <button
               type="button"
               aria-label={t(($) => $.list.row_actions_aria)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
             >
               <MoreHorizontal className="size-4" />
             </button>
           }
         />
         <DropdownMenuContent align="end" className="w-40">
+          {isCustomRuntime && profile && (
+            <DropdownMenuItem onClick={() => setEditOpen(true)}>
+              <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+              {t(($) => $.list.edit_action)}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             variant="destructive"
             onClick={() => setDeleteOpen(true)}
             title={t(($) => $.list.delete_permission_hint)}
           >
-            <Trash2 className="h-3.5 w-3.5" />
-            {t(($) => $.list.delete_action)}
+            <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+            {isCustomRuntime
+              ? t(($) => $.list.delete_profile_action)
+              : t(($) => $.list.delete_action)}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {isCustomRuntime && profile && editOpen && (
+        <RuntimeProfilesDialog
+          wsId={wsId}
+          intent="edit"
+          initialProfile={profile}
+          onClose={() => setEditOpen(false)}
+        />
+      )}
       {isCustomRuntime && profile ? (
         <DeleteRuntimeProfileDialog
           open={deleteOpen}
@@ -570,20 +613,14 @@ export function RuntimeRowMenu({
 
 export function RuntimeList({
   runtimes,
-  updatableIds,
   now,
+  runtimeHref,
 }: {
   runtimes: AgentRuntime[];
-  // Kept on the API surface for callers, but unused here: the CLI column
-  // shows each agent's own tool version, while the multica daemon CLI
-  // update prompt lives at the machine/detail level (UpdateSection), so the
-  // table no longer derives per-row update state. Left to avoid scope creep
-  // on the page-level wrapper that still computes the set.
-  updatableIds?: Set<string>;
   now: number;
+  /** Machine-detail pages keep runtime settings nested under the machine. */
+  runtimeHref?: (runtimeId: string) => string;
 }) {
-  void updatableIds;
-
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -643,11 +680,10 @@ export function RuntimeList({
           ? memberById.get(runtime.owner_id) ?? null
           : null,
         workload: workloadIndex.get(runtime.id) ?? EMPTY_WORKLOAD,
-        canDelete:
-          !isPendingCustomRuntime(runtime) &&
-          (isCustomRuntime
-            ? isAdmin && !!profile
-            : isAdmin || (!!user && runtime.owner_id === user.id)),
+        canDelete: isCustomRuntime
+          ? isAdmin && !!profile
+          : !isPendingCustomRuntime(runtime) &&
+            (isAdmin || (!!user && runtime.owner_id === user.id)),
       };
     });
   }, [runtimes, profileById, memberById, workloadIndex, isAdmin, user]);
@@ -692,7 +728,10 @@ export function RuntimeList({
               key={row.runtime.id}
               className={pending ? "cursor-default" : "cursor-pointer"}
               {...(!pending
-                ? rowLink(wsPaths.runtimeDetail(row.runtime.id))
+                ? rowLink(
+                    runtimeHref?.(row.runtime.id) ??
+                      wsPaths.runtimeDetail(row.runtime.id),
+                  )
                 : {})}
             >
               <RuntimeNameCell runtime={row.runtime} />

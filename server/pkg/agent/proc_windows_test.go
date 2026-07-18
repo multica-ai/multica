@@ -63,3 +63,9 @@ func TestHideAgentWindowPreservesExistingSysProcAttr(t *testing.T) {
 		t.Error("CREATE_NEW_CONSOLE should be OR'd into existing flags")
 	}
 }
+
+func TestCodexInitializeRetrySuppressedWithoutConfirmedTreeCleanup(t *testing.T) {
+	if codexInitializeRetrySupported() {
+		t.Fatal("Codex initialize retry must remain disabled until Windows descendant cleanup is positively confirmed")
+	}
+}

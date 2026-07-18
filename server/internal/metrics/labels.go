@@ -31,6 +31,7 @@ const (
 	labelAction       = "action"
 	labelResult       = "result"
 	labelOp           = "op"
+	labelGate         = "gate"
 )
 
 var businessMetricLabels = map[string][]string{
@@ -76,12 +77,14 @@ var businessMetricLabels = map[string][]string{
 	"multica_autopilot_run_terminal_total":             {labelCadence, labelTriggerKind, labelTerminalStatus},
 	"multica_autopilot_run_skipped_total":              {labelCadence, labelReason},
 	"multica_webhook_delivery_total":                   {labelProvider, labelStatus},
+	"multica_webhook_rate_limited_total":               {labelGate},
 	"multica_github_event_received_total":              {labelEventKind, labelAction},
 	"multica_github_pr_review_total":                   {labelResult},
 	"multica_cloudruntime_request_total":               {labelOp, labelStatus},
 	"multica_cloudruntime_request_duration_seconds":    {labelOp},
 	"multica_feedback_submitted_total":                 {labelKind, labelPlatform},
 	"multica_contact_sales_submitted_total":            {labelSource},
+	"multica_chat_output_local_path_total":             {labelKind},
 }
 
 var forbiddenMetricLabels = map[string]struct{}{
@@ -119,12 +122,14 @@ var (
 		"copilot":       "copilot",
 		"cursor":        "cursor",
 		"gemini":        "gemini",
+		"grok":          "grok",
 		"hermes":        "hermes",
 		"kiro":          "kiro",
 		"kimi":          "kimi",
 		"multica_agent": "multica_agent",
 		"openclaw":      "openclaw",
 		"opencode":      "opencode",
+		"deveco":        "deveco",
 		"pi":            "pi",
 		"other":         "other",
 	}

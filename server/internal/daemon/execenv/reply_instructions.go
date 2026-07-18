@@ -199,3 +199,71 @@ func buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID strin
 		issueID, triggerCommentID,
 	)
 }
+
+// ThreadReplyTarget is one root-thread group a coalesced run must answer.
+// ThreadID labels the conversation (its root comment id); ParentID is the exact
+// `--parent` the agent must pass so its reply lands inside that thread.
+type ThreadReplyTarget struct {
+	ThreadID string
+	ParentID string
+}
+
+// BuildMultiThreadCommentReplyInstructions is the reply cookbook for a run whose
+// coalesced comments span MORE THAN ONE root thread (MUL-4348). It deliberately
+// overrides the general "post exactly one comment per run" guidance for this
+// specific run: three unrelated questions raised in three separate threads must
+// land as three in-thread answers, not one merged blob posted under a single
+// thread (or as a stray root comment).
+//
+// The grouping is computed server-side, so same-thread follow-ups never reach
+// here — they collapse to a single target upstream and take the ordinary
+// single-parent path. That is why the agent is told, unconditionally, to post
+// exactly one reply per listed thread and never more than one reply in the same
+// thread: the "multiple @mentions in one thread" case is already consolidated
+// before this instruction is emitted, so a per-thread fan-out cannot split it.
+//
+// Returns "" for fewer than two targets; callers keep the single-parent path.
+func BuildMultiThreadCommentReplyInstructions(issueID string, targets []ThreadReplyTarget) string {
+	if issueID == "" || len(targets) < 2 {
+		return ""
+	}
+
+	targetLines := ""
+	for i, tgt := range targets {
+		targetLines += fmt.Sprintf("%d. thread %s → reply with `--parent %s`\n", i+1, tgt.ThreadID, tgt.ParentID)
+	}
+
+	// File-hygiene guidance mirrors buildCommentReplyInstructionsSlim, but the
+	// agent must use a DISTINCT body file per thread so one reply's content can
+	// never leak into another's.
+	var cookbook string
+	if runtimeGOOS == "windows" {
+		cookbook = fmt.Sprintf(
+			"For EACH thread above, write that reply's body to its own UTF-8 file with your file-write tool, then post it with `--content-file` (do NOT use inline `--content` or a `--content-stdin` HEREDOC — see ## Comment Formatting above for why). Use a DISTINCT file per thread (never reuse one file) and remove each after posting:\n\n"+
+				"    multica issue comment add %s --parent <thread-1-parent> --content-file ./reply-1.md\n"+
+				"    Remove-Item ./reply-1.md\n"+
+				"    multica issue comment add %s --parent <thread-2-parent> --content-file ./reply-2.md\n"+
+				"    Remove-Item ./reply-2.md\n\n",
+			issueID, issueID,
+		)
+	} else {
+		cookbook = fmt.Sprintf(
+			"For EACH thread above, write that reply's body to its own UTF-8 file with your file-write tool, then post it with `--content-file` (do NOT use inline `--content` or a `--content-stdin` HEREDOC — see ## Comment Formatting above for why). Use a DISTINCT file per thread (never reuse one file) and remove each after posting:\n\n"+
+				"    multica issue comment add %s --parent <thread-1-parent> --content-file ./reply-1.md\n"+
+				"    rm ./reply-1.md\n"+
+				"    multica issue comment add %s --parent <thread-2-parent> --content-file ./reply-2.md\n"+
+				"    rm ./reply-2.md\n\n",
+			issueID, issueID,
+		)
+	}
+
+	return fmt.Sprintf(
+		"This run coalesced comments from %d DISTINCT threads. Post ONE reply per thread — %d replies in total — each threaded under its own conversation. This OVERRIDES the general \"post exactly one comment per run\" guidance: for THIS run multiple replies are required and correct. Do NOT merge separate threads into a single comment, and do NOT post more than one reply in the same thread.\n\n"+
+			"Post the replies in the order listed below — OLDEST thread first, the newest (triggering) thread LAST — so they land in chronological order. Do NOT answer the newest/triggering comment first.\n\n"+
+			"Reply targets, in the order to post them (use the exact `--parent` for each — do NOT reuse `--parent` values from previous turns in this session):\n"+
+			"%s\n"+
+			"%s"+
+			"Do NOT write literal `\\n` escapes to simulate line breaks; each file preserves real newlines.\n",
+		len(targets), len(targets), targetLines, cookbook,
+	)
+}

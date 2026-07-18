@@ -319,7 +319,6 @@ func TestCodebuddyHandleAssistantText(t *testing.T) {
 
 	b := &codebuddyBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 10)
-	var output strings.Builder
 
 	msg := codebuddySDKMessage{
 		Type: "assistant",
@@ -331,10 +330,13 @@ func TestCodebuddyHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
 
-	if output.String() != "codebuddy says hi" {
-		t.Fatalf("expected output 'codebuddy says hi', got %q", output.String())
+	if output != "codebuddy says hi" {
+		t.Fatalf("expected output 'codebuddy says hi', got %q", output)
+	}
+	if tools != 0 {
+		t.Fatalf("expected no tool uses, got %d", tools)
 	}
 	select {
 	case m := <-ch:
@@ -374,11 +376,11 @@ Options:
 	}
 	checks := map[string]string{
 		"gpt-5.5":                "openai",
-		"gemini-3.1-pro":        "google",
-		"glm-5.1-ioa":           "zhipu",
-		"minimax-m2.7-ioa":      "minimax",
-		"kimi-k2.6-ioa":         "kimi",
-		"hy3-preview-ioa":       "hunyuan",
+		"gemini-3.1-pro":         "google",
+		"glm-5.1-ioa":            "zhipu",
+		"minimax-m2.7-ioa":       "minimax",
+		"kimi-k2.6-ioa":          "kimi",
+		"hy3-preview-ioa":        "hunyuan",
 		"deepseek-v3-2-volc-ioa": "deepseek",
 	}
 	for id, want := range checks {

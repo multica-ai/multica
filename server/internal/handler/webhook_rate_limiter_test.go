@@ -60,6 +60,23 @@ func TestMemoryWebhookRateLimiter_ZeroLimitDisabled(t *testing.T) {
 	}
 }
 
+func TestMemoryWebhookRateLimiter_CheckDoesNotConsumeBudget(t *testing.T) {
+	l := NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 1, Window: time.Minute})
+	ctx := context.Background()
+	if !webhookLimiterCheck(ctx, l, "shared-ip") || !webhookLimiterCheck(ctx, l, "shared-ip") {
+		t.Fatal("non-consuming checks should remain allowed before bad debt is charged")
+	}
+	if !l.Allow(ctx, "shared-ip") {
+		t.Fatal("check unexpectedly consumed the only budget slot")
+	}
+	if webhookLimiterCheck(ctx, l, "shared-ip") {
+		t.Fatal("check should reject after bad debt reaches the limit")
+	}
+	if retry := webhookLimiterRetryAfter(ctx, l, "shared-ip"); retry <= 0 || retry > time.Minute {
+		t.Fatalf("unexpected retry interval: %v", retry)
+	}
+}
+
 // TestWebhookLimiterLuaScript_StructureGuard pins the Lua script so any future
 // edit that reorders trim/count/insert (or drops EXPIRE) is caught even when
 // no live Redis is available to the test process. The per-pod race the script
