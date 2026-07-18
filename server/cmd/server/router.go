@@ -44,6 +44,7 @@ import (
 	cerebrodashboard "github.com/multica-ai/multica/server/internal/cerebro/dashboard"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroevals "github.com/multica-ai/multica/server/internal/cerebro/evals"                   // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 eval catalog API.
+	cerebroevalsrunner "github.com/multica-ai/multica/server/internal/cerebro/evals/runner"      // CEREBRO-PATCH(cerebro-evals-run-now): FIR-3496 default-OFF real-run engine wiring.
 	operatingsystem "github.com/multica-ai/multica/server/internal/cerebro/operatingsystem"      // CEREBRO-PATCH(operating-system-routes): FIR-2816 fork route module.
 	cerebroplatformaction "github.com/multica-ai/multica/server/internal/cerebro/platformaction" // CEREBRO-PATCH(router-platform-action-gate): FIR-3266 always-on agent mutation floor.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 loop planning-dispatch materializer import
@@ -814,7 +815,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).
 		WithService(opts.WorkflowService).
 		WithPlanDocuments(workflowPlanDocuments)
-	cerebroEvalsHandler := cerebroevals.NewHandler(pool)                                            // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 eval catalog handler.
+	cerebroEvalsHandler := cerebroevals.NewHandler(pool) // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 eval catalog handler.
+	// CEREBRO-PATCH(cerebro-evals-run-now): FIR-3496 — default-OFF real-run wiring. Only when the
+	// Firtal AI Gateway env is fully configured does POST /{id}/run execute evals for real via the
+	// merged engine; absent config, NewGatewayCompleter errors, the executor stays nil, and the
+	// endpoint is disabled so the existing run path is unchanged.
+	if evalsCompleter, err := cerebroevalsrunner.NewGatewayCompleter(
+		os.Getenv("CEREBRO_EVALS_GATEWAY_URL"),
+		os.Getenv("CEREBRO_EVALS_GATEWAY_KEY"),
+		os.Getenv("CEREBRO_EVALS_GATEWAY_MODEL"),
+		nil,
+	); err == nil {
+		cerebroEvalsHandler = cerebroEvalsHandler.WithRunExecutor(cerebroevalsrunner.NewEvalExecutor(evalsCompleter, nil))
+	}
 	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool)) // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature.
 	h.TaskService.WorkflowCompletionGate = workflowHooksFeature.CompletionGate                      // CEREBRO-PATCH(workflow-hooks-completion-wire): FIR-3101 pre-completion delegation.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 — plug the loop planning-dispatch materializer so a run_skill workflow's `loop_planning` toggle actually creates its companion planning-phase rule (see workflows/loop_planning.go).

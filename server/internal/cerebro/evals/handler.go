@@ -15,7 +15,12 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
-type Handler struct{ store *Store }
+type Handler struct {
+	store *Store
+	// executor is the real-run engine behind the default-OFF "Run now" flag
+	// (FIR-3496). Nil keeps POST /{id}/run disabled; see run_now.go.
+	executor RunExecutor
+}
 
 func NewHandler(pool *pgxpool.Pool) *Handler { return &Handler{store: NewStore(pool)} }
 
@@ -31,6 +36,7 @@ func (h *Handler) Routes() http.Handler {
 	r.Delete("/{id}", h.Delete)
 	r.Get("/{id}/runs", h.ListRuns)
 	r.Post("/{id}/runs", h.CreateRun)
+	r.Post("/{id}/run", h.RunNow)
 	return r
 }
 
