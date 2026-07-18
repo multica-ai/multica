@@ -247,7 +247,7 @@ export function GitHubTab() {
                               : t(($) => $.github.account_type_unknown)}
                         </p>
                         {installation.connected_by && (
-                          <p className="text-xs text-muted-foreground">
+                          <p className="break-words text-xs text-muted-foreground">
                             {t(($) => $.github.connected_by, {
                               name: installation.connected_by,
                             })}

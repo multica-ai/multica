@@ -271,6 +271,44 @@ describe("GitHubTab", () => {
     expect(screen.getByText("Unknown account type")).toBeTruthy();
   });
 
+  it("keeps the GitHub mark fallback when the account avatar fails to load", async () => {
+    let requestedSrc = "";
+    class FailingImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      referrerPolicy = "";
+      crossOrigin: string | null = null;
+
+      set src(value: string) {
+        requestedSrc = value;
+        queueMicrotask(() => this.onerror?.());
+      }
+    }
+    vi.stubGlobal("Image", FailingImage);
+    installationsRef.current = {
+      configured: true,
+      can_manage: true,
+      installations: [
+        {
+          id: "inst-broken-avatar",
+          workspace_id: "workspace-1",
+          account_login: "broken-avatar",
+          account_type: "User",
+          account_avatar_url: "https://avatars.example/missing.png",
+          created_at: "2026-07-18T00:00:00Z",
+        },
+      ],
+    };
+
+    const { container } = render(<GitHubTab />, { wrapper: I18nWrapper });
+
+    await waitFor(() => {
+      expect(requestedSrc).toBe("https://avatars.example/missing.png");
+    });
+    expect(container.querySelector('[data-slot="avatar-fallback"]')).toBeTruthy();
+    expect(container.querySelector('[data-slot="avatar-image"]')).toBeNull();
+  });
+
   it("disconnects the selected installation row", async () => {
     const user = userEvent.setup();
     installationsRef.current = {
