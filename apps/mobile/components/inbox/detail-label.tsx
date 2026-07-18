@@ -59,6 +59,7 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   review_requested: "Review requested",
   task_completed: "Task completed",
   task_failed: "Task failed",
+  task_fallback: "Switched runtime",
   agent_blocked: "Agent blocked",
   agent_completed: "Agent completed",
   reaction_added: "Reaction added",
