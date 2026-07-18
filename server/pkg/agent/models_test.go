@@ -1233,58 +1233,57 @@ func TestCachedDiscovery(t *testing.T) {
 	}
 }
 
-func TestKimiStaticModels(t *testing.T) {
-	t.Parallel()
-	models := kimiStaticModels()
-	if len(models) == 0 {
-		t.Fatal("expected static models, got empty list")
+func TestParseKimiSessionNewConfigOptions(t *testing.T) {
+	// Mirrors the real shape emitted by kimi 0.27.0's ACP server:
+	// no `models` block; the catalog is the configOptions select
+	// entry with category "model" (alongside thinking/mode selects).
+	raw := []byte(`{
+      "sessionId": "session_4a38f007-ca7e-4f44-a4ce-e88e9d042767",
+      "configOptions": [
+        {"type": "select", "id": "model", "name": "Model", "category": "model",
+         "currentValue": "kimi-code/k3",
+         "options": [
+           {"value": "kimi-code/kimi-for-coding", "name": "K2.7 Coding"},
+           {"value": "kimi-code/kimi-for-coding-highspeed", "name": "K2.7 Coding Highspeed"},
+           {"value": "kimi-code/k3", "name": "K3"}
+         ]},
+        {"type": "select", "id": "thinking", "name": "Thinking", "category": "thought_level",
+         "currentValue": "on", "options": [{"value": "on", "name": "Thinking On"}]},
+        {"type": "select", "id": "mode", "name": "Mode", "category": "mode",
+         "currentValue": "default", "options": [{"value": "default", "name": "Default"}]}
+      ]
+    }`)
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 3 {
+		t.Fatalf("expected 3 models, got %d: %+v", len(models), models)
 	}
-
-	ids := map[string]Model{}
-	defaults := 0
+	if models[0].ID != "kimi-code/kimi-for-coding" || models[0].Label != "K2.7 Coding" {
+		t.Errorf("unexpected first model: %+v", models[0])
+	}
+	if models[0].Default {
+		t.Errorf("non-current entry must not be marked default: %+v", models[0])
+	}
+	if !models[2].Default || models[2].ID != "kimi-code/k3" {
+		t.Errorf("currentValue kimi-code/k3 must be the default: %+v", models[2])
+	}
 	for _, m := range models {
-		ids[m.ID] = m
-		if m.Default {
-			defaults++
+		if m.ID == "on" || m.ID == "default" {
+			t.Errorf("thinking/mode select values leaked into the model catalog: %+v", models)
 		}
-		if m.Provider != "kimi" {
-			t.Errorf("model %q has provider %q, want kimi", m.ID, m.Provider)
-		}
-	}
-
-	expectedIDs := []string{"kimi-k2.7-coding", "kimi-k2.7-coding-highspeed", "kimi-k3"}
-	for _, id := range expectedIDs {
-		if _, ok := ids[id]; !ok {
-			t.Errorf("missing expected model %q in: %+v", id, models)
-		}
-	}
-
-	if defaults != 1 {
-		t.Errorf("expected exactly 1 default model, got %d", defaults)
-	}
-	if !ids["kimi-k2.7-coding"].Default {
-		t.Error("expected kimi-k2.7-coding to be the default")
 	}
 }
 
-func TestDiscoverKimiModelsFallsBackToStatic(t *testing.T) {
+func TestDiscoverKimiModelsNonexistentBinaryReturnsEmpty(t *testing.T) {
 	t.Parallel()
-	// With a nonexistent binary, ACP discovery must fail and fall
-	// back to the static catalog so the UI stays usable.
+	// With a nonexistent binary, discovery fails soft: an empty
+	// catalog (no error) so the UI offers manual entry, and the
+	// uncached result lets the next load retry. No static fallback.
 	ctx := context.Background()
 	models, err := discoverKimiModels(ctx, "/nonexistent/kimi")
 	if err != nil {
 		t.Fatalf("discoverKimiModels returned error: %v", err)
 	}
-	if len(models) == 0 {
-		t.Fatal("expected static fallback models, got empty list")
-	}
-
-	ids := map[string]bool{}
-	for _, m := range models {
-		ids[m.ID] = true
-	}
-	if !ids["kimi-k2.7-coding"] || !ids["kimi-k3"] {
-		t.Errorf("static fallback missing expected models: %+v", models)
+	if len(models) != 0 {
+		t.Fatalf("expected empty catalog on discovery failure, got %+v", models)
 	}
 }

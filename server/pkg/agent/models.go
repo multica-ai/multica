@@ -834,36 +834,39 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 
 // discoverKimiModels spins up a throwaway `kimi acp` process and
 // drives the same minimal ACP handshake as Hermes to surface the
-// model catalog advertised by Kimi's `session/new` response. Kimi
-// ≤0.28 returns a `models` block (`availableModels`/`currentModelId`);
-// 0.29 moved the same catalog into `configOptions` (MUL-5239). The
-// shared parser accepts both, so the discovery path stays identical.
+// model catalog the installed CLI advertises from `session/new`.
+// Current kimi builds (≥ 0.2x) return it via the ACP configOptions
+// schema (the select entry with category "model"); older builds used
+// the `models.availableModels` block — parseACPSessionNewModels
+// handles both shapes.
 //
-// On any failure (kimi missing, not logged in, config error) falls
-// back to kimiStaticModels so the UI picker stays usable offline.
+// There is deliberately NO static fallback: the picker must reflect
+// what the installed CLI actually offers so the list stays in sync
+// with the account and CLI version. On failure we return an empty
+// catalog (reason logged at debug, mirroring the Grok pattern); the
+// UI then offers manual model entry, and cachedDiscovery never caches
+// empty results so the next load retries discovery.
 func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, error) {
 	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:   "kimi",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kimi-discovery-",
+		strictErrors: true,
 	})
 	if err != nil || len(models) == 0 {
 		if err != nil {
-			slog.Debug("kimi model discovery fell back to static catalog", "error", err)
+			slog.Debug("kimi model discovery returned no models", "error", err)
 		}
-		return kimiStaticModels(), nil
+		return []Model{}, nil
+	}
+	// Kimi model IDs (e.g. "kimi-code/k3") carry no colon prefix, so
+	// the shared parser leaves Provider empty — backfill it like Grok.
+	for i := range models {
+		if models[i].Provider == "" {
+			models[i].Provider = "kimi"
+		}
 	}
 	return models, nil
-}
-
-// kimiStaticModels is the offline fallback catalog for the Kimi CLI.
-// IDs match the model keys advertised by the Kimi Code platform.
-func kimiStaticModels() []Model {
-	return []Model{
-		{ID: "kimi-k2.7-coding", Label: "K2.7 Coding", Provider: "kimi", Default: true},
-		{ID: "kimi-k2.7-coding-highspeed", Label: "K2.7 Coding Highspeed", Provider: "kimi"},
-		{ID: "kimi-k3", Label: "K3", Provider: "kimi"},
-	}
 }
 
 // discoverKiroModels spins up a throwaway `kiro-cli acp` process and parses
@@ -1128,8 +1131,9 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 }
 
 // parseACPSessionNewModels extracts the model catalog from an ACP
-// `session/new` response. Hermes and older Kimi (and any other ACP
-// agent that follows that schema) emit:
+// `session/new` response. Two shapes exist in the wild.
+//
+// The original SessionModelState block (Hermes and older runtimes):
 //
 //	{
 //	  "sessionId": "...",
@@ -1141,13 +1145,20 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 //	  }
 //	}
 //
-// Newer agents advertise the same catalog through the ACP
-// `configOptions` list instead — see parseACPConfigOptionModels. Both
-// shapes are accepted: the `models` block wins when present, and
-// `configOptions` is consulted only when it yields nothing, so no
-// existing provider changes behaviour.
+// The newer ACP session config-options schema (current Kimi builds),
+// where the catalog is one select entry among several:
 //
-// Returns nil (not an empty slice) when the payload is missing so
+//	{
+//	  "sessionId": "...",
+//	  "configOptions": [
+//	    {"type": "select", "id": "model", "category": "model",
+//	     "currentValue": "kimi-code/k3",
+//	     "options": [{"value": "kimi-code/k3", "name": "K3"}, ...]},
+//	    ...
+//	  ]
+//	}
+//
+// Returns nil (not an empty slice) when neither payload is present so
 // the caller can distinguish "parsed with no models" (valid but
 // empty catalog) from "couldn't find the structure at all".
 func parseACPSessionNewModels(raw json.RawMessage) []Model {
@@ -1164,6 +1175,16 @@ func parseACPSessionNewModels(raw json.RawMessage) []Model {
 			CurrentModelID       string         `json:"currentModelId"`
 			CurrentModelIDSnake  string         `json:"current_model_id"`
 		} `json:"models"`
+		ConfigOptions []struct {
+			Type         string `json:"type"`
+			ID           string `json:"id"`
+			Category     string `json:"category"`
+			CurrentValue string `json:"currentValue"`
+			Options      []struct {
+				Value string `json:"value"`
+				Name  string `json:"name"`
+			} `json:"options"`
+		} `json:"configOptions"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil
@@ -1171,6 +1192,33 @@ func parseACPSessionNewModels(raw json.RawMessage) []Model {
 	availableModels := resp.Models.AvailableModels
 	if len(availableModels) == 0 && resp.Models.AvailableModelsSnake != nil {
 		availableModels = resp.Models.AvailableModelsSnake
+	}
+	if len(availableModels) == 0 {
+		// No legacy models block — try the config-options schema. The
+		// catalog is the select entry whose category is "model"; the
+		// plain id match is a weaker fallback for runtimes that omit
+		// the category field.
+		for _, opt := range resp.ConfigOptions {
+			if opt.Category == "model" || (opt.Category == "" && opt.ID == "model") {
+				currentModelID := strings.TrimSpace(opt.CurrentValue)
+				models := make([]Model, 0, len(opt.Options))
+				seen := map[string]bool{}
+				for _, o := range opt.Options {
+					modelID := strings.TrimSpace(o.Value)
+					if modelID == "" || seen[modelID] {
+						continue
+					}
+					seen[modelID] = true
+					models = append(models, Model{
+						ID:      modelID,
+						Label:   acpModelLabel(o.Name, modelID),
+						Default: modelID == currentModelID,
+					})
+				}
+				return models
+			}
+		}
+		return nil
 	}
 	currentModelID := strings.TrimSpace(resp.Models.CurrentModelID)
 	if currentModelID == "" {
