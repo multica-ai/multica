@@ -3533,18 +3533,22 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 
 const listQueuedClaimCandidatesByRuntime = `-- name: ListQueuedClaimCandidatesByRuntime :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id FROM agent_task_queue
-WHERE runtime_id = $1 AND status = 'queued'
+WHERE id IN (
+    SELECT id FROM (
+        SELECT DISTINCT ON (agent_id) id, priority, created_at
+        FROM agent_task_queue
+        WHERE runtime_id = $1 AND status = 'queued'
+        ORDER BY agent_id, priority DESC, created_at ASC
+    ) candidates
+)
 ORDER BY priority DESC, created_at ASC
 `
 
-// Returns rows the runtime can attempt to claim. Status is restricted to
-// 'queued' (in contrast to ListPendingTasksByRuntime which also includes
-// 'dispatched') because dispatched rows are by definition already owned
-// and cannot be re-claimed — including them in the candidate list pads
-// the result with rows that always lose the per-(issue, agent) race in
-// ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
-// runtime is busy on a long-running task. Backed by the partial index
-// idx_agent_task_queue_claim_candidates so the warm path is cheap.
+// Returns one queued representative per agent on the runtime. The service uses
+// these rows only to decide which agents should be attempted; ClaimAgentTask
+// re-selects the exact runnable task while enforcing capacity and serialization.
+// Collapsing here keeps a team/squad leader with a large queue from forcing the
+// claim endpoint to read every queued row before it can dispatch work.
 func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, listQueuedClaimCandidatesByRuntime, runtimeID)
 	if err != nil {
@@ -3615,20 +3619,22 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtim
 
 const listQueuedClaimCandidatesByRuntimes = `-- name: ListQueuedClaimCandidatesByRuntimes :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id FROM agent_task_queue
-WHERE runtime_id = ANY($1::uuid[]) AND status = 'queued'
+WHERE id IN (
+    SELECT id FROM (
+        SELECT DISTINCT ON (runtime_id, agent_id) id, priority, created_at
+        FROM agent_task_queue
+        WHERE runtime_id = ANY($1::uuid[]) AND status = 'queued'
+        ORDER BY runtime_id, agent_id, priority DESC, created_at ASC
+    ) candidates
+)
 ORDER BY priority DESC, created_at ASC
 `
 
-// Batch variant of ListQueuedClaimCandidatesByRuntime (MUL-4257): returns
-// queued claim candidates across every runtime_id in the input set in ONE round
-// trip, so a daemon can list candidates for all of its runtimes with a single
-// query instead of one per runtime. Ordering matches the singular query
-// (priority, then FIFO) so the batch claim loop keeps the same fairness. The
-// runtime_id filter is served by the partial index
-// idx_agent_task_queue_claim_candidates; the cross-runtime ORDER BY still needs
-// a sort step (each runtime's slice is index-ordered, but merging several
-// runtimes' rows into one priority/FIFO order is not). The per-machine
-// candidate set is small, so this is cheap in practice.
+// Batch variant of ListQueuedClaimCandidatesByRuntime (MUL-4257): returns one
+// queued representative per (runtime, agent) across the input set. This keeps
+// the request bounded by active agents rather than queued tasks, while still
+// preserving runtime-level empty-cache bookkeeping and global priority/FIFO
+// ordering among the representatives.
 func (q *Queries) ListQueuedClaimCandidatesByRuntimes(ctx context.Context, runtimeIds []pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, listQueuedClaimCandidatesByRuntimes, runtimeIds)
 	if err != nil {

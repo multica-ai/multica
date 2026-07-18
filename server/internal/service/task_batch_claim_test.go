@@ -95,10 +95,9 @@ func batchClaimFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (r
 }
 
 // TestClaimTasksForRuntimes_MultiRuntimeDrain verifies the machine-level batch
-// claim (MUL-4257): a single call claims across all runtimes, one task per
-// agent per call (matching the singular path's dedup), routes each task to its
-// runtime, respects a subsequent drain, and reports empty once nothing is
-// queued.
+// claim (MUL-4257): a single call claims across all runtimes, lets one agent
+// fill multiple free slots up to its max_concurrent_tasks, routes each task to
+// its runtime, and reports empty once nothing is queued.
 func TestClaimTasksForRuntimes_MultiRuntimeDrain(t *testing.T) {
 	ctx := context.Background()
 	pool := newTaskClaimRacePool(t)
@@ -107,42 +106,59 @@ func TestClaimTasksForRuntimes_MultiRuntimeDrain(t *testing.T) {
 	rt1, rt2 := batchClaimFixture(t, ctx, pool)
 	ids := []pgtype.UUID{util.MustParseUUID(rt1), util.MustParseUUID(rt2)}
 
-	// Call 1: one task per agent (agent1→rt1, agent2→rt2) => 2 tasks, one per runtime.
+	// Call 1: agent1 has two different-issue tasks and max_concurrent_tasks=5,
+	// so both may dispatch in the same batch; agent2 contributes one more.
 	got1, err := svc.ClaimTasksForRuntimes(ctx, ids, 5)
 	if err != nil {
 		t.Fatalf("call1: %v", err)
 	}
-	if len(got1) != 2 {
-		t.Fatalf("call1 claimed %d tasks, want 2", len(got1))
+	if len(got1) != 3 {
+		t.Fatalf("call1 claimed %d tasks, want 3", len(got1))
 	}
 	seen := map[string]int{}
 	for _, task := range got1 {
 		seen[util.UUIDToString(task.RuntimeID)]++
 	}
-	if seen[rt1] != 1 || seen[rt2] != 1 {
-		t.Fatalf("call1 runtime distribution = %v, want one task each for rt1/rt2", seen)
+	if seen[rt1] != 2 || seen[rt2] != 1 {
+		t.Fatalf("call1 runtime distribution = %v, want two tasks for rt1 and one for rt2", seen)
 	}
 
-	// Call 2: agent1 still has a second queued task (different issue, capacity 5);
-	// agent2 is drained => exactly 1 task, on rt1.
+	// Call 2: everything dispatched => empty.
 	got2, err := svc.ClaimTasksForRuntimes(ctx, ids, 5)
 	if err != nil {
 		t.Fatalf("call2: %v", err)
 	}
-	if len(got2) != 1 {
-		t.Fatalf("call2 claimed %d tasks, want 1", len(got2))
+	if len(got2) != 0 {
+		t.Fatalf("call2 claimed %d tasks, want 0", len(got2))
 	}
-	if util.UUIDToString(got2[0].RuntimeID) != rt1 {
-		t.Fatalf("call2 claimed runtime = %s, want rt1", util.UUIDToString(got2[0].RuntimeID))
-	}
+}
 
-	// Call 3: everything dispatched => empty.
-	got3, err := svc.ClaimTasksForRuntimes(ctx, ids, 5)
+// TestListQueuedClaimCandidatesByRuntimes_CollapsesTeamLeaderQueue pins the
+// GitHub #3166 shape: many team/squad-assigned tasks point at the same leader
+// agent and runtime. Candidate listing must stay bounded by runtime/agent, not
+// by the number of queued tasks, or the daemon's short claim request can time
+// out before the service even starts dispatching.
+func TestListQueuedClaimCandidatesByRuntimes_CollapsesTeamLeaderQueue(t *testing.T) {
+	ctx := context.Background()
+	pool := newTaskClaimRacePool(t)
+	queries := db.New(pool)
+
+	rt1, rt2 := batchClaimFixture(t, ctx, pool)
+	ids := []pgtype.UUID{util.MustParseUUID(rt1), util.MustParseUUID(rt2)}
+
+	got, err := queries.ListQueuedClaimCandidatesByRuntimes(ctx, ids)
 	if err != nil {
-		t.Fatalf("call3: %v", err)
+		t.Fatalf("list candidates: %v", err)
 	}
-	if len(got3) != 0 {
-		t.Fatalf("call3 claimed %d tasks, want 0", len(got3))
+	if len(got) != 2 {
+		t.Fatalf("candidate count = %d, want 2 (one per runtime/agent, not one per queued task)", len(got))
+	}
+	seen := map[string]int{}
+	for _, task := range got {
+		seen[util.UUIDToString(task.RuntimeID)]++
+	}
+	if seen[rt1] != 1 || seen[rt2] != 1 {
+		t.Fatalf("candidate runtime distribution = %v, want one representative for each runtime", seen)
 	}
 }
 

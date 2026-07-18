@@ -2262,11 +2262,12 @@ func (s *TaskService) RequeueTaskAfterClaimFailure(ctx context.Context, task db.
 //     the task out of `queued`, which the empty-queued cache cannot represent;
 //  3. short-circuit runtimes whose empty-claim verdict is cached, sampling the
 //     invalidation version for the rest BEFORE the candidate SELECT;
-//  4. list queued candidates across the non-empty set (one SELECT);
+//  4. list queued candidate agents across the non-empty set (one SELECT);
 //  5. mark still-empty runtimes so their next idle poll skips Postgres;
-//  6. claim per distinct agent via ClaimTask (unchanged — preserves the
+//  6. claim per candidate agent via ClaimTask (unchanged — preserves the
 //     per-(issue, agent) serialization, the agent concurrency cap, and every
-//     dispatch side effect) until maxTasks is reached.
+//     dispatch side effect), repeating while the agent still has capacity and
+//     maxTasks has not been reached.
 //
 // The returned slice contains both reclaimed and freshly-claimed tasks, each
 // already carrying its runtime_id so the daemon routes it to the matching
@@ -2387,47 +2388,58 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		}
 	}
 
-	// 6. Claim per distinct agent (unchanged path → same per-(issue, agent)
+	// 6. Claim per candidate agent (unchanged path → same per-(issue, agent)
 	// serialization, capacity cap, and dispatch side effects) until maxTasks is
-	// reached.
-	triedAgents := make(map[string]struct{}, len(candidates))
-	for i := range candidates {
-		if len(claimed) >= maxTasks {
+	// reached. The candidate query is already collapsed to one row per
+	// (runtime, agent), so a team/squad leader with a large queue does not force
+	// an unbounded scan. Iterate in rounds so every candidate agent gets a first
+	// chance before any one agent fills extra slots with its remaining capacity.
+	exhaustedAgents := make(map[string]struct{}, len(candidates))
+	for len(claimed) < maxTasks {
+		progress := false
+		for i := range candidates {
+			if len(claimed) >= maxTasks {
+				break
+			}
+			agentKey := util.UUIDToString(candidates[i].AgentID)
+			if _, exhausted := exhaustedAgents[agentKey]; exhausted {
+				continue
+			}
+
+			task, err := s.ClaimTask(ctx, candidates[i].AgentID)
+			if err != nil {
+				// Each ClaimTask commits in its own transaction, so earlier
+				// iterations (and step-2 reclaims) are already dispatched
+				// server-side. Returning nil here would drop them and force the
+				// daemon to double-claim via HTTP fallback (MUL-4257). Return the
+				// partial batch instead; the failed agent's task stays queued.
+				if len(claimed) > 0 {
+					slog.Error("batch claim: claim task failed after partial success; returning claimed tasks to avoid loss",
+						"error", err, "claimed", len(claimed))
+					return claimed, nil
+				}
+				return nil, fmt.Errorf("claim task: %w", err)
+			}
+			if task == nil {
+				exhaustedAgents[agentKey] = struct{}{}
+				continue
+			}
+			// ClaimAgentTask selects by agent only; guard that the claimed task
+			// belongs to a runtime this daemon hosts. An agent with a
+			// higher-priority queued task on ANOTHER daemon's runtime could
+			// otherwise be dispatched here and dropped — matching the singular
+			// path's runtime_id guard. Such a stray dispatch is recovered by the
+			// reclaim path on the owning daemon's next poll.
+			if _, ok := runtimeInSet[util.UUIDToString(task.RuntimeID)]; !ok {
+				exhaustedAgents[agentKey] = struct{}{}
+				continue
+			}
+			claimed = append(claimed, *task)
+			progress = true
+		}
+		if !progress {
 			break
 		}
-		agentKey := util.UUIDToString(candidates[i].AgentID)
-		if _, tried := triedAgents[agentKey]; tried {
-			continue
-		}
-		triedAgents[agentKey] = struct{}{}
-
-		task, err := s.ClaimTask(ctx, candidates[i].AgentID)
-		if err != nil {
-			// Each ClaimTask commits in its own transaction, so earlier
-			// iterations (and step-2 reclaims) are already dispatched
-			// server-side. Returning nil here would drop them and force the
-			// daemon to double-claim via HTTP fallback (MUL-4257). Return the
-			// partial batch instead; the failed agent's task stays queued.
-			if len(claimed) > 0 {
-				slog.Error("batch claim: claim task failed after partial success; returning claimed tasks to avoid loss",
-					"error", err, "claimed", len(claimed))
-				return claimed, nil
-			}
-			return nil, fmt.Errorf("claim task: %w", err)
-		}
-		if task == nil {
-			continue
-		}
-		// ClaimAgentTask selects by agent only; guard that the claimed task
-		// belongs to a runtime this daemon hosts. An agent with a
-		// higher-priority queued task on ANOTHER daemon's runtime could
-		// otherwise be dispatched here and dropped — matching the singular
-		// path's runtime_id guard. Such a stray dispatch is recovered by the
-		// reclaim path on the owning daemon's next poll.
-		if _, ok := runtimeInSet[util.UUIDToString(task.RuntimeID)]; !ok {
-			continue
-		}
-		claimed = append(claimed, *task)
 	}
 
 	return claimed, nil
