@@ -104,10 +104,10 @@ func TestApplyMeetingNoteTypeUsesRecurringNoteCadence(t *testing.T) {
 		NoteTypeID: "note-weekly", CadenceUnit: "month", CadenceCount: 3,
 	}
 	applyMeetingNoteType(&response, []MeetingNoteTypeResponse{{
-		ID: "note-weekly", Name: "Business Review", CadenceUnit: "week", CadenceCount: 1, Enabled: true,
+		ID: "note-weekly", Name: "Business Review", CadenceUnit: "week", CadenceCount: 1, Enabled: true, CurrentNoteID: "note-current",
 	}})
 
-	if response.NoteTypeName != "Business Review" || response.CadenceUnit != "week" || response.CadenceCount != 1 {
+	if response.NoteTypeName != "Business Review" || response.CurrentNoteID != "note-current" || response.CadenceUnit != "week" || response.CadenceCount != 1 {
 		t.Fatalf("meeting timing did not follow recurring note: %#v", response)
 	}
 }
@@ -195,7 +195,7 @@ func TestDefaultTerminologyUsesNeutralNamesForEveryElement(t *testing.T) {
 	got := DefaultTerminology()
 	want := Terminology{
 		Strategy: "Strategy", Rock: "Goal", Rocks: "Goals",
-		VisionPlan: "Vision Plan", Meetings: "Meetings", OrgChart: "Org Chart",
+		VisionPlan: "Vision Plan", Meetings: "Cycles", OrgChart: "Roles",
 		Scorecard: "Scorecard", IssuesList: "Issues List", StrategyMap: "Strategy Map",
 	}
 	if got != want {

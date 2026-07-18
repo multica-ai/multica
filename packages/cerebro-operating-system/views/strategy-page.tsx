@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { DEFAULT_TERMINOLOGY } from "../core/api-schemas";
 import {
   periodsOptions, rocksOptions, settingsOptions, useCreateConnection, useCreateVisionPlanItem,
@@ -13,6 +14,7 @@ import {
 } from "../core/queries";
 import type { Rock, VisionPlanItem, VisionPlanItemInput, VisionPlanSection, VisionPlanSectionType } from "../core/types";
 import { SearchSelect, type SearchSelectOption } from "./search-select";
+import { StrategyMap } from "./strategy-map";
 
 const MARKETING_PARTS = ["Target market", "Differentiators", "Proven process", "Guarantee"];
 
@@ -94,9 +96,9 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
         {allowGoalConnections && <SearchSelect compact multiple label={`${item.title} Goals`} options={goals.map((goal) => ({ value: goal.id, label: goal.title }))} values={selectedGoals} onValuesChange={changeGoals} placeholder="Connect Goals" actionLabel={currentPeriodId ? "Create linked Goal" : undefined} onAction={currentPeriodId ? createLinkedGoal : undefined} />}
       </div>
       <div className="flex items-start gap-1 opacity-60 group-hover:opacity-100">
-        <button type="button" aria-label={`Move ${item.title} up`} disabled={itemIndex === 0} onClick={() => move(-1)} className="h-8 rounded px-1.5 text-muted-foreground hover:bg-muted disabled:opacity-30">↑</button>
-        <button type="button" aria-label={`Move ${item.title} down`} disabled={itemIndex === siblingItems.length - 1} onClick={() => move(1)} className="h-8 rounded px-1.5 text-muted-foreground hover:bg-muted disabled:opacity-30">↓</button>
-        <button type="button" aria-label={`Delete ${item.title}`} onClick={() => remove.mutate(item.id)} className="h-8 rounded px-2 text-xs text-muted-foreground hover:bg-muted hover:text-destructive">Delete</button>
+        <button type="button" aria-label={`Move ${item.title} up`} disabled={itemIndex === 0} onClick={() => move(-1)} className="grid size-11 place-items-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30"><ChevronUp aria-hidden className="size-4" /></button>
+        <button type="button" aria-label={`Move ${item.title} down`} disabled={itemIndex === siblingItems.length - 1} onClick={() => move(1)} className="grid size-11 place-items-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30"><ChevronDown aria-hidden className="size-4" /></button>
+        <button type="button" aria-label={`Delete ${item.title}`} onClick={() => remove.mutate(item.id)} className="grid size-11 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"><Trash2 aria-hidden className="size-4" /></button>
       </div>
     </div>
   );
@@ -148,14 +150,14 @@ function PlanSection({ section, index, sections, wsId, goals, ownerOptions, curr
       <header className="flex items-center gap-2 border-b pb-3">
         <span aria-hidden className="text-xs tabular-nums text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
         <input aria-label={`${section.name} section name`} value={name} onChange={(event) => setName(event.target.value)} onBlur={() => updateSection.mutate({ id: section.id, input: sectionInput() })} className="min-w-0 flex-1 bg-transparent text-base font-semibold outline-none focus:ring-1 focus:ring-ring" />
-        <button type="button" aria-label={`Move ${section.name} up`} disabled={index === 0} onClick={() => move(-1)} className="h-8 rounded px-2 text-muted-foreground hover:bg-muted disabled:opacity-30">↑</button>
-        <button type="button" aria-label={`Move ${section.name} down`} disabled={index === sections.length - 1} onClick={() => move(1)} className="h-8 rounded px-2 text-muted-foreground hover:bg-muted disabled:opacity-30">↓</button>
-        <button type="button" aria-label={`Delete ${section.name} section`} onClick={() => { if (window.confirm(`Delete ${section.name} and its items?`)) deleteSection.mutate(section.id); }} className="h-8 rounded px-2 text-xs text-muted-foreground hover:bg-muted hover:text-destructive">Delete</button>
+        <button type="button" aria-label={`Move ${section.name} up`} disabled={index === 0} onClick={() => move(-1)} className="grid size-11 place-items-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30"><ChevronUp aria-hidden className="size-4" /></button>
+        <button type="button" aria-label={`Move ${section.name} down`} disabled={index === sections.length - 1} onClick={() => move(1)} className="grid size-11 place-items-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30"><ChevronDown aria-hidden className="size-4" /></button>
+        <button type="button" aria-label={`Delete ${section.name} section`} onClick={() => { if (window.confirm(`Delete ${section.name} and its items?`)) deleteSection.mutate(section.id); }} className="grid size-11 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"><Trash2 aria-hidden className="size-4" /></button>
       </header>
       <div className="mt-3 grid gap-2">
         {activeItems.map((item, itemIndex) => <PlanItem key={item.id} item={item} itemIndex={itemIndex} siblingItems={activeItems} section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} allowGoalConnections={allowGoalConnections} />)}
-        {missingParts.length > 0 && <div className="flex flex-wrap gap-1.5">{missingParts.map((part) => <button key={part} type="button" onClick={() => addItem(part, part)} className="rounded-full border border-dashed px-2.5 py-1 text-xs text-muted-foreground hover:border-foreground hover:text-foreground">+ {part}</button>)}</div>}
-        <input aria-label={`Add item to ${section.name}`} value={newItem} onChange={(event) => setNewItem(event.target.value)} onKeyDown={onNewItemKeyDown} placeholder={section.section_type === "process" ? "+ Add process and press Enter" : "+ Add item and press Enter"} className="h-9 rounded-md border border-dashed bg-transparent px-3 text-sm text-muted-foreground outline-none focus:border-ring focus:text-foreground" />
+        {missingParts.length > 0 && <div className="flex flex-wrap gap-1.5">{missingParts.map((part) => <button key={part} type="button" onClick={() => addItem(part, part)} className="flex min-h-11 items-center gap-1 rounded-full border border-dashed px-3 text-xs text-muted-foreground hover:border-foreground hover:text-foreground"><Plus aria-hidden className="size-3.5" />{part}</button>)}</div>}
+        <input aria-label={`Add item to ${section.name}`} value={newItem} onChange={(event) => setNewItem(event.target.value)} onKeyDown={onNewItemKeyDown} placeholder={section.section_type === "process" ? "+ Add process and press Enter" : "+ Add item and press Enter"} className="min-h-11 rounded-md border border-dashed bg-transparent px-3 text-sm text-muted-foreground outline-none focus:border-ring focus:text-foreground" />
       </div>
     </section>
   );
@@ -171,6 +173,8 @@ export function StrategyPage() {
   const members = useQuery(memberListOptions(wsId));
   const agents = useQuery(agentListOptions(wsId));
   const createSection = useCreateVisionPlanSection(wsId);
+  const [mode, setMode] = useState<"overview" | "edit">("overview");
+  const [focusedSectionId, setFocusedSectionId] = useState<string>();
   const [addingSection, setAddingSection] = useState(false);
   const [sectionName, setSectionName] = useState("");
   if (!enabled) return null;
@@ -189,15 +193,28 @@ export function StrategyPage() {
     setSectionName(""); setAddingSection(false);
   }
 
+  function editSection(sectionId: string) {
+    setFocusedSectionId(sectionId);
+    setMode("edit");
+    window.requestAnimationFrame(() => document.getElementById(`vision-section-${sectionId}`)?.scrollIntoView({ block: "start" }));
+  }
+
+  function openRock(rockId: string) {
+    const target = new URL(window.location.href);
+    target.pathname = target.pathname.replace(/\/strategy\/?$/, "/rocks");
+    target.searchParams.set("rock", rockId);
+    window.location.assign(target);
+  }
+
   return (
     <main className="h-full min-w-0 overflow-y-auto bg-muted/20">
       <div className="mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-5 p-4 sm:p-6">
         <header className="flex flex-wrap items-end justify-between gap-4 border-b pb-5">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Company direction</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">{terminology.vision_plan}</h1><p className="mt-1 text-sm text-muted-foreground">Edit the plan where it lives. Connect direction to {terminology.rocks} as it becomes actionable.</p></div>
-          <button type="button" aria-label="Add section" onClick={() => setAddingSection(true)} className="h-10 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted">+ Add section</button>
+          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Company direction</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">{terminology.strategy_map}</h1><p className="mt-1 text-sm text-muted-foreground">Connect long-term direction to current {terminology.rocks.toLowerCase()} in one scan.</p></div>
+          <div className="flex gap-2"><button type="button" aria-pressed={mode === "overview"} onClick={() => setMode("overview")} className="h-11 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted">Overview</button><button type="button" aria-pressed={mode === "edit"} onClick={() => setMode("edit")} className="h-11 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted">Edit plan</button>{mode === "edit" && <button type="button" aria-label="Add section" onClick={() => setAddingSection(true)} className="h-11 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted">+ Add section</button>}</div>
         </header>
-        {addingSection && <div className="flex gap-2 rounded-xl border border-dashed bg-card p-3"><input autoFocus aria-label="New section name" value={sectionName} onChange={(event) => setSectionName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addSection(); }} placeholder="Section name" className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" /><button type="button" onClick={addSection} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Add</button><button type="button" onClick={() => setAddingSection(false)} className="h-10 rounded-md border px-4 text-sm">Cancel</button></div>}
-        {plan.isLoading ? <p>Loading {terminology.vision_plan}…</p> : plan.isError ? <p role="alert">{terminology.vision_plan} could not be loaded</p> : <div className="grid gap-3">{sections.map((section, index) => <PlanSection key={section.id} section={section} index={index} sections={sections} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={periods.data?.periods[0]?.id} />)}</div>}
+        {mode === "edit" && addingSection && <div className="flex gap-2 rounded-xl border border-dashed bg-card p-3"><input autoFocus aria-label="New section name" value={sectionName} onChange={(event) => setSectionName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addSection(); }} placeholder="Section name" className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" /><button type="button" onClick={addSection} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Add</button><button type="button" onClick={() => setAddingSection(false)} className="h-10 rounded-md border px-4 text-sm">Cancel</button></div>}
+        {plan.isLoading ? <p>Loading {terminology.vision_plan}…</p> : plan.isError ? <p role="alert">{terminology.vision_plan} could not be loaded</p> : mode === "overview" ? <StrategyMap sections={sections} rocks={goals} terminology={terminology} onEditSection={editSection} onOpenRock={openRock} /> : <div className="grid gap-3">{sections.map((section, index) => <div id={`vision-section-${section.id}`} key={section.id} className={focusedSectionId === section.id ? "scroll-mt-4 rounded-xl ring-2 ring-primary/30" : "scroll-mt-4"}><PlanSection section={section} index={index} sections={sections} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={periods.data?.periods[0]?.id} /></div>)}</div>}
         <footer className="rounded-xl border border-dashed bg-card px-5 py-4 text-sm text-muted-foreground"><strong className="text-foreground">One plan, shared context.</strong> Items in One-Year Plan can connect to {terminology.rocks}; the remaining sections stay focused on the written plan.</footer>
       </div>
     </main>

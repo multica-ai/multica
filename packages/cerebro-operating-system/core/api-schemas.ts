@@ -8,7 +8,7 @@ const label = (fallback: string) => z.unknown().optional().transform((value) =>
 
 export const DEFAULT_TERMINOLOGY = {
   strategy: "Strategy", rock: "Goal", rocks: "Goals",
-  vision_plan: "Vision Plan", meetings: "Meetings", org_chart: "Org Chart",
+  vision_plan: "Vision Plan", meetings: "Cycles", org_chart: "Roles",
   scorecard: "Scorecard", issues_list: "Issues List", strategy_map: "Strategy Map",
 } as const;
 const terminologySchema = z.object({
@@ -102,9 +102,10 @@ export const objectConnectionListSchema = z.object({ connections: z.array(object
 const meetingCadence = fallbackEnum(["manual", "day", "week", "month", "quarter"] as const, "manual");
 const meetingBinding = fallbackEnum(["none", "scorecard", "goals", "issues_list"] as const, "none");
 const meetingAgendaSchema = z.object({ id: z.string(), name: z.string(), position: z.number().int().default(0), binding: meetingBinding });
-const meetingNoteTypeSchema = z.object({ id: z.string(), name: z.string(), cadence_unit: meetingCadence, cadence_count: z.number().int().positive().catch(1), enabled: z.boolean().catch(false) });
+const safeOptionalId = z.unknown().optional().transform((value) => typeof value === "string" && value.trim() ? value : undefined);
+const meetingNoteTypeSchema = z.object({ id: z.string(), name: z.string(), cadence_unit: meetingCadence, cadence_count: z.number().int().positive().catch(1), enabled: z.boolean().catch(false), current_note_id: safeOptionalId });
 export const meetingSchema = z.object({
-  workspace_id: z.string(), note_type_id: z.string().optional(), note_type_name: z.string().optional(),
+  workspace_id: z.string(), note_type_id: z.string().optional(), note_type_name: z.string().optional(), current_note_id: safeOptionalId,
   cadence_unit: meetingCadence, cadence_count: z.number().int().positive().catch(1),
   agenda: z.array(meetingAgendaSchema).nullable().transform((value) => value ?? []),
   available_note_types: z.array(meetingNoteTypeSchema).nullable().transform((value) => value ?? []),

@@ -123,10 +123,10 @@ describe("operating system API schemas", () => {
 
   it("parses meeting configuration and safely downgrades new enum values", () => {
     const parsed = meetingSchema.parse({
-      workspace_id: "w1", cadence_unit: "weekly", cadence_count: 2,
-      agenda: [{ id: "review", name: "Review", position: 0, binding: "future_data" }], available_note_types: null,
+      workspace_id: "w1", cadence_unit: "weekly", cadence_count: 2, current_note_id: 42,
+      agenda: [{ id: "review", name: "Review", position: 0, binding: "future_data" }], available_note_types: [{ id: "weekly", name: "Weekly", cadence_unit: "week", cadence_count: 1, enabled: true, current_note_id: null }],
     });
-    expect(parsed).toMatchObject({ cadence_unit: "manual", cadence_count: 2, agenda: [{ binding: "none" }], available_note_types: [] });
+    expect(parsed).toMatchObject({ cadence_unit: "manual", cadence_count: 2, current_note_id: undefined, agenda: [{ binding: "none" }], available_note_types: [{ current_note_id: undefined }] });
     expect(EMPTY_MEETING.agenda).toEqual([]);
   });
 

@@ -1686,5 +1686,6 @@ Approved plan and delivery gate are attached to FIR-3425, 2026-07-17.
 | Patch | Location | Reason |
 |---|---|---|
 | `operating-system-stage4-nav` | `packages/views/layout/cerebro-operating-system-nav.tsx`; `packages/views/layout/cerebro-operating-system-nav.test.tsx` | Show the fork-owned Meetings and Org Chart links only when the workspace enables those elements; the pages and API remain in the Cerebro-owned package and server module. |
+| `operating-system-cycle-note-composition` | `packages/views/operating-system/cycles-page.tsx`; web and desktop Cycle route mounts | FIR-2816 composes the Operating System Cycle shell with the canonical Note query/editor at the app-view seam, preserving one Note implementation without introducing a `cerebro-operating-system` → `cerebro-notes` package dependency. |
 
 Approved plan and delivery gate are attached to FIR-3421, 2026-07-17.

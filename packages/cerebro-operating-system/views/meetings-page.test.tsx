@@ -11,11 +11,12 @@ const state = vi.hoisted(() => ({
     workspace_id: "workspace-1",
     note_type_id: "note-weekly",
     note_type_name: "Business Review",
+    current_note_id: "note-current",
     cadence_unit: "week",
     cadence_count: 1,
     agenda: [{ id: "review", name: "Review", position: 0, binding: "goals" }],
     available_note_types: [
-      { id: "note-weekly", name: "Business Review", cadence_unit: "week", cadence_count: 1, enabled: true },
+      { id: "note-weekly", name: "Business Review", cadence_unit: "week", cadence_count: 1, enabled: true, current_note_id: "note-current" },
       { id: "note-monthly", name: "Monthly Review", cadence_unit: "month", cadence_count: 1, enabled: true },
     ],
   } as MeetingConfig,
@@ -41,6 +42,7 @@ describe("MeetingsPage", () => {
 
   it("takes its timing from the selected recurring note instead of separate cadence controls", () => {
     render(<MeetingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Cycle setup" }));
 
     expect(screen.getByText("Every week")).toBeInTheDocument();
     expect(screen.getByText(/Timing is controlled by Business Review in recurring Notes/)).toBeInTheDocument();
@@ -50,15 +52,22 @@ describe("MeetingsPage", () => {
 
   it("saves the cadence of a newly selected recurring note", () => {
     render(<MeetingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Cycle setup" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Recurring note type" }));
     fireEvent.click(screen.getByRole("option", { name: /Monthly Review/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Save meeting" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Cycle setup" }));
 
     expect(state.save).toHaveBeenCalledWith(expect.objectContaining({
       note_type_id: "note-monthly",
       cadence_unit: "month",
       cadence_count: 1,
     }));
+  });
+
+  it("renders the canonical current Note as the primary Cycle surface", () => {
+    render(<MeetingsPage renderCurrentNote={(noteId) => <div>Canonical Note {noteId}</div>} />);
+    expect(screen.getByText("Canonical Note note-current")).toBeInTheDocument();
+    expect(screen.queryByText("Recurring note type")).not.toBeInTheDocument();
   });
 });
