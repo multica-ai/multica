@@ -35,6 +35,8 @@ func TestDedicatedVerifierImageRunsUnprivilegedBesideInternalTargets(t *testing.
 		"./cmd/browser-verifier-runner",
 		"agent-browser@0.26.0",
 		"AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser",
+		"AGENT_BROWSER_ARGS=--no-sandbox,--disable-dev-shm-usage",
+		"AGENT_BROWSER_PROXY_BYPASS=*.internal,localhost,127.0.0.1",
 		"USER app",
 	} {
 		if !strings.Contains(content, required) {
