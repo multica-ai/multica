@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, FlaskConical, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Copy, FlaskConical, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { cerebroWorkflowsListOptions } from "@multica/cerebro-workflows/core";
@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { createEval, createEvalBinding, deleteEval, deleteEvalBinding, updateEval } from "../api";
 import { evalBindingsOptions, evalKeys, evalRunsOptions, evalsListOptions } from "../queries";
 import { buildWriteInput, EMPTY_FORM, formFromEval, GRADER_MATCHES, type DraftTask } from "./form";
+import { EVAL_TEMPLATES, duplicateForm } from "./templates";
 import { RunDetail } from "./run-detail";
 import type { CerebroEval } from "../types";
 
@@ -44,6 +45,7 @@ export function EvalsPage() {
   const closeForm = () => { setForm(EMPTY_FORM); setEditing(null); setShowCreate(false); };
   const startCreate = () => { setForm(EMPTY_FORM); setEditing(null); setShowCreate(true); };
   const startEdit = (item: CerebroEval) => { setForm(formFromEval(item)); setEditing(item); setShowCreate(true); };
+  const startDuplicate = (item: CerebroEval) => { setForm(duplicateForm(item)); setEditing(null); setShowCreate(true); };
 
   const addTask = () => setForm((f) => ({ ...f, tasks: [...f.tasks, { id: crypto.randomUUID(), situation: "", expected: "", critical: false }] }));
   const updateTask = (id: string, patch: Partial<DraftTask>) => setForm((f) => ({ ...f, tasks: f.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
@@ -85,6 +87,13 @@ export function EvalsPage() {
         <div className="mx-auto flex max-w-6xl flex-col gap-6">
           {showCreate && <form onSubmit={submit} className="grid gap-4 rounded-lg border bg-card p-4 md:grid-cols-2">
             <div className="md:col-span-2"><h2 className="text-sm font-semibold">{editing ? `Edit ${editing.title}` : "Create draft eval"}</h2><p className="text-xs text-muted-foreground">{editing ? "Change the eval — tasks, grader, and pass rate are all editable here." : "Add the tasks, pick a grader, and set the pass rate. Saved as a draft you can activate later."}</p></div>
+            {!editing && <div className="md:col-span-2 flex flex-col gap-2 rounded-md border border-dashed p-3">
+              <p className="text-[11px] text-muted-foreground">Start from a template — it fills in tasks, grader and pass rate, which you can then tailor. Or keep the blank form below.</p>
+              <div className="flex flex-wrap gap-2">
+                {EVAL_TEMPLATES.map((template) => <Button key={template.id} type="button" size="sm" variant="outline" title={template.description} onClick={() => setForm(template.build())}>{template.name}</Button>)}
+                <Button type="button" size="sm" variant="ghost" onClick={() => setForm(EMPTY_FORM)}>Blank</Button>
+              </div>
+            </div>}
             <Field label="Key"><Input required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} placeholder="customer-service-quality" /></Field>
             <Field label="Version"><Input required value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })} /></Field>
             <Field label="Title"><Input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
@@ -130,7 +139,7 @@ export function EvalsPage() {
                 <TableCell className="text-xs"><div>{String(item.target.kind ?? "Unknown")}</div><div className="max-w-[220px] truncate text-muted-foreground">{String(item.target.locator ?? "")}</div></TableCell>
                 <TableCell className="font-mono text-xs">{item.version}</TableCell><TableCell><Badge variant={item.status === "active" ? "default" : "secondary"}>{item.status}</Badge></TableCell>
                 <TableCell className="max-w-[220px] truncate text-xs">{String(item.source.path ?? item.source.repository ?? "Not pinned")}</TableCell>
-                <TableCell className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="ghost" onClick={() => { setSelectedEvalId(item.id); setSelectedRunId(""); }}>Runs</Button><Button size="icon-sm" variant="ghost" aria-label={`Edit ${item.title}`} onClick={() => startEdit(item)}><Pencil className="size-4" /></Button><Button size="icon-sm" variant="ghost" aria-label={`Delete ${item.title}`} onClick={() => confirm(`Delete eval "${item.title}"?`) && deleteMutation.mutate(item.id)}><Trash2 className="size-4 text-destructive" /></Button></div></TableCell>
+                <TableCell className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="ghost" onClick={() => { setSelectedEvalId(item.id); setSelectedRunId(""); }}>Runs</Button><Button size="icon-sm" variant="ghost" aria-label={`Edit ${item.title}`} onClick={() => startEdit(item)}><Pencil className="size-4" /></Button><Button size="icon-sm" variant="ghost" aria-label={`Duplicate ${item.title}`} onClick={() => startDuplicate(item)}><Copy className="size-4" /></Button><Button size="icon-sm" variant="ghost" aria-label={`Delete ${item.title}`} onClick={() => confirm(`Delete eval "${item.title}"?`) && deleteMutation.mutate(item.id)}><Trash2 className="size-4 text-destructive" /></Button></div></TableCell>
               </TableRow>)}
             </TableBody></Table>
           </section>
