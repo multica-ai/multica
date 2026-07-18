@@ -93,6 +93,19 @@ type Commander interface {
 
 type ExecCommander struct{}
 
+const agentBrowserDefaultTimeout = 60 * time.Second
+
+func agentBrowserCommandEnv(environ []string) []string {
+	const timeoutKey = "AGENT_BROWSER_DEFAULT_TIMEOUT="
+	env := make([]string, 0, len(environ)+1)
+	for _, entry := range environ {
+		if !strings.HasPrefix(entry, timeoutKey) {
+			env = append(env, entry)
+		}
+	}
+	return append(env, fmt.Sprintf("%s%d", timeoutKey, agentBrowserDefaultTimeout.Milliseconds()))
+}
+
 type commandFailureKind string
 
 const (
@@ -156,6 +169,7 @@ func safeCommandFailureKind(err error) commandFailureKind {
 
 func (ExecCommander) Run(ctx context.Context, stdin string, args ...string) ([]byte, error) {
 	command := exec.CommandContext(ctx, "agent-browser", args...)
+	command.Env = agentBrowserCommandEnv(os.Environ())
 	if stdin != "" {
 		command.Stdin = strings.NewReader(stdin)
 	}
@@ -219,7 +233,7 @@ type stageObservation struct {
 
 func NewRunner(commander Commander) *Runner {
 	return &Runner{
-		commander: commander, openTimeout: 60 * time.Second,
+		commander: commander, openTimeout: 75 * time.Second,
 		stageTimeout: 30 * time.Second, cleanupTimeout: 30 * time.Second,
 		observeStage: func(observation stageObservation) {
 			log.Printf("internal browser diagnostic app=%s stage=%s duration_ms=%d exit_class=%s target_host=%s",

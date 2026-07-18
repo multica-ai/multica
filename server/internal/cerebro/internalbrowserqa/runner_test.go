@@ -383,6 +383,27 @@ func TestClassifyCommandFailure(t *testing.T) {
 	}
 }
 
+func TestAgentBrowserCommandEnvOverridesShortDefaultTimeout(t *testing.T) {
+	env := agentBrowserCommandEnv([]string{
+		"PATH=/usr/bin",
+		"AGENT_BROWSER_DEFAULT_TIMEOUT=25000",
+	})
+
+	var timeoutValues []string
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "AGENT_BROWSER_DEFAULT_TIMEOUT=") {
+			timeoutValues = append(timeoutValues, entry)
+		}
+	}
+	want := "AGENT_BROWSER_DEFAULT_TIMEOUT=60000"
+	if len(timeoutValues) != 1 || timeoutValues[0] != want {
+		t.Fatalf("timeout env = %v, want [%s]", timeoutValues, want)
+	}
+	if runner := NewRunner(&recordingCommander{}); runner.openTimeout <= agentBrowserDefaultTimeout {
+		t.Fatalf("open timeout = %s, must exceed action timeout %s", runner.openTimeout, agentBrowserDefaultTimeout)
+	}
+}
+
 func TestRunnerBoundsStagesAndCleanup(t *testing.T) {
 	runner := &Runner{
 		commander:      blockingCommander{},
