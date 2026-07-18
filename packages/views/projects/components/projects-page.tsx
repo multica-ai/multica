@@ -2,7 +2,7 @@
 
 // CEREBRO-PATCH(projects-page-cerebro): cerebro modification of upstream file
 
-import { useCallback, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -31,8 +31,8 @@ import {
   type ProjectListFilters,
   type ProjectSortField,
 } from "@multica/core/projects";
-// CEREBRO-PATCH(projects-tree-table-mount): FIR-3425 fork-owned tree-table rows.
-import { CerebroProjectTreeRows } from "@multica/cerebro-projects/views";
+// CEREBRO-PATCH(projects-cards-mount): FIR-3425 fork-owned table and card grouping.
+import { CerebroProjectCards, CerebroProjectTreeRows } from "@multica/cerebro-projects/views";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { workspaceSprintsOptions } from "@multica/cerebro-sprints/core";
 import {
@@ -583,10 +583,12 @@ function ProjectCard({
   project,
   pinned,
   canDelete,
+  children,
 }: {
   project: Project;
   pinned: boolean;
   canDelete: boolean;
+  children?: ReactNode;
 }) {
   const { t } = useT("projects");
   const wsPaths = useWorkspacePaths();
@@ -644,6 +646,8 @@ function ProjectCard({
           </span>
         )}
       </div>
+
+      {children}
 
       <div className="mt-0 flex items-center justify-between border-t px-3 pb-3 pt-2">
         <ProjectLeadPicker
@@ -1295,20 +1299,48 @@ export function ProjectsPage() {
               </ListGrid>
             </div>
           ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-4">
-              <div
-                className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
-                style={{ paddingBottom: LIST_GRID_BOTTOM_CLEARANCE }}
-              >
-                {visible.map((project) => (
-                  <ProjectCard
-                    key={project.id}
-                    project={project}
-                    pinned={pinnedProjectIds.has(project.id)}
-                    canDelete={isWorkspaceAdmin}
-                  />
-                ))}
-              </div>
+            <div
+              className="min-h-0 flex-1 overflow-y-auto px-5 pt-4"
+              style={{ paddingBottom: LIST_GRID_BOTTOM_CLEARANCE }}
+            >
+              {/* CEREBRO-PATCH(projects-cards-mount): feature-off preserves the upstream flat cards. */}
+              {projectsTreeEnabled ? (
+                <CerebroProjectCards
+                  workspaceId={wsId}
+                  tree={projectTree}
+                  sprints={sprintsEnabled ? workspaceSprints.sprints : []}
+                  visibleProjectIds={visible.map((project) => project.id)}
+                  search={search}
+                  filters={filters}
+                  sortField={sortField}
+                  sortDirection={sortDirection}
+                  renderProjectCard={({ project, details }) => (
+                    <ProjectCard
+                      project={project}
+                      pinned={pinnedProjectIds.has(project.id)}
+                      canDelete={isWorkspaceAdmin}
+                    >
+                      {details}
+                    </ProjectCard>
+                  )}
+                  renderSprintLink={(sprint, children) => (
+                    <AppLink href={wsPaths.sprintDetail(sprint.id)} className="min-w-0">
+                      {children}
+                    </AppLink>
+                  )}
+                />
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {visible.map((project) => (
+                    <ProjectCard
+                      key={project.id}
+                      project={project}
+                      pinned={pinnedProjectIds.has(project.id)}
+                      canDelete={isWorkspaceAdmin}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

@@ -1671,11 +1671,12 @@ The runtime-image, entrypoint, fallback-provider helpers, canary, and cloud runb
 
 Approved by Jesper Hvejsel on FIR-3212 ("Vi skal kun lave agent configuration fuld scope"), 2026-07-17. Standing FIR-3212 approval for marked patches recorded 2026-07-15.
 
-## FIR-3425 — Projects tree table
+## FIR-3425 — Projects tree table and cards
 
 | Patch | Location | Reason |
 |---|---|---|
 | `projects-tree-table-mount` | `packages/views/package.json`; `packages/views/projects/components/projects-page.tsx` | Mount the feature-flagged fork-owned project tree and sprint rows while preserving the existing flat table byte-for-byte when the flag is off. Tree state and presentation remain in `packages/cerebro-projects`. |
+| `projects-cards-mount` | `packages/views/projects/components/projects-page.tsx` | Mount the feature-flagged fork-owned grouped Cards view and its optional project-card detail slot while preserving the existing flat Cards view when the flag is off. Grouping, section state, paths, and sprint summaries remain in `packages/cerebro-projects`. |
 
 Approved plan and delivery gate are attached to FIR-3425, 2026-07-17.
 
