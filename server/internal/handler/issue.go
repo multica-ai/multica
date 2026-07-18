@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -2381,6 +2382,27 @@ func duplicateIssueMessage(issue IssueResponse) string {
 	return issueguard.DuplicateMessage(issue.Identifier, issue.Title, issue.Status)
 }
 
+// writeParentStateConflict translates the database-owned hierarchy invariant
+// into the stable public API contract. The database remains the single source
+// of truth for HTTP, workers, integrations, and imports; this helper only
+// shapes its safe, aggregate error for HTTP clients.
+func writeParentStateConflict(w http.ResponseWriter, err error) bool {
+	conflict, ok := issueguard.ParentStateConflictFrom(err)
+	if !ok {
+		return false
+	}
+	payload := map[string]any{
+		"code":            conflict.Code,
+		"error":           issueguard.ParentStateConflictMessage(conflict.Code),
+		"parent_issue_id": conflict.ParentIssueID,
+	}
+	if conflict.IncompleteDescendantCount != nil {
+		payload["incomplete_descendant_count"] = *conflict.IncompleteDescendantCount
+	}
+	writeJSON(w, http.StatusConflict, payload)
+	return true
+}
+
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	var req CreateIssueRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -2618,6 +2640,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			"error": duplicateIssueMessage(existing),
 			"issue": existing,
 		})
+		return
+	}
+	if writeParentStateConflict(w, err) {
 		return
 	}
 	if errors.Is(err, service.ErrParentIssueNotFound) {
@@ -2866,6 +2891,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	issue, err := h.Queries.UpdateIssue(r.Context(), params)
 	if err != nil {
+		if writeParentStateConflict(w, err) {
+			return
+		}
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
 		return
@@ -3179,6 +3207,91 @@ type BatchUpdateIssuesRequest struct {
 	Updates  UpdateIssueRequest `json:"updates"`
 }
 
+type batchUpdatedIssue struct {
+	issue     db.Issue
+	prevIssue db.Issue
+}
+
+// orderBatchIssueIDsForStatus makes a uniform status update independent of
+// request order for issues that belong to the same selected tree. Terminal
+// transitions must visit descendants first; active transitions must visit
+// ancestors first. The database trigger remains the authority for concurrent
+// hierarchy changes, so an unavailable or out-of-selection ancestor simply
+// keeps its stable request order here.
+func (h *Handler) orderBatchIssueIDsForStatus(ctx context.Context, workspaceID pgtype.UUID, issueIDs []string, terminal bool) []string {
+	type orderedIssue struct {
+		issueID     string
+		canonicalID string
+		depth       int
+		known       bool
+	}
+
+	ordered := make([]orderedIssue, len(issueIDs))
+	issuesByID := make(map[string]db.Issue, len(issueIDs))
+	for index, issueID := range issueIDs {
+		ordered[index].issueID = issueID
+		issueUUID, err := util.ParseUUID(issueID)
+		if err != nil {
+			continue
+		}
+		issue, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+			ID:          issueUUID,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			continue
+		}
+		ordered[index].canonicalID = uuidToString(issue.ID)
+		issuesByID[ordered[index].canonicalID] = issue
+		ordered[index].known = true
+	}
+
+	var depthFor func(string, map[string]bool) int
+	depthFor = func(issueID string, path map[string]bool) int {
+		issue, ok := issuesByID[issueID]
+		if !ok || !issue.ParentIssueID.Valid {
+			return 0
+		}
+		parentID := uuidToString(issue.ParentIssueID)
+		if path[parentID] {
+			return 0
+		}
+		if _, ok := issuesByID[parentID]; !ok {
+			return 0
+		}
+		path[parentID] = true
+		defer delete(path, parentID)
+		return 1 + depthFor(parentID, path)
+	}
+	for index := range ordered {
+		if ordered[index].known {
+			ordered[index].depth = depthFor(ordered[index].canonicalID, map[string]bool{ordered[index].canonicalID: true})
+		}
+	}
+
+	sort.SliceStable(ordered, func(left, right int) bool {
+		if ordered[left].known != ordered[right].known {
+			// Unknown or stale selections are skipped by the existing batch
+			// contract. Keep them after known rows so they cannot break the
+			// strict tree ordering of a valid parent/child selection.
+			return ordered[left].known
+		}
+		if !ordered[left].known {
+			return false
+		}
+		if terminal {
+			return ordered[left].depth > ordered[right].depth
+		}
+		return ordered[left].depth < ordered[right].depth
+	})
+
+	result := make([]string, len(ordered))
+	for index, issue := range ordered {
+		result[index] = issue.issueID
+	}
+	return result
+}
+
 func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -3251,17 +3364,34 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	orderedIssueIDs := req.IssueIDs
+	if req.Updates.Status != nil {
+		orderedIssueIDs = h.orderBatchIssueIDsForStatus(r.Context(), wsUUID, req.IssueIDs, isTerminalChildStatus(*req.Updates.Status))
+	}
+
+	// A parent-state conflict must reject the whole batch. Keep every row write
+	// in one transaction and defer event/automation side effects until after the
+	// commit, so a 409 cannot leave earlier batch entries visible.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start batch transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
 	updated := 0
+	updatedIssues := make([]batchUpdatedIssue, 0, len(orderedIssueIDs))
 	// Children that transitioned into a terminal status this batch, collected so
 	// the parent/stage notification is evaluated once against the final state
 	// after the loop (MUL-4155) rather than per-child mid-batch.
 	var childDoneCompleted []db.Issue
-	for _, issueID := range req.IssueIDs {
+	for _, issueID := range orderedIssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
 			continue
 		}
-		prevIssue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+		prevIssue, err := qtx.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 			ID:          issueUUID,
 			WorkspaceID: wsUUID,
 		})
@@ -3347,7 +3477,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				// Validate parent exists in the same workspace.
-				if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+				if _, err := qtx.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 					ID:          newParentID,
 					WorkspaceID: prevIssue.WorkspaceID,
 				}); err != nil {
@@ -3357,7 +3487,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				cycleDetected := false
 				cursor := newParentID
 				for depth := 0; depth < 10; depth++ {
-					ancestor, err := h.Queries.GetIssue(r.Context(), cursor)
+					ancestor, err := qtx.GetIssue(r.Context(), cursor)
 					if err != nil || !ancestor.ParentIssueID.Valid {
 						break
 					}
@@ -3407,16 +3537,30 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		issue, err := h.Queries.UpdateIssue(r.Context(), params)
+		issue, err := qtx.UpdateIssue(r.Context(), params)
 		if err != nil {
+			if writeParentStateConflict(w, err) {
+				return
+			}
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
-			continue
+			writeError(w, http.StatusInternalServerError, "failed to update issue in batch")
+			return
 		}
 
+		updatedIssues = append(updatedIssues, batchUpdatedIssue{issue: issue, prevIssue: prevIssue})
+		updated++
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit batch update")
+		return
+	}
+
+	for _, updatedIssue := range updatedIssues {
+		issue := updatedIssue.issue
+		prevIssue := updatedIssue.prevIssue
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
-
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
 		statusChanged := req.Updates.Status != nil && prevIssue.Status != issue.Status
@@ -3431,12 +3575,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			"project_changed":  projectChanged,
 		})
 
-		// Reassignment does not cancel existing tasks (#4963 / MUL-4113) —
-		// mirrors UpdateIssue. See that handler for the rationale.
-		//
-		// Same single predicate as UpdateIssue — batch must not grow its own
-		// copy of the enqueue rule (the historical source of four-entry-point
-		// drift, MUL-3375). suppress_run applies batch-wide.
 		if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
 			service.IssueTriggerInput{
 				Issue:           issue,
@@ -3449,23 +3587,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.Updates.HandoffNote)
 		}
 
-		// No status change — not even → cancelled — cancels active tasks here,
-		// mirroring UpdateIssue (MUL-4465). See that handler for the rationale.
-
-		// Platform-driven parent notification, mirrored from UpdateIssue
-		// (MUL-2538) but DEFERRED to after the loop. Evaluating the stage
-		// barrier here, per-child, would read a mid-batch sibling snapshot and
-		// fire a stale "advance Stage N+1" wake when one batch closes several
-		// stages at once (MUL-4155). Collect the terminal transitions and let
-		// notifyParentsOfBatchChildDone below evaluate each parent once against
-		// the batch's final committed state. Same transition guard as
-		// notifyParentOfChildDone: a non-terminal -> terminal move on a child.
 		if statusChanged && issue.ParentIssueID.Valid &&
 			!isTerminalChildStatus(prevIssue.Status) && isTerminalChildStatus(issue.Status) {
 			childDoneCompleted = append(childDoneCompleted, issue)
 		}
-
-		updated++
 	}
 
 	// Aggregate parent/stage notification over the whole batch's final state so

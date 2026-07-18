@@ -23,6 +23,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -1367,6 +1368,15 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
+		if conflict, ok := issueguard.ParentStateConflictFrom(err); ok {
+			slog.Warn("github: automatic issue completion rejected by parent-state constraint",
+				"issue_id", issue.ID,
+				"workspace_id", issue.WorkspaceID,
+				"parent_issue_id", conflict.ParentIssueID,
+				"conflict_code", conflict.Code,
+			)
+			return
+		}
 		slog.Warn("github: advance issue to done failed", "err", err)
 		return
 	}
