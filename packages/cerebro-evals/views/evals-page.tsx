@@ -17,9 +17,11 @@ import { createEval, createEvalBinding, deleteEval, deleteEvalBinding, updateEva
 import { evalBindingsOptions, evalKeys, evalRunsOptions, evalsListOptions } from "../queries";
 import { buildWriteInput, EMPTY_FORM, formFromEval, GRADER_MATCHES, type DraftTask } from "./form";
 import { EVAL_TEMPLATES, duplicateForm } from "./templates";
+import { statusInput } from "./lifecycle";
 import { formatCost, formatDuration } from "../format";
 import { RunDetail } from "./run-detail";
-import type { CerebroEval } from "../types";
+import { EvalDetail, type EvalDetailTab } from "./eval-detail";
+import type { CerebroEval, EvalStatus } from "../types";
 
 export function EvalsPage() {
   const workflowsEnabled = useFeatureFlag("cerebro_workflows");
@@ -36,12 +38,18 @@ export function EvalsPage() {
   const [bindingWorkflowId, setBindingWorkflowId] = useState("");
   const [selectedEvalId, setSelectedEvalId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
+  const [detailEvalId, setDetailEvalId] = useState("");
+  const [detailTab, setDetailTab] = useState<EvalDetailTab>("overview");
 
   const evalsQuery = useQuery(evalsListOptions(workspaceId));
   const workflowsQuery = useQuery(cerebroWorkflowsListOptions(workspaceId));
   const bindingsQuery = useQuery(evalBindingsOptions(workspaceId));
   const runsQuery = useQuery(evalRunsOptions(workspaceId, selectedEvalId));
   const selectedRun = useMemo(() => (runsQuery.data ?? []).find((run) => run.id === selectedRunId) ?? null, [runsQuery.data, selectedRunId]);
+  const detailItem = useMemo(() => (detailEvalId ? (evalsQuery.data ?? []).find((item) => item.id === detailEvalId) ?? null : null), [evalsQuery.data, detailEvalId]);
+
+  const openDetail = (id: string, tab: EvalDetailTab = "overview") => { setDetailEvalId(id); setDetailTab(tab); setSelectedEvalId(id); setSelectedRunId(""); closeForm(); };
+  const closeDetail = () => { setDetailEvalId(""); setSelectedRunId(""); };
 
   const closeForm = () => { setForm(EMPTY_FORM); setEditing(null); setShowCreate(false); };
   const startCreate = () => { setForm(EMPTY_FORM); setEditing(null); setShowCreate(true); };
@@ -60,6 +68,10 @@ export function EvalsPage() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: evalKeys.list(workspaceId) }); closeForm(); },
   });
   const deleteMutation = useMutation({ mutationFn: deleteEval, onSuccess: () => queryClient.invalidateQueries({ queryKey: evalKeys.list(workspaceId) }) });
+  const statusMutation = useMutation({
+    mutationFn: ({ item, to }: { item: CerebroEval; to: EvalStatus }) => updateEval(item.id, statusInput(item, to)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: evalKeys.list(workspaceId) }),
+  });
   const bindMutation = useMutation({
     mutationFn: () => createEvalBinding({ workflow_id: bindingWorkflowId, eval_id: bindingEvalId, phase: "delivery", blocking: true }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: evalKeys.bindings(workspaceId) }); setBindingEvalId(""); setBindingWorkflowId(""); },
@@ -82,10 +94,32 @@ export function EvalsPage() {
           <Button size="icon-sm" variant="ghost" aria-label="Back to workflows" onClick={() => navigation.push(`/${workspace.slug}/workflows`)}><ArrowLeft /></Button>
           <div><h1 className="text-sm font-semibold">Evals</h1><p className="text-[11px] text-muted-foreground">Versioned quality contracts and workflow gates</p></div>
         </div>
-        <Button size="sm" onClick={() => (showCreate ? closeForm() : startCreate())}><Plus className="size-4" />New eval</Button>
+        <Button size="sm" onClick={() => { closeDetail(); showCreate ? closeForm() : startCreate(); }}><Plus className="size-4" />New eval</Button>
       </PageHeader>
       <div className="flex-1 overflow-y-auto p-6">
         <div className="mx-auto flex max-w-6xl flex-col gap-6">
+          {detailItem ? <EvalDetail
+            item={detailItem}
+            versions={evalsQuery.data ?? []}
+            initialTab={detailTab}
+            runs={runsQuery.data ?? []}
+            runsLoading={runsQuery.isLoading}
+            runsError={runsQuery.isError}
+            selectedRunId={selectedRunId}
+            selectedRun={selectedRun}
+            onSelectRun={setSelectedRunId}
+            bindings={bindingsQuery.data ?? []}
+            workflows={workflowsQuery.data?.workflows ?? []}
+            onEdit={() => { closeDetail(); startEdit(detailItem); }}
+            onDuplicate={() => { closeDetail(); startDuplicate(detailItem); }}
+            onStatusChange={(to) => statusMutation.mutate({ item: detailItem, to })}
+            statusPending={statusMutation.isPending}
+            statusError={statusMutation.isError}
+            onDelete={() => { deleteMutation.mutate(detailItem.id); closeDetail(); }}
+            onClose={closeDetail}
+            onOpenVersion={(id) => openDetail(id)}
+            onOpenEvidence={(artifactId) => navigation.push(`/${workspace.slug}/documents/${artifactId}`)}
+          /> : <>
           {showCreate && <form onSubmit={submit} className="grid gap-4 rounded-lg border bg-card p-4 md:grid-cols-2">
             <div className="md:col-span-2"><h2 className="text-sm font-semibold">{editing ? `Edit ${editing.title}` : "Create draft eval"}</h2><p className="text-xs text-muted-foreground">{editing ? "Change the eval — tasks, grader, and pass rate are all editable here." : "Add the tasks, pick a grader, and set the pass rate. Saved as a draft you can activate later."}</p></div>
             {!editing && <div className="md:col-span-2 flex flex-col gap-2 rounded-md border border-dashed p-3">
@@ -136,11 +170,11 @@ export function EvalsPage() {
             <Table><TableHeader><TableRow><TableHead>Eval</TableHead><TableHead>Target</TableHead><TableHead>Version</TableHead><TableHead>Status</TableHead><TableHead>Source</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader><TableBody>
               {filtered.length === 0 && !evalsQuery.isLoading && <TableRow><TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground"><FlaskConical className="mx-auto mb-2 size-5" />No evals found.</TableCell></TableRow>}
               {filtered.map((item: CerebroEval) => <TableRow key={item.id}>
-                <TableCell><div className="font-medium">{item.title}</div><div className="text-xs text-muted-foreground">{item.key}</div><div className="mt-1 max-w-md text-xs text-muted-foreground">{item.objective}</div></TableCell>
+                <TableCell><button type="button" className="text-left font-medium hover:underline" onClick={() => openDetail(item.id)}>{item.title}</button><div className="text-xs text-muted-foreground">{item.key}</div><div className="mt-1 max-w-md text-xs text-muted-foreground">{item.objective}</div></TableCell>
                 <TableCell className="text-xs"><div>{String(item.target.kind ?? "Unknown")}</div><div className="max-w-[220px] truncate text-muted-foreground">{String(item.target.locator ?? "")}</div></TableCell>
                 <TableCell className="font-mono text-xs">{item.version}</TableCell><TableCell><Badge variant={item.status === "active" ? "default" : "secondary"}>{item.status}</Badge></TableCell>
                 <TableCell className="max-w-[220px] truncate text-xs">{String(item.source.path ?? item.source.repository ?? "Not pinned")}</TableCell>
-                <TableCell className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="ghost" onClick={() => { setSelectedEvalId(item.id); setSelectedRunId(""); }}>Runs</Button><Button size="icon-sm" variant="ghost" aria-label={`Edit ${item.title}`} onClick={() => startEdit(item)}><Pencil className="size-4" /></Button><Button size="icon-sm" variant="ghost" aria-label={`Duplicate ${item.title}`} onClick={() => startDuplicate(item)}><Copy className="size-4" /></Button><Button size="icon-sm" variant="ghost" aria-label={`Delete ${item.title}`} onClick={() => confirm(`Delete eval "${item.title}"?`) && deleteMutation.mutate(item.id)}><Trash2 className="size-4 text-destructive" /></Button></div></TableCell>
+                <TableCell className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="ghost" onClick={() => openDetail(item.id, "runs")}>Runs</Button><Button size="icon-sm" variant="ghost" aria-label={`Edit ${item.title}`} onClick={() => startEdit(item)}><Pencil className="size-4" /></Button><Button size="icon-sm" variant="ghost" aria-label={`Duplicate ${item.title}`} onClick={() => startDuplicate(item)}><Copy className="size-4" /></Button><Button size="icon-sm" variant="ghost" aria-label={`Delete ${item.title}`} onClick={() => confirm(`Delete eval "${item.title}"?`) && deleteMutation.mutate(item.id)}><Trash2 className="size-4 text-destructive" /></Button></div></TableCell>
               </TableRow>)}
             </TableBody></Table>
           </section>
@@ -164,6 +198,7 @@ export function EvalsPage() {
             </div>
             <div className="flex flex-col divide-y rounded-md border">{(bindingsQuery.data ?? []).map((binding) => <div key={binding.id} className="flex items-center justify-between gap-3 p-3"><div><span className="text-sm font-medium">{binding.eval_title}</span><span className="ml-2 font-mono text-xs text-muted-foreground">{binding.eval_version}</span><div className="text-xs text-muted-foreground">{binding.phase} · {binding.blocking ? "Blocking" : "Advisory"} · workflow {binding.workflow_id.slice(0, 8)}</div></div><Button size="sm" variant="ghost" onClick={() => unbindMutation.mutate(binding.id)}>Remove</Button></div>)}{(bindingsQuery.data ?? []).length === 0 && <p className="p-4 text-sm text-muted-foreground">No eval gates are bound yet.</p>}</div>
           </section>
+          </>}
         </div>
       </div>
     </div>
