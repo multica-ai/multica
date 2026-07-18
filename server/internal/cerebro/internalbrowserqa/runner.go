@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -203,6 +204,7 @@ type Runner struct {
 	openTimeout    time.Duration
 	stageTimeout   time.Duration
 	cleanupTimeout time.Duration
+	verificationMu sync.Mutex
 }
 
 func NewRunner(commander Commander) *Runner {
@@ -273,6 +275,12 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	if target.SessionCookie != (credential.SessionToken != "") {
 		return Result{}, fmt.Errorf("target session credential does not match its auth mode")
 	}
+
+	// agent-browser launches a process per session, but concurrent first opens
+	// inside one verifier container can race and leave one launch waiting forever.
+	// Keep the dedicated runner single-flight so every session gets a clean start.
+	r.verificationMu.Lock()
+	defer r.verificationMu.Unlock()
 
 	session, err := sessionName()
 	if err != nil {

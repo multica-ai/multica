@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os/exec"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -25,6 +27,11 @@ type blockingCommander struct{}
 
 type classifiedFailingCommander struct {
 	kind commandFailureKind
+}
+
+type concurrentProbeCommander struct {
+	active    atomic.Int32
+	maxActive atomic.Int32
 }
 
 func (failingCommander) Run(_ context.Context, _ string, _ ...string) ([]byte, error) {
@@ -71,6 +78,29 @@ func (blockingCommander) CaptureScreenshot(ctx context.Context, _ ...string) ([]
 
 func (classifiedFailingCommander) CaptureScreenshot(_ context.Context, _ ...string) ([]byte, error) {
 	return nil, errors.New("unused")
+}
+
+func (c *concurrentProbeCommander) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
+	active := c.active.Add(1)
+	for max := c.maxActive.Load(); active > max && !c.maxActive.CompareAndSwap(max, active); max = c.maxActive.Load() {
+	}
+	defer c.active.Add(-1)
+	time.Sleep(5 * time.Millisecond)
+
+	switch {
+	case len(args) > 0 && args[len(args)-1] == "snapshot":
+		return []byte("Desk\nAnalytics\n"), nil
+	case len(args) > 0 && args[len(args)-1] == "url":
+		return []byte("http://customer-service.internal:3456/desk\n"), nil
+	case len(args) > 0 && args[len(args)-1] == "errors":
+		return []byte("[]\n"), nil
+	default:
+		return nil, nil
+	}
+}
+
+func (c *concurrentProbeCommander) CaptureScreenshot(_ context.Context, _ ...string) ([]byte, error) {
+	return append([]byte(nil), pngSignature...), nil
 }
 
 func TestTargetForUsesOnlyInternalAllowlist(t *testing.T) {
@@ -273,6 +303,36 @@ func TestRunnerReturnsSafeOpenFailureClass(t *testing.T) {
 	_, err := NewRunner(classifiedFailingCommander{kind: commandFailureDNS}).Verify(context.Background(), "customer-service", Credential{})
 	if err == nil || err.Error() != "internal browser stage open dns failed" {
 		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestRunnerSerializesConcurrentVerifications(t *testing.T) {
+	commander := &concurrentProbeCommander{}
+	runner := NewRunner(commander)
+	start := make(chan struct{})
+	errors := make(chan error, 4)
+	var group sync.WaitGroup
+
+	for range 4 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			_, err := runner.Verify(context.Background(), "customer-service", Credential{})
+			errors <- err
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(errors)
+
+	for err := range errors {
+		if err != nil {
+			t.Fatalf("Verify: %v", err)
+		}
+	}
+	if got := commander.maxActive.Load(); got != 1 {
+		t.Fatalf("concurrent browser commands = %d, want 1", got)
 	}
 }
 
