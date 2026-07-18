@@ -45,4 +45,26 @@ describe("RocksTimeline", () => {
     render(<RocksTimeline rocks={[]} periods={[]} terminology={terminology} groupBy="owner" onSelect={vi.fn()} />);
     expect(screen.getByText(/No periods defined yet/)).toBeInTheDocument();
   });
+
+  it("renames a rock inline from the timeline card", () => {
+    const onRename = vi.fn();
+    render(<RocksTimeline rocks={[baseRock]} periods={periods} terminology={terminology} groupBy="owner" onSelect={vi.fn()} onRename={onRename} />);
+    fireEvent.click(screen.getByRole("button", { name: "Rename Cut fulfilment cost 12%" }));
+    const input = screen.getByRole("textbox", { name: "Cut fulfilment cost 12% new title" });
+    fireEvent.change(input, { target: { value: "Cut fulfilment cost 15%" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onRename).toHaveBeenCalledWith(baseRock, "Cut fulfilment cost 15%");
+  });
+
+  it("adds a new rock inline into a period column, inheriting the group's owner", () => {
+    const onCreate = vi.fn();
+    render(<RocksTimeline rocks={[baseRock]} periods={periods} terminology={terminology} groupBy="owner" onSelect={vi.fn()} onCreate={onCreate} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add a rock in Q4 2026 for Sara" }));
+    const input = screen.getByRole("textbox", { name: "New rock in Q4 2026 for Sara" });
+    fireEvent.change(input, { target: { value: "Launch loyalty program" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    const input0 = onCreate.mock.calls[0]?.[0];
+    expect(input0).toMatchObject({ title: "Launch loyalty program", period_id: "period-2", owner_type: "agent", owner_id: "agent-1" });
+  });
 });

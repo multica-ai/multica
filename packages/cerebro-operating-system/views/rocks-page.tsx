@@ -159,7 +159,7 @@ export function RocksPage() {
         {formRock !== undefined && <RockForm wsId={wsId} terminology={terminology} periods={periodList} strategyItems={strategy.data?.strategy_items ?? []} rock={formRock} onSaved={() => setFormRock(undefined)} onCancel={() => setFormRock(undefined)} />}
 
         {view === "timeline" ? (
-          <RocksTimeline rocks={rocks} periods={periodList} terminology={terminology} groupBy={groupBy} onSelect={(id) => setSelectedId(selectedId === id ? undefined : id)} />
+          <RocksTimeline rocks={rocks} periods={periodList} terminology={terminology} groupBy={groupBy} onSelect={(id) => setSelectedId(selectedId === id ? undefined : id)} onRename={(rock, title) => saveInline(rock, { title })} onCreate={(input, reset) => save.mutate({ input }, { onSuccess: reset })} isCreating={save.isPending} />
         ) : (
           <section className="overflow-visible rounded-xl border bg-card">
             <div className="hidden grid-cols-[minmax(16rem,2fr)_minmax(11rem,1fr)_minmax(10rem,1fr)_7rem_minmax(9rem,1fr)] gap-4 border-b bg-muted/40 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground md:grid"><span>{terminology.rock}</span><span>Owner</span><span>Issues &amp; Projects</span><span>Health</span><span>Period</span></div>
