@@ -307,6 +307,51 @@ func (s *Store) BlockingEvalsPassed(ctx context.Context, workflowID, issueID uui
 	return allPassed, err
 }
 
+// FailingAdvisoryEvals returns the advisory (non-blocking) bindings for the
+// requested phase whose latest server-scored run for this workflow+issue is not
+// a pass — the mirror of BlockingEvalsPassed for warn-only bindings. A binding
+// with no run counts as failing (warn on missing evidence). The AdvisoryWarner
+// turns each returned binding into an owner/admin inbox card; it NEVER affects a
+// gate's advance decision.
+func (s *Store) FailingAdvisoryEvals(ctx context.Context, workflowID, issueID uuid.UUID, phase string) ([]Binding, error) {
+	if !validEvalPhase(phase) {
+		return nil, fmt.Errorf("invalid eval binding phase %q", phase)
+	}
+	rows, err := s.pool.Query(ctx, `WITH selected_workflow AS (
+      SELECT COALESCE(generated_from_workflow_id, id) AS id
+      FROM cerebro_workflow WHERE id=$1
+    )
+    SELECT b.id, b.workspace_id, b.workflow_id, b.eval_id, b.phase, b.blocking,
+      b.created_by_id, b.created_at, e.eval_key, e.version, e.title
+    FROM cerebro_workflow_eval_binding b
+    JOIN cerebro_eval e ON e.id=b.eval_id
+    JOIN selected_workflow selected ON selected.id=b.workflow_id
+    LEFT JOIN LATERAL (
+      SELECT r.status FROM cerebro_eval_run r
+      WHERE r.workspace_id=b.workspace_id AND r.workflow_id=b.workflow_id
+        AND r.issue_id=$2 AND r.eval_id=b.eval_id AND r.eval_version=e.version
+      ORDER BY r.created_at DESC LIMIT 1
+    ) latest ON TRUE
+    WHERE b.phase=$3 AND NOT b.blocking
+      AND COALESCE(latest.status, '') <> 'passed'
+    ORDER BY b.created_at DESC`, workflowID, issueID, phase)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]Binding, 0)
+	for rows.Next() {
+		var item Binding
+		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.WorkflowID, &item.EvalID,
+			&item.Phase, &item.Blocking, &item.CreatedByID, &item.CreatedAt, &item.EvalKey,
+			&item.EvalVersion, &item.EvalTitle); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 // LatestRunPassed reports whether the newest run of eval evalID for this issue
 // passed. Fails closed: no run → (false, nil). Used by the eval.gate hook action
 // and the eval_passed hook condition, which key on eval+issue (not workflow).

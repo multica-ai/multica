@@ -3,6 +3,7 @@ package evals
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 
 	"github.com/google/uuid"
 )
@@ -24,12 +25,21 @@ type evalPhaseCarrier interface {
 // bound to the canonical workflow recipe must have a latest passed run for the
 // same issue. Missing results fail closed.
 type GateEvaluator struct {
-	base  BaseGateEvaluator
-	store BlockingEvalStore
+	base   BaseGateEvaluator
+	store  BlockingEvalStore
+	warner *AdvisoryWarner
 }
 
 func NewGateEvaluator(base BaseGateEvaluator, store BlockingEvalStore) *GateEvaluator {
 	return &GateEvaluator{base: base, store: store}
+}
+
+// WithAdvisoryWarner plugs in the warn-only path for advisory (non-blocking)
+// bindings. Optional and nil-safe: without it the gate only enforces blocking
+// evals. The warner NEVER changes the advance decision — its error is logged.
+func (g *GateEvaluator) WithAdvisoryWarner(warner *AdvisoryWarner) *GateEvaluator {
+	g.warner = warner
+	return g
 }
 
 func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate string, value any) (bool, error) {
@@ -45,7 +55,15 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 	if err != nil {
 		return false, err
 	}
-	return g.store.BlockingEvalsPassed(ctx, workflowUUID, issueUUID, evalBindingPhase(value))
+	phase := evalBindingPhase(value)
+	// Advisory bindings only warn — fire before the blocking read, log and
+	// continue on any error so a warn failure can never block the gate.
+	if g.warner != nil {
+		if werr := g.warner.Warn(ctx, workflowUUID, issueUUID, phase); werr != nil {
+			slog.Warn("eval advisory warn failed", "workflow_id", workflowUUID, "issue_id", issueUUID, "phase", phase, "error", werr)
+		}
+	}
+	return g.store.BlockingEvalsPassed(ctx, workflowUUID, issueUUID, phase)
 }
 
 func evalBindingPhase(value any) string {

@@ -358,7 +358,9 @@ func main() {
 	// CEREBRO-PATCH(main-loop-gate-evaluator): FIR-2283 plug the loop delivery-gate evaluator (check_passes) into the engine, with the egress that dispatches enqueued checks to the worker agent's runtime.
 	// CEREBRO-PATCH(main-loop-status-reverter): FIR-2283 v2 — also plug in the status-revert egress, so a gate revising visibly moves the board back to Build/Plan.
 	baseLoopGate := cerebroloops.NewGateEvaluator(pool).WithDispatcher(cerebroloops.NewTaskDispatcher(queries).WithSessionStamper(workflowSessionStamper)).WithStatusSetter(cerebroloops.NewIssueStatusSetter(queries)) // CEREBRO-PATCH(main-eval-gate): FIR-3308 preserve existing checks.
-	workflowSvc.WithGateEvaluator(cerebroevals.NewGateEvaluator(baseLoopGate, cerebroevals.NewStore(pool)))                                                                                                             // CEREBRO-PATCH(main-eval-gate): require bound eval runs after normal checks.
+	evalGateStore := cerebroevals.NewStore(pool)                                                                                                                                                                        // CEREBRO-PATCH(main-eval-advisory): FIR-3496 share one store between the blocking gate and the advisory warner.
+	evalAdvisoryWarner := cerebroevals.NewAdvisoryWarner(evalGateStore, cerebrodb.New(pool), queries, bus)                                                                                                               // CEREBRO-PATCH(main-eval-advisory): FIR-3496 warn owners/admins on failing advisory (non-blocking) eval bindings.
+	workflowSvc.WithGateEvaluator(cerebroevals.NewGateEvaluator(baseLoopGate, evalGateStore).WithAdvisoryWarner(evalAdvisoryWarner))                                                                                     // CEREBRO-PATCH(main-eval-gate): require bound eval runs after normal checks.
 	// CEREBRO-PATCH(router-push-service): pushSvc threaded through to handlers.
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, pushSvc, RouterOptions{
 		HTTPMetrics:        httpMetrics,
