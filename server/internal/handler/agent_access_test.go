@@ -490,7 +490,7 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 		t.Fatalf("count tasks before: %v", err)
 	}
 
-	enqueueMentionedAgentTasksForTest(t, ctx, issue, comment, nil, "member", testUserID)
+	enqueueMentionedAgentTasksForTest(t, ctx, issue, comment, nil, "member", testUserID, commentTriggerComputeOptions{})
 
 	var afterCount int
 	if err := testPool.QueryRow(ctx,
@@ -587,7 +587,7 @@ func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-				got := testHandler.shouldEnqueueAssigneeFallback(ctx, issue, tc.actorType, tc.actorID, commentTriggerComputeOptions{})
+			got := testHandler.shouldEnqueueAssigneeFallback(ctx, issue, tc.actorType, tc.actorID, commentTriggerComputeOptions{})
 			if got != tc.want {
 				t.Fatalf("%s\n  actor=%s/%s got=%v want=%v",
 					tc.reason, tc.actorType, tc.actorID, got, tc.want)

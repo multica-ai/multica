@@ -332,6 +332,17 @@ func (h *Handler) taskFromRequestHeader(r *http.Request) (db.AgentTaskQueue, boo
 	return task, true
 }
 
+func (h *Handler) authoringTaskIDFromRequest(r *http.Request, actorType, actorID string) pgtype.UUID {
+	if actorType != "agent" {
+		return pgtype.UUID{}
+	}
+	task, ok := h.taskFromRequestHeader(r)
+	if !ok || !task.AgentID.Valid || uuidToString(task.AgentID) != actorID {
+		return pgtype.UUID{}
+	}
+	return task.ID
+}
+
 // accessibleAgentIDs returns the set of agent IDs in the workspace the actor
 // is allowed to see, for use by workspace-wide aggregation endpoints
 // (run counts, activity histograms, task snapshots) that need to filter out

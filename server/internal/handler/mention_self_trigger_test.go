@@ -33,18 +33,18 @@ func TestComputeCommentAgentTriggers_AssigneeAuthorMemberMentionIsNoop(t *testin
 // enqueueMentionedAgentTasksForTest mirrors the production comment path for
 // @mention triggers: compute the cascade trigger set, then enqueue it. Kept as a
 // test helper so these integration tests keep asserting enqueue side effects.
-func enqueueMentionedAgentTasksForTest(t *testing.T, ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
+func enqueueMentionedAgentTasksForTest(t *testing.T, ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string, opts commentTriggerComputeOptions) {
 	t.Helper()
-	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, authorType, authorID, commentTriggerComputeOptions{})
+	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, authorType, authorID, opts)
 	testHandler.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 }
 
 // selfMentionFixture wires the seeded "Handler Test Agent" as J plus two
 // fresh issues so we can exercise the agent-self-mention path on the @mention
 // branch of computeCommentAgentTriggers. The three tests below cover
-// the loop-safe self-mention behavior:
+// the narrow loop-safe self-mention behavior:
 //
-//   - cross-issue self-mention is a no-op; a handoff must name another owner
+//   - cross-issue self-mention from a trusted task enqueues
 //   - same-issue self-mention with an in-flight task does not enqueue a follow-up
 //   - same-issue self-mention with a queued/dispatched task is deduped
 //     (HasPendingTaskForIssueAndAgent still does its job)
@@ -169,9 +169,9 @@ func countQueuedOrDispatched(t *testing.T, agentID, issueID string) int {
 	return n
 }
 
-// TestEnqueueMentionedAgentTasks_SelfMentionCrossIssueIsNoop documents that an
-// explicit self-mention is never a delegation, even across issues.
-func TestEnqueueMentionedAgentTasks_SelfMentionCrossIssueIsNoop(t *testing.T) {
+// TestEnqueueMentionedAgentTasks_SelfMentionCrossIssueEnqueues preserves the
+// explicit child→parent handoff when the trusted authoring task is on another issue.
+func TestEnqueueMentionedAgentTasks_SelfMentionCrossIssueEnqueues(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -181,15 +181,23 @@ func TestEnqueueMentionedAgentTasks_SelfMentionCrossIssueIsNoop(t *testing.T) {
 	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueBID); got != 0 {
 		t.Fatalf("before: expected 0 pending tasks on parent issue, got %d", got)
 	}
-	triggers, targets := testHandler.computeCommentAgentTriggers(ctx, fx.IssueB, fx.CommentB.Content, nil, "agent", fx.JID, commentTriggerComputeOptions{})
-	if len(triggers) != 0 || len(targets) != 1 || targets[0].Status != DispatchBlocked || targets[0].ReasonCode != ReasonSelfTriggerSuppressed {
-		t.Fatalf("inactive self-mention outcome = triggers:%d targets:%+v, want blocked/self_trigger_suppressed", len(triggers), targets)
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status)
+		VALUES ($1, $2, $3, 'running') RETURNING id
+	`, fx.JID, fx.RuntimeID, fx.IssueAID).Scan(&taskID); err != nil {
+		t.Fatalf("seed child task: %v", err)
+	}
+	opts := commentTriggerComputeOptions{AuthoringTaskID: util.MustParseUUID(taskID)}
+	triggers, targets := testHandler.computeCommentAgentTriggers(ctx, fx.IssueB, fx.CommentB.Content, nil, "agent", fx.JID, opts)
+	if len(triggers) != 1 || len(targets) != 1 || targets[0].ExecAgentID != fx.JID {
+		t.Fatalf("cross-issue self-handoff = triggers:%d targets:%+v, want one executable target", len(triggers), targets)
 	}
 
-	enqueueMentionedAgentTasksForTest(t, ctx, fx.IssueB, fx.CommentB, nil, "agent", fx.JID)
+	enqueueMentionedAgentTasksForTest(t, ctx, fx.IssueB, fx.CommentB, nil, "agent", fx.JID, opts)
 
-	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueBID); got != 0 {
-		t.Fatalf("after self-mention from another issue: expected no queued task, got %d", got)
+	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueBID); got != 1 {
+		t.Fatalf("after self-mention from another issue: expected one queued task, got %d", got)
 	}
 }
 
@@ -204,22 +212,24 @@ func TestEnqueueMentionedAgentTasks_SelfMentionWhileRunningIsNoop(t *testing.T) 
 	fx := newSelfMentionFixture(t)
 
 	// Seed a running task for J on issue A — this is the agent's current run.
-	if _, err := testPool.Exec(ctx, `
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status)
-		VALUES ($1, $2, $3, 'running')
-	`, fx.JID, fx.RuntimeID, fx.IssueAID); err != nil {
+		VALUES ($1, $2, $3, 'running') RETURNING id
+	`, fx.JID, fx.RuntimeID, fx.IssueAID).Scan(&taskID); err != nil {
 		t.Fatalf("seed running task: %v", err)
 	}
 
 	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueAID); got != 0 {
 		t.Fatalf("before: expected 0 queued/dispatched tasks (only the running task), got %d", got)
 	}
-	triggers, targets := testHandler.computeCommentAgentTriggers(ctx, fx.IssueA, fx.CommentA.Content, nil, "agent", fx.JID, commentTriggerComputeOptions{})
+	opts := commentTriggerComputeOptions{AuthoringTaskID: util.MustParseUUID(taskID)}
+	triggers, targets := testHandler.computeCommentAgentTriggers(ctx, fx.IssueA, fx.CommentA.Content, nil, "agent", fx.JID, opts)
 	if len(triggers) != 0 || len(targets) != 1 || targets[0].Status != DispatchDeferred || targets[0].ReasonCode != ReasonAlreadyActive {
 		t.Fatalf("active self-mention outcome = triggers:%d targets:%+v, want deferred/already_active", len(triggers), targets)
 	}
 
-	enqueueMentionedAgentTasksForTest(t, ctx, fx.IssueA, fx.CommentA, nil, "agent", fx.JID)
+	enqueueMentionedAgentTasksForTest(t, ctx, fx.IssueA, fx.CommentA, nil, "agent", fx.JID, opts)
 
 	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueAID); got != 0 {
 		t.Fatalf("after self-mention while running: expected no queued follow-up, got %d", got)
@@ -262,7 +272,7 @@ func TestEnqueueMentionedAgentTasks_SelfMentionDedupesAgainstPendingTask(t *test
 				t.Fatalf("before: expected 1 pre-existing %s task, got %d", tc.status, before)
 			}
 
-			enqueueMentionedAgentTasksForTest(t, ctx, fx.IssueA, fx.CommentA, nil, "agent", fx.JID)
+			enqueueMentionedAgentTasksForTest(t, ctx, fx.IssueA, fx.CommentA, nil, "agent", fx.JID, commentTriggerComputeOptions{})
 
 			after := countQueuedOrDispatched(t, fx.JID, fx.IssueAID)
 			if after != 1 {
