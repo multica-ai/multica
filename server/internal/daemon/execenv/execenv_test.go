@@ -1580,6 +1580,53 @@ func TestInjectRuntimeConfigKimiSkillsUseExplicitPath(t *testing.T) {
 	if !strings.Contains(s, ".kimi/skills/") {
 		t.Error("AGENTS.md for Kimi must point the agent at the .kimi/skills/ path where SKILL.md bodies actually live")
 	}
+	if strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md for Kimi must not also claim native discovery — the explicit path is the whole point of the fix")
+	}
+}
+
+// TestWriteContextFilesKimiNativeSkillsMatchesAgentsMdPath pins the contract
+// that the fix in this PR depends on: AGENTS.md tells Kimi to read
+// .kimi/skills/<name>/SKILL.md (writeSkills in runtime_config_sections.go),
+// and writeContextFiles actually puts the file there (skillsDirPath in
+// context.go). Those two switch statements are maintained independently, so
+// nothing else catches one of them drifting — e.g. someone changes
+// skillsDirPath's kimi case without updating the AGENTS.md text, and the
+// agent is pointed at a path that doesn't exist.
+func TestWriteContextFilesKimiNativeSkillsMatchesAgentsMdPath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "kimi-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+
+	agentsContent, err := InjectRuntimeConfig(dir, "kimi", ctx)
+	if err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	if !strings.Contains(agentsContent, ".kimi/skills/") {
+		t.Fatalf("AGENTS.md content does not claim the .kimi/skills/ path")
+	}
+
+	if err := writeContextFiles(dir, "kimi", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".kimi", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("skill file not found at the path AGENTS.md claims (.kimi/skills/go-conventions/SKILL.md): %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for Kimi provider")
+	}
 }
 
 func TestInjectRuntimeConfigQoder(t *testing.T) {
