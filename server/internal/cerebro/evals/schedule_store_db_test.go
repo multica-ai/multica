@@ -2,6 +2,7 @@ package evals
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -24,6 +25,10 @@ func TestUpsertClaimAndMarkSchedule(t *testing.T) {
 	}
 	if sched.EvalID != evalID || !sched.Enabled || sched.NextRunAt == nil {
 		t.Fatalf("unexpected schedule row: %+v", sched)
+	}
+	loaded, err := store.GetSchedule(ctx, f.workspaceID, evalID)
+	if err != nil || loaded.ID != sched.ID {
+		t.Fatalf("GetSchedule: row=%+v err=%v", loaded, err)
 	}
 
 	// next_run_at is the next hourly boundary (in the future). A claim anchored
@@ -67,6 +72,12 @@ func TestUpsertClaimAndMarkSchedule(t *testing.T) {
 	}
 	if scheduleInSet(disabled, sched.ID) {
 		t.Fatal("disabled schedule was claimed")
+	}
+	if err := store.DeleteSchedule(ctx, f.workspaceID, evalID); err != nil {
+		t.Fatalf("DeleteSchedule: %v", err)
+	}
+	if _, err := store.GetSchedule(ctx, f.workspaceID, evalID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetSchedule after delete = %v, want ErrNotFound", err)
 	}
 }
 

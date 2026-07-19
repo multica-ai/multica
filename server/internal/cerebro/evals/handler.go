@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -63,6 +64,9 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/{id}/runs", h.ListRuns)
 	r.Post("/{id}/runs", h.CreateRun)
 	r.Post("/{id}/run", h.RunNow)
+	r.Get("/{id}/schedule", h.GetSchedule)
+	r.Put("/{id}/schedule", h.UpsertSchedule)
+	r.Delete("/{id}/schedule", h.DeleteSchedule)
 	return r
 }
 
@@ -164,6 +168,25 @@ func canEditEval(member db.Member, memberOK bool, actorID uuid.UUID, eval Eval) 
 }
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	actorID, workspaceID, _, ok := requestContext(w, r)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	if _, ok := h.requireEvalEditor(w, r, actorID, workspaceID, id); !ok {
+		return
+	}
+	if err := h.store.Delete(r.Context(), workspaceID, id); err != nil {
+		h.storeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 	_, workspaceID, _, ok := requestContext(w, r)
 	if !ok {
 		return
@@ -172,11 +195,77 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.store.Delete(r.Context(), workspaceID, id); err != nil {
+	item, err := h.store.GetSchedule(r.Context(), workspaceID, id)
+	if errors.Is(err, ErrNotFound) {
+		writeJSON(w, http.StatusOK, nil)
+		return
+	}
+	if err != nil {
+		h.storeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *Handler) UpsertSchedule(w http.ResponseWriter, r *http.Request) {
+	actorID, workspaceID, _, ok := requestContext(w, r)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	if _, ok := h.requireEvalEditor(w, r, actorID, workspaceID, id); !ok {
+		return
+	}
+	var input EvalScheduleInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if _, err := nextScheduleRun(input.ScheduleExpr, input.Timezone, time.Now()); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	item, err := h.store.UpsertSchedule(r.Context(), workspaceID, id, actorID, input.ScheduleExpr, input.Timezone, input.Enabled)
+	if err != nil {
+		h.storeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *Handler) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
+	actorID, workspaceID, _, ok := requestContext(w, r)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	if _, ok := h.requireEvalEditor(w, r, actorID, workspaceID, id); !ok {
+		return
+	}
+	if err := h.store.DeleteSchedule(r.Context(), workspaceID, id); err != nil {
 		h.storeError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) requireEvalEditor(w http.ResponseWriter, r *http.Request, actorID, workspaceID, evalID uuid.UUID) (Eval, bool) {
+	item, err := h.store.Get(r.Context(), workspaceID, evalID)
+	if err != nil {
+		h.storeError(w, r, err)
+		return Eval{}, false
+	}
+	member, memberOK := middleware.MemberFromContext(r.Context())
+	if !canEditEval(member, memberOK, actorID, item) {
+		writeError(w, http.StatusForbidden, "only the eval owner or a workspace admin may edit this eval")
+		return Eval{}, false
+	}
+	return item, true
 }
 
 func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {

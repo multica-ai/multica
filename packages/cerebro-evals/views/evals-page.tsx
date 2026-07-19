@@ -13,8 +13,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@multica/ui/components/ui/table";
-import { createEval, createEvalBinding, deleteEval, deleteEvalBinding, updateEval } from "../api";
-import { evalBindingsOptions, evalKeys, evalRunsOptions, evalsListOptions } from "../queries";
+import { createEval, createEvalBinding, deleteEval, deleteEvalBinding, deleteEvalSchedule, runEvalNow, updateEval, upsertEvalSchedule } from "../api";
+import { evalBindingsOptions, evalKeys, evalRunsOptions, evalScheduleOptions, evalsListOptions } from "../queries";
 import { buildWriteInput, EMPTY_FORM, formFromEval, GRADER_MATCHES, type DraftTask } from "./form";
 import { EVAL_TEMPLATES, duplicateForm } from "./templates";
 import { statusInput } from "./lifecycle";
@@ -23,7 +23,7 @@ import { formatCost, formatDuration } from "../format";
 import { RunDetail } from "./run-detail";
 import { EvalDetail, type EvalDetailTab } from "./eval-detail";
 import { GateBinder } from "./gate-binder";
-import type { CerebroEval, EvalBindingPhase, EvalStatus } from "../types";
+import type { CerebroEval, EvalBindingPhase, EvalScheduleInput, EvalStatus } from "../types";
 
 export function EvalsPage() {
   const workflowsEnabled = useFeatureFlag("cerebro_workflows");
@@ -46,6 +46,7 @@ export function EvalsPage() {
   const workflowsQuery = useQuery(cerebroWorkflowsListOptions(workspaceId));
   const bindingsQuery = useQuery(evalBindingsOptions(workspaceId));
   const runsQuery = useQuery(evalRunsOptions(workspaceId, selectedEvalId));
+  const scheduleQuery = useQuery(evalScheduleOptions(workspaceId, detailEvalId));
   const selectedRun = useMemo(() => (runsQuery.data ?? []).find((run) => run.id === selectedRunId) ?? null, [runsQuery.data, selectedRunId]);
   const detailItem = useMemo(() => (detailEvalId ? (evalsQuery.data ?? []).find((item) => item.id === detailEvalId) ?? null : null), [evalsQuery.data, detailEvalId]);
 
@@ -79,6 +80,20 @@ export function EvalsPage() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: evalKeys.bindings(workspaceId) }); },
   });
   const unbindMutation = useMutation({ mutationFn: deleteEvalBinding, onSuccess: () => queryClient.invalidateQueries({ queryKey: evalKeys.bindings(workspaceId) }) });
+  const scheduleMutation = useMutation({
+    mutationFn: async ({ evalId, input }: { evalId: string; input: EvalScheduleInput | null }) => {
+      if (input) await upsertEvalSchedule(evalId, input);
+      else await deleteEvalSchedule(evalId);
+    },
+    onSuccess: (_result, variables) => queryClient.invalidateQueries({ queryKey: evalKeys.schedule(workspaceId, variables.evalId) }),
+  });
+  const runMutation = useMutation({
+    mutationFn: runEvalNow,
+    onSuccess: (run) => {
+      setSelectedEvalId(run.eval_id); setSelectedRunId(run.id);
+      queryClient.invalidateQueries({ queryKey: evalKeys.runs(workspaceId, run.eval_id) });
+    },
+  });
 
   const counts = useMemo(() => statusCounts(evalsQuery.data ?? []), [evalsQuery.data]);
   const filtered = useMemo(() => filterEvals(evalsQuery.data ?? [], statusFilter, search), [evalsQuery.data, statusFilter, search]);
@@ -116,6 +131,15 @@ export function EvalsPage() {
             statusPending={statusMutation.isPending}
             statusError={statusMutation.isError}
             onDelete={() => { deleteMutation.mutate(detailItem.id); closeDetail(); }}
+            onRunNow={() => runMutation.mutate(detailItem.id)}
+            runPending={runMutation.isPending}
+            runError={runMutation.isError}
+            schedule={scheduleQuery.data ?? null}
+            scheduleLoading={scheduleQuery.isLoading}
+            schedulePending={scheduleMutation.isPending}
+            scheduleError={scheduleMutation.isError}
+            onSaveSchedule={(input) => scheduleMutation.mutate({ evalId: detailItem.id, input })}
+            onOpenHooks={() => navigation.push(`/${workspace.slug}/workflows`)}
             onClose={closeDetail}
             onOpenVersion={(id) => openDetail(id)}
             onOpenEvidence={(artifactId) => navigation.push(`/${workspace.slug}/documents/${artifactId}`)}

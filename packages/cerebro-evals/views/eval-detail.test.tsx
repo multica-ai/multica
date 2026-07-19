@@ -27,6 +27,9 @@ const baseProps = {
   bindings: [] as EvalBinding[], workflows: [],
   onEdit: () => {}, onDuplicate: () => {}, onStatusChange: () => {},
   statusPending: false, statusError: false, onDelete: () => {},
+  onRunNow: () => {}, runPending: false, runError: false,
+  schedule: null, scheduleLoading: false, schedulePending: false, scheduleError: false,
+  onSaveSchedule: () => {}, onOpenHooks: () => {},
   onClose: () => {}, onOpenVersion: () => {},
 };
 
@@ -49,6 +52,14 @@ describe("EvalDetail", () => {
     render(<EvalDetail {...baseProps} item={item} versions={[item]} onStatusChange={onStatusChange} />);
     fireEvent.click(screen.getAllByText("Activate")[0]!);
     expect(onStatusChange).toHaveBeenCalledWith("active");
+  });
+
+  it("runs an active eval from the detail header", () => {
+    const onRunNow = vi.fn();
+    const item = makeEval({ status: "active" });
+    render(<EvalDetail {...baseProps} item={item} versions={[item]} onRunNow={onRunNow} />);
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }));
+    expect(onRunNow).toHaveBeenCalledOnce();
   });
 
   it("confirms before retiring an active eval", () => {

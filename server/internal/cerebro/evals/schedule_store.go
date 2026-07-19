@@ -38,6 +38,12 @@ type EvalSchedule struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
+type EvalScheduleInput struct {
+	ScheduleExpr string `json:"schedule_expr"`
+	Timezone     string `json:"timezone"`
+	Enabled      bool   `json:"enabled"`
+}
+
 const evalScheduleColumns = `id, workspace_id, eval_id, schedule_expr, timezone,
  enabled, next_run_at, last_run_at, created_by_id, created_at`
 
@@ -98,6 +104,25 @@ func (s *Store) UpsertSchedule(ctx context.Context, workspaceID, evalID, actorID
 		workspaceID, evalID, scheduleExpr, timezone, enabled,
 		pgtype.Timestamptz{Time: next, Valid: true}, actorID)
 	return scanEvalSchedule(row)
+}
+
+// GetSchedule returns the single recurring schedule for an eval.
+func (s *Store) GetSchedule(ctx context.Context, workspaceID, evalID uuid.UUID) (EvalSchedule, error) {
+	value, err := scanEvalSchedule(s.pool.QueryRow(ctx, `
+		SELECT `+evalScheduleColumns+` FROM cerebro_eval_schedule
+		WHERE workspace_id=$1 AND eval_id=$2`, workspaceID, evalID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return EvalSchedule{}, ErrNotFound
+	}
+	return value, err
+}
+
+// DeleteSchedule switches an eval back to manual-only runs. It is idempotent
+// so saving "Manual only" is safe even when no schedule exists yet.
+func (s *Store) DeleteSchedule(ctx context.Context, workspaceID, evalID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `
+		DELETE FROM cerebro_eval_schedule WHERE workspace_id=$1 AND eval_id=$2`, workspaceID, evalID)
+	return err
 }
 
 // ClaimDueSchedules returns up to `limit` enabled schedules whose next_run_at
