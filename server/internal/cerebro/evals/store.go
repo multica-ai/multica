@@ -292,3 +292,22 @@ func (s *Store) BlockingEvalsPassed(ctx context.Context, workflowID, issueID uui
     )`, workflowID, issueID, phase).Scan(&allPassed)
 	return allPassed, err
 }
+
+// LatestRunPassed reports whether the newest run of eval evalID for this issue
+// passed. Fails closed: no run → (false, nil). Used by the eval.gate hook action
+// and the eval_passed hook condition, which key on eval+issue (not workflow).
+func (s *Store) LatestRunPassed(ctx context.Context, workspaceID, evalID, issueID uuid.UUID) (bool, error) {
+	var passed bool
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE((
+      SELECT r.status = 'passed' FROM cerebro_eval_run r
+      WHERE r.workspace_id=$1 AND r.eval_id=$2 AND r.issue_id=$3
+      ORDER BY r.created_at DESC LIMIT 1
+    ), FALSE)`, workspaceID, evalID, issueID).Scan(&passed)
+	return passed, err
+}
+
+// EvalPassed is an alias of LatestRunPassed used by the eval_passed hook
+// condition resolver (U3), where the resolver interface is keyed on eval+issue.
+func (s *Store) EvalPassed(ctx context.Context, workspaceID, evalID, issueID uuid.UUID) (bool, error) {
+	return s.LatestRunPassed(ctx, workspaceID, evalID, issueID)
+}

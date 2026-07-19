@@ -61,7 +61,7 @@ var versionOneHookActionTypes = []string{
 	"session.handoff", "task.retry", "task.cancel", "artifact.create_or_update",
 	"workflow.activate", "workflow.pause", "workflow.resume", "workflow.stop",
 	"approval.require", "audit.record", "metric.increment",
-	"skill.run", "judge.gate",
+	"skill.run", "judge.gate", "eval.gate",
 }
 
 func validateTypedHookAction(action HookAction) error {
@@ -131,6 +131,11 @@ func validateTypedHookAction(action HookAction) error {
 			return err
 		}
 		return requireString("rubric")
+	case "eval.gate":
+		if _, err := hookConfigUUID(action.Config, "eval_id"); err != nil {
+			return fmt.Errorf("eval.gate requires eval_id: %w", err)
+		}
+		return nil
 	case "agent.dispatch":
 		return requireString("agent_id")
 	case "squad.dispatch":
@@ -163,7 +168,7 @@ func hookActionCapability(actionType string) string {
 	switch actionType {
 	case "member.notify":
 		return "add_comment"
-	case "agent.dispatch", "squad.dispatch", "skill.run", "judge.gate":
+	case "agent.dispatch", "squad.dispatch", "skill.run", "judge.gate", "eval.gate":
 		return "trigger_other_agent"
 	case "wakeup.create", "wakeup.cancel":
 		return "schedule_agent_wakeup"

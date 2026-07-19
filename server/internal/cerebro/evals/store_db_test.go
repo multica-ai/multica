@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -192,4 +193,66 @@ func TestBlockingEvalsPassedScopesPlanDeliveryAndMonitorIndependently(t *testing
 			t.Fatalf("%s binding with a server-derived passing run should pass: passed=%v err=%v", phase, passed, err)
 		}
 	}
+}
+
+// insertRunAt inserts a run for an eval+issue with an explicit created_at so the
+// "latest" ordering under test is deterministic.
+func insertRunAt(t *testing.T, f evalFixture, evalID uuid.UUID, status string, createdAt time.Time) {
+	t.Helper()
+	if _, err := evalTestPool.Exec(context.Background(), `INSERT INTO cerebro_eval_run
+		(workspace_id, eval_id, eval_version, issue_id, status, results, created_by_id, created_by_type, created_at)
+		SELECT $1, e.id, e.version, $3, $4, '{}'::jsonb, $5, 'member', $6
+		FROM cerebro_eval e WHERE e.workspace_id=$1 AND e.id=$2`,
+		f.workspaceID, evalID, f.issueID, status, f.actorID, createdAt); err != nil {
+		t.Fatalf("insert run: %v", err)
+	}
+}
+
+func TestLatestRunPassed(t *testing.T) {
+	if evalTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	store := NewStore(evalTestPool)
+	base := time.Now().UTC()
+
+	t.Run("newest passed after older failed", func(t *testing.T) {
+		f := seedEvalFixture(t)
+		evalID := seedActiveEval(t, f, "latest-passed", 1)
+		insertRunAt(t, f, evalID, "failed", base.Add(-2*time.Hour))
+		insertRunAt(t, f, evalID, "passed", base.Add(-1*time.Hour))
+		passed, err := store.LatestRunPassed(ctx, f.workspaceID, evalID, f.issueID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !passed {
+			t.Fatal("expected latest run to be passed")
+		}
+	})
+
+	t.Run("newest failed", func(t *testing.T) {
+		f := seedEvalFixture(t)
+		evalID := seedActiveEval(t, f, "latest-failed", 1)
+		insertRunAt(t, f, evalID, "passed", base.Add(-2*time.Hour))
+		insertRunAt(t, f, evalID, "failed", base.Add(-1*time.Hour))
+		passed, err := store.LatestRunPassed(ctx, f.workspaceID, evalID, f.issueID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if passed {
+			t.Fatal("expected latest run to be failed (fail closed)")
+		}
+	})
+
+	t.Run("no runs fails closed", func(t *testing.T) {
+		f := seedEvalFixture(t)
+		evalID := seedActiveEval(t, f, "latest-none", 1)
+		passed, err := store.LatestRunPassed(ctx, f.workspaceID, evalID, f.issueID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if passed {
+			t.Fatal("expected no runs to fail closed")
+		}
+	})
 }

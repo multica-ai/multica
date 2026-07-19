@@ -17,12 +17,12 @@ type HookFeature struct {
 	CompletionGate *TaskCompletionGate
 }
 
-func NewHookFeature(db cerebrodb.DBTX, policies *toolpolicy.Store) *HookFeature {
+func NewHookFeature(db cerebrodb.DBTX, policies *toolpolicy.Store, evalStore EvalGateStore) *HookFeature {
 	repository := NewPostgresHookRepository(db)
 	engineStore := NewPostgresHookEngineStore(repository)
 	authorizer := NewToolPolicyHookAuthorizer(policies)
 	actions := NewActionRegistry()
-	registerVersionOneHookActions(actions, NewPostgresHookActionExecutor(db, authorizer))
+	registerVersionOneHookActions(actions, NewPostgresHookActionExecutor(db, authorizer, evalStore))
 	engine := NewHookEngine(hookFeatureEnabled(), engineStore).WithActionRegistry(actions)
 	return &HookFeature{
 		API:            NewHookAPI(repository, authorizer),

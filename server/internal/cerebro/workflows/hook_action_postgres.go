@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -15,17 +16,29 @@ import (
 
 var ErrHookActionPermissionDenied = errors.New("workflow hook creator no longer has permission to run this action")
 
+// EvalGateStore is the read seam eval.gate needs: the latest verdict for an
+// eval+issue. It is declared here (not imported from the evals package) because
+// evals → loops → workflows would form an import cycle; *evals.Store satisfies
+// it. U2 (eval.run) extends the hook↔eval seam with an execute method.
+type EvalGateStore interface {
+	LatestRunPassed(ctx context.Context, workspaceID, evalID, issueID uuid.UUID) (bool, error)
+}
+
 type PostgresHookActionExecutor struct {
 	db         cerebrodb.DBTX
 	authorizer HookAuthorizer
+	// CEREBRO(FIR-3496 Phase 4): hook↔eval coupling. evalStore reads the latest
+	// eval verdict for eval.gate. Nil-safe: eval.gate fails closed when it is not
+	// wired, so the feature stays invisible until deliberately enabled.
+	evalStore EvalGateStore
 }
 
 type HookActionAuthorizer interface {
 	CanAction(context.Context, string, HookPermissionActor, string) bool
 }
 
-func NewPostgresHookActionExecutor(db cerebrodb.DBTX, authorizer HookAuthorizer) *PostgresHookActionExecutor {
-	return &PostgresHookActionExecutor{db: db, authorizer: authorizer}
+func NewPostgresHookActionExecutor(db cerebrodb.DBTX, authorizer HookAuthorizer, evalStore EvalGateStore) *PostgresHookActionExecutor {
+	return &PostgresHookActionExecutor{db: db, authorizer: authorizer, evalStore: evalStore}
 }
 
 func (e *PostgresHookActionExecutor) ExecuteHookAction(ctx context.Context, policy HookPolicy, event HookEvent, action HookAction) (map[string]any, error) {
@@ -87,6 +100,8 @@ WHERE a.id=$1 AND a.workspace_id=$7 RETURNING id`, agentID, optionalHookUUID(eve
 		return e.runSkill(ctx, workspaceID, actorID, policy, event, action.Config)
 	case "judge.gate":
 		return e.startJudgeGate(ctx, workspaceID, actorID, policy, event, action.Config)
+	case "eval.gate":
+		return e.startEvalGate(ctx, workspaceID, event, action.Config)
 
 	case "wakeup.create":
 		fireAt, err := time.Parse(time.RFC3339, hookConfigString(action.Config, "fire_at", ""))
@@ -215,6 +230,39 @@ SELECT a.id,a.runtime_id,$2,'queued',0,$3,$4 FROM agent a
 		return nil, fmt.Errorf("judge.gate dispatch judge: %w", err)
 	}
 	return map[string]any{"task_id": util.UUIDToString(taskID), "gate": gate, "round": round, "check_id": checkID}, nil
+}
+
+// ErrHookGateBlocked is returned by eval.gate when the eval's latest run did not
+// pass. Returning an error makes the engine record the action as failed; a
+// fail-closed policy then blocks the hook (hook_engine.go FailMode handling).
+var ErrHookGateBlocked = errors.New("eval gate blocked: latest run did not pass")
+
+// startEvalGate fails closed on the eval's latest run for the event's issue: it
+// blocks the hook unless the newest run passed. Unlike eval.run it does not
+// execute the eval — it reads the persisted verdict, so it needs no runner.
+func (e *PostgresHookActionExecutor) startEvalGate(ctx context.Context, workspaceID pgtype.UUID, event HookEvent, config map[string]any) (map[string]any, error) {
+	if e.evalStore == nil {
+		return nil, errors.New("eval.gate: evals not configured")
+	}
+	if event.IssueID == "" {
+		return nil, errors.New("eval.gate requires an issue event")
+	}
+	issueID, err := util.ParseUUID(event.IssueID)
+	if err != nil {
+		return nil, fmt.Errorf("eval.gate issue_id: %w", err)
+	}
+	evalID, err := hookConfigUUID(config, "eval_id")
+	if err != nil {
+		return nil, fmt.Errorf("eval.gate eval_id: %w", err)
+	}
+	passed, err := e.evalStore.LatestRunPassed(ctx, uuid.UUID(workspaceID.Bytes), uuid.UUID(evalID.Bytes), uuid.UUID(issueID.Bytes))
+	if err != nil {
+		return nil, err
+	}
+	if !passed {
+		return map[string]any{"eval_id": util.UUIDToString(evalID), "passed": false}, ErrHookGateBlocked
+	}
+	return map[string]any{"eval_id": util.UUIDToString(evalID), "passed": true}, nil
 }
 
 func (e *PostgresHookActionExecutor) cancelWakeup(ctx context.Context, workspaceID pgtype.UUID, config map[string]any) (map[string]any, error) {
