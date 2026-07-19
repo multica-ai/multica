@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { appForeground, chatSessions, chatStore, detail, deletePin, inboxItems, navigation, pins, summary, workspaces } = vi.hoisted(() => ({
+const { appForeground, chatSessions, chatStore, detail, deletePin, inboxItems, navigation, pins, summary, themeMock, workspaces } = vi.hoisted(() => ({
   appForeground: { current: true },
   chatSessions: { current: [] as { id?: string; unread_count?: number }[] },
   chatStore: { current: { activeSessionId: null as string | null, isOpen: false } },
@@ -12,6 +12,9 @@ const { appForeground, chatSessions, chatStore, detail, deletePin, inboxItems, n
   inboxItems: { current: [] as { id: string; read: boolean }[] },
   navigation: { current: { pathname: "/acme/issues" } },
   summary: { current: [] as { workspace_id: string; count: number }[] },
+  themeMock: {
+    current: { theme: "light" as string | undefined, setTheme: vi.fn() },
+  },
   workspaces: {
     current: [] as { id: string; name: string; slug: string; avatar_url: string | null }[],
   },
@@ -68,15 +71,61 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarRail: () => null,
 }));
-vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuSeparator: () => null,
-  DropdownMenuTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
-}));
+vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
+  const { createContext, useContext } = await import("react");
+  // Faithful-enough radio semantics so the appearance submenu's "current
+  // theme has a Check" and "click calls setTheme" behavior is testable:
+  // RadioGroup feeds its value + onValueChange via context, and RadioItem
+  // renders data-checked when its value matches and forwards clicks.
+  const RadioCtx = createContext<{ value?: string; onValueChange?: (v: string) => void }>({});
+  return {
+    DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    DropdownMenuGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    DropdownMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    DropdownMenuSeparator: () => null,
+    DropdownMenuTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
+    DropdownMenuSub: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    DropdownMenuSubTrigger: ({ children }: { children: React.ReactNode }) => (
+      <button type="button">{children}</button>
+    ),
+    DropdownMenuSubContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    DropdownMenuRadioGroup: ({
+      value,
+      onValueChange,
+      children,
+    }: {
+      value?: string;
+      onValueChange?: (v: string) => void;
+      children: React.ReactNode;
+    }) => (
+      <RadioCtx.Provider value={{ value, onValueChange }}>{children}</RadioCtx.Provider>
+    ),
+    DropdownMenuRadioItem: ({
+      value,
+      children,
+    }: {
+      value?: string;
+      children: React.ReactNode;
+    }) => {
+      const ctx = useContext(RadioCtx);
+      const checked = value !== undefined && value === ctx.value;
+      return (
+        <button
+          type="button"
+          role="menuitemradio"
+          data-value={value}
+          data-checked={checked ? "true" : undefined}
+          aria-checked={checked}
+          onClick={() => ctx.onValueChange?.(value as string)}
+        >
+          {children}
+        </button>
+      );
+    },
+  };
+});
 vi.mock("@multica/ui/components/ui/collapsible", () => ({
   Collapsible: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   CollapsibleContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -100,6 +149,9 @@ vi.mock("../navigation", () => ({
 vi.mock("../projects/components/project-icon", () => ({ ProjectIcon: () => <span /> }));
 vi.mock("../workspace/workspace-avatar", () => ({ WorkspaceAvatar: () => <span /> }));
 vi.mock("@multica/ui/components/common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
+vi.mock("@multica/ui/components/common/theme-provider", () => ({
+  useTheme: () => themeMock.current,
+}));
 
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (selector: (state: { user: { id: string } }) => unknown) => selector({ user: { id: "user-1" } }),
@@ -391,5 +443,42 @@ describe("personal nav — Chat", () => {
     appForeground.current = false;
     const { container } = render(<AppSidebar />);
     expect(chatBadge(container)).toHaveAttribute("aria-label", "5");
+  });
+});
+
+describe("appearance submenu", () => {
+  beforeEach(() => {
+    themeMock.current = { theme: "light", setTheme: vi.fn() };
+    summary.current = [];
+    workspaces.current = [];
+  });
+
+  it("renders the three theme options inside the appearance submenu", () => {
+    const { container } = render(<AppSidebar />);
+    expect(container.querySelector('[data-value="light"]')).not.toBeNull();
+    expect(container.querySelector('[data-value="dark"]')).not.toBeNull();
+    expect(container.querySelector('[data-value="system"]')).not.toBeNull();
+  });
+
+  it("calls setTheme when a theme option is clicked", () => {
+    const { container } = render(<AppSidebar />);
+    fireEvent.click(container.querySelector('[data-value="dark"]')!);
+    expect(themeMock.current.setTheme).toHaveBeenCalledWith("dark");
+  });
+
+  it("does not call setTheme when the already-active theme is clicked", () => {
+    // theme defaults to "light"; clicking light is a no-op so the radio
+    // group's onValueChange guard skips the redundant write.
+    const { container } = render(<AppSidebar />);
+    fireEvent.click(container.querySelector('[data-value="light"]')!);
+    expect(themeMock.current.setTheme).not.toHaveBeenCalled();
+  });
+
+  it("marks the current theme option as checked", () => {
+    themeMock.current = { theme: "dark", setTheme: vi.fn() };
+    const { container } = render(<AppSidebar />);
+    expect(container.querySelector('[data-value="dark"]')).toHaveAttribute("data-checked", "true");
+    expect(container.querySelector('[data-value="light"]')).not.toHaveAttribute("data-checked");
+    expect(container.querySelector('[data-value="system"]')).not.toHaveAttribute("data-checked");
   });
 });

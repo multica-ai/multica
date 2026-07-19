@@ -33,6 +33,7 @@
     "invitation_workspace_fallback": "工作区",
     "invitation_join": "加入",
     "invitation_decline": "拒绝",
+    "appearance": "外观",
     "log_out": "退出登录",
     "new_issue": "新建 issue",
     "new_issue_shortcut": "C",
