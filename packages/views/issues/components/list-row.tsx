@@ -10,6 +10,7 @@ import type { Issue, Project,
 } from "@multica/core/types";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PropertyIcon } from "../../common/property-icon";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useQuery } from "@tanstack/react-query";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
@@ -137,8 +138,9 @@ function ListRowContent({
                 {cardCustomProperties.slice(0, 3).map((property) => (
                   <span
                     key={property.id}
-                    className="inline-flex max-w-[120px] items-center rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                    className="inline-flex max-w-[120px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground"
                   >
+                    <PropertyIcon property={property} className="size-3 text-[11px]" />
                     <CustomPropertyValueDisplay property={property} value={issue.properties?.[property.id]} />
                   </span>
                 ))}

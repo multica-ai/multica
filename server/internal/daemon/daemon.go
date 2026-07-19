@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -48,9 +49,18 @@ var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace
 var ErrNoRuntimesToRegister = errors.New("no agent runtimes could be registered")
 
 const (
-	taskSlotWaitTimeout     = 2 * time.Second
-	taskSlotCapacityBackoff = 5 * time.Second
+	taskSlotWaitTimeout      = 2 * time.Second
+	taskSlotCapacityBackoff  = 5 * time.Second
+	repoCheckoutModeEnv      = "MULTICA_REPO_CHECKOUT_MODE"
+	repoCheckoutModeIsolated = "isolated"
 )
+
+func repoCheckoutModeFor(provider, goos string) string {
+	if provider == "codex" && goos == "linux" {
+		return repoCheckoutModeIsolated
+	}
+	return ""
+}
 
 var (
 	taskPrepareLeaseRefresh = 15 * time.Second
@@ -253,8 +263,10 @@ type Daemon struct {
 	pauseClaims    bool // when true, the batch poller skips claiming
 	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
-	activeEnvRootsMu sync.Mutex
-	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
+	activeEnvRootsMu   sync.Mutex
+	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
+	activeEnvRoots     map[string]int  // env root path -> reference count (handles reuse paths marked twice)
+	deletingEnvRoots   map[string]bool // env roots reserved by GC; new tasks wait until the mutation finishes
 
 	activeCodexStoresMu   sync.Mutex
 	activeCodexStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
@@ -285,6 +297,7 @@ type Daemon struct {
 
 type profileLaunchSpec struct {
 	path      string
+	version   string
 	fixedArgs []string
 }
 
@@ -310,6 +323,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		resolvedPaths:             make(map[string]healedAgent),
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
+		deletingEnvRoots:          make(map[string]bool),
 		activeCodexStores:         make(map[string]int),
 		deletingCodexStores:       make(map[string]bool),
 		localPathLocks:            NewLocalPathLocker(),
@@ -321,6 +335,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		workspaceChanges:          newWorkspaceChangeSignal(),
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
 	}
+	d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
 	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
@@ -945,6 +960,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"heartbeat_interval", d.cfg.HeartbeatInterval,
 		"agent_timeout", d.cfg.AgentTimeout,
 		"idle_watchdog", d.cfg.AgentIdleWatchdog,
+		"opencode_idle_watchdog", d.cfg.OpenCodeIdleWatchdog,
 		"max_concurrent_tasks", d.cfg.MaxConcurrentTasks,
 		"gc_enabled", d.cfg.GCEnabled,
 		"auto_update", d.cfg.AutoUpdateEnabled,
@@ -1081,7 +1097,7 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 // args resolved for a custom runtime profile. Called from
 // registerRuntimesForWorkspace. Lazily initializes the map so test fixtures
 // that build a Daemon literal without seeding every map don't panic.
-func (d *Daemon) recordProfileLaunch(profileID, path string, fixedArgs []string) {
+func (d *Daemon) recordProfileLaunch(profileID, path, version string, fixedArgs []string) {
 	if profileID == "" || path == "" {
 		return
 	}
@@ -1092,6 +1108,7 @@ func (d *Daemon) recordProfileLaunch(profileID, path string, fixedArgs []string)
 	}
 	d.profileLaunchSpecs[profileID] = profileLaunchSpec{
 		path:      path,
+		version:   version,
 		fixedArgs: append([]string(nil), fixedArgs...),
 	}
 }
@@ -1309,7 +1326,7 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
-		d.recordProfileLaunch(profile.ID, resolved, profile.FixedArgs)
+		d.recordProfileLaunch(profile.ID, resolved, version, profile.FixedArgs)
 		d.logger.Info("registering custom runtime profile",
 			"workspace_id", workspaceID, "profile_id", profile.ID,
 			"protocol_family", profile.ProtocolFamily, "command_path", resolved)
@@ -3517,6 +3534,80 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 	return reused
 }
 
+// shouldReusePriorWorkdir keeps the local_directory lock invariant without
+// forcing every squad-leader follow-up onto a fresh provider session. Worker
+// tasks already expose their current local-directory assignment, so their
+// existing reuse behavior remains unchanged. Leader tasks intentionally skip
+// that assignment and its lock; they may therefore reuse only directories
+// that resolve to the {workspace}/{task}/workdir shape, carry Prepare-time
+// managed-env provenance for the same workspace/issue/agent, and carry a
+// matching daemon task-context marker.
+//
+// Reuse eligibility is deliberately keyed off .managed_env.json (written by
+// execenv.Prepare) and NOT .gc_meta.json (written only after the task reaches
+// terminal state). The server's task-complete handler reconciles a follow-up
+// and wakes the runtime before the prior task's daemon handler writes the GC
+// file, so a successor can be claimed inside that window; keying off the
+// terminal file raced and dropped the session (MUL-4886). Both proofs this
+// function reads — the env-root provenance and the workdir task-context marker
+// — are written at Prepare time, so neither depends on completion ordering.
+func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignment, workspacesRoot string) bool {
+	if task.PriorWorkDir == "" || localAssignment != nil {
+		return false
+	}
+	if !task.IsLeaderTask {
+		return true
+	}
+
+	root, err := filepath.EvalSymlinks(workspacesRoot)
+	if err != nil {
+		return false
+	}
+	workdir, err := filepath.EvalSymlinks(task.PriorWorkDir)
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(workdir)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	rel, err := filepath.Rel(root, workdir)
+	if err != nil || !filepath.IsLocal(rel) {
+		return false
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) != 3 || parts[0] != task.WorkspaceID || parts[1] == "" || parts[2] != "workdir" {
+		return false
+	}
+	if task.AgentID == "" || task.IssueID == "" {
+		return false
+	}
+	// Managed-env provenance is written only for non-local managed issue envs,
+	// so its presence (plus the workspace/issue/agent match) proves this is a
+	// safe daemon-managed reuse target and not a residual local_directory path.
+	prov, err := execenv.ReadManagedEnvProvenance(filepath.Dir(workdir))
+	if err != nil || prov.ManagedBy != execenv.ManagedEnvProvenanceManagedBy ||
+		prov.WorkspaceID != task.WorkspaceID || prov.IssueID != task.IssueID ||
+		prov.AgentID != task.AgentID {
+		return false
+	}
+
+	data, err := os.ReadFile(filepath.Join(workdir, execenv.TaskContextMarkerRelPath))
+	if err != nil {
+		return false
+	}
+	var marker struct {
+		ManagedBy string `json:"managed_by"`
+		AgentID   string `json:"agent_id"`
+		IssueID   string `json:"issue_id"`
+	}
+	if json.Unmarshal(data, &marker) != nil {
+		return false
+	}
+	return marker.ManagedBy == execenv.TaskContextMarkerManagedBy &&
+		marker.AgentID == task.AgentID && marker.IssueID == task.IssueID
+}
+
 // gateCodexResumeToRolloutPresence drops the prior Codex session when its
 // rollout is not actually present in the task's CODEX_HOME sessions. A reused
 // workdir keeps PriorSessionID (gateResumeToReusedWorkdir), but Codex session
@@ -3755,6 +3846,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var resolvedVersion string
 	if customSpec, isCustom := d.customProfileLaunchForRuntime(task.RuntimeID); isCustom {
 		entry.Path = customSpec.path
+		resolvedVersion = customSpec.version
 		profileFixedArgs = customSpec.fixedArgs
 		ok = true
 		d.logger.Info("task uses custom runtime profile command",
@@ -3811,6 +3903,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectDescription:               task.ProjectDescription,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:                    task.ChatSessionID,
+		ChatChannelType:                  task.ChatChannelType,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
 		AutopilotTitle:                   task.AutopilotTitle,
@@ -3869,8 +3962,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running
 	// Prepare against a stable user path is cheap (no clone, no copy).
-	// Squad-leader tasks also skip reuse so a pre-fix leader session recorded
-	// against the user's local_directory cannot be re-entered without a lock.
+	// Leader tasks have no localAssignment; shouldReusePriorWorkdir separately
+	// requires Prepare-time managed-env provenance and a daemon-owned marker
+	// before allowing reuse, so a pre-fix leader session recorded against
+	// local_directory still fails closed.
 	var agentMcpConfig json.RawMessage
 	var effectiveMcpConfig json.RawMessage
 	var cursorMcpAuthSource string
@@ -3942,7 +4037,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			defer d.unmarkActiveCodexStore(store)
 		}
 	}
-	if task.PriorWorkDir != "" && localAssignment == nil && !task.IsLeaderTask {
+	if shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkspacesRoot:        d.cfg.WorkspacesRoot,
 			Profile:               d.cfg.Profile,
@@ -4095,6 +4190,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"TMP":                  taskTempDir,
 		"TEMP":                 taskTempDir,
 	}
+	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
+		agentEnv[repoCheckoutModeEnv] = checkoutMode
+	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
 	}
@@ -4127,6 +4225,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
+	}
+	// Redirect HOME/XDG/npm_config_cache to the per-task writable home under the
+	// Linux codex workspace-write sandbox, where the real home is read-only. This
+	// lets tools that write to `~` (npm, Prisma, …) succeed without per-tool env
+	// tweaks. Set before custom_env below so a user override still wins for the
+	// non-blocklisted XDG keys; HOME itself stays blocklisted. Empty TaskHome
+	// (macOS/Windows, non-sandboxed providers) leaves the real HOME untouched
+	// (MUL-4856).
+	if env.TaskHome != "" {
+		for k, v := range execenv.TaskHomeEnv(env.TaskHome) {
+			agentEnv[k] = v
+		}
 	}
 	// (Hermes HERMES_HOME is applied after custom_env below so the per-task
 	// overlay can win over a user-set HERMES_HOME; see
@@ -4164,10 +4274,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, d.logger); err != nil {
+		return TaskResult{}, err
+	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
+		CLIVersion:     resolvedVersion,
 		Env:            agentEnv,
 		Logger:         d.logger,
+		TaskID:         task.ID,
+		RuntimeID:      task.RuntimeID,
+		DaemonVersion:  d.cfg.CLIVersion,
+		CodexVersion:   codexVersion,
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
@@ -4247,12 +4365,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			thinkingLevel = ""
 		}
 	}
+	var idleWatchdogTimeout time.Duration
+	if provider == "opencode" {
+		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
+	}
 	execOpts := agent.ExecOptions{
 		Cwd:                       env.WorkDir,
 		Model:                     model,
 		ThreadName:                deriveTaskThreadName(task),
 		Timeout:                   d.cfg.AgentTimeout,
 		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
+		IdleWatchdogTimeout:       idleWatchdogTimeout,
 		HandshakeTimeout:          d.cfg.CodexHandshakeTimeout,
 		ResumeSessionID:           task.PriorSessionID,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
@@ -4302,6 +4425,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"inline_system_prompt", execOpts.SystemPrompt != "",
 		"resume_session", execOpts.ResumeSessionID != "",
 		"timeout", execOpts.Timeout,
+		"idle_watchdog", execOpts.IdleWatchdogTimeout,
 	)
 
 	// Shared across the resume-retry below so the retry's transcript rows
@@ -4567,9 +4691,15 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	// idleWatchdogThreshold records (as nanos) which silence budget actually
 	// tripped the watchdog — the idle window or the larger in-flight-tool
 	// window — so the failure message reports the real duration.
-	var idleWatchdogThreshold atomic.Int64
-	idleWatchdogThreshold.Store(int64(d.cfg.AgentIdleWatchdog))
 	idleWindow := d.cfg.AgentIdleWatchdog
+	// A provider may opt into a shorter per-run no-message budget. The global
+	// zero remains authoritative so MULTICA_AGENT_IDLE_WATCHDOG=0 still disables
+	// the entire watchdog suite. Tool calls continue to use AgentToolWatchdog.
+	if idleWindow > 0 && opts.IdleWatchdogTimeout > 0 && opts.IdleWatchdogTimeout < idleWindow {
+		idleWindow = opts.IdleWatchdogTimeout
+	}
+	var idleWatchdogThreshold atomic.Int64
+	idleWatchdogThreshold.Store(int64(idleWindow))
 	if idleWindow > 0 {
 		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
 	}
@@ -4979,6 +5109,10 @@ func (d *Daemon) markActiveEnvRoot(envRoot string) {
 	}
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
+	d.ensureActiveEnvRootStateLocked()
+	for d.deletingEnvRoots[envRoot] {
+		d.activeEnvRootsCond.Wait()
+	}
 	d.activeEnvRoots[envRoot]++
 }
 
@@ -4988,6 +5122,7 @@ func (d *Daemon) unmarkActiveEnvRoot(envRoot string) {
 	}
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
+	d.ensureActiveEnvRootStateLocked()
 	if d.activeEnvRoots[envRoot] <= 1 {
 		delete(d.activeEnvRoots, envRoot)
 		return
@@ -4998,7 +5133,44 @@ func (d *Daemon) unmarkActiveEnvRoot(envRoot string) {
 func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
+	d.ensureActiveEnvRootStateLocked()
 	return d.activeEnvRoots[envRoot] > 0
+}
+
+func (d *Daemon) ensureActiveEnvRootStateLocked() {
+	if d.activeEnvRoots == nil {
+		d.activeEnvRoots = make(map[string]int)
+	}
+	if d.deletingEnvRoots == nil {
+		d.deletingEnvRoots = make(map[string]bool)
+	}
+	if d.activeEnvRootsCond == nil {
+		d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
+	}
+}
+
+// reserveEnvRootForGC atomically confirms that no live task is using envRoot
+// and prevents a new task from entering until release runs. This closes the
+// check-then-remove race between the GC loop and task startup: either GC sees
+// the active task and skips, or task startup waits for the mutation to finish
+// and recreates/uses the post-GC environment.
+func (d *Daemon) reserveEnvRootForGC(envRoot string) (release func(), ok bool) {
+	if envRoot == "" {
+		return nil, false
+	}
+	d.activeEnvRootsMu.Lock()
+	defer d.activeEnvRootsMu.Unlock()
+	d.ensureActiveEnvRootStateLocked()
+	if d.activeEnvRoots[envRoot] > 0 || d.deletingEnvRoots[envRoot] {
+		return nil, false
+	}
+	d.deletingEnvRoots[envRoot] = true
+	return func() {
+		d.activeEnvRootsMu.Lock()
+		delete(d.deletingEnvRoots, envRoot)
+		d.activeEnvRootsCond.Broadcast()
+		d.activeEnvRootsMu.Unlock()
+	}, true
 }
 
 // markActiveCodexStore records that a task is about to use the given per-issue
@@ -5230,6 +5402,27 @@ func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayH
 	if overlayHome != "" {
 		agentEnv["HERMES_HOME"] = overlayHome
 	}
+}
+
+// configureCodexTaskShellEnvironment writes the managed shell policy only
+// after the task and agent custom environment are fully assembled. This makes
+// the allowlist reflect the child environment that will actually be launched,
+// including platform-specific essentials and non-secret custom_env values.
+// Failure is fatal: launching with an unowned or malformed policy could either
+// drop the task-scoped token again or expose inherited daemon credentials.
+func configureCodexTaskShellEnvironment(provider, codexHome string, inherited []string, agentEnv map[string]string, logger *slog.Logger) error {
+	if provider != "codex" {
+		return nil
+	}
+	if strings.TrimSpace(codexHome) == "" {
+		return errors.New("configure Codex shell environment: task CODEX_HOME is missing")
+	}
+	includeOnly := execenv.CodexShellEnvAllowlist(inherited, agentEnv)
+	configPath := filepath.Join(codexHome, "config.toml")
+	if err := execenv.EnsureCodexShellEnvPolicyConfig(configPath, includeOnly, logger); err != nil {
+		return fmt.Errorf("configure Codex shell environment: %w", err)
+	}
+	return nil
 }
 
 func defaultArgsForProvider(cfg Config, provider string) []string {

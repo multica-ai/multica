@@ -122,7 +122,7 @@ ACP-protocol agent, primarily aimed at the Chinese market. MCP config is passed 
 
 ### Hermes (Nous Research)
 
-ACP-protocol agent (shares the transport with Kimi). Session resumption works, and MCP config is passed through ACP `mcpServers`. Hermes discovers skills only from its home (`~/.hermes/skills/`), so when an agent has skills assigned Multica points `HERMES_HOME` at a per-task overlay of your `~/.hermes/` (real home mirrored by symlink; a derived `config.yaml` references your existing skills as external roots) and writes the assigned skills into its `skills/` directory for native discovery. Tasks with no assigned skills run against your real home unchanged.
+ACP-protocol agent (shares the transport with Kimi). Session resumption works, and MCP config is passed through ACP `mcpServers`. Hermes discovers skills only from its home (`~/.hermes/skills/`), so when an agent has skills assigned Multica points `HERMES_HOME` at a per-task overlay of your `~/.hermes/` (real home mirrored by symlink; a derived `config.yaml` references your existing skills as external roots) and writes the assigned skills into its `skills/` directory for native discovery. The SQLite `state.db` session store and its journal files remain task-local, so host conversation history is neither linked nor copied and live Windows WAL locks cannot block setup. Tasks with no assigned skills run against your real home unchanged.
 
 | | |
 |---|---|

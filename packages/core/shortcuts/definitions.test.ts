@@ -98,6 +98,14 @@ describe("keyboard shortcut definitions", () => {
     expect(shortcutMatchesEvent(null, keyEvent(key, modifiers), "macos")).toBe(false);
   });
 
+  it("ignores synthetic events without a key, such as Chrome autofill", () => {
+    const event = keyEvent(undefined as unknown as string, { metaKey: true });
+    expect(shortcutFromEvent(event, "macos")).toBeNull();
+    expect(
+      shortcutMatchesEvent(createShortcutChord("K", { primary: true }), event, "macos"),
+    ).toBe(false);
+  });
+
   it("formats the same semantic binding for each platform", () => {
     const shortcut = createShortcutChord("Enter", { primary: true });
     expect(formatShortcut(shortcut, "macos")).toBe("⌘↵");

@@ -27,15 +27,16 @@ const (
 
 // UpdateRequest represents a pending or completed CLI update request.
 type UpdateRequest struct {
-	ID            string       `json:"id"`
-	RuntimeID     string       `json:"runtime_id"`
-	Status        UpdateStatus `json:"status"`
-	TargetVersion string       `json:"target_version"`
-	Output        string       `json:"output,omitempty"`
-	Error         string       `json:"error,omitempty"`
-	CreatedAt     time.Time    `json:"created_at"`
-	UpdatedAt     time.Time    `json:"updated_at"`
-	RunStartedAt  *time.Time   `json:"-"`
+	ID              string       `json:"id"`
+	RuntimeID       string       `json:"runtime_id"`
+	InitiatorUserID string       `json:"-"`
+	Status          UpdateStatus `json:"status"`
+	TargetVersion   string       `json:"target_version"`
+	Output          string       `json:"output,omitempty"`
+	Error           string       `json:"error,omitempty"`
+	CreatedAt       time.Time    `json:"created_at"`
+	UpdatedAt       time.Time    `json:"updated_at"`
+	RunStartedAt    *time.Time   `json:"-"`
 }
 
 const (
@@ -45,7 +46,7 @@ const (
 )
 
 type UpdateStore interface {
-	Create(ctx context.Context, runtimeID, targetVersion string) (*UpdateRequest, error)
+	Create(ctx context.Context, runtimeID, targetVersion, initiatorUserID string) (*UpdateRequest, error)
 	Get(ctx context.Context, id string) (*UpdateRequest, error)
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
 	PopPending(ctx context.Context, runtimeID string) (*UpdateRequest, error)
@@ -91,7 +92,7 @@ func NewInMemoryUpdateStore() *InMemoryUpdateStore {
 	}
 }
 
-func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, targetVersion string) (*UpdateRequest, error) {
+func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, targetVersion, initiatorUserID string) (*UpdateRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -110,12 +111,13 @@ func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, targetVersion
 	}
 
 	req := &UpdateRequest{
-		ID:            randomID(),
-		RuntimeID:     runtimeID,
-		Status:        UpdatePending,
-		TargetVersion: targetVersion,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+		ID:              randomID(),
+		RuntimeID:       runtimeID,
+		InitiatorUserID: initiatorUserID,
+		Status:          UpdatePending,
+		TargetVersion:   targetVersion,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 	s.requests[req.ID] = req
 	return req, nil
@@ -219,7 +221,12 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
+	member, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found")
+	if !ok {
+		return
+	}
+	if !canEditRuntime(member, rt) {
+		writeError(w, http.StatusForbidden, "only runtime owners and workspace admins can update runtimes")
 		return
 	}
 
@@ -235,7 +242,12 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	update, err := h.UpdateStore.Create(r.Context(), uuidToString(rt.ID), req.TargetVersion)
+	update, err := h.UpdateStore.Create(
+		r.Context(),
+		uuidToString(rt.ID),
+		req.TargetVersion,
+		uuidToString(member.UserID),
+	)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -257,10 +269,10 @@ func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return
 	}
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
+	member, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found")
+	if !ok {
 		return
 	}
-
 	updateID := chi.URLParam(r, "updateId")
 
 	update, err := h.UpdateStore.Get(r.Context(), updateID)
@@ -270,6 +282,13 @@ func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if update == nil || update.RuntimeID != uuidToString(rt.ID) {
 		writeError(w, http.StatusNotFound, "update not found")
+		return
+	}
+	// Keep an in-flight poll alive if an admin is downgraded after starting
+	// the update. This exception is scoped to the immutable request initiator;
+	// other plain members still cannot read another runtime's update status.
+	if !canEditRuntime(member, rt) && update.InitiatorUserID != uuidToString(member.UserID) {
+		writeError(w, http.StatusForbidden, "only runtime owners, workspace admins, and the update initiator can view this update")
 		return
 	}
 

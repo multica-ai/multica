@@ -1788,35 +1788,37 @@ INSERT INTO agent_task_queue (
     squad_id, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
-    chat_input_task_id
+    chat_input_task_id, fire_at
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
-    'queued',
+    CASE WHEN $2::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
-    p.attempt + 1, p.max_attempts, p.id,
+    p.attempt + 1, COALESCE($3::int, p.max_attempts), p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
     p.squad_id,
     p.originator_user_id,
     p.accountable_user_id,
-    $2,
-    $3,
+    $4,
+    $5,
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
-    p.chat_input_task_id
+    p.chat_input_task_id, $2
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id
 `
 
 type CreateRetryTaskParams struct {
-	ID                   pgtype.UUID `json:"id"`
-	RuntimeMcpOverlay    []byte      `json:"runtime_mcp_overlay"`
-	RuntimeConnectedApps []byte      `json:"runtime_connected_apps"`
+	ID                   pgtype.UUID        `json:"id"`
+	FireAt               pgtype.Timestamptz `json:"fire_at"`
+	MaxAttempts          pgtype.Int4        `json:"max_attempts"`
+	RuntimeMcpOverlay    []byte             `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps []byte             `json:"runtime_connected_apps"`
 }
 
 // Clones a parent task into a fresh queued attempt. Carries forward the
@@ -1857,8 +1859,28 @@ type CreateRetryTaskParams struct {
 // queued while the failing turn was still running — the retry continues the
 // older turn first. Combined with creating the retry inside FailTask's
 // transaction, this leaves no window for a newer input task to jump ahead.
+//
+// fire_at arms a backoff before the retry: when non-NULL the child is inserted
+// as 'deferred' with that fire_at and stays inert until the existing
+// PromoteDueDeferredTasksForRuntime sweeper (run promote-first on every claim
+// poll) flips it to 'queued'. Used for provider_network's final attempt so it
+// waits ~5s instead of firing back-to-back with the immediate retry (MUL-4910).
+// NULL keeps the historical behaviour: an immediately-claimable 'queued' child.
+//
+// max_attempts overrides the inherited budget when non-NULL (NULL inherits
+// p.max_attempts unchanged). Callers persist the reason-aware effective ceiling
+// here so the row stays self-consistent — e.g. provider_network's chain records
+// attempt=3, max_attempts=3 rather than leaking attempt=3, max_attempts=2 to the
+// task API (MUL-4910). The Go retryAttemptCeiling already refuses to raise a
+// disabled (max_attempts<=1) task, so this only ever widens, never revives.
 func (q *Queries) CreateRetryTask(ctx context.Context, arg CreateRetryTaskParams) (AgentTaskQueue, error) {
-	row := q.db.QueryRow(ctx, createRetryTask, arg.ID, arg.RuntimeMcpOverlay, arg.RuntimeConnectedApps)
+	row := q.db.QueryRow(ctx, createRetryTask,
+		arg.ID,
+		arg.FireAt,
+		arg.MaxAttempts,
+		arg.RuntimeMcpOverlay,
+		arg.RuntimeConnectedApps,
+	)
 	var i AgentTaskQueue
 	err := row.Scan(
 		&i.ID,
@@ -2606,7 +2628,7 @@ WHERE agent_id = $1 AND issue_id = $2
     status = 'completed'
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
     )
   )
@@ -2636,19 +2658,26 @@ type GetLastTaskSessionRow struct {
 // conversation and lose the in-flight context — exactly what MUL-1128's B
 // branch is meant to fix.
 //
-// Manual rerun (TaskService.RerunIssue) does NOT take this path: it sets
-// force_fresh_session=true on the new task, and the daemon claim handler
-// skips this lookup entirely. The user already judged the prior output bad;
-// resuming the same conversation would replay a poisoned state.
+// Manual rerun (TaskService.RerunIssue) does NOT take this path. The claim
+// handler branches on rerun_of_task_id FIRST and resolves the session/workdir
+// from that exact source task (so a parallel task on the same issue can't be
+// resumed by mistake), reusing the source workdir and resuming its session only
+// when the source failure is resume-safe. The rerun row still carries
+// force_fresh_session=true purely as a rollback-safe signal: an OLD claim
+// handler that predates the rerun_of_task_id branch falls back to this query,
+// and force_fresh_session=true makes it start clean instead of resuming the
+// wrong execution (MUL-4869).
 //
 // Tasks that ended in a known "poisoned" terminal state are also excluded
 // here so even auto-retry does not inherit the bad session. The daemon
 // classifies these failures (iteration_limit, agent_fallback_message,
-// api_invalid_request, codex_semantic_inactivity) when it detects either an
-// agent fallback marker in the output, an upstream API 400 that means the
-// conversation history itself is unprocessable (oversized image, malformed
-// base64, etc.), or a Codex semantic inactivity timeout whose recorded
-// session may replay the same stuck state.
+// api_invalid_request, codex_semantic_inactivity, agent_error.context_overflow)
+// when it detects either an agent fallback marker in the output, an upstream
+// API 400 that means the conversation history itself is unprocessable
+// (oversized image, malformed base64, etc.), a Codex semantic inactivity
+// timeout whose recorded session may replay the same stuck state, or a context
+// window overflow that would immediately overflow again on resume. Keep this
+// list in sync with resumeUnsafeFailureReason and GetLastChatTaskSession.
 //
 // The error-text ILIKE clause is defense-in-depth for the api_invalid_request
 // shape: a legacy row tagged 'agent_error' (pre-MUL-1921), a deploy-window

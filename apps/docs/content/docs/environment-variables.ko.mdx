@@ -178,12 +178,44 @@ S3 앞에 CloudFront를 두는 경우 세 가지 변수가 적용됩니다: `CLO
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | 서버 주소 (자체 호스팅: 자신의 도메인으로 교체) |
+| `MULTICA_DAEMON_DEVICE_NAME` | 호스트명 | Runtimes UI에 표시되는 장치 이름 |
+| `MULTICA_AGENT_RUNTIME_NAME` | 기본값 | 런타임 표시 이름 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 하트비트 간격 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | 작업 폴링 간격 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 최대 동시 작업 수 |
+| `MULTICA_AGENT_TIMEOUT` | `0` | 에이전트 실행당 절대 벽시계 상한. `0`은 상한 없음 — inactivity watchdog만이 긴 실행을 제한합니다. 하드 리소스/비용 상한이 필요하면 양의 Go 기간을 지정하세요 |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex 전용 inactivity watchdog 시간 |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex `app-server` 시작 RPC 타임아웃 |
+| `MULTICA_DAEMON_AUTO_UPDATE` | 클라우드: `true`, 자체 호스팅: `false` | `false`/`0`/`no`/`off`로 설정하면 데몬의 CLI 자동 업데이트 폴링이 꺼집니다. `true`/`1`/`yes`/`on`은 자체 호스팅 데몬이 업스트림 업데이트를 구독하도록 합니다 |
+| `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 데몬이 새 CLI 릴리스를 GitHub에서 확인하는 주기 |
 | `MULTICA_<PROVIDER>_PATH` | CLI 이름과 일치 | 각 AI 코딩 도구 실행 파일의 경로 (예: `MULTICA_CLAUDE_PATH`) |
 | `MULTICA_<PROVIDER>_MODEL` | 비어 있음 | 각 AI 코딩 도구의 기본 모델 |
 | `MULTICA_<PROVIDER>_ARGS` | 비어 있음 | 백엔드별 데몬 전역 기본 CLI 인자. 각 작업에 대해 각 에이전트 자체의 `custom_args`보다 먼저 적용됩니다. `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`를 지원 |
+
+### `config.json`에 데몬 설정 유지하기
+
+위 표의 모든 데몬 키 — `device_name`, `runtime_name`, `max_concurrent_tasks`, `poll_interval`, `heartbeat_interval`, `agent_timeout`, `codex_semantic_inactivity_timeout`, `codex_handshake_timeout`, `disable_auto_update`, `auto_update_check_interval` — 는 프로파일의 `~/.multica/config.json`(또는 `~/.multica/profiles/<name>/config.json`)에 유지할 수도 있어, `daemon start` 마다 플래그를 다시 전달하거나 환경 변수를 export 할 필요가 없습니다.
+
+```bash
+multica config set device_name my-vm-custom-name
+multica config set runtime_name worker-a
+multica config set max_concurrent_tasks 8
+multica config set poll_interval 10s          # Go 기간, 반드시 > 0
+multica config set heartbeat_interval 30s
+multica config set agent_timeout 1h           # 또는 0s로 벽시계 상한을 명시적으로 비활성화
+multica config set codex_semantic_inactivity_timeout 15m
+multica config set codex_handshake_timeout 45s
+multica config set disable_auto_update true   # 단방향: 자동 업데이트를 끄는 용도로만 사용
+multica config set auto_update_check_interval 12h
+```
+
+기간 키는 양수인 Go 기간(`500ms`, `10s`, `1m30s` 등)만 허용합니다. `0s`, 음수, 파싱 불가능한 문자열은 `config set` 시점에 거부됩니다 — **단 `agent_timeout`은 예외로, 여기서 `0s`는 "벽시계 상한을 명시적으로 비활성화" 하는 의미 있는 값**입니다(음수는 여전히 거부됨). 이미 저장된 값을 지우고 환경 변수 / 내장 기본값으로 되돌리려면 빈 문자열을 전달하세요: `multica config set poll_interval ""`.
+
+`disable_auto_update`는 단방향 불리언입니다. `true`로 설정하면 데몬의 CLI 자동 업데이트 폴링이 꺼지고, `false`(또는 `""`로 클리어)로 설정하면 결정을 `MULTICA_DAEMON_AUTO_UPDATE` / 클라우드-vs-자체호스팅 기본값에 다시 넘깁니다. config 파일에서 자동 업데이트를 *강제로 켜는* 데는 사용할 수 없습니다.
+
+우선순위(위쪽이 우선): `daemon start`의 `--flag` > `MULTICA_…` 환경 변수 > `config.json` > 내장 기본값. systemd unit 등에서 설정한 라이브 환경 변수는 파일을 이깁니다. 명시적인 CLI 플래그는 둘 다 이깁니다.
+
+같은 호스트에서 `--profile <name>`으로 여러 데몬을 실행할 때 특히 유용합니다: 프로파일마다 별도의 `device_name`을 지정하면 Runtimes UI에서 공유된 호스트명 아래로 뭉치지 않고 서로 다른 행으로 구분됩니다.
 
 각 파라미터가 데몬 동작에 어떻게 영향을 미치는지에 대한 전체 설명은 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
 

@@ -17,7 +17,9 @@ import type {
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
+  CronPreviewResponse,
   GroupedIssuesResponse,
+  InboxItem,
   InboxWorkspaceUnread,
   Label,
   IssueProperty,
@@ -91,6 +93,7 @@ export const IssuePropertySchema = z.object({
   name: z.string(),
   type: z.string(),
   description: z.string().optional().default(""),
+  icon: z.string().optional().default(""),
   config: z.object({
     options: z.array(z.object({
       id: z.string(),
@@ -112,6 +115,7 @@ export const EMPTY_ISSUE_PROPERTY: IssueProperty = {
   name: "",
   type: "text",
   description: "",
+  icon: "",
   config: {},
   position: 0,
   archived: false,
@@ -465,6 +469,25 @@ export const IssueSchema = z.object({
 export const ListIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
   total: z.number().default(0),
+}).loose();
+
+// Response schema for POST /api/issues. Two tightenings over IssueSchema:
+//
+//   - `id` must be non-empty. A created issue always carries a real id, so an
+//     empty/absent id means the create effectively failed. createIssue turns a
+//     schema failure into a rejection (not a fabricated success), so tightening
+//     id here routes an id-less body to that same failure path.
+//   - `labels` is the backend-compatibility signal the create modal reads to
+//     decide whether the backend attached labels in the create transaction
+//     (present) or predates that (absent → fall back to per-label attach).
+//     Validate it strictly as Label[] and degrade a malformed value to
+//     `undefined` — the same as an absent field — so a wrong shape (null,
+//     object, a garbage array) can never masquerade as "handled" and suppress
+//     the fallback. Unlike the loose IssueSchema.labels (z.array(z.unknown())),
+//     the elements are fully validated. See packages/views/modals/create-issue.tsx.
+export const CreateIssueResponseSchema = IssueSchema.extend({
+  id: z.string().min(1),
+  labels: z.array(LabelSchema).optional().catch(undefined),
 }).loose();
 
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
@@ -1208,6 +1231,18 @@ export const FALLBACK_AUTOPILOT_RUN: AutopilotRun = {
   created_at: "",
 };
 
+// Cron preview: the server is the authority on the next occurrences. No
+// `.default([])` here — a missing or reshaped field must fail validation so it
+// degrades to the `next_runs: null` fallback ("preview unreadable") instead of
+// masquerading as a valid empty list ("this expression never fires").
+export const CronPreviewResponseSchema = z.object({
+  next_runs: z.array(z.string()),
+}).loose();
+
+export const UNREADABLE_CRON_PREVIEW_RESPONSE: CronPreviewResponse = {
+  next_runs: null,
+};
+
 export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
   id: "",
   workspace_id: "",
@@ -1291,6 +1326,38 @@ export const InboxUnreadSummarySchema = z.array(
 );
 
 export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
+
+// ---------------------------------------------------------------------------
+// Archived inbox items (`/api/inbox/archived` GET).
+// Lenient per the usual rules: `severity` / `type` / `recipient_type` stay
+// `z.string()` so a notification kind this client doesn't know yet still
+// parses and renders (the UI's type-label lookup already tolerates unknown
+// kinds). Nullable optional fields are declared optional as well, since older
+// rows can omit them entirely. On malformed JSON parseWithFallback returns the
+// empty list — the archived view then reads as empty rather than white-
+// screening the inbox.
+// ---------------------------------------------------------------------------
+
+export const InboxItemListSchema = z.array(
+  z
+    .object({
+      id: z.string(),
+      workspace_id: z.string(),
+      recipient_type: z.string(),
+      recipient_id: z.string(),
+      type: z.string(),
+      severity: z.string(),
+      issue_id: z.string().nullish(),
+      title: z.string(),
+      body: z.string().nullish(),
+      read: z.boolean(),
+      archived: z.boolean(),
+      created_at: z.string(),
+    })
+    .loose(),
+);
+
+export const EMPTY_INBOX_ITEMS: InboxItem[] = [];
 
 // ---------------------------------------------------------------------------
 // Billing schemas (cloud-billing proxy surface)

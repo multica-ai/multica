@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -37,15 +37,6 @@ import {
   PopoverDescription,
 } from "@multica/ui/components/ui/popover";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@multica/ui/components/ui/select";
-import { TimeInput } from "@multica/ui/components/ui/time-input";
-import { TimezonePicker } from "./pickers/timezone-picker";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
@@ -66,19 +57,17 @@ import type {
 } from "@multica/core/types";
 import { TitleEditor, ContentEditor } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { SegmentedToggle } from "../../common/segmented-toggle";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import { SubscriberMultiSelect } from "./subscriber-multi-select";
 import { AutopilotAccessManager } from "./autopilot-access-manager";
-import {
-  getDefaultTriggerConfig,
-  getLocalTimezone,
-  parseCronExpression,
-  toCronExpression,
-  type TriggerConfig,
-  type TriggerFrequency,
-} from "./trigger-config";
+import { ScheduleEditor } from "./schedule-editor/schedule-editor";
+import { getDefaultScheduleConfig, type ScheduleConfig } from "./schedule-editor/model";
+import { browserTimezone } from "../../common/timezone-select";
+import { parseCron, toCron } from "./schedule-editor/cron-mapping";
+import { useScheduleSubmitGate } from "./schedule-editor/validate";
 import { WebhookEventFilterSection } from "./webhook-event-filter-section";
 import { useT } from "../../i18n";
 import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
@@ -104,7 +93,7 @@ export type AutopilotDialogProps =
       open: boolean;
       onOpenChange: (v: boolean) => void;
       initial?: Partial<AutopilotInitial>;
-      initialTriggerConfig?: Partial<TriggerConfig>;
+      initialSchedule?: Pick<ScheduleConfig, "time" | "days">;
     }
   | {
       mode: "edit";
@@ -121,128 +110,12 @@ export type AutopilotDialogProps =
 // Static schema-level data (not user-visible)
 // ---------------------------------------------------------------------------
 
-const FREQUENCY_KEYS: TriggerFrequency[] = [
-  "hourly",
-  "daily",
-  "weekdays",
-  "weekly",
-  "custom",
-];
-
-const DAY_KEYS = [
-  "sunday",
-  "monday",
-  "tuesday",
-  "wednesday",
-  "thursday",
-  "friday",
-  "saturday",
-] as const;
-
-const TIMEZONE_OPTIONS = [
-  "UTC",
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "America/Sao_Paulo",
-  "Europe/London",
-  "Europe/Paris",
-  "Europe/Berlin",
-  "Europe/Moscow",
-  "Asia/Dubai",
-  "Asia/Kolkata",
-  "Asia/Singapore",
-  "Asia/Shanghai",
-  "Asia/Tokyo",
-  "Asia/Seoul",
-  "Australia/Sydney",
-  "Pacific/Auckland",
-];
-
 const OUTPUT_MODE_KEYS: AutopilotExecutionMode[] = ["create_issue", "run_only"];
 
 const OUTPUT_MODE_ICONS: Record<AutopilotExecutionMode, typeof FilePlus2> = {
   create_issue: FilePlus2,
   run_only: Play,
 };
-
-// ---------------------------------------------------------------------------
-// Next-run computation (local approximation — server stores the authoritative value)
-// ---------------------------------------------------------------------------
-
-function computeNextRun(cfg: TriggerConfig, now: Date): Date | null {
-  const [hStr, mStr] = cfg.time.split(":");
-  const hour = parseInt(hStr ?? "9", 10);
-  const minute = parseInt(mStr ?? "0", 10);
-  const next = new Date(now);
-
-  switch (cfg.frequency) {
-    case "hourly": {
-      next.setMinutes(minute, 0, 0);
-      if (next <= now) next.setHours(next.getHours() + 1);
-      return next;
-    }
-    case "daily": {
-      next.setHours(hour, minute, 0, 0);
-      if (next <= now) next.setDate(next.getDate() + 1);
-      return next;
-    }
-    case "weekdays": {
-      next.setHours(hour, minute, 0, 0);
-      for (let i = 0; i < 8; i++) {
-        const dow = next.getDay();
-        if (next > now && dow >= 1 && dow <= 5) return next;
-        next.setDate(next.getDate() + 1);
-        next.setHours(hour, minute, 0, 0);
-      }
-      return null;
-    }
-    case "weekly": {
-      if (cfg.daysOfWeek.length === 0) return null;
-      next.setHours(hour, minute, 0, 0);
-      for (let i = 0; i < 8; i++) {
-        if (next > now && cfg.daysOfWeek.includes(next.getDay())) return next;
-        next.setDate(next.getDate() + 1);
-        next.setHours(hour, minute, 0, 0);
-      }
-      return null;
-    }
-    case "custom":
-      return null;
-  }
-}
-
-function useFormatCountdown(): (target: Date, now: Date) => string {
-  const { t } = useT("autopilots");
-  return (target, now) => {
-    const diff = Math.max(0, target.getTime() - now.getTime());
-    const seconds = Math.floor(diff / 1000);
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    if (days > 0) return t(($) => $.trigger_config.countdown.days_hours, { days, hours });
-    if (hours > 0) return t(($) => $.trigger_config.countdown.hours_minutes, { hours, minutes });
-    if (minutes > 0) return t(($) => $.trigger_config.countdown.minutes, { minutes });
-    return t(($) => $.trigger_config.countdown.less_than_minute);
-  };
-}
-
-function formatNextRunAbsolute(date: Date, timezone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    }).format(date);
-  } catch {
-    return date.toLocaleString();
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Webhook event-filter dirty detection
@@ -256,19 +129,6 @@ function serializeEventFilters(filters: WebhookEventFilter[]): string {
   return JSON.stringify(
     filters.map((f) => ({ event: f.event, actions: f.actions ?? [] })),
   );
-}
-
-// ---------------------------------------------------------------------------
-// Live "now" ticker for countdown
-// ---------------------------------------------------------------------------
-
-function useNowTicker(intervalMs = 30_000): Date {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), intervalMs);
-    return () => clearInterval(t);
-  }, [intervalMs]);
-  return now;
 }
 
 // ---------------------------------------------------------------------------
@@ -304,18 +164,19 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     initial.subscriber_user_ids ?? [],
   );
 
-  const initialCfg: TriggerConfig = (() => {
+  const initialCfg: ScheduleConfig = (() => {
     if (isCreate) {
-      const tpl = props.initialTriggerConfig;
-      return tpl ? { ...getDefaultTriggerConfig(), ...tpl } : getDefaultTriggerConfig();
+      const tpl = props.initialSchedule;
+      const fallback = getDefaultScheduleConfig(browserTimezone());
+      return tpl ? { ...fallback, ...tpl } : fallback;
     }
     const first = props.triggers[0];
     if (first?.cron_expression) {
-      return parseCronExpression(first.cron_expression, first.timezone ?? "UTC");
+      return parseCron(first.cron_expression, first.timezone ?? "UTC");
     }
-    return getDefaultTriggerConfig();
+    return getDefaultScheduleConfig(browserTimezone());
   })();
-  const [triggerConfig, setTriggerConfig] = useState<TriggerConfig>(initialCfg);
+  const [schedule, setSchedule] = useState<ScheduleConfig>(initialCfg);
 
   // Trigger kind selector. Only meaningful in create mode — edit mode does
   // not support converting between kinds inline (PLAN.md calls that
@@ -335,12 +196,12 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     !isCreate && props.triggers[0]?.event_filters ? props.triggers[0].event_filters : [];
   const [eventFilters, setEventFilters] = useState<WebhookEventFilter[]>(initialEventFilters);
 
-  const initialCronRef = useRef(toCronExpression(initialCfg));
+  const initialCronRef = useRef(toCron(initialCfg));
   const initialTimezoneRef = useRef(initialCfg.timezone);
   const initialEventFiltersRef = useRef(serializeEventFilters(initialEventFilters));
   const scheduleDirty =
-    toCronExpression(triggerConfig) !== initialCronRef.current ||
-    triggerConfig.timezone !== initialTimezoneRef.current;
+    toCron(schedule) !== initialCronRef.current ||
+    schedule.timezone !== initialTimezoneRef.current;
   const eventFiltersDirty =
     serializeEventFilters(eventFilters) !== initialEventFiltersRef.current;
 
@@ -382,13 +243,29 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   // and click into it to grab the URL" friction.
   const [createdWebhookTrigger, setCreatedWebhookTrigger] = useState<AutopilotTrigger | null>(null);
 
+  const scheduleGate = useScheduleSubmitGate(wsId);
+
+  // The schedule only gates submit when this save would actually write it. A
+  // locked schedule (2+ triggers) or one the user never touched is not sent, so
+  // a preview 400 on the stored expression — an expression the server accepted
+  // once and may now reject, e.g. a timezone its tzdata dropped — must not veto
+  // edits to the title, prompt or assignee.
+  const scheduleWillBeWritten =
+    triggerKind === "schedule" && !schedulePillDisabled && (isCreate || scheduleDirty);
   const canSubmit =
-    title.trim().length > 0 && assigneeId.length > 0 && !submitting;
+    title.trim().length > 0 &&
+    assigneeId.length > 0 &&
+    !submitting &&
+    (!scheduleWillBeWritten || scheduleGate.scheduleValid);
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
+      if (scheduleWillBeWritten && !(await scheduleGate.ensureAccepted(schedule))) {
+        setSubmitting(false);
+        return;
+      }
       if (isCreate) {
         const autopilot = await createAutopilot.mutateAsync({
           title: title.trim(),
@@ -416,8 +293,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             await createTrigger.mutateAsync({
               autopilotId: autopilot.id,
               kind: "schedule",
-              cron_expression: toCronExpression(triggerConfig),
-              timezone: triggerConfig.timezone,
+              cron_expression: toCron(schedule),
+              timezone: schedule.timezone,
             });
           }
         } catch (err) {
@@ -460,22 +337,22 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         // Skip the schedule sync when the autopilot's first trigger is a
         // webhook — there's no cron to update there, and the schedule
         // panel isn't even rendered for webhook autopilots.
-        if (triggerKind === "schedule" && scheduleDirty && !schedulePillDisabled) {
+        if (scheduleWillBeWritten) {
           const snapshottedTriggerId = firstTriggerIdRef.current;
           try {
             if (snapshottedTriggerId) {
               await updateTrigger.mutateAsync({
                 autopilotId: props.autopilotId,
                 triggerId: snapshottedTriggerId,
-                cron_expression: toCronExpression(triggerConfig),
-                timezone: triggerConfig.timezone,
+                cron_expression: toCron(schedule),
+                timezone: schedule.timezone,
               });
             } else {
               await createTrigger.mutateAsync({
                 autopilotId: props.autopilotId,
                 kind: "schedule",
-                cron_expression: toCronExpression(triggerConfig),
-                timezone: triggerConfig.timezone,
+                cron_expression: toCron(schedule),
+                timezone: schedule.timezone,
               });
             }
           } catch (err) {
@@ -675,7 +552,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           </div>
 
           {/* Right: Configuration */}
-          <aside className="w-full lg:w-[340px] shrink-0 overflow-visible lg:overflow-y-auto px-5 py-5 space-y-5 bg-muted/30">
+          <aside className="w-full lg:w-[380px] shrink-0 overflow-visible lg:overflow-y-auto px-5 py-5 space-y-5 bg-muted/30">
             <AgentSection
               selectedType={assigneeType}
               selectedId={assigneeId}
@@ -706,16 +583,28 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             )}
 
             {triggerKind === "schedule" ? (
-              <ScheduleSection
-                config={triggerConfig}
-                onChange={setTriggerConfig}
-                disabled={schedulePillDisabled}
-                disabledReason={
-                  schedulePillDisabled
-                    ? t(($) => $.dialog.schedule_disabled_reason)
-                    : undefined
-                }
-              />
+              <div>
+                <SectionLabel>{t(($) => $.dialog.section_schedule)}</SectionLabel>
+                <ScheduleEditor
+                  value={schedule}
+                  onChange={(next) => {
+                    scheduleGate.clearRejection();
+                    setSchedule(next);
+                  }}
+                  wsId={wsId}
+                  onValidityChange={scheduleGate.onValidityChange}
+                  // Locked while the save is in flight: the submit path validates
+                  // over the network and then writes the schedule it read before
+                  // that round trip, so an edit made in between would be dropped
+                  // on the floor with a success toast over it.
+                  disabled={schedulePillDisabled || submitting}
+                  disabledReason={
+                    schedulePillDisabled
+                      ? t(($) => $.dialog.schedule_disabled_reason)
+                      : undefined
+                  }
+                />
+              </div>
             ) : (
               <WebhookSection
                 isCreate={isCreate}
@@ -948,145 +837,6 @@ function SubscribersSection({
   );
 }
 
-function ScheduleSection({
-  config,
-  onChange,
-  disabled,
-  disabledReason,
-}: {
-  config: TriggerConfig;
-  onChange: (c: TriggerConfig) => void;
-  disabled?: boolean;
-  disabledReason?: string;
-}) {
-  const { t } = useT("autopilots");
-  const formatCountdown = useFormatCountdown();
-  const now = useNowTicker();
-  const next = useMemo(() => computeNextRun(config, now), [config, now]);
-  const frequencyItems = FREQUENCY_KEYS.map((value) => ({
-    value,
-    label: t(($) => $.dialog.frequency_long[value]),
-  }));
-  const dayItems = DAY_KEYS.map((dayKey, value) => ({
-    value: String(value),
-    label: t(($) => $.dialog.days[dayKey]),
-  }));
-  const timezones = useMemo(() => {
-    const local = getLocalTimezone();
-    if (TIMEZONE_OPTIONS.includes(local)) return TIMEZONE_OPTIONS;
-    return [local, ...TIMEZONE_OPTIONS];
-  }, []);
-
-  const selectedDay = config.daysOfWeek[0] ?? 1;
-
-  return (
-    <div>
-      <SectionLabel>{t(($) => $.dialog.section_schedule)}</SectionLabel>
-      <div
-        className={cn(
-          "space-y-2",
-          disabled && "opacity-60 pointer-events-none",
-        )}
-      >
-        {/* Row 1: Frequency + (Day when weekly) */}
-        <div className="grid grid-cols-2 gap-2">
-          <Select
-            items={frequencyItems}
-            value={config.frequency}
-            onValueChange={(v) =>
-              v && onChange({ ...config, frequency: v as TriggerFrequency })
-            }
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {frequencyItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {config.frequency === "weekly" ? (
-            <Select
-              items={dayItems}
-              value={String(selectedDay)}
-              onValueChange={(v) =>
-                v && onChange({ ...config, daysOfWeek: [parseInt(v, 10)] })
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {dayItems.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <div />
-          )}
-        </div>
-
-        {/* Row 2: Time + Timezone (hidden for hourly / custom) */}
-        {config.frequency === "custom" ? (
-          <input
-            type="text"
-            value={config.cronExpression}
-            onChange={(e) =>
-              onChange({ ...config, cronExpression: e.target.value })
-            }
-            placeholder="0 9 * * 1-5"
-            className="w-full rounded-lg border border-input bg-transparent px-2.5 py-1 h-8 text-sm font-mono outline-none transition-colors focus:border-ring focus:ring-3 focus:ring-ring/50 dark:bg-input/30"
-          />
-        ) : config.frequency === "hourly" ? (
-          <TimeInput
-            minuteOnly
-            value={config.time}
-            onChange={(v) => onChange({ ...config, time: v })}
-          />
-        ) : (
-          <div className="grid grid-cols-2 gap-2">
-            <TimeInput
-              value={config.time}
-              onChange={(v) => onChange({ ...config, time: v })}
-            />
-            <TimezonePicker
-              value={config.timezone}
-              onChange={(tz) => onChange({ ...config, timezone: tz })}
-              options={timezones}
-            />
-          </div>
-        )}
-
-        {/* Next run preview */}
-        {next && (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-1">
-            <Clock className="size-3 shrink-0" />
-            <span className="truncate">
-              {t(($) => $.dialog.next_run_label)}{" "}
-              <span className="text-foreground">
-                {formatNextRunAbsolute(next, config.timezone)}
-              </span>
-            </span>
-            <span className="ml-auto rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground shrink-0">
-              {formatCountdown(next, now)}
-            </span>
-          </div>
-        )}
-      </div>
-      {disabled && disabledReason && (
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          {disabledReason}
-        </p>
-      )}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Trigger kind segmented control + webhook help section
@@ -1103,49 +853,28 @@ function TriggerKindSection({
   return (
     <div>
       <SectionLabel>{t(($) => $.dialog.section_trigger_kind)}</SectionLabel>
-      <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
-        <TriggerKindButton
-          active={kind === "schedule"}
-          onClick={() => onChange("schedule")}
-          icon={<Clock className="h-3.5 w-3.5" />}
-          label={t(($) => $.dialog.trigger_kind_schedule)}
-        />
-        <TriggerKindButton
-          active={kind === "webhook"}
-          onClick={() => onChange("webhook")}
-          icon={<Webhook className="h-3.5 w-3.5" />}
-          label={t(($) => $.dialog.trigger_kind_webhook)}
-        />
-      </div>
+      <SegmentedToggle
+        value={kind}
+        onChange={onChange}
+        buttonClassName="px-3 py-1.5 text-sm"
+        options={[
+          [
+            "schedule",
+            <span key="schedule" className="flex items-center justify-center gap-1.5">
+              <Clock className="h-3.5 w-3.5" />
+              {t(($) => $.dialog.trigger_kind_schedule)}
+            </span>,
+          ],
+          [
+            "webhook",
+            <span key="webhook" className="flex items-center justify-center gap-1.5">
+              <Webhook className="h-3.5 w-3.5" />
+              {t(($) => $.dialog.trigger_kind_webhook)}
+            </span>,
+          ],
+        ]}
+      />
     </div>
-  );
-}
-
-function TriggerKindButton({
-  active,
-  onClick,
-  icon,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex items-center justify-center gap-1.5 rounded px-3 py-1.5 text-sm transition-colors",
-        active
-          ? "bg-background text-foreground shadow-sm"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
   );
 }
 

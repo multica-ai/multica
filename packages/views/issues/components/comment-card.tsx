@@ -29,9 +29,8 @@ import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
-import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
+import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider, useUploadGate, useEditorUpload } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api, dispatchReasonCode } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import { CommentTriggerChips } from "./comment-trigger-chips";
@@ -322,10 +321,14 @@ function useEditAttachmentState(
   onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => Promise<void>,
 ) {
   const { t } = useT("issues");
-  const { uploadWithToast } = useFileUpload(api);
+  const { t: tEditor } = useT("editor");
+  const { uploadWithToast } = useEditorUpload();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const editorRef = useRef<ContentEditorRef>(null);
+  // Saving mid-upload would persist the edit without the file the user just
+  // pasted in — same failure as posting a new comment.
+  const uploadGate = useUploadGate(editorRef);
   const cancelledRef = useRef(false);
   const savingRef = useRef(false);
   const [content, setContent] = useState(entry.content ?? "");
@@ -411,6 +414,8 @@ function useEditAttachmentState(
 
   const saveEdit = async () => {
     if (cancelledRef.current || savingRef.current) return;
+    // Submit-time re-read — Cmd+Enter bypasses the Save button entirely.
+    if (uploadGate.isBlocked()) return;
     const trimmed = editorRef.current
       ?.getMarkdown()
       ?.replace(/(\n\s*)+$/, "")
@@ -454,6 +459,9 @@ function useEditAttachmentState(
   return {
     editing,
     saving,
+    uploading: uploadGate.uploading,
+    onUploadingChange: uploadGate.onUploadingChange,
+    uploadingLabel: tEditor(($) => $.upload.in_progress),
     editorRef,
     editorAttachments,
     handleUpload,
@@ -633,6 +641,7 @@ function CommentRow({
               }}
               onSubmit={edit.saveEdit}
               onUploadFile={edit.handleUpload}
+              onUploadingChange={edit.onUploadingChange}
               debounceMs={100}
               currentIssueId={issueId}
               attachments={edit.editorAttachments}
@@ -668,9 +677,16 @@ function CommentRow({
                 onSelect={(file) => edit.editorRef.current?.uploadFile(file)}
               />
               <Button size="sm" variant="ghost" onClick={edit.cancelEdit} disabled={edit.saving}>{t(($) => $.comment.cancel_edit)}</Button>
-              <Button size="sm" variant="outline" onClick={edit.saveEdit} disabled={edit.saving}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={edit.saveEdit}
+                disabled={edit.saving || edit.uploading}
+                aria-disabled={edit.uploading || undefined}
+                aria-busy={edit.uploading || undefined}
+              >
                 {edit.saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                {t(($) => $.comment.save_action)}
+                {edit.uploading ? edit.uploadingLabel : t(($) => $.comment.save_action)}
               </Button>
             </div>
           </div>
@@ -934,6 +950,7 @@ function CommentCardImpl({
                     }}
                     onSubmit={edit.saveEdit}
                     onUploadFile={edit.handleUpload}
+                    onUploadingChange={edit.onUploadingChange}
                     debounceMs={100}
                     currentIssueId={issueId}
                     attachments={edit.editorAttachments}
@@ -969,9 +986,16 @@ function CommentCardImpl({
                   </div>
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="ghost" onClick={edit.cancelEdit} disabled={edit.saving}>{t(($) => $.comment.cancel_edit)}</Button>
-                    <Button size="sm" variant="outline" onClick={edit.saveEdit} disabled={edit.saving}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={edit.saveEdit}
+                      disabled={edit.saving || edit.uploading}
+                      aria-disabled={edit.uploading || undefined}
+                      aria-busy={edit.uploading || undefined}
+                    >
                       {edit.saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      {t(($) => $.comment.save_action)}
+                      {edit.uploading ? edit.uploadingLabel : t(($) => $.comment.save_action)}
                     </Button>
                   </div>
                 </div>

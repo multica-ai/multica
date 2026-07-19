@@ -164,6 +164,8 @@ multica issue property unset <issue-id> --name Environment
 ```
 
 - A validation error lists the legal options — fix the value and retry.
+- Definitions may include an optional catalog icon for visual identification;
+  it does not change the property's type or value validation.
 - Agents cannot create or edit property definitions (owner/admin humans only).
   If a needed property does not exist, propose it in a comment instead.
 - Property vs metadata: if the value is workflow state a human should see and

@@ -303,7 +303,6 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_hint": "Only process webhooks matching these events. Leave empty to accept all.",
     "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
-    "next_run_label": "Next run:",
     "output_modes": {
       "create_issue": {
         "label": "Create issue",
@@ -313,32 +312,20 @@
         "label": "Run only",
         "description": "Silent run, no issue created"
       }
-    },
-    "frequency_long": {
-      "hourly": "Every hour",
-      "daily": "Every day",
-      "weekdays": "Every weekday",
-      "weekly": "Every week",
-      "custom": "Custom cron"
-    },
-    "days": {
-      "sunday": "Sunday",
-      "monday": "Monday",
-      "tuesday": "Tuesday",
-      "wednesday": "Wednesday",
-      "thursday": "Thursday",
-      "friday": "Friday",
-      "saturday": "Saturday"
     }
   },
-  "trigger_config": {
-    "frequencies": {
-      "hourly": "Hourly",
-      "daily": "Daily",
-      "weekdays": "Weekdays",
-      "weekly": "Days",
-      "custom": "Custom"
-    },
+  "schedule_editor": {
+    "time_label": "Time",
+    "time_at": "At a time",
+    "time_every": "At an interval",
+    "every_prefix": "Every",
+    "unit_hours": "hours",
+    "unit_minutes": "minutes",
+    "days_label": "Days",
+    "days_every": "Every day",
+    "days_weekly": "Days of week",
+    "days_monthly": "Day of month",
+    "monthly_short_month_hint": "Months without day {{day}} are skipped.",
     "days_short": {
       "sun": "Sun",
       "mon": "Mon",
@@ -348,32 +335,69 @@
       "fri": "Fri",
       "sat": "Sat"
     },
-    "cron_label": "Cron Expression",
-    "cron_hint": "Standard 5-field cron (min hour dom month dow)",
-    "minute_label": "Minute",
-    "time_label": "Time",
     "timezone_label": "Timezone",
-    "days_label": "Days",
-    "summary": {
-      "hourly": "Hourly · :{{min}}",
-      "daily": "Daily {{time}}",
-      "weekdays": "Weekdays {{time}}",
-      "weekly": "{{days}} {{time}}",
-      "custom": "Custom cron",
-      "no_days": "—"
-    },
+    "cron_toggle": "Cron",
+    "cron_click_to_edit": "click to edit",
+    "cron_hint": "Standard 5-field cron (min hour dom month dow)",
+    "cron_invalid": "This cron expression isn't valid.",
+    "timezone_invalid": "This timezone isn't recognized by the server.",
+    "advanced_hint": "This expression uses features the visual editor can't represent. Edit the cron text directly, or simplify it to re-enable the controls.",
+    "advanced_unverified": "The server couldn't be reached to check this expression, so the controls stay off. Make sure the cron text is right before saving.",
+    "advanced_checking": "Checking this expression with the server. The controls stay off until it answers.",
+    "next_runs_label": "Next runs",
+    "next_in": "in {{countdown}}",
+    "preview_unavailable": "Next runs unavailable right now.",
+    "no_upcoming_runs": "This expression has no upcoming runs.",
     "describe": {
-      "hourly": "Runs every hour at :{{min}}",
-      "daily": "Runs daily at {{time}} {{offset}}",
-      "weekdays": "Runs weekdays at {{time}} {{offset}}",
-      "weekly": "Runs every {{days}} at {{time}} {{offset}}",
-      "custom": "Custom schedule: {{cron}}"
+      "days_every": "Every day",
+      "days_monthly": "Day {{day}} of the month",
+      "days_long": {
+        "sun": "Sun",
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat"
+      },
+      "days_range": "{{from}}–{{to}}",
+      "days_join": ", ",
+      "time_at": "At {{time}}",
+      "time_every_hour": "Every hour at :{{minute}}",
+      "time_every_hours": "Every {{interval}} hours at :{{minute}}",
+      "time_every_hour_window": "Every hour",
+      "time_every_hours_window": "Every {{interval}} hours",
+      "time_every_minute": "Every minute",
+      "time_every_minutes": "Every {{interval}} minutes",
+      "window": "{{from}}–{{to}}"
     },
     "countdown": {
-      "days_hours": "{{days}}d {{hours}}h",
+      "days_hours": "{{days}}d {{hours}}h {{minutes}}m",
       "hours_minutes": "{{hours}}h {{minutes}}m",
       "minutes": "{{minutes}}m",
       "less_than_minute": "<1m"
+    },
+    "a11y": {
+      "fixed_hour": "Hour",
+      "fixed_minute": "Minute",
+      "interval": "Interval",
+      "interval_unit": "Interval unit",
+      "window_start_hour": "Window start hour",
+      "window_start_minute": "Window start minute",
+      "window_end_hour": "Window end hour",
+      "window_end_minute": "Window end minute",
+      "day_pattern": "Day pattern",
+      "day_of_month": "Day of month",
+      "timezone": "Timezone",
+      "days_full": {
+        "sun": "Sunday",
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday"
+      }
     }
   },
   "agent_picker": {

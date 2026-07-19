@@ -35,7 +35,7 @@ export function AllPlatforms({
         <div className="mt-10 overflow-hidden rounded-2xl border border-[#0a0d12]/10">
           <Row
             icon={<AppleIcon className="text-[#0a0d12]" />}
-            label={d.macLabel}
+            label={d.macArm64Label}
             formats={[
               {
                 label: d.formatDmg,
@@ -44,6 +44,21 @@ export function AllPlatforms({
               {
                 label: d.formatZip,
                 href: assets.macArm64Zip,
+              },
+            ]}
+            unavailable={d.unavailable}
+          />
+          <Row
+            icon={<AppleIcon className="text-[#0a0d12]" />}
+            label={d.macX64Label}
+            formats={[
+              {
+                label: d.formatDmg,
+                href: assets.macX64Dmg,
+              },
+              {
+                label: d.formatZip,
+                href: assets.macX64Zip,
               },
             ]}
             unavailable={d.unavailable}
@@ -111,10 +126,8 @@ export function AllPlatforms({
           />
         </div>
 
-        <p className="mt-6 text-[13px] text-[#0a0d12]/60">{d.intelNote}</p>
-
         {isFallbackNeeded(assets) ? (
-          <p className="mt-2 text-[13px] text-[#0a0d12]/60">
+          <p className="mt-6 text-[13px] text-[#0a0d12]/60">
             <Link
               href={fallbackHref}
               className="underline decoration-[#0a0d12]/30 underline-offset-4 hover:text-[#0a0d12] hover:decoration-[#0a0d12]/70"
@@ -182,10 +195,10 @@ function Row({ icon, label, formats, unavailable, isLast }: RowProps) {
   );
 }
 
-// Ten desktop artifacts are expected per release (two Mac,
+// Twelve desktop artifacts are expected per release (four Mac,
 // two Windows, six Linux). If any are missing, surface the GitHub
 // fallback link so users on an orphaned row have a way out.
-const EXPECTED_ASSET_COUNT = 10;
+const EXPECTED_ASSET_COUNT = 12;
 
 function isFallbackNeeded(assets: DownloadAssets): boolean {
   return Object.values(assets).filter(Boolean).length < EXPECTED_ASSET_COUNT;

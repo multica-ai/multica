@@ -184,6 +184,14 @@ export interface UpdateAutopilotTriggerRequest {
   event_filters?: WebhookEventFilter[] | null;
 }
 
+export interface CronPreviewResponse {
+  // Next occurrences as RFC3339 UTC timestamps, ascending. An empty array
+  // means the expression never fires; `null` is the client-side sentinel for
+  // "the response could not be read" (schema drift), which callers must not
+  // present as "never fires".
+  next_runs: string[] | null;
+}
+
 export interface ListAutopilotsResponse {
   autopilots: Autopilot[];
   total: number;

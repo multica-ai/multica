@@ -588,11 +588,12 @@ export function useRealtimeSync(
       inbox: () => {
         const wsId = getCurrentWsId();
         if (wsId) onInboxInvalidate(qc, wsId);
-        // inbox:read / inbox:archived / batch events arrive here. They can
-        // originate from a workspace other than the active one (personal
-        // events fan out to all the user's connections), so always refresh
-        // the cross-workspace summary — its dot must clear when another
-        // workspace's items are read/archived.
+        // inbox:read / inbox:archived / inbox:unarchived / batch events arrive
+        // here. They can originate from a workspace other than the active one
+        // (personal events fan out to all the user's connections), so always
+        // refresh the cross-workspace summary — its dot must clear when another
+        // workspace's items are read/archived, and light again when an unread
+        // item is restored from the archive.
         onInboxSummaryInvalidate(qc);
       },
       agent: () => {
