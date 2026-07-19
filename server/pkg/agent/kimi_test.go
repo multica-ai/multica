@@ -366,7 +366,10 @@ func TestReadKimiWireUsageSumsRecentRecordsPerModel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := readKimiWireUsage("session-abc", now.Add(-10*time.Second), slog.Default())
+	got, foundWire := readKimiWireUsage("session-abc", now.Add(-10*time.Second), slog.Default())
+	if !foundWire {
+		t.Fatal("expected foundWire=true with a wire file present")
+	}
 	if len(got) != 2 {
 		t.Fatalf("expected 2 models, got %+v", got)
 	}
@@ -381,8 +384,12 @@ func TestReadKimiWireUsageSumsRecentRecordsPerModel(t *testing.T) {
 
 func TestReadKimiWireUsageMissingSessionReturnsNil(t *testing.T) {
 	t.Setenv("KIMI_CODE_HOME", t.TempDir())
-	if got := readKimiWireUsage("session-nope", time.Now().Add(-time.Minute), slog.Default()); got != nil {
+	got, foundWire := readKimiWireUsage("session-nope", time.Now().Add(-time.Minute), slog.Default())
+	if got != nil {
 		t.Fatalf("expected nil for missing wire, got %+v", got)
+	}
+	if foundWire {
+		t.Fatal("expected foundWire=false when no wire file matches")
 	}
 }
 
@@ -400,8 +407,212 @@ func TestReadKimiWireUsageSumsAcrossAgentWires(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got := readKimiWireUsage("session-abc", now.Add(-10*time.Second), slog.Default())
+	got, foundWire := readKimiWireUsage("session-abc", now.Add(-10*time.Second), slog.Default())
+	if !foundWire {
+		t.Fatal("expected foundWire=true with wire files present")
+	}
 	if u := got["kimi-code/k3"]; u.InputTokens != 20 || u.OutputTokens != 2 {
 		t.Fatalf("expected both agent wires summed, got %+v", got)
+	}
+}
+
+// TestWaitKimiWireUsageSettlesAcrossAgentWires pins the flush-race fix:
+// the main agent's usage.record commonly lands a poll tick before a
+// sub-agent's. waitKimiWireUsage must not return on the first non-empty
+// read — it waits for the totals to hold steady across one more interval,
+// so the late second wire is counted too.
+func TestWaitKimiWireUsageSettlesAcrossAgentWires(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+
+	now := time.Now()
+	mainDir := filepath.Join(home, "sessions", "wd_x_deadbeef", "session-abc", "agents", "main")
+	if err := os.MkdirAll(mainDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The wire exists from session start but holds no usage record yet —
+	// kimi flushes it only after answering session/prompt.
+	mainWire := filepath.Join(mainDir, "wire.jsonl")
+	if err := os.WriteFile(mainWire, []byte(`{"type":"llm.request","kind":"loop","model":"k3"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resultCh := make(chan map[string]TokenUsage, 1)
+	go func() {
+		resultCh <- waitKimiWireUsage("session-abc", now, slog.Default())
+	}()
+
+	// Main agent flushes first…
+	time.Sleep(kimiWireUsagePollInterval / 2)
+	f, err := os.OpenFile(mainWire, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(kimiWireRec("kimi-code/k3", 100, 10, 0, 0, now) + "\n"); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	f.Close()
+
+	// …and the sub-agent's wire appears one tick later. The read that
+	// settles the totals must happen after this write.
+	time.Sleep(kimiWireUsagePollInterval)
+	criticDir := filepath.Join(home, "sessions", "wd_x_deadbeef", "session-abc", "agents", "task-critic")
+	if err := os.MkdirAll(criticDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(criticDir, "wire.jsonl"), []byte(kimiWireRec("kimi-code/k3", 7, 3, 0, 0, now)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case got := <-resultCh:
+		u := got["kimi-code/k3"]
+		if u.InputTokens != 107 || u.OutputTokens != 13 {
+			t.Fatalf("expected both agent wires summed (107 in / 13 out), got %+v", got)
+		}
+	case <-time.After(kimiWireUsagePollTimeout + 5*time.Second):
+		t.Fatal("waitKimiWireUsage did not return")
+	}
+}
+
+// TestWaitKimiWireUsageNoWireReturnsImmediately pins the no-wire fast
+// path: kimi creates the session wire at session start, long before the
+// post-prompt poll, so a first probe matching nothing means this build
+// writes none (older CLI, custom data dir). The wait must bail at once,
+// not burn the whole poll budget on every completed run.
+func TestWaitKimiWireUsageNoWireReturnsImmediately(t *testing.T) {
+	t.Setenv("KIMI_CODE_HOME", t.TempDir())
+
+	start := time.Now()
+	if got := waitKimiWireUsage("session-nope", start.Add(-time.Minute), slog.Default()); got != nil {
+		t.Fatalf("expected nil usage, got %+v", got)
+	}
+	if elapsed := time.Since(start); elapsed > kimiWireUsagePollTimeout/2 {
+		t.Fatalf("expected immediate return on missing wire, took %s", elapsed)
+	}
+}
+
+// TestAccumulateKimiWireFileReadsPastOversizedLines pins the unbounded
+// line reader: a huge tool-output frame must not stop the scan and hide
+// usage.record entries appended after it — the old 4 MiB bufio.Scanner
+// cap aborted the read at exactly that line.
+func TestAccumulateKimiWireFileReadsPastOversizedLines(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	// 5 MiB of tool output — over the old 4 MiB scanner cap.
+	big := strings.Repeat("x", 5*1024*1024)
+	wire := strings.Join([]string{
+		kimiWireRec("kimi-code/k3", 100, 10, 0, 0, now),
+		`{"type":"tool.output","data":"` + big + `"}`,
+		kimiWireRec("kimi-code/k3", 50, 5, 0, 0, now),
+	}, "\n") + "\n"
+
+	path := filepath.Join(t.TempDir(), "wire.jsonl")
+	if err := os.WriteFile(path, []byte(wire), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	totals := map[string]TokenUsage{}
+	if err := accumulateKimiWireFile(path, now.Add(-time.Minute).UnixMilli(), totals); err != nil {
+		t.Fatalf("accumulateKimiWireFile: %v", err)
+	}
+	if u := totals["kimi-code/k3"]; u.InputTokens != 150 || u.OutputTokens != 15 {
+		t.Fatalf("expected records on both sides of the oversized line summed, got %+v", totals)
+	}
+}
+
+// fakeKimiACPPromptOutcomeScript impersonates `kimi acp` for a session
+// whose prompt ends with the given canned JSON-RPC fragment — e.g.
+// `"error":{"code":-32603,...}` for a failed turn or
+// `"result":{"stopReason":"cancelled"}` for a cancelled one.
+func fakeKimiACPPromptOutcomeScript(outcome string) string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_wire"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,` + outcome + `}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKimiBackendRecoversWireUsageOnNonCompletedRun pins the failure-path
+// usage recovery: a run that consumed tokens but ended failed or
+// cancelled must still report the partial turn's usage, recovered with a
+// single non-polling wire read at usage-build time — no settle wait on
+// these paths. The daemon bills usage even for cancelled tasks (see the
+// ReportTaskUsage comment in server/internal/daemon/daemon.go).
+func TestKimiBackendRecoversWireUsageOnNonCompletedRun(t *testing.T) {
+	tests := []struct {
+		name       string
+		outcome    string
+		wantStatus string
+	}{
+		{"failed prompt", `"error":{"code":-32603,"message":"upstream boom"}`, "failed"},
+		{"cancelled turn", `"result":{"stopReason":"cancelled"}`, "aborted"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			home := t.TempDir()
+			t.Setenv("KIMI_CODE_HOME", home)
+
+			// Pre-seed the session wire the way kimi leaves it after a
+			// turn that consumed tokens but did not complete.
+			wireDir := filepath.Join(home, "sessions", "wd_x_deadbeef", "ses_wire", "agents", "main")
+			if err := os.MkdirAll(wireDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			wire := kimiWireRec("kimi-code/k3", 120, 30, 8, 2, time.Now()) + "\n"
+			if err := os.WriteFile(filepath.Join(wireDir, "wire.jsonl"), []byte(wire), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			fakePath := filepath.Join(t.TempDir(), "kimi")
+			writeTestExecutable(t, fakePath, []byte(fakeKimiACPPromptOutcomeScript(tt.outcome)))
+
+			backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+			if err != nil {
+				t.Fatalf("new kimi backend: %v", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+
+			select {
+			case result, ok := <-session.Result:
+				if !ok {
+					t.Fatal("result channel closed without a value")
+				}
+				if result.Status != tt.wantStatus {
+					t.Fatalf("expected status=%q, got %q (error=%q)", tt.wantStatus, result.Status, result.Error)
+				}
+				u := result.Usage["kimi-code/k3"]
+				if u.InputTokens != 120 || u.OutputTokens != 30 || u.CacheReadTokens != 8 || u.CacheWriteTokens != 2 {
+					t.Fatalf("expected wire usage on the %s path, got %+v", tt.wantStatus, result.Usage)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("timeout waiting for result")
+			}
+		})
 	}
 }

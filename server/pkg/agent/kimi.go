@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -417,9 +418,22 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			// usage_update notifications flow. The per-turn usage lands
 			// in the session's wire.jsonl instead, recovered above so
 			// the run report carries the real model id and token counts
-			// (and therefore cost). Nil when nothing usable was found —
-			// the run then reports no usage, matching prior behavior.
+			// (and therefore cost).
 			usageMap = wireUsage
+			if usageMap == nil && sessionID != "" && finalStatus != "completed" {
+				// Failed/aborted/timeout runs skipped the polling wait
+				// above (only worthwhile on the completed path, where a
+				// flush is imminent). By now the process is dead and the
+				// wire holds whatever it will hold, so a single
+				// non-polling read recovers the partial turn's usage
+				// with no added latency. The daemon bills usage even
+				// for cancelled tasks (see the ReportTaskUsage comment
+				// in server/internal/daemon/daemon.go), so the report
+				// should carry what the run consumed. Still nil when
+				// nothing usable was found — the run then reports no
+				// usage, matching prior behavior.
+				usageMap, _ = readKimiWireUsage(sessionID, startTime, b.cfg.Logger)
+			}
 		}
 
 		resCh <- Result{
@@ -498,18 +512,34 @@ const (
 )
 
 // waitKimiWireUsage polls readKimiWireUsage until the turn's usage
-// record appears on disk or the poll budget runs out (nil).
+// totals settle — non-empty and unchanged across one more poll interval —
+// or the poll budget runs out, in which case the latest read wins (nil
+// when nothing was ever found).
 func waitKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) map[string]TokenUsage {
+	// Fast path: kimi creates the session wire at session start, long
+	// before this post-prompt poll. A first probe matching no wire file
+	// at all therefore means this build writes none (older CLI, custom
+	// data dir) — bail now instead of burning the whole budget per run.
+	usage, foundWire := readKimiWireUsage(sessionID, since, logger)
+	if !foundWire {
+		return nil
+	}
+
+	// Settle rather than returning on the first non-empty read: the main
+	// agent's record can land a beat before a sub-agent's, and the
+	// per-model totals only stop growing once every agent wire for this
+	// session has flushed. On budget expiry return the latest read —
+	// partial usage still beats none.
 	deadline := time.Now().Add(kimiWireUsagePollTimeout)
-	for {
-		if usage := readKimiWireUsage(sessionID, since, logger); usage != nil {
+	for !time.Now().After(deadline) {
+		time.Sleep(kimiWireUsagePollInterval)
+		prev := usage
+		usage, _ = readKimiWireUsage(sessionID, since, logger)
+		if usage != nil && maps.Equal(usage, prev) {
 			return usage
 		}
-		if time.Now().After(deadline) {
-			return nil
-		}
-		time.Sleep(kimiWireUsagePollInterval)
 	}
+	return usage
 }
 
 // readKimiWireUsage recovers per-model token usage from kimi's on-disk
@@ -525,9 +555,12 @@ func waitKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) m
 // tokens already billed to earlier tasks. Records are summed per model so
 // multi-model runs attribute correctly. The KIMI_CODE_HOME lookup uses the
 // daemon process env, which is what the child inherits in the common case.
-// Returns nil when nothing usable is found — the caller then reports no
-// usage, matching the pre-recovery behavior.
-func readKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) map[string]TokenUsage {
+// The second return value reports whether any wire file matched at all —
+// callers use it to tell "this kimi build writes no wire" from "wire
+// exists but the turn's record isn't flushed yet". Totals are nil when
+// nothing usable is found — the caller then reports no usage, matching
+// the pre-recovery behavior.
+func readKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) (map[string]TokenUsage, bool) {
 	home := os.Getenv("KIMI_CODE_HOME")
 	if home == "" {
 		if h, err := os.UserHomeDir(); err == nil {
@@ -535,11 +568,11 @@ func readKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) m
 		}
 	}
 	if home == "" {
-		return nil
+		return nil, false
 	}
 	files, err := filepath.Glob(filepath.Join(home, "sessions", "*", sessionID, "agents", "*", "wire.jsonl"))
 	if err != nil || len(files) == 0 {
-		return nil
+		return nil, false
 	}
 	cutoff := since.Add(-kimiWireUsageGrace).UnixMilli()
 	totals := map[string]TokenUsage{}
@@ -549,53 +582,70 @@ func readKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) m
 		}
 	}
 	if len(totals) == 0 {
-		return nil
+		return nil, true
 	}
-	return totals
+	return totals, true
 }
 
 // accumulateKimiWireFile sums usage.record entries newer than cutoffMs
 // into totals, keyed by the record's model id. Malformed lines are
 // skipped — the wire is an append-only log best read leniently.
+//
+// Lines are read with an unbounded bufio.Reader on purpose: tool-output
+// frames on this log can exceed any fixed scanner buffer, and a capped
+// reader would stop at the oversized line and hide usage.record entries
+// appended after it.
 func accumulateKimiWireFile(path string, cutoffMs int64, totals map[string]TokenUsage) error {
 	fh, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer fh.Close()
-	scanner := bufio.NewScanner(fh)
-	scanner.Buffer(make([]byte, 0, 256*1024), 4*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		// Cheap pre-filter: almost no wire line is a usage record, and
-		// lines carrying tool output can be large.
-		if !bytes.Contains(line, []byte(`"usage.record"`)) {
-			continue
+	r := bufio.NewReader(fh)
+	for {
+		line, err := r.ReadBytes('\n')
+		if len(line) > 0 {
+			accumulateKimiWireLine(line, cutoffMs, totals)
 		}
-		var rec struct {
-			Type  string `json:"type"`
-			Model string `json:"model"`
-			Usage struct {
-				InputOther         int64 `json:"inputOther"`
-				Output             int64 `json:"output"`
-				InputCacheRead     int64 `json:"inputCacheRead"`
-				InputCacheCreation int64 `json:"inputCacheCreation"`
-			} `json:"usage"`
-			Time int64 `json:"time"` // epoch ms
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
 		}
-		if err := json.Unmarshal(line, &rec); err != nil || rec.Type != "usage.record" {
-			continue
-		}
-		model := strings.TrimSpace(rec.Model)
-		if model == "" || rec.Time < cutoffMs {
-			continue
-		}
-		u := totals[model]
-		u.InputTokens += rec.Usage.InputOther
-		u.OutputTokens += rec.Usage.Output
-		u.CacheReadTokens += rec.Usage.InputCacheRead
-		u.CacheWriteTokens += rec.Usage.InputCacheCreation
-		totals[model] = u
 	}
-	return scanner.Err()
+}
+
+// accumulateKimiWireLine folds one wire line into totals when it is an
+// in-window usage.record; anything else is ignored.
+func accumulateKimiWireLine(line []byte, cutoffMs int64, totals map[string]TokenUsage) {
+	// Cheap pre-filter: almost no wire line is a usage record, and
+	// lines carrying tool output can be large.
+	if !bytes.Contains(line, []byte(`"usage.record"`)) {
+		return
+	}
+	var rec struct {
+		Type  string `json:"type"`
+		Model string `json:"model"`
+		Usage struct {
+			InputOther         int64 `json:"inputOther"`
+			Output             int64 `json:"output"`
+			InputCacheRead     int64 `json:"inputCacheRead"`
+			InputCacheCreation int64 `json:"inputCacheCreation"`
+		} `json:"usage"`
+		Time int64 `json:"time"` // epoch ms
+	}
+	if err := json.Unmarshal(line, &rec); err != nil || rec.Type != "usage.record" {
+		return
+	}
+	model := strings.TrimSpace(rec.Model)
+	if model == "" || rec.Time < cutoffMs {
+		return
+	}
+	u := totals[model]
+	u.InputTokens += rec.Usage.InputOther
+	u.OutputTokens += rec.Usage.Output
+	u.CacheReadTokens += rec.Usage.InputCacheRead
+	u.CacheWriteTokens += rec.Usage.InputCacheCreation
+	totals[model] = u
 }
