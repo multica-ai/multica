@@ -192,6 +192,29 @@ describe("ContentEditor", () => {
     expect(mockFocus).not.toHaveBeenCalled();
   });
 
+  it("focuses at the end through the lazy-handoff ref", () => {
+    const ref = createRef<ContentEditorRef>();
+    render(<ContentEditor ref={ref} />);
+
+    act(() => ref.current?.focusAtEnd());
+
+    expect(mockFocus).toHaveBeenCalledWith("end");
+  });
+
+  it("adopts pending handoff text without emitting an update", () => {
+    const onUpdate = vi.fn();
+    const ref = createRef<ContentEditorRef>();
+    render(<ContentEditor ref={ref} onUpdate={onUpdate} />);
+
+    act(() => ref.current?.adoptContent("我"));
+
+    expect(mockSetContent).toHaveBeenCalledWith(
+      "我",
+      expect.objectContaining({ emitUpdate: false, contentType: "markdown" }),
+    );
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
   it("syncs editor content when defaultValue changes externally and editor is unfocused", () => {
     editorState.markdown = "old content";
     const { rerender } = render(<ContentEditor defaultValue="old content" />);

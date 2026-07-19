@@ -158,6 +158,10 @@ export function useLazyEditor({
 
   const onCompositionStart = useCallback(() => {
     composingRef.current = true;
+    // `onReady` and the next native input event can land in one React batch.
+    // If readiness already queued the stand-in swap but has not committed it,
+    // make this later update win so the browser keeps its composing node.
+    if (editorReadyRef.current) setReady(false);
   }, []);
 
   const onCompositionEnd = useCallback(() => {

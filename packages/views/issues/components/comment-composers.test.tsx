@@ -242,6 +242,40 @@ describe("comment composers", () => {
     expect(screen.getByTestId("editor")).toHaveProperty("selectionStart", 1);
   });
 
+  it.each([
+    {
+      name: "main comment",
+      shellTestId: "comment-composer-shell" as const,
+      renderComposer: () => renderCommentInput(),
+    },
+    {
+      name: "reply",
+      shellTestId: "reply-composer-shell" as const,
+      renderComposer: () => renderReplyInput(),
+    },
+  ])("preserves $name text typed before the editor is ready", async ({
+    shellTestId,
+    renderComposer,
+  }) => {
+    editorLifecycle.deferReady = true;
+    renderComposer();
+
+    const shell = screen.getByTestId(shellTestId);
+    act(() => shell.focus());
+    await waitFor(() => expect(editorLifecycle.pendingReady).toHaveLength(1));
+
+    fireEvent.input(shell, { target: { value: "typed during startup" } });
+    act(() => editorLifecycle.pendingReady.shift()?.());
+
+    await waitFor(() => expect(screen.queryByTestId(shellTestId)).not.toBeInTheDocument());
+    expect(screen.getByTestId("editor")).toHaveValue("typed during startup");
+    expect(screen.getByTestId("editor")).toHaveFocus();
+    expect(screen.getByTestId("editor")).toHaveProperty(
+      "selectionStart",
+      "typed during startup".length,
+    );
+  });
+
   it("renders the main comment composer without a manual expand control", () => {
     const { container } = renderCommentInput();
 

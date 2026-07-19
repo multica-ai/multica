@@ -76,6 +76,41 @@ describe("useLazyEditor", () => {
     expect(handle.focusAtEnd).toHaveBeenCalled();
   });
 
+  it("cancels a queued ready swap when composition starts before its commit", () => {
+    let pendingContent = "";
+    const handle = {
+      ...makeHandle(),
+      focusAtEnd: vi.fn(),
+      adoptContent: vi.fn(),
+    };
+    const editorRef = { current: handle as LazyEditorHandle };
+    const { result } = renderHook(() =>
+      useLazyEditor({
+        editorRef,
+        getPendingContent: () => pendingContent,
+      }),
+    );
+
+    act(() => result.current.activate());
+    act(() => {
+      result.current.onReady();
+      result.current.onCompositionStart();
+    });
+
+    // React may batch the ready update with the next native input event. The
+    // composition-start update must win that batch so the focused shell stays.
+    expect(result.current.ready).toBe(false);
+    expect(handle.adoptContent).toHaveBeenCalledWith("");
+    expect(handle.focusAtEnd).not.toHaveBeenCalled();
+
+    pendingContent = "我";
+    act(() => result.current.onCompositionEnd());
+
+    expect(result.current.ready).toBe(true);
+    expect(handle.adoptContent).toHaveBeenLastCalledWith("我");
+    expect(handle.focusAtEnd).toHaveBeenCalled();
+  });
+
   it("resets to the stand-in during the render that changes resetKey", () => {
     const editorRef = { current: makeHandle() as LazyEditorHandle };
     const { result, rerender } = renderHook(
