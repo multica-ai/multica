@@ -228,6 +228,66 @@ test("reuses a deterministic service after a create conflict", async () => {
   assert.equal(creates, 1);
 });
 
+// Regression guard for FIR-3315 / FIR-3537: the original bug created a brand-new
+// Sliplane service on every deploy and never reused, so repeated deploys of the
+// same app grew to hundreds of duplicate workers and overloaded the host. This
+// drives two consecutive deploys of the SAME app version through a stateful fake
+// Sliplane registry and asserts exactly one service is ever created. Against the
+// pre-fix create-first logic the second deploy would POST a second service and
+// this would fail with creates === 2.
+test("deploying the same app version twice reuses one worker and never spawns a second service", async () => {
+  const registry = [];
+  let creates = 0;
+  const name = serviceNameForVersion(deployment.appName, deployment.appId, deployment.version);
+  const makeService = (id) => ({
+    id,
+    name,
+    serverId: "server-1",
+    status: "live",
+    network: { internalDomain: `${id}.internal` },
+    env: [
+      { key: "APP_ID", value: deployment.appId },
+      { key: "APP_VERSION", value: deployment.version },
+      { key: "BUNDLE_SHA256", value: "" },
+      { key: "WORKER_COMMIT", value: workerCommit },
+    ],
+  });
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    workerBranch: "main",
+    workerCommit,
+    fetch: async (url, init = {}) => {
+      const u = String(url);
+      if (u.endsWith("/services") && (!init.method || init.method === "GET")) {
+        return Response.json(registry);
+      }
+      if (u.endsWith("/services") && init.method === "POST") {
+        creates++;
+        const service = makeService(`worker-${registry.length + 1}`);
+        registry.push(service);
+        return Response.json(service, { status: 201 });
+      }
+      const detail = u.match(/\/services\/([^/]+)$/);
+      if (detail && (!init.method || init.method === "GET")) {
+        const found = registry.find((service) => service.id === detail[1]);
+        return found ? Response.json(found) : new Response(null, { status: 404 });
+      }
+      if (/\/services\/[^/]+\/deploy$/.test(u)) return new Response(null, { status: 204 });
+      if (/^http:\/\/[^:]+:4311\/healthz$/.test(u)) return Response.json({ status: "ok", commit: workerCommit });
+      throw new Error(`unexpected request ${init.method} ${u}`);
+    },
+  });
+
+  const first = await provider.createOrDeploy(deployment);
+  const second = await provider.createOrDeploy(deployment);
+
+  assert.equal(creates, 1);
+  assert.equal(registry.length, 1);
+  assert.equal(first.serviceId, second.serviceId);
+});
+
 test("service identity cannot collide on app IDs or prerelease punctuation", () => {
   assert.notEqual(
     serviceNameForVersion("Formatter", "aaaaaaaa-1111-4111-8111-111111111111", "1.0.0"),
