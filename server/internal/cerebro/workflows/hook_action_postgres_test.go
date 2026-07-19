@@ -27,6 +27,10 @@ func (s poolEvalStore) LatestRunPassed(ctx context.Context, workspaceID, evalID,
 	return passed, err
 }
 
+func (s poolEvalStore) EvalPassed(ctx context.Context, workspaceID, evalID, issueID uuid.UUID) (bool, error) {
+	return s.LatestRunPassed(ctx, workspaceID, evalID, issueID)
+}
+
 func (s poolEvalStore) RunForIssue(ctx context.Context, workspaceID, actorID, evalID, issueID uuid.UUID, actorType string) (string, string, error) {
 	var runID string
 	err := s.pool.QueryRow(ctx, `INSERT INTO cerebro_eval_run
@@ -275,6 +279,9 @@ func TestEvalRunActionExecutes(t *testing.T) {
 type evalRunFailClosedStore struct{}
 
 func (evalRunFailClosedStore) LatestRunPassed(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (bool, error) {
+	return false, nil
+}
+func (evalRunFailClosedStore) EvalPassed(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (bool, error) {
 	return false, nil
 }
 func (evalRunFailClosedStore) RunForIssue(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, string) (string, string, error) {

@@ -24,6 +24,12 @@ func NewHookFeature(db cerebrodb.DBTX, policies *toolpolicy.Store, evalStore Eva
 	actions := NewActionRegistry()
 	registerVersionOneHookActions(actions, NewPostgresHookActionExecutor(db, authorizer, evalStore))
 	engine := NewHookEngine(hookFeatureEnabled(), engineStore).WithActionRegistry(actions)
+	if evalStore != nil {
+		// evalStore satisfies HookConditionResolver via its EvalPassed method.
+		// Guarded so a nil store does not become a non-nil interface that
+		// panics when the eval_passed condition is evaluated.
+		engine = engine.WithConditionResolver(evalStore)
+	}
 	return &HookFeature{
 		API:            NewHookAPI(repository, authorizer),
 		CompletionGate: NewTaskCompletionGate(NewPostgresTaskCompletionStore(db), engine, hookFeatureEnabled()),

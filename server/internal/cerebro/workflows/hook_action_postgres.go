@@ -23,6 +23,9 @@ var ErrHookActionPermissionDenied = errors.New("workflow hook creator no longer 
 type EvalStore interface {
 	LatestRunPassed(ctx context.Context, workspaceID, evalID, issueID uuid.UUID) (bool, error)
 	RunForIssue(ctx context.Context, workspaceID, actorID, evalID, issueID uuid.UUID, actorType string) (runID string, status string, err error)
+	// EvalPassed backs the eval_passed deferred hook condition; it satisfies
+	// HookConditionResolver. On *evals.Store it is an alias of LatestRunPassed.
+	EvalPassed(ctx context.Context, workspaceID, evalID, issueID uuid.UUID) (bool, error)
 }
 
 type PostgresHookActionExecutor struct {
