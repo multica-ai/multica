@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -67,7 +68,7 @@ func fakeKimiACPScript() string {
 #
 # Writes the full argv (one arg per line) to $KIMI_ARGS_FILE if that env
 # var is set, so tests can assert that the daemon invokes us with the
-# right flags (`+"`--yolo acp`"+`, not bare `+"`acp`"+`).
+# right flags (` + "`--yolo acp`" + `, not bare ` + "`acp`" + `).
 #
 # Then reads one JSON-RPC request per line from stdin, matches on the
 # method name, and writes back a canned response. Exits after set_model
@@ -614,5 +615,291 @@ func TestKimiBackendRecoversWireUsageOnNonCompletedRun(t *testing.T) {
 				t.Fatal("timeout waiting for result")
 			}
 		})
+	}
+}
+
+// fakeKimiACPSwallowedFailureScript impersonates `kimi acp` for the
+// swallowed-failure scenario (M-95): the turn dies provider-side but the
+// ACP server still answers session/prompt with stopReason=end_turn and
+// streams no output. Handles both session/new and session/resume so tests
+// can cover fresh and poisoned-resume runs.
+func fakeKimiACPSwallowedFailureScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_swallowed"}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      sid=$(printf '%s' "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"%s"}}\n' "$id" "$sid"
+      ;;
+    *'"method":"session/prompt"'*)
+      # The swallowed failure: end_turn, no text, no error — the real
+      # failure only exists in the session's logs/kimi-code.log.
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// kimiTurnFailedLogLines builds the kimi-code.log line pair kimi-cli
+// writes when a turn dies provider-side while ACP reports end_turn —
+// captured verbatim from a real poisoned session (see M-95):
+//
+//	2026-07-19T15:03:24.931Z ERROR turn failed  turnId=1
+//	2026-07-19T15:03:24.933Z WARN  acp: turn ended with failed reason  error="{...}"
+func kimiTurnFailedLogLines(at time.Time, turnID int, message string) string {
+	ts := at.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+	payload := fmt.Sprintf(`{"code":"provider.api_error","message":%s,"name":"APIStatusError","details":{"statusCode":400,"requestId":null,"turnId":%d},"retryable":false}`,
+		strconv.Quote(message), turnID)
+	return fmt.Sprintf("%s ERROR turn failed  turnId=%d\n%s WARN  acp: turn ended with failed reason  error=%s\n",
+		ts, turnID, ts, strconv.Quote(payload))
+}
+
+// seedKimiSessionFiles writes the session wire and/or session log under a
+// fake KIMI_CODE_HOME with the same on-disk layout kimi-cli uses:
+// sessions/<cwd-hash>/<sessionID>/{agents/main/wire.jsonl,logs/kimi-code.log}.
+// Empty content skips that file.
+func seedKimiSessionFiles(t *testing.T, home, sessionID, wire, log string) {
+	t.Helper()
+	if wire != "" {
+		dir := filepath.Join(home, "sessions", "wd_x_deadbeef", sessionID, "agents", "main")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "wire.jsonl"), []byte(wire), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if log != "" {
+		dir := filepath.Join(home, "sessions", "wd_x_deadbeef", sessionID, "logs")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "kimi-code.log"), []byte(log), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// runFakeKimi executes the backend against a fake kimi binary and drains
+// the session, returning the final Result.
+func runFakeKimi(t *testing.T, fakePath string, opts ExecOptions) Result {
+	t.Helper()
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+	if opts.Timeout == 0 {
+		opts.Timeout = 15 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", opts)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		return result
+	case <-time.After(30 * time.Second):
+		t.Fatal("timeout waiting for result")
+		return Result{}
+	}
+}
+
+// TestKimiBackendSwallowedTurnFailureFailsRun is the M-95 core regression
+// test: kimi answers session/prompt with stopReason=end_turn even though
+// the turn died provider-side, streaming no output and flushing no
+// usage.record. The backend must not report a silent success — it must
+// cross-check the session's logs/kimi-code.log, fail the run with the
+// real provider error, and drop the session id so the next run starts
+// fresh instead of resuming the poisoned context.
+func TestKimiBackendSwallowedTurnFailureFailsRun(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+
+	providerMsg := "400 the message at position 168 with role 'assistant' must not be empty"
+	// The wire exists (kimi creates it at session start) but the failed
+	// turn flushed no usage.record; the log holds the in-window failure.
+	seedKimiSessionFiles(t, home, "ses_swallowed",
+		`{"type":"llm.request","kind":"loop","model":"k3"}`+"\n",
+		kimiTurnFailedLogLines(time.Now(), 1, providerMsg))
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPSwallowedFailureScript()))
+
+	result := runFakeKimi(t, fakePath, ExecOptions{})
+
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "provider.api_error") {
+		t.Errorf("expected error to name the provider error code, got %q", result.Error)
+	}
+	if !strings.Contains(result.Error, providerMsg) {
+		t.Errorf("expected error to surface the provider message, got %q", result.Error)
+	}
+	if result.SessionID != "" {
+		t.Errorf("expected session id to be dropped so the next run starts fresh, got %q", result.SessionID)
+	}
+}
+
+// TestKimiBackendSwallowedTurnFailureDropsPoisonedSession covers the
+// poisoned-session loop from M-95: a resumed session whose context is
+// corrupt fails every turn the same silent way. When the swallowed
+// failure is detected on a resume, the Result must carry an empty
+// SessionID so the daemon's resume-failure fallback retries with a fresh
+// session instead of resuming the brick forever.
+func TestKimiBackendSwallowedTurnFailureDropsPoisonedSession(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+
+	providerMsg := "400 the message at position 168 with role 'assistant' must not be empty"
+	seedKimiSessionFiles(t, home, "ses_poisoned",
+		`{"type":"llm.request","kind":"loop","model":"k3"}`+"\n",
+		kimiTurnFailedLogLines(time.Now(), 7, providerMsg))
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPSwallowedFailureScript()))
+
+	result := runFakeKimi(t, fakePath, ExecOptions{ResumeSessionID: "ses_poisoned"})
+
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if result.SessionID != "" {
+		t.Errorf("expected empty session id so the daemon's fresh-session retry fires, got %q", result.SessionID)
+	}
+}
+
+// TestKimiBackendHealthyEmptyCompletionNotFlagged guards the false-positive
+// side: a legit answer with no text (the turn really ran and flushed its
+// usage.record) is a valid empty completion and must NOT be failed by the
+// kimi-code.log cross-check — even when the log still holds failure
+// entries from a previous run on the same session.
+func TestKimiBackendHealthyEmptyCompletionNotFlagged(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+
+	now := time.Now()
+	// In-window usage.record for the turn; only stale (previous run)
+	// failure entries in the log.
+	seedKimiSessionFiles(t, home, "ses_swallowed",
+		kimiWireRec("kimi-code/k3", 100, 10, 0, 0, now)+"\n",
+		kimiTurnFailedLogLines(now.Add(-time.Hour), 1, "400 the message at position 168 with role 'assistant' must not be empty"))
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPSwallowedFailureScript()))
+
+	result := runFakeKimi(t, fakePath, ExecOptions{})
+
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if result.SessionID != "ses_swallowed" {
+		t.Errorf("expected session id preserved on a healthy run, got %q", result.SessionID)
+	}
+	if u := result.Usage["kimi-code/k3"]; u.InputTokens != 100 || u.OutputTokens != 10 {
+		t.Errorf("expected wire usage on the healthy run, got %+v", result.Usage)
+	}
+}
+
+// TestReadKimiTurnFailure pins the kimi-code.log cross-check itself:
+// in-window failures are found with the provider error extracted, stale
+// entries from previous runs are ignored, and a missing log means "no
+// signal" (older kimi builds), never a false positive.
+func TestReadKimiTurnFailure(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+
+	now := time.Now()
+	providerMsg := "400 the message at position 168 with role 'assistant' must not be empty"
+
+	tests := []struct {
+		name        string
+		log         string
+		wantFound   bool
+		wantMsgPart string
+	}{
+		{
+			name:        "in-window failure surfaces the provider error",
+			log:         kimiTurnFailedLogLines(now, 3, providerMsg),
+			wantFound:   true,
+			wantMsgPart: providerMsg,
+		},
+		{
+			name:        "stale failure from a previous run is ignored",
+			log:         kimiTurnFailedLogLines(now.Add(-time.Hour), 3, providerMsg),
+			wantFound:   false,
+			wantMsgPart: "",
+		},
+		{
+			name: "mixed stale and in-window failures finds the new one",
+			log: kimiTurnFailedLogLines(now.Add(-time.Hour), 1, "stale boom") +
+				kimiTurnFailedLogLines(now, 2, providerMsg),
+			wantFound:   true,
+			wantMsgPart: providerMsg,
+		},
+		{
+			name:        "bare turn failed without detail line still flags",
+			log:         fmt.Sprintf("%s ERROR turn failed  turnId=4\n", now.UTC().Format("2006-01-02T15:04:05.000Z07:00")),
+			wantFound:   true,
+			wantMsgPart: "turn failed",
+		},
+		{
+			name:        "healthy log with no failure entries",
+			log:         fmt.Sprintf("%s INFO  llm response  turnStep=0/1 outputTokens=42\n", now.UTC().Format("2006-01-02T15:04:05.000Z07:00")),
+			wantFound:   false,
+			wantMsgPart: "",
+		},
+		{
+			name: "malformed lines are skipped",
+			log: "not a log line at all\n" +
+				"ERROR turn failed without timestamp\n" +
+				kimiTurnFailedLogLines(now, 5, providerMsg),
+			wantFound:   true,
+			wantMsgPart: providerMsg,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seedKimiSessionFiles(t, home, "ses_log", "", tt.log)
+			msg, found := readKimiTurnFailure("ses_log", now.Add(-time.Minute), slog.Default())
+			if found != tt.wantFound {
+				t.Fatalf("found = %v, want %v (msg=%q)", found, tt.wantFound, msg)
+			}
+			if tt.wantMsgPart != "" && !strings.Contains(msg, tt.wantMsgPart) {
+				t.Fatalf("expected message to contain %q, got %q", tt.wantMsgPart, msg)
+			}
+			// Clean up so subtests don't see each other's files.
+			if err := os.RemoveAll(filepath.Join(home, "sessions")); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// TestReadKimiTurnFailureMissingLog pins the no-signal case: kimi builds
+// that write no session log (or a custom data dir) must not false-positive.
+func TestReadKimiTurnFailureMissingLog(t *testing.T) {
+	t.Setenv("KIMI_CODE_HOME", t.TempDir())
+	msg, found := readKimiTurnFailure("session-nope", time.Now().Add(-time.Minute), slog.Default())
+	if found {
+		t.Fatalf("expected found=false for missing log, got msg=%q", msg)
 	}
 }
