@@ -9,6 +9,10 @@ import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
 
 const uploadWithToast = vi.hoisted(() => vi.fn());
+const editorLifecycle = vi.hoisted(() => ({
+  deferReady: false,
+  pendingReady: [] as Array<() => void>,
+}));
 
 vi.mock("@multica/core/api", () => ({
   api: {},
@@ -64,13 +68,18 @@ vi.mock("../../editor", async () => ({
     ref: Ref<unknown>,
   ) {
     const valueRef = useRef(defaultValue ?? "");
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     // Mirrors the real editor's `uploading` node attrs: the placeholder exists
     // from before the await until the upload settles, `hasActiveUploads` reads
     // it synchronously, and the host is told through onUploadingChange.
     const inFlightRef = useRef(0);
 
     useEffect(() => {
-      onReady?.();
+      if (editorLifecycle.deferReady && onReady) {
+        editorLifecycle.pendingReady.push(onReady);
+      } else {
+        onReady?.();
+      }
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -79,8 +88,18 @@ vi.mock("../../editor", async () => ({
       clearContent: () => {
         valueRef.current = "";
       },
-      focus: () => {},
-      focusAtCoords: () => {},
+      focus: () => textareaRef.current?.focus(),
+      focusAtEnd: () => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+      },
+      focusAtCoords: () => textareaRef.current?.focus(),
+      adoptContent: (markdown: string) => {
+        valueRef.current = markdown;
+        if (textareaRef.current) textareaRef.current.value = markdown;
+      },
       blur: () => {},
       uploadFile: async (file: File) => {
         inFlightRef.current += 1;
@@ -100,6 +119,7 @@ vi.mock("../../editor", async () => ({
 
     return (
       <textarea
+        ref={textareaRef}
         data-testid="editor"
         defaultValue={defaultValue}
         placeholder={placeholder}
@@ -157,7 +177,7 @@ function renderReplyInput({
 // unsent draft exists). Tests that interact with the editor activate it the
 // same way a user does.
 function activateComposer(shellTestId: "comment-composer-shell" | "reply-composer-shell") {
-  fireEvent.click(screen.getByTestId(shellTestId));
+  fireEvent.focus(screen.getByTestId(shellTestId));
 }
 
 function getSubmitButton(container: HTMLElement): HTMLButtonElement {
@@ -170,6 +190,8 @@ function getSubmitButton(container: HTMLElement): HTMLButtonElement {
 
 beforeEach(() => {
   uploadWithToast.mockReset();
+  editorLifecycle.deferReady = false;
+  editorLifecycle.pendingReady = [];
   localStorage.clear();
   useCommentComposerStore.setState({ sticky: true });
   // The draft store is a module singleton — a draft left by a previous test
@@ -179,14 +201,58 @@ beforeEach(() => {
 });
 
 describe("comment composers", () => {
+  it.each([
+    {
+      name: "main comment",
+      shellTestId: "comment-composer-shell" as const,
+      renderComposer: () => renderCommentInput(),
+    },
+    {
+      name: "reply",
+      shellTestId: "reply-composer-shell" as const,
+      renderComposer: () => renderReplyInput(),
+    },
+  ])("keeps $name IME composition intact while the editor becomes ready", async ({
+    shellTestId,
+    renderComposer,
+  }) => {
+    editorLifecycle.deferReady = true;
+    renderComposer();
+
+    const shell = screen.getByTestId(shellTestId);
+    expect(shell).toHaveAttribute("role", "textbox");
+    act(() => shell.focus());
+    await waitFor(() => expect(editorLifecycle.pendingReady).toHaveLength(1));
+
+    fireEvent.compositionStart(shell);
+    fireEvent.input(shell, { target: { value: "w" } });
+    act(() => editorLifecycle.pendingReady.shift()?.());
+
+    // The hidden Tiptap instance may finish mounting, but replacing the
+    // composing native control here would cancel the browser's IME session.
+    expect(screen.getByTestId(shellTestId)).toBe(shell);
+    expect(shell).toHaveFocus();
+
+    fireEvent.input(shell, { target: { value: "我" } });
+    fireEvent.compositionEnd(shell);
+
+    await waitFor(() => expect(screen.queryByTestId(shellTestId)).not.toBeInTheDocument());
+    expect(screen.getByTestId("editor")).toHaveValue("我");
+    expect(screen.getByTestId("editor")).toHaveFocus();
+    expect(screen.getByTestId("editor")).toHaveProperty("selectionStart", 1);
+  });
+
   it("renders the main comment composer without a manual expand control", () => {
     const { container } = renderCommentInput();
 
     // Readonly-first: shell shows the placeholder text; clicking mounts the
     // real editor in place.
-    expect(screen.getByTestId("comment-composer-shell")).toHaveTextContent("Leave a comment...");
+    expect(screen.getByTestId("comment-composer-shell")).toHaveAttribute(
+      "placeholder",
+      "Leave a comment...",
+    );
     activateComposer("comment-composer-shell");
-    expect(screen.getByPlaceholderText("Leave a comment...")).toBeInTheDocument();
+    expect(screen.getByTestId("editor")).toHaveAttribute("placeholder", "Leave a comment...");
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
     expect(container.querySelectorAll("button")).toHaveLength(2);
 
@@ -198,9 +264,12 @@ describe("comment composers", () => {
   it("renders reply composer without a manual expand control", () => {
     const { container } = renderReplyInput();
 
-    expect(screen.getByTestId("reply-composer-shell")).toHaveTextContent("Leave a reply...");
+    expect(screen.getByTestId("reply-composer-shell")).toHaveAttribute(
+      "placeholder",
+      "Leave a reply...",
+    );
     activateComposer("reply-composer-shell");
-    expect(screen.getByPlaceholderText("Leave a reply...")).toBeInTheDocument();
+    expect(screen.getByTestId("editor")).toHaveAttribute("placeholder", "Leave a reply...");
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
     expect(container.querySelectorAll("button")).toHaveLength(2);
 

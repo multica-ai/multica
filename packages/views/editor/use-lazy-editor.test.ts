@@ -46,6 +46,36 @@ describe("useLazyEditor", () => {
     expect(handle.uploadFile).toHaveBeenCalledWith(file);
   });
 
+  it("keeps an editable stand-in alive until IME composition ends", () => {
+    let pendingContent = "w";
+    const handle = {
+      ...makeHandle(),
+      focusAtEnd: vi.fn(),
+      adoptContent: vi.fn(),
+    };
+    const editorRef = { current: handle as LazyEditorHandle };
+    const { result } = renderHook(() =>
+      useLazyEditor({
+        editorRef,
+        getPendingContent: () => pendingContent,
+      }),
+    );
+
+    act(() => result.current.activate());
+    act(() => result.current.onCompositionStart());
+    act(() => result.current.onReady());
+
+    expect(result.current.ready).toBe(false);
+    expect(handle.adoptContent).not.toHaveBeenCalled();
+
+    pendingContent = "我";
+    act(() => result.current.onCompositionEnd());
+
+    expect(result.current.ready).toBe(true);
+    expect(handle.adoptContent).toHaveBeenCalledWith("我");
+    expect(handle.focusAtEnd).toHaveBeenCalled();
+  });
+
   it("resets to the stand-in during the render that changes resetKey", () => {
     const editorRef = { current: makeHandle() as LazyEditorHandle };
     const { result, rerender } = renderHook(

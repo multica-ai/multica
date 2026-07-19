@@ -9,9 +9,12 @@ import type { TextAnchor } from "./text-anchor";
  */
 export interface LazyEditorHandle {
   focus: () => void;
+  focusAtEnd?: () => void;
   focusAtCoords?: (coords: { x: number; y: number }) => void;
   focusAtAnchor?: (anchor: TextAnchor) => void;
   uploadFile?: (file: File) => void;
+  /** Replace the live document with text collected by an editable stand-in. */
+  adoptContent?: (markdown: string) => void;
 }
 
 /**
@@ -47,6 +50,12 @@ export interface UseLazyEditorOptions {
    * Hosts that remount per subject (via `key`) don't need this.
    */
   resetKey?: unknown;
+  /**
+   * Read text accepted by an editable stand-in while Tiptap initializes.
+   * When present, readiness is held across an active IME composition, then
+   * the collected text is adopted before the stand-in is replaced.
+   */
+  getPendingContent?: () => string | undefined;
 }
 
 /**
@@ -70,6 +79,10 @@ export interface UseLazyEditorOptions {
  *     <Editor ref={editorRef} onReady={lazy.onReady} ... /></div>}
  *   {!lazy.ready && <StaticStandIn onClick={e => lazy.activate({x: e.clientX, y: e.clientY})} />}
  *
+ * A stand-in that accepts text should pass `getPendingContent` and wire the
+ * returned composition handlers. The hook then delays the swap until IME
+ * composition ends and adopts the stand-in's complete text first.
+ *
  * Hosts that outlive a subject switch without remounting (the web issue
  * route) must pass `resetKey`; keyed hosts get the reset for free by
  * remounting.
@@ -78,12 +91,15 @@ export function useLazyEditor({
   initialActive = false,
   editorRef,
   resetKey,
+  getPendingContent,
 }: UseLazyEditorOptions) {
   const [active, setActive] = useState(initialActive);
   const [ready, setReady] = useState(false);
   const focusTargetRef = useRef<LazyFocusTarget | null>(null);
   const focusPendingRef = useRef(false);
   const pendingFilesRef = useRef<File[]>([]);
+  const editorReadyRef = useRef(false);
+  const composingRef = useRef(false);
 
   // Render-phase reset on subject change — see the `resetKey` option doc.
   const [prevResetKey, setPrevResetKey] = useState(resetKey);
@@ -94,6 +110,8 @@ export function useLazyEditor({
     focusTargetRef.current = null;
     focusPendingRef.current = false;
     pendingFilesRef.current = [];
+    editorReadyRef.current = false;
+    composingRef.current = false;
   }
 
   const focusAtTarget = useCallback(
@@ -102,6 +120,7 @@ export function useLazyEditor({
       if (!handle) return;
       if (target?.anchor && handle.focusAtAnchor) handle.focusAtAnchor(target.anchor);
       else if (target && handle.focusAtCoords) handle.focusAtCoords(target);
+      else if (handle.focusAtEnd) handle.focusAtEnd();
       else handle.focus();
     },
     [editorRef],
@@ -124,7 +143,27 @@ export function useLazyEditor({
     [ready, focusAtTarget],
   );
 
-  const onReady = useCallback(() => setReady(true), []);
+  const completeReady = useCallback(() => {
+    const pendingContent = getPendingContent?.();
+    if (pendingContent !== undefined) {
+      editorRef.current?.adoptContent?.(pendingContent);
+    }
+    setReady(true);
+  }, [editorRef, getPendingContent]);
+
+  const onReady = useCallback(() => {
+    editorReadyRef.current = true;
+    if (!composingRef.current) completeReady();
+  }, [completeReady]);
+
+  const onCompositionStart = useCallback(() => {
+    composingRef.current = true;
+  }, []);
+
+  const onCompositionEnd = useCallback(() => {
+    composingRef.current = false;
+    if (editorReadyRef.current) completeReady();
+  }, [completeReady]);
 
   // Post-swap work — runs after the commit that revealed the ready editor,
   // so focus targets can resolve against a laid-out, live doc and uploads
@@ -155,5 +194,13 @@ export function useLazyEditor({
     [ready, editorRef],
   );
 
-  return { active, ready, activate, onReady, uploadOrQueue };
+  return {
+    active,
+    ready,
+    activate,
+    onReady,
+    onCompositionStart,
+    onCompositionEnd,
+    uploadOrQueue,
+  };
 }

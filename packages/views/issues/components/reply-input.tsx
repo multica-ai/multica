@@ -54,10 +54,11 @@ function ReplyInput({
   const sendShortcut = useShortcut("send");
   const placeholderText = placeholder ?? t(($) => $.reply.placeholder);
   const editorRef = useRef<ContentEditorRef>(null);
+  const shellRef = useRef<HTMLTextAreaElement>(null);
   // See CommentInput — replying mid-upload posts without the file.
   const uploadGate = useUploadGate(editorRef);
-  // If a draft key is provided, hydrate from store on mount (defaultValue is
-  // the only injection point on ContentEditorRef) and flush on every onUpdate.
+  // If a draft key is provided, hydrate from store on mount and flush on every
+  // onUpdate.
   const initialDraft = draftKey
     ? useCommentDraftStore.getState().getDraft(draftKey)
     : undefined;
@@ -72,6 +73,10 @@ function ReplyInput({
   // rationale (drives both submit-time attachment_ids and editor previews).
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   const { uploadWithToast } = useEditorUpload();
+  const getPendingContent = useCallback(
+    () => shellRef.current?.value,
+    [],
+  );
   // Readonly-first: static shell until intent; an unsent draft mounts the
   // real editor immediately (see CommentInput). This is also what keeps the
   // reply box working across Virtuoso scroll-out — a typed draft rehydrates
@@ -80,6 +85,7 @@ function ReplyInput({
   const lazy = useLazyEditor({
     initialActive: !!initialDraft?.trim(),
     editorRef,
+    getPendingContent,
   });
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: lazy.uploadOrQueue,
@@ -217,27 +223,30 @@ function ReplyInput({
           />
         </div>
         )}
-        {/* Static shell — clones the empty single-line reply box (see
-            CommentInput for the pattern). */}
+        {/* Native handoff shell — see CommentInput for the IME-safe swap. */}
         {!lazy.ready && (
-          <div
+          <textarea
+            ref={shellRef}
             data-testid="reply-composer-shell"
-            role="button"
-            tabIndex={0}
+            role="textbox"
+            rows={1}
             aria-label={placeholderText}
-            className="flex-1 min-h-0 cursor-text rich-text-editor text-sm"
-            onClick={() => lazy.activate()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                lazy.activate();
+            defaultValue={initialDraft}
+            placeholder={placeholderText}
+            className="flex-1 min-h-0 w-full resize-none overflow-hidden bg-transparent text-sm leading-[1.625] outline-none placeholder:text-muted-foreground"
+            onFocus={() => lazy.activate()}
+            onInput={(event) => {
+              const md = event.currentTarget.value;
+              setContent(md);
+              setIsEmpty(!md.trim());
+              if (draftKey) {
+                if (md.trim().length > 0) setDraft(draftKey, md);
+                else clearDraft(draftKey);
               }
             }}
-          >
-            {/* <p> under rich-text-editor: same type metrics as the real
-                editor's empty paragraph — no height jump on swap. */}
-            <p className="text-muted-foreground">{placeholderText}</p>
-          </div>
+            onCompositionStart={lazy.onCompositionStart}
+            onCompositionEnd={lazy.onCompositionEnd}
+          />
         )}
         <div className="absolute bottom-0 left-0 right-24 min-w-0">
           <CommentTriggerChips

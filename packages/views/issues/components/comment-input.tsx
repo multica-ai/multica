@@ -26,6 +26,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
+  const shellRef = useRef<HTMLTextAreaElement>(null);
   // Sending mid-upload would strip the pending image's blob URL out of the
   // markdown and bind no attachment id — the comment posts without the file.
   const uploadGate = useUploadGate(editorRef);
@@ -46,6 +47,12 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   //    resolve text/code/markdown previews that require the attachment id.
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   const { uploadWithToast } = useEditorUpload();
+  const setDraft = useCommentDraftStore((s) => s.setDraft);
+  const clearDraft = useCommentDraftStore((s) => s.clearDraft);
+  const getPendingContent = useCallback(
+    () => shellRef.current?.value,
+    [],
+  );
   // Readonly-first: the composer renders as a same-looking static shell until
   // the user shows intent (click / keyboard / file drop). An unsent draft is
   // standing intent — mount the real editor immediately so the draft is
@@ -53,6 +60,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const lazy = useLazyEditor({
     initialActive: !!initialDraft?.trim(),
     editorRef,
+    getPendingContent,
   });
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: lazy.uploadOrQueue,
@@ -61,12 +69,9 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   // composer to the bottom of the scroll viewport when enabled.
   const sticky = useCommentComposerStore((s) => s.sticky);
 
-  // Draft persistence. Hydrate from store on mount via `defaultValue` above
-  // (ContentEditorRef has no setContent, so this is the only injection point).
-  // Flush on every onUpdate (debounced upstream) + visibilitychange/pagehide
+  // Draft persistence. Hydrate from store on mount via `defaultValue` above;
+  // flush on every onUpdate (debounced upstream) + visibilitychange/pagehide
   // so tab close / mobile background doesn't lose work. Cleared on submit.
-  const setDraft = useCommentDraftStore((s) => s.setDraft);
-  const clearDraft = useCommentDraftStore((s) => s.clearDraft);
   useEffect(() => {
     const flush = () => {
       const md = editorRef.current?.getMarkdown();
@@ -198,31 +203,30 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         />
       </div>
       )}
-      {/* Static shell — visually clones the empty single-line composer.
-          Real editor mounts (hidden) on first intent; shell stays visible
-          until it's ready so the card never blanks or shifts. */}
+      {/* Native handoff shell. It can accept text while Tiptap initializes,
+          and useLazyEditor keeps it mounted through an active IME composition
+          before adopting its text and moving focus to the real editor. */}
       {!lazy.ready && (
-        <div
+        <textarea
+          ref={shellRef}
           data-testid="comment-composer-shell"
-          role="button"
-          tabIndex={0}
+          role="textbox"
+          rows={1}
           aria-label={t(($) => $.comment.leave_comment_placeholder)}
-          className="flex-1 min-h-0 cursor-text px-3 py-2"
-          onClick={() => lazy.activate()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              lazy.activate();
-            }
+          defaultValue={initialDraft}
+          placeholder={t(($) => $.comment.leave_comment_placeholder)}
+          className="flex-1 min-h-0 w-full resize-none overflow-hidden bg-transparent px-3 py-2 text-sm leading-[1.625] outline-none placeholder:text-muted-foreground"
+          onFocus={() => lazy.activate()}
+          onInput={(event) => {
+            const md = event.currentTarget.value;
+            setContent(md);
+            setIsEmpty(!md.trim());
+            if (md.trim().length > 0) setDraft(draftKey, md);
+            else clearDraft(draftKey);
           }}
-        >
-          {/* rich-text-editor + <p>: the shell line inherits the editor's
-              exact type metrics (line-height 1.625 from prose.css), so the
-              shell→editor swap doesn't shift layout. */}
-          <div className="rich-text-editor text-sm">
-            <p className="text-muted-foreground">{t(($) => $.comment.leave_comment_placeholder)}</p>
-          </div>
-        </div>
+          onCompositionStart={lazy.onCompositionStart}
+          onCompositionEnd={lazy.onCompositionEnd}
+        />
       )}
       <div className="absolute bottom-1 left-2 right-28 min-w-0">
         <CommentTriggerChips
