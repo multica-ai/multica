@@ -244,22 +244,22 @@ func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader
 			t.Fatalf("clear tasks: %v", err)
 		}
 	}
-	// insertLeaderTask seeds a same-squad task for the leader agent so the
-	// self-trigger guard can read the agent's most recent role on the issue.
-	// Separate Exec calls get distinct created_at values, so the last inserted
-	// row is the "latest" task.
-	insertLeaderTask := func(isLeader bool, status string) {
+	// insertLeaderTask seeds exact same-squad task lineage for the self-trigger
+	// guard; unrelated older/newer tasks must not affect the decision.
+	insertLeaderTask := func(isLeader bool, status string) string {
 		t.Helper()
 		var runtimeID string
 		if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
 			t.Fatalf("load runtime: %v", err)
 		}
-		if _, err := testPool.Exec(ctx, `
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
 			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, squad_id)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, fx.LeaderID, runtimeID, issueID, status, isLeader, fx.SquadID); err != nil {
+			VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
+		`, fx.LeaderID, runtimeID, issueID, status, isLeader, fx.SquadID).Scan(&taskID); err != nil {
 			t.Fatalf("insert task: %v", err)
 		}
+		return taskID
 	}
 
 	// Case 1: a worker agent (not the leader) posts a result comment on the
@@ -271,14 +271,15 @@ func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader
 		}
 	})
 
-	// Case 2: author identity wins over historical task role. A dual-role
-	// leader's own comment must not enqueue that same agent again.
-	t.Run("dual-role leader comment does not self-trigger after worker task", func(t *testing.T) {
+	// Case 2: the exact authoring worker task permits the supported
+	// worker-slice→leader coordination resume.
+	t.Run("dual-role worker comment wakes leader from exact worker task", func(t *testing.T) {
 		clearTasks()
-		insertLeaderTask(true, "completed")  // older leader task
-		insertLeaderTask(false, "completed") // newer worker task → latest role is worker
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "done with my worker slice", "agent", fx.LeaderID); got {
-			t.Fatalf("dual-role leader comment: expected self-trigger suppression, got wake")
+		insertLeaderTask(true, "completed")
+		workerTaskID := insertLeaderTask(false, "completed")
+		triggers, _ := testHandler.computeCommentAgentTriggers(ctx, fx.Issue, "done with my worker slice", nil, "agent", fx.LeaderID, commentTriggerComputeOptions{AuthoringTaskID: util.MustParseUUID(workerTaskID)})
+		if !triggersContainIssueAssigneeSquadLeader(triggers) {
+			t.Fatalf("dual-role worker comment: expected leader wake from exact worker lineage, got skip")
 		}
 	})
 
@@ -286,9 +287,10 @@ func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader
 	// is a self-trigger loop and must stay suppressed.
 	t.Run("leader comment from latest leader task does not self-trigger", func(t *testing.T) {
 		clearTasks()
-		insertLeaderTask(false, "completed") // older worker task
-		insertLeaderTask(true, "completed")  // newer leader task → latest role is leader
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "coordinating next steps", "agent", fx.LeaderID); got {
+		insertLeaderTask(false, "completed")
+		leaderTaskID := insertLeaderTask(true, "completed")
+		triggers, _ := testHandler.computeCommentAgentTriggers(ctx, fx.Issue, "coordinating next steps", nil, "agent", fx.LeaderID, commentTriggerComputeOptions{AuthoringTaskID: util.MustParseUUID(leaderTaskID)})
+		if triggersContainIssueAssigneeSquadLeader(triggers) {
 			t.Fatalf("leader self-trigger: expected skip, got wake")
 		}
 	})
@@ -388,16 +390,15 @@ func TestCreateComment_SquadPlainReplyToMemberParentKeepsRootMentionOwner(t *tes
 	}
 }
 
-// TestCreateComment_DualRoleLeaderCommentDoesNotSelfTrigger pins the
-// author-based self-trigger boundary at the full-handler level. Scenario:
+// TestCreateComment_DualRoleAgentWorkerCommentWakesLeader pins exact-task
+// lineage at the full-handler level. Scenario:
 //
 //   - Agent L is the leader of squad S and also runs worker tasks on issues
 //     belonging to S.
 //   - L is woken in its worker role (is_leader_task=false) and posts a result
 //     comment.
-//   - No second task is enqueued for L: changing role does not change author
-//     identity, and a result comment cannot delegate back to its own author.
-func TestCreateComment_DualRoleLeaderCommentDoesNotSelfTrigger(t *testing.T) {
+//   - A leader-role task is enqueued so coordination resumes.
+func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -440,7 +441,7 @@ func TestCreateComment_DualRoleLeaderCommentDoesNotSelfTrigger(t *testing.T) {
 		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// No new leader-role task: author and computed assignee leader are identical.
+	// Exact worker-task lineage permits one leader-role coordination task.
 	var leaderTasks int
 	if err := testPool.QueryRow(ctx, `
 		SELECT count(*) FROM agent_task_queue
@@ -448,8 +449,8 @@ func TestCreateComment_DualRoleLeaderCommentDoesNotSelfTrigger(t *testing.T) {
 	`, issueID, fx.LeaderID).Scan(&leaderTasks); err != nil {
 		t.Fatalf("count leader tasks: %v", err)
 	}
-	if leaderTasks != 0 {
-		t.Fatalf("after worker comment from dual-role leader: expected no queued self-trigger, got %d", leaderTasks)
+	if leaderTasks != 1 {
+		t.Fatalf("after worker comment from dual-role leader: expected 1 queued leader task, got %d", leaderTasks)
 	}
 }
 
