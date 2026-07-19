@@ -131,6 +131,13 @@ export function WorkflowsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
+              {list.isLoading && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                    Loading workflows…
+                  </TableCell>
+                </TableRow>
+              )}
               {workflows.length === 0 && !list.isLoading && (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">

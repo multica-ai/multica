@@ -195,10 +195,10 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
           save.mutate();
         }}
       >
-        {!workflowId && (
+        {!workflowId && WORKFLOW_TEMPLATES.some((tpl) => tpl.status === "active") && (
           <Section title="Start from a template (optional)">
             <ul className="flex flex-col divide-y">
-              {WORKFLOW_TEMPLATES.map((tpl) => (
+              {WORKFLOW_TEMPLATES.filter((tpl) => tpl.status === "active").map((tpl) => (
                 <li
                   key={tpl.key}
                   className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0"

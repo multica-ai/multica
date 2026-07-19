@@ -443,8 +443,8 @@ export const RUN_STATUS_BADGE: Record<CerebroWorkflowRunStatus, string> = {
   queued: "bg-muted text-muted-foreground",
   running: "bg-info/10 text-info",
   success: "bg-success/10 text-success",
-  failed: "bg-warning/10 text-warning",
-  escalated: "bg-destructive/10 text-destructive",
+  failed: "bg-destructive/10 text-destructive",
+  escalated: "bg-warning/10 text-warning",
 };
 
 // Outbound webhook headers — the server-side guard rejects anything that
