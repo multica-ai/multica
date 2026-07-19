@@ -982,25 +982,6 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 
 // ── Squad Trigger Logic ─────────────────────────────────────────────────────
 
-// shouldSuppressSquadLeaderSelfTrigger reports whether a squad leader's own
-// comment should be blocked from re-enqueuing that same leader. The only
-// leader-authored non-leader task allowed to wake the assigned leader is a
-// same-squad worker task; generic agent tasks such as direct mentions and
-// thread-parent replies are not worker-role proof and must not self-trigger.
-func (h *Handler) shouldSuppressSquadLeaderSelfTrigger(ctx context.Context, issueID, leaderID, squadID pgtype.UUID) bool {
-	latest, err := h.Queries.GetLatestTaskRoleForIssueAndAgent(ctx, db.GetLatestTaskRoleForIssueAndAgentParams{
-		IssueID: issueID,
-		AgentID: leaderID,
-	})
-	if err != nil {
-		return false
-	}
-	if latest.IsLeaderTask {
-		return true
-	}
-	return !latest.SquadID.Valid || uuidToString(latest.SquadID) != uuidToString(squadID)
-}
-
 // commentMentionsAnyone returns true when the comment body contains at least
 // one routing-style mention — [@Name](mention://agent|member|squad|all/<id>).
 // Issue cross-references (mention://issue/...) are ignored because they are

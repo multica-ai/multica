@@ -2170,8 +2170,7 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 	if err != nil {
 		return commentAgentTrigger{}, false
 	}
-	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
-		h.shouldSuppressSquadLeaderSelfTrigger(ctx, issue.ID, squad.LeaderID, squad.ID) {
+	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) {
 		return commentAgentTrigger{}, false
 	}
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
@@ -2214,11 +2213,8 @@ func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, a
 // mentions from the current comment and returns the runnable agent recipients.
 // Skips agents with on_mention trigger disabled, and private agents mentioned
 // by non-owner members (only the agent owner or workspace admin/owner can
-// mention a private agent). Self-mentions are intentionally allowed so an
-// agent running in one issue can explicitly enqueue itself on another (e.g.
-// a child-issue run notifying the parent issue whose assignee is the same
-// agent); runaway loops are prevented by HasPendingTaskForIssueAndAgent
-// dedupe and the natural queued/dispatched coalescing of the task queue.
+// mention a private agent). Self-mentions are reported as suppressed and never
+// enqueue a new run; a delegation must name a different agent or squad.
 // Note: no issue status gate here — @mention is an explicit action and should
 // work even on done/cancelled issues (the agent can reopen the issue if needed).
 // commentMentionTarget is one EXPLICIT @agent / @squad mention and how it
@@ -2295,16 +2291,13 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				continue
 			}
 			leaderID := squad.LeaderID
-			// A2A self-suppression: the author IS this squad's leader and its
-			// most recent task on this issue was a leader/generic role (NOT a
-			// fresh same-squad worker→leader handoff), so we do not re-fire the
-			// leader from its own @mention. The outcome must reflect reality, not
+			// A2A self-suppression: the author IS this squad's leader, so we do
+			// not re-fire the leader from its own @mention. The outcome must reflect reality, not
 			// assume success (MUL-4525): `deferred` only when a real non-terminal
 			// task is still active (its reconcile covers this comment); a query
 			// failure is a non-success internal_error, never a fabricated
 			// deferred; otherwise nothing runs → self_trigger_suppressed.
-			if authorType == "agent" && authorID == uuidToString(leaderID) &&
-				h.shouldSuppressSquadLeaderSelfTrigger(ctx, issue.ID, leaderID, squad.ID) {
+			if authorType == "agent" && authorID == uuidToString(leaderID) {
 				active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, leaderID)
 				status, reason := decideSuppressedLeaderOutcome(active, activeErr)
 				addTarget(commentMentionTarget{TargetType: "squad", TargetID: m.ID, Status: status, ReasonCode: reason})
@@ -2345,6 +2338,16 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			continue
 		}
 		agentUUID := parseUUID(m.ID)
+		// An explicit self-mention is never a new delegation. Enqueueing the
+		// author again lets a result comment create an unbounded comment/run
+		// loop. Keep the per-target outcome honest: an active run will reconcile
+		// the comment, otherwise the self-mention is a safe no-op.
+		if authorType == "agent" && authorID == uuidToString(agentUUID) {
+			active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, agentUUID)
+			status, reason := decideSuppressedLeaderOutcome(active, activeErr)
+			addTarget(commentMentionTarget{TargetType: "agent", TargetID: m.ID, Status: status, ReasonCode: reason})
+			continue
+		}
 		// Load the agent scoped to the current issue's workspace. Using the
 		// bare GetAgent here would let a mention resolve to an agent in a
 		// different workspace, and the visibility check below would then be
