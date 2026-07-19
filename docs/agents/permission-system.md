@@ -340,6 +340,22 @@ admits nothing, it is absent and cannot become a bypass.
 
 ---
 
+### Blocking eval gates on Issue workflows
+
+The set_blocking_gate group capability is an always-on, default-deny permission
+for binding an eval to an Issue workflow with enforcement=block. Workspace
+owners/admins bypass the capability check. Other members must belong to a group
+granted set_blocking_gate through the group detail capability control. Warn-only
+bindings do not require this capability and never block workflow progress. The
+check is implemented by
+server/internal/cerebro/grouppermissions.Service.CanSetBlockingGate, with the
+capability name validated against the cerebro_group_capability contract.
+
+This is separate from the runtime tool registry inventory. The registry may
+list eval and eval-schedule MCP tools, but their handler-level authorization and
+the blocking-binding capability check remain authoritative; adding a tool to the
+registry does not grant permission to create a blocking gate.
+
 ## What is OFF by default (and only this)
 
 These exist and work, but with default flags they block nothing for a normal
