@@ -151,8 +151,15 @@ func TestTryEnterClaim_RespectsBarrier(t *testing.T) {
 		t.Fatal("tryEnterClaim must refuse while barrier is held")
 	}
 	d.releaseClaimBarrier()
+	if !d.tryBeginDrain() {
+		t.Fatal("tryBeginDrain should acquire an idle claim barrier")
+	}
+	if d.trySetClaimBarrier() {
+		t.Fatal("auto-update must not steal a manual drain barrier")
+	}
+	d.releaseDrain()
 	if !d.tryEnterClaim() {
-		t.Fatal("tryEnterClaim should succeed after barrier release")
+		t.Fatal("tryEnterClaim should succeed after barriers are released")
 	}
 	d.exitClaim()
 }

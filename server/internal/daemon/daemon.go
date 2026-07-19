@@ -247,20 +247,19 @@ type Daemon struct {
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
 	ready         atomic.Bool        // false until preflight completes; gates /health status (starting -> running)
 
-	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
+	// claimMu guards pauseClaims, draining, and claimsInFlight. It is held only for the
 	// microseconds it takes to make a decision; ClaimTask itself runs without
 	// the lock so a slow per-runtime claim cannot stall auto-update or any
 	// other poller.
 	//
-	// The pair is the auto-update path's barrier against the issue's
-	// requirement that "升级过程中如果有 task 进来，会延后升级而不是中断 task":
-	// runRuntimePoller refuses to call ClaimTask while pauseClaims is set, and
-	// tryAutoUpdate refuses to flip pauseClaims while any poller is mid-claim
-	// or any task is in handleTask. Together that closes the fetch-then-claim
-	// race where a new task slipping in during the release-metadata fetch
-	// would be cancelled by triggerRestart's root-ctx cancel.
+	// The fields provide one shared claim barrier for auto-update and manual
+	// drain shutdown. Auto-update acquires it only when already idle; drain
+	// acquires it first and then waits for earlier claims and tasks to finish.
+	// In both cases a task cannot slip in immediately before the root context
+	// is cancelled.
 	claimMu        sync.Mutex
 	pauseClaims    bool // when true, the batch poller skips claiming
+	draining       bool // true while a client-owned drain shutdown holds pauseClaims
 	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
 	activeEnvRootsMu   sync.Mutex
@@ -2679,18 +2678,59 @@ func (d *Daemon) exitClaim() {
 // trySetClaimBarrier atomically pauses new ClaimTask calls if the daemon is
 // fully idle (no claims in flight, no tasks running). Returns true if the
 // caller now holds the barrier and must release it with releaseClaimBarrier
-// on every non-restart exit path; false if the daemon is busy and the caller
-// should defer to the next tick. Used by tryAutoUpdate to close the race
+// on every non-restart exit path; false if the daemon is busy, or another
+// operation owns the barrier. Used by tryAutoUpdate to close the race
 // where a task slips in between the cheap pre-fetch idle check and the
 // actual upgrade kick-off.
 func (d *Daemon) trySetClaimBarrier() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
+	if d.pauseClaims || d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
 		return false
 	}
 	d.pauseClaims = true
 	return true
+}
+
+// tryBeginDrain atomically pauses new claims for a client-owned drain
+// shutdown. Unlike the auto-update barrier, an active task or in-flight claim
+// is expected here: the drain waits for both to finish naturally. A false
+// return means another drain or auto-update already owns the claim pause.
+func (d *Daemon) tryBeginDrain() bool {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	if d.pauseClaims {
+		return false
+	}
+	d.pauseClaims = true
+	d.draining = true
+	return true
+}
+
+// drainIdle reports whether every claim that entered before the drain barrier
+// has completed its handoff and every resulting task has finished. The batch
+// poller increments activeTasks before exitClaim, so observing both values at
+// zero under claimMu cannot miss a task between the two counters.
+func (d *Daemon) drainIdle() bool {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	return d.draining && d.claimsInFlight == 0 && d.activeTasks.Load() == 0
+}
+
+func (d *Daemon) releaseDrain() {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	if !d.draining {
+		return
+	}
+	d.draining = false
+	d.pauseClaims = false
+}
+
+func (d *Daemon) isDraining() bool {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	return d.draining
 }
 
 // releaseClaimBarrier clears the auto-update claim barrier so pollers may

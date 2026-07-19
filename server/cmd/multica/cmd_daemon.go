@@ -112,6 +112,7 @@ func init() {
 	rf.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
+	rf.Bool("drain", false, "Stop claiming new tasks and wait for active tasks to finish before restarting")
 
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by task")
@@ -894,6 +895,7 @@ func requireDaemonRestartPreflight(cmd *cobra.Command, profile string) error {
 func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	profile := resolveProfile(cmd)
 	healthPort := healthPortForProfile(profile)
+	drain, _ := cmd.Flags().GetBool("drain")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -911,10 +913,18 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 		}
 		pid, _ := health["pid"].(float64)
 		if pid > 0 {
-			fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
-			if err := requestDaemonShutdown(healthPort); err != nil {
-				if p, perr := os.FindProcess(int(pid)); perr == nil {
-					_ = p.Kill()
+			if drain {
+				active, _ := health["active_task_count"].(float64)
+				fmt.Fprintf(os.Stderr, "Draining daemon (pid %d); waiting for %d active task(s)...\n", int(pid), int(active))
+				if err := requestDaemonDrainShutdown(cmd.Context(), healthPort); err != nil {
+					return fmt.Errorf("drain daemon before restart: %w", err)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
+				if err := requestDaemonShutdown(healthPort); err != nil {
+					if p, perr := os.FindProcess(int(pid)); perr == nil {
+						_ = p.Kill()
+					}
 				}
 			}
 			// Wait until the port is fully released (not merely past "running"),
@@ -1013,6 +1023,29 @@ func requestDaemonShutdown(healthPort int) error {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// requestDaemonDrainShutdown asks the daemon to stop claiming new tasks, wait
+// for every in-flight claim and active task to finish naturally, and then shut
+// down. It deliberately has no fixed client timeout: a legitimate agent task
+// can run for hours. Cancelling ctx aborts the request and makes the daemon
+// release its claim barrier instead of leaving the runtime paused.
+func requestDaemonDrainShutdown(ctx context.Context, healthPort int) error {
+	url := fmt.Sprintf("http://127.0.0.1:%d/shutdown/drain", healthPort)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
 }

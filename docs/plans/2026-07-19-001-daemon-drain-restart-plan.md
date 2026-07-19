@@ -10,63 +10,27 @@ execution: code
 
 # Drain-Aware Daemon Restart - Plan
 
-## Goal Capsule
+## Goal
 
-- **Objective:** let an explicit daemon restart wait for active agent work to finish instead of cancelling it.
-- **User surface:** `multica daemon restart --drain`.
-- **Compatibility:** plain `multica daemon restart` keeps its current immediate behavior.
-- **Stop conditions:** the daemon stops claiming before the idle check, in-flight claims and active tasks finish naturally, cancellation resumes claims, and the replacement starts through the invoking CLI binary.
+Add `multica daemon restart --drain`: stop claiming, let accepted work finish, then restart through the invoking CLI. Plain restart remains immediate for compatibility.
 
 ## Problem
 
 `daemon restart` currently calls the local `/shutdown` endpoint. That cancels the daemon root context, which is also passed to active agent tasks. The subsequent 30-second wait only waits for cancelled task goroutines to clean up; it does not let agent work finish.
 
-The server can recover the interrupted row with `runtime_recovery`, but that still creates a failed attempt, performs another dispatch, and may spend more model tokens resuming the task. Recovery is a crash safety net, not a safe restart protocol.
+`runtime_recovery` can retry the interrupted row, but still records a failure, redispatches work, and can spend more model tokens. It is crash recovery, not safe restart.
 
 ## Design
 
 1. Add an opt-in `--drain` flag to `daemon restart`.
-2. Extend the local shutdown request with a drain mode. The request remains open while draining.
-3. Under the existing claim mutex, set a manual drain barrier before checking liveness. New claims are rejected; a claim already in flight must finish handing tasks to `activeTasks` before the barrier can observe idle.
-4. Wait until both `claimsInFlight == 0` and `activeTasks == 0`.
-5. Respond to the caller, then asynchronously cancel the daemon root context so the response can flush.
-6. The CLI waits for the old health endpoint to disappear and calls the existing start path. This preserves profile, foreground mode, overrides, and the invoking binary.
+2. Use a dedicated local endpoint so an older daemon returns 404 rather than ignoring a query parameter and stopping immediately.
+3. Under `claimMu`, pause new claims, then wait for `claimsInFlight == 0 && activeTasks == 0` without cancelling active contexts.
+4. Preserve the existing handoff invariant: `activeTasks` increments before `claimsInFlight` decrements, so the drain cannot observe false idle.
+5. If the requester disconnects, release only its barrier and resume claims. Conflicting drain/auto-update requests return 409.
+6. After idle, cancel the daemon and use the existing CLI start path, preserving binary, profile, foreground mode, and overrides.
 
-The handler releases the manual barrier if its request context is cancelled before the daemon reaches idle. A second drain request, or a drain request while another claim barrier owns the pause, returns a conflict instead of stealing state.
+## Scope and Verification
 
-## State and Race Invariants
+Change only daemon lifecycle/health code, focused tests, and the daemon command doc. Do not change default restart, server recovery, executable trust, or PR #5494 ownership semantics.
 
-- `pauseClaims` and `claimsInFlight` remain guarded by `claimMu`.
-- A dispatcher increments `activeTasks` before it decrements `claimsInFlight`; therefore observing both counters at zero while the barrier is held proves that no later task can appear.
-- Active work receives the original live root context throughout the drain.
-- Only after the counters reach zero does normal shutdown cancel the root context.
-- Client cancellation clears only the barrier owned by that drain request.
-
-## Scope
-
-Expected implementation files:
-
-- `server/cmd/multica/cmd_daemon.go`
-- `server/cmd/multica/cmd_daemon_test.go`
-- `server/internal/daemon/daemon.go`
-- `server/internal/daemon/health.go`
-- `server/internal/daemon/health_test.go`
-- `apps/docs/content/docs/daemon-runtimes.mdx`
-
-Out of scope:
-
-- changing the default semantics of `daemon restart`;
-- changing server-side `runtime_recovery`;
-- fixing the unconfirmed one-off `signal: killed` startup failure;
-- accepting a caller-supplied executable path through the unauthenticated localhost endpoint;
-- changing the cross-profile ownership work in PR #5494.
-
-## Test Plan
-
-- CLI: `--drain` selects drain shutdown and still starts through the existing start path.
-- Daemon: active tasks keep the request blocked and new claims are paused.
-- Daemon: the claim-to-active handoff cannot create a false idle window.
-- Daemon: cancelling the client request releases the barrier and claims resume.
-- Daemon: a concurrent drain request is rejected.
-- Regression: immediate shutdown and plain restart retain their current behavior.
-- Verification: focused package tests, race tests for the daemon package, `go test ./server/cmd/multica ./server/internal/daemon`, `go vet` on touched packages, and `gofmt -l`.
+Cover active work, claim handoff, client cancellation, barrier conflict, dedicated endpoint selection, immediate-shutdown regression, focused package tests, race tests, vet, and formatting.
