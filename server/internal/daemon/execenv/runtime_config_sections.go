@@ -527,8 +527,11 @@ func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 		// path to the model — an assumption that comment already
 		// contradicts. State the on-disk path explicitly here so the
 		// agent's own file-read tool can find the skill body even when
-		// Kimi's native scan silently misses it.
-		b.WriteString("Skill instructions are on disk at `.kimi/skills/<name>/SKILL.md` in your working directory (one subdirectory per skill below, `<name>` matching the skill name) — read the file before using a skill:\n\n")
+		// Kimi's native scan silently misses it. The path emitted per skill
+		// below must come from sanitizeSkillName — the same function
+		// writeSkillFiles uses to name the on-disk directory — so this text
+		// can never drift from where the SKILL.md actually lives.
+		b.WriteString("Skill instructions are on disk at `.kimi/skills/<slug>/SKILL.md` in your working directory (one subdirectory per skill, exact path given below) — read the file before using a skill:\n\n")
 	case "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kiro", "qoder", "antigravity", "qwen":
 		// Hermes discovers these from its per-task HERMES_HOME/skills (seeded by
 		// the daemon), so it needs the same "discovered automatically" framing
@@ -538,7 +541,17 @@ func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 		b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 	}
 	for _, skill := range skills {
-		if desc := strings.TrimSpace(skill.Description); desc != "" {
+		desc := strings.TrimSpace(skill.Description)
+		if provider == "kimi" {
+			path := fmt.Sprintf("`.kimi/skills/%s/SKILL.md`", sanitizeSkillName(skill.Name))
+			if desc != "" {
+				fmt.Fprintf(b, "- **%s** — %s — %s\n", skill.Name, path, desc)
+			} else {
+				fmt.Fprintf(b, "- **%s** — %s\n", skill.Name, path)
+			}
+			continue
+		}
+		if desc != "" {
 			fmt.Fprintf(b, "- **%s** — %s\n", skill.Name, desc)
 		} else {
 			fmt.Fprintf(b, "- **%s**\n", skill.Name)

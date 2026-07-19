@@ -1608,8 +1608,8 @@ func TestWriteContextFilesKimiNativeSkillsMatchesAgentsMdPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
-	if !strings.Contains(agentsContent, ".kimi/skills/") {
-		t.Fatalf("AGENTS.md content does not claim the .kimi/skills/ path")
+	if !strings.Contains(agentsContent, "`.kimi/skills/go-conventions/SKILL.md`") {
+		t.Fatalf("AGENTS.md must hand the agent the exact slugified path for %q (want .kimi/skills/go-conventions/SKILL.md), got:\n%s", "Go Conventions", agentsContent)
 	}
 
 	if err := writeContextFiles(dir, "kimi", ctx, nil); err != nil {
