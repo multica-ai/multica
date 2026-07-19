@@ -69,6 +69,7 @@ vi.mock("@multica/core/hooks", () => ({
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     squadDetail: (id: string) => `/test-ws/squads/${id}`,
+    newAgent: () => `/test-ws/agents/new`,
   }),
 }));
 
@@ -147,6 +148,24 @@ vi.mock("@multica/ui/components/ui/dialog", () => ({
   DialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
   DialogDescription: ({ children }: { children: ReactNode }) => <p>{children}</p>,
+}));
+
+// Collapsible is mocked to always render its content so the optional fields
+// (avatar / description / members) stay queryable without driving the
+// expand/collapse interaction in tests.
+vi.mock("@multica/ui/components/ui/collapsible", () => ({
+  Collapsible: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CollapsibleTrigger: ({
+    children,
+    render,
+  }: {
+    children?: ReactNode;
+    render?: ReactNode;
+  }) => {
+    if (render !== undefined) return <>{render}</>;
+    return <button type="button">{children}</button>;
+  },
+  CollapsibleContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock("@multica/ui/components/ui/button", () => ({
@@ -295,12 +314,13 @@ describe("CreateSquadModal", () => {
     mocks.members = [wsMember];
   });
 
-  it("binds the name and description inputs in the identity row", () => {
+  it("binds the name input and the optional description field", () => {
     renderModal();
     const name = screen.getByPlaceholderText(/e\.g\. Frontend Team/i) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Platform Team" } });
     expect(name.value).toBe("Platform Team");
 
+    // Description now lives inside the collapsible "More options" section.
     const desc = screen.getByPlaceholderText(/Describe what this squad/i) as HTMLInputElement;
     fireEvent.change(desc, { target: { value: "We own infra" } });
     expect(desc.value).toBe("We own infra");
@@ -325,6 +345,57 @@ describe("CreateSquadModal", () => {
     const myIdx = all.findIndex((n) => n.textContent === "My Agents");
     const wsIdx = all.findIndex((n) => n.textContent === "Workspace Agents");
     expect(myIdx).toBeLessThan(wsIdx);
+  });
+
+  it("auto-selects the leader when the user owns exactly one active agent", async () => {
+    // Single active agent owned by ME -> the modal pre-selects it as leader,
+    // so the user only needs to type a name and submit (<=2 interactions).
+    mocks.agents = [myAgent];
+    renderModal();
+    fireEvent.change(screen.getByPlaceholderText(/e\.g\. Frontend Team/i), {
+      target: { value: "Auto Squad" },
+    });
+    // Submit eligibility requires both name + leader; the auto-select is the
+    // only thing that could have set the leader here, so an enabled button
+    // proves the pre-selection landed.
+    await waitFor(() => {
+      expect(getSubmitButton().disabled).toBe(false);
+    });
+    mocks.createSquad.mockResolvedValue(
+      makeSquad({ id: "sq-auto", leader_id: "agent-mine-1" }),
+    );
+    fireEvent.click(getSubmitButton());
+
+    await waitFor(() => {
+      expect(mocks.createSquad).toHaveBeenCalledWith({
+        name: "Auto Squad",
+        description: undefined,
+        leader_id: "agent-mine-1",
+        avatar_url: undefined,
+      });
+    });
+    expect(mocks.addSquadMember).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-select when the user owns multiple active agents", () => {
+    // Multiple owned agents -> the user must pick; submit stays disabled
+    // because no leader is set.
+    mocks.agents = [myAgent, myAgent2];
+    renderModal();
+    fireEvent.change(screen.getByPlaceholderText(/e\.g\. Frontend Team/i), {
+      target: { value: "Picky Squad" },
+    });
+    expect(getSubmitButton().disabled).toBe(true);
+  });
+
+  it("renders a create-agent escape hatch when no active agents exist and navigates on click", () => {
+    mocks.agents = [];
+    const { onClose } = renderModal();
+    // The empty state surfaces a Create agent button instead of a dead-end hint.
+    const createAgentBtn = screen.getByRole("button", { name: /create agent/i });
+    fireEvent.click(createAgentBtn);
+    expect(mocks.navigationPush).toHaveBeenCalledWith("/test-ws/agents/new");
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("auto-clears an additional-members entry when the same agent is picked as leader", async () => {

@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, UserPlus, X } from "lucide-react";
+import { ChevronDown, Plus, UserPlus, X } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -27,6 +27,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@multica/ui/components/ui/collapsible";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -77,6 +82,26 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
   const [selectedMembers, setSelectedMembers] = useState<SelectedMember[]>([]);
   const [creating, setCreating] = useState(false);
 
+  // Auto-select the leader once the agents query resolves and the user owns
+  // exactly one active agent - the common single-agent path then needs no
+  // extra click. The ref guards it to a single attempt so it never fights a
+  // user-initiated change afterwards.
+  const autoSelectAppliedRef = useRef(false);
+  useEffect(() => {
+    if (autoSelectAppliedRef.current) return;
+    if (activeAgents.length === 0) return;
+    autoSelectAppliedRef.current = true;
+    if (leaderId || !currentUserId) return;
+    const mine = activeAgents.filter((a) => a.owner_id === currentUserId);
+    if (mine.length === 1) {
+      const id = mine[0]!.id;
+      setLeaderId(id);
+      setSelectedMembers((prev) =>
+        prev.filter((m) => !(m.type === "agent" && m.id === id)),
+      );
+    }
+  }, [activeAgents, currentUserId, leaderId]);
+
   // Promoting an agent to leader must actually drop it from selectedMembers,
   // not merely hide it. Otherwise switching leader away later resurrects the
   // hidden pick and silently submits it as a member.
@@ -87,6 +112,11 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
         prev.filter((m) => !(m.type === "agent" && m.id === id)),
       );
     }
+  };
+
+  const handleCreateAgent = () => {
+    onClose();
+    router.push(wsPaths.newAgent());
   };
 
   const canSubmit = !!name.trim() && !!leaderId && !creating;
@@ -142,7 +172,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="p-0 gap-0 flex flex-col overflow-hidden !top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !w-full !max-w-2xl !h-[85vh]">
+      <DialogContent className="p-0 gap-0 flex flex-col overflow-hidden !top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !w-full !max-w-2xl max-h-[85vh]">
         <DialogHeader className="border-b px-5 py-3 space-y-0">
           <DialogTitle className="text-base font-semibold">
             {t(($) => $.create_squad.title)}
@@ -154,56 +184,25 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-4 min-w-0">
-            {/* Identity row mirrors CreateAgentDialog so the two creates read
-                as siblings — avatar (left) + name/description stack (right). */}
-            <div className="flex items-start gap-4">
-              <AvatarUploadControl
-                variant="squad"
-                value={avatarUrl}
-                name={name}
-                size={64}
-                onUploaded={setAvatarUrl}
-                onClear={() => setAvatarUrl(null)}
+            {/* Core path: name + leader. Description / avatar / members are
+                optional and live in the collapsible below so they never
+                block submit. */}
+            <div>
+              <Label className="text-xs text-muted-foreground">
+                {t(($) => $.create_squad.name_label)}
+              </Label>
+              <Input
+                autoFocus
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={t(($) => $.create_squad.name_placeholder)}
+                className="mt-1"
+                onKeyDown={(e) => {
+                  if (isImeComposing(e)) return;
+                  if (e.key === "Enter") void handleSubmit();
+                }}
               />
-              <div className="flex-1 min-w-0 space-y-3">
-                <div>
-                  <Label className="text-xs text-muted-foreground">
-                    {t(($) => $.create_squad.name_label)}
-                  </Label>
-                  <Input
-                    autoFocus
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder={t(($) => $.create_squad.name_placeholder)}
-                    className="mt-1"
-                    onKeyDown={(e) => {
-                      if (isImeComposing(e)) return;
-                      if (e.key === "Enter") void handleSubmit();
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <Label className="text-xs text-muted-foreground">
-                    {t(($) => $.create_squad.description_label)}
-                  </Label>
-                  <Input
-                    type="text"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder={t(($) => $.create_squad.description_placeholder)}
-                    maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
-                    className="mt-1"
-                  />
-                  <div className="mt-1">
-                    <CharCounter
-                      length={[...description].length}
-                      max={AGENT_DESCRIPTION_MAX_LENGTH}
-                    />
-                  </div>
-                </div>
-              </div>
             </div>
 
             <LeaderPicker
@@ -211,20 +210,72 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
               currentUserId={currentUserId}
               value={leaderId}
               onChange={handleLeaderChange}
+              onCreateAgent={handleCreateAgent}
             />
 
-            <AdditionalMembersPicker
-              agents={activeAgents}
-              members={wsMembers}
-              currentUserId={currentUserId}
-              leaderId={leaderId}
-              value={selectedMembers}
-              onChange={setSelectedMembers}
-            />
+            <Collapsible>
+              <CollapsibleTrigger
+                render={
+                  <button
+                    type="button"
+                    className="group/optional-trigger flex w-full items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    <ChevronDown className="h-3.5 w-3.5 transition-transform duration-200 group-data-[panel-open]/optional-trigger:rotate-180" />
+                    {t(($) => $.create_squad.optional_section_label)}
+                  </button>
+                }
+              />
+              <CollapsibleContent className="pt-4 space-y-4">
+                {/* Identity row mirrors CreateAgentDialog so the two creates
+                    read as siblings - avatar (left) + description stack
+                    (right). Both stay optional; the squad submits fine with
+                    neither. */}
+                <div className="flex items-start gap-4">
+                  <AvatarUploadControl
+                    variant="squad"
+                    value={avatarUrl}
+                    name={name}
+                    size={64}
+                    onUploaded={setAvatarUrl}
+                    onClear={() => setAvatarUrl(null)}
+                  />
+                  <div className="flex-1 min-w-0 space-y-3">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">
+                        {t(($) => $.create_squad.description_label)}
+                      </Label>
+                      <Input
+                        type="text"
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        placeholder={t(($) => $.create_squad.description_placeholder)}
+                        maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
+                        className="mt-1"
+                      />
+                      <div className="mt-1">
+                        <CharCounter
+                          length={[...description].length}
+                          max={AGENT_DESCRIPTION_MAX_LENGTH}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <AdditionalMembersPicker
+                  agents={activeAgents}
+                  members={wsMembers}
+                  currentUserId={currentUserId}
+                  leaderId={leaderId}
+                  value={selectedMembers}
+                  onChange={setSelectedMembers}
+                />
+              </CollapsibleContent>
+            </Collapsible>
           </div>
         </div>
 
-        {/* Inline footer — see CreateAgentDialog: shadcn DialogFooter applies
+        {/* Inline footer - see CreateAgentDialog: shadcn DialogFooter applies
             negative margins assuming a padded DialogContent. Our content is
             p-0, so a plain bordered row is the right call. */}
         <div className="flex items-center justify-end gap-2 border-t bg-background px-5 py-3">
@@ -243,20 +294,22 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// LeaderPicker — single-select agent picker, grouped "My Agents" first then
-// "Workspace Agents". Empty workspaces render a disabled trigger that points
-// the user at agent creation.
+// LeaderPicker - single-select agent picker, grouped "My Agents" first then
+// "Workspace Agents". Empty workspaces render an actionable empty state that
+// points the user at agent creation instead of a dead-end hint.
 // ---------------------------------------------------------------------------
 function LeaderPicker({
   agents,
   currentUserId,
   value,
   onChange,
+  onCreateAgent,
 }: {
   agents: Agent[];
   currentUserId: string | null;
   value: string;
   onChange: (id: string) => void;
+  onCreateAgent: () => void;
 }) {
   const { t } = useT("modals");
   const [open, setOpen] = useState(false);
@@ -293,8 +346,19 @@ function LeaderPicker({
       </p>
 
       {noAgents ? (
-        <div className="flex items-center gap-2 rounded-lg border border-dashed bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
-          {t(($) => $.create_squad.no_agents)}
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed bg-muted/30 px-3 py-2.5">
+          <div className="min-w-0">
+            <div className="text-sm font-medium">
+              {t(($) => $.create_squad.no_agents_title)}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {t(($) => $.create_squad.no_agents)}
+            </div>
+          </div>
+          <Button variant="outline" size="sm" onClick={onCreateAgent}>
+            <Plus aria-hidden="true" className="size-3.5" />
+            {t(($) => $.create_squad.create_agent_button)}
+          </Button>
         </div>
       ) : (
         <Popover
@@ -386,7 +450,7 @@ function LeaderPicker({
 }
 
 // ---------------------------------------------------------------------------
-// AdditionalMembersPicker — multi-select agents + workspace members. The
+// AdditionalMembersPicker - multi-select agents + workspace members. The
 // trigger shows up to 3 chips inline; the rest collapse into "+N". The popup
 // stays open while the user toggles selections so they can pick multiple
 // without re-opening it.
@@ -473,7 +537,7 @@ function AdditionalMembersPicker({
           if (!v) setFilter("");
         }}
       >
-        {/* render={<div role="combobox" />} — chips contain their own remove
+        {/* render={<div role="combobox" />} - chips contain their own remove
             <button>, so the trigger cannot itself be a <button> without
             nesting interactive content. Base UI injects click/keyboard/ARIA
             wiring into the rendered element. */}
