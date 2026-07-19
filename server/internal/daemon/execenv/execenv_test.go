@@ -1547,6 +1547,41 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 	}
 }
 
+// TestInjectRuntimeConfigKimiSkillsUseExplicitPath pins MUL-93: Kimi's
+// native .kimi/skills/ scan depends on the same cwd resolution the daemon
+// already distrusts enough to inline the whole runtime brief for this
+// provider (see providerNeedsInlineSystemPrompt in daemon.go), so unlike
+// the other native-discovery runtimes AGENTS.md must give the agent an
+// explicit on-disk path to the SKILL.md body instead of just asserting the
+// skill was "discovered automatically" with no way to find it if that scan
+// silently misses.
+func TestInjectRuntimeConfigKimiSkillsUseExplicitPath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "kimi", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, ".kimi/skills/") {
+		t.Error("AGENTS.md for Kimi must point the agent at the .kimi/skills/ path where SKILL.md bodies actually live")
+	}
+}
+
 func TestInjectRuntimeConfigQoder(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

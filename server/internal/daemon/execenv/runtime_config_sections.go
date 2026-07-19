@@ -515,7 +515,21 @@ func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 	}
 	b.WriteString("## Skills\n\n")
 	switch provider {
-	case "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "qoder", "antigravity", "qwen":
+	case "kimi":
+		// Kimi's own project-level skill scan (.kimi/skills/, see
+		// resolveSkillsDir in context.go) depends on the same cwd
+		// resolution daemon.go's providerNeedsInlineSystemPrompt already
+		// distrusts enough to inline the *entire* runtime brief for this
+		// provider instead of relying on Kimi reading AGENTS.md natively
+		// (see the "kiro and kimi ... cwd handling is opaque" comment on
+		// that switch). The bare "discovered automatically" framing used
+		// below assumes Kimi's native scan reliably supplies the SKILL.md
+		// path to the model — an assumption that comment already
+		// contradicts. State the on-disk path explicitly here so the
+		// agent's own file-read tool can find the skill body even when
+		// Kimi's native scan silently misses it.
+		b.WriteString("Skill instructions are on disk at `.kimi/skills/<name>/SKILL.md` in your working directory (one subdirectory per skill below, `<name>` matching the skill name) — read the file before using a skill:\n\n")
+	case "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kiro", "qoder", "antigravity", "qwen":
 		// Hermes discovers these from its per-task HERMES_HOME/skills (seeded by
 		// the daemon), so it needs the same "discovered automatically" framing
 		// as the other native-discovery runtimes rather than a path pointer.
