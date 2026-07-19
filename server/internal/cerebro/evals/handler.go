@@ -1,6 +1,7 @@
 package evals
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -19,6 +20,18 @@ import (
 type Handler struct {
 	store         *Store
 	runNowEnabled bool
+	// blockingGate authorizes *blocking* eval bindings (FIR-3496). Nil keeps the
+	// gate open (advisory-only enforcement), which is the pre-flag behaviour;
+	// wired in router.go over grouppermissions.
+	blockingGate BlockingGateAuthorizer
+}
+
+// BlockingGateAuthorizer decides whether a member may create a blocking eval
+// binding in a workspace. A workspace admin always may; otherwise the member
+// must belong to a group granted the set_blocking_gate capability. Implemented
+// by an adapter over grouppermissions.Service (router.go).
+type BlockingGateAuthorizer interface {
+	CanSetBlockingGate(ctx context.Context, workspaceID, userID uuid.UUID, isAdmin bool) (bool, error)
 }
 
 func NewHandler(pool *pgxpool.Pool) *Handler { return &Handler{store: NewStore(pool)} }
@@ -26,6 +39,14 @@ func NewHandler(pool *pgxpool.Pool) *Handler { return &Handler{store: NewStore(p
 func (h *Handler) WithRunExecutor(executor RunExecutor) *Handler {
 	h.store.WithRunExecutor(executor)
 	h.runNowEnabled = executor != nil
+	return h
+}
+
+// WithBlockingGateAuthorizer enables the "who may set a blocking gate" check on
+// CreateBinding. With no authorizer wired, blocking bindings are unrestricted
+// (the pre-FIR-3496 behaviour). Returns the handler for chained wiring.
+func (h *Handler) WithBlockingGateAuthorizer(a BlockingGateAuthorizer) *Handler {
+	h.blockingGate = a
 	return h
 }
 
@@ -234,6 +255,31 @@ func (h *Handler) CreateBinding(w http.ResponseWriter, r *http.Request) {
 	if err := validateBindingInput(&input); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// A blocking binding needs the set_blocking_gate right (FIR-3496): a
+	// workspace admin, or a member of a group granted it. Advisory bindings are
+	// unrestricted. Only enforced when an authorizer is wired.
+	if input.Blocking && h.blockingGate != nil {
+		member, memberOK := middleware.MemberFromContext(r.Context())
+		if !memberOK || !member.UserID.Valid {
+			writeError(w, http.StatusForbidden, "only admins or granted members may set a blocking eval gate")
+			return
+		}
+		userID, err := uuid.FromBytes(member.UserID.Bytes[:])
+		if err != nil {
+			writeError(w, http.StatusForbidden, "invalid user identity")
+			return
+		}
+		isAdmin := member.Role == "owner" || member.Role == "admin"
+		allowed, err := h.blockingGate.CanSetBlockingGate(r.Context(), workspaceID, userID, isAdmin)
+		if err != nil {
+			h.internalError(w, r, "failed to check blocking-gate permission", err)
+			return
+		}
+		if !allowed {
+			writeError(w, http.StatusForbidden, "only admins or granted members may set a blocking eval gate")
+			return
+		}
 	}
 	item, err := h.store.CreateBinding(r.Context(), workspaceID, actorID, input)
 	if err != nil {
