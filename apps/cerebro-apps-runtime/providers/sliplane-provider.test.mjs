@@ -337,3 +337,72 @@ test("pauses and deletes only the concrete private service", async () => {
     ["https://ctrl.sliplane.io/v0/projects/project-1/services/service-1", "DELETE"],
   ]);
 });
+
+const APP_A = "f1540000-0000-4154-8154-000000000001";
+const APP_B = "a1540000-0000-4154-8154-000000000002";
+
+function appService(id, appId, version, { serverId = "server-1" } = {}) {
+  return { id, serverId, env: [{ key: "APP_ID", value: appId }, { key: "APP_VERSION", value: version }] };
+}
+
+test("reaps only superseded worker services of the same app on this server", async () => {
+  const requests = [];
+  const services = [
+    appService("keep", APP_A, "2.0.0"), // current version — keep
+    appService("old-1", APP_A, "1.9.0"), // superseded — reap
+    appService("old-2", APP_A, "1.0.0"), // superseded — reap
+    appService("other-app", APP_B, "1.0.0"), // different app — keep
+    appService("other-server", APP_A, "1.0.0", { serverId: "server-2" }), // different server — keep
+    { id: "core-postgres", serverId: "server-1", env: [] }, // non-app core service — keep
+  ];
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    fetch: async (url, init = {}) => {
+      requests.push([String(url), init.method ?? "GET"]);
+      if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) return Response.json(services);
+      if (init.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`unexpected request ${init.method} ${url}`);
+    },
+  });
+
+  const reaped = await provider.reapSuperseded(APP_A, "2.0.0");
+  assert.equal(reaped, 2);
+  const deletes = requests.filter(([, method]) => method === "DELETE").map(([url]) => url).sort();
+  assert.deepEqual(deletes, [
+    "https://ctrl.sliplane.io/v0/projects/project-1/services/old-1",
+    "https://ctrl.sliplane.io/v0/projects/project-1/services/old-2",
+  ]);
+});
+
+test("reap tolerates a single delete failure and still removes the rest", async () => {
+  const services = [appService("old-1", APP_A, "1.0.0"), appService("old-2", APP_A, "1.1.0")];
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) return Response.json(services);
+      if (init.method === "DELETE" && String(url).endsWith("old-1")) return new Response(null, { status: 500 });
+      if (init.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`unexpected request ${init.method} ${url}`);
+    },
+  });
+
+  const reaped = await provider.reapSuperseded(APP_A, "2.0.0");
+  assert.equal(reaped, 1);
+});
+
+test("reap does nothing for an invalid app id or version and never lists services", async () => {
+  let calls = 0;
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    fetch: async () => (calls++, Response.json([])),
+  });
+  assert.equal(await provider.reapSuperseded("not-a-uuid", "1.0.0"), 0);
+  assert.equal(await provider.reapSuperseded(APP_A, "not-semver"), 0);
+  assert.equal(calls, 0);
+});
