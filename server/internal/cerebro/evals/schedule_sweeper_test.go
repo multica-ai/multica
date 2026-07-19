@@ -20,11 +20,19 @@ func countRunsForEval(t *testing.T, store *Store, workspaceID, evalID uuid.UUID)
 	return n
 }
 
+func enableEvalFeature(t *testing.T, workspaceID uuid.UUID) {
+	t.Helper()
+	if _, err := evalTestPool.Exec(context.Background(), `INSERT INTO cerebro_feature_flags (workspace_id,user_id,flag_key,enabled) VALUES ($1,'00000000-0000-0000-0000-000000000000','cerebro_evals',true) ON CONFLICT (workspace_id,user_id,flag_key) DO UPDATE SET enabled=true`, workspaceID); err != nil {
+		t.Fatalf("enable cerebro_evals: %v", err)
+	}
+}
+
 func TestScheduleSweeperRunsDueScheduleOnceThenAdvances(t *testing.T) {
 	if evalTestPool == nil {
 		t.Skip("no test DB")
 	}
 	f := seedEvalFixture(t)
+	enableEvalFeature(t, f.workspaceID)
 	store := NewStore(evalTestPool)
 	ctx := context.Background()
 
@@ -68,6 +76,7 @@ func TestScheduleSweeperSkipsWorkspaceWithoutExecutor(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	f := seedEvalFixture(t)
+	enableEvalFeature(t, f.workspaceID)
 	store := NewStore(evalTestPool)
 	ctx := context.Background()
 
@@ -94,5 +103,26 @@ func TestScheduleSweeperSkipsWorkspaceWithoutExecutor(t *testing.T) {
 	}
 	if scheduleInSet(after, sched.ID) {
 		t.Fatal("schedule without a gateway should have been advanced, not left due")
+	}
+}
+
+func TestScheduleSweeperSkipsWorkspaceWithoutEvalFeature(t *testing.T) {
+	if evalTestPool == nil {
+		t.Skip("no test DB")
+	}
+	f := seedEvalFixture(t)
+	store := NewStore(evalTestPool)
+	ctx := context.Background()
+	evalID := seedActiveEval(t, f, "scheduled-feature-off", 1)
+	sched, err := store.UpsertSchedule(ctx, f.workspaceID, evalID, f.actorID, "@hourly", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	due, err := store.ClaimDueSchedules(ctx, sched.NextRunAt.Add(time.Minute), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scheduleInSet(due, sched.ID) {
+		t.Fatal("feature-off workspace schedule was claimed")
 	}
 }

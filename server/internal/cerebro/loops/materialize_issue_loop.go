@@ -22,14 +22,19 @@ type WorkspaceSkillLister interface {
 	ListSkillSummariesByWorkspace(context.Context, pgtype.UUID) ([]db.ListSkillSummariesByWorkspaceRow, error)
 }
 
+type MonitorEvalBindingLister interface {
+	ListMonitorAdvisoryEvalKeys(context.Context, pgtype.UUID) ([]string, error)
+}
+
 type IssueLoopBridge struct {
-	pool       *pgxpool.Pool
-	queries    *cerebrodb.Queries
-	issues     *db.Queries
-	columns    *workflows.IssueLoopColumnStore
-	skills     WorkspaceSkillLister
-	driver     *ChainDriver
-	dispatcher *TaskDispatcher
+	pool         *pgxpool.Pool
+	queries      *cerebrodb.Queries
+	issues       *db.Queries
+	columns      *workflows.IssueLoopColumnStore
+	skills       WorkspaceSkillLister
+	monitorEvals MonitorEvalBindingLister
+	driver       *ChainDriver
+	dispatcher   *TaskDispatcher
 }
 
 func NewIssueLoopBridge(pool *pgxpool.Pool, queries *cerebrodb.Queries, issues *db.Queries, columns *workflows.IssueLoopColumnStore) *IssueLoopBridge {
@@ -50,6 +55,54 @@ func (b *IssueLoopBridge) WithBusyWakeupScheduler(s BusyWakeupScheduler) *IssueL
 func (b *IssueLoopBridge) WithSkillLister(l WorkspaceSkillLister) *IssueLoopBridge {
 	b.skills = l
 	return b
+}
+
+func (b *IssueLoopBridge) WithMonitorEvalBindingLister(l MonitorEvalBindingLister) *IssueLoopBridge {
+	b.monitorEvals = l
+	return b
+}
+
+func (b *IssueLoopBridge) withMonitorEvalBindings(ctx context.Context, workflowID pgtype.UUID, chain *Chain) (*Chain, error) {
+	if b.monitorEvals == nil {
+		return chain, nil
+	}
+	keys, err := b.monitorEvals.ListMonitorAdvisoryEvalKeys(ctx, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("list monitor eval bindings: %w", err)
+	}
+	seen := make(map[string]bool)
+	phaseIDs := make(map[string]bool)
+	for _, phase := range chain.Phases {
+		phaseIDs[phase.ID] = true
+		for _, block := range phase.Blocks {
+			if block.Type == BlockEval && block.EvalPhase == "monitor" {
+				seen[block.EvalKey] = true
+			}
+		}
+	}
+	blocks := make([]Block, 0, len(keys))
+	for _, key := range keys {
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		blocks = append(blocks, Block{ID: "monitor-" + key, Type: BlockEval, EvalKey: key, EvalPhase: "monitor"})
+	}
+	if len(blocks) == 0 {
+		return chain, nil
+	}
+	copyChain := *chain
+	copyChain.Phases = append([]Phase(nil), chain.Phases...)
+	phaseID := "eval-monitor"
+	for n := 2; phaseIDs[phaseID]; n++ {
+		phaseID = fmt.Sprintf("eval-monitor-%d", n)
+	}
+	status := chain.DoneStatus
+	if status == "" {
+		status = "done"
+	}
+	copyChain.Phases = append(copyChain.Phases, Phase{ID: phaseID, Name: "Monitor evals", Status: status, Blocks: blocks, Limits: PhaseLimits{MaxSteps: len(blocks), MaxRounds: 1, NoProgressStalls: 1}})
+	return &copyChain, nil
 }
 
 func decodeChain(raw []byte) (*Chain, error) {
@@ -208,6 +261,10 @@ func (b *IssueLoopBridge) advanceChain(ctx context.Context, workflowID, issueID 
 	issue, err := b.issues.GetIssue(ctx, issueID)
 	if err != nil {
 		return fmt.Errorf("load chain issue: %w", err)
+	}
+	chain, err = b.withMonitorEvalBindings(ctx, workflowID, chain)
+	if err != nil {
+		return err
 	}
 	run := ChainRun{IssueID: issueID, WorkflowID: workflowID, IssueStatus: issue.Status, AgentID: util.UUIDToString(issue.AssigneeID)}
 	for {

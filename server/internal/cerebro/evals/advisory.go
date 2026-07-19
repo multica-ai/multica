@@ -10,10 +10,12 @@ package evals
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -69,52 +71,81 @@ func (w *AdvisoryWarner) Warn(ctx context.Context, workflowID, issueID uuid.UUID
 	if len(failing) == 0 {
 		return nil
 	}
-	workspaceID := failing[0].WorkspaceID
+	for _, binding := range failing {
+		if err := w.WarnBinding(ctx, binding, issueID, binding.LatestRunID, binding.LatestRunStatus); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// WarnBinding writes only the card for the binding that just ran. This avoids
+// treating other, not-yet-run advisory bindings in the same phase as failures.
+func (w *AdvisoryWarner) WarnBinding(ctx context.Context, binding Binding, issueID uuid.UUID, runID *uuid.UUID, status string) error {
+	if w == nil || w.store == nil || w.recipients == nil || w.inbox == nil {
+		return nil
+	}
+	workspaceID := binding.WorkspaceID
 	recipients, err := w.recipients.ListCerebroWorkspaceOwnerAdmins(ctx, pgUUID(workspaceID))
 	if err != nil {
 		return fmt.Errorf("list owner/admins: %w", err)
 	}
 	if len(recipients) == 0 {
 		slog.Info("eval advisory: failing advisory evals but no owner/admin recipients",
-			"workspace_id", workspaceID.String(), "failing_count", len(failing))
+			"workspace_id", workspaceID.String(), "eval", binding.EvalKey)
 		return nil
 	}
-	for _, binding := range failing {
-		title := fmt.Sprintf("Advisory eval failing: %s", binding.EvalTitle)
-		body := fmt.Sprintf(
-			"The advisory eval %q (%s) has no passing run for this issue in the %s phase. It does not block the workflow — review it when you can.",
-			binding.EvalTitle, binding.EvalKey, phase,
-		)
-		details, _ := json.Marshal(map[string]any{
-			"eval":     binding.EvalKey,
-			"eval_id":  binding.EvalID.String(),
-			"workflow": binding.WorkflowID.String(),
-			"issue":    issueID.String(),
-			"phase":    phase,
-			"blocking": false,
+	identity := status
+	if runID != nil {
+		identity = runID.String()
+	}
+	if identity == "" {
+		identity = "missing"
+	}
+	notificationKey := fmt.Sprintf("%s:%s:%s", binding.ID, issueID, identity)
+	title := fmt.Sprintf("Advisory eval failing: %s", binding.EvalTitle)
+	body := fmt.Sprintf(
+		"The advisory eval %q (%s) did not pass for this issue in the %s phase. It does not block the workflow — review it when you can.",
+		binding.EvalTitle, binding.EvalKey, binding.Phase,
+	)
+	details, _ := json.Marshal(map[string]any{
+		"eval": binding.EvalKey, "eval_id": binding.EvalID.String(), "binding_id": binding.ID.String(),
+		"workflow": binding.WorkflowID.String(), "issue": issueID.String(), "phase": binding.Phase,
+		"status": status, "notification_key": notificationKey, "blocking": false,
+	})
+	for _, recipientID := range recipients {
+		recipientUUID := uuid.UUID(recipientID.Bytes)
+		exists, err := w.store.AdvisoryNotificationExists(ctx, workspaceID, recipientUUID, notificationKey)
+		if err != nil {
+			return fmt.Errorf("check advisory notification dedupe: %w", err)
+		}
+		if exists {
+			continue
+		}
+		item, err := w.inbox.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			WorkspaceID:   pgUUID(workspaceID),
+			RecipientType: "member",
+			RecipientID:   recipientID,
+			Type:          inboxTypeEvalAdvisoryFailed,
+			Severity:      "attention",
+			IssueID:       pgUUID(issueID),
+			Title:         title,
+			Body:          pgtype.Text{String: body, Valid: true},
+			ActorType:     pgtype.Text{String: "system", Valid: true},
+			ActorID:       pgtype.UUID{},
+			Details:       details,
+			Route:         "inbox",
 		})
-		for _, recipientID := range recipients {
-			item, err := w.inbox.CreateInboxItem(ctx, db.CreateInboxItemParams{
-				WorkspaceID:   pgUUID(workspaceID),
-				RecipientType: "member",
-				RecipientID:   recipientID,
-				Type:          inboxTypeEvalAdvisoryFailed,
-				Severity:      "attention",
-				IssueID:       pgUUID(issueID),
-				Title:         title,
-				Body:          pgtype.Text{String: body, Valid: true},
-				ActorType:     pgtype.Text{String: "system", Valid: true},
-				ActorID:       pgtype.UUID{},
-				Details:       details,
-				Route:         "inbox",
-			})
-			if err != nil {
-				slog.Warn("eval advisory: inbox write failed",
-					"eval", binding.EvalKey, "recipient_id", recipientID.String(), "error", err)
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 				continue
 			}
-			publishInboxNew(w.bus, item)
+			slog.Warn("eval advisory: inbox write failed",
+				"eval", binding.EvalKey, "recipient_id", recipientID.String(), "error", err)
+			continue
 		}
+		publishInboxNew(w.bus, item)
 	}
 	return nil
 }

@@ -23,7 +23,7 @@ import { formatCost, formatDuration } from "../format";
 import { RunDetail } from "./run-detail";
 import { EvalDetail, type EvalDetailTab } from "./eval-detail";
 import { GateBinder } from "./gate-binder";
-import type { CerebroEval, EvalBindingPhase, EvalScheduleInput, EvalStatus } from "../types";
+import type { CerebroEval, EvalBindingPhase, EvalSchedule, EvalScheduleInput, EvalStatus } from "../types";
 
 export function EvalsPage() {
   const workflowsEnabled = useFeatureFlag("cerebro_workflows");
@@ -85,7 +85,26 @@ export function EvalsPage() {
       if (input) await upsertEvalSchedule(evalId, input);
       else await deleteEvalSchedule(evalId);
     },
-    onSuccess: (_result, variables) => queryClient.invalidateQueries({ queryKey: evalKeys.schedule(workspaceId, variables.evalId) }),
+    onMutate: async (variables) => {
+      const queryKey = evalKeys.schedule(workspaceId, variables.evalId);
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<EvalSchedule | null>(queryKey) ?? null;
+      const optimistic = variables.input ? {
+        id: previous?.id ?? "optimistic",
+        workspace_id: workspaceId,
+        eval_id: variables.evalId,
+        created_by_id: previous?.created_by_id ?? "",
+        created_at: previous?.created_at ?? new Date().toISOString(),
+        ...previous,
+        ...variables.input,
+      } satisfies EvalSchedule : null;
+      queryClient.setQueryData(queryKey, optimistic);
+      return { previous, queryKey };
+    },
+    onError: (_error, _variables, context) => {
+      if (context) queryClient.setQueryData(context.queryKey, context.previous);
+    },
+    onSettled: (_result, _error, variables) => queryClient.invalidateQueries({ queryKey: evalKeys.schedule(workspaceId, variables.evalId) }),
   });
   const runMutation = useMutation({
     mutationFn: runEvalNow,

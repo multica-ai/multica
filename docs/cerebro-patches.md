@@ -1701,3 +1701,9 @@ Approved plan and delivery gate are attached to FIR-3421, 2026-07-17.
 | `github-app-key-escaped-newlines` | `server/internal/handler/github.go` | Reconstruct a `GITHUB_APP_PRIVATE_KEY` PEM that a secret store flattened to a single line with literal `\n` (the July-17 rotation corruption that broke GitHub App auth with a "cannot decode" error). One `strings.ReplaceAll` before `ParseRSAPrivateKeyFromPEM`; a no-op for well-formed PEMs since valid base64 can never contain a backslash-n sequence. Test: `TestSignGitHubAppJWT_EscapedNewlinePEM`. |
 
 Approved by Jesper Hvejsel on FIR-3539 ("Fix det" + "find en måde hvor det ikke sker igen").
+
+## FIR-3496 — Eval ownership identity
+
+| Patch | Location | Reason |
+|---|---|---|
+| `eval-actor-resolver` | `server/internal/handler/handler.go`; wiring in `server/cmd/server/router.go` | Reuse the server-validated task/member actor identity in the fork-owned eval handler, so a client-supplied `X-Agent-ID` cannot impersonate an eval owner. |

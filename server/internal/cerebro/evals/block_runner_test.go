@@ -16,10 +16,13 @@ func TestBlockRunnerSelectsBindingPhaseAndHonorsAdvisory(t *testing.T) {
 	ctx := context.Background()
 	f := seedEvalFixture(t)
 	evalID := seedActiveEval(t, f, "phase-aware-block", 1)
+	otherEvalID := seedActiveEval(t, f, "other-advisory", 1)
 	store := NewStore(evalTestPool)
 	for _, binding := range []BindingInput{
 		{WorkflowID: f.workflowID, EvalID: evalID, Phase: "plan", Blocking: false},
 		{WorkflowID: f.workflowID, EvalID: evalID, Phase: "delivery", Blocking: true},
+		{WorkflowID: f.workflowID, EvalID: evalID, Phase: "monitor", Blocking: true},
+		{WorkflowID: f.workflowID, EvalID: otherEvalID, Phase: "plan", Blocking: false},
 	} {
 		if _, err := store.CreateBinding(ctx, f.workspaceID, f.actorID, binding); err != nil {
 			t.Fatalf("create %s binding: %v", binding.Phase, err)
@@ -54,13 +57,19 @@ func TestBlockRunnerSelectsBindingPhaseAndHonorsAdvisory(t *testing.T) {
 		t.Fatalf("advisory outcome=%s err=%v", outcome, err)
 	}
 	if len(inbox.calls) != 1 || inbox.calls[0].Type != inboxTypeEvalAdvisoryFailed {
-		t.Fatalf("monitor advisory inbox cards=%+v", inbox.calls)
+		t.Fatalf("only the executed advisory binding should notify, cards=%+v", inbox.calls)
 	}
 
 	dispatch.Block.EvalPhase = "delivery"
 	status, outcome, err = runner.RunEvalBlock(ctx, dispatch)
 	if err != nil || status != loops.StepFailed {
 		t.Fatalf("blocking eval should fail the step: status=%q outcome=%s err=%v", status, outcome, err)
+	}
+
+	dispatch.Block.EvalPhase = "monitor"
+	status, outcome, err = runner.RunEvalBlock(ctx, dispatch)
+	if err != nil || status != loops.StepCompleted {
+		t.Fatalf("monitor eval must never block: status=%q outcome=%s err=%v", status, outcome, err)
 	}
 }
 

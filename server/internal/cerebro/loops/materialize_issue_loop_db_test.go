@@ -153,6 +153,12 @@ type phaseRecordingEvalRunner struct {
 	phases []string
 }
 
+type fakeMonitorBindingLister struct{ keys []string }
+
+func (f *fakeMonitorBindingLister) ListMonitorAdvisoryEvalKeys(_ context.Context, _ pgtype.UUID) ([]string, error) {
+	return f.keys, nil
+}
+
 func (r *phaseRecordingEvalRunner) RunEvalBlock(_ context.Context, d BlockDispatch) (StepStatus, json.RawMessage, error) {
 	phase := d.Block.EvalPhase
 	if phase == "" {
@@ -176,7 +182,6 @@ func TestIssueLoopBridge_MonitorAdvisoryRunsAfterDeliveryAndKeepsDoneTerminal(t 
 		Version: ChainVersion,
 		Phases: []Phase{
 			{ID: "delivery", Status: "todo", Blocks: []Block{{ID: "delivery-eval", Type: BlockEval, EvalKey: "quality", EvalPhase: "delivery"}}, Limits: PhaseLimits{MaxSteps: 2, MaxRounds: 1, NoProgressStalls: 1}},
-			{ID: "monitor", Status: "done", Blocks: []Block{{ID: "monitor-eval", Type: BlockEval, EvalKey: "quality", EvalPhase: "monitor"}}, Limits: PhaseLimits{MaxSteps: 2, MaxRounds: 1, NoProgressStalls: 1}},
 		},
 		DoneStatus: "done",
 	}
@@ -186,7 +191,9 @@ func TestIssueLoopBridge_MonitorAdvisoryRunsAfterDeliveryAndKeepsDoneTerminal(t 
 	}
 	recipe := seedIssueLoopRecipe(t, workspaceID, "monitor advisory chain", raw)
 	runner := &phaseRecordingEvalRunner{}
-	bridge := NewIssueLoopBridge(loopTestPool, cerebrodb.New(loopTestPool), db.New(loopTestPool), workflows.NewIssueLoopColumnStore(loopTestPool)).WithEvalBlockRunner(runner)
+	bridge := NewIssueLoopBridge(loopTestPool, cerebrodb.New(loopTestPool), db.New(loopTestPool), workflows.NewIssueLoopColumnStore(loopTestPool)).
+		WithEvalBlockRunner(runner).
+		WithMonitorEvalBindingLister(&fakeMonitorBindingLister{keys: []string{"quality"}})
 	if err := bridge.ActivateOnIssue(ctx, workspaceID, recipe, pgtype.UUID{}, recipe, issueID, "member", raw); err != nil {
 		t.Fatalf("activate monitor chain: %v", err)
 	}

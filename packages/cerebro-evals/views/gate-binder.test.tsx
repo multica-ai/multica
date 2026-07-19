@@ -38,6 +38,19 @@ describe("GateBinder", () => {
     expect(onBind).toHaveBeenCalledWith({ workflowId: "w1", evalId: "e1", phase: "delivery", blocking: true });
   });
 
+  it("forces Monitor bindings to Warn only", () => {
+    const onBind = vi.fn();
+    render(<GateBinder evals={evals} workflows={workflows} onBind={onBind} />);
+    fireEvent.change(screen.getByLabelText("Eval"), { target: { value: "e1" } });
+    fireEvent.change(screen.getByLabelText("Issue workflow"), { target: { value: "w1" } });
+    fireEvent.change(screen.getByLabelText("Phase"), { target: { value: "monitor" } });
+    const enforcement = screen.getByLabelText("Enforcement") as HTMLSelectElement;
+    expect(enforcement.value).toBe("warn");
+    expect(enforcement.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button"));
+    expect(onBind).toHaveBeenCalledWith({ workflowId: "w1", evalId: "e1", phase: "monitor", blocking: false });
+  });
+
   it("does not submit without an eval and a workflow", () => {
     const onBind = vi.fn();
     render(<GateBinder evals={evals} workflows={workflows} onBind={onBind} />);

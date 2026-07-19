@@ -32,6 +32,18 @@ describe("loopChainSchema", () => {
 
     expect(loopChainSchema.parse(chain)).toEqual(chain);
   });
+
+  it("preserves an unknown future eval phase", () => {
+    const chain = {
+      version: 2 as const,
+      phases: [{
+        id: "future",
+        limits: { max_steps: 1, max_rounds: 1, no_progress_stalls: 1 },
+        blocks: [{ id: "quality", type: "eval", eval_key: "quality", eval_phase: "future_phase" }],
+      }],
+    };
+    expect(loopChainSchema.parse(chain)).toEqual(chain);
+  });
 });
 
 // These tests pin the boundary defense CLAUDE.md "API Response Compatibility"

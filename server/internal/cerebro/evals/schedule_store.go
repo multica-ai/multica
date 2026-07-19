@@ -99,7 +99,8 @@ func (s *Store) UpsertSchedule(ctx context.Context, workspaceID, evalID, actorID
             schedule_expr = EXCLUDED.schedule_expr,
             timezone      = EXCLUDED.timezone,
             enabled       = EXCLUDED.enabled,
-            next_run_at   = EXCLUDED.next_run_at
+            next_run_at   = EXCLUDED.next_run_at,
+            claimed_until = NULL
         RETURNING `+evalScheduleColumns,
 		workspaceID, evalID, scheduleExpr, timezone, enabled,
 		pgtype.Timestamptz{Time: next, Valid: true}, actorID)
@@ -125,19 +126,31 @@ func (s *Store) DeleteSchedule(ctx context.Context, workspaceID, evalID uuid.UUI
 	return err
 }
 
-// ClaimDueSchedules returns up to `limit` enabled schedules whose next_run_at
-// has elapsed at `now`, oldest-due first. It does not mutate the rows — the
-// caller advances next_run_at via MarkScheduleRan after running each one, which
-// is what keeps a second sweep at the same instant from re-claiming them.
+// ClaimDueSchedules atomically leases up to `limit` enabled schedules whose
+// next_run_at has elapsed. SKIP LOCKED plus claimed_until prevents two server
+// replicas from executing the same scheduled eval; an abandoned lease retries.
 func (s *Store) ClaimDueSchedules(ctx context.Context, now time.Time, limit int32) ([]EvalSchedule, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.pool.Query(ctx, `
-        SELECT `+evalScheduleColumns+` FROM cerebro_eval_schedule
+	rows, err := s.pool.Query(ctx, `WITH due AS (
+        SELECT id FROM cerebro_eval_schedule
         WHERE enabled AND next_run_at IS NOT NULL AND next_run_at <= $1
+          AND (claimed_until IS NULL OR claimed_until <= $1)
+          AND EXISTS (
+            SELECT 1 FROM cerebro_feature_flags f
+            WHERE f.workspace_id=cerebro_eval_schedule.workspace_id
+              AND f.user_id='00000000-0000-0000-0000-000000000000'
+              AND f.flag_key='cerebro_evals' AND f.enabled
+          )
         ORDER BY next_run_at ASC
-        LIMIT $2`, pgtype.Timestamptz{Time: now, Valid: true}, limit)
+        FOR UPDATE SKIP LOCKED
+        LIMIT $2
+      )
+      UPDATE cerebro_eval_schedule s
+      SET claimed_until=$1 + interval '10 minutes'
+      FROM due WHERE s.id=due.id
+      RETURNING s.`+evalScheduleColumns, pgtype.Timestamptz{Time: now, Valid: true}, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -157,8 +170,8 @@ func (s *Store) ClaimDueSchedules(ctx context.Context, now time.Time, limit int3
 // next_run_at is advanced to `next` (the schedule's following fire instant).
 func (s *Store) MarkScheduleRan(ctx context.Context, id uuid.UUID, next time.Time) error {
 	tag, err := s.pool.Exec(ctx, `
-        UPDATE cerebro_eval_schedule
-        SET last_run_at = now(), next_run_at = $2
+		UPDATE cerebro_eval_schedule
+		SET last_run_at = now(), next_run_at = $2, claimed_until = NULL
         WHERE id = $1`, id, pgtype.Timestamptz{Time: next, Valid: true})
 	if err != nil {
 		return err

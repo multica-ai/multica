@@ -21,7 +21,9 @@ func evalDriftEnabled() bool {
 	return false
 }
 
-// ScheduleSweeper runs due eval schedules. Modeled on the workflow cron sweeper
+// ScheduleSweeper runs due eval schedules. The env switch is a deployment kill
+// switch; ClaimDueSchedules also requires the workspace's cerebro_evals flag.
+// Modeled on the workflow cron sweeper
 // (workflows/cron.go): each tick claims due rows, runs each eval through the
 // per-workspace gateway executor, records the run, and advances next_run_at.
 // Idempotent — never backfills a missed window; a second sweep at the same

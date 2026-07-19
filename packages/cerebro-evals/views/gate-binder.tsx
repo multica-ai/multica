@@ -36,7 +36,7 @@ export function GateBinder({ evals, workflows, pending = false, onBind }: GateBi
 
   const submit = () => {
     if (!evalId || !workflowId) return;
-    onBind({ workflowId, evalId, phase, blocking });
+    onBind({ workflowId, evalId, phase, blocking: phase === "monitor" ? false : blocking });
     setEvalId("");
     setWorkflowId("");
     setPhase("delivery");
@@ -53,10 +53,14 @@ export function GateBinder({ evals, workflows, pending = false, onBind }: GateBi
         <option value="">Select Issue workflow…</option>
         {workflows.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select>
-      <select aria-label="Phase" className="h-9 rounded-md border bg-background px-3 text-sm capitalize" value={phase} onChange={(e) => setPhase(e.target.value as EvalBindingPhase)}>
+      <select aria-label="Phase" className="h-9 rounded-md border bg-background px-3 text-sm capitalize" value={phase} onChange={(e) => {
+        const nextPhase = e.target.value as EvalBindingPhase;
+        setPhase(nextPhase);
+        if (nextPhase === "monitor") setBlocking(false);
+      }}>
         {PHASES.map((p) => <option key={p} value={p}>{p}</option>)}
       </select>
-      <select aria-label="Enforcement" className="h-9 rounded-md border bg-background px-3 text-sm" value={blocking ? "block" : "warn"} onChange={(e) => setBlocking(e.target.value === "block")}>
+      <select aria-label="Enforcement" className="h-9 rounded-md border bg-background px-3 text-sm" value={blocking ? "block" : "warn"} disabled={phase === "monitor"} onChange={(e) => setBlocking(e.target.value === "block")}>
         <option value="block">Block</option>
         <option value="warn">Warn only</option>
       </select>

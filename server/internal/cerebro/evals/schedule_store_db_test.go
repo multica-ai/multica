@@ -14,6 +14,7 @@ func TestUpsertClaimAndMarkSchedule(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	f := seedEvalFixture(t)
+	enableEvalFeature(t, f.workspaceID)
 	store := NewStore(evalTestPool)
 	ctx := context.Background()
 
@@ -47,6 +48,13 @@ func TestUpsertClaimAndMarkSchedule(t *testing.T) {
 	}
 	if !scheduleInSet(due, sched.ID) {
 		t.Fatal("due schedule was not claimed")
+	}
+	leasingSweep, err := store.ClaimDueSchedules(ctx, time.Now().Add(2*time.Hour), 10)
+	if err != nil {
+		t.Fatalf("ClaimDueSchedules (leased): %v", err)
+	}
+	if scheduleInSet(leasingSweep, sched.ID) {
+		t.Fatal("leased schedule was claimed by a second sweeper")
 	}
 
 	next := sched.NextRunAt.Add(time.Hour)

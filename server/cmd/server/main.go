@@ -449,7 +449,7 @@ func main() {
 	go cerebronotetypes.NewSweeper(pool, cerebrodb.New(pool)).Run(sweepCtx, 24*time.Hour)
 	// CEREBRO-PATCH(main-skill-learning-sweeper): TECH-3077 skill self-learning. Turns threshold-crossing observations into change-request proposals. No-ops for workspaces with cerebro_skill_learning flag off.
 	go cerebrolearn.NewLearningSweeper(pool, cerebrodb.New(pool), queries).Run(sweepCtx, 6*time.Hour)
-	// CEREBRO-PATCH(main-eval-schedule-sweeper): FIR-3496 scheduled eval runs. Gated OFF by CEREBRO_EVAL_DRIFT_ENABLED; Run returns immediately until enabled.
+	// CEREBRO-PATCH(main-eval-schedule-sweeper): FIR-3496 scheduled eval runs. Deployment kill switch plus per-workspace cerebro_evals flag.
 	go cerebroevals.NewScheduleSweeper(cerebroevals.NewStore(pool), cerebroevalrun.New(pool)).Run(sweepCtx, time.Minute)
 	// CEREBRO-PATCH(main-eval-drift-sweeper): FIR-3496 daily eval drift alarm (fail + pass-rate regression). Gated OFF by CEREBRO_EVAL_DRIFT_ENABLED.
 	go cerebroevals.NewDriftSweeper(cerebroevals.NewStore(pool), cerebrodb.New(pool), queries, bus).Run(sweepCtx, 24*time.Hour)

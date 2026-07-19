@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -117,6 +118,31 @@ func TestAdvisoryWarner(t *testing.T) {
 		}
 		if len(inbox.calls) != 2 {
 			t.Fatalf("expected both recipients attempted despite errors, got %d", len(inbox.calls))
+		}
+	})
+
+	t.Run("same failed run is notified once", func(t *testing.T) {
+		f := seedEvalFixture(t)
+		evalID := seedActiveEval(t, f, "adv-dedupe", 1)
+		binding, err := store.CreateBinding(ctx, f.workspaceID, f.actorID, BindingInput{
+			WorkflowID: f.workflowID, EvalID: evalID, Phase: "monitor", Blocking: false,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		runID := uuid.New()
+		warner := NewAdvisoryWarner(store, &fakeOwnerAdminLister{recipients: []pgtype.UUID{pgUUID(f.actorID)}}, db.New(evalTestPool), nil)
+		for i := 0; i < 2; i++ {
+			if err := warner.WarnBinding(ctx, binding, f.issueID, &runID, RunStatusFailed); err != nil {
+				t.Fatalf("warn %d: %v", i, err)
+			}
+		}
+		var count int
+		if err := evalTestPool.QueryRow(ctx, `SELECT count(*) FROM inbox_item WHERE workspace_id=$1 AND type=$2 AND details->>'binding_id'=$3`, f.workspaceID, inboxTypeEvalAdvisoryFailed, binding.ID.String()).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("duplicate advisory cards=%d, want 1", count)
 		}
 	})
 }

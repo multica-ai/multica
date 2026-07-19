@@ -8,14 +8,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
-	ErrNotFound            = errors.New("eval not found")
-	ErrImmutable           = errors.New("active eval definitions are immutable; create a new version")
-	ErrRunExecutorMissing  = errors.New("server-side eval runner is not configured")
-	ErrInvalidRunExecution = errors.New("server-side eval runner returned an invalid result")
+	ErrNotFound                 = errors.New("eval not found")
+	ErrImmutable                = errors.New("active eval definitions are immutable; create a new version")
+	ErrRunExecutorMissing       = errors.New("server-side eval runner is not configured")
+	ErrInvalidRunExecution      = errors.New("server-side eval runner returned an invalid result")
+	ErrBlockingBindingProtected = errors.New("blocking eval binding is protected")
 )
 
 type Store struct {
@@ -103,9 +105,18 @@ func (s *Store) Update(ctx context.Context, workspaceID, id uuid.UUID, input Eva
 	return value, err
 }
 
-func (s *Store) Delete(ctx context.Context, workspaceID, id uuid.UUID) error {
-	result, err := s.pool.Exec(ctx, `DELETE FROM cerebro_eval WHERE workspace_id=$1 AND id=$2`, workspaceID, id)
+func (s *Store) HasBlockingBinding(ctx context.Context, workspaceID, id uuid.UUID) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM cerebro_workflow_eval_binding WHERE workspace_id=$1 AND eval_id=$2 AND blocking)`, workspaceID, id).Scan(&exists)
+	return exists, err
+}
+
+func (s *Store) Delete(ctx context.Context, workspaceID, id uuid.UUID, allowBlocking bool) error {
+	result, err := s.pool.Exec(ctx, `DELETE FROM cerebro_eval e WHERE workspace_id=$1 AND id=$2 AND ($3 OR NOT EXISTS (SELECT 1 FROM cerebro_workflow_eval_binding b WHERE b.workspace_id=e.workspace_id AND b.eval_id=e.id AND b.blocking))`, workspaceID, id, allowBlocking)
 	if err == nil && result.RowsAffected() == 0 {
+		if exists, existsErr := s.HasBlockingBinding(ctx, workspaceID, id); existsErr == nil && exists {
+			return ErrBlockingBindingProtected
+		}
 		return ErrNotFound
 	}
 	return err
@@ -248,6 +259,29 @@ func (s *Store) ListBindings(ctx context.Context, workspaceID uuid.UUID, workflo
 	return items, rows.Err()
 }
 
+func (s *Store) ListMonitorAdvisoryEvalKeys(ctx context.Context, workflowID pgtype.UUID) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT e.eval_key
+      FROM cerebro_workflow_eval_binding b
+      JOIN cerebro_eval e ON e.id=b.eval_id
+      JOIN cerebro_workflow w ON w.id=$1
+      WHERE b.workflow_id=COALESCE(w.generated_from_workflow_id, w.id)
+        AND b.phase='monitor' AND NOT b.blocking
+      ORDER BY e.eval_key`, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keys := make([]string, 0)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
+
 func (s *Store) GetBinding(ctx context.Context, workspaceID, id uuid.UUID) (Binding, error) {
 	var item Binding
 	err := s.pool.QueryRow(ctx, `SELECT b.id, b.workspace_id, b.workflow_id, b.eval_id, b.phase, b.blocking,
@@ -337,12 +371,12 @@ func (s *Store) FailingAdvisoryEvals(ctx context.Context, workflowID, issueID uu
       FROM cerebro_workflow WHERE id=$1
     )
     SELECT b.id, b.workspace_id, b.workflow_id, b.eval_id, b.phase, b.blocking,
-      b.created_by_id, b.created_at, e.eval_key, e.version, e.title
+      b.created_by_id, b.created_at, e.eval_key, e.version, e.title, latest.id, COALESCE(latest.status, '')
     FROM cerebro_workflow_eval_binding b
     JOIN cerebro_eval e ON e.id=b.eval_id
     JOIN selected_workflow selected ON selected.id=b.workflow_id
     LEFT JOIN LATERAL (
-      SELECT r.status FROM cerebro_eval_run r
+      SELECT r.id, r.status FROM cerebro_eval_run r
       WHERE r.workspace_id=b.workspace_id AND r.workflow_id=b.workflow_id
         AND r.issue_id=$2 AND r.eval_id=b.eval_id AND r.eval_version=e.version
       ORDER BY r.created_at DESC LIMIT 1
@@ -359,12 +393,22 @@ func (s *Store) FailingAdvisoryEvals(ctx context.Context, workflowID, issueID uu
 		var item Binding
 		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.WorkflowID, &item.EvalID,
 			&item.Phase, &item.Blocking, &item.CreatedByID, &item.CreatedAt, &item.EvalKey,
-			&item.EvalVersion, &item.EvalTitle); err != nil {
+			&item.EvalVersion, &item.EvalTitle, &item.LatestRunID, &item.LatestRunStatus); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (s *Store) AdvisoryNotificationExists(ctx context.Context, workspaceID, recipientID uuid.UUID, notificationKey string) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS (
+      SELECT 1 FROM inbox_item
+      WHERE workspace_id=$1 AND recipient_type='member' AND recipient_id=$2
+        AND type=$3 AND details->>'notification_key'=$4
+    )`, workspaceID, recipientID, inboxTypeEvalAdvisoryFailed, notificationKey).Scan(&exists)
+	return exists, err
 }
 
 // LatestRunPassed reports whether the newest run of eval evalID for this issue

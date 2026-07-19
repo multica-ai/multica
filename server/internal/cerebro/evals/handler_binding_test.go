@@ -103,6 +103,29 @@ func TestCreateBindingAllowsAdvisoryWithoutBlockingPermission(t *testing.T) {
 	}
 }
 
+func TestCreateBindingRejectsBlockingMonitor(t *testing.T) {
+	f, evalID, member := bindingFixture(t)
+	gate := &fakeBlockingGate{allowed: true}
+	h := NewHandler(evalTestPool).WithBlockingGateAuthorizer(gate)
+	body := fmt.Sprintf(`{"workflow_id":%q,"eval_id":%q,"phase":"monitor","blocking":true}`,
+		f.workflowID.String(), evalID.String())
+
+	rec := postBinding(t, h, f.workspaceID, member, body)
+	if rec.Code != http.StatusBadRequest || gate.called {
+		t.Fatalf("blocking monitor: status=%d body=%s gate_called=%v", rec.Code, rec.Body.String(), gate.called)
+	}
+}
+
+func TestCreateBindingFailsClosedWithoutBlockingAuthorizer(t *testing.T) {
+	f, evalID, member := bindingFixture(t)
+	h := NewHandler(evalTestPool)
+
+	rec := postBinding(t, h, f.workspaceID, member, bindingBody(f.workflowID, evalID, true))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("blocking binding without authorizer: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestDeleteBindingProtectsBlockingButNotAdvisory(t *testing.T) {
 	for _, blocking := range []bool{true, false} {
 		t.Run(fmt.Sprintf("blocking=%t", blocking), func(t *testing.T) {
@@ -128,5 +151,27 @@ func TestDeleteBindingProtectsBlockingButNotAdvisory(t *testing.T) {
 				t.Fatalf("DELETE binding: status=%d want=%d gate_called=%v", rec.Code, wantStatus, gate.called)
 			}
 		})
+	}
+}
+
+func TestDeleteEvalCannotCascadeProtectedBlockingBinding(t *testing.T) {
+	f, evalID, member := bindingFixture(t)
+	store := NewStore(evalTestPool)
+	if _, err := store.CreateBinding(context.Background(), f.workspaceID, f.actorID, BindingInput{
+		WorkflowID: f.workflowID, EvalID: evalID, Phase: "delivery", Blocking: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(evalTestPool).WithBlockingGateAuthorizer(&fakeBlockingGate{})
+	ctx := middleware.SetMemberContext(context.Background(), f.workspaceID.String(), member)
+	req := httptest.NewRequest(http.MethodDelete, "/"+evalID.String(), nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("DELETE eval: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := store.Get(context.Background(), f.workspaceID, evalID); err != nil {
+		t.Fatalf("protected eval was deleted: %v", err)
 	}
 }
