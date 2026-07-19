@@ -133,22 +133,22 @@ export function VCSTab() {
         <div className="space-y-3">
           {connections.map((c) => (
             <Card key={c.id}>
-              <CardContent className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-3">
-                  <div className="rounded-md border bg-muted/50 p-2 text-muted-foreground">
+              <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="rounded-md border bg-muted/50 p-2 text-muted-foreground shrink-0">
                     <GitBranch className="h-4 w-4" />
                   </div>
-                  <div className="space-y-0.5">
-                    <p className="text-sm font-medium">
+                  <div className="min-w-0 space-y-0.5">
+                    <p className="text-sm font-medium break-all">
                       {(PROVIDER_LABELS[c.provider] ?? c.provider) + " · " + c.instance_url}
                     </p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-muted-foreground break-all">
                       {t(($) => $.vcs.connected_as, { login: c.account_login })}
                     </p>
                   </div>
                 </div>
                 {canManage && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
                     <Button
                       variant="outline"
                       size="sm"
@@ -340,8 +340,18 @@ function CopyField({
     <div className="space-y-1.5">
       <Label className="text-xs">{label}</Label>
       <div className="flex items-center gap-2">
-        <Input readOnly value={value} className={mono ? "font-mono text-xs" : "text-xs"} />
-        <Button variant="outline" size="sm" onClick={() => onCopy(value)} title={copyLabel}>
+        <Input
+          readOnly
+          value={value}
+          className={mono ? "min-w-0 font-mono text-xs" : "min-w-0 text-xs"}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={() => onCopy(value)}
+          title={copyLabel}
+        >
           <Copy className="h-3 w-3" />
         </Button>
       </div>
