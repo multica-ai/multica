@@ -45,8 +45,6 @@ type Handler struct {
 	// rejected (see requireIssueLoopColumns). Wired via
 	// WithIssueLoopColumns from router.go.
 	issueLoopColumns *IssueLoopColumnStore
-	// loopCheckStore is optional and nil-safe: see issue_loop_state.go.
-	loopCheckStore LoopCheckStore
 	// planDocuments is optional and nil-safe: when wired, issue workflow
 	// activation maintains the shared plan artifact under Agents > Workflow.
 	planDocuments *PlanDocumentService
@@ -1032,11 +1030,16 @@ type loopStateResponse struct {
 // through it (the recipe itself has no single "the" issue — a person picks
 // one to watch, typically the test issue they just ran it on).
 func (h *Handler) LoopState(w http.ResponseWriter, r *http.Request) {
+	memberID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 	row, ok := h.loadWorkflowForWrite(w, r)
 	if !ok {
 		return
 	}
-	if h.issueLoopColumns == nil || h.loopCheckStore == nil {
+	reader, ok := h.issueLoopCompiler.(IssueLoopStateReader)
+	if !ok {
 		writeError(w, http.StatusServiceUnavailable, "issue workflow live state is not wired on this server")
 		return
 	}
@@ -1046,50 +1049,23 @@ func (h *Handler) LoopState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gateID, err := h.issueLoopColumns.GeneratedChildIDByName(r.Context(), row.ID, "loop:delivery-gate")
+	issueID, err := util.ParseUUID(issueIDStr)
 	if err != nil {
-		// Not compiled yet (e.g. a brand-new recipe that failed to sync) —
-		// report the zero state rather than an error; there is nothing to
-		// watch yet.
-		writeJSON(w, http.StatusOK, loopStateResponse{PendingHumanChecks: []PendingHumanCheck{}})
+		writeError(w, http.StatusBadRequest, "invalid issue_id")
 		return
 	}
-	gate := util.UUIDToString(gateID)
-
-	state, err := h.loopCheckStore.GateState(r.Context(), issueIDStr, gate)
+	state, err := reader.ReadIssueLoopState(r.Context(), row.ID, issueID, memberID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load loop state")
 		return
 	}
-	pending, err := h.loopCheckStore.PendingHumanChecks(r.Context(), issueIDStr, gate)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load pending human checks")
-		return
+	if state.PendingHumanChecks == nil {
+		state.PendingHumanChecks = []PendingHumanCheck{}
 	}
-	if pending == nil {
-		pending = []PendingHumanCheck{}
-	}
-
-	maxIterations := 0
-	if h.issueLoopColumns != nil {
-		if fields, err := h.issueLoopColumns.Get(r.Context(), row.ID); err == nil && len(fields.LoopSpec) > 0 {
-			var spec struct {
-				Caps struct {
-					MaxIterations int `json:"max_iterations"`
-				} `json:"caps"`
-			}
-			if json.Unmarshal(fields.LoopSpec, &spec) == nil {
-				maxIterations = spec.Caps.MaxIterations
-			}
-		}
-	}
-
 	writeJSON(w, http.StatusOK, loopStateResponse{
-		Round:              state.Round,
-		MaxIterations:      maxIterations,
 		Stopped:            state.Stopped,
 		StopReason:         state.StopReason,
-		PendingHumanChecks: pending,
+		PendingHumanChecks: state.PendingHumanChecks,
 	})
 }
 
@@ -1101,7 +1077,7 @@ func (h *Handler) LoopState(w http.ResponseWriter, r *http.Request) {
 // natural pass (the same reconciliation loop a reported check/judge verdict
 // feeds).
 func (h *Handler) ApproveHumanCheck(w http.ResponseWriter, r *http.Request) {
-	_, ok := requireUserID(w, r)
+	memberID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
@@ -1147,7 +1123,11 @@ func (h *Handler) ApproveHumanCheck(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "issue workflow chain is not wired on this server")
 		return
 	}
-	if err := resolver.ResolveHumanBlock(r.Context(), row.ID, issueID, checkID, req.Approved, req.Note); err != nil {
+	if err := resolver.ResolveHumanBlock(r.Context(), row.ID, issueID, checkID, req.Approved, req.Note, memberID); err != nil {
+		if strings.Contains(err.Error(), "not authorized") {
+			writeError(w, http.StatusForbidden, "approval is assigned to another member")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to record decision")
 		return
 	}

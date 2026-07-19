@@ -858,10 +858,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	if err := cerebroIssueLoopBridge.ResumeActiveIssueLoops(context.Background()); err != nil {
 		slog.Error("resume active Issue workflow chains", "error", err)
 	}
+	// CEREBRO-PATCH(cerebro-issue-loop-chain-cutover): FIR-3493 bid 8 — drop the legacy LoopCheckStore wiring; Chain v2 (ChainDriver) now owns block-step advancement, so the old check store is no longer wired here.
 	cerebroWorkflowsHandler.WithIssueLoopColumns(cerebroIssueLoopColumns).
 		// CEREBRO-PATCH(cerebro-issue-loop-skill-validate): FIR-2283 followup — reject a recipe naming a skill the workspace lacks at save time.
-		WithIssueLoopCompiler(cerebroIssueLoopBridge).
-		WithLoopCheckStore(cerebroloops.NewLoopCheckStoreAdapter(cerebroloops.NewStore(pool)))
+		WithIssueLoopCompiler(cerebroIssueLoopBridge)
 	// FIR-3493 bid 8: block tasks complete their durable step and immediately
 	// advance the same chain. The old plan-only hook remains a no-op fallback
 	// for tasks created before the cutover.

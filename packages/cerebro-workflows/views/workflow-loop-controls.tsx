@@ -134,18 +134,11 @@ export function WorkflowLoopControls({
 
       {watchIssueId && loopState.data && (
         <div className="flex flex-col gap-2 text-xs">
-          <p className="text-muted-foreground">
-            {loopState.data.stopped ? (
-              <span className="font-medium text-warning">
-                Paused · escalated to owner{loopState.data.stop_reason ? ` — ${loopState.data.stop_reason}` : ""}
-              </span>
-            ) : (
-              <>
-                Round {loopState.data.round}
-                {loopState.data.max_iterations ? ` of ${loopState.data.max_iterations}` : ""}
-              </>
-            )}
-          </p>
+          {loopState.data.stopped && (
+            <p className="font-medium text-warning">
+              Paused · escalated to owner{loopState.data.stop_reason ? ` — ${loopState.data.stop_reason}` : ""}
+            </p>
+          )}
           {loopState.data.pending_human_checks.map((check) => (
             <div
               key={check.check_id}

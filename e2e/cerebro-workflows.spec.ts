@@ -365,10 +365,11 @@ async function setFeatureFlag(token: string, key: string, enabled: boolean) {
   const res = await fetch(`${API_BASE}/api/workspaces`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  const data = (await res.json()) as {
-    workspaces?: Array<{ slug?: string; id?: string }>;
-  };
-  const ws = (data.workspaces ?? []).find((w) => !!w.id);
+  const data = (await res.json()) as
+    | Array<{ slug?: string; id?: string }>
+    | { workspaces?: Array<{ slug?: string; id?: string }> };
+  const workspaces = Array.isArray(data) ? data : data.workspaces ?? [];
+  const ws = workspaces.find((w) => !!w.id);
   if (!ws?.id) throw new Error("could not resolve workspace id");
   const r = await fetch(`${API_BASE}/api/workspaces/${ws.id}/feature-flags/${key}`, {
     method: "PUT",
@@ -687,4 +688,3 @@ async function pollForStatus(
   }
   return false;
 }
-

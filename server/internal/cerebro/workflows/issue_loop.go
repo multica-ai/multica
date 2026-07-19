@@ -52,7 +52,22 @@ type IssueLoopCompiler interface {
 }
 
 type HumanBlockResolver interface {
-	ResolveHumanBlock(ctx context.Context, workflowID, issueID pgtype.UUID, blockID string, approved bool, note string) error
+	ResolveHumanBlock(ctx context.Context, workflowID, issueID pgtype.UUID, blockID string, approved bool, note, approverID string) error
+}
+
+// IssueLoopState is the live Chain v2 state a signed-in member may act on.
+// PendingHumanChecks only contains approvals assigned to that member.
+type IssueLoopState struct {
+	Stopped            bool
+	StopReason         string
+	PendingHumanChecks []PendingHumanCheck
+}
+
+// IssueLoopStateReader is implemented by the Chain v2 bridge. Keeping the
+// read model beside the bridge prevents the workflow HTTP layer from reading
+// retired generated delivery-gate rows.
+type IssueLoopStateReader interface {
+	ReadIssueLoopState(ctx context.Context, workflowID, issueID pgtype.UUID, memberID string) (IssueLoopState, error)
 }
 
 // WithIssueLoopCompiler plugs in the issue-loop bridge implementation.

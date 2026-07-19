@@ -3,6 +3,7 @@ package loops
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -159,7 +160,8 @@ func TestIssueLoopBridge_ResolveHumanBlockCompletesStep(t *testing.T) {
 	if err := loopTestPool.QueryRow(ctx, `SELECT workspace_id FROM issue WHERE id=$1`, issueID).Scan(&workspaceID); err != nil {
 		t.Fatal(err)
 	}
-	chain := &Chain{Version: ChainVersion, DoneStatus: "done", Phases: []Phase{{ID: "approval", Limits: PhaseLimits{MaxSteps: 2, MaxRounds: 2, NoProgressStalls: 1}, Blocks: []Block{{ID: "signoff", Type: BlockHuman, Prompt: "Approve", ApproverType: AssigneeMember, ApproverID: uuid.NewString()}}}}}
+	approverID := uuid.NewString()
+	chain := &Chain{Version: ChainVersion, DoneStatus: "done", Phases: []Phase{{ID: "approval", Limits: PhaseLimits{MaxSteps: 2, MaxRounds: 2, NoProgressStalls: 1}, Blocks: []Block{{ID: "signoff", Type: BlockHuman, Prompt: "Approve", ApproverType: AssigneeMember, ApproverID: approverID}}}}}
 	raw, _ := json.Marshal(chain)
 	recipe := seedIssueLoopRecipe(t, workspaceID, "human chain", raw)
 	store := NewStore(loopTestPool)
@@ -174,7 +176,18 @@ func TestIssueLoopBridge_ResolveHumanBlockCompletesStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	bridge := NewIssueLoopBridge(loopTestPool, cerebrodb.New(loopTestPool), db.New(loopTestPool), workflows.NewIssueLoopColumnStore(loopTestPool))
-	if err := bridge.ResolveHumanBlock(ctx, recipe, issueID, "signoff", true, "ok"); err != nil {
+	state, err := bridge.ReadIssueLoopState(ctx, recipe, issueID, approverID)
+	if err != nil || len(state.PendingHumanChecks) != 1 || state.PendingHumanChecks[0].CheckID != "signoff" {
+		t.Fatalf("pending approval state=%+v err=%v", state, err)
+	}
+	state, err = bridge.ReadIssueLoopState(ctx, recipe, issueID, uuid.NewString())
+	if err != nil || len(state.PendingHumanChecks) != 0 {
+		t.Fatalf("other member state=%+v err=%v", state, err)
+	}
+	if err := bridge.ResolveHumanBlock(ctx, recipe, issueID, "signoff", true, "no", uuid.NewString()); err == nil || !strings.Contains(err.Error(), "not authorized") {
+		t.Fatalf("unexpected unauthorized approval result: %v", err)
+	}
+	if err := bridge.ResolveHumanBlock(ctx, recipe, issueID, "signoff", true, "ok", approverID); err != nil {
 		t.Fatal(err)
 	}
 	steps, err := store.ListSteps(ctx, ref.PhaseRunKey)

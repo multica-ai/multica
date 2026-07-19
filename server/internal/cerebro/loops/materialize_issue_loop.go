@@ -7,8 +7,10 @@ package loops
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -124,7 +126,7 @@ func (b *IssueLoopBridge) ActivateOnIssue(ctx context.Context, workspaceID, work
 
 // ResolveHumanBlock records the authenticated decision at the durable Chain
 // v2 step and immediately re-enters the same chain.
-func (b *IssueLoopBridge) ResolveHumanBlock(ctx context.Context, workflowID, issueID pgtype.UUID, blockID string, approved bool, note string) error {
+func (b *IssueLoopBridge) ResolveHumanBlock(ctx context.Context, workflowID, issueID pgtype.UUID, blockID string, approved bool, note, approverID string) error {
 	fields, err := b.columns.Get(ctx, workflowID)
 	if err != nil {
 		return err
@@ -143,6 +145,16 @@ func (b *IssueLoopBridge) ResolveHumanBlock(ctx context.Context, workflowID, iss
 			if step.BlockID != blockID || (step.Status != StepWaiting && step.Status != StepRunning) {
 				continue
 			}
+			var block *Block
+			for i := range phase.Blocks {
+				if phase.Blocks[i].ID == blockID {
+					block = &phase.Blocks[i]
+					break
+				}
+			}
+			if block == nil || block.Type != BlockHuman || block.ApproverType != AssigneeMember || block.ApproverID != approverID {
+				return errors.New("not authorized to approve this human block")
+			}
 			status := StepCompleted
 			if !approved {
 				status = StepFailed
@@ -155,6 +167,50 @@ func (b *IssueLoopBridge) ResolveHumanBlock(ctx context.Context, workflowID, iss
 		}
 	}
 	return fmt.Errorf("human block %q has no pending step", blockID)
+}
+
+// ReadIssueLoopState returns only the current member's actionable Human
+// blocks. It reads the Chain v2 tables directly rather than the retired
+// generated delivery-gate state.
+func (b *IssueLoopBridge) ReadIssueLoopState(ctx context.Context, workflowID, issueID pgtype.UUID, memberID string) (workflows.IssueLoopState, error) {
+	fields, err := b.columns.Get(ctx, workflowID)
+	if err != nil {
+		return workflows.IssueLoopState{}, err
+	}
+	chain, err := decodeChain(fields.LoopSpec)
+	if err != nil {
+		return workflows.IssueLoopState{}, err
+	}
+
+	state := workflows.IssueLoopState{PendingHumanChecks: []workflows.PendingHumanCheck{}}
+	store := NewStore(b.pool)
+	for _, phase := range chain.Phases {
+		key := PhaseRunKey{IssueID: issueID, WorkflowID: workflowID, PhaseID: phase.ID}
+		phaseState, err := store.LoadPhaseRun(ctx, key)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return workflows.IssueLoopState{}, err
+		}
+		if err == nil && phaseState.Status == PhaseFailed {
+			state.Stopped = true
+			state.StopReason = phaseState.FailureReason
+		}
+		steps, err := store.ListSteps(ctx, key)
+		if err != nil {
+			return workflows.IssueLoopState{}, err
+		}
+		for _, step := range steps {
+			if step.Status != StepWaiting {
+				continue
+			}
+			for _, block := range phase.Blocks {
+				if block.ID == step.BlockID && block.Type == BlockHuman && block.ApproverType == AssigneeMember && block.ApproverID == memberID {
+					state.PendingHumanChecks = append(state.PendingHumanChecks, workflows.PendingHumanCheck{CheckID: block.ID, Prompt: block.Prompt, AssigneeType: block.ApproverType, AssigneeID: block.ApproverID})
+					break
+				}
+			}
+		}
+	}
+	return state, nil
 }
 
 // ResumeActiveIssueLoops re-enters every binding retained by the cutover
