@@ -1693,3 +1693,11 @@ Approved plan and delivery gate are attached to FIR-3425, 2026-07-17.
 | `operating-system-cycle-note-composition` | `packages/views/operating-system/cycles-page.tsx`; web and desktop Cycle route mounts | FIR-2816 composes the Operating System Cycle shell with the canonical Note query/editor at the app-view seam, preserving one Note implementation without introducing a `cerebro-operating-system` → `cerebro-notes` package dependency. |
 
 Approved plan and delivery gate are attached to FIR-3421, 2026-07-17.
+
+## FIR-3539 — GitHub App key robustness
+
+| Patch | Location | Reason |
+|---|---|---|
+| `github-app-key-escaped-newlines` | `server/internal/handler/github.go` | Reconstruct a `GITHUB_APP_PRIVATE_KEY` PEM that a secret store flattened to a single line with literal `\n` (the July-17 rotation corruption that broke GitHub App auth with a "cannot decode" error). One `strings.ReplaceAll` before `ParseRSAPrivateKeyFromPEM`; a no-op for well-formed PEMs since valid base64 can never contain a backslash-n sequence. Test: `TestSignGitHubAppJWT_EscapedNewlinePEM`. |
+
+Approved by Jesper Hvejsel on FIR-3539 ("Fix det" + "find en måde hvor det ikke sker igen").

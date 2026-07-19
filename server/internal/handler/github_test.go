@@ -2162,6 +2162,29 @@ func TestSignGitHubAppJWT_ClaimsAndSignature(t *testing.T) {
 	}
 }
 
+// TestSignGitHubAppJWT_EscapedNewlinePEM proves the loader tolerates a PEM
+// that a secret store flattened to a single line with literal backslash-n
+// sequences (the FIR-3539 corruption from the July-17 key rotation) — the key
+// is reconstructed and signing still succeeds. A well-formed PEM is untouched
+// because valid PEM base64 can never contain a backslash-n sequence.
+func TestSignGitHubAppJWT_EscapedNewlinePEM(t *testing.T) {
+	pemBytes, _ := generateTestRSAKeyPEM(t)
+	flattened := strings.ReplaceAll(string(pemBytes), "\n", `\n`)
+	if !strings.Contains(flattened, `\n`) {
+		t.Fatal("expected the flattened key to contain literal backslash-n")
+	}
+	t.Setenv("GITHUB_APP_ID", "424242")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", flattened)
+
+	tok, err := signGitHubAppJWT(time.Now())
+	if err != nil {
+		t.Fatalf("sign with escaped-newline PEM: %v", err)
+	}
+	if tok == "" {
+		t.Fatal("expected a signed token from a reconstructed escaped-newline PEM")
+	}
+}
+
 // TestFetchInstallationAccount_AuthenticatedPopulatesRow simulates the
 // GitHub `/app/installations/{id}` endpoint with a JWT-gated mock and
 // verifies that fetchInstallationAccount, when fully configured,

@@ -73,6 +73,41 @@ export class SliplaneProvider extends AppProvider {
     }
   }
 
+  // Delete every superseded worker service for an app so old versions do not
+  // pile up on the host (each published version otherwise leaves a dead
+  // service behind — the accumulation that overloaded the staging host).
+  // Best-effort: a scan or per-service delete failure never rejects, so a
+  // healthy just-deployed version is never taken down by cleanup.
+  async reapSuperseded(appId, keepVersion) {
+    if (!UUID.test(String(appId ?? "")) || !SEMVER.test(String(keepVersion ?? ""))) return 0;
+    let reaped = 0;
+    try {
+      if (!this.apiKey || !this.projectId || !this.serverId || typeof this.fetch !== "function") throw new Error("Sliplane provider is not configured for reaping");
+      const response = await this.#request(`/projects/${this.projectId}/services`, {}, [200], true);
+      const services = await response.json();
+      const superseded = services.filter((service) => this.#isSupersededAppService(service, appId, keepVersion));
+      for (const service of superseded) {
+        try {
+          await this.#request(`/projects/${this.projectId}/services/${service.id}`, { method: "DELETE" }, [200, 202, 204, 404]);
+          reaped++;
+        } catch (error) {
+          console.error("Sliplane superseded app service delete failed", { error, serviceId: service.id, appId });
+        }
+      }
+    } catch (error) {
+      console.error("Sliplane superseded app service scan failed", { error, appId });
+    }
+    return reaped;
+  }
+
+  #isSupersededAppService(service, appId, keepVersion) {
+    if (!service?.id || service.serverId !== this.serverId) return false;
+    const env = new Map((service.env ?? []).map((entry) => [entry.key, String(entry.value ?? "")]));
+    if (env.get("APP_ID") !== appId) return false;
+    const version = env.get("APP_VERSION");
+    return Boolean(version) && version !== keepVersion;
+  }
+
   async #createService(name, deployment) {
     const body = {
       name,

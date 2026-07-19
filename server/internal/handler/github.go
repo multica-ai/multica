@@ -441,6 +441,8 @@ func signGitHubAppJWT(now time.Time) (string, error) {
 	if appID == "" || pemKey == "" {
 		return "", nil
 	}
+	// CEREBRO-PATCH(github-app-key-escaped-newlines): FIR-3539 — restore PEMs a secret store flattened to literal \n.
+	pemKey = strings.ReplaceAll(pemKey, `\n`, "\n")
 	key, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(pemKey))
 	if err != nil {
 		return "", fmt.Errorf("parse GITHUB_APP_PRIVATE_KEY: %w", err)
