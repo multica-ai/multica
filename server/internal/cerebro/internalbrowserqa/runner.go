@@ -93,7 +93,10 @@ type Commander interface {
 
 type ExecCommander struct{}
 
-const agentBrowserDefaultTimeout = 60 * time.Second
+// agent-browser's CLI gives its daemon 30 seconds to answer. Keep the action
+// timeout below that transport ceiling so slow navigation returns a classified
+// browser error instead of stranding the CLI until its IPC read times out.
+const agentBrowserDefaultTimeout = 25 * time.Second
 
 func agentBrowserCommandEnv(environ []string) []string {
 	const timeoutKey = "AGENT_BROWSER_DEFAULT_TIMEOUT="
