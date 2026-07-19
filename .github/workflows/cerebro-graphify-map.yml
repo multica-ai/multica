@@ -3,9 +3,16 @@ name: Cerebro graphify map
 # Keeps the committed cerebro code-map (graphify-out/graph.json) fresh.
 #
 # Every agent gets the map for free on checkout — no local build, no LLM key —
-# so it must never be more than one merge stale. On each push to main that
-# touches the mapped cerebro surface, this rebuilds the map (offline, code-only,
-# Tree-sitter AST) and commits it back if it changed.
+# so it stays close to current. This rebuilds the map (offline, code-only,
+# Tree-sitter AST) on a schedule and commits it back if it changed.
+#
+# Why scheduled, not push-triggered: staging (cerebro.firtal.com) runs on
+# Sliplane, which redeploys every service on ANY push to main — [skip ci] only
+# skips GitHub Actions, not the Sliplane deploy. A per-push auto-commit here
+# therefore fired a second full staging deploy wave for every cerebro merge
+# (~1 in 4 commits on main). Running on a schedule keeps the map at most a few
+# hours stale while removing that self-inflicted deploy amplification (FIR-3537).
+# Use workflow_dispatch to refresh on demand right before an agent needs it.
 #
 # Fork-safe: this is a cerebro-only workflow that touches exactly one path
 # (graphify-out/graph.json) via a cerebro-only script. It never edits upstream
@@ -15,16 +22,9 @@ name: Cerebro graphify map
 # so an unchanged surface produces an unchanged file and no commit is made.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "server/internal/cerebro/**"
-      - "packages/cerebro-*/**"
-      - ".agents/skills/graphify/**"
-      - ".graphifyignore"
-      - "scripts/cerebro/graphify-normalize.py"
-      - "scripts/cerebro/build-graphify-map.sh"
-      - ".github/workflows/cerebro-graphify-map.yml"
+  schedule:
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}
