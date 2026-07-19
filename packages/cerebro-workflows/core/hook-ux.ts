@@ -12,7 +12,7 @@ export interface ActionFieldDefinition {
   label: string;
   input: "text" | "textarea" | "number" | "datetime-local" | "checkbox" | "target" | "select";
   required?: boolean;
-  target?: "agent" | "member" | "issue" | "workflow" | "skill" | "squad" | "artifact";
+  target?: "agent" | "member" | "issue" | "workflow" | "skill" | "squad" | "artifact" | "eval";
   help?: string;
   options?: ReadonlyArray<{ value: string; label: string }>;
 }
@@ -63,6 +63,12 @@ export const ACTION_CONFIGURATION: Record<string, ActionDefinition> = {
   "judge.gate": { label: "Judge gate", description: "Ask a judge agent to decide against a written rubric.", fields: [
     { key: "agent_id", label: "Judge agent", input: "target", target: "agent", required: true },
     { key: "rubric", label: "Rubric", input: "textarea", required: true },
+  ] },
+  "eval.run": { label: "Run eval", description: "Run a cerebro eval when this event fires.", fields: [
+    { key: "eval_id", label: "Eval", input: "target", target: "eval", required: true },
+  ] },
+  "eval.gate": { label: "Eval gate", description: "Block this hook unless the eval's latest run passed.", fields: [
+    { key: "eval_id", label: "Eval", input: "target", target: "eval", required: true },
   ] },
   "wakeup.create": { label: "Create wakeup", description: "Schedule a single future wakeup.", fields: [
     { key: "fire_at", label: "Wake up at", input: "datetime-local", required: true },

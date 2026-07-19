@@ -35,6 +35,11 @@ describe("Hooks UX contract", () => {
     expect(ACTION_CONFIGURATION["task.retry"]?.fields.find((field) => field.key === "task_id")?.required).toBe(true);
   });
 
+  it("exposes eval.run and eval.gate actions targeting an eval (FIR-3496)", () => {
+    expect(ACTION_CONFIGURATION["eval.run"]?.fields[0]).toMatchObject({ key: "eval_id", target: "eval", required: true });
+    expect(ACTION_CONFIGURATION["eval.gate"]?.fields[0]).toMatchObject({ key: "eval_id", target: "eval", required: true });
+  });
+
   it("uses human labels and typed value metadata for filter fields", () => {
     expect(fieldDefinition("issue.status")).toMatchObject({ label: "Issue status", input: "select" });
     expect(fieldDefinition("attempt")).toMatchObject({ label: "Attempt number", input: "number" });
