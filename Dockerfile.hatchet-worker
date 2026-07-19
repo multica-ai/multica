@@ -15,11 +15,14 @@ RUN apk add --no-cache git
 
 WORKDIR /src
 
-# Dependencies. The cerebro fork's server/go.mod has a replace() directive
-# pointing at ../packages/cerebro-pdf-text, so that local module must exist
-# before `go mod download` runs.
+# Dependencies. The cerebro fork's server/go.mod has replace() directives
+# pointing at local ../packages/cerebro-* modules, so every referenced module
+# must exist before `go mod download` runs. Keep this list in sync with the
+# replace() block in server/go.mod (mirrors the main Dockerfile).
 COPY server/go.mod server/go.sum ./server/
 COPY packages/cerebro-pdf-text ./packages/cerebro-pdf-text
+COPY packages/cerebro-attachment-text ./packages/cerebro-attachment-text
+COPY packages/cerebro-pi-harness ./packages/cerebro-pi-harness
 RUN cd server && go mod download
 
 COPY server/ ./server/
