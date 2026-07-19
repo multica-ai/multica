@@ -5,6 +5,7 @@ import { createTestApi, loginAsDefault } from "./helpers";
 const HOOK_ID = "22222222-2222-2222-2222-222222222222";
 const ENFORCED_HOOK_ID = "00000000-0000-0000-0000-000000000003";
 const NEW_HOOK_ID = "55555555-5555-5555-5555-555555555555";
+const EVAL_ID = "66666666-6666-6666-6666-666666666666";
 const SHA = process.env.GITHUB_SHA ?? process.env.CI_COMMIT_SHA ?? "local-candidate";
 const SHOT_DIR = `e2e/screenshots/fir-3321/${SHA}`;
 
@@ -145,6 +146,22 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
     await expect(page.getByLabel("Agent")).toContainText("Lone");
   });
 
+  test("adds an eval gate action and saves its selected eval", async ({ page }) => {
+    const slug = "e2e-workspace";
+    await page.goto(`/${slug}/workflows/hooks/${HOOK_ID}`);
+    await page.getByRole("button", { name: "Configure Actions" }).click();
+    await page.getByRole("button", { name: "Add action", exact: true }).click();
+    await page.getByLabel("Action 2 type").click();
+    await page.getByRole("option", { name: "Eval gate" }).click();
+    await page.getByRole("button", { name: "Eval" }).click();
+    await page.getByRole("button", { name: /Answer quality/ }).click();
+
+    const saveRequest = page.waitForRequest((request) => request.url().endsWith(`/api/cerebro/workflow-hooks/${HOOK_ID}`) && request.method() === "PUT");
+    await page.getByRole("button", { name: "Save draft" }).click();
+    const saved = (await saveRequest).postDataJSON();
+    expect(saved.handlers[0].actions).toContainEqual({ type: "eval.gate", config: { eval_id: EVAL_ID } });
+  });
+
   test("warns before a live hook is saved as a draft", async ({ page }, testInfo) => {
     const slug = "e2e-workspace";
     await page.goto(`/${slug}/workflows/hooks/${ENFORCED_HOOK_ID}`);
@@ -255,6 +272,7 @@ async function mockHookAPI(page: Page) {
   let newPolicy: typeof basePolicy | null = null;
   await page.route("**/api/agents?**", (route) => route.fulfill({ json: [{ id: "11111111-1111-1111-1111-111111111111", name: "Lone", model: "codex", archived_at: null }] }));
   await page.route("**/api/skills?**", (route) => route.fulfill({ json: [{ id: "44444444-4444-4444-4444-444444444444", name: "verification-before-completion", description: "Verify behavior" }] }));
+  await page.route("**/api/cerebro/evals", (route) => route.fulfill({ json: { evals: [{ id: EVAL_ID, title: "Answer quality", status: "active" }] } }));
   await page.route("**/api/cerebro/workflow-hooks**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
