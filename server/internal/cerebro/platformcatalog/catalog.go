@@ -1112,6 +1112,8 @@ var catalog = []Capability{
 			"DELETE /api/cerebro/evals/{id}",
 			"POST /api/cerebro/evals/{id}/runs",
 			"POST /api/cerebro/evals/{id}/run",
+			"PUT /api/cerebro/evals/{id}/schedule",
+			"DELETE /api/cerebro/evals/{id}/schedule",
 			"POST /api/cerebro/evals/bindings",
 			"DELETE /api/cerebro/evals/bindings/{bindingId}",
 		},
