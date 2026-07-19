@@ -88,7 +88,14 @@ When creating or editing a comment, clients may send an optional
 `suppress_agent_ids` array. The server still computes the full trigger set
 first, then removes those agent IDs as a post-filter. A missing or empty field
 preserves the old behavior. A valid UUID that is not in the computed trigger set
-is a no-op; a malformed UUID is rejected at the request boundary.
+is a no-op; duplicate UUIDs are collapsed before storage, and a malformed UUID
+is rejected at the request boundary.
+
+Suppression is durable per comment routing action. If a target is busy and the
+comment is reconsidered when that target's current task completes, the same
+exact agent IDs remain suppressed. A content edit is a new routing action and
+replaces the stored suppression set; an update that leaves content unchanged
+retains it.
 
 ## @all is the broadcast type
 

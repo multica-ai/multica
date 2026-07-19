@@ -56,6 +56,8 @@ a pointer.
 | Create-comment `suppress_agent_ids` is parsed as request-boundary UUID input | `server/internal/handler/comment.go:957-964` |
 | Update-comment `suppress_agent_ids` is parsed as request-boundary UUID input | `server/internal/handler/comment.go:1523-1535` |
 | Create and edit trigger paths compute the full trigger set, then apply `filterSuppressedCommentAgentTriggers` before enqueueing | `server/internal/handler/comment.go:1092-1122,1594` |
+| Comment suppression is stored with the comment and reapplied to the exact completing agent during deferred reconciliation | `server/pkg/db/queries/comment.sql` (`CreateComment`, `UpdateComment`); `server/internal/handler/daemon.go` (search `commentSuppressesAgent`) |
+| A content edit replaces stored suppression; a content-preserving update retains it | `server/internal/handler/comment.go` (search `suppressedAgentIDsForWrite`) |
 | Frontend API sends `editing_comment_id` for preview and `suppress_agent_ids` for update when present | `packages/core/api/client.ts:664-700` |
 | Edit UI calls preview with `editingCommentId`, renders trigger chips, tracks suppressed agents, and submits suppressions on save | `packages/views/issues/components/comment-card.tsx:269-274,300-315,359-367,578-582,858-862` |
 | Preview hook includes `editingCommentId` in its query key and sends it to the API | `packages/views/issues/hooks/use-comment-trigger-preview.ts:58-80` |

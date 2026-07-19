@@ -1302,6 +1302,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	suppressAgentIDs = deduplicateUUIDs(suppressAgentIDs)
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
@@ -1383,14 +1384,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
-		IssueID:      issue.ID,
-		WorkspaceID:  issue.WorkspaceID,
-		AuthorType:   authorType,
-		AuthorID:     parseUUID(authorID),
-		Content:      req.Content,
-		Type:         req.Type,
-		ParentID:     parentID,
-		SourceTaskID: sourceTaskID,
+		IssueID:            issue.ID,
+		WorkspaceID:        issue.WorkspaceID,
+		AuthorType:         authorType,
+		AuthorID:           parseUUID(authorID),
+		Content:            req.Content,
+		Type:               req.Type,
+		ParentID:           parentID,
+		SourceTaskID:       sourceTaskID,
+		SuppressedAgentIds: suppressAgentIDs,
 	})
 	if err != nil {
 		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
@@ -1496,6 +1498,25 @@ func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppre
 		filtered = append(filtered, trigger)
 	}
 	return filtered
+}
+
+func deduplicateUUIDs(ids []pgtype.UUID) []pgtype.UUID {
+	if len(ids) < 2 {
+		return ids
+	}
+	unique := make([]pgtype.UUID, 0, len(ids))
+	seen := make(map[[16]byte]struct{}, len(ids))
+	for _, id := range ids {
+		if !id.Valid {
+			continue
+		}
+		if _, ok := seen[id.Bytes]; ok {
+			continue
+		}
+		seen[id.Bytes] = struct{}{}
+		unique = append(unique, id)
+	}
+	return unique
 }
 
 // commentEnqueueResult is the domain outcome of enqueuing ONE executing agent.
@@ -2456,10 +2477,20 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	suppressAgentIDs = deduplicateUUIDs(suppressAgentIDs)
 
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
 
 	oldContent := existing.Content
+	// Suppression belongs to the routing action, not to attachment-only or other
+	// content-preserving updates. A content edit is a new routing action and
+	// replaces the prior suppression set (omission deliberately means empty);
+	// an unchanged edit retains the original contract so a later completion
+	// reconcile cannot resurrect a target that was suppressed on creation.
+	suppressedAgentIDsForWrite := existing.SuppressedAgentIds
+	if oldContent != req.Content {
+		suppressedAgentIDsForWrite = suppressAgentIDs
+	}
 	// Preserve the existing authority lineage by default — this path is taken only
 	// for an UNCHANGED edit (no re-trigger). When the content changes below, the
 	// lineage is re-derived from the EDIT action itself (MUL-4857), never carried
@@ -2499,9 +2530,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
-		ID:           commentUUID,
-		Content:      req.Content,
-		SourceTaskID: sourceTaskID,
+		ID:                 commentUUID,
+		Content:            req.Content,
+		SourceTaskID:       sourceTaskID,
+		SuppressedAgentIds: suppressedAgentIDsForWrite,
 	})
 	if err != nil {
 		slog.Warn("update comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
