@@ -38,7 +38,8 @@ func (l *Listener) Attach(bus *events.Bus) {
 }
 
 func (l *Listener) onIssueUpdated(e events.Event) {
-	if !l.svc.Enabled() {
+	wsID, ok := optionalUUID(e.WorkspaceID)
+	if !ok || !l.svc.engineEnabledForWorkspace(context.Background(), wsID) {
 		return
 	}
 
@@ -162,7 +163,8 @@ func (l *Listener) maybeFireAllChildrenDone(e events.Event, payload map[string]a
 // the workspace ID from the bus event. Two listener calls for the same
 // comment collapse on the comment-derived EventID.
 func (l *Listener) onCommentCreated(e events.Event) {
-	if !l.svc.Enabled() {
+	wsID, ok := optionalUUID(e.WorkspaceID)
+	if !ok || !l.svc.engineEnabledForWorkspace(context.Background(), wsID) {
 		return
 	}
 	payload, ok := payloadToMap(e.Payload)
@@ -201,7 +203,8 @@ func (l *Listener) onCommentCreated(e events.Event) {
 // a child of some other issue. Top-level issues (parent_issue_id empty) are
 // ignored — they are not "sub-issues".
 func (l *Listener) onIssueCreated(e events.Event) {
-	if !l.svc.Enabled() {
+	wsID, ok := optionalUUID(e.WorkspaceID)
+	if !ok || !l.svc.engineEnabledForWorkspace(context.Background(), wsID) {
 		return
 	}
 	payload, ok := payloadToMap(e.Payload)

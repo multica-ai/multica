@@ -53,7 +53,7 @@ type loopAdvanceContext struct {
 // issue or a write error is logged, never surfaced, and never blocks the
 // task-completion transaction (which already committed before this runs).
 func (a *LoopPhaseAdvancer) AdvanceOnComplete(ctx context.Context, task db.AgentTaskQueue) {
-	if a == nil || a.svc == nil || !a.svc.Enabled() || len(task.Context) == 0 {
+	if a == nil || a.svc == nil || len(task.Context) == 0 {
 		return
 	}
 	var tc loopAdvanceContext
@@ -79,6 +79,9 @@ func (a *LoopPhaseAdvancer) AdvanceOnComplete(ctx context.Context, task db.Agent
 		slog.Warn("workflow loop advance: load issue failed",
 			"issue_id", uuidString(issueID), "error", err)
 		return
+	}
+	if !a.svc.engineEnabledForWorkspace(ctx, issue.WorkspaceID) {
+		return // engine disabled for this workspace
 	}
 
 	// Guard: only advance a plan still sitting on its planning status. If the
