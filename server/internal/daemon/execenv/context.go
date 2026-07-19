@@ -128,7 +128,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // OpenClaw:    skills → {workDir}/skills/{name}/SKILL.md  (native discovery — paired with a per-task synthesized openclaw-config.json that pins agents.defaults.workspace to workDir; see openclaw_config.go)
 // Pi:          skills → {workDir}/.pi/skills/{name}/SKILL.md  (native discovery)
 // Cursor:      skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
-// Kimi:        skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
+// Kimi:        skills → handled separately in Prepare via kimi-code-home ($KIMI_CODE_HOME/skills, the CLI's User-tier scan location — no workdir-relative path is scanned; see kimi_code_home.go)
 // Kiro:        skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
 // Qoder:       skills → {workDir}/.qoder/skills/{name}/SKILL.md  (project-level; see docs.qoder.com/cli/Skills.md)
 // Qwen Code:    skills → {workDir}/.qwen/skills/{name}/SKILL.md  (native project-level discovery)
@@ -177,8 +177,9 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 			if err != nil {
 				return fmt.Errorf("resolve skills dir: %w", err)
 			}
-			// Codex skills are written to codex-home in Prepare; skip here.
-			if provider != "codex" {
+			// Codex/Kimi skills are written to their per-task provider-home
+			// in Prepare; skip here.
+			if provider != "codex" && provider != "kimi" {
 				if err := writeSkillFiles(skillsDir, ctx.AgentSkills, manifest); err != nil {
 					return fmt.Errorf("write skill files: %w", err)
 				}
@@ -377,10 +378,19 @@ func skillsDirPath(workDir, provider string) string {
 	case "cursor":
 		// Cursor natively discovers skills from .cursor/skills/ in the workdir.
 		return filepath.Join(workDir, ".cursor", "skills")
-	case "kimi":
-		// Kimi Code CLI auto-discovers project-level skills from .kimi/skills/
-		// in the workdir. See https://moonshotai.github.io/kimi-cli/en/customization/skills.html
-		return filepath.Join(workDir, ".kimi", "skills")
+	// "kimi" is deliberately absent from this switch, matching "codex": Kimi
+	// Code CLI never scans a workdir-relative skills path under any of its
+	// scan tiers (Project tiers are anchored at the nearest .git ancestor,
+	// not the daemon's task workdir; see
+	// https://www.kimi.com/code/docs/en/kimi-code-cli/customization/skills.html).
+	// The path this case used to return, workDir/.kimi/skills, was never
+	// scanned by any Kimi Code CLI tier — it referenced the pre-rebrand
+	// kimi-cli project's directory naming, which the CLI/directory were
+	// renamed away from (.kimi -> .kimi-code) without this comment/path being
+	// updated. Kimi's skills are instead hydrated into the per-task
+	// KIMI_CODE_HOME/skills directory (its User-tier scan location) during
+	// Prepare/Reuse — see kimi_code_home.go — a sibling of workDir, not
+	// reachable via any workDir-relative path this function could return.
 	case "kiro":
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.

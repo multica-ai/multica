@@ -20,7 +20,7 @@ Multica は **16 個の AI コーディングツール**を標準でサポート
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静的（アカウントの権限で決定） |
 | **Cursor** | Anysphere | ✅ | ✅ | `.cursor/skills/` | 動的探索 |
 | **Hermes** | Nous Research | ✅ | ✅ | `HERMES_HOME/skills/`（タスクごとのホーム） | 動的探索 |
-| **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | 動的探索 |
+| **Kimi** | Moonshot | ✅ | ✅ | `$KIMI_CODE_HOME/skills/`（タスクごとの home） | 動的探索 |
 | **Kiro CLI** | Amazon | ✅ | ✅ | `.kiro/skills/` | 動的探索 |
 | **OpenCode** | SST | ✅ | ✅ | `.opencode/skills/` | 動的探索 + variant |
 | **DevEco Code** | Huawei（ファーウェイ） | ✅ | ❌ | `.deveco/skills/` | 動的探索（`deveco models`） |
@@ -70,7 +70,7 @@ Nous Research が提供します。ACP プロトコルを使用します（Kimi 
 
 ### Kimi
 
-Moonshot が提供し、中国市場を対象としています。Hermes と ACP プロトコルを共有し、MCP 構成も ACP `mcpServers` として渡されますが、スキルパス `.kimi/skills/` は Kimi CLI のネイティブな探索メカニズムであり、Hermes のフォールバックとは異なります。
+Moonshot が提供し、中国市場を対象としています。Hermes と ACP プロトコルを共有し、MCP 構成も ACP `mcpServers` として渡されます。スキルはタスクごとの `$KIMI_CODE_HOME/skills/`（Kimi Code CLI 自身の User ティアのスキャン位置）に展開されるため、ユーザーの実際の `~/.kimi-code/` に触れることなくネイティブに探索されます。
 
 ### Kiro CLI
 
@@ -129,7 +129,7 @@ xAI の Grok Build CLI（`grok`）です。Multica は `grok --no-auto-update ag
 | Codex | `$CODEX_HOME/skills/` | ✅ ネイティブ |
 | Copilot | `.github/skills/` | ✅ ネイティブ |
 | Cursor | `.cursor/skills/` | ✅ ネイティブ |
-| Kimi | `.kimi/skills/` | ✅ ネイティブ |
+| Kimi | `$KIMI_CODE_HOME/skills/`（タスクごとの home） | ✅ ネイティブ（Kimi Code CLI の User ティアのスキャン位置） |
 | Kiro CLI | `.kiro/skills/` | ✅ ネイティブ |
 | OpenCode | `.opencode/skills/` | ✅ ネイティブ |
 | DevEco Code | `.deveco/skills/` | ✅ ネイティブ |

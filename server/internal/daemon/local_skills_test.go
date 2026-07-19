@@ -274,8 +274,8 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 		},
 		{
 			provider: "kimi",
-			root:     filepath.Join(".kimi", "skills"),
-			wantPath: "~/.kimi/skills/review-helper",
+			root:     filepath.Join(".kimi-code", "skills"),
+			wantPath: "~/.kimi-code/skills/review-helper",
 			wantName: "Kimi Review",
 		},
 		{
@@ -307,6 +307,12 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			}
 			if tc.provider == "qwen" {
 				t.Setenv("QWEN_HOME", "")
+			}
+			if tc.provider == "kimi" {
+				// Pin the documented default (~/.kimi-code) so a
+				// KIMI_CODE_HOME set in the test's outer environment
+				// can't redirect the provider root elsewhere.
+				t.Setenv("KIMI_CODE_HOME", "")
 			}
 
 			writeTestLocalSkill(t, filepath.Join(home, tc.root), "review-helper", map[string]string{

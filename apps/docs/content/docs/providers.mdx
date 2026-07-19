@@ -20,7 +20,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | Static (determined by account entitlement) |
 | **Cursor** | Anysphere | ✅ | ✅ | `.cursor/skills/` | Dynamic discovery |
 | **Hermes** | Nous Research | ✅ | ✅ | `HERMES_HOME/skills/` (per-task home) | Dynamic discovery |
-| **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | Dynamic discovery |
+| **Kimi** | Moonshot | ✅ | ✅ | `$KIMI_CODE_HOME/skills/` (per-task home) | Dynamic discovery |
 | **Kiro CLI** | Amazon | ✅ | ✅ | `.kiro/skills/` | Dynamic discovery |
 | **OpenCode** | SST | ✅ | ✅ | `.opencode/skills/` | Dynamic discovery + variants |
 | **DevEco Code** | Huawei | ✅ | ❌ | `.deveco/skills/` | Dynamic discovery (`deveco models`) |
@@ -71,7 +71,7 @@ Don't combine them into one string like `"-p research"`; Multica passes each arr
 
 ### Kimi
 
-From Moonshot, aimed at the Chinese market. Shares the ACP protocol with Hermes, including MCP config through ACP `mcpServers`, but the skill path `.kimi/skills/` is Kimi CLI's native discovery mechanism — different from Hermes's fallback.
+From Moonshot, aimed at the Chinese market. Shares the ACP protocol with Hermes, including MCP config through ACP `mcpServers`. Skills are hydrated into a per-task `$KIMI_CODE_HOME/skills/` — Kimi Code CLI's own User-tier scan location — so discovery is native without touching the user's real `~/.kimi-code/`.
 
 ### Kiro CLI
 
@@ -143,7 +143,7 @@ Each tool uses **its own** skill discovery path. Before a task runs, the Multica
 | Codex | `$CODEX_HOME/skills/` | ✅ Native |
 | Copilot | `.github/skills/` | ✅ Native |
 | Cursor | `.cursor/skills/` | ✅ Native |
-| Kimi | `.kimi/skills/` | ✅ Native |
+| Kimi | `$KIMI_CODE_HOME/skills/` (per-task home) | ✅ Native (Kimi Code CLI's User-tier scan location) |
 | Kiro CLI | `.kiro/skills/` | ✅ Native |
 | OpenCode | `.opencode/skills/` | ✅ Native |
 | DevEco Code | `.deveco/skills/` | ✅ Native |

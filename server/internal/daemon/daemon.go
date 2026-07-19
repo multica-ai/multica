@@ -4500,6 +4500,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
+	// Point Kimi Code CLI at the per-task KIMI_CODE_HOME so its native
+	// User-tier skill scan discovers the bound skills at
+	// $KIMI_CODE_HOME/skills/ (see kimi_code_home.go) without polluting the
+	// user's real ~/.kimi-code/skills/.
+	if env.KimiCodeHome != "" {
+		agentEnv["KIMI_CODE_HOME"] = env.KimiCodeHome
+	}
 	// Redirect HOME/XDG/npm_config_cache to the per-task writable home under the
 	// Linux codex workspace-write sandbox, where the real home is read-only. This
 	// lets tools that write to `~` (npm, Prisma, …) succeed without per-tool env
@@ -5758,7 +5765,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "KIMI_CODE_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false

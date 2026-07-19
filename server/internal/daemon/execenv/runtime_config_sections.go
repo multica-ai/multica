@@ -515,42 +515,19 @@ func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 	}
 	b.WriteString("## Skills\n\n")
 	switch provider {
-	case "kimi":
-		// Kimi's own project-level skill scan (.kimi/skills/, see
-		// resolveSkillsDir in context.go) depends on the same cwd
-		// resolution daemon.go's providerNeedsInlineSystemPrompt already
-		// distrusts enough to inline the *entire* runtime brief for this
-		// provider instead of relying on Kimi reading AGENTS.md natively
-		// (see the "kiro and kimi ... cwd handling is opaque" comment on
-		// that switch). The bare "discovered automatically" framing used
-		// below assumes Kimi's native scan reliably supplies the SKILL.md
-		// path to the model — an assumption that comment already
-		// contradicts. State the on-disk path explicitly here so the
-		// agent's own file-read tool can find the skill body even when
-		// Kimi's native scan silently misses it. The path emitted per skill
-		// below must come from sanitizeSkillName — the same function
-		// writeSkillFiles uses to name the on-disk directory — so this text
-		// can never drift from where the SKILL.md actually lives.
-		b.WriteString("Skill instructions are on disk at `.kimi/skills/<slug>/SKILL.md` in your working directory (one subdirectory per skill, exact path given below) — read the file before using a skill:\n\n")
-	case "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kiro", "qoder", "antigravity", "qwen":
-		// Hermes discovers these from its per-task HERMES_HOME/skills (seeded by
-		// the daemon), so it needs the same "discovered automatically" framing
-		// as the other native-discovery runtimes rather than a path pointer.
+	case "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "qoder", "antigravity", "qwen":
+		// Kimi's skills are hydrated into its per-task KIMI_CODE_HOME/skills
+		// (seeded by the daemon at Prepare/Reuse — see kimi_code_home.go),
+		// which is Kimi Code CLI's own User-tier skill scan location. That
+		// placement is what makes discovery work by construction, so Kimi
+		// gets the same "discovered automatically" framing as the other
+		// native-discovery runtimes instead of a special-cased path pointer.
 		b.WriteString("You have the following skills installed (discovered automatically):\n\n")
 	default:
 		b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 	}
 	for _, skill := range skills {
 		desc := strings.TrimSpace(skill.Description)
-		if provider == "kimi" {
-			path := fmt.Sprintf("`.kimi/skills/%s/SKILL.md`", sanitizeSkillName(skill.Name))
-			if desc != "" {
-				fmt.Fprintf(b, "- **%s** — %s — %s\n", skill.Name, path, desc)
-			} else {
-				fmt.Fprintf(b, "- **%s** — %s\n", skill.Name, path)
-			}
-			continue
-		}
 		if desc != "" {
 			fmt.Fprintf(b, "- **%s** — %s\n", skill.Name, desc)
 		} else {

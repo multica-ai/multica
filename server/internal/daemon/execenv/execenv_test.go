@@ -1547,15 +1547,16 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigKimiSkillsUseExplicitPath pins MUL-93: Kimi's
-// native .kimi/skills/ scan depends on the same cwd resolution the daemon
-// already distrusts enough to inline the whole runtime brief for this
-// provider (see providerNeedsInlineSystemPrompt in daemon.go), so unlike
-// the other native-discovery runtimes AGENTS.md must give the agent an
-// explicit on-disk path to the SKILL.md body instead of just asserting the
-// skill was "discovered automatically" with no way to find it if that scan
-// silently misses.
-func TestInjectRuntimeConfigKimiSkillsUseExplicitPath(t *testing.T) {
+// TestInjectRuntimeConfigKimi pins the corrected MUL-93 fix: Kimi Code CLI's
+// real skill-discovery mechanism scans $KIMI_CODE_HOME/skills/ (its
+// User-tier), which the daemon now hydrates directly (see kimi_code_home.go)
+// rather than relying on any workdir-relative path. Placing skills at the
+// path Kimi actually scans is what makes discovery work by construction, so
+// AGENTS.md uses the same "discovered automatically" framing as every other
+// native-discovery provider — no special-cased explicit path is needed
+// (the earlier explicit-.kimi/skills/-path text pinned in this test was
+// itself the bug: that path was never scanned by any Kimi Code CLI tier).
+func TestInjectRuntimeConfigKimi(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -1577,23 +1578,22 @@ func TestInjectRuntimeConfigKimiSkillsUseExplicitPath(t *testing.T) {
 	if !strings.Contains(s, "Coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
-	if !strings.Contains(s, ".kimi/skills/") {
-		t.Error("AGENTS.md for Kimi must point the agent at the .kimi/skills/ path where SKILL.md bodies actually live")
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md for Kimi must use the standard native-discovery framing")
 	}
-	if strings.Contains(s, "discovered automatically") {
-		t.Error("AGENTS.md for Kimi must not also claim native discovery — the explicit path is the whole point of the fix")
+	if strings.Contains(s, ".kimi/skills/") || strings.Contains(s, ".kimi-code/skills/") {
+		t.Error("AGENTS.md for Kimi must not special-case a workdir-relative skills path — discovery is via KIMI_CODE_HOME, not the workdir")
 	}
 }
 
-// TestWriteContextFilesKimiNativeSkillsMatchesAgentsMdPath pins the contract
-// that the fix in this PR depends on: AGENTS.md tells Kimi to read
-// .kimi/skills/<name>/SKILL.md (writeSkills in runtime_config_sections.go),
-// and writeContextFiles actually puts the file there (skillsDirPath in
-// context.go). Those two switch statements are maintained independently, so
-// nothing else catches one of them drifting — e.g. someone changes
-// skillsDirPath's kimi case without updating the AGENTS.md text, and the
-// agent is pointed at a path that doesn't exist.
-func TestWriteContextFilesKimiNativeSkillsMatchesAgentsMdPath(t *testing.T) {
+// TestWriteContextFilesKimiSkipsWorkdirSkillFiles pins that Kimi's bound
+// skills are NOT written under the workdir at all — they're hydrated into
+// KIMI_CODE_HOME/skills by Prepare/Reuse (see kimi_code_home.go and
+// TestPrepareKimiHydratesSkillsIntoKimiCodeHome). This mirrors Codex, which
+// also skips the workdir skill-file write here (writeContextFiles still
+// creates the empty .agent_context/skills/ fallback dir via resolveSkillsDir,
+// harmless since nothing reads it for either provider).
+func TestWriteContextFilesKimiSkipsWorkdirSkillFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -1604,28 +1604,90 @@ func TestWriteContextFilesKimiNativeSkillsMatchesAgentsMdPath(t *testing.T) {
 		},
 	}
 
-	agentsContent, err := InjectRuntimeConfig(dir, "kimi", ctx)
-	if err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	if !strings.Contains(agentsContent, "`.kimi/skills/go-conventions/SKILL.md`") {
-		t.Fatalf("AGENTS.md must hand the agent the exact slugified path for %q (want .kimi/skills/go-conventions/SKILL.md), got:\n%s", "Go Conventions", agentsContent)
-	}
-
 	if err := writeContextFiles(dir, "kimi", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".kimi", "skills", "go-conventions", "SKILL.md"))
+	if _, err := os.Stat(filepath.Join(dir, ".kimi")); !os.IsNotExist(err) {
+		t.Errorf("expected no .kimi/ dir under workdir for Kimi, got err=%v", err)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(dir, ".agent_context", "skills"))
 	if err != nil {
-		t.Fatalf("skill file not found at the path AGENTS.md claims (.kimi/skills/go-conventions/SKILL.md): %v", err)
+		t.Fatalf("expected .agent_context/skills/ fallback dir to exist (matching Codex): %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected .agent_context/skills/ to be empty for Kimi, got %d entries", len(entries))
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); err != nil {
+		t.Errorf("expected .agent_context/issue_context.md to exist: %v", err)
+	}
+}
+
+// TestPrepareKimiHydratesSkillsIntoKimiCodeHome is the integration-level
+// pin for the corrected MUL-93 fix: Prepare must set env.KimiCodeHome and
+// write bound skills to {KimiCodeHome}/skills/{slug}/SKILL.md — Kimi Code
+// CLI's own User-tier skill scan location — rather than anywhere under the
+// task workdir. It also confirms the shared config.toml/credentials/mcp.json
+// are symlinked in so authentication and MCP servers keep working under the
+// redirected home (see kimi_code_home.go for why this matters: Kimi reads
+// provider credentials exclusively from config.toml, never process env).
+func TestPrepareKimiHydratesSkillsIntoKimiCodeHome(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`[providers.kimi]
+api_key = "secret"
+`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(sharedHome, "credentials"), 0o700); err != nil {
+		t.Fatalf("create shared credentials dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "credentials", "kimi.json"), []byte(`{"token":"tok"}`), 0o600); err != nil {
+		t.Fatalf("write shared credential: %v", err)
+	}
+	t.Setenv("KIMI_CODE_HOME", sharedHome)
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-kimi",
+		TaskID:         "d5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Kimi Agent",
+		Provider:       "kimi",
+		Task: TaskContextForEnv{
+			IssueID:     "kimi-hydrate-test",
+			AgentSkills: []SkillContextForEnv{{Name: "Go Conventions", Content: "Follow Go conventions."}},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if env.KimiCodeHome == "" {
+		t.Fatal("expected KimiCodeHome to be set after Prepare")
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(env.KimiCodeHome, "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("skill file not found at KIMI_CODE_HOME/skills/go-conventions/SKILL.md: %v", err)
 	}
 	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
 		t.Error("SKILL.md missing content")
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
-		t.Error("expected .agent_context/skills/ to NOT exist for Kimi provider")
+	if target, err := os.Readlink(filepath.Join(env.KimiCodeHome, "config.toml")); err != nil || target != filepath.Join(sharedHome, "config.toml") {
+		t.Errorf("expected config.toml symlinked to shared home, got target=%q err=%v", target, err)
+	}
+	if target, err := os.Readlink(filepath.Join(env.KimiCodeHome, "credentials")); err != nil || target != filepath.Join(sharedHome, "credentials") {
+		t.Errorf("expected credentials/ symlinked to shared home, got target=%q err=%v", target, err)
+	}
+
+	// Bound skills must not also land under the task workdir.
+	if _, err := os.Stat(filepath.Join(env.WorkDir, ".kimi")); !os.IsNotExist(err) {
+		t.Errorf("expected no .kimi/ dir under workdir, got err=%v", err)
 	}
 }
 
