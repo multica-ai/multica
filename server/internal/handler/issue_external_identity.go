@@ -78,7 +78,11 @@ func (h *Handler) UpsertIssueExternalIdentity(w http.ResponseWriter, r *http.Req
 		writeError(w, status, message)
 		return
 	}
-	if h.AuthoritySigner == nil || authority.ValidateServerCommit(h.ServerCommit) != nil {
+	receiptSigner := h.writeReceiptSigner
+	if receiptSigner == nil {
+		receiptSigner = h.AuthoritySigner
+	}
+	if receiptSigner == nil || authority.ValidateServerCommit(h.ServerCommit) != nil {
 		writeError(w, http.StatusServiceUnavailable, "external identity write receipts are not configured")
 		return
 	}
@@ -130,6 +134,37 @@ func (h *Handler) UpsertIssueExternalIdentity(w http.ResponseWriter, r *http.Req
 		metadataPatch = []byte(req.Metadata)
 	}
 
+	// Prove every receipt prerequisite that does not depend on the mutation
+	// result before opening the mutation transaction. The final resource-bound
+	// signature is prepared by BeforeCommit while rollback is still possible.
+	var dbIdentity authority.DBIdentity
+	if h.DB == nil {
+		writeError(w, http.StatusInternalServerError, "failed to create external identity write receipt")
+		return
+	}
+	if err := h.DB.QueryRow(r.Context(), `
+		SELECT (pg_control_system()).system_identifier::text, d.oid::int8, current_database()::text
+		FROM pg_catalog.pg_database d WHERE d.datname = current_database()
+	`).Scan(&dbIdentity.SystemIdentifier, &dbIdentity.DatabaseOID, &dbIdentity.DatabaseName); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create external identity write receipt")
+		return
+	}
+	digest := sha256.Sum256(body)
+	receiptWorkspaceID := ""
+	if receiptProtocol == authority.WriteReceiptProtocolV2 {
+		receiptWorkspaceID = util.UUIDToString(wsUUID)
+	}
+	receiptStatement := authority.WriteReceiptStatement{
+		Protocol: receiptProtocol, Operation: authority.OperationIssueUpsertExternal,
+		RequestSHA256: fmt.Sprintf("%x", digest), ResourceID: "preflight", WorkspaceID: receiptWorkspaceID, Nonce: req.Nonce,
+		DBIdentity: dbIdentity, IssuedAt: time.Now().UTC(), ServerCommit: h.ServerCommit,
+	}
+	if _, err := receiptSigner.SignWriteReceipt(receiptStatement); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create external identity write receipt")
+		return
+	}
+
+	var receipt authority.WriteReceipt
 	prefix := h.getIssuePrefix(r.Context(), wsUUID)
 	res, err := h.IssueService.UpsertExternalIdentity(r.Context(), service.IssueExternalIdentityUpsertParams{
 		WorkspaceID:   wsUUID,
@@ -145,6 +180,13 @@ func (h *Handler) UpsertIssueExternalIdentity(w http.ResponseWriter, r *http.Req
 			BroadcastPayload: func(issue db.Issue, _ []db.Attachment, _ []db.IssueLabel) map[string]any {
 				return map[string]any{"issue": issueToResponse(issue, prefix)}
 			},
+		},
+		BeforeCommit: func(prepared service.IssueExternalIdentityUpsertResult) error {
+			statement := receiptStatement
+			statement.ResourceID = util.UUIDToString(prepared.Issue.ID)
+			var signErr error
+			receipt, signErr = receiptSigner.SignWriteReceipt(statement)
+			return signErr
 		},
 	})
 	if errors.Is(err, service.ErrExternalIdentityConflict) {
@@ -170,32 +212,6 @@ func (h *Handler) UpsertIssueExternalIdentity(w http.ResponseWriter, r *http.Req
 		status = http.StatusCreated
 	}
 	issue := issueToResponse(res.Issue, prefix)
-	var dbIdentity authority.DBIdentity
-	if h.DB == nil {
-		writeError(w, http.StatusInternalServerError, "failed to create external identity write receipt")
-		return
-	}
-	if err := h.DB.QueryRow(r.Context(), `
-		SELECT (pg_control_system()).system_identifier::text, d.oid::int8, current_database()::text
-		FROM pg_catalog.pg_database d WHERE d.datname = current_database()
-	`).Scan(&dbIdentity.SystemIdentifier, &dbIdentity.DatabaseOID, &dbIdentity.DatabaseName); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create external identity write receipt")
-		return
-	}
-	digest := sha256.Sum256(body)
-	receiptWorkspaceID := ""
-	if receiptProtocol == authority.WriteReceiptProtocolV2 {
-		receiptWorkspaceID = util.UUIDToString(res.Issue.WorkspaceID)
-	}
-	receipt, err := h.AuthoritySigner.SignWriteReceipt(authority.WriteReceiptStatement{
-		Protocol: receiptProtocol, Operation: authority.OperationIssueUpsertExternal,
-		RequestSHA256: fmt.Sprintf("%x", digest), ResourceID: issue.ID, WorkspaceID: receiptWorkspaceID, Nonce: req.Nonce,
-		DBIdentity: dbIdentity, IssuedAt: time.Now().UTC(), ServerCommit: h.ServerCommit,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create external identity write receipt")
-		return
-	}
 	responseIssue := externalUpsertResponseIssue(issue, receiptProtocol)
 	writeJSON(w, status, map[string]any{"issue": responseIssue, "receipt": receipt})
 }

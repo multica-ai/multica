@@ -55,6 +55,10 @@ type dbExecutor interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+type writeReceiptSigner interface {
+	SignWriteReceipt(authority.WriteReceiptStatement) (authority.WriteReceipt, error)
+}
+
 type Config struct {
 	AllowSignup         bool
 	AllowedEmails       []string
@@ -237,9 +241,10 @@ type Handler struct {
 	// AuthoritySigner backs the public Ed25519 authority attestation endpoint.
 	// Nil means the deployment has not opted in; the public endpoint returns
 	// 503 and no private material is logged or exposed.
-	AuthoritySigner *authority.Signer
-	ServerCommit    string
-	cfg             Config
+	AuthoritySigner    *authority.Signer
+	writeReceiptSigner writeReceiptSigner
+	ServerCommit       string
+	cfg                Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {

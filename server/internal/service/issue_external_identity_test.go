@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -677,42 +676,104 @@ func TestIssueExternalIdentityUpsertProcessInterruptionRollsBackAllEffects(t *te
 	}
 }
 
-func TestIssueExternalIdentityRejectsIssueWorkspaceMoveAcrossAliasWorkspace(t *testing.T) {
+func TestIssueExternalIdentityTargetDeleteRaceLeavesNoOrphan(t *testing.T) {
 	ctx := context.Background()
 	pool := newExternalIdentityPool(t)
 	queries := db.New(pool)
-	first := createExternalIdentityFixture(t, ctx, pool)
-	second := createExternalIdentityFixture(t, ctx, pool)
+	fixture := createExternalIdentityFixture(t, ctx, pool)
 	svc := NewIssueService(queries, pool, events.New(), nil, nil)
 
-	res, err := svc.UpsertExternalIdentity(ctx, IssueExternalIdentityUpsertParams{
-		WorkspaceID: first.workspaceID,
-		Aliases:     []ExternalIdentityAlias{{Namespace: "github-node", ExternalID: "workspace-move-guard"}},
-		Create:      externalCreateParams(first, "Workspace move guard"),
-		CreatorType: "member",
-		CreatorID:   first.userID,
-	})
+	target, err := svc.Create(ctx, externalCreateParams(fixture, "Delete race target"), IssueCreateOpts{})
 	if err != nil {
-		t.Fatalf("seed external identity: %v", err)
+		t.Fatalf("create target: %v", err)
 	}
-	_, err = pool.Exec(ctx, `UPDATE issue SET workspace_id=$1 WHERE id=$2`, second.workspaceID, res.Issue.ID)
-	if err == nil {
-		t.Fatal("issue workspace move succeeded while a same-workspace external identity exists")
+	externalID := fmt.Sprintf("delete-race-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM issue_external_identity WHERE workspace_id=$1 AND namespace='github-node' AND external_id=$2`, fixture.workspaceID, externalID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM issue WHERE id=$1`, target.Issue.ID)
+	})
+
+	deleteTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin delete transaction: %v", err)
 	}
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "23503" || !strings.Contains(pgErr.Message, "external identity issue workspace cannot change") {
-		t.Fatalf("workspace move error = %v, want migration 180 same-workspace guard", err)
+	defer deleteTx.Rollback(ctx)
+	deleteQueries := queries.WithTx(deleteTx)
+	deleteParams := db.DeleteIssueExternalIdentitiesByIssueParams{WorkspaceID: fixture.workspaceID, IssueID: target.Issue.ID}
+	if err := deleteQueries.DeleteIssueExternalIdentitiesByIssue(ctx, deleteParams); err != nil {
+		t.Fatalf("first alias cleanup: %v", err)
 	}
 
-	var issueWorkspace, aliasWorkspace pgtype.UUID
-	if err := pool.QueryRow(ctx, `SELECT workspace_id FROM issue WHERE id=$1`, res.Issue.ID).Scan(&issueWorkspace); err != nil {
-		t.Fatalf("read issue workspace: %v", err)
+	prepared := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	upsertDone := make(chan error, 1)
+	go func() {
+		_, upsertErr := svc.UpsertExternalIdentity(ctx, IssueExternalIdentityUpsertParams{
+			WorkspaceID:   fixture.workspaceID,
+			Aliases:       []ExternalIdentityAlias{{Namespace: "github-node", ExternalID: externalID}},
+			TargetIssueID: target.Issue.ID,
+			CreatorType:   "member",
+			CreatorID:     fixture.userID,
+			BeforeCommit: func(IssueExternalIdentityUpsertResult) error {
+				close(prepared)
+				<-release
+				return nil
+			},
+		})
+		upsertDone <- upsertErr
+	}()
+	select {
+	case <-prepared:
+	case <-time.After(5 * time.Second):
+		t.Fatal("upsert did not reach before-commit gate")
 	}
-	if err := pool.QueryRow(ctx, `SELECT workspace_id FROM issue_external_identity WHERE issue_id=$1`, res.Issue.ID).Scan(&aliasWorkspace); err != nil {
-		t.Fatalf("read alias workspace: %v", err)
+
+	deleteDone := make(chan error, 1)
+	go func() {
+		deleteErr := deleteQueries.DeleteIssue(ctx, db.DeleteIssueParams{ID: target.Issue.ID, WorkspaceID: fixture.workspaceID})
+		if deleteErr == nil {
+			deleteErr = deleteQueries.DeleteIssueExternalIdentitiesByIssue(ctx, deleteParams)
+		}
+		if deleteErr == nil {
+			deleteErr = deleteTx.Commit(ctx)
+		}
+		deleteDone <- deleteErr
+	}()
+	select {
+	case deleteErr := <-deleteDone:
+		t.Fatalf("delete did not wait for the in-flight target upsert: %v", deleteErr)
+	case <-time.After(150 * time.Millisecond):
 	}
-	if issueWorkspace != first.workspaceID || aliasWorkspace != first.workspaceID {
-		t.Fatalf("workspace invariant changed: issue=%s alias=%s want=%s", util.UUIDToString(issueWorkspace), util.UUIDToString(aliasWorkspace), util.UUIDToString(first.workspaceID))
+	releaseOnce.Do(func() { close(release) })
+
+	select {
+	case upsertErr := <-upsertDone:
+		if upsertErr != nil {
+			t.Fatalf("upsert: %v", upsertErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("upsert did not finish")
+	}
+	select {
+	case deleteErr := <-deleteDone:
+		if deleteErr != nil {
+			t.Fatalf("delete: %v", deleteErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("delete did not finish")
+	}
+
+	var issues, aliases int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE id=$1`, target.Issue.ID).Scan(&issues); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM issue_external_identity WHERE workspace_id=$1 AND namespace='github-node' AND external_id=$2`, fixture.workspaceID, externalID).Scan(&aliases); err != nil {
+		t.Fatal(err)
+	}
+	if issues != 0 || aliases != 0 {
+		t.Fatalf("delete/upsert race left issues=%d aliases=%d, want 0/0", issues, aliases)
 	}
 }
 

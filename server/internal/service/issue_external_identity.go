@@ -47,6 +47,9 @@ type IssueExternalIdentityUpsertParams struct {
 	CreatorType    string
 	CreatorID      pgtype.UUID
 	IssueCreateOpt IssueCreateOpts
+	// BeforeCommit prepares the response-bound receipt while the mutation is
+	// still rollbackable. It must not publish external side effects.
+	BeforeCommit func(IssueExternalIdentityUpsertResult) error
 }
 
 type IssueExternalIdentityUpsertResult struct {
@@ -106,14 +109,14 @@ func (s *IssueService) UpsertExternalIdentity(ctx context.Context, p IssueExtern
 		if p.TargetIssueID.Valid && id != p.TargetIssueID {
 			return IssueExternalIdentityUpsertResult{}, ErrExternalIdentityConflict
 		}
-		effective, err = qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: id, WorkspaceID: p.WorkspaceID})
+		effective, err = qtx.GetExternalIdentityTargetIssueForUpdate(ctx, db.GetExternalIdentityTargetIssueForUpdateParams{ID: id, WorkspaceID: p.WorkspaceID})
 		if err != nil {
 			return IssueExternalIdentityUpsertResult{}, fmt.Errorf("load mapped issue: %w", err)
 		}
 	}
 	if !effective.ID.Valid {
 		if p.TargetIssueID.Valid {
-			effective, err = qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: p.TargetIssueID, WorkspaceID: p.WorkspaceID})
+			effective, err = qtx.GetExternalIdentityTargetIssueForUpdate(ctx, db.GetExternalIdentityTargetIssueForUpdateParams{ID: p.TargetIssueID, WorkspaceID: p.WorkspaceID})
 			if err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
 					return IssueExternalIdentityUpsertResult{}, ErrExternalIdentityTargetNotFound
@@ -170,6 +173,12 @@ func (s *IssueService) UpsertExternalIdentity(ctx context.Context, p IssueExtern
 		}
 	}
 
+	result := IssueExternalIdentityUpsertResult{Issue: effective, Created: created, MetadataChanged: metadataChanged}
+	if p.BeforeCommit != nil {
+		if err := p.BeforeCommit(result); err != nil {
+			return IssueExternalIdentityUpsertResult{}, fmt.Errorf("prepare external identity response: %w", err)
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return IssueExternalIdentityUpsertResult{}, fmt.Errorf("commit: %w", err)
 	}
@@ -203,7 +212,7 @@ func (s *IssueService) UpsertExternalIdentity(ctx context.Context, p IssueExtern
 		})
 	}
 
-	return IssueExternalIdentityUpsertResult{Issue: effective, Created: created, MetadataChanged: metadataChanged}, nil
+	return result, nil
 }
 
 func normalizeExternalIdentityAliases(in []ExternalIdentityAlias) ([]ExternalIdentityAlias, error) {

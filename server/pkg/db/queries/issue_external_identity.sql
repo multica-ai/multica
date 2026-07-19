@@ -7,10 +7,24 @@ FROM issue_external_identity
 WHERE workspace_id = $1 AND namespace = $2 AND external_id = $3
 FOR UPDATE;
 
+-- name: GetExternalIdentityTargetIssueForUpdate :one
+-- Hold the parent issue until alias insertion commits. Without this lock, an
+-- application-owned delete could remove the issue after validation but before
+-- the alias insert, leaving an orphan because this table intentionally has no FK.
+SELECT * FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: InsertIssueExternalIdentity :exec
 INSERT INTO issue_external_identity (workspace_id, namespace, external_id, issue_id)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (workspace_id, namespace, external_id) DO NOTHING;
+
+-- name: DeleteIssueExternalIdentitiesByIssue :exec
+-- Relationships are application-owned: delete aliases in the same transaction
+-- as the workspace-guarded parent issue deletion.
+DELETE FROM issue_external_identity
+WHERE workspace_id = $1 AND issue_id = $2;
 
 -- name: MergeIssueMetadataPatch :one
 UPDATE issue
