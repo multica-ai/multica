@@ -997,6 +997,7 @@ type CerebroEvalSchedule struct {
 	LastRunAt    pgtype.Timestamptz `json:"last_run_at"`
 	CreatedByID  pgtype.UUID        `json:"created_by_id"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	ClaimedUntil pgtype.Timestamptz `json:"claimed_until"`
 }
 
 type CerebroExchangeRate struct {
