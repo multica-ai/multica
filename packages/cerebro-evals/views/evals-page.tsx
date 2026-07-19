@@ -22,7 +22,8 @@ import { filterEvals, STATUS_FILTERS, statusCounts, type StatusFilter } from "./
 import { formatCost, formatDuration } from "../format";
 import { RunDetail } from "./run-detail";
 import { EvalDetail, type EvalDetailTab } from "./eval-detail";
-import type { CerebroEval, EvalStatus } from "../types";
+import { GateBinder } from "./gate-binder";
+import type { CerebroEval, EvalBindingPhase, EvalStatus } from "../types";
 
 export function EvalsPage() {
   const workflowsEnabled = useFeatureFlag("cerebro_workflows");
@@ -36,8 +37,6 @@ export function EvalsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<CerebroEval | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [bindingEvalId, setBindingEvalId] = useState("");
-  const [bindingWorkflowId, setBindingWorkflowId] = useState("");
   const [selectedEvalId, setSelectedEvalId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [detailEvalId, setDetailEvalId] = useState("");
@@ -75,8 +74,9 @@ export function EvalsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: evalKeys.list(workspaceId) }),
   });
   const bindMutation = useMutation({
-    mutationFn: () => createEvalBinding({ workflow_id: bindingWorkflowId, eval_id: bindingEvalId, phase: "delivery", blocking: true }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: evalKeys.bindings(workspaceId) }); setBindingEvalId(""); setBindingWorkflowId(""); },
+    mutationFn: (input: { workflowId: string; evalId: string; phase: EvalBindingPhase; blocking: boolean }) =>
+      createEvalBinding({ workflow_id: input.workflowId, eval_id: input.evalId, phase: input.phase, blocking: input.blocking }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: evalKeys.bindings(workspaceId) }); },
   });
   const unbindMutation = useMutation({ mutationFn: deleteEvalBinding, onSuccess: () => queryClient.invalidateQueries({ queryKey: evalKeys.bindings(workspaceId) }) });
 
@@ -191,12 +191,13 @@ export function EvalsPage() {
           {selectedRun && <RunDetail run={selectedRun} onClose={() => setSelectedRunId("")} onOpenEvidence={(artifactId) => navigation.push(`/${workspace.slug}/documents/${artifactId}`)} />}
 
           <section className="flex flex-col gap-3 rounded-lg border p-4">
-            <div><h2 className="text-sm font-semibold">Workflow gates</h2><p className="text-xs text-muted-foreground">A blocking delivery binding prevents the workflow from advancing until the latest issue-specific run passes.</p></div>
-            <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
-              <select className="h-9 rounded-md border bg-background px-3 text-sm" value={bindingEvalId} onChange={(e) => setBindingEvalId(e.target.value)}><option value="">Select eval…</option>{(evalsQuery.data ?? []).map((item) => <option key={item.id} value={item.id}>{item.title} · {item.version}</option>)}</select>
-              <select className="h-9 rounded-md border bg-background px-3 text-sm" value={bindingWorkflowId} onChange={(e) => setBindingWorkflowId(e.target.value)}><option value="">Select Issue workflow…</option>{(workflowsQuery.data?.workflows ?? []).filter((item) => item.workflow_type === "issue_loop").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-              <Button disabled={!bindingEvalId || !bindingWorkflowId || bindMutation.isPending} onClick={() => bindMutation.mutate()}>Add blocking gate</Button>
-            </div>
+            <div><h2 className="text-sm font-semibold">Workflow gates</h2><p className="text-xs text-muted-foreground">Bind an eval to an Issue workflow phase. A Block binding holds the workflow at that phase until the latest issue-specific run passes; Warn only notifies the owners and never blocks.</p></div>
+            <GateBinder
+              evals={evalsQuery.data ?? []}
+              workflows={(workflowsQuery.data?.workflows ?? []).filter((item) => item.workflow_type === "issue_loop")}
+              pending={bindMutation.isPending}
+              onBind={(input) => bindMutation.mutate(input)}
+            />
             <div className="flex flex-col divide-y rounded-md border">{(bindingsQuery.data ?? []).map((binding) => <div key={binding.id} className="flex items-center justify-between gap-3 p-3"><div><span className="text-sm font-medium">{binding.eval_title}</span><span className="ml-2 font-mono text-xs text-muted-foreground">{binding.eval_version}</span><div className="text-xs text-muted-foreground">{binding.phase} · {binding.blocking ? "Blocking" : "Advisory"} · workflow {binding.workflow_id.slice(0, 8)}</div></div><Button size="sm" variant="ghost" onClick={() => unbindMutation.mutate(binding.id)}>Remove</Button></div>)}{(bindingsQuery.data ?? []).length === 0 && <p className="p-4 text-sm text-muted-foreground">No eval gates are bound yet.</p>}</div>
           </section>
           </>}
