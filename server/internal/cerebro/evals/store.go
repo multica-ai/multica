@@ -248,6 +248,21 @@ func (s *Store) ListBindings(ctx context.Context, workspaceID uuid.UUID, workflo
 	return items, rows.Err()
 }
 
+func (s *Store) GetBinding(ctx context.Context, workspaceID, id uuid.UUID) (Binding, error) {
+	var item Binding
+	err := s.pool.QueryRow(ctx, `SELECT b.id, b.workspace_id, b.workflow_id, b.eval_id, b.phase, b.blocking,
+		b.created_by_id, b.created_at, e.eval_key, e.version, e.title
+		FROM cerebro_workflow_eval_binding b JOIN cerebro_eval e ON e.id=b.eval_id
+		WHERE b.workspace_id=$1 AND b.id=$2`, workspaceID, id).Scan(
+		&item.ID, &item.WorkspaceID, &item.WorkflowID, &item.EvalID, &item.Phase,
+		&item.Blocking, &item.CreatedByID, &item.CreatedAt, &item.EvalKey,
+		&item.EvalVersion, &item.EvalTitle)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Binding{}, ErrNotFound
+	}
+	return item, err
+}
+
 func (s *Store) CreateBinding(ctx context.Context, workspaceID, actorID uuid.UUID, input BindingInput) (Binding, error) {
 	var item Binding
 	err := s.pool.QueryRow(ctx, `INSERT INTO cerebro_workflow_eval_binding

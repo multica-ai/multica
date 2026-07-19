@@ -222,6 +222,8 @@ export function EvalsPage() {
               pending={bindMutation.isPending}
               onBind={(input) => bindMutation.mutate(input)}
             />
+            {bindMutation.isError && <p className="text-sm text-destructive">You do not have permission to add this gate, or the selected eval is not active.</p>}
+            {unbindMutation.isError && <p className="text-sm text-destructive">You do not have permission to remove this gate.</p>}
             <div className="flex flex-col divide-y rounded-md border">{(bindingsQuery.data ?? []).map((binding) => <div key={binding.id} className="flex items-center justify-between gap-3 p-3"><div><span className="text-sm font-medium">{binding.eval_title}</span><span className="ml-2 font-mono text-xs text-muted-foreground">{binding.eval_version}</span><div className="text-xs text-muted-foreground">{binding.phase} · {binding.blocking ? "Blocking" : "Advisory"} · workflow {binding.workflow_id.slice(0, 8)}</div></div><Button size="sm" variant="ghost" onClick={() => unbindMutation.mutate(binding.id)}>Remove</Button></div>)}{(bindingsQuery.data ?? []).length === 0 && <p className="p-4 text-sm text-muted-foreground">No eval gates are bound yet.</p>}</div>
           </section>
           </>}

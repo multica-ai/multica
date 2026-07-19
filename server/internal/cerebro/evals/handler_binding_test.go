@@ -3,6 +3,7 @@ package evals
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -99,5 +100,33 @@ func TestCreateBindingAllowsAdvisoryWithoutBlockingPermission(t *testing.T) {
 	rec := postBinding(t, h, f.workspaceID, member, bindingBody(f.workflowID, evalID, false))
 	if rec.Code != 201 || gate.called {
 		t.Fatalf("advisory binding: status=%d body=%s gate_called=%v", rec.Code, rec.Body.String(), gate.called)
+	}
+}
+
+func TestDeleteBindingProtectsBlockingButNotAdvisory(t *testing.T) {
+	for _, blocking := range []bool{true, false} {
+		t.Run(fmt.Sprintf("blocking=%t", blocking), func(t *testing.T) {
+			f, evalID, member := bindingFixture(t)
+			binding, err := NewStore(evalTestPool).CreateBinding(context.Background(), f.workspaceID, f.actorID, BindingInput{
+				WorkflowID: f.workflowID, EvalID: evalID, Phase: "delivery", Blocking: blocking,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			gate := &fakeBlockingGate{}
+			h := NewHandler(evalTestPool).WithBlockingGateAuthorizer(gate)
+			ctx := middleware.SetMemberContext(context.Background(), f.workspaceID.String(), member)
+			req := httptest.NewRequest(http.MethodDelete, "/bindings/"+binding.ID.String(), nil).WithContext(ctx)
+			rec := httptest.NewRecorder()
+			h.Routes().ServeHTTP(rec, req)
+
+			wantStatus := http.StatusNoContent
+			if blocking {
+				wantStatus = http.StatusForbidden
+			}
+			if rec.Code != wantStatus || gate.called != blocking {
+				t.Fatalf("DELETE binding: status=%d want=%d gate_called=%v", rec.Code, wantStatus, gate.called)
+			}
+		})
 	}
 }

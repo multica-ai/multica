@@ -348,27 +348,8 @@ func (h *Handler) CreateBinding(w http.ResponseWriter, r *http.Request) {
 	// A blocking binding needs the set_blocking_gate right (FIR-3496): a
 	// workspace admin, or a member of a group granted it. Advisory bindings are
 	// unrestricted. Only enforced when an authorizer is wired.
-	if input.Blocking && h.blockingGate != nil {
-		member, memberOK := middleware.MemberFromContext(r.Context())
-		if !memberOK || !member.UserID.Valid {
-			writeError(w, http.StatusForbidden, "only admins or granted members may set a blocking eval gate")
-			return
-		}
-		userID, err := uuid.FromBytes(member.UserID.Bytes[:])
-		if err != nil {
-			writeError(w, http.StatusForbidden, "invalid user identity")
-			return
-		}
-		isAdmin := member.Role == "owner" || member.Role == "admin"
-		allowed, err := h.blockingGate.CanSetBlockingGate(r.Context(), workspaceID, userID, isAdmin)
-		if err != nil {
-			h.internalError(w, r, "failed to check blocking-gate permission", err)
-			return
-		}
-		if !allowed {
-			writeError(w, http.StatusForbidden, "only admins or granted members may set a blocking eval gate")
-			return
-		}
+	if input.Blocking && !h.authorizeBlockingGate(w, r, workspaceID) {
+		return
 	}
 	item, err := h.store.CreateBinding(r.Context(), workspaceID, actorID, input)
 	if err != nil {
@@ -387,11 +368,46 @@ func (h *Handler) DeleteBinding(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	binding, err := h.store.GetBinding(r.Context(), workspaceID, id)
+	if err != nil {
+		h.storeError(w, r, err)
+		return
+	}
+	if binding.Blocking && !h.authorizeBlockingGate(w, r, workspaceID) {
+		return
+	}
 	if err := h.store.DeleteBinding(r.Context(), workspaceID, id); err != nil {
 		h.storeError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) authorizeBlockingGate(w http.ResponseWriter, r *http.Request, workspaceID uuid.UUID) bool {
+	if h.blockingGate == nil {
+		return true
+	}
+	member, memberOK := middleware.MemberFromContext(r.Context())
+	if !memberOK || !member.UserID.Valid {
+		writeError(w, http.StatusForbidden, "only admins or granted members may manage a blocking eval gate")
+		return false
+	}
+	userID, err := uuid.FromBytes(member.UserID.Bytes[:])
+	if err != nil {
+		writeError(w, http.StatusForbidden, "invalid user identity")
+		return false
+	}
+	isAdmin := member.Role == "owner" || member.Role == "admin"
+	allowed, err := h.blockingGate.CanSetBlockingGate(r.Context(), workspaceID, userID, isAdmin)
+	if err != nil {
+		h.internalError(w, r, "failed to check blocking-gate permission", err)
+		return false
+	}
+	if !allowed {
+		writeError(w, http.StatusForbidden, "only admins or granted members may manage a blocking eval gate")
+		return false
+	}
+	return true
 }
 
 func requestContext(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, string, bool) {
