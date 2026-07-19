@@ -256,3 +256,37 @@ func TestLatestRunPassed(t *testing.T) {
 		}
 	})
 }
+
+func TestRunForIssue(t *testing.T) {
+	if evalTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	f := seedEvalFixture(t)
+	evalID := seedActiveEval(t, f, "run-for-issue", 1)
+
+	t.Run("executes and persists linked to issue", func(t *testing.T) {
+		store := NewStore(evalTestPool).WithRunExecutor(&fakeRunExecutor{execution: RunExecution{
+			Status:        RunStatusPassed,
+			Results:       json.RawMessage(`{"cases":[{"case_id":"c","passed":true}],"outcome":{"status":"passed","pass_rate":1}}`),
+			TargetVersion: "server-target-v1",
+		}})
+		runID, status, err := store.RunForIssue(ctx, f.workspaceID, f.actorID, evalID, f.issueID, "member")
+		if err != nil {
+			t.Fatalf("run for issue: %v", err)
+		}
+		if status != RunStatusPassed || runID == "" {
+			t.Fatalf("run id=%q status=%q", runID, status)
+		}
+		passed, err := store.LatestRunPassed(ctx, f.workspaceID, evalID, f.issueID)
+		if err != nil || !passed {
+			t.Fatalf("persisted run not readable as passed: passed=%v err=%v", passed, err)
+		}
+	})
+
+	t.Run("fails closed without a runner", func(t *testing.T) {
+		if _, _, err := NewStore(evalTestPool).RunForIssue(ctx, f.workspaceID, f.actorID, evalID, f.issueID, "member"); err == nil {
+			t.Fatal("expected RunForIssue to fail when no runner is wired")
+		}
+	})
+}

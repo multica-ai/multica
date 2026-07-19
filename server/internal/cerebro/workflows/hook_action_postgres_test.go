@@ -10,13 +10,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// poolEvalGateStore is a test double for the EvalGateStore seam. It runs the same
-// latest-verdict query as evals.Store.LatestRunPassed directly against the pool,
-// so the workflows test package need not import evals (which would cycle through
-// loops → workflows). The store SQL itself is covered by evals.TestLatestRunPassed.
-type poolEvalGateStore struct{ pool *pgxpool.Pool }
+// poolEvalStore is a test double for the EvalStore seam. It talks directly to the
+// pool so the workflows test package need not import evals (which would cycle
+// through loops → workflows). LatestRunPassed mirrors evals.Store.LatestRunPassed;
+// RunForIssue persists a passing run the way evals.Store.RunForIssue would. The
+// real store methods are covered by evals.TestLatestRunPassed / TestRunForIssue.
+type poolEvalStore struct{ pool *pgxpool.Pool }
 
-func (s poolEvalGateStore) LatestRunPassed(ctx context.Context, workspaceID, evalID, issueID uuid.UUID) (bool, error) {
+func (s poolEvalStore) LatestRunPassed(ctx context.Context, workspaceID, evalID, issueID uuid.UUID) (bool, error) {
 	var passed bool
 	err := s.pool.QueryRow(ctx, `SELECT COALESCE((
       SELECT r.status = 'passed' FROM cerebro_eval_run r
@@ -24,6 +25,19 @@ func (s poolEvalGateStore) LatestRunPassed(ctx context.Context, workspaceID, eva
       ORDER BY r.created_at DESC LIMIT 1
     ), FALSE)`, workspaceID, evalID, issueID).Scan(&passed)
 	return passed, err
+}
+
+func (s poolEvalStore) RunForIssue(ctx context.Context, workspaceID, actorID, evalID, issueID uuid.UUID, actorType string) (string, string, error) {
+	var runID string
+	err := s.pool.QueryRow(ctx, `INSERT INTO cerebro_eval_run
+		(workspace_id, eval_id, eval_version, issue_id, status, results, created_by_id, created_by_type)
+		SELECT $1, e.id, e.version, $3, 'passed', '{}'::jsonb, $4, $5
+		FROM cerebro_eval e WHERE e.workspace_id=$1 AND e.id=$2 RETURNING id`,
+		workspaceID, evalID, issueID, actorID, actorType).Scan(&runID)
+	if err != nil {
+		return "", "", err
+	}
+	return runID, "passed", nil
 }
 
 type allowHookActions struct{}
@@ -169,7 +183,7 @@ func runEvalGate(t *testing.T, pool *pgxpool.Pool, f workflowIntegrationFixture,
 	policy.CreatedByID = uuidString(f.userID)
 	policy.Handlers[0].Actions = []HookAction{{Type: "eval.gate", Config: map[string]any{"eval_id": uuidString(evalID)}}}
 	registry := NewActionRegistry()
-	registerVersionOneHookActions(registry, NewPostgresHookActionExecutor(pool, allowHookActions{}, poolEvalGateStore{pool}))
+	registerVersionOneHookActions(registry, NewPostgresHookActionExecutor(pool, allowHookActions{}, poolEvalStore{pool}))
 	result, err := NewHookEngine(true, NewMemoryHookStore([]HookPolicy{policy})).WithActionRegistry(registry).Evaluate(context.Background(), HookEvent{
 		EventID: "eval-gate-" + uuidString(issueID), Type: HookBeforeTaskComplete, WorkspaceID: uuidString(f.workspaceID), IssueID: uuidString(issueID),
 	})
@@ -212,4 +226,83 @@ func TestEvalGateActionBlocksOnFailedRun(t *testing.T) {
 			t.Fatal("passing gate must not block")
 		}
 	})
+}
+
+func TestEvalRunActionExecutes(t *testing.T) {
+	pool := openWorkflowIntegrationPool(t)
+	ctx := context.Background()
+	f := setupWorkflowIntegrationFixture(t, pool)
+	issueID := insertWorkflowIntegrationIssue(t, pool, f, "Run eval on hook", "in_progress", 21, pgtype.UUID{})
+
+	var evalID pgtype.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO cerebro_eval
+		(workspace_id, eval_key, version, title, objective, target, status, created_by_id)
+		VALUES ($1,'hook-eval','1.0.0','Hook eval','Objective','{}'::jsonb,'active',$2) RETURNING id`,
+		f.workspaceID, f.userID).Scan(&evalID); err != nil {
+		t.Fatalf("insert eval: %v", err)
+	}
+
+	policy := newTestHookPolicy("eval-run-policy", HookAllow, HookModeEnforce, HookBinding{Kind: HookScopeIssue, ID: uuidString(issueID)})
+	policy.CreatedByType = "member"
+	policy.CreatedByID = uuidString(f.userID)
+	policy.Handlers[0].Actions = []HookAction{{Type: "eval.run", Config: map[string]any{"eval_id": uuidString(evalID)}}}
+	registry := NewActionRegistry()
+	registerVersionOneHookActions(registry, NewPostgresHookActionExecutor(pool, allowHookActions{}, poolEvalStore{pool}))
+	result, err := NewHookEngine(true, NewMemoryHookStore([]HookPolicy{policy})).WithActionRegistry(registry).Evaluate(ctx, HookEvent{
+		EventID: "eval-run-event", Type: HookBeforeTaskComplete, WorkspaceID: uuidString(f.workspaceID), IssueID: uuidString(issueID),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.ActionResults) != 1 || result.ActionResults[0].Status != HookActionSuccess {
+		t.Fatalf("action result = %#v", result.ActionResults)
+	}
+	if result.ActionResults[0].Result["status"] != "passed" {
+		t.Fatalf("expected status:passed, got %#v", result.ActionResults[0].Result)
+	}
+
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT status FROM cerebro_eval_run WHERE eval_id=$1 AND issue_id=$2`, evalID, issueID).Scan(&status); err != nil {
+		t.Fatalf("read eval run: %v", err)
+	}
+	if status != "passed" {
+		t.Fatalf("eval run status = %q, want passed", status)
+	}
+}
+
+// evalRunFailClosedStore satisfies EvalStore but has no runner, so RunForIssue
+// fails — proving eval.run fails closed (blocks under a fail-closed policy).
+type evalRunFailClosedStore struct{}
+
+func (evalRunFailClosedStore) LatestRunPassed(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (bool, error) {
+	return false, nil
+}
+func (evalRunFailClosedStore) RunForIssue(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, string) (string, string, error) {
+	return "", "", context.DeadlineExceeded
+}
+
+func TestEvalRunActionFailsClosedWithoutRunner(t *testing.T) {
+	pool := openWorkflowIntegrationPool(t)
+	f := setupWorkflowIntegrationFixture(t, pool)
+	issueID := insertWorkflowIntegrationIssue(t, pool, f, "Run eval fail closed", "in_progress", 22, pgtype.UUID{})
+
+	policy := newTestHookPolicy("eval-run-closed", HookAllow, HookModeEnforce, HookBinding{Kind: HookScopeIssue, ID: uuidString(issueID)})
+	policy.FailMode = HookFailClosed
+	policy.CreatedByType = "member"
+	policy.CreatedByID = uuidString(f.userID)
+	policy.Handlers[0].Actions = []HookAction{{Type: "eval.run", Config: map[string]any{"eval_id": uuidString(issueID)}}}
+	registry := NewActionRegistry()
+	registerVersionOneHookActions(registry, NewPostgresHookActionExecutor(pool, allowHookActions{}, evalRunFailClosedStore{}))
+	result, err := NewHookEngine(true, NewMemoryHookStore([]HookPolicy{policy})).WithActionRegistry(registry).Evaluate(context.Background(), HookEvent{
+		EventID: "eval-run-closed-event", Type: HookBeforeTaskComplete, WorkspaceID: uuidString(f.workspaceID), IssueID: uuidString(issueID),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.ActionResults) != 1 || result.ActionResults[0].Status != HookActionFailed {
+		t.Fatalf("action result = %#v", result.ActionResults)
+	}
+	if result.Decision != HookBlock {
+		t.Fatalf("decision = %q, want block", result.Decision)
+	}
 }

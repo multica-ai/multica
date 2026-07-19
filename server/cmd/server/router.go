@@ -844,7 +844,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		WithPlanDocuments(workflowPlanDocuments)
 	evalExecutor := cerebroevalrun.New(pool)
 	cerebroEvalsHandler := cerebroevals.NewHandler(pool).WithRunExecutor(evalExecutor)              // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308/FIR-3493 eval catalog + server runner.
-	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool), cerebroevals.NewStore(pool)) // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature; FIR-3496 Phase 4 eval store for eval.gate.
+	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool), cerebroevals.NewStore(pool).WithRunExecutor(evalExecutor)) // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature; FIR-3496 Phase 4 eval store (eval.gate verdict + eval.run via the shared Run-now executor).
 	h.TaskService.WorkflowCompletionGate = workflowHooksFeature.CompletionGate                      // CEREBRO-PATCH(workflow-hooks-completion-wire): FIR-3101 pre-completion delegation.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 — plug the loop planning-dispatch materializer so a run_skill workflow's `loop_planning` toggle actually creates its companion planning-phase rule (see workflows/loop_planning.go).
 	cerebroWorkflowsHandler.WithLoopPlanningMaterializer(cerebroloops.NewPlanningMaterializer(cerebroQueries))

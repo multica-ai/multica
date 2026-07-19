@@ -17,7 +17,7 @@ type HookFeature struct {
 	CompletionGate *TaskCompletionGate
 }
 
-func NewHookFeature(db cerebrodb.DBTX, policies *toolpolicy.Store, evalStore EvalGateStore) *HookFeature {
+func NewHookFeature(db cerebrodb.DBTX, policies *toolpolicy.Store, evalStore EvalStore) *HookFeature {
 	repository := NewPostgresHookRepository(db)
 	engineStore := NewPostgresHookEngineStore(repository)
 	authorizer := NewToolPolicyHookAuthorizer(policies)

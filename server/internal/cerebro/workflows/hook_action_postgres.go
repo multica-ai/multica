@@ -16,28 +16,30 @@ import (
 
 var ErrHookActionPermissionDenied = errors.New("workflow hook creator no longer has permission to run this action")
 
-// EvalGateStore is the read seam eval.gate needs: the latest verdict for an
-// eval+issue. It is declared here (not imported from the evals package) because
-// evals → loops → workflows would form an import cycle; *evals.Store satisfies
-// it. U2 (eval.run) extends the hook↔eval seam with an execute method.
-type EvalGateStore interface {
+// EvalStore is the hook↔eval seam. It is declared here (not imported from the
+// evals package) because evals → loops → workflows would form an import cycle;
+// *evals.Store satisfies it. LatestRunPassed backs eval.gate (read a verdict);
+// RunForIssue backs eval.run (execute + persist a run).
+type EvalStore interface {
 	LatestRunPassed(ctx context.Context, workspaceID, evalID, issueID uuid.UUID) (bool, error)
+	RunForIssue(ctx context.Context, workspaceID, actorID, evalID, issueID uuid.UUID, actorType string) (runID string, status string, err error)
 }
 
 type PostgresHookActionExecutor struct {
 	db         cerebrodb.DBTX
 	authorizer HookAuthorizer
 	// CEREBRO(FIR-3496 Phase 4): hook↔eval coupling. evalStore reads the latest
-	// eval verdict for eval.gate. Nil-safe: eval.gate fails closed when it is not
-	// wired, so the feature stays invisible until deliberately enabled.
-	evalStore EvalGateStore
+	// eval verdict for eval.gate and executes+persists a run for eval.run. Nil-safe:
+	// both actions fail closed when it is not wired (or has no runner), so the
+	// feature stays invisible until deliberately enabled.
+	evalStore EvalStore
 }
 
 type HookActionAuthorizer interface {
 	CanAction(context.Context, string, HookPermissionActor, string) bool
 }
 
-func NewPostgresHookActionExecutor(db cerebrodb.DBTX, authorizer HookAuthorizer, evalStore EvalGateStore) *PostgresHookActionExecutor {
+func NewPostgresHookActionExecutor(db cerebrodb.DBTX, authorizer HookAuthorizer, evalStore EvalStore) *PostgresHookActionExecutor {
 	return &PostgresHookActionExecutor{db: db, authorizer: authorizer, evalStore: evalStore}
 }
 
@@ -102,6 +104,8 @@ WHERE a.id=$1 AND a.workspace_id=$7 RETURNING id`, agentID, optionalHookUUID(eve
 		return e.startJudgeGate(ctx, workspaceID, actorID, policy, event, action.Config)
 	case "eval.gate":
 		return e.startEvalGate(ctx, workspaceID, event, action.Config)
+	case "eval.run":
+		return e.startEvalRun(ctx, workspaceID, actorID, policy, event, action.Config)
 
 	case "wakeup.create":
 		fireAt, err := time.Parse(time.RFC3339, hookConfigString(action.Config, "fire_at", ""))
@@ -230,6 +234,34 @@ SELECT a.id,a.runtime_id,$2,'queued',0,$3,$4 FROM agent a
 		return nil, fmt.Errorf("judge.gate dispatch judge: %w", err)
 	}
 	return map[string]any{"task_id": util.UUIDToString(taskID), "gate": gate, "round": round, "check_id": checkID}, nil
+}
+
+// startEvalRun runs the configured eval for real when the hook fires: it executes
+// the eval via the store's wired runner (the same server executor as eval
+// Run-now) and persists the resulting run, linked to the event's issue so a
+// later eval.gate on the same issue reads this verdict. It fails closed when
+// evals are not wired for this server, so eval.run stays inert until the feature
+// is deliberately enabled.
+func (e *PostgresHookActionExecutor) startEvalRun(ctx context.Context, workspaceID, actorID pgtype.UUID, policy HookPolicy, event HookEvent, config map[string]any) (map[string]any, error) {
+	if e.evalStore == nil {
+		return nil, errors.New("eval.run: evals not configured")
+	}
+	if event.IssueID == "" {
+		return nil, errors.New("eval.run requires an issue event")
+	}
+	issueID, err := util.ParseUUID(event.IssueID)
+	if err != nil {
+		return nil, fmt.Errorf("eval.run issue_id: %w", err)
+	}
+	evalID, err := hookConfigUUID(config, "eval_id")
+	if err != nil {
+		return nil, fmt.Errorf("eval.run eval_id: %w", err)
+	}
+	runID, status, err := e.evalStore.RunForIssue(ctx, uuid.UUID(workspaceID.Bytes), uuid.UUID(actorID.Bytes), uuid.UUID(evalID.Bytes), uuid.UUID(issueID.Bytes), policy.CreatedByType)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"run_id": runID, "status": status, "eval_id": util.UUIDToString(evalID)}, nil
 }
 
 // ErrHookGateBlocked is returned by eval.gate when the eval's latest run did not

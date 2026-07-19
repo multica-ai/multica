@@ -205,6 +205,20 @@ func (s *Store) CreateRun(ctx context.Context, workspaceID, actorID, evalID uuid
 	return run, err
 }
 
+// RunForIssue executes evalID against the given issue using the store's wired
+// runner (the same server executor as eval Run-now) and persists the run. It
+// returns the run id and status as strings so callers outside this package —
+// the eval.run hook action — need not import evals types (avoiding the
+// evals→loops→workflows import cycle). Fails closed when no runner is wired:
+// CreateRun returns ErrRunExecutorMissing, which the hook records as a failure.
+func (s *Store) RunForIssue(ctx context.Context, workspaceID, actorID, evalID, issueID uuid.UUID, actorType string) (string, string, error) {
+	run, err := s.CreateRun(ctx, workspaceID, actorID, evalID, actorType, EvalRunInput{IssueID: &issueID})
+	if err != nil {
+		return "", "", err
+	}
+	return run.ID.String(), run.Status, nil
+}
+
 func (s *Store) ListBindings(ctx context.Context, workspaceID uuid.UUID, workflowID *uuid.UUID) ([]Binding, error) {
 	query := `SELECT b.id, b.workspace_id, b.workflow_id, b.eval_id, b.phase, b.blocking,
         b.created_by_id, b.created_at, e.eval_key, e.version, e.title
