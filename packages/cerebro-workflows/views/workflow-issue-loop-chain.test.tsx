@@ -41,6 +41,7 @@ const apiChain: LoopChainSpec = {
           type: "eval",
           name: "Quality eval",
           eval_key: "delivery-quality",
+          eval_phase: "monitor",
         },
       ],
     },

@@ -1099,6 +1099,13 @@ const GROUP_CAPABILITIES: {
       "Members of this group can use agent & member memory: enable it on an agent for themselves and write memories. Default deny — without this, memory stays read-only company context at most. Requires the workspace memory switch to be on.",
     testId: "capability-create-memory",
   },
+  {
+    key: "set_blocking_gate",
+    label: "Set blocking eval gates",
+    tooltip:
+      "Members of this group can make an eval block a workflow. Without this grant they can still add warn-only eval connections. Workspace admins always have access.",
+    testId: "capability-set-blocking-gate",
+  },
 ];
 
 function CapabilitiesSection({

@@ -9,7 +9,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@multica/ui/co
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 
 export interface HookTargetOption { value: string; label: string; description?: string }
-export type HookDirectory = Partial<Record<"agent" | "member" | "model" | "issue" | "project" | "workflow" | "session" | "squad" | "skill" | "artifact", HookTargetOption[]>> & {
+export type HookDirectory = Partial<Record<"agent" | "member" | "model" | "issue" | "project" | "workflow" | "session" | "squad" | "skill" | "artifact" | "eval", HookTargetOption[]>> & {
   searchIssues?: (query: string) => Promise<HookTargetOption[]>;
 };
 

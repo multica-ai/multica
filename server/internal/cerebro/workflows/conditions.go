@@ -28,6 +28,12 @@ type Condition struct {
 	Values []any  `json:"values,omitempty"`
 }
 
+// OpEvalPassed is a deferred (DB-backed) hook condition operator: it is true iff
+// the referenced eval's latest run for the event's issue passed. It is NOT
+// handled by the pure match() below (which fails closed on it via default);
+// splitHookConditions routes it to the DB-backed resolveHookConditions instead.
+const OpEvalPassed = "eval_passed"
+
 func parseConditions(raw []byte) ([]Condition, error) {
 	if len(raw) == 0 {
 		return nil, nil

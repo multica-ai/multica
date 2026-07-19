@@ -1,6 +1,6 @@
 import { api, parseWithFallback } from "@multica/core/api";
-import { evalBindingSchema, evalBindingsListSchema, evalRunsListSchema, evalSchema, evalsListSchema } from "./schemas";
-import type { CerebroEval, EvalBinding, EvalRun, EvalWriteInput } from "./types";
+import { evalBindingSchema, evalBindingsListSchema, evalRunSchema, evalRunsListSchema, evalScheduleSchema, evalSchema, evalsListSchema } from "./schemas";
+import type { CerebroEval, EvalBinding, EvalRun, EvalSchedule, EvalScheduleInput, EvalWriteInput } from "./types";
 
 export async function fetchEvals(): Promise<CerebroEval[]> {
   const raw = await api.cerebroRequest<unknown>("/api/cerebro/evals");
@@ -45,4 +45,31 @@ export async function createEvalBinding(input: { workflow_id: string; eval_id: s
 
 export async function deleteEvalBinding(id: string): Promise<void> {
   await api.cerebroRequest(`/api/cerebro/evals/bindings/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function fetchEvalSchedule(evalId: string): Promise<EvalSchedule | null> {
+  const raw = await api.cerebroRequest<unknown>(`/api/cerebro/evals/${encodeURIComponent(evalId)}/schedule`);
+  if (raw === null) return null;
+  const parsed = parseWithFallback(raw, evalScheduleSchema, null, { endpoint: "getCerebroEvalSchedule" });
+  return parsed as EvalSchedule | null;
+}
+
+export async function upsertEvalSchedule(evalId: string, input: EvalScheduleInput): Promise<EvalSchedule> {
+  const raw = await api.cerebroRequest<unknown>(`/api/cerebro/evals/${encodeURIComponent(evalId)}/schedule`, {
+    method: "PUT", body: JSON.stringify(input),
+  });
+  const parsed = parseWithFallback(raw, evalScheduleSchema, null, { endpoint: "upsertCerebroEvalSchedule" });
+  if (!parsed) throw new Error("Invalid eval schedule response");
+  return parsed as EvalSchedule;
+}
+
+export async function deleteEvalSchedule(evalId: string): Promise<void> {
+  await api.cerebroRequest(`/api/cerebro/evals/${encodeURIComponent(evalId)}/schedule`, { method: "DELETE" });
+}
+
+export async function runEvalNow(evalId: string): Promise<EvalRun> {
+  const raw = await api.cerebroRequest<unknown>(`/api/cerebro/evals/${encodeURIComponent(evalId)}/run`, { method: "POST" });
+  const parsed = parseWithFallback(raw, evalRunSchema, null, { endpoint: "runCerebroEvalNow" });
+  if (!parsed) throw new Error("Invalid eval run response");
+  return parsed as EvalRun;
 }

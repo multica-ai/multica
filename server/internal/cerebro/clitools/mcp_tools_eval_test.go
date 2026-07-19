@@ -14,10 +14,28 @@ import (
 func TestRegisterEvalToolsRegistersSharedSurface(t *testing.T) {
 	server := mcp.NewServer("test", "0")
 	registerEvalTools(server, cli.NewAPIClient("", "", ""))
-	for _, name := range []string{"list_evals", "get_eval", "create_eval", "update_eval", "delete_eval", "list_eval_runs", "record_eval_run", "list_eval_bindings", "bind_eval", "unbind_eval"} {
+	for _, name := range []string{"list_evals", "get_eval", "create_eval", "update_eval", "delete_eval", "list_eval_runs", "run_eval", "record_eval_run", "get_eval_schedule", "set_eval_schedule", "delete_eval_schedule", "list_eval_bindings", "bind_eval", "unbind_eval"} {
 		if !hasTool(server, name) {
 			t.Errorf("expected tool %q", name)
 		}
+	}
+}
+
+func TestRunEvalUsesTrustedRunRoute(t *testing.T) {
+	var gotPath string
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "run-1"})
+	}))
+	defer httpServer.Close()
+	server := mcp.NewServer("test", "0")
+	registerEvalTools(server, cli.NewAPIClient(httpServer.URL, "workspace-1", "token"))
+	result, err := server.Call(context.Background(), "run_eval", map[string]any{"eval_id": "eval-1"})
+	if err != nil || result.IsError {
+		t.Fatalf("call failed: result=%#v err=%v", result, err)
+	}
+	if gotPath != "/api/cerebro/evals/eval-1/run" {
+		t.Fatalf("path = %q", gotPath)
 	}
 }
 

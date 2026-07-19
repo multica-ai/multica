@@ -986,6 +986,20 @@ type CerebroEvalRun struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroEvalSchedule struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	EvalID       pgtype.UUID        `json:"eval_id"`
+	ScheduleExpr string             `json:"schedule_expr"`
+	Timezone     string             `json:"timezone"`
+	Enabled      bool               `json:"enabled"`
+	NextRunAt    pgtype.Timestamptz `json:"next_run_at"`
+	LastRunAt    pgtype.Timestamptz `json:"last_run_at"`
+	CreatedByID  pgtype.UUID        `json:"created_by_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	ClaimedUntil pgtype.Timestamptz `json:"claimed_until"`
+}
+
 type CerebroExchangeRate struct {
 	BaseCurrency   string             `json:"base_currency"`
 	TargetCurrency string             `json:"target_currency"`

@@ -956,7 +956,12 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `sidebar-workspace-reorder` | packages/views/layout/app-sidebar.tsx | ~30 | JEH-1296 — removes `personalNav` array; workspace group reordered to: My Issues, Dashboard, Issues, Tasks, Documents, Permissions, Projects. Agents/Autopilot/Workflows moved to configure. `workspaceNav` and `configureNav` arrays updated. |
 | `sidebar-configure-reorder` | packages/views/layout/app-sidebar.tsx | ~15 | JEH-1296 — configure group reordered: Agents, Runtimes, Autopilot, then WorkflowsNavItem (feature-flagged, inline after autopilots), Skills, Settings. |
 | `cerebro-evals-routes` | server/cmd/server/router.go | 4 | FIR-3308/FIR-3493/FIR-3496 — mounts the fork-owned eval catalog, run history, workflow-binding API, and server-owned workspace-gateway runner from `server/internal/cerebro/evals`. |
+| `cerebro-evals-blocking-gate` | server/cmd/server/router.go | 1 | FIR-3496 — wires the set_blocking_gate authorizer (admin or granted group) onto the eval catalog handler so only permitted members may create a blocking eval binding; advisory bindings stay unrestricted. |
 | `main-eval-gate` | server/cmd/server/main.go | 3 | FIR-3308 — decorates the existing Issue workflow delivery gate so blocking eval bindings fail closed until the issue has a latest passing run. |
+| `main-eval-advisory` | server/cmd/server/main.go | 3 | FIR-3496 — shares one eval store between the blocking gate and a new AdvisoryWarner that notifies workspace owners/admins on failing advisory (non-blocking) eval bindings; warn-only, never changes the gate's advance decision. |
+| `cerebro-eval-block-advisory` | server/cmd/server/router.go | 1 | FIR-3496 — wires the same advisory notifier into Chain v2 eval blocks so plan/monitor Warn bindings complete with a visible warning instead of blocking the phase. |
+| `main-eval-schedule-sweeper` | server/cmd/server/main.go | 2 | FIR-3496 — starts the eval schedule sweeper alongside the other sweepers; gated OFF by CEREBRO_EVAL_DRIFT_ENABLED so it is inert until enabled. |
+| `main-eval-drift-sweeper` | server/cmd/server/main.go | 2 | FIR-3496 — starts the daily eval drift alarm (fail + pass-rate regression) alongside the other sweepers; gated OFF by CEREBRO_EVAL_DRIFT_ENABLED. |
 | `sidebar-notification-badge` | packages/views/layout/app-sidebar.tsx | ~30 | JEH-1296 — removes standalone Notifications footer link; moves Notifications into user-avatar Popover (with Bell icon + count + Clear); adds grey count badge overlaid on avatar in top-right corner. |
 | `squad-create-avatar` | server/internal/handler/squad.go<br>server/internal/handler/squad_test.go | 6 | JEH-1541 — accepts `avatar_url` on squad creation and passes it through to `CreateSquad` so the create modal's selected avatar is persisted immediately; test covers response + DB persistence. |
 | `sqlc-squad-create-avatar` | server/pkg/db/queries/squad.sql | 3 | JEH-1541 — includes `avatar_url` in the squad insert used by create-squad. |
@@ -1697,3 +1702,9 @@ Approved plan and delivery gate are attached to FIR-3421, 2026-07-17.
 | `github-app-key-escaped-newlines` | `server/internal/handler/github.go` | Reconstruct a `GITHUB_APP_PRIVATE_KEY` PEM that a secret store flattened to a single line with literal `\n` (the July-17 rotation corruption that broke GitHub App auth with a "cannot decode" error). One `strings.ReplaceAll` before `ParseRSAPrivateKeyFromPEM`; a no-op for well-formed PEMs since valid base64 can never contain a backslash-n sequence. Test: `TestSignGitHubAppJWT_EscapedNewlinePEM`. |
 
 Approved by Jesper Hvejsel on FIR-3539 ("Fix det" + "find en måde hvor det ikke sker igen").
+
+## FIR-3496 — Eval ownership identity
+
+| Patch | Location | Reason |
+|---|---|---|
+| `eval-actor-resolver` | `server/internal/handler/handler.go`; wiring in `server/cmd/server/router.go` | Reuse the server-validated task/member actor identity in the fork-owned eval handler, so a client-supplied `X-Agent-ID` cannot impersonate an eval owner. |

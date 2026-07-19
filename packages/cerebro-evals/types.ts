@@ -93,3 +93,22 @@ export interface EvalBinding {
   eval_title: string;
   created_at: string;
 }
+
+export interface EvalSchedule {
+  id: string;
+  workspace_id: string;
+  eval_id: string;
+  schedule_expr: string;
+  timezone: string;
+  enabled: boolean;
+  next_run_at?: string;
+  last_run_at?: string;
+  created_by_id: string;
+  created_at: string;
+}
+
+export interface EvalScheduleInput {
+  schedule_expr: string;
+  timezone: string;
+  enabled: boolean;
+}

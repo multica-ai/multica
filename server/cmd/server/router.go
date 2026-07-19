@@ -843,9 +843,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		WithService(opts.WorkflowService).
 		WithPlanDocuments(workflowPlanDocuments)
 	evalExecutor := cerebroevalrun.New(pool)
-	cerebroEvalsHandler := cerebroevals.NewHandler(pool).WithRunExecutor(evalExecutor)              // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308/FIR-3493 eval catalog + server runner.
-	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool)) // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature.
-	h.TaskService.WorkflowCompletionGate = workflowHooksFeature.CompletionGate                      // CEREBRO-PATCH(workflow-hooks-completion-wire): FIR-3101 pre-completion delegation.
+	cerebroEvalsHandler := cerebroevals.NewHandler(pool).WithRunExecutor(evalExecutor).WithActorResolver(h.ResolveActor).WithBlockingGateAuthorizer(evalBlockingGateAdapter{svc: cerebroGroupPermissionsHandler.Service}) // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308/FIR-3493 eval catalog + server runner. CEREBRO-PATCH(cerebro-evals-blocking-gate): FIR-3496 restrict blocking bindings. CEREBRO-PATCH(cerebro-evals-actor): FIR-3496 trusted ownership identity.
+	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool), cerebroevals.NewStore(pool).WithRunExecutor(evalExecutor))                                                            // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature; FIR-3496 Phase 4 eval store (eval.gate verdict + eval.run via the shared Run-now executor).
+	h.TaskService.WorkflowCompletionGate = workflowHooksFeature.CompletionGate                                                                                                                                            // CEREBRO-PATCH(workflow-hooks-completion-wire): FIR-3101 pre-completion delegation.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 — plug the loop planning-dispatch materializer so a run_skill workflow's `loop_planning` toggle actually creates its companion planning-phase rule (see workflows/loop_planning.go).
 	cerebroWorkflowsHandler.WithLoopPlanningMaterializer(cerebroloops.NewPlanningMaterializer(cerebroQueries))
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop): FIR-2283 — plug the Issue workflow bridge (workflow_type=="issue_loop": save -> Compile -> materialize the dispatch/gate/escalate rules) and the control-strip/approval seam onto the compiled delivery gate.
@@ -853,7 +853,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	workflowWakeups := cerebrowakeup.New(cerebroQueries, queries, h.TaskService, bus)
 	cerebroIssueLoopBridge := cerebroloops.NewIssueLoopBridge(pool, cerebroQueries, queries, cerebroIssueLoopColumns).
 		WithSkillLister(queries).
-		WithEvalBlockRunner(cerebroevals.NewBlockRunner(pool, evalExecutor)).
+		WithMonitorEvalBindingLister(cerebroevals.NewStore(pool)).
+		WithEvalBlockRunner(cerebroevals.NewBlockRunner(pool, evalExecutor).WithAdvisoryWarner(cerebroevals.NewAdvisoryWarner(cerebroevals.NewStore(pool), cerebroQueries, queries, bus))). // CEREBRO-PATCH(cerebro-eval-block-advisory): FIR-3496 phase-aware BlockEval uses the same warn-only notifier.
 		WithBusyWakeupScheduler(&workflowBusyWakeupScheduler{service: workflowWakeups, queries: queries})
 	if err := cerebroIssueLoopBridge.ResumeActiveIssueLoops(context.Background()); err != nil {
 		slog.Error("resume active Issue workflow chains", "error", err)

@@ -84,6 +84,9 @@ func validateBindingInput(input *BindingInput) error {
 	if !oneOf(input.Phase, "plan", "delivery", "monitor") {
 		return errors.New("invalid phase")
 	}
+	if input.Phase == "monitor" && input.Blocking {
+		return errors.New("monitor bindings must be advisory")
+	}
 	if input.WorkflowID == uuidNil || input.EvalID == uuidNil {
 		return errors.New("workflow_id and eval_id are required")
 	}

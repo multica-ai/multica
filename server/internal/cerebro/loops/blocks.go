@@ -131,6 +131,9 @@ type Block struct {
 
 	// EvalKey names the eval a BlockEval requires a passing run of.
 	EvalKey string `yaml:"eval_key,omitempty" json:"eval_key,omitempty"`
+	// EvalPhase selects the workflow binding phase. Empty preserves existing
+	// Chain v2 recipes by resolving their eval block as a delivery binding.
+	EvalPhase string `yaml:"eval_phase,omitempty" json:"eval_phase,omitempty"`
 }
 
 // PhaseLimits bounds one phase. Every loop back in the phase is counted here,
@@ -300,6 +303,9 @@ func validateBlock(label string, b Block, limits PhaseLimits) []error {
 	case BlockEval:
 		if b.EvalKey == "" {
 			errs = append(errs, fmt.Errorf("%s: eval block needs an eval_key", label))
+		}
+		if b.EvalPhase != "" && b.EvalPhase != "plan" && b.EvalPhase != "delivery" && b.EvalPhase != "monitor" {
+			errs = append(errs, fmt.Errorf("%s: eval_phase must be plan, delivery, or monitor", label))
 		}
 	case "":
 		errs = append(errs, fmt.Errorf("%s: type is required (session|command|review|human|eval)", label))

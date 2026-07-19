@@ -153,3 +153,23 @@ func (f *fakeTypedActionExecutor) ExecuteHookAction(context.Context, HookPolicy,
 	f.calls++
 	return map[string]any{"ok": true}, nil
 }
+
+func TestEvalActionsValidationAndRegistry(t *testing.T) {
+	registry := NewActionRegistry()
+	registerVersionOneHookActions(registry, &fakeTypedActionExecutor{})
+	for _, actionType := range []string{"eval.run", "eval.gate"} {
+		if !registry.Has(actionType) {
+			t.Fatalf("%s not registered", actionType)
+		}
+		if got := hookActionCapability(actionType); got != "trigger_other_agent" {
+			t.Fatalf("%s capability = %q", actionType, got)
+		}
+		if err := validateTypedHookAction(HookAction{Type: actionType, Config: map[string]any{}}); err == nil {
+			t.Fatalf("expected %s to require eval_id", actionType)
+		}
+		if err := validateTypedHookAction(HookAction{Type: actionType,
+			Config: map[string]any{"eval_id": "11111111-1111-1111-1111-111111111111"}}); err != nil {
+			t.Fatalf("unexpected %s error: %v", actionType, err)
+		}
+	}
+}

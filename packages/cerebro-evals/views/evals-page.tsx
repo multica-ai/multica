@@ -13,8 +13,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@multica/ui/components/ui/table";
-import { createEval, createEvalBinding, deleteEval, deleteEvalBinding, updateEval } from "../api";
-import { evalBindingsOptions, evalKeys, evalRunsOptions, evalsListOptions } from "../queries";
+import { createEval, createEvalBinding, deleteEval, deleteEvalBinding, deleteEvalSchedule, runEvalNow, updateEval, upsertEvalSchedule } from "../api";
+import { evalBindingsOptions, evalKeys, evalRunsOptions, evalScheduleOptions, evalsListOptions } from "../queries";
 import { buildWriteInput, EMPTY_FORM, formFromEval, GRADER_MATCHES, type DraftTask } from "./form";
 import { EVAL_TEMPLATES, duplicateForm } from "./templates";
 import { statusInput } from "./lifecycle";
@@ -22,7 +22,8 @@ import { filterEvals, STATUS_FILTERS, statusCounts, type StatusFilter } from "./
 import { formatCost, formatDuration } from "../format";
 import { RunDetail } from "./run-detail";
 import { EvalDetail, type EvalDetailTab } from "./eval-detail";
-import type { CerebroEval, EvalStatus } from "../types";
+import { GateBinder } from "./gate-binder";
+import type { CerebroEval, EvalBindingPhase, EvalSchedule, EvalScheduleInput, EvalStatus } from "../types";
 
 export function EvalsPage() {
   const workflowsEnabled = useFeatureFlag("cerebro_workflows");
@@ -36,8 +37,6 @@ export function EvalsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<CerebroEval | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [bindingEvalId, setBindingEvalId] = useState("");
-  const [bindingWorkflowId, setBindingWorkflowId] = useState("");
   const [selectedEvalId, setSelectedEvalId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [detailEvalId, setDetailEvalId] = useState("");
@@ -47,6 +46,7 @@ export function EvalsPage() {
   const workflowsQuery = useQuery(cerebroWorkflowsListOptions(workspaceId));
   const bindingsQuery = useQuery(evalBindingsOptions(workspaceId));
   const runsQuery = useQuery(evalRunsOptions(workspaceId, selectedEvalId));
+  const scheduleQuery = useQuery(evalScheduleOptions(workspaceId, detailEvalId));
   const selectedRun = useMemo(() => (runsQuery.data ?? []).find((run) => run.id === selectedRunId) ?? null, [runsQuery.data, selectedRunId]);
   const detailItem = useMemo(() => (detailEvalId ? (evalsQuery.data ?? []).find((item) => item.id === detailEvalId) ?? null : null), [evalsQuery.data, detailEvalId]);
 
@@ -75,10 +75,44 @@ export function EvalsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: evalKeys.list(workspaceId) }),
   });
   const bindMutation = useMutation({
-    mutationFn: () => createEvalBinding({ workflow_id: bindingWorkflowId, eval_id: bindingEvalId, phase: "delivery", blocking: true }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: evalKeys.bindings(workspaceId) }); setBindingEvalId(""); setBindingWorkflowId(""); },
+    mutationFn: (input: { workflowId: string; evalId: string; phase: EvalBindingPhase; blocking: boolean }) =>
+      createEvalBinding({ workflow_id: input.workflowId, eval_id: input.evalId, phase: input.phase, blocking: input.blocking }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: evalKeys.bindings(workspaceId) }); },
   });
   const unbindMutation = useMutation({ mutationFn: deleteEvalBinding, onSuccess: () => queryClient.invalidateQueries({ queryKey: evalKeys.bindings(workspaceId) }) });
+  const scheduleMutation = useMutation({
+    mutationFn: async ({ evalId, input }: { evalId: string; input: EvalScheduleInput | null }) => {
+      if (input) await upsertEvalSchedule(evalId, input);
+      else await deleteEvalSchedule(evalId);
+    },
+    onMutate: async (variables) => {
+      const queryKey = evalKeys.schedule(workspaceId, variables.evalId);
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<EvalSchedule | null>(queryKey) ?? null;
+      const optimistic = variables.input ? {
+        id: previous?.id ?? "optimistic",
+        workspace_id: workspaceId,
+        eval_id: variables.evalId,
+        created_by_id: previous?.created_by_id ?? "",
+        created_at: previous?.created_at ?? new Date().toISOString(),
+        ...previous,
+        ...variables.input,
+      } satisfies EvalSchedule : null;
+      queryClient.setQueryData(queryKey, optimistic);
+      return { previous, queryKey };
+    },
+    onError: (_error, _variables, context) => {
+      if (context) queryClient.setQueryData(context.queryKey, context.previous);
+    },
+    onSettled: (_result, _error, variables) => queryClient.invalidateQueries({ queryKey: evalKeys.schedule(workspaceId, variables.evalId) }),
+  });
+  const runMutation = useMutation({
+    mutationFn: runEvalNow,
+    onSuccess: (run) => {
+      setSelectedEvalId(run.eval_id); setSelectedRunId(run.id);
+      queryClient.invalidateQueries({ queryKey: evalKeys.runs(workspaceId, run.eval_id) });
+    },
+  });
 
   const counts = useMemo(() => statusCounts(evalsQuery.data ?? []), [evalsQuery.data]);
   const filtered = useMemo(() => filterEvals(evalsQuery.data ?? [], statusFilter, search), [evalsQuery.data, statusFilter, search]);
@@ -116,6 +150,15 @@ export function EvalsPage() {
             statusPending={statusMutation.isPending}
             statusError={statusMutation.isError}
             onDelete={() => { deleteMutation.mutate(detailItem.id); closeDetail(); }}
+            onRunNow={() => runMutation.mutate(detailItem.id)}
+            runPending={runMutation.isPending}
+            runError={runMutation.isError}
+            schedule={scheduleQuery.data ?? null}
+            scheduleLoading={scheduleQuery.isLoading}
+            schedulePending={scheduleMutation.isPending}
+            scheduleError={scheduleMutation.isError}
+            onSaveSchedule={(input) => scheduleMutation.mutate({ evalId: detailItem.id, input })}
+            onOpenHooks={() => navigation.push(`/${workspace.slug}/workflows`)}
             onClose={closeDetail}
             onOpenVersion={(id) => openDetail(id)}
             onOpenEvidence={(artifactId) => navigation.push(`/${workspace.slug}/documents/${artifactId}`)}
@@ -191,12 +234,15 @@ export function EvalsPage() {
           {selectedRun && <RunDetail run={selectedRun} onClose={() => setSelectedRunId("")} onOpenEvidence={(artifactId) => navigation.push(`/${workspace.slug}/documents/${artifactId}`)} />}
 
           <section className="flex flex-col gap-3 rounded-lg border p-4">
-            <div><h2 className="text-sm font-semibold">Workflow gates</h2><p className="text-xs text-muted-foreground">A blocking delivery binding prevents the workflow from advancing until the latest issue-specific run passes.</p></div>
-            <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
-              <select className="h-9 rounded-md border bg-background px-3 text-sm" value={bindingEvalId} onChange={(e) => setBindingEvalId(e.target.value)}><option value="">Select eval…</option>{(evalsQuery.data ?? []).map((item) => <option key={item.id} value={item.id}>{item.title} · {item.version}</option>)}</select>
-              <select className="h-9 rounded-md border bg-background px-3 text-sm" value={bindingWorkflowId} onChange={(e) => setBindingWorkflowId(e.target.value)}><option value="">Select Issue workflow…</option>{(workflowsQuery.data?.workflows ?? []).filter((item) => item.workflow_type === "issue_loop").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-              <Button disabled={!bindingEvalId || !bindingWorkflowId || bindMutation.isPending} onClick={() => bindMutation.mutate()}>Add blocking gate</Button>
-            </div>
+            <div><h2 className="text-sm font-semibold">Workflow gates</h2><p className="text-xs text-muted-foreground">Bind an eval to an Issue workflow phase. A Block binding holds the workflow at that phase until the latest issue-specific run passes; Warn only notifies the owners and never blocks.</p></div>
+            <GateBinder
+              evals={evalsQuery.data ?? []}
+              workflows={(workflowsQuery.data?.workflows ?? []).filter((item) => item.workflow_type === "issue_loop")}
+              pending={bindMutation.isPending}
+              onBind={(input) => bindMutation.mutate(input)}
+            />
+            {bindMutation.isError && <p className="text-sm text-destructive">You do not have permission to add this gate, or the selected eval is not active.</p>}
+            {unbindMutation.isError && <p className="text-sm text-destructive">You do not have permission to remove this gate.</p>}
             <div className="flex flex-col divide-y rounded-md border">{(bindingsQuery.data ?? []).map((binding) => <div key={binding.id} className="flex items-center justify-between gap-3 p-3"><div><span className="text-sm font-medium">{binding.eval_title}</span><span className="ml-2 font-mono text-xs text-muted-foreground">{binding.eval_version}</span><div className="text-xs text-muted-foreground">{binding.phase} · {binding.blocking ? "Blocking" : "Advisory"} · workflow {binding.workflow_id.slice(0, 8)}</div></div><Button size="sm" variant="ghost" onClick={() => unbindMutation.mutate(binding.id)}>Remove</Button></div>)}{(bindingsQuery.data ?? []).length === 0 && <p className="p-4 text-sm text-muted-foreground">No eval gates are bound yet.</p>}</div>
           </section>
           </>}

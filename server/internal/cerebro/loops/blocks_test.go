@@ -187,6 +187,7 @@ func TestChainValidateRequiresTypeSpecificFields(t *testing.T) {
 		{"review without rubric", Block{ID: "b", Type: BlockReview}, "review block needs a rubric"},
 		{"human without prompt", Block{ID: "b", Type: BlockHuman}, "human block needs a prompt"},
 		{"eval without key", Block{ID: "b", Type: BlockEval}, "eval block needs an eval_key"},
+		{"eval with invalid phase", Block{ID: "b", Type: BlockEval, EvalKey: "quality", EvalPhase: "aftercare"}, "eval_phase must be plan, delivery, or monitor"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			assertErrContains(t, chainWith(tc.block).Validate(), tc.want)

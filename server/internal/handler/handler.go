@@ -773,6 +773,11 @@ func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (act
 	return "agent", agentID
 }
 
+// ResolveActor exposes the validated actor resolver to fork-owned handlers. // CEREBRO-PATCH(eval-actor-resolver): FIR-3496 prevents forged X-Agent-ID ownership.
+func (h *Handler) ResolveActor(r *http.Request, userID, workspaceID string) (string, string) {
+	return h.resolveActor(r, userID, workspaceID)
+}
+
 func requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	userID := requestUserID(r)
 	if userID == "" {

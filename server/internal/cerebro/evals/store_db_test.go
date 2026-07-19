@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -192,4 +193,197 @@ func TestBlockingEvalsPassedScopesPlanDeliveryAndMonitorIndependently(t *testing
 			t.Fatalf("%s binding with a server-derived passing run should pass: passed=%v err=%v", phase, passed, err)
 		}
 	}
+}
+
+// insertRunAt inserts a run for an eval+issue with an explicit created_at so the
+// "latest" ordering under test is deterministic.
+func insertRunAt(t *testing.T, f evalFixture, evalID uuid.UUID, status string, createdAt time.Time) {
+	t.Helper()
+	if _, err := evalTestPool.Exec(context.Background(), `INSERT INTO cerebro_eval_run
+		(workspace_id, eval_id, eval_version, issue_id, status, results, created_by_id, created_by_type, created_at)
+		SELECT $1, e.id, e.version, $3, $4, '{}'::jsonb, $5, 'member', $6
+		FROM cerebro_eval e WHERE e.workspace_id=$1 AND e.id=$2`,
+		f.workspaceID, evalID, f.issueID, status, f.actorID, createdAt); err != nil {
+		t.Fatalf("insert run: %v", err)
+	}
+}
+
+func TestLatestRunPassed(t *testing.T) {
+	if evalTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	store := NewStore(evalTestPool)
+	base := time.Now().UTC()
+
+	t.Run("newest passed after older failed", func(t *testing.T) {
+		f := seedEvalFixture(t)
+		evalID := seedActiveEval(t, f, "latest-passed", 1)
+		insertRunAt(t, f, evalID, "failed", base.Add(-2*time.Hour))
+		insertRunAt(t, f, evalID, "passed", base.Add(-1*time.Hour))
+		passed, err := store.LatestRunPassed(ctx, f.workspaceID, evalID, f.issueID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !passed {
+			t.Fatal("expected latest run to be passed")
+		}
+	})
+
+	t.Run("newest failed", func(t *testing.T) {
+		f := seedEvalFixture(t)
+		evalID := seedActiveEval(t, f, "latest-failed", 1)
+		insertRunAt(t, f, evalID, "passed", base.Add(-2*time.Hour))
+		insertRunAt(t, f, evalID, "failed", base.Add(-1*time.Hour))
+		passed, err := store.LatestRunPassed(ctx, f.workspaceID, evalID, f.issueID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if passed {
+			t.Fatal("expected latest run to be failed (fail closed)")
+		}
+	})
+
+	t.Run("no runs fails closed", func(t *testing.T) {
+		f := seedEvalFixture(t)
+		evalID := seedActiveEval(t, f, "latest-none", 1)
+		passed, err := store.LatestRunPassed(ctx, f.workspaceID, evalID, f.issueID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if passed {
+			t.Fatal("expected no runs to fail closed")
+		}
+	})
+}
+
+func TestFailingAdvisoryEvals(t *testing.T) {
+	if evalTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	store := NewStore(evalTestPool)
+
+	t.Run("returns advisory bindings with no passing run, excludes blocking and passing", func(t *testing.T) {
+		f := seedEvalFixture(t)
+		// Advisory binding, no run yet → failing (warn on missing evidence).
+		advNoRun := seedActiveEval(t, f, "adv-no-run", 1)
+		if _, err := store.CreateBinding(ctx, f.workspaceID, f.actorID, BindingInput{
+			WorkflowID: f.workflowID, EvalID: advNoRun, Phase: "delivery", Blocking: false,
+		}); err != nil {
+			t.Fatalf("create advisory no-run binding: %v", err)
+		}
+		// Advisory binding whose latest run failed → failing.
+		advFailed := seedActiveEval(t, f, "adv-failed", 1)
+		if _, err := store.CreateBinding(ctx, f.workspaceID, f.actorID, BindingInput{
+			WorkflowID: f.workflowID, EvalID: advFailed, Phase: "delivery", Blocking: false,
+		}); err != nil {
+			t.Fatalf("create advisory failed binding: %v", err)
+		}
+		insertLinkedRunAt(t, f, advFailed, "failed", time.Now().UTC())
+		// Advisory binding whose latest run passed → excluded.
+		advPassed := seedActiveEval(t, f, "adv-passed", 1)
+		if _, err := store.CreateBinding(ctx, f.workspaceID, f.actorID, BindingInput{
+			WorkflowID: f.workflowID, EvalID: advPassed, Phase: "delivery", Blocking: false,
+		}); err != nil {
+			t.Fatalf("create advisory passed binding: %v", err)
+		}
+		insertLinkedRunAt(t, f, advPassed, "passed", time.Now().UTC())
+		// Blocking binding, no run → excluded (advisory query only).
+		blk := seedActiveEval(t, f, "blk", 1)
+		if _, err := store.CreateBinding(ctx, f.workspaceID, f.actorID, BindingInput{
+			WorkflowID: f.workflowID, EvalID: blk, Phase: "delivery", Blocking: true,
+		}); err != nil {
+			t.Fatalf("create blocking binding: %v", err)
+		}
+
+		failing, err := store.FailingAdvisoryEvals(ctx, f.workflowID, f.issueID, "delivery")
+		if err != nil {
+			t.Fatalf("failing advisory evals: %v", err)
+		}
+		keys := map[string]bool{}
+		for _, b := range failing {
+			keys[b.EvalKey] = true
+			if b.Blocking {
+				t.Fatalf("blocking binding leaked into advisory result: %+v", b)
+			}
+		}
+		if !keys["adv-no-run"] || !keys["adv-failed"] {
+			t.Fatalf("expected failing advisory bindings adv-no-run and adv-failed, got %v", keys)
+		}
+		if keys["adv-passed"] || keys["blk"] {
+			t.Fatalf("passing advisory or blocking binding must be excluded, got %v", keys)
+		}
+	})
+
+	t.Run("scopes by phase", func(t *testing.T) {
+		f := seedEvalFixture(t)
+		monitorEval := seedActiveEval(t, f, "adv-monitor", 1)
+		if _, err := store.CreateBinding(ctx, f.workspaceID, f.actorID, BindingInput{
+			WorkflowID: f.workflowID, EvalID: monitorEval, Phase: "monitor", Blocking: false,
+		}); err != nil {
+			t.Fatalf("create monitor advisory binding: %v", err)
+		}
+		delivery, err := store.FailingAdvisoryEvals(ctx, f.workflowID, f.issueID, "delivery")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(delivery) != 0 {
+			t.Fatalf("monitor binding must not surface under the delivery phase, got %d", len(delivery))
+		}
+		monitor, err := store.FailingAdvisoryEvals(ctx, f.workflowID, f.issueID, "monitor")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(monitor) != 1 || monitor[0].EvalKey != "adv-monitor" {
+			t.Fatalf("expected the monitor advisory binding, got %+v", monitor)
+		}
+	})
+}
+
+// insertLinkedRunAt inserts a run for an eval+issue linked to the fixture
+// workflow (FailingAdvisoryEvals joins on workflow_id, unlike insertRunAt).
+func insertLinkedRunAt(t *testing.T, f evalFixture, evalID uuid.UUID, status string, createdAt time.Time) {
+	t.Helper()
+	if _, err := evalTestPool.Exec(context.Background(), `INSERT INTO cerebro_eval_run
+		(workspace_id, eval_id, eval_version, workflow_id, issue_id, status, results, created_by_id, created_by_type, created_at)
+		SELECT $1, e.id, e.version, $3, $4, $5, '{}'::jsonb, $6, 'member', $7
+		FROM cerebro_eval e WHERE e.workspace_id=$1 AND e.id=$2`,
+		f.workspaceID, evalID, f.workflowID, f.issueID, status, f.actorID, createdAt); err != nil {
+		t.Fatalf("insert linked run: %v", err)
+	}
+}
+
+func TestRunForIssue(t *testing.T) {
+	if evalTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	f := seedEvalFixture(t)
+	evalID := seedActiveEval(t, f, "run-for-issue", 1)
+
+	t.Run("executes and persists linked to issue", func(t *testing.T) {
+		store := NewStore(evalTestPool).WithRunExecutor(&fakeRunExecutor{execution: RunExecution{
+			Status:        RunStatusPassed,
+			Results:       json.RawMessage(`{"cases":[{"case_id":"c","passed":true}],"outcome":{"status":"passed","pass_rate":1}}`),
+			TargetVersion: "server-target-v1",
+		}})
+		runID, status, err := store.RunForIssue(ctx, f.workspaceID, f.actorID, evalID, f.issueID, "member")
+		if err != nil {
+			t.Fatalf("run for issue: %v", err)
+		}
+		if status != RunStatusPassed || runID == "" {
+			t.Fatalf("run id=%q status=%q", runID, status)
+		}
+		passed, err := store.LatestRunPassed(ctx, f.workspaceID, evalID, f.issueID)
+		if err != nil || !passed {
+			t.Fatalf("persisted run not readable as passed: passed=%v err=%v", passed, err)
+		}
+	})
+
+	t.Run("fails closed without a runner", func(t *testing.T) {
+		if _, _, err := NewStore(evalTestPool).RunForIssue(ctx, f.workspaceID, f.actorID, evalID, f.issueID, "member"); err == nil {
+			t.Fatal("expected RunForIssue to fail when no runner is wired")
+		}
+	})
 }

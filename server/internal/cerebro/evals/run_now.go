@@ -23,7 +23,7 @@ func (h *Handler) RunNow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "run-now is not enabled")
 		return
 	}
-	actorID, workspaceID, actorType, ok := requestContext(w, r)
+	actorID, workspaceID, actorType, ok := h.requestContext(w, r)
 	if !ok {
 		return
 	}

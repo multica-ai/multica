@@ -9,8 +9,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formFromEval } from "./form";
 import { describeGrader, describeThreshold, nextTransitions, versionsForKey } from "./lifecycle";
 import { RunDetail } from "./run-detail";
+import { EvalScheduleCard } from "./eval-schedule-card";
 import { formatCost, formatDuration } from "../format";
-import type { CerebroEval, EvalBinding, EvalRun, EvalStatus } from "../types";
+import type { CerebroEval, EvalBinding, EvalRun, EvalSchedule, EvalScheduleInput, EvalStatus } from "../types";
 
 export type EvalDetailTab = "overview" | "tasks" | "runs" | "connections" | "settings";
 
@@ -25,6 +26,8 @@ export function EvalDetail({
   item, versions, initialTab = "overview", runs, runsLoading, runsError,
   selectedRunId, selectedRun, onSelectRun, bindings, workflows,
   onEdit, onDuplicate, onStatusChange, statusPending, statusError, onDelete,
+  onRunNow, runPending, runError,
+  schedule, scheduleLoading, schedulePending, scheduleError, onSaveSchedule, onOpenHooks,
   onClose, onOpenVersion, onOpenEvidence,
 }: {
   item: CerebroEval;
@@ -44,6 +47,15 @@ export function EvalDetail({
   statusPending: boolean;
   statusError: boolean;
   onDelete: () => void;
+  onRunNow: () => void;
+  runPending: boolean;
+  runError: boolean;
+  schedule: EvalSchedule | null;
+  scheduleLoading: boolean;
+  schedulePending: boolean;
+  scheduleError: boolean;
+  onSaveSchedule: (input: EvalScheduleInput | null) => void;
+  onOpenHooks: () => void;
   onClose: () => void;
   onOpenVersion: (evalId: string) => void;
   onOpenEvidence?: (artifactId: string) => void;
@@ -70,6 +82,7 @@ export function EvalDetail({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button size="sm" disabled={runPending || item.status !== "active"} onClick={onRunNow}>{runPending ? "Running…" : "Run now"}</Button>
           {transitions.map((t) => (
             <Button key={t.to} size="sm" variant={t.confirm ? "outline" : "default"} disabled={statusPending}
               onClick={() => { if (!t.confirm || confirm(`Retire "${item.title} · ${item.version}"? It will stop being used as a gate.`)) onStatusChange(t.to); }}>
@@ -80,6 +93,7 @@ export function EvalDetail({
         </div>
       </div>
       {statusError && <p className="text-sm text-destructive">Failed to change status.</p>}
+      {runError && <p className="text-sm text-destructive">Failed to run eval. Check that it has tasks, a grader, and an available target.</p>}
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as EvalDetailTab)}>
         <TabsList>
@@ -155,6 +169,7 @@ export function EvalDetail({
         </TabsContent>
 
         <TabsContent value="settings" className="mt-4 flex flex-col gap-4">
+          <EvalScheduleCard schedule={schedule} loading={scheduleLoading} pending={schedulePending} error={scheduleError} onSave={onSaveSchedule} onOpenHooks={onOpenHooks} />
           <div className="flex flex-col gap-2 rounded-md border p-3">
             <h3 className="text-xs font-semibold">Lifecycle</h3>
             <p className="text-[11px] text-muted-foreground">A draft is activated when it is ready to gate work; pause it to take it out of use without losing it; retire it when the version is done.</p>

@@ -129,6 +129,7 @@ export interface LoopChainBlock {
   approver_type?: LoopAssigneeType;
   approver_id?: string;
   eval_key?: string;
+  eval_phase?: "plan" | "delivery" | "monitor";
 }
 
 export interface LoopPhaseLimits {

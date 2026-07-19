@@ -100,17 +100,19 @@ type RunExecutor interface {
 }
 
 type Binding struct {
-	ID          uuid.UUID `json:"id"`
-	WorkspaceID uuid.UUID `json:"workspace_id"`
-	WorkflowID  uuid.UUID `json:"workflow_id"`
-	EvalID      uuid.UUID `json:"eval_id"`
-	Phase       string    `json:"phase"`
-	Blocking    bool      `json:"blocking"`
-	CreatedByID uuid.UUID `json:"created_by_id"`
-	CreatedAt   time.Time `json:"created_at"`
-	EvalKey     string    `json:"eval_key"`
-	EvalVersion string    `json:"eval_version"`
-	EvalTitle   string    `json:"eval_title"`
+	ID              uuid.UUID  `json:"id"`
+	WorkspaceID     uuid.UUID  `json:"workspace_id"`
+	WorkflowID      uuid.UUID  `json:"workflow_id"`
+	EvalID          uuid.UUID  `json:"eval_id"`
+	Phase           string     `json:"phase"`
+	Blocking        bool       `json:"blocking"`
+	CreatedByID     uuid.UUID  `json:"created_by_id"`
+	CreatedAt       time.Time  `json:"created_at"`
+	EvalKey         string     `json:"eval_key"`
+	EvalVersion     string     `json:"eval_version"`
+	EvalTitle       string     `json:"eval_title"`
+	LatestRunID     *uuid.UUID `json:"latest_run_id,omitempty"`
+	LatestRunStatus string     `json:"latest_run_status,omitempty"`
 }
 
 type BindingInput struct {
