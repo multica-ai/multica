@@ -12,7 +12,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -99,6 +101,7 @@ func TestToolExecutorInvoker_ListIssues_RealDB(t *testing.T) {
 		agentID, runtimeAccountTestWSID,
 		pgtype.UUID{},            // userID: zero = agent authorship
 		runtimeAccountTestUserID, // cascadeUserID drives the cascade check
+		pgtype.UUID{},            // taskID: not task-scoped
 		"list_issues",
 		map[string]any{},
 	)
@@ -135,6 +138,7 @@ func TestToolExecutorInvoker_ToolNotGranted_ReturnsErrToolNotPermitted(t *testin
 		agentID, runtimeAccountTestWSID,
 		pgtype.UUID{},
 		runtimeAccountTestUserID,
+		pgtype.UUID{},
 		"list_issues",
 		map[string]any{},
 	)
@@ -143,5 +147,79 @@ func TestToolExecutorInvoker_ToolNotGranted_ReturnsErrToolNotPermitted(t *testin
 	}
 	if !errors.Is(err, handler.ErrToolNotPermitted) {
 		t.Fatalf("expected ErrToolNotPermitted, got: %v", err)
+	}
+}
+
+func TestToolExecutorInvoker_OpenLoopStepUsesTaskScopedCapabilityWithoutGrant(t *testing.T) {
+	if runtimeAccountTestPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	pool := runtimeAccountTestPool
+	agentID := createInvokerTestAgent(t, "larry-open-loop-step")
+	var issueID, workflowID, taskID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id)
+		VALUES ($1, 'Open loop step', 'member', $2) RETURNING id
+	`, runtimeAccountTestWSID, runtimeAccountTestUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO cerebro_workflow (
+			workspace_id, name, trigger_type, trigger_config, conditions,
+			action_type, action_config, created_by_id, created_by_type
+		) VALUES ($1, 'Open loop step', 'status_changed', '{}', '[]', 'set_status', '{}', $2, 'member')
+		RETURNING id
+	`, runtimeAccountTestWSID, runtimeAccountTestUserID).Scan(&workflowID); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	store := cerebroloops.NewStore(pool)
+	limits := cerebroloops.PhaseLimits{MaxSteps: 3, MaxRounds: 1, NoProgressStalls: 1}
+	current := cerebroloops.StepRef{
+		PhaseRunKey: cerebroloops.PhaseRunKey{IssueID: issueID, WorkflowID: workflowID, PhaseID: "build"},
+		BlockID:     "build", Number: 1,
+	}
+	if _, _, err := store.OpenStep(ctx, current, limits); err != nil {
+		t.Fatalf("open current step: %v", err)
+	}
+	taskContext, _ := json.Marshal(map[string]any{
+		"type": "workflow_block",
+		"loop_step": map[string]any{
+			"workflow_id": util.UUIDToString(workflowID), "phase_id": "build", "block_id": "build", "step_number": 1,
+			"steps": cerebroloops.StepsConfig{Allowed: true, Max: 2}, "phase_limits": limits,
+		},
+	})
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
+		VALUES ($1, $2, $3, 'queued', 0, $4) RETURNING id
+	`, agentID, runtimeAccountTestRuntimeID, issueID, taskContext).Scan(&taskID); err != nil {
+		t.Fatalf("create workflow task: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		pool.Exec(context.Background(), `DELETE FROM cerebro_workflow WHERE id = $1`, workflowID)
+		pool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	invoker := &ToolExecutorInvoker{
+		Queries: db.New(pool), CerebroQueries: cerebrodb.New(pool), Pool: pool, LoopStore: store,
+	}
+	if _, err := invoker.Invoke(ctx, agentID, runtimeAccountTestWSID, pgtype.UUID{}, runtimeAccountTestUserID, pgtype.UUID{}, "open_loop_step", map[string]any{}); !errors.Is(err, handler.ErrToolNotPermitted) {
+		t.Fatalf("open_loop_step without its task capability was not denied: %v", err)
+	}
+	result, err := invoker.Invoke(ctx, agentID, runtimeAccountTestWSID, pgtype.UUID{}, runtimeAccountTestUserID, taskID, "open_loop_step", map[string]any{})
+	if err != nil {
+		t.Fatalf("invoke task-scoped open_loop_step: %v", err)
+	}
+	var opened map[string]any
+	if err := json.Unmarshal([]byte(result), &opened); err != nil {
+		t.Fatalf("decode open result: %v", err)
+	}
+	if opened["step_number"] != float64(2) {
+		t.Fatalf("opened result = %v", opened)
+	}
+	steps, err := store.ListSteps(ctx, current.PhaseRunKey)
+	if err != nil || len(steps) != 2 || steps[1].Number != 2 {
+		t.Fatalf("durable opened steps = %+v err=%v", steps, err)
 	}
 }

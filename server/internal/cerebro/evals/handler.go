@@ -16,18 +16,17 @@ import (
 )
 
 type Handler struct {
-	store *Store
-	// executor is the real-run engine behind the default-OFF "Run now" flag
-	// (FIR-3496). Nil keeps POST /{id}/run disabled; see run_now.go.
-	executor RunExecutor
-	// resolver builds a per-request executor from the eval's workspace so the
-	// runner uses that workspace's own Firtal Gateway credentials instead of a
-	// duplicate server env var (FIR-3496). Preferred over executor when set; see
-	// run_now.go.
-	resolver ExecutorResolver
+	store         *Store
+	runNowEnabled bool
 }
 
 func NewHandler(pool *pgxpool.Pool) *Handler { return &Handler{store: NewStore(pool)} }
+
+func (h *Handler) WithRunExecutor(executor RunExecutor) *Handler {
+	h.store.WithRunExecutor(executor)
+	h.runNowEnabled = executor != nil
+	return h
+}
 
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()

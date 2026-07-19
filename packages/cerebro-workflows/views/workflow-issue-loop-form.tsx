@@ -1,19 +1,9 @@
 "use client";
 
-// FIR-2283 — "Issue workflow" design surface. Built with the exact same
-// primitives workflow-form.tsx already uses (Section/Field fieldset-legend
-// pattern, Switch, NativeSelect, Input, Textarea, Button, PageHeader) so it
-// sits inside the existing Workflows page as a workflow TYPE, not a
-// separately-styled surface. Structured as the flow itself:
-// Plan -> Build -> Delivery gate -> Done, plus a control strip for watching
-// a compiled recipe run on a specific issue.
-
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { runtimeModelsOptions } from "@multica/core/runtimes";
-import { agentListOptions } from "@multica/core/workspace/queries";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { useNavigation } from "@multica/views/navigation";
 import { Button } from "@multica/ui/components/ui/button";
@@ -24,14 +14,11 @@ import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { AgentPicker } from "@multica/views/autopilots/components/pickers/agent-picker";
 import { AssigneePicker } from "@multica/views/issues/components";
-import { ModelPicker } from "@multica/views/agents/components/inspector/model-picker";
-import { ThinkingPicker } from "@multica/views/agents/components/inspector/thinking-picker";
-import { Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 
 import { SkillNamePicker } from "./loop-pickers";
-
+import { MachineControlNotice } from "./workflow-issue-loop-chain";
 import {
-  DEFAULT_LOOP_CAPS,
   cerebroWorkflowDetailOptions,
   cerebroWorkflowsKeys,
   createWorkflow,
@@ -39,281 +26,75 @@ import {
 } from "../core";
 import type {
   CerebroWorkflow,
-  LoopAssigneeType,
-  LoopCheckType,
-  LoopSpec,
-  LoopVerification,
+  LoopBusyPolicy,
+  LoopChainBlock,
+  LoopChainPhase,
+  LoopChainSpec,
+  LoopBlockType,
   WorkflowWriteInput,
 } from "../core/types";
 
-// FIR-2283 v2 point 6 — the editor no longer exposes the wire's three-way
-// "Confirmed by" (command / AI review / person). A condition is now either
-// "A command" or "A review", and WHO is assigned to the review decides the
-// rest: an agent assignee compiles to a wire "judge" check, a person to a
-// "human" check. So the UI kind is 2-way; the wire type is still 3-way and
-// derived at serialization time (wireTypeForRow).
-type RowKind = "programmatic" | "review";
-
-const ROW_KIND_OPTIONS: ReadonlyArray<{ value: RowKind; label: string }> = [
-  { value: "programmatic", label: "A command" },
-  { value: "review", label: "A review" },
+const BLOCK_OPTIONS: ReadonlyArray<{ value: LoopBlockType; label: string; hint: string }> = [
+  { value: "session", label: "Session", hint: "Run a skill on the issue" },
+  { value: "command", label: "Command", hint: "Run a machine-controlled check" },
+  { value: "review", label: "Review", hint: "Ask an agent to review the work" },
+  { value: "human", label: "Human approval", hint: "Wait for a person or agent to approve" },
+  { value: "eval", label: "Eval", hint: "Require a server-scored eval to pass" },
 ];
 
-interface VerificationRow {
-  key: string; // React key + the verification id sent to the server
-  label: string;
-  kind: RowKind;
-  command: string; // space-separated argv, edited under "Advanced"
-  // The review instruction — what the reviewer should check. Maps to the
-  // wire's `rubric` for an agent review and `prompt` for a person.
-  prompt: string;
-  // Optional skill an AGENT review runs instead of judging from the prompt.
-  // Ignored for a person review (people don't run skills).
-  skill: string;
-  assigneeType: LoopAssigneeType;
-  assigneeId: string;
-  model: string;
-  thinkingLevel: string;
+const BUSY_OPTIONS: ReadonlyArray<{ value: LoopBusyPolicy; label: string }> = [
+  { value: "wait", label: "Wait for an agent" },
+  { value: "pause", label: "Pause the run" },
+  { value: "wakeup", label: "Schedule a wakeup" },
+  { value: "ping_member", label: "Notify a person" },
+];
+
+function key(prefix: string) {
+  return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function newRow(): VerificationRow {
+function newBlock(type: LoopBlockType = "session"): LoopChainBlock {
+  const id = key(type);
+  const block: LoopChainBlock = { id, type, name: BLOCK_OPTIONS.find((item) => item.value === type)?.label };
+  if (type === "session" || type === "review") {
+    block.agents = [];
+    block.on_all_busy = "wait";
+  }
+  if (type === "command") block.expect = "exit_zero";
+  return block;
+}
+
+function newPhase(index = 0): LoopChainPhase {
   return {
-    key: `check-${Math.random().toString(36).slice(2, 10)}`,
-    label: "",
-    kind: "programmatic",
-    command: "",
-    prompt: "",
-    skill: "",
-    assigneeType: "agent",
-    assigneeId: "",
-    model: "",
-    thinkingLevel: "",
+    id: key("phase"),
+    name: `Phase ${index + 1}`,
+    blocks: [newBlock()],
+    limits: { max_steps: 8, max_rounds: 3, no_progress_stalls: 2, max_wait_seconds: 600 },
   };
 }
 
-// A build phase in the editor (FIR-2283 followup point 6): its own build
-// skill/agent, an optional prompt, and its own delivery gate (verification).
-interface PhaseRow {
-  key: string;
-  name: string;
-  buildSkill: string;
-  buildAgentId: string;
-  model: string;
-  thinkingLevel: string;
-  goal: string;
-  verification: VerificationRow[];
+function newChain(): LoopChainSpec {
+  return { version: 2, phases: [newPhase()], done_status: "done" };
 }
 
-function newPhase(seed?: Partial<PhaseRow>): PhaseRow {
-  return {
-    key: `phase-${Math.random().toString(36).slice(2, 10)}`,
-    name: "",
-    buildSkill: "",
-    buildAgentId: "",
-    model: "",
-    thinkingLevel: "",
-    goal: "",
-    verification: [newRow()],
-    ...seed,
-  };
+function isChainSpec(spec: CerebroWorkflow["loop_spec"]): spec is LoopChainSpec {
+  return spec?.version === 2 && Array.isArray((spec as LoopChainSpec).phases);
 }
 
-// The wire's LoopCheckType, derived from the UI kind + who is assigned.
-function wireTypeForRow(row: VerificationRow): LoopCheckType {
-  if (row.kind === "programmatic") return "programmatic";
-  return row.assigneeType === "member" ? "human" : "judge";
-}
-
-interface LoopFormState {
+interface FormState {
   name: string;
   enabled: boolean;
-  // FIR-2283 v2 point 4 — one skill-taggable prompt replaces Goal +
-  // Definition of done. Stored on the wire as `goal`.
-  goal: string;
-  planning: boolean;
-  planAgentId: string;
-  planSkill: string;
-  planModel: string;
-  planThinking: string;
-  buildAgentId: string;
-  buildSkill: string;
-  buildModel: string;
-  buildThinking: string;
-  maxAttempts: string;
-  noProgressStalls: string;
-  verification: VerificationRow[];
-  // Gates on the Plan step (FIR-2283 v2 point 6) — only shown/sent when
-  // planning is true. Empty means no plan gate: the agent advances Plan ->
-  // Build on its own judgment, same as before this feature existed.
-  planGate: VerificationRow[];
-  // Build phases (FIR-2283 followup point 6). Empty = single-phase loop (the
-  // buildSkill/buildAgentId/verification fields above drive it). Non-empty =
-  // the build is split into these ordered phases, each with its own gate.
-  phases: PhaseRow[];
+  chain: LoopChainSpec;
+  legacy: boolean;
 }
 
-const EMPTY_LOOP_FORM: LoopFormState = {
-  name: "",
-  enabled: true,
-  goal: "",
-  planning: false,
-  planAgentId: "",
-  planSkill: "",
-  planModel: "",
-  planThinking: "",
-  buildAgentId: "",
-  buildSkill: "",
-  buildModel: "",
-  buildThinking: "",
-  maxAttempts: String(DEFAULT_LOOP_CAPS.max_iterations),
-  noProgressStalls: String(DEFAULT_LOOP_CAPS.no_progress_stalls),
-  verification: [newRow()],
-  planGate: [],
-  phases: [],
-};
-
-// rowsFromVerification/verificationFromRows convert between the wire shape
-// (LoopVerification[]) and the editable form rows — shared by the Delivery
-// gate (verification) and the Plan gate (plan_gate), which use the exact
-// same per-condition shape.
-function rowsFromVerification(list: LoopVerification[]): VerificationRow[] {
-  return list.map((v) => ({
-    key: v.id,
-    label: v.label ?? "",
-    kind: v.type === "programmatic" ? "programmatic" : "review",
-    command: (v.check ?? []).join(" "),
-    // Both wire review types collapse into one editable instruction: a
-    // judge stores it as `rubric`, a person as `prompt`.
-    prompt: v.rubric ?? v.prompt ?? "",
-    skill: v.skill ?? "",
-    // Default an old judge check (no explicit assignee_type) to an agent,
-    // an old human check to a person.
-    assigneeType: v.assignee_type ?? (v.type === "human" ? "member" : "agent"),
-    assigneeId: v.assignee_id ?? "",
-    model: v.model ?? "",
-    thinkingLevel: v.thinking_level ?? "",
-  }));
-}
-
-function verificationFromRows(rows: VerificationRow[]): LoopVerification[] {
-  return rows.map((row, i) => {
-    const wireType = wireTypeForRow(row);
-    const base: LoopVerification = {
-      id: row.key || `check-${i}`,
-      type: wireType,
-      label: row.label || undefined,
-    };
-    if (wireType === "programmatic") {
-      base.check = row.command.trim().split(/\s+/).filter(Boolean);
-      base.expect = "exit_zero";
-    } else if (wireType === "human") {
-      base.assignee_type = "member";
-      base.assignee_id = row.assigneeId;
-      base.prompt = row.prompt;
-    } else {
-      // judge — an agent review. Runs a skill if one is chosen, otherwise
-      // judges from the free-text instruction.
-      base.assignee_type = "agent";
-      base.assignee_id = row.assigneeId;
-      base.model = row.model || undefined;
-      base.thinking_level = row.thinkingLevel || undefined;
-      if (row.skill) base.skill = row.skill;
-      base.rubric = row.prompt || row.label || row.skill;
-    }
-    return base;
-  });
-}
-
-function formStateFromWorkflow(wf: CerebroWorkflow): LoopFormState {
-  const spec = wf.loop_spec;
-  if (!spec) return { ...EMPTY_LOOP_FORM, name: wf.name, enabled: wf.enabled };
+export function formFromWorkflow(workflow: CerebroWorkflow): FormState {
   return {
-    name: wf.name,
-    enabled: wf.enabled,
-    // Fold any legacy definition_of_done into the single prompt so old
-    // recipes still show their full instruction after the point-4 collapse.
-    goal: [spec.goal, spec.definition_of_done].filter(Boolean).join("\n\n"),
-    planning: spec.planning === true,
-    planAgentId: spec.plan_agent_id ?? "",
-    planSkill: spec.plan_skill ?? "",
-    planModel: spec.plan_model ?? "",
-    planThinking: spec.plan_thinking ?? "",
-    buildAgentId: spec.build_agent_id ?? "",
-    buildSkill: spec.build_skill ?? "",
-    buildModel: spec.build_model ?? "",
-    buildThinking: spec.build_thinking ?? "",
-    maxAttempts: String(spec.caps?.max_iterations ?? DEFAULT_LOOP_CAPS.max_iterations),
-    noProgressStalls: String(
-      spec.caps?.no_progress_stalls ?? DEFAULT_LOOP_CAPS.no_progress_stalls,
-    ),
-    verification:
-      spec.verification.length > 0 ? rowsFromVerification(spec.verification) : [newRow()],
-    planGate: spec.plan_gate && spec.plan_gate.length > 0 ? rowsFromVerification(spec.plan_gate) : [],
-    phases:
-      spec.phases && spec.phases.length > 0
-        ? spec.phases.map((p) =>
-            newPhase({
-              name: p.name ?? "",
-              buildSkill: p.build_skill ?? "",
-              buildAgentId: p.build_agent_id ?? "",
-              model: p.model ?? "",
-              thinkingLevel: p.thinking_level ?? "",
-              goal: p.goal ?? "",
-              verification:
-                p.verification.length > 0 ? rowsFromVerification(p.verification) : [newRow()],
-            }),
-          )
-        : [],
+    name: workflow.name,
+    enabled: workflow.enabled,
+    chain: isChainSpec(workflow.loop_spec) ? workflow.loop_spec : newChain(),
+    legacy: Boolean(workflow.loop_spec && !isChainSpec(workflow.loop_spec)),
   };
-}
-
-function buildLoopSpec(form: LoopFormState): LoopSpec {
-  const attempts = Math.max(1, Number.parseInt(form.maxAttempts, 10) || DEFAULT_LOOP_CAPS.max_iterations);
-  const stalls = Math.max(
-    1,
-    Number.parseInt(form.noProgressStalls, 10) || DEFAULT_LOOP_CAPS.no_progress_stalls,
-  );
-
-  const multiPhase = form.phases.length > 0;
-  const spec: LoopSpec = {
-    version: 1,
-    // Point 4 — the single prompt is stored as `goal`; definition_of_done is
-    // no longer authored (left unset on the wire).
-    goal: form.goal,
-    // In multi-phase mode each phase carries its own gate; the top-level
-    // verification is unused (the backend ignores it when phases is set).
-    verification: multiPhase ? [] : verificationFromRows(form.verification),
-    caps: {
-      max_iterations: attempts,
-      max_revisions: attempts,
-      no_progress_stalls: stalls,
-    },
-    planning: form.planning,
-    plan_agent_id: form.planning ? form.planAgentId || undefined : undefined,
-    plan_skill: form.planning ? form.planSkill || form.buildSkill : undefined,
-    plan_model: form.planning ? form.planModel || undefined : undefined,
-    plan_thinking: form.planning ? form.planThinking || undefined : undefined,
-    plan_gate:
-      form.planning && form.planGate.length > 0 ? verificationFromRows(form.planGate) : undefined,
-    // In multi-phase mode phase 0 drives the loop; keep build_skill pointing at
-    // it so a downgrade to single-phase still has a skill to fall back on.
-    build_agent_id: multiPhase ? (form.phases[0]?.buildAgentId ?? "") : form.buildAgentId,
-    build_skill: multiPhase ? (form.phases[0]?.buildSkill ?? "") : form.buildSkill,
-    build_model: multiPhase ? (form.phases[0]?.model || undefined) : form.buildModel || undefined,
-    build_thinking: multiPhase ? (form.phases[0]?.thinkingLevel || undefined) : form.buildThinking || undefined,
-  };
-  if (multiPhase) {
-    spec.phases = form.phases.map((p) => ({
-      name: p.name || undefined,
-      build_skill: p.buildSkill,
-      build_agent_id: p.buildAgentId || undefined,
-      model: p.model || undefined,
-      thinking_level: p.thinkingLevel || undefined,
-      goal: p.goal || undefined,
-      verification: verificationFromRows(p.verification),
-    }));
-  }
-  return spec;
 }
 
 interface Props {
@@ -323,23 +104,19 @@ interface Props {
 
 export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
   const featureEnabled = useFeatureFlag("cerebro_workflows");
-  const stepModelOverrideEnabled = useFeatureFlag("cerebro_workflow_step_model_override");
   const workspace = useCurrentWorkspace();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
   const wsId = workspace?.id ?? "";
-
   const detail = useQuery({
     ...cerebroWorkflowDetailOptions(wsId, workflowId ?? ""),
-    enabled: !!workflowId && !!wsId,
+    enabled: Boolean(workflowId && wsId),
   });
-
-  const [form, setForm] = useState<LoopFormState>(EMPTY_LOOP_FORM);
+  const [form, setForm] = useState<FormState>({ name: "", enabled: true, chain: newChain(), legacy: false });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!detail.data) return;
-    setForm(formStateFromWorkflow(detail.data));
+    if (detail.data) setForm(formFromWorkflow(detail.data));
   }, [detail.data]);
 
   const save = useMutation({
@@ -348,772 +125,251 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
         name: form.name,
         enabled: form.enabled,
         workflow_type: "issue_loop",
-        loop_spec: buildLoopSpec(form),
+        loop_spec: form.chain,
       };
-      if (workflowId) return updateWorkflow(workflowId, payload);
-      return createWorkflow(payload);
+      return workflowId ? updateWorkflow(workflowId, payload) : createWorkflow(payload);
     },
-    onSuccess: (wf) => {
+    onSuccess: (workflow) => {
       queryClient.invalidateQueries({ queryKey: cerebroWorkflowsKeys.all(wsId) });
-      if (workspace && !workflowId) navigation.push(`/${workspace.slug}/workflows/${wf.id}`);
+      if (workspace && !workflowId) navigation.push(`/${workspace.slug}/workflows/${workflow.id}`);
     },
-    onError: (err: unknown) => {
-      setError(err instanceof Error ? err.message : "Could not save the Issue workflow");
+    onError: (reason: unknown) => {
+      setError(reason instanceof Error ? reason.message : "Could not save the Issue workflow");
     },
   });
 
   if (!featureEnabled) return null;
   if (!workspace) {
+    return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading workspace…</div>;
+  }
+
+  if (form.legacy) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading workspace…
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="max-w-lg rounded-lg border border-warning/40 bg-warning/10 p-5 text-sm">
+          <h2 className="font-semibold text-foreground">This workflow needs migration</h2>
+          <p className="mt-2 text-muted-foreground">
+            This workflow still uses the retired recipe format. It cannot be edited until the block-chain migration has run,
+            preventing the existing recipe from being overwritten.
+          </p>
+        </div>
       </div>
     );
   }
 
-  // Shared row editing for both gate lists (Delivery gate = "verification",
-  // Plan gate = "planGate") — same VerificationRow shape, same operations.
-  const rowOps = (field: "verification" | "planGate") => ({
-    set: (key: string, patch: Partial<VerificationRow>) =>
-      setForm((f) => ({
-        ...f,
-        [field]: f[field].map((r) => (r.key === key ? { ...r, ...patch } : r)),
-      })),
-    add: () => setForm((f) => ({ ...f, [field]: [...f[field], newRow()] })),
-    remove: (key: string) =>
-      setForm((f) => ({ ...f, [field]: f[field].filter((r) => r.key !== key) })),
-  });
-  const verificationOps = rowOps("verification");
-  const planGateOps = rowOps("planGate");
-  const setRow = verificationOps.set;
-
-  // Build phases (FIR-2283 followup point 6). usePhases is derived from the
-  // presence of phases; the toggle seeds the first phase from the single-build
-  // fields (so nothing is lost switching modes) and clearing them returns to a
-  // single-phase loop.
-  const usePhases = form.phases.length > 0;
-  const phaseOps = {
-    toggle: (on: boolean) =>
-      setForm((f) => {
-        if (on && f.phases.length === 0) {
-          return {
-            ...f,
-            phases: [
-              newPhase({
-                name: "Phase 1",
-                buildSkill: f.buildSkill,
-                buildAgentId: f.buildAgentId,
-                model: f.buildModel,
-                thinkingLevel: f.buildThinking,
-                goal: f.goal,
-                verification: f.verification.length > 0 ? f.verification : [newRow()],
-              }),
-            ],
-          };
-        }
-        if (!on) return { ...f, phases: [] };
-        return f;
-      }),
-    add: () =>
-      setForm((f) => ({
-        ...f,
-        phases: [...f.phases, newPhase({ name: `Phase ${f.phases.length + 1}` })],
-      })),
-    remove: (key: string) =>
-      setForm((f) => ({ ...f, phases: f.phases.filter((p) => p.key !== key) })),
-    set: (key: string, patch: Partial<PhaseRow>) =>
-      setForm((f) => ({
-        ...f,
-        phases: f.phases.map((p) => (p.key === key ? { ...p, ...patch } : p)),
-      })),
-    setVerification: (
-      phaseKey: string,
-      updater: (rows: VerificationRow[]) => VerificationRow[],
-    ) =>
-      setForm((f) => ({
-        ...f,
-        phases: f.phases.map((p) =>
-          p.key === phaseKey ? { ...p, verification: updater(p.verification) } : p,
-        ),
-      })),
-  };
+  const setChain = (updater: (chain: LoopChainSpec) => LoopChainSpec) =>
+    setForm((current) => ({ ...current, chain: updater(current.chain) }));
+  const setPhase = (phaseId: string, updater: (phase: LoopChainPhase) => LoopChainPhase) =>
+    setChain((chain) => ({ ...chain, phases: chain.phases.map((phase) => phase.id === phaseId ? updater(phase) : phase) }));
 
   const body = (
-    <div className="flex-1 min-h-0 overflow-y-auto">
-      <form
-        className="mx-auto flex max-w-2xl flex-col gap-6 p-6"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setError(null);
-          save.mutate();
-        }}
-      >
-        <Section title="Basics">
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <form className="mx-auto flex max-w-3xl flex-col gap-5 p-6" onSubmit={(event) => {
+        event.preventDefault();
+        setError(null);
+        save.mutate();
+      }}>
+        <Section title="Workflow">
           <Field label="Name">
-            <Input
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              required
-              placeholder='E.g. "Ship a small feature end-to-end"'
-            />
+            <Input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="E.g. Ship a feature end-to-end" />
           </Field>
-        </Section>
-
-        {/* FIR-2283 followup point 4 — the loop controls (Loop on/off, Watch,
-            Activate on this issue, live loop state) moved OUT of this editor
-            form. They now live on the run-history page, reached from its
-            three-dot menu (WorkflowLoopControls). They made no sense inline
-            here next to the recipe fields. */}
-
-        <Section title="Plan">
-          <Field label="Planning mode">
-            <Switch
-              checked={form.planning}
-              onCheckedChange={(v) => setForm({ ...form, planning: v === true })}
-              data-testid="issue-loop-planning-mode"
-            />
-          </Field>
-          <p className="text-[11px] text-muted-foreground">
-            When enabled, the agent must produce and post a plan before Build starts.
-          </p>
-          {form.planning && (
-            <>
-              <Field label="Plan agent">
-                <AgentPicker
-                  agentId={form.planAgentId || null}
-                  onChange={(id) => setForm({ ...form, planAgentId: id })}
-                />
-              </Field>
-              {stepModelOverrideEnabled && (
-                <StepModelControls
-                  wsId={wsId}
-                  agentId={form.planAgentId || form.buildAgentId}
-                  model={form.planModel}
-                  thinkingLevel={form.planThinking}
-                  onChange={(patch) =>
-                    setForm({
-                      ...form,
-                      planModel: patch.model ?? form.planModel,
-                      planThinking: patch.thinkingLevel ?? form.planThinking,
-                    })
-                  }
-                />
-              )}
-              <Field label="Plan skill (defaults to the build skill below)">
-                <SkillNamePicker
-                  value={form.planSkill}
-                  onChange={(name) => setForm({ ...form, planSkill: name })}
-                  placeholder="Same as the build skill"
-                />
-              </Field>
-
-              <div className="flex flex-col gap-2 border-t pt-3">
-                <p className="text-[11px] text-muted-foreground">
-                  Optional — Build only starts when… (e.g. an adversarial AI review of the
-                  plan). Leave empty to let the agent move to Build on its own judgment.
-                </p>
-                {form.planGate.length > 0 && (
-                  <div className="flex flex-col gap-4">
-                    {form.planGate.map((row, i) => (
-                      <VerificationRowEditor
-                        key={row.key}
-                        row={row}
-                        index={i}
-                        canRemove
-                        wsId={wsId}
-                        modelControlsEnabled={stepModelOverrideEnabled}
-                        onChange={(patch) => planGateOps.set(row.key, patch)}
-                        onRemove={() => planGateOps.remove(row.key)}
-                      />
-                    ))}
-                  </div>
-                )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="self-start"
-                  onClick={planGateOps.add}
-                >
-                  <Plus className="size-4" />
-                  Add plan gate
-                </Button>
-              </div>
-            </>
-          )}
-        </Section>
-
-        <Section title="Build">
-          {/* FIR-2283 followup point 6 — split the build into phases. */}
-          <Field label="Split the build into phases">
-            <Switch
-              checked={usePhases}
-              onCheckedChange={(v) => phaseOps.toggle(v === true)}
-              data-testid="issue-loop-build-phases"
-            />
-          </Field>
-          <p className="text-[11px] text-muted-foreground">
-            Off = one build then one review. On = an ordered chain of build phases,
-            each with its own review that must pass before the next phase starts.
-          </p>
-          {!usePhases && (
-            <>
-              <Field label="Worker skill">
-                <SkillNamePicker
-                  value={form.buildSkill}
-                  onChange={(name) => setForm({ ...form, buildSkill: name })}
-                  placeholder="Select the skill the worker runs"
-                />
-              </Field>
-              <Field label="Agent (must have the skill attached)">
-                <AgentPicker
-                  agentId={form.buildAgentId || null}
-                  onChange={(id) => setForm({ ...form, buildAgentId: id })}
-                />
-              </Field>
-              {stepModelOverrideEnabled && (
-                <StepModelControls
-                  wsId={wsId}
-                  agentId={form.buildAgentId}
-                  model={form.buildModel}
-                  thinkingLevel={form.buildThinking}
-                  onChange={(patch) =>
-                    setForm({
-                      ...form,
-                      buildModel: patch.model ?? form.buildModel,
-                      buildThinking: patch.thinkingLevel ?? form.buildThinking,
-                    })
-                  }
-                />
-              )}
-              <Field label="Prompt">
-                <Textarea
-                  value={form.goal}
-                  onChange={(e) => setForm({ ...form, goal: e.target.value })}
-                  rows={4}
-                  placeholder="Describe how the agent should work. Tag a skill with @, or use the picker below."
-                  data-testid="issue-loop-prompt"
-                />
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">Tag a skill:</span>
-                  <SkillNamePicker
-                    value=""
-                    onChange={(name) => {
-                      if (!name) return;
-                      setForm((f) => ({
-                        ...f,
-                        goal: f.goal.trim() ? `${f.goal.trimEnd()} @${name} ` : `@${name} `,
-                      }));
-                    }}
-                    placeholder="Add a skill…"
-                  />
-                </div>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Replaces the old Goal / Definition of done. The recipe describes HOW
-                  to work — &quot;done&quot; is decided by the gates below, not a fixed text.
-                </p>
-              </Field>
-            </>
-          )}
-        </Section>
-
-        {usePhases && (
-          <Section title="Build phases">
-            <p className="text-[11px] text-muted-foreground">
-              Each phase runs its own build, then its own review. The next phase only
-              starts once the current phase&apos;s review passes.
-            </p>
-            {form.phases.map((phase, pi) => (
-              <div key={phase.key} className="flex flex-col gap-3 rounded-md border p-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-muted-foreground">
-                    Phase {pi + 1}
-                  </span>
-                  {form.phases.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label="Remove phase"
-                      onClick={() => phaseOps.remove(phase.key)}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  )}
-                </div>
-                <Field label="Name">
-                  <Input
-                    value={phase.name}
-                    onChange={(e) => phaseOps.set(phase.key, { name: e.target.value })}
-                    placeholder='E.g. "Backend"'
-                  />
-                </Field>
-                <Field label="Worker skill">
-                  <SkillNamePicker
-                    value={phase.buildSkill}
-                    onChange={(name) => phaseOps.set(phase.key, { buildSkill: name })}
-                    placeholder="Select the skill this phase runs"
-                  />
-                </Field>
-                <Field label="Agent (must have the skill attached)">
-                  <AgentPicker
-                    agentId={phase.buildAgentId || null}
-                    onChange={(id) => phaseOps.set(phase.key, { buildAgentId: id })}
-                  />
-                </Field>
-                {stepModelOverrideEnabled && (
-                  <StepModelControls
-                    wsId={wsId}
-                    agentId={phase.buildAgentId || form.buildAgentId}
-                    model={phase.model}
-                    thinkingLevel={phase.thinkingLevel}
-                    onChange={(patch) =>
-                      phaseOps.set(phase.key, {
-                        model: patch.model ?? phase.model,
-                        thinkingLevel: patch.thinkingLevel ?? phase.thinkingLevel,
-                      })
-                    }
-                  />
-                )}
-                <Field label="Prompt">
-                  <Textarea
-                    value={phase.goal}
-                    onChange={(e) => phaseOps.set(phase.key, { goal: e.target.value })}
-                    rows={3}
-                    placeholder="Describe how the agent should work in this phase."
-                  />
-                </Field>
-                <div className="flex flex-col gap-2 border-t pt-3">
-                  <p className="text-[11px] text-muted-foreground">This phase is done when…</p>
-                  <div className="flex flex-col gap-4">
-                    {phase.verification.map((row, i) => (
-                      <VerificationRowEditor
-                        key={row.key}
-                        row={row}
-                        index={i}
-                        canRemove={phase.verification.length > 1}
-                        wsId={wsId}
-                        modelControlsEnabled={stepModelOverrideEnabled}
-                        onChange={(patch) =>
-                          phaseOps.setVerification(phase.key, (rows) =>
-                            rows.map((r) => (r.key === row.key ? { ...r, ...patch } : r)),
-                          )
-                        }
-                        onRemove={() =>
-                          phaseOps.setVerification(phase.key, (rows) =>
-                            rows.filter((r) => r.key !== row.key),
-                          )
-                        }
-                      />
-                    ))}
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="self-start"
-                    onClick={() =>
-                      phaseOps.setVerification(phase.key, (rows) => [...rows, newRow()])
-                    }
-                  >
-                    <Plus className="size-4" />
-                    Add condition
-                  </Button>
-                </div>
-              </div>
-            ))}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="self-start"
-              onClick={phaseOps.add}
-            >
-              <Plus className="size-4" />
-              Add build phase
-            </Button>
-
-            <div className="flex flex-col gap-2 border-t pt-3">
-              <p className="text-xs text-muted-foreground">
-                Give each phase up to{" "}
-                <Input
-                  type="number"
-                  min={1}
-                  value={form.maxAttempts}
-                  onChange={(e) => setForm({ ...form, maxAttempts: e.target.value })}
-                  className="inline-block h-7 w-16 px-2 py-1 text-center"
-                />{" "}
-                attempts, then stop.
-              </p>
-              <p className="text-xs text-muted-foreground">
-                If nothing improves in{" "}
-                <Input
-                  type="number"
-                  min={1}
-                  value={form.noProgressStalls}
-                  onChange={(e) => setForm({ ...form, noProgressStalls: e.target.value })}
-                  className="inline-block h-7 w-16 px-2 py-1 text-center"
-                />{" "}
-                attempts in a row, stop early and ask me.
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                Each phase needs at least one condition confirmed by <strong>a command</strong>.
-              </p>
+          <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+            <div>
+              <p className="text-xs font-medium">Enabled</p>
+              <p className="text-[11px] text-muted-foreground">Allow new issues to start this chain.</p>
             </div>
-          </Section>
-        )}
-
-        {!usePhases && (
-        <Section title="Delivery gate">
-          <p className="text-[11px] text-muted-foreground">
-            This is done when…
-          </p>
-          <div className="flex flex-col gap-4">
-            {form.verification.map((row, i) => (
-              <VerificationRowEditor
-                key={row.key}
-                row={row}
-                index={i}
-                canRemove={form.verification.length > 1}
-                wsId={wsId}
-                modelControlsEnabled={stepModelOverrideEnabled}
-                onChange={(patch) => setRow(row.key, patch)}
-                onRemove={() =>
-                  setForm((f) => ({
-                    ...f,
-                    verification: f.verification.filter((r) => r.key !== row.key),
-                  }))
-                }
-              />
-            ))}
+            <Switch checked={form.enabled} onCheckedChange={(checked) => setForm({ ...form, enabled: checked === true })} />
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="self-start"
-            onClick={() => setForm((f) => ({ ...f, verification: [...f.verification, newRow()] }))}
-          >
-            <Plus className="size-4" />
-            Add condition
-          </Button>
-
-          <div className="flex flex-col gap-2 border-t pt-3">
-            <p className="text-xs text-muted-foreground">
-              Give it up to{" "}
-              <Input
-                type="number"
-                min={1}
-                value={form.maxAttempts}
-                onChange={(e) => setForm({ ...form, maxAttempts: e.target.value })}
-                className="inline-block h-7 w-16 px-2 py-1 text-center"
-              />{" "}
-              attempts, then stop.
-            </p>
-            <p className="text-xs text-muted-foreground">
-              If nothing improves in{" "}
-              <Input
-                type="number"
-                min={1}
-                value={form.noProgressStalls}
-                onChange={(e) => setForm({ ...form, noProgressStalls: e.target.value })}
-                className="inline-block h-7 w-16 px-2 py-1 text-center"
-              />{" "}
-              attempts in a row, stop early and ask me.
-            </p>
-          </div>
-
-          <p className="text-[11px] text-muted-foreground">
-            At least one condition confirmed by <strong>a command</strong> is required — it is the
-            only thing the engine can prove on its own; everything else is a judgment call.
-          </p>
         </Section>
-        )}
 
-        {error && (
-          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-            {error}
-          </div>
-        )}
+        <MachineControlNotice chain={form.chain} />
 
-        <div className="flex justify-end gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => navigation.push(`/${workspace.slug}/workflows`)}
-          >
-            Cancel
-          </Button>
-          <Button type="submit" disabled={save.isPending}>
-            {save.isPending ? "Saving…" : "Save"}
-          </Button>
+        <div className="flex flex-col gap-4" data-testid="issue-loop-chain">
+          {form.chain.phases.map((phase, phaseIndex) => (
+            <PhaseEditor
+              key={phase.id}
+              phase={phase}
+              index={phaseIndex}
+              phaseCount={form.chain.phases.length}
+              onChange={(updater) => setPhase(phase.id, updater)}
+              onMove={(offset) => setChain((chain) => ({ ...chain, phases: move(chain.phases, phaseIndex, phaseIndex + offset) }))}
+              onRemove={() => setChain((chain) => ({ ...chain, phases: chain.phases.filter((item) => item.id !== phase.id) }))}
+            />
+          ))}
         </div>
 
-        <p className="text-[11px] text-muted-foreground">
-          Only the engine can set this to Done — and only once a command it ran itself is green.
-        </p>
+        <Button type="button" variant="outline" className="self-start" onClick={() => setChain((chain) => ({ ...chain, phases: [...chain.phases, newPhase(chain.phases.length)] }))}>
+          <Plus className="size-4" /> Add phase
+        </Button>
+
+        <Section title="Completion">
+          <Field label="Done status">
+            <Input value={form.chain.done_status ?? ""} onChange={(event) => setChain((chain) => ({ ...chain, done_status: event.target.value || undefined }))} placeholder="done" />
+          </Field>
+        </Section>
+
+        {error && <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={() => navigation.push(`/${workspace.slug}/workflows`)}>Cancel</Button>
+          <Button type="submit" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save chain"}</Button>
+        </div>
       </form>
     </div>
   );
 
   if (embedded) return body;
-
-  const heading = workflowId ? "Edit Issue workflow" : "New Issue workflow";
-  return (
-    <div className="flex h-full flex-col">
-      <PageHeader className="justify-between gap-3">
-        <div className="flex min-w-0 flex-col">
-          <h1 className="text-sm font-semibold">{heading}</h1>
-          <p className="truncate text-[11px] text-muted-foreground">
-            Plan → Build → Delivery gate → Done.
-          </p>
-        </div>
-      </PageHeader>
-      {body}
-    </div>
-  );
+  return <div className="flex h-full flex-col">
+    <PageHeader className="justify-between gap-3">
+      <div className="flex min-w-0 flex-col">
+        <h1 className="text-sm font-semibold">{workflowId ? "Edit Issue workflow" : "New Issue workflow"}</h1>
+        <p className="truncate text-[11px] text-muted-foreground">Phases contain the ordered blocks the engine runs.</p>
+      </div>
+    </PageHeader>
+    {body}
+  </div>;
 }
 
-// FIR-2283 followup point 5 — the presets ARE the interface for a non-developer.
-// Each option pairs a plain-language meaning with the exact command the engine
-// runs, so someone who doesn't know "make test" still understands "Run the
-// tests". `label` seeds the condition's name; `command` is what actually runs.
-const COMMAND_PRESETS: ReadonlyArray<{ label: string; command: string; hint: string }> = [
-  { label: "Run the tests", command: "make test", hint: "the project's automated tests all pass" },
-  { label: "Build the project", command: "make build", hint: "the project compiles with no errors" },
-  { label: "Check the code types", command: "pnpm typecheck", hint: "the code has no type mistakes" },
-];
-
-function VerificationRowEditor({
-  row,
-  index,
-  canRemove,
-  wsId,
-  modelControlsEnabled,
-  onChange,
-  onRemove,
-}: {
-  row: VerificationRow;
+function PhaseEditor({ phase, index, phaseCount, onChange, onMove, onRemove }: {
+  phase: LoopChainPhase;
   index: number;
-  canRemove: boolean;
-  wsId: string;
-  modelControlsEnabled: boolean;
-  onChange: (patch: Partial<VerificationRow>) => void;
+  phaseCount: number;
+  onChange: (updater: (phase: LoopChainPhase) => LoopChainPhase) => void;
+  onMove: (offset: number) => void;
   onRemove: () => void;
 }) {
-  return (
-    <div className="flex flex-col gap-2 rounded-md border p-3">
-      <div className="flex items-center gap-2">
-        <Input
-          value={row.label}
-          onChange={(e) => onChange({ label: e.target.value })}
-          placeholder={`Condition ${index + 1}, e.g. "The tests pass"`}
-          className="flex-1"
-        />
-        {canRemove && (
-          <Button type="button" variant="ghost" size="icon" onClick={onRemove} aria-label="Remove condition">
-            <Trash2 className="size-4" />
-          </Button>
-        )}
+  const setBlock = (blockId: string, updater: (block: LoopChainBlock) => LoopChainBlock) =>
+    onChange((current) => ({ ...current, blocks: current.blocks.map((block) => block.id === blockId ? updater(block) : block) }));
+  return <section className="rounded-lg border bg-card">
+    <div className="flex items-center gap-2 border-b px-4 py-3">
+      <span className="flex size-6 items-center justify-center rounded-full bg-foreground text-[11px] font-semibold text-background">{index + 1}</span>
+      <Input className="h-8 flex-1 border-0 bg-transparent px-1 font-medium shadow-none" value={phase.name ?? ""} onChange={(event) => onChange((current) => ({ ...current, name: event.target.value }))} aria-label={`Phase ${index + 1} name`} />
+      <OrderButtons index={index} count={phaseCount} label="phase" onMove={onMove} />
+      {phaseCount > 1 && <IconButton label="Remove phase" onClick={onRemove}><Trash2 className="size-4" /></IconButton>}
+    </div>
+    <div className="flex flex-col gap-4 p-4">
+      <div className="grid gap-3 sm:grid-cols-4">
+        <NumberField label="Max steps" value={phase.limits.max_steps} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, max_steps: value } }))} />
+        <NumberField label="Max rounds" value={phase.limits.max_rounds} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, max_rounds: value } }))} />
+        <NumberField label="No-progress rounds" value={phase.limits.no_progress_stalls} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, no_progress_stalls: value } }))} />
+        <NumberField label="Max wait (seconds)" value={phase.limits.max_wait_seconds ?? 0} min={0} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, max_wait_seconds: value || undefined } }))} />
       </div>
+      <Field label="Starts when issue status is (optional)">
+        <Input value={phase.status ?? ""} onChange={(event) => onChange((current) => ({ ...current, status: event.target.value || undefined }))} placeholder="in_progress" />
+      </Field>
+      <div className="flex flex-col gap-3 border-l border-border/70 pl-4">
+        {phase.blocks.map((block, blockIndex) => <BlockEditor
+          key={block.id}
+          block={block}
+          index={blockIndex}
+          count={phase.blocks.length}
+          onChange={(updater) => setBlock(block.id, updater)}
+          onMove={(offset) => onChange((current) => ({ ...current, blocks: move(current.blocks, blockIndex, blockIndex + offset) }))}
+          onRemove={() => onChange((current) => ({ ...current, blocks: current.blocks.filter((item) => item.id !== block.id) }))}
+        />)}
+      </div>
+      <Button type="button" variant="outline" size="sm" className="self-start" onClick={() => onChange((current) => ({ ...current, blocks: [...current.blocks, newBlock()] }))}>
+        <Plus className="size-4" /> Add block
+      </Button>
+    </div>
+  </section>;
+}
 
-      <Field label="Confirmed by">
-        <NativeSelect
-          value={row.kind}
-          onChange={(e) => onChange({ kind: e.target.value as RowKind })}
-        >
-          {ROW_KIND_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
+function BlockEditor({ block, index, count, onChange, onMove, onRemove }: {
+  block: LoopChainBlock;
+  index: number;
+  count: number;
+  onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void;
+  onMove: (offset: number) => void;
+  onRemove: () => void;
+}) {
+  const needsAgent = block.type === "session" || block.type === "review";
+  return <div className="rounded-md border bg-background p-3">
+    <div className="mb-3 flex items-center gap-2">
+      <span className="font-mono text-[10px] text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
+      <Input className="h-8 flex-1" value={block.name ?? ""} onChange={(event) => onChange((current) => ({ ...current, name: event.target.value }))} placeholder="Block name" />
+      <OrderButtons index={index} count={count} label="block" onMove={onMove} />
+      {count > 1 && <IconButton label="Remove block" onClick={onRemove}><Trash2 className="size-4" /></IconButton>}
+    </div>
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Field label="Block type">
+        <NativeSelect value={block.type} onChange={(event) => {
+          const replacement = newBlock(event.target.value as LoopBlockType);
+          onChange((current) => ({ ...replacement, id: current.id, name: current.name || replacement.name }));
+        }}>
+          {BLOCK_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label} — {option.hint}</option>)}
         </NativeSelect>
       </Field>
-
-      {row.kind === "programmatic" && (
-        // FIR-2283 followup point 5 — "commands" were hidden behind an
-        // "Advanced" toggle and explained in developer terms (exit codes,
-        // Makefile targets). A non-developer never opened it. Now the plain-
-        // language meaning is the default, the ready-made checks are the
-        // primary interface, and the exact command is a clearly-labelled
-        // secondary field for people who know exactly what to run.
-        <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3 text-xs">
-          <p className="text-muted-foreground">
-            A check is something the computer runs by itself to <strong>prove the
-            work is really finished</strong> — for example that the tests pass or
-            the project builds. Pick a ready-made check, or type the exact one your
-            project uses. Only the computer can mark the issue Done, and only when
-            this check comes back clean.
-          </p>
-          <Field label="Which check?">
-            <NativeSelect
-              value={COMMAND_PRESETS.find((p) => p.command === row.command)?.label ?? ""}
-              onChange={(e) => {
-                const preset = COMMAND_PRESETS.find((p) => p.label === e.target.value);
-                if (preset) onChange({ command: preset.command, label: row.label || preset.label });
-              }}
-            >
-              <option value="">Choose a ready-made check…</option>
-              {COMMAND_PRESETS.map((p) => (
-                <option key={p.label} value={p.label}>
-                  {p.label} — checks that {p.hint}
-                </option>
-              ))}
-            </NativeSelect>
-          </Field>
-          <Field label="Or type the exact command your project runs">
-            <Input
-              value={row.command}
-              onChange={(e) => onChange({ command: e.target.value })}
-              placeholder="e.g. make test"
-              data-testid="loop-check-command"
-            />
-          </Field>
-          <p className="text-[11px] text-muted-foreground">
-            The computer runs this in the project and treats the check as passed
-            only when it finishes with no error. Anything the project can already
-            run works here — there is nothing to register first.
-          </p>
-        </div>
-      )}
-
-      {/* FIR-2283 v2 point 6 — one "A review" branch. The assignee picker
-          (agents + people, shared component) decides everything: an agent is
-          an AI review that can run a skill; a person is a human sign-off. */}
-      {row.kind === "review" && (
-        <>
-          <AssigneeFields row={row} onChange={onChange} />
-          {modelControlsEnabled && row.assigneeType === "agent" && (
-            <StepModelControls
-              wsId={wsId}
-              agentId={row.assigneeId}
-              model={row.model}
-              thinkingLevel={row.thinkingLevel}
-              onChange={onChange}
-            />
-          )}
-          {row.assigneeType === "agent" && (
-            <Field label="Run a skill (optional)">
-              <SkillNamePicker
-                value={row.skill}
-                onChange={(name) => onChange({ skill: name })}
-                placeholder="Leave empty to review from the instruction below"
-              />
-            </Field>
-          )}
-          <Field label={row.assigneeType === "member" ? "What should they sign off on?" : "What should the review check?"}>
-            <Textarea
-              value={row.prompt}
-              onChange={(e) => onChange({ prompt: e.target.value })}
-              rows={2}
-              placeholder={
-                row.assigneeType === "member"
-                  ? "What should the person confirm before this is done?"
-                  : "What should the AI review judge? (ignored if a skill is chosen above)"
-              }
-            />
-          </Field>
-        </>
-      )}
-    </div>
-  );
-}
-
-function StepModelControls({
-  wsId,
-  agentId,
-  model,
-  thinkingLevel,
-  onChange,
-}: {
-  wsId: string;
-  agentId: string;
-  model: string;
-  thinkingLevel: string;
-  onChange: (patch: { model?: string; thinkingLevel?: string }) => void;
-}) {
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const agent = agents.find((a) => a.id === agentId && !a.archived_at);
-  const runtimeId = agent?.runtime_id || null;
-  const modelsQuery = useQuery(runtimeModelsOptions(runtimeId));
-  const models = modelsQuery.data?.models ?? [];
-  const effectiveModel = model || agent?.model || models.find((m) => m.default)?.id || "";
-  const levels =
-    models.find((m) => m.id === effectiveModel)?.thinking?.supported_levels ?? [];
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <Field label="Model">
-        <ModelPicker
-          runtimeId={runtimeId}
-          runtimeOnline={Boolean(runtimeId)}
-          value={model}
-          canEdit={Boolean(runtimeId)}
-          onChange={(next) => onChange({ model: next, thinkingLevel: "" })}
-        />
-      </Field>
-      <Field label="Thinking">
-        {levels.length > 0 || thinkingLevel ? (
-          <ThinkingPicker
-            value={thinkingLevel}
-            levels={levels}
-            canEdit={Boolean(runtimeId) && levels.length > 0}
-            onChange={(next: string) => onChange({ thinkingLevel: next })}
-          />
-        ) : (
-          <span className="min-w-0 truncate px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-            Agent default
-          </span>
-        )}
+      <Field label="Stable block ID">
+        <Input value={block.id} onChange={(event) => onChange((current) => ({ ...current, id: event.target.value }))} />
       </Field>
     </div>
-  );
-}
 
-function AssigneeFields({
-  row,
-  onChange,
-}: {
-  row: VerificationRow;
-  onChange: (patch: Partial<VerificationRow>) => void;
-}) {
-  return (
-    <Field label="Assign to">
-      <div className="w-fit max-w-full">
-        <AssigneePicker
-          assigneeType={row.assigneeId ? row.assigneeType : null}
-          assigneeId={row.assigneeId || null}
-          onUpdate={(u) => {
-            const type = u.assignee_type;
-            if (type === "agent" || type === "member") {
-              onChange({ assigneeType: type, assigneeId: u.assignee_id ?? "" });
-            } else {
-              onChange({ assigneeId: "" });
-            }
-          }}
-          align="start"
-        />
+    {needsAgent && <AgentCandidates block={block} onChange={onChange} />}
+    {block.type === "session" && <>
+      <Field label="Skill"><SkillNamePicker value={block.skill ?? ""} onChange={(skill) => onChange((current) => ({ ...current, skill }))} placeholder="Select the skill this session runs" /></Field>
+      <Field label="Instruction"><Textarea rows={3} value={block.goal ?? ""} onChange={(event) => onChange((current) => ({ ...current, goal: event.target.value }))} placeholder="Describe what this session must accomplish." /></Field>
+    </>}
+    {block.type === "command" && <Field label="Command (argv, separated by spaces)"><Input value={(block.check ?? []).join(" ")} onChange={(event) => onChange((current) => ({ ...current, check: event.target.value.trim().split(/\s+/).filter(Boolean), expect: "exit_zero" }))} placeholder="make test" /></Field>}
+    {block.type === "review" && <>
+      <Field label="Review skill (optional)"><SkillNamePicker value={block.skill ?? ""} onChange={(skill) => onChange((current) => ({ ...current, skill }))} placeholder="Leave empty to use the rubric" /></Field>
+      <Field label="Rubric"><Textarea rows={3} value={block.rubric ?? ""} onChange={(event) => onChange((current) => ({ ...current, rubric: event.target.value }))} placeholder="What should the reviewer check?" /></Field>
+    </>}
+    {block.type === "human" && <>
+      <Field label="Approver"><AssigneePicker assigneeType={block.approver_id ? block.approver_type ?? null : null} assigneeId={block.approver_id ?? null} onUpdate={(update) => onChange((current) => ({ ...current, approver_type: update.assignee_type === "agent" || update.assignee_type === "member" ? update.assignee_type : undefined, approver_id: update.assignee_id ?? undefined }))} align="start" /></Field>
+      <Field label="Approval request"><Textarea rows={3} value={block.prompt ?? ""} onChange={(event) => onChange((current) => ({ ...current, prompt: event.target.value }))} placeholder="What should the approver confirm?" /></Field>
+    </>}
+    {block.type === "eval" && <Field label="Eval key"><Input value={block.eval_key ?? ""} onChange={(event) => onChange((current) => ({ ...current, eval_key: event.target.value }))} placeholder="delivery-quality" /></Field>}
+
+    {(block.type === "session" || block.type === "review") && <div className="mt-3 flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
+      <div><p className="text-xs font-medium">Allow more steps</p><p className="text-[11px] text-muted-foreground">The agent may open another step of this same block.</p></div>
+      <div className="flex items-center gap-2">
+        <Switch checked={block.steps?.allowed === true} onCheckedChange={(checked) => onChange((current) => ({ ...current, steps: { allowed: checked === true, max: checked ? current.steps?.max ?? 2 : undefined } }))} />
+        {block.steps?.allowed && <Input aria-label="Maximum block steps" type="number" min={1} className="h-8 w-16" value={block.steps.max ?? 2} onChange={(event) => onChange((current) => ({ ...current, steps: { allowed: true, max: positive(event.target.value) } }))} />}
       </div>
-    </Field>
-  );
+    </div>}
+  </div>;
+}
+
+function AgentCandidates({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
+  const agents = block.agents ?? [];
+  return <div className="my-3 flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+    <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-medium">Agent preference</p><p className="text-[11px] text-muted-foreground">The first available agent runs this block.</p></div><Button type="button" size="sm" variant="outline" onClick={() => onChange((current) => ({ ...current, agents: [...(current.agents ?? []), { agent_id: "" }] }))}><Plus className="size-3.5" /> Add agent</Button></div>
+    {agents.length === 0 && <p className="text-[11px] text-muted-foreground">No agent pinned — use the issue assignee.</p>}
+    {agents.map((agent, index) => <div key={`${index}-${agent.agent_id}`} className="flex items-center gap-2">
+      <span className="w-4 text-[10px] text-muted-foreground">{index + 1}</span>
+      <div className="min-w-0 flex-1"><AgentPicker agentId={agent.agent_id || null} onChange={(agentId) => onChange((current) => ({ ...current, agents: (current.agents ?? []).map((item, itemIndex) => itemIndex === index ? { ...item, agent_id: agentId } : item) }))} /></div>
+      <IconButton label="Remove agent" onClick={() => onChange((current) => ({ ...current, agents: (current.agents ?? []).filter((_, itemIndex) => itemIndex !== index) }))}><Trash2 className="size-4" /></IconButton>
+    </div>)}
+    <Field label="When every agent is busy"><NativeSelect value={block.on_all_busy ?? "wait"} onChange={(event) => onChange((current) => ({ ...current, on_all_busy: event.target.value as LoopBusyPolicy }))}>{BUSY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</NativeSelect></Field>
+  </div>;
+}
+
+function move<T>(items: T[], from: number, to: number): T[] {
+  if (to < 0 || to >= items.length) return items;
+  const next = [...items];
+  const [item] = next.splice(from, 1);
+  if (item !== undefined) next.splice(to, 0, item);
+  return next;
+}
+
+function positive(value: string) { return Math.max(1, Number.parseInt(value, 10) || 1); }
+
+function NumberField({ label, value, min = 1, onChange }: { label: string; value: number; min?: number; onChange: (value: number) => void }) {
+  return <Field label={label}><Input type="number" min={min} value={value} onChange={(event) => onChange(min === 0 ? Math.max(0, Number.parseInt(event.target.value, 10) || 0) : positive(event.target.value))} /></Field>;
+}
+
+function OrderButtons({ index, count, label, onMove }: { index: number; count: number; label: string; onMove: (offset: number) => void }) {
+  return <div className="flex items-center"><IconButton label={`Move ${label} up`} disabled={index === 0} onClick={() => onMove(-1)}><ArrowUp className="size-3.5" /></IconButton><IconButton label={`Move ${label} down`} disabled={index === count - 1} onClick={() => onMove(1)}><ArrowDown className="size-3.5" /></IconButton></div>;
+}
+
+function IconButton({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
+  return <Button type="button" variant="ghost" size="icon" aria-label={label} disabled={disabled} onClick={onClick}>{children}</Button>;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <fieldset className="flex flex-col gap-3 rounded-md border bg-card p-4">
-      <legend className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {title}
-      </legend>
-      {children}
-    </fieldset>
-  );
+  return <fieldset className="flex flex-col gap-3 rounded-lg border bg-card p-4"><legend className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</legend>{children}</fieldset>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Label className="text-xs">{label}</Label>
-      {children}
-    </div>
-  );
+  return <div className="flex flex-col gap-1.5"><Label className="text-xs">{label}</Label>{children}</div>;
 }

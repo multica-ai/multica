@@ -53,6 +53,10 @@ type ToolContext struct {
 	// by FirtalReportLoopCheckTool so worker agents can report check exit codes
 	// back to the delivery gate. Nil disables the tool (no loop check reporting).
 	LoopStore *cerebroloops.Store
+	// LoopStep is a server-derived capability for the exact workflow block step
+	// represented by the current task. Nil means this task may not open another
+	// step. Agents never supply these IDs or limits themselves.
+	LoopStep *LoopStepCapability
 }
 
 // NewFirtalGatewayToolServer builds the in-process MCP server with the POC

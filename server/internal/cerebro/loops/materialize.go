@@ -37,25 +37,26 @@ func NewPlanningMaterializer(queries *cerebrodb.Queries) *PlanningMaterializer {
 // toggle carries no authored spec, so planning/build statuses fall to their
 // defaults (todo -> in_progress) inside PlanningDispatchRule.
 func (m *PlanningMaterializer) CreatePlanningDispatch(ctx context.Context, workspaceID, createdByID pgtype.UUID, createdByType, agentID, skillName string) error {
-	rule := PlanningDispatchRule(agentID, skillName, "", "")
-
-	triggerConfigJSON, err := json.Marshal(rule.TriggerConfig)
+	triggerConfigJSON, err := json.Marshal(workflows.TriggerConfigStatusChanged{ToStatus: "todo"})
 	if err != nil {
 		return fmt.Errorf("marshal planning-dispatch trigger config: %w", err)
 	}
-	actionConfigJSON, err := json.Marshal(rule.ActionConfig)
+	actionConfigJSON, err := json.Marshal(workflows.ActionConfigRunSkill{
+		SkillName: skillName, AgentID: agentID, PlanMode: true, LoopPhase: "plan",
+		AdvanceFromStatus: "todo", AdvanceToStatus: "in_progress",
+	})
 	if err != nil {
 		return fmt.Errorf("marshal planning-dispatch action config: %w", err)
 	}
 
 	_, err = m.queries.CreateCerebroWorkflow(ctx, cerebrodb.CreateCerebroWorkflowParams{
 		WorkspaceID:   workspaceID,
-		Name:          rule.Name,
+		Name:          "loop:planning-dispatch",
 		Enabled:       true,
-		TriggerType:   rule.TriggerType,
+		TriggerType:   workflows.TriggerStatusChanged,
 		TriggerConfig: triggerConfigJSON,
 		Conditions:    []byte("[]"),
-		ActionType:    rule.ActionType,
+		ActionType:    workflows.ActionRunSkill,
 		ActionConfig:  actionConfigJSON,
 		EditorMode:    workflows.EditorModeForm,
 		EditorLayout:  []byte("null"),

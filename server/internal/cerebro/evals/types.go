@@ -1,6 +1,7 @@
 package evals
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
@@ -79,6 +80,23 @@ type EvalRunInput struct {
 	LatencyMS          int64           `json:"latency_ms"`
 	StartedAt          *time.Time      `json:"started_at"`
 	CompletedAt        *time.Time      `json:"completed_at"`
+}
+
+// RunExecution is the trusted result produced by the server-side eval runner.
+// CreateRun deliberately copies these fields over the caller's report so an
+// external status or cases array can never open a workflow gate.
+type RunExecution struct {
+	TargetVersion string
+	Status        string
+	Results       json.RawMessage
+	CostCents     int64
+	LatencyMS     int64
+	StartedAt     *time.Time
+	CompletedAt   *time.Time
+}
+
+type RunExecutor interface {
+	Execute(ctx context.Context, eval Eval) (RunExecution, error)
 }
 
 type Binding struct {

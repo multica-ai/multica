@@ -17,7 +17,7 @@ import (
 type CerebroToolItem struct {
 	Name        string
 	Description string
-	Status      string // CEREBRO-PATCH(agent-tools-status): carries implemented/excluded registry state into admin API.
+	Status      string         // CEREBRO-PATCH(agent-tools-status): carries implemented/excluded registry state into admin API.
 	InputSchema map[string]any // CEREBRO-PATCH(handler-tool-schema): TECH-3226 JSON Schema for the tool; nil for tools not in the server registry.
 }
 
@@ -155,7 +155,41 @@ func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
 		out = append(out, resp)
 	}
 
+	// CEREBRO-PATCH(workflow-open-step-tool): FIR-3493 — open_loop_step is a
+	// task-scoped capability, not an administrator grant. Offer it to external
+	// runtimes only when the authenticated task's trusted workflow context says
+	// the current block allows more steps. InvokeAgentTool re-validates the same
+	// task and the runtime layer pins the exact IDs and limits before execution.
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		if taskID, err := util.ParseUUID(r.Header.Get("X-Task-ID")); err == nil {
+			if task, err := h.Queries.GetAgentTask(r.Context(), taskID); err == nil && task.AgentID == agent.ID && taskAllowsOpenLoopStep(task.Context) {
+				schema, _ := json.Marshal(map[string]any{
+					"type": "object", "additionalProperties": false, "properties": map[string]any{},
+				})
+				out = append(out, AgentToolResponse{
+					Name:        "open_loop_step",
+					Description: "Open the next step of the workflow block currently running. The server enforces the block and phase limits.",
+					Status:      "implemented",
+					Enabled:     true,
+					InputSchema: schema,
+				})
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, out)
+}
+
+func taskAllowsOpenLoopStep(raw json.RawMessage) bool {
+	var context struct {
+		LoopStep struct {
+			Steps struct {
+				Allowed bool `json:"allowed"`
+				Max     int  `json:"max"`
+			} `json:"steps"`
+		} `json:"loop_step"`
+	}
+	return json.Unmarshal(raw, &context) == nil && context.LoopStep.Steps.Allowed && context.LoopStep.Steps.Max > 0
 }
 
 // UpsertAgentTool handles PUT /api/agents/{id}/tools/{name}

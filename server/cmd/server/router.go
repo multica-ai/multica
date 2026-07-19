@@ -13,7 +13,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -45,7 +44,7 @@ import (
 	cerebrodashboard "github.com/multica-ai/multica/server/internal/cerebro/dashboard"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroevals "github.com/multica-ai/multica/server/internal/cerebro/evals"                   // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 eval catalog API.
-	cerebroevalsrunner "github.com/multica-ai/multica/server/internal/cerebro/evals/runner"      // CEREBRO-PATCH(cerebro-evals-run-now): FIR-3496 default-OFF real-run engine wiring.
+	cerebroevalrun "github.com/multica-ai/multica/server/internal/cerebro/evals/runservice"      // CEREBRO-PATCH(cerebro-evals-routes): FIR-3493 server-owned eval execution.
 	operatingsystem "github.com/multica-ai/multica/server/internal/cerebro/operatingsystem"      // CEREBRO-PATCH(operating-system-routes): FIR-2816 fork route module.
 	cerebroplatformaction "github.com/multica-ai/multica/server/internal/cerebro/platformaction" // CEREBRO-PATCH(router-platform-action-gate): FIR-3266 always-on agent mutation floor.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 loop planning-dispatch materializer import
@@ -252,6 +251,32 @@ type RouterOptions struct {
 	// the bus. When nil, the route is registered with a 503 stub so the
 	// router still builds for tests that don't wire the engine.
 	WorkflowService *cerebroworkflows.Service
+}
+
+type workflowBusyWakeupScheduler struct {
+	service *cerebrowakeup.Service
+	queries *db.Queries
+}
+
+func (s *workflowBusyWakeupScheduler) ScheduleBusyWakeup(ctx context.Context, d cerebroloops.BlockDispatch) error {
+	agent := d.Run.AgentID
+	if len(d.Block.Agents) > 0 {
+		agent = d.Block.Agents[0].AgentID
+	}
+	agentID, err := util.ParseUUID(agent)
+	if err != nil {
+		return err
+	}
+	issue, err := s.queries.GetIssue(ctx, d.Run.IssueID)
+	if err != nil {
+		return err
+	}
+	_, err = s.service.Create(ctx, issue.WorkspaceID, cerebrowakeup.CreateRequest{
+		AgentID: agentID, IssueID: d.Run.IssueID, TriggerType: cerebrowakeup.TriggerTime,
+		FireAt: pgtype.Timestamptz{Time: time.Now().Add(5 * time.Minute), Valid: true},
+		Prompt: cerebroloops.BusyWakeupPrompt(d),
+	})
+	return err
 }
 
 // NewRouterWithOptions builds the fully-configured Chi router and
@@ -779,7 +804,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.ToolExecutor = &cerebroruntime.ToolExecutorInvoker{
 		Queries:        queries,
 		CerebroQueries: cerebroQueries,
-		Pool:           pool, // CEREBRO-PATCH(invoke-grant-config-pool): TECH-3356 — registry needs the pool to read agent_tool_grant.config_json.
+		Pool:           pool,                        // CEREBRO-PATCH(invoke-grant-config-pool): TECH-3356 — registry needs the pool to read agent_tool_grant.config_json.
+		LoopStore:      cerebroloops.NewStore(pool), // CEREBRO-PATCH(workflow-open-step-invoker): FIR-3493 wires task-scoped step opening into external runtimes.
 	}
 	// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 wire the unified
 	// runtime tool admin service (per-runtime tool inventory + group/user
@@ -807,62 +833,39 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	daemonHub.SetDisconnectHandler(cerebroTerminalBridge.OnDaemonDisconnect)
 	// CEREBRO-PATCH(workflow-plan-document-wire): FIR-3052 wire shared plan document creation/logging for Issue workflows.
 	workflowPlanDocuments := cerebroworkflows.NewPlanDocumentService(queries)
+	var legacyLoopAdvancer *cerebroworkflows.LoopPhaseAdvancer
 	if opts.WorkflowService != nil {
 		opts.WorkflowService.WithPlanDocuments(workflowPlanDocuments)
-		// CEREBRO-PATCH(workflow-loop-advancer-wire): FIR-3052 — advance Plan -> Build on plan-task completion via the engine's own Dispatch; nil-safe seam.
-		h.TaskService.WorkflowLoopAdvancer = cerebroworkflows.NewLoopPhaseAdvancer(opts.WorkflowService)
+		legacyLoopAdvancer = cerebroworkflows.NewLoopPhaseAdvancer(opts.WorkflowService)
 	}
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).
 		WithService(opts.WorkflowService).
 		WithPlanDocuments(workflowPlanDocuments)
-	cerebroEvalsHandler := cerebroevals.NewHandler(pool) // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 eval catalog handler.
-	// CEREBRO-PATCH(cerebro-evals-run-now): FIR-3496 — default-OFF real-run wiring. Only when the
-	// Firtal AI Gateway env is fully configured does POST /{id}/run execute evals for real via the
-	// merged engine; absent config, NewGatewayCompleter errors, the executor stays nil, and the
-	// endpoint is disabled so the existing run path is unchanged.
-	if evalsCompleter, err := cerebroevalsrunner.NewGatewayCompleter(
-		os.Getenv("CEREBRO_EVALS_GATEWAY_URL"),
-		os.Getenv("CEREBRO_EVALS_GATEWAY_KEY"),
-		os.Getenv("CEREBRO_EVALS_GATEWAY_MODEL"),
-		nil,
-	); err == nil {
-		cerebroEvalsHandler = cerebroEvalsHandler.WithRunExecutor(cerebroevalsrunner.NewEvalExecutor(evalsCompleter, nil))
-	}
-	// CEREBRO-PATCH(cerebro-evals-run-now-workspace-gateway): FIR-3496 — resolve the eval
-	// runner from each workspace's own Firtal Gateway settings (the firtal_gateway credentials
-	// the agent runtime and avatar generator already read), so Run-now works with the key the
-	// workspace already holds instead of a duplicate CEREBRO_EVALS_GATEWAY_* server env var. The
-	// env path above stays as a static fallback; a workspace without a gateway resolves to nothing
-	// and keeps Run-now disabled there.
-	if gwFallback, gwErr := cerebroruntime.LoadFirtalGatewayRuntimeConfig(); gwErr == nil {
-		cerebroEvalsHandler = cerebroEvalsHandler.WithExecutorResolver(
-			func(ctx context.Context, workspaceID uuid.UUID) (cerebroevals.RunExecutor, bool) {
-				ws, err := queries.GetWorkspace(ctx, pgtype.UUID{Bytes: workspaceID, Valid: true})
-				if err != nil {
-					return nil, false
-				}
-				cfg, ok, cfgErr := cerebroruntime.FirtalGatewayConfigFromWorkspaceSettings(ws.Settings, gwFallback)
-				if cfgErr != nil || !ok {
-					return nil, false
-				}
-				completer, cErr := cerebroevalsrunner.NewGatewayCompleter(cfg.BaseURL, cfg.APIKey, cfg.Model, nil)
-				if cErr != nil {
-					return nil, false
-				}
-				return cerebroevalsrunner.NewEvalExecutor(completer, nil), true
-			})
-	}
+	evalExecutor := cerebroevalrun.New(pool)
+	cerebroEvalsHandler := cerebroevals.NewHandler(pool).WithRunExecutor(evalExecutor)              // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308/FIR-3493 eval catalog + server runner.
 	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool)) // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature.
 	h.TaskService.WorkflowCompletionGate = workflowHooksFeature.CompletionGate                      // CEREBRO-PATCH(workflow-hooks-completion-wire): FIR-3101 pre-completion delegation.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 — plug the loop planning-dispatch materializer so a run_skill workflow's `loop_planning` toggle actually creates its companion planning-phase rule (see workflows/loop_planning.go).
 	cerebroWorkflowsHandler.WithLoopPlanningMaterializer(cerebroloops.NewPlanningMaterializer(cerebroQueries))
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop): FIR-2283 — plug the Issue workflow bridge (workflow_type=="issue_loop": save -> Compile -> materialize the dispatch/gate/escalate rules) and the control-strip/approval seam onto the compiled delivery gate.
 	cerebroIssueLoopColumns := cerebroworkflows.NewIssueLoopColumnStore(pool)
+	workflowWakeups := cerebrowakeup.New(cerebroQueries, queries, h.TaskService, bus)
+	cerebroIssueLoopBridge := cerebroloops.NewIssueLoopBridge(pool, cerebroQueries, queries, cerebroIssueLoopColumns).
+		WithSkillLister(queries).
+		WithEvalBlockRunner(cerebroevals.NewBlockRunner(pool, evalExecutor)).
+		WithBusyWakeupScheduler(&workflowBusyWakeupScheduler{service: workflowWakeups, queries: queries})
+	if err := cerebroIssueLoopBridge.ResumeActiveIssueLoops(context.Background()); err != nil {
+		slog.Error("resume active Issue workflow chains", "error", err)
+	}
 	cerebroWorkflowsHandler.WithIssueLoopColumns(cerebroIssueLoopColumns).
 		// CEREBRO-PATCH(cerebro-issue-loop-skill-validate): FIR-2283 followup — reject a recipe naming a skill the workspace lacks at save time.
-		WithIssueLoopCompiler(cerebroloops.NewIssueLoopBridge(cerebroQueries, cerebroIssueLoopColumns).WithSkillLister(queries)).
+		WithIssueLoopCompiler(cerebroIssueLoopBridge).
 		WithLoopCheckStore(cerebroloops.NewLoopCheckStoreAdapter(cerebroloops.NewStore(pool)))
+	// FIR-3493 bid 8: block tasks complete their durable step and immediately
+	// advance the same chain. The old plan-only hook remains a no-op fallback
+	// for tasks created before the cutover.
+	h.TaskService.WorkflowLoopAdvancer = cerebroloops.NewChainTaskAdvancer(cerebroIssueLoopBridge, legacyLoopAdvancer)
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop-activation): FIR-2283 v2 point 8 — plug the upstream issue lookup so the per-issue activation endpoints can confirm the target issue exists and belongs to the caller's workspace.
 	cerebroWorkflowsHandler.WithIssueLookup(queries)
 	// CEREBRO-PATCH(handler-issue-workflow-activator-wire): FIR-2283 followup — let CreateIssue (HTTP + CLI `--workflow`) start a new issue on an Issue workflow in the same call, reusing the workflows handler's ActivateForIssue.

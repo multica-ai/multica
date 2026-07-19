@@ -426,7 +426,7 @@ func (s *Store) LoadGateState(ctx context.Context, issueID pgtype.UUID, gate str
 // Spec, whose caps are required to be positive. Once any guard trips the gate
 // is Stopped for good: a cap trip is a one-way door, so a later call is a
 // no-op that returns the already-stopped state unchanged.
-func (s *Store) RecordRevision(ctx context.Context, issueID pgtype.UUID, gate string, signature string, caps Caps) (GateRoundState, error) {
+func (s *Store) RecordRevision(ctx context.Context, issueID pgtype.UUID, gate string, signature string, caps GateLimits) (GateRoundState, error) {
 	cur, err := s.LoadGateState(ctx, issueID, gate)
 	if err != nil {
 		return GateRoundState{}, err

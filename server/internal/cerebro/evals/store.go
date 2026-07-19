@@ -2,6 +2,7 @@ package evals
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -11,13 +12,23 @@ import (
 )
 
 var (
-	ErrNotFound  = errors.New("eval not found")
-	ErrImmutable = errors.New("active eval definitions are immutable; create a new version")
+	ErrNotFound            = errors.New("eval not found")
+	ErrImmutable           = errors.New("active eval definitions are immutable; create a new version")
+	ErrRunExecutorMissing  = errors.New("server-side eval runner is not configured")
+	ErrInvalidRunExecution = errors.New("server-side eval runner returned an invalid result")
 )
 
-type Store struct{ pool *pgxpool.Pool }
+type Store struct {
+	pool        *pgxpool.Pool
+	runExecutor RunExecutor
+}
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+func (s *Store) WithRunExecutor(executor RunExecutor) *Store {
+	s.runExecutor = executor
+	return s
+}
 
 const evalColumns = `id, workspace_id, eval_key, version, title, description, status,
  owner, objective, target, datasets, graders, thresholds, runner, source,
@@ -157,6 +168,28 @@ func (s *Store) ListRuns(ctx context.Context, workspaceID, evalID uuid.UUID) ([]
 }
 
 func (s *Store) CreateRun(ctx context.Context, workspaceID, actorID, evalID uuid.UUID, actorType string, input EvalRunInput) (EvalRun, error) {
+	eval, err := s.Get(ctx, workspaceID, evalID)
+	if err != nil {
+		return EvalRun{}, err
+	}
+	if s.runExecutor == nil {
+		return EvalRun{}, ErrRunExecutorMissing
+	}
+	execution, err := s.runExecutor.Execute(ctx, eval)
+	if err != nil {
+		return EvalRun{}, fmt.Errorf("execute eval: %w", err)
+	}
+	if (execution.Status != RunStatusPassed && execution.Status != RunStatusFailed && execution.Status != RunStatusError) ||
+		!json.Valid(execution.Results) || execution.CostCents < 0 || execution.LatencyMS < 0 {
+		return EvalRun{}, ErrInvalidRunExecution
+	}
+	input.TargetVersion = execution.TargetVersion
+	input.Status = execution.Status
+	input.Results = execution.Results
+	input.CostCents = execution.CostCents
+	input.LatencyMS = execution.LatencyMS
+	input.StartedAt = execution.StartedAt
+	input.CompletedAt = execution.CompletedAt
 	run, err := scanRun(s.pool.QueryRow(ctx, `INSERT INTO cerebro_eval_run (
         workspace_id, eval_id, eval_version, target_version, workflow_id, issue_id,
         status, results, evidence_artifact_id, cost_cents, latency_ms, created_by_id,
@@ -234,9 +267,12 @@ func (s *Store) DeleteBinding(ctx context.Context, workspaceID, id uuid.UUID) er
 	return err
 }
 
-// BlockingEvalsPassed fails closed: every blocking delivery binding must have a
-// latest run for this workflow+issue, and that latest run must be passed.
-func (s *Store) BlockingEvalsPassed(ctx context.Context, workflowID, issueID uuid.UUID) (bool, error) {
+// BlockingEvalsPassed fails closed: every blocking binding for the requested
+// phase must have a latest server-scored passing run for this workflow+issue.
+func (s *Store) BlockingEvalsPassed(ctx context.Context, workflowID, issueID uuid.UUID, phase string) (bool, error) {
+	if !validEvalPhase(phase) {
+		return false, fmt.Errorf("invalid eval binding phase %q", phase)
+	}
 	var allPassed bool
 	err := s.pool.QueryRow(ctx, `WITH selected_workflow AS (
       SELECT COALESCE(generated_from_workflow_id, id) AS id
@@ -251,8 +287,8 @@ func (s *Store) BlockingEvalsPassed(ctx context.Context, workflowID, issueID uui
           AND r.issue_id=$2 AND r.eval_id=b.eval_id AND r.eval_version=e.version
         ORDER BY r.created_at DESC LIMIT 1
       ) latest ON TRUE
-      WHERE b.phase='delivery' AND b.blocking
+      WHERE b.phase=$3 AND b.blocking
         AND COALESCE(latest.status, '') <> 'passed'
-    )`, workflowID, issueID).Scan(&allPassed)
+    )`, workflowID, issueID, phase).Scan(&allPassed)
 	return allPassed, err
 }

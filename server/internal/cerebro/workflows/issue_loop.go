@@ -51,6 +51,10 @@ type IssueLoopCompiler interface {
 	ActivateOnIssue(ctx context.Context, workspaceID, workflowID, projectID, createdByID, issueID pgtype.UUID, createdByType string, loopSpecJSON []byte) error
 }
 
+type HumanBlockResolver interface {
+	ResolveHumanBlock(ctx context.Context, workflowID, issueID pgtype.UUID, blockID string, approved bool, note string) error
+}
+
 // WithIssueLoopCompiler plugs in the issue-loop bridge implementation.
 // Optional and nil-safe: without it, an issue_loop workflow's loop_spec is
 // persisted but never compiled onto the engine — the recipe is stored, ready
