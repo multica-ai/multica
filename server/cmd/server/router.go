@@ -853,7 +853,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	workflowWakeups := cerebrowakeup.New(cerebroQueries, queries, h.TaskService, bus)
 	cerebroIssueLoopBridge := cerebroloops.NewIssueLoopBridge(pool, cerebroQueries, queries, cerebroIssueLoopColumns).
 		WithSkillLister(queries).
-		WithEvalBlockRunner(cerebroevals.NewBlockRunner(pool, evalExecutor)).
+		WithEvalBlockRunner(cerebroevals.NewBlockRunner(pool, evalExecutor).WithAdvisoryWarner(cerebroevals.NewAdvisoryWarner(cerebroevals.NewStore(pool), cerebroQueries, queries, bus))). // CEREBRO-PATCH(cerebro-eval-block-advisory): FIR-3496 phase-aware BlockEval uses the same warn-only notifier.
 		WithBusyWakeupScheduler(&workflowBusyWakeupScheduler{service: workflowWakeups, queries: queries})
 	if err := cerebroIssueLoopBridge.ResumeActiveIssueLoops(context.Background()); err != nil {
 		slog.Error("resume active Issue workflow chains", "error", err)

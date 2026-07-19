@@ -149,6 +149,59 @@ func testWaitingChain() *Chain {
 	return &Chain{Version: ChainVersion, Phases: []Phase{{ID: "phase", Blocks: []Block{{ID: "gate", Type: BlockEval, EvalKey: "delivery"}}, Limits: PhaseLimits{MaxSteps: 3, MaxRounds: 3, NoProgressStalls: 1}}}}
 }
 
+type phaseRecordingEvalRunner struct {
+	phases []string
+}
+
+func (r *phaseRecordingEvalRunner) RunEvalBlock(_ context.Context, d BlockDispatch) (StepStatus, json.RawMessage, error) {
+	phase := d.Block.EvalPhase
+	if phase == "" {
+		phase = "delivery"
+	}
+	r.phases = append(r.phases, phase)
+	return StepCompleted, json.RawMessage(`{"warning":true}`), nil
+}
+
+func TestIssueLoopBridge_MonitorAdvisoryRunsAfterDeliveryAndKeepsDoneTerminal(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	var workspaceID pgtype.UUID
+	if err := loopTestPool.QueryRow(ctx, `SELECT workspace_id FROM issue WHERE id=$1`, issueID).Scan(&workspaceID); err != nil {
+		t.Fatal(err)
+	}
+	chain := &Chain{
+		Version: ChainVersion,
+		Phases: []Phase{
+			{ID: "delivery", Status: "todo", Blocks: []Block{{ID: "delivery-eval", Type: BlockEval, EvalKey: "quality", EvalPhase: "delivery"}}, Limits: PhaseLimits{MaxSteps: 2, MaxRounds: 1, NoProgressStalls: 1}},
+			{ID: "monitor", Status: "done", Blocks: []Block{{ID: "monitor-eval", Type: BlockEval, EvalKey: "quality", EvalPhase: "monitor"}}, Limits: PhaseLimits{MaxSteps: 2, MaxRounds: 1, NoProgressStalls: 1}},
+		},
+		DoneStatus: "done",
+	}
+	raw, err := json.Marshal(chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipe := seedIssueLoopRecipe(t, workspaceID, "monitor advisory chain", raw)
+	runner := &phaseRecordingEvalRunner{}
+	bridge := NewIssueLoopBridge(loopTestPool, cerebrodb.New(loopTestPool), db.New(loopTestPool), workflows.NewIssueLoopColumnStore(loopTestPool)).WithEvalBlockRunner(runner)
+	if err := bridge.ActivateOnIssue(ctx, workspaceID, recipe, pgtype.UUID{}, recipe, issueID, "member", raw); err != nil {
+		t.Fatalf("activate monitor chain: %v", err)
+	}
+	issue, err := db.New(loopTestPool).GetIssue(ctx, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue.Status != "done" {
+		t.Fatalf("monitor advisory changed terminal status to %q", issue.Status)
+	}
+	if len(runner.phases) != 2 || runner.phases[0] != "delivery" || runner.phases[1] != "monitor" {
+		t.Fatalf("eval phases=%v, want delivery then monitor", runner.phases)
+	}
+}
+
 func TestIssueLoopBridge_ResolveHumanBlockCompletesStep(t *testing.T) {
 	if loopTestPool == nil {
 		t.Skip("no test DB")

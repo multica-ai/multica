@@ -25,7 +25,7 @@ describe("loopChainSchema", () => {
       phases: [{
         id: "build",
         limits: { max_steps: 8, max_rounds: 3, no_progress_stalls: 2, max_wait_seconds: 600 },
-        blocks: [{ id: "quality", type: "eval", eval_key: "delivery-quality" }],
+        blocks: [{ id: "quality", type: "eval", eval_key: "delivery-quality", eval_phase: "monitor" }],
       }],
       done_status: "done",
     };

@@ -39,6 +39,7 @@ const loopBlockSchema = z
     approver_type: z.enum(["agent", "member"]).optional(),
     approver_id: z.string().optional(),
     eval_key: z.string().optional(),
+    eval_phase: z.enum(["plan", "delivery", "monitor"]).optional(),
   })
   .passthrough();
 

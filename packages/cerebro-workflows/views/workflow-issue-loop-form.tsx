@@ -61,6 +61,7 @@ function newBlock(type: LoopBlockType = "session"): LoopChainBlock {
     block.on_all_busy = "wait";
   }
   if (type === "command") block.expect = "exit_zero";
+  if (type === "eval") block.eval_phase = "delivery";
   return block;
 }
 
@@ -318,7 +319,10 @@ function BlockEditor({ block, index, count, onChange, onMove, onRemove }: {
       <Field label="Approver"><AssigneePicker assigneeType={block.approver_id ? block.approver_type ?? null : null} assigneeId={block.approver_id ?? null} onUpdate={(update) => onChange((current) => ({ ...current, approver_type: update.assignee_type === "agent" || update.assignee_type === "member" ? update.assignee_type : undefined, approver_id: update.assignee_id ?? undefined }))} align="start" /></Field>
       <Field label="Approval request"><Textarea rows={3} value={block.prompt ?? ""} onChange={(event) => onChange((current) => ({ ...current, prompt: event.target.value }))} placeholder="What should the approver confirm?" /></Field>
     </>}
-    {block.type === "eval" && <Field label="Eval key"><Input value={block.eval_key ?? ""} onChange={(event) => onChange((current) => ({ ...current, eval_key: event.target.value }))} placeholder="delivery-quality" /></Field>}
+    {block.type === "eval" && <>
+      <Field label="Eval key"><Input value={block.eval_key ?? ""} onChange={(event) => onChange((current) => ({ ...current, eval_key: event.target.value }))} placeholder="delivery-quality" /></Field>
+      <Field label="Eval phase"><NativeSelect value={block.eval_phase ?? "delivery"} onChange={(event) => onChange((current) => ({ ...current, eval_phase: event.target.value as "plan" | "delivery" | "monitor" }))}><option value="plan">Plan</option><option value="delivery">Delivery</option><option value="monitor">Monitor</option></NativeSelect></Field>
+    </>}
 
     {(block.type === "session" || block.type === "review") && <div className="mt-3 flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
       <div><p className="text-xs font-medium">Allow more steps</p><p className="text-[11px] text-muted-foreground">The agent may open another step of this same block.</p></div>
