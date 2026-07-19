@@ -451,6 +451,8 @@ func main() {
 	go cerebrolearn.NewLearningSweeper(pool, cerebrodb.New(pool), queries).Run(sweepCtx, 6*time.Hour)
 	// CEREBRO-PATCH(main-eval-schedule-sweeper): FIR-3496 scheduled eval runs. Gated OFF by CEREBRO_EVAL_DRIFT_ENABLED; Run returns immediately until enabled.
 	go cerebroevals.NewScheduleSweeper(cerebroevals.NewStore(pool), cerebroevalrun.New(pool)).Run(sweepCtx, time.Minute)
+	// CEREBRO-PATCH(main-eval-drift-sweeper): FIR-3496 daily eval drift alarm (fail + pass-rate regression). Gated OFF by CEREBRO_EVAL_DRIFT_ENABLED.
+	go cerebroevals.NewDriftSweeper(cerebroevals.NewStore(pool), cerebrodb.New(pool), queries, bus).Run(sweepCtx, 24*time.Hour)
 	if gatewayCfg, err := cerebroruntime.LoadFirtalGatewayRuntimeConfig(); err != nil {
 		slog.Error("invalid firtal gateway server runtime config", "error", err)
 		os.Exit(1)

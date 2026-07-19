@@ -370,3 +370,86 @@ func (s *Store) LatestRunPassed(ctx context.Context, workspaceID, evalID, issueI
 func (s *Store) EvalPassed(ctx context.Context, workspaceID, evalID, issueID uuid.UUID) (bool, error) {
 	return s.LatestRunPassed(ctx, workspaceID, evalID, issueID)
 }
+
+// VersionPassRate is the pass/total tally for one target_version of an eval.
+type VersionPassRate struct {
+	TargetVersion string `json:"target_version"`
+	Passed        int    `json:"passed"`
+	Total         int    `json:"total"`
+}
+
+// Rate returns the fraction of runs that passed for this target version, or 0
+// when there are no runs (guards a zero divide).
+func (v VersionPassRate) Rate() float64 {
+	if v.Total == 0 {
+		return 0
+	}
+	return float64(v.Passed) / float64(v.Total)
+}
+
+// PassRateByTargetVersion returns the pass/total tally per target_version for an
+// eval, newest target_version first (ordered by each version's most recent run).
+// Used by the drift alarm to detect a pass-rate regression between the newest
+// target version and the one before it.
+func (s *Store) PassRateByTargetVersion(ctx context.Context, workspaceID, evalID uuid.UUID) ([]VersionPassRate, error) {
+	rows, err := s.pool.Query(ctx, `
+      SELECT target_version,
+        count(*) FILTER (WHERE status = 'passed') AS passed,
+        count(*) AS total
+      FROM cerebro_eval_run
+      WHERE workspace_id=$1 AND eval_id=$2
+      GROUP BY target_version
+      ORDER BY max(created_at) DESC`, workspaceID, evalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]VersionPassRate, 0)
+	for rows.Next() {
+		var v VersionPassRate
+		if err := rows.Scan(&v.TargetVersion, &v.Passed, &v.Total); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// LatestRunStatusForEval returns the status of the newest run of an eval across
+// all issues/versions, and whether any run exists. Used by the drift alarm to
+// flag an eval whose most recent run failed.
+func (s *Store) LatestRunStatusForEval(ctx context.Context, workspaceID, evalID uuid.UUID) (string, bool, error) {
+	var status string
+	err := s.pool.QueryRow(ctx, `
+      SELECT status FROM cerebro_eval_run
+      WHERE workspace_id=$1 AND eval_id=$2
+      ORDER BY created_at DESC LIMIT 1`, workspaceID, evalID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return status, true, nil
+}
+
+// ListActiveEvals returns every active eval across all workspaces, newest first.
+// The drift alarm walks these each tick; a workspace with no active evals simply
+// contributes nothing.
+func (s *Store) ListActiveEvals(ctx context.Context) ([]Eval, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+evalColumns+` FROM cerebro_eval
+        WHERE status='active' ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]Eval, 0)
+	for rows.Next() {
+		eval, err := scanEval(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, eval)
+	}
+	return items, rows.Err()
+}
