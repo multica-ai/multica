@@ -13,6 +13,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 type Handler struct {
@@ -96,7 +97,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
-	_, workspaceID, _, ok := requestContext(w, r)
+	actorID, workspaceID, _, ok := requestContext(w, r)
 	if !ok {
 		return
 	}
@@ -112,12 +113,33 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Only the eval's owner (its creator) or a workspace admin may edit an eval
+	// (FIR-3496). Load it first so the ownership check has the creator to compare.
+	existing, err := h.store.Get(r.Context(), workspaceID, id)
+	if err != nil {
+		h.storeError(w, r, err)
+		return
+	}
+	member, memberOK := middleware.MemberFromContext(r.Context())
+	if !canEditEval(member, memberOK, actorID, existing) {
+		writeError(w, http.StatusForbidden, "only the eval owner or a workspace admin may edit this eval")
+		return
+	}
 	item, err := h.store.Update(r.Context(), workspaceID, id, input)
 	if err != nil {
 		h.storeError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
+}
+
+// canEditEval reports whether the actor may edit the eval: a workspace admin
+// (owner/admin role) always may; otherwise only the eval's creator may.
+func canEditEval(member db.Member, memberOK bool, actorID uuid.UUID, eval Eval) bool {
+	if memberOK && (member.Role == "owner" || member.Role == "admin") {
+		return true
+	}
+	return eval.CreatedByID == actorID
 }
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
