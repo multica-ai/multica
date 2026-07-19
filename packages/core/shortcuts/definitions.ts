@@ -114,6 +114,8 @@ const KEY_LABELS: Record<string, string> = {
 };
 
 function eventKey(event: KeyboardEvent): string | null {
+  // Synthetic events (e.g. Chrome autofill) may omit `key` entirely.
+  if (typeof event.key !== "string") return null;
   if (MODIFIER_KEYS.has(event.key) || NON_ACTIONABLE_KEYS.has(event.key)) return null;
   const key = KEY_LABELS[event.key] ?? event.key;
   if (key.length === 1 && /[a-z]/i.test(key)) return key.toUpperCase();

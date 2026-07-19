@@ -120,6 +120,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // skills into the appropriate provider-native location.
 //
 // Claude:      skills → {workDir}/.claude/skills/{name}/SKILL.md  (native discovery)
+// CodeBuddy:   skills → {workDir}/.codebuddy/skills/{name}/SKILL.md  (native discovery — CodeBuddy is a Claude Code fork but uses its own config directory, not .claude/; see https://www.codebuddy.ai/docs/cli/skills)
 // Codex:       skills → handled separately in Prepare via codex-home
 // Hermes:      skills → handled separately in Prepare via hermes-home (HERMES_HOME/skills; Hermes has no workspace-relative discovery, see hermes_home.go)
 // Copilot:     skills → {workDir}/.github/skills/{name}/SKILL.md  (native project-level discovery)
@@ -330,9 +331,14 @@ func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (stri
 // it can match the managed skill roots the prior manifest recorded.
 func skillsDirPath(workDir, provider string) string {
 	switch provider {
-	case "claude", "codebuddy":
+	case "claude":
 		// Claude Code natively discovers skills from .claude/skills/ in the workdir.
 		return filepath.Join(workDir, ".claude", "skills")
+	case "codebuddy":
+		// CodeBuddy Code is a Claude Code fork but uses its own native
+		// project-level skill directory .codebuddy/skills/, not
+		// .claude/skills/. See https://www.codebuddy.ai/docs/cli/skills.
+		return filepath.Join(workDir, ".codebuddy", "skills")
 	case "copilot":
 		// GitHub Copilot CLI natively discovers project-level skills from
 		// .github/skills/<name>/SKILL.md (takes precedence over user-level

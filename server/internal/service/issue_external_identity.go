@@ -187,7 +187,7 @@ func (s *IssueService) UpsertExternalIdentity(ctx context.Context, p IssueExtern
 		actorType = effective.CreatorType
 	}
 	if created {
-		s.publishIssueCreated(effective, nil, effective.CreatorType, actorID, p.IssueCreateOpt)
+		s.publishIssueCreated(effective, nil, nil, effective.CreatorType, actorID, p.IssueCreateOpt)
 		s.captureCreatedAnalytics(effective, effective.CreatorType, actorID, p.IssueCreateOpt)
 		s.maybeEnqueueOnAssign(ctx, effective, effective.CreatorType, actorID)
 	} else if metadataChanged && s.Bus != nil {

@@ -21,11 +21,26 @@ var codexSymlinkedFiles = []string{
 }
 
 // Files to copy from the shared ~/.codex/ into the per-task CODEX_HOME.
-// Copies are isolated — changes don't affect the shared home.
+// Copies are isolated — task-local config and cache refreshes don't mutate
+// the shared home.
 var codexCopiedFiles = []string{
 	"config.json",
 	"config.toml",
 	"instructions.md",
+}
+
+const (
+	codexModelsCacheFile        = "models_cache.json"
+	codexModelsCacheBindingFile = ".models_cache_config.sha256"
+)
+
+// Files whose contents select the model provider/catalog used by Codex. The
+// task-local models cache is only reusable while this source configuration
+// remains unchanged. A model_catalog_json referenced by config.toml is folded
+// into the binding separately by codexModelsCacheConfigFingerprint.
+var codexModelsCacheConfigFiles = []string{
+	"config.json",
+	"config.toml",
 }
 
 // CodexHomeOptions carries optional inputs for prepareCodexHomeWithOpts that
@@ -62,6 +77,12 @@ type CodexHomeOptions struct {
 	// task with no issue), in which case sessions/ stays task-local. See
 	// codexSessionStoreDir and prepareCodexSessionsDir (MUL-4424).
 	SessionStoreKey string
+	// WritableRoots are extra absolute paths written into the config.toml
+	// `[sandbox_workspace_write] writable_roots` so the workspace-write sandbox
+	// (Linux) can write outside the task workdir — the per-task writable HOME.
+	// Only meaningful when the policy resolves to workspace-write; ignored on
+	// darwin danger-full-access. See task_home.go and MUL-4856.
+	WritableRoots []string
 }
 
 // prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
@@ -78,6 +99,10 @@ func prepareCodexHome(codexHome string, logger *slog.Logger) error {
 // daemon-managed sandbox block picked by codexSandboxPolicyFor.
 func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *slog.Logger) error {
 	sharedHome := resolveSharedCodexHome()
+	freshHome := false
+	if _, err := os.Lstat(codexHome); os.IsNotExist(err) {
+		freshHome = true
+	}
 
 	if err := os.MkdirAll(codexHome, 0o755); err != nil {
 		return fmt.Errorf("create codex-home dir: %w", err)
@@ -105,7 +130,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// into a stale local copy.
 	logCodexAuthState(filepath.Join(codexHome, "auth.json"), logger)
 
-	// Sync config files from the shared source (isolated per task).
+	// Sync isolated files from the shared source.
 	for _, name := range codexCopiedFiles {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
@@ -113,7 +138,6 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 			logger.Warn("execenv: codex-home sync failed", "file", name, "error", err)
 		}
 	}
-
 	// Drop `[[skills.config]]` entries inherited from the user's
 	// ~/.codex/config.toml. Codex Desktop writes plugin-backed skills with a
 	// `name` and no `path`, which the CLI's stricter TOML parser rejects with
@@ -128,6 +152,18 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		return fmt.Errorf("sync codex model_catalog_json: %w", err)
 	}
 
+	// Seed the shared model cache only for a fresh task home. On reuse, keep a
+	// task-local cache that Codex may have refreshed, but only while the source
+	// provider/catalog configuration is still the one that cache was bound to.
+	// If binding fails, discard the optional cache so Codex refreshes it instead
+	// of potentially using models from the wrong provider.
+	if err := syncCodexModelsCache(codexHome, sharedHome, freshHome); err != nil {
+		logger.Warn("execenv: codex-home models cache sync failed; discarding cache", "error", err)
+		if removeErr := os.RemoveAll(filepath.Join(codexHome, codexModelsCacheFile)); removeErr != nil {
+			return fmt.Errorf("sync codex models cache: %v; discard unsafe cache: %w", err, removeErr)
+		}
+	}
+
 	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
 		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
 	}
@@ -136,6 +172,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// need to fall back to danger-full-access because of openai/codex#10390;
 	// see codex_sandbox.go for the full rationale.
 	policy := codexSandboxPolicyFor(opts.GOOS, opts.CodexVersion)
+	policy.WritableRoots = opts.WritableRoots
 	if err := ensureCodexSandboxConfig(filepath.Join(codexHome, "config.toml"), policy, opts.CodexVersion, logger); err != nil {
 		logger.Warn("execenv: codex-home ensure sandbox config failed", "error", err)
 	}
@@ -723,6 +760,162 @@ func syncCodexModelCatalog(codexHome, sharedHome string) error {
 	return nil
 }
 
+// syncCodexModelsCache seeds models_cache.json once for a fresh task home and
+// binds it to the shared provider/catalog configuration. Codex can replace the
+// task-local cache after startup, so an unchanged binding preserves whatever
+// the task last wrote rather than restoring a potentially stale shared copy.
+//
+// A changed or missing binding makes an existing cache unsafe: Codex's cache
+// format (as of 0.144.x) records the client version and fetch time but not the
+// provider identity. Reusing that cache after config.toml switches providers
+// can therefore pair provider B with provider A's model catalog. Drop it and
+// let Codex fetch a catalog for the new effective configuration. We
+// deliberately do not seed the shared cache in this case because it carries
+// the same provider-identity ambiguity.
+func syncCodexModelsCache(codexHome, sharedHome string, freshHome bool) error {
+	fingerprint, err := codexModelsCacheConfigFingerprint(sharedHome)
+	if err != nil {
+		return err
+	}
+
+	bindingPath := filepath.Join(codexHome, codexModelsCacheBindingFile)
+	previous, bound, err := readCodexModelsCacheBinding(bindingPath)
+	if err != nil {
+		return err
+	}
+
+	cachePath := filepath.Join(codexHome, codexModelsCacheFile)
+	cacheInfo, cacheErr := os.Lstat(cachePath)
+	cacheExists := cacheErr == nil
+	if cacheErr != nil && !os.IsNotExist(cacheErr) {
+		return fmt.Errorf("stat codex models cache %s: %w", cachePath, cacheErr)
+	}
+
+	if bound && previous == fingerprint {
+		// The cache belongs to the current config. Preserve both an existing
+		// task-refreshed cache and an intentional absence after a failed fetch;
+		// seeding on reuse could reintroduce an unbound shared snapshot.
+		if cacheExists && !cacheInfo.Mode().IsRegular() {
+			if err := os.RemoveAll(cachePath); err != nil {
+				return fmt.Errorf("remove non-regular codex models cache %s: %w", cachePath, err)
+			}
+		}
+		return nil
+	}
+
+	if cacheExists {
+		if err := os.RemoveAll(cachePath); err != nil {
+			return fmt.Errorf("remove unbound codex models cache %s: %w", cachePath, err)
+		}
+	}
+
+	if freshHome && !bound && !cacheExists {
+		// A shared snapshot is useful on the one path where the task home itself
+		// did not exist yet; subsequent task-local refreshes stay isolated. An
+		// existing legacy home without a binding never seeds because its prior
+		// effective configuration is unknown even when its cache is absent.
+		if err := seedCopiedFile(filepath.Join(sharedHome, codexModelsCacheFile), cachePath); err != nil {
+			return fmt.Errorf("seed codex models cache: %w", err)
+		}
+	}
+
+	if err := writeCodexModelsCacheBinding(bindingPath, fingerprint); err != nil {
+		return err
+	}
+	return nil
+}
+
+// codexModelsCacheConfigFingerprint hashes the shared config files plus the
+// contents of any model_catalog_json they reference. The digest is stored in
+// the isolated task home; no config contents or credentials are persisted.
+func codexModelsCacheConfigFingerprint(sharedHome string) (string, error) {
+	h := sha256.New()
+	var configTOML []byte
+
+	for _, name := range codexModelsCacheConfigFiles {
+		path := filepath.Join(sharedHome, name)
+		data, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			fmt.Fprintf(h, "%s\x00missing\x00", name)
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("read codex model cache config %s: %w", path, err)
+		}
+		fmt.Fprintf(h, "%s\x00%d\x00", name, len(data))
+		_, _ = h.Write(data)
+		if name == "config.toml" {
+			configTOML = data
+		}
+	}
+
+	if len(configTOML) > 0 {
+		var cfg struct {
+			ModelCatalogJSON string `toml:"model_catalog_json"`
+		}
+		if err := toml.Unmarshal(configTOML, &cfg); err != nil {
+			return "", fmt.Errorf("parse codex model cache config %s: %w", filepath.Join(sharedHome, "config.toml"), err)
+		}
+		catalogPath := strings.TrimSpace(cfg.ModelCatalogJSON)
+		if catalogPath != "" {
+			resolved, err := resolveCodexConfigPath(catalogPath, sharedHome)
+			if err != nil {
+				return "", err
+			}
+			data, err := os.ReadFile(resolved)
+			if err != nil {
+				return "", fmt.Errorf("read model_catalog_json %s: %w", resolved, err)
+			}
+			fmt.Fprintf(h, "model_catalog_json\x00%d\x00", len(data))
+			_, _ = h.Write(data)
+		}
+	}
+
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// readCodexModelsCacheBinding returns bound=false for a missing or non-regular
+// marker. Non-regular paths are removed so a reused task cannot redirect the
+// later binding write outside its isolated CODEX_HOME.
+func readCodexModelsCacheBinding(path string) (fingerprint string, bound bool, err error) {
+	fi, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("stat codex models cache binding %s: %w", path, err)
+	}
+	if !fi.Mode().IsRegular() {
+		if err := os.RemoveAll(path); err != nil {
+			return "", false, fmt.Errorf("remove non-regular codex models cache binding %s: %w", path, err)
+		}
+		return "", false, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false, fmt.Errorf("read codex models cache binding %s: %w", path, err)
+	}
+	return strings.TrimSpace(string(data)), true, nil
+}
+
+func writeCodexModelsCacheBinding(path, fingerprint string) error {
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("remove prior codex models cache binding %s: %w", path, err)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("create codex models cache binding %s: %w", path, err)
+	}
+	if _, err := io.WriteString(f, fingerprint+"\n"); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("write codex models cache binding %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close codex models cache binding %s: %w", path, err)
+	}
+	return nil
+}
+
 func resolveCodexConfigPath(configPath, sharedHome string) (string, error) {
 	if filepath.IsAbs(configPath) {
 		return filepath.Clean(configPath), nil
@@ -874,6 +1067,31 @@ func syncCopiedFile(src, dst string) error {
 
 	if srcMissing {
 		return nil
+	}
+	return copyFile(src, dst)
+}
+
+// seedCopiedFile copies src only when dst has no task-local regular file.
+// Unlike syncCopiedFile, it never overwrites or removes a cache refreshed by a
+// prior run. Non-regular destinations are removed defensively so a reused task
+// cannot turn the cache path into a link outside its isolated CODEX_HOME.
+func seedCopiedFile(src, dst string) error {
+	if fi, err := os.Lstat(dst); err == nil {
+		if fi.Mode().IsRegular() {
+			return nil
+		}
+		if err := os.RemoveAll(dst); err != nil {
+			return fmt.Errorf("remove non-regular dst %s: %w", dst, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat dst %s: %w", dst, err)
+	}
+
+	if _, err := os.Stat(src); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat src %s: %w", src, err)
 	}
 	return copyFile(src, dst)
 }

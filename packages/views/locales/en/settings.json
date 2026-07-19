@@ -30,6 +30,10 @@
     "sticky_comment_bar": {
       "title": "Sticky comment bar",
       "hint": "Keep the comment bar pinned to the bottom while scrolling an issue page."
+    },
+    "issue_link_new_tab": {
+      "title": "Open issue links in new tab",
+      "hint": "Issue links in descriptions, comments, and chat open in a new tab instead of navigating in place."
     }
   },
   "shortcuts": {
@@ -95,6 +99,22 @@
     "floating_label": "Floating chat window",
     "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, Chat lives only in this tab."
   },
+  "issue": {
+    "description": "Choose which fields each create dialog keeps on its toolbar. Hidden fields stay available from the ⋯ menu and reappear while they hold a value.",
+    "quick_create_title": "Create with agent",
+    "quick_create_description": "Fields shown in the quick create toolbar.",
+    "manual_create_title": "Create manually",
+    "manual_create_description": "Fields shown in the manual create toolbar.",
+    "fields": {
+      "status": "Status",
+      "priority": "Priority",
+      "assignee": "Assignee",
+      "labels": "Labels",
+      "project": "Project",
+      "due_date": "Due date",
+      "start_date": "Start date"
+    }
+  },
   "page": {
     "title": "Settings",
     "my_account": "My Account",
@@ -103,6 +123,7 @@
       "profile": "Profile",
       "preferences": "Preferences",
       "shortcuts": "Shortcuts",
+      "issue": "Issue",
       "chat": "Chat",
       "notifications": "Notifications",
       "tokens": "API Tokens",
@@ -157,6 +178,9 @@
       "create_title": "New property",
       "edit_title": "Edit property",
       "admin_hint": "Only workspace owners and admins can manage property definitions.",
+      "icon": "Icon",
+      "choose_icon": "Choose icon",
+      "remove_icon": "Remove icon",
       "name": "Name",
       "name_placeholder": "e.g. Severity",
       "type": "Type",

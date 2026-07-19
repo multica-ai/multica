@@ -157,6 +157,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // config file so the agent discovers its environment through its native mechanism.
 //
 // For Claude:   writes {workDir}/CLAUDE.md  (skills discovered natively from .claude/skills/)
+// For CodeBuddy: writes {workDir}/CODEBUDDY.md  (CodeBuddy's native memory filename; skills discovered natively from .codebuddy/skills/)
 // For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
 // For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .opencode/skills/)
@@ -188,8 +189,15 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 // added to one side cannot drift past the other.
 func runtimeConfigPath(workDir, provider string) string {
 	switch provider {
-	case "claude", "codebuddy":
+	case "claude":
 		return filepath.Join(workDir, "CLAUDE.md")
+	case "codebuddy":
+		// CodeBuddy Code's native memory file is CODEBUDDY.md, not
+		// CLAUDE.md — see https://www.codebuddy.ai/docs/cli/codebuddy-dir
+		// ("CODEBUDDY.md / .codebuddy/CODEBUDDY.md — Project-level memory
+		// file"). CodeBuddy only reads CLAUDE.md if the user manually
+		// migrates/symlinks it in.
+		return filepath.Join(workDir, "CODEBUDDY.md")
 	case "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli", "grok":
 		return filepath.Join(workDir, "AGENTS.md")
 	default:

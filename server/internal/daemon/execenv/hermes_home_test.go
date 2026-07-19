@@ -264,6 +264,99 @@ func TestHermesOverlayIsolatesMemories(t *testing.T) {
 	}
 }
 
+// TestHermesOverlayKeepsSessionDatabaseTaskLocal verifies the live SQLite
+// session store is never mirrored from the host. Hermes creates it lazily in
+// the task home, and reuse must preserve that task-local database instead of
+// replacing it with a fresh host snapshot.
+func TestHermesOverlayKeepsSessionDatabaseTaskLocal(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), "model: hermes-4\n")
+	stateFiles := []string{"state.db", "state.db-wal", "state.db-shm", "state.db-journal"}
+	for _, name := range stateFiles {
+		mustWrite(t, filepath.Join(sharedHome, name), "HOST "+name)
+	}
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+	for _, name := range stateFiles {
+		if _, err := os.Lstat(filepath.Join(hermesHome, name)); !os.IsNotExist(err) {
+			t.Fatalf("host %s must not be mirrored into a fresh task overlay: %v", name, err)
+		}
+		mustWrite(t, filepath.Join(hermesHome, name), "TASK "+name)
+		mustWrite(t, filepath.Join(sharedHome, name), "UPDATED HOST "+name)
+	}
+
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome (reuse) failed: %v", err)
+	}
+	for _, name := range stateFiles {
+		data, err := os.ReadFile(filepath.Join(hermesHome, name))
+		if err != nil {
+			t.Fatalf("read task-local %s after reuse: %v", name, err)
+		}
+		if got, want := string(data), "TASK "+name; got != want {
+			t.Errorf("task-local %s after reuse = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// TestHermesOverlayMigratesLegacySessionDatabase verifies an overlay created by
+// an older daemon drops potentially inconsistent copied SQLite files once,
+// without touching the host, then preserves the database Hermes creates locally.
+func TestHermesOverlayMigratesLegacySessionDatabase(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), "model: hermes-4\n")
+	stateFiles := []string{"state.db", "state.db-wal", "state.db-shm", "state.db-journal"}
+	for _, name := range stateFiles {
+		mustWrite(t, filepath.Join(sharedHome, name), "HOST "+name)
+	}
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	for _, name := range stateFiles {
+		mustWrite(t, filepath.Join(hermesHome, name), "LEGACY COPY "+name)
+	}
+	// POSIX overlays used symlinks while Windows without symlink privilege used
+	// copies. Exercise the symlink migration when the host permits creating one.
+	walPath := filepath.Join(hermesHome, "state.db-wal")
+	if err := os.Remove(walPath); err != nil {
+		t.Fatalf("remove copied WAL before symlink setup: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(sharedHome, "state.db-wal"), walPath); err != nil {
+		mustWrite(t, walPath, "LEGACY COPY state.db-wal")
+	}
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+	for _, name := range stateFiles {
+		if _, err := os.Lstat(filepath.Join(hermesHome, name)); !os.IsNotExist(err) {
+			t.Errorf("legacy overlay %s should be removed during migration: %v", name, err)
+		}
+		data, err := os.ReadFile(filepath.Join(sharedHome, name))
+		if err != nil {
+			t.Fatalf("read host %s after migration: %v", name, err)
+		}
+		if got, want := string(data), "HOST "+name; got != want {
+			t.Errorf("host %s changed during migration: got %q, want %q", name, got, want)
+		}
+	}
+
+	mustWrite(t, filepath.Join(hermesHome, "state.db"), "TASK DB")
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome (reuse) failed: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(hermesHome, "state.db")); err != nil {
+		t.Fatalf("read migrated task-local state.db after reuse: %v", err)
+	} else if got := string(data); got != "TASK DB" {
+		t.Errorf("migrated task-local state.db after reuse = %q, want TASK DB", got)
+	}
+}
+
 // TestHermesOverlayPermissions asserts the task home is 0700 and the derived
 // config (which can hold inline api_key secrets) is 0600.
 func TestHermesOverlayPermissions(t *testing.T) {
@@ -286,6 +379,11 @@ func TestHermesOverlayPermissions(t *testing.T) {
 		t.Fatalf("stat config: %v", err)
 	} else if fi.Mode().Perm() != 0o600 {
 		t.Errorf("derived config perms = %o, want 0600", fi.Mode().Perm())
+	}
+	if fi, err := os.Stat(filepath.Join(hermesHome, hermesTaskLocalStateMarker)); err != nil {
+		t.Fatalf("stat task-local state marker: %v", err)
+	} else if fi.Mode().Perm() != 0o600 {
+		t.Errorf("task-local state marker perms = %o, want 0600", fi.Mode().Perm())
 	}
 }
 

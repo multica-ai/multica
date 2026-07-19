@@ -6,12 +6,14 @@ import userEvent from "@testing-library/user-event";
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetLastActor = vi.hoisted(() => vi.fn());
 const mockSetLastProjectId = vi.hoisted(() => vi.fn());
+const mockSetQuickCreateFieldVisible = vi.hoisted(() => vi.fn());
 const mockSetPrompt = vi.hoisted(() => vi.fn());
 const mockClearPrompt = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const mockUploadWithToast = vi.hoisted(() => vi.fn());
+const mockNavigationPush = vi.hoisted(() => vi.fn());
 
 const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
@@ -24,6 +26,11 @@ const mockQuickCreateStore = {
   clearPrompt: mockClearPrompt,
   keepOpen: false,
   setKeepOpen: mockSetKeepOpen,
+};
+
+const mockCreateSettingsStore = {
+  quickCreateFields: ["project"] as Array<"project" | "priority" | "due_date">,
+  setQuickCreateFieldVisible: mockSetQuickCreateFieldVisible,
 };
 
 // Per-test override for the projects query, so tests can swap between
@@ -80,6 +87,13 @@ vi.mock("@multica/core/hooks", () => ({
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ name: "Test Workspace" }),
+  useWorkspacePaths: () => ({
+    settings: () => "/ws-test/settings",
+  }),
+}));
+
+vi.mock("../navigation", () => ({
+  useNavigation: () => ({ push: mockNavigationPush }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -99,6 +113,12 @@ vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
     (selector ? selector(mockQuickCreateStore) : mockQuickCreateStore),
 }));
 
+vi.mock("@multica/core/issues/stores/issue-create-settings-store", () => ({
+  useIssueCreateSettingsStore: (
+    selector?: (state: typeof mockCreateSettingsStore) => unknown,
+  ) => (selector ? selector(mockCreateSettingsStore) : mockCreateSettingsStore),
+}));
+
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
   useCreateModeStore: (selector?: (state: { setLastMode: typeof mockSetLastMode }) => unknown) =>
     (selector ? selector({ setLastMode: mockSetLastMode }) : { setLastMode: mockSetLastMode }),
@@ -112,6 +132,7 @@ vi.mock("@multica/core/auth", () => ({
 vi.mock("@multica/core/runtimes", () => ({
   runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
   checkQuickCreateCliVersion: () => ({ state: "ok", min: "1.0.0" }),
+  checkQuickCreateFieldsCliVersion: () => ({ state: "ok", min: "1.0.0" }),
   readRuntimeCliVersion: () => "1.2.3",
   MIN_QUICK_CREATE_CLI_VERSION: "1.0.0",
 }));
@@ -129,22 +150,68 @@ vi.mock("../common/actor-avatar", () => ({
 }));
 
 vi.mock("../issues/components", () => ({
-  PriorityPicker: () => <div data-testid="priority-picker" />,
-  DueDatePicker: () => <div data-testid="due-date-picker" />,
+  PriorityIcon: ({ priority }: { priority: string }) => <span>{priority}</span>,
+  PriorityPicker: ({ onUpdate }: any) => (
+    <button type="button" data-testid="priority-picker" onClick={() => onUpdate({ priority: "high" })}>
+      Priority
+    </button>
+  ),
+  DueDatePicker: ({ onUpdate }: any) => (
+    <button type="button" data-testid="due-date-picker" onClick={() => onUpdate({ due_date: "2026-08-01" })}>
+      Due date
+    </button>
+  ),
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
-  ProjectPicker: () => <div data-testid="project-picker" />,
+  ProjectPicker: ({ onUpdate }: any) => (
+    <button type="button" data-testid="project-picker" onClick={() => onUpdate({ project_id: "proj-1" })}>
+      Project
+    </button>
+  ),
 }));
 
 vi.mock("../common/pill-button", () => ({
-  PillButton: () => <div data-testid="pill-button" />,
+  PillButton: ({ children, ...props }: any) => <button type="button" {...props}>{children}</button>,
 }));
 
-vi.mock("../editor", () => {
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, placeholder }: any, ref: any) => {
+vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
+  DropdownMenuTrigger: ({ render }: { render: ReactNode }) => <>{render}</>,
+  DropdownMenuContent: ({ children }: { children: ReactNode }) => <>{children}</>,
+  DropdownMenuItem: ({ children, onClick }: any) => (
+    <button type="button" onClick={onClick}>{children}</button>
+  ),
+  DropdownMenuSeparator: () => null,
+}));
+
+vi.mock("@multica/ui/lib/utils", () => ({
+  cn: (...values: Array<string | false | null | undefined>) => values.filter(Boolean).join(" "),
+}));
+
+vi.mock("../editor", async () => {
+  // Real submit gate (pure React) driven by the mock editor's
+  // `hasActiveUploads` / `onUploadingChange`.
+  const uploadGate = await vi.importActual<typeof import("../editor/use-upload-gate")>(
+    "../editor/use-upload-gate",
+  );
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, onUploadingChange, placeholder }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
+    // Mirrors the real editor's `uploading` node attrs: the placeholder sits
+    // in the doc from before the await until the upload settles, which is what
+    // `hasActiveUploads` reports and `onUploadingChange` publishes.
+    const inFlightRef = useRef(0);
+    const runUpload = async (file: File) => {
+      inFlightRef.current += 1;
+      if (inFlightRef.current === 1) onUploadingChange?.(true);
+      try {
+        return await onUploadFile?.(file);
+      } finally {
+        inFlightRef.current -= 1;
+        if (inFlightRef.current === 0) onUploadingChange?.(false);
+      }
+    };
 
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
@@ -152,13 +219,9 @@ vi.mock("../editor", () => {
         valueRef.current = "";
         setValue("");
       },
-      uploadFile: vi.fn(),
+      uploadFile: runUpload,
       focus: vi.fn(),
-      // Real ContentEditor checks ProseMirror node attrs for any `uploading:
-      // true` marker. The mock returns false because none of these tests drive
-      // a real in-flight upload through the editor — the multi-upload race is
-      // covered as a unit test against useFileUpload directly (MUL-3339).
-      hasActiveUploads: () => false,
+      hasActiveUploads: () => inFlightRef.current > 0,
     }));
 
     return (
@@ -179,7 +242,7 @@ vi.mock("../editor", () => {
         />
         <button
           type="button"
-          onClick={() => onUploadFile?.(new File(["image"], "shot.png", { type: "image/png" }))}
+          onClick={() => runUpload(new File(["image"], "shot.png", { type: "image/png" }))}
         >
           Mock editor upload
         </button>
@@ -189,6 +252,12 @@ vi.mock("../editor", () => {
   ContentEditor.displayName = "ContentEditor";
 
   return {
+    ...uploadGate,
+    useEditorUpload: () => ({
+      uploadWithToast: mockUploadWithToast,
+      upload: vi.fn(),
+      uploading: false,
+    }),
     ContentEditor,
     useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
     FileDropOverlay: () => null,
@@ -256,7 +325,6 @@ vi.mock("@multica/ui/components/ui/button", () => ({
 vi.mock("@multica/ui/components/ui/switch", () => ({
   Switch: ({ checked, onCheckedChange }: { checked: boolean; onCheckedChange: (v: boolean) => void }) => (
     <input
-      aria-label="Create another"
       type="checkbox"
       checked={checked}
       onChange={(e) => onCheckedChange(e.target.checked)}
@@ -265,7 +333,11 @@ vi.mock("@multica/ui/components/ui/switch", () => ({
 }));
 
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
-  FileUploadButton: () => <button type="button">Upload file</button>,
+  // `disabled` is forwarded so the "can still queue another file mid-upload"
+  // guarantee is actually assertable here (MUL-4808).
+  FileUploadButton: ({ disabled }: { disabled?: boolean }) => (
+    <button type="button" disabled={disabled}>Upload file</button>
+  ),
 }));
 
 vi.mock("sonner", () => ({
@@ -295,6 +367,7 @@ describe("AgentCreatePanel", () => {
     mockQuickCreateStore.lastActorType = null;
     mockQuickCreateStore.lastActorId = null;
     mockQuickCreateStore.lastProjectId = null;
+    mockCreateSettingsStore.quickCreateFields = ["project"];
     mockQuickCreateStore.prompt = "Persisted draft prompt";
     mockQuickCreateStore.keepOpen = false;
     mockProjectsQuery.data = [];
@@ -364,6 +437,75 @@ describe("AgentCreatePanel", () => {
     expect(mockClearPrompt).toHaveBeenCalled();
     expect(mockSetLastMode).toHaveBeenCalledWith("agent");
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("reveals optional fields from the overflow and submits their values", async () => {
+    const user = userEvent.setup();
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.queryByTestId("priority-picker")).not.toBeInTheDocument();
+    await user.click(screen.getByText("Set priority..."));
+    await user.click(screen.getByTestId("priority-picker"));
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agent_id: "agent-1",
+          priority: "high",
+        }),
+      );
+    });
+  });
+
+  it("routes Customize fields to Settings → Issue, keeping the typed prompt", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+    );
+    fireEvent.change(editor, { target: { value: "Half-typed request" } });
+    await user.click(screen.getByRole("button", { name: "Customize fields..." }));
+
+    expect(mockSetPrompt).toHaveBeenLastCalledWith("Half-typed request");
+    expect(onClose).toHaveBeenCalled();
+    expect(mockNavigationPush).toHaveBeenCalledWith("/ws-test/settings?tab=issue");
+  });
+
+  it("respects fields enabled in Settings → Issue by rendering them inline", () => {
+    mockCreateSettingsStore.quickCreateFields = ["project", "priority", "due_date"];
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.getByTestId("project-picker")).toBeInTheDocument();
+    expect(screen.getByTestId("priority-picker")).toBeInTheDocument();
+    expect(screen.getByTestId("due-date-picker")).toBeInTheDocument();
+  });
+
+  it("submits seeded priority and due date as authoritative quick-create fields", async () => {
+    const user = userEvent.setup();
+
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: { priority: "urgent", due_date: "2026-08-01" },
+    });
+
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          priority: "urgent",
+          due_date: "2026-08-01",
+        }),
+      );
+    });
   });
 
   it("passes referenced upload attachment ids to quick-create", async () => {
@@ -525,5 +667,46 @@ describe("AgentCreatePanel", () => {
   it("does not render the sub-issue chip when no parent is seeded", () => {
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
     expect(screen.queryByTestId("agent-sub-issue-chip")).toBeNull();
+  });
+
+  // MUL-4808 — Quick Create already gated Create; these pin the two gaps:
+  // the mode switch (which re-serializes the prompt into the manual draft)
+  // and the file button that used to lock during an upload for no reason.
+  describe("upload submit gate", () => {
+    function startPendingUpload() {
+      let release!: (result: unknown) => void;
+      mockUploadWithToast.mockImplementationOnce(
+        () => new Promise((resolve) => { release = resolve; }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Mock editor upload" }));
+      return { release: (result: unknown) => release(result) };
+    }
+
+    it("blocks Switch to Manual while an upload is in flight", async () => {
+      const onSwitchMode = vi.fn();
+      renderPanel({ onClose: vi.fn(), onSwitchMode, isExpanded: false, setIsExpanded: vi.fn() });
+
+      startPendingUpload();
+
+      // The switch hands the serialized prompt to the manual panel — mid-upload
+      // that prompt has already lost the pending image.
+      const switchButton = screen.getByRole("button", { name: /Switch to Manual/i });
+      await waitFor(() => expect(switchButton).toBeDisabled());
+      fireEvent.click(switchButton);
+      expect(onSwitchMode).not.toHaveBeenCalled();
+    });
+
+    it("keeps the attach-file button usable during an upload so files can queue", async () => {
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      startPendingUpload();
+
+      // Each file is its own queue entry — making users wait for the first to
+      // land before picking the second was a restriction with no race behind
+      // it, and this issue explicitly removed it.
+      const submit = await screen.findByRole("button", { name: "Uploading…" });
+      expect(submit).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Upload file" })).not.toBeDisabled();
+    });
   });
 });

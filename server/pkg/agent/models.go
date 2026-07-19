@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -889,7 +889,8 @@ func discoverQoderModels(ctx context.Context, executablePath string) ([]Model, e
 
 // acpDiscoveryProvider configures how discoverACPModels launches an
 // ACP-speaking agent CLI. The shared helper drives every CLI in
-// the same way (initialize → session/new → parse models block) — the
+// the same way (initialize → optional authenticate → session/new → parse
+// models block) — the
 // per-provider differences are which binary to spawn, which env
 // vars suppress interactive prompts during init, what argv puts
 // the binary into ACP server mode (most use `acp`, Copilot uses
@@ -903,12 +904,14 @@ type acpDiscoveryProvider struct {
 	// acpArgs is the argv passed to the binary to start it in ACP
 	// server mode. Defaults to []string{"acp"} when nil/empty.
 	acpArgs []string
-	// authMethodID, when non-empty, inserts an ACP `authenticate` request
-	// (with the given methodId) between `initialize` and `session/new`.
-	// Agents that need no auth (kiro/qoder/trae) leave this empty and the
-	// handshake is unchanged. Grok Build requires it or session/new is
-	// rejected, degrading discovery to the static fallback catalog.
-	authMethodID string
+	// selectAuthMethod inspects the initialize response and child environment
+	// after initialize succeeds. A non-nil selector must return one advertised
+	// method id; its error aborts discovery before any session operation.
+	selectAuthMethod func(json.RawMessage, []string) (string, error)
+	// strictErrors surfaces stage-specific handshake errors to the caller.
+	// Legacy discovery providers keep their empty-list behavior; Grok enables
+	// this so it can log the actual fallback reason.
+	strictErrors bool
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
@@ -917,11 +920,17 @@ type acpDiscoveryProvider struct {
 // `models.availableModels` / `models.currentModelId`. Provider-specific
 // `launchArgs` select ACP mode (e.g. `acp` vs `--acp`).
 func discoverACPModels(ctx context.Context, executablePath string, p acpDiscoveryProvider) ([]Model, error) {
+	fail := func(stage string, err error) ([]Model, error) {
+		if p.strictErrors {
+			return nil, fmt.Errorf("ACP model discovery %s failed: %w", stage, err)
+		}
+		return []Model{}, nil
+	}
 	if executablePath == "" {
 		executablePath = p.defaultBin
 	}
 	if _, err := exec.LookPath(executablePath); err != nil {
-		return []Model{}, nil
+		return fail("executable lookup", err)
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -932,23 +941,22 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	}
 	cmd := exec.CommandContext(runCtx, executablePath, cmdArgs...)
 	hideAgentWindow(cmd)
-	if len(p.extraEnv) > 0 {
-		cmd.Env = append(os.Environ(), p.extraEnv...)
-	}
+	childEnv := append(os.Environ(), p.extraEnv...)
+	cmd.Env = childEnv
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return []Model{}, nil
+		return fail("stdin setup", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		stdin.Close()
-		return []Model{}, nil
+		return fail("stdout setup", err)
 	}
 	// Discard stderr; noisy logs here don't help us and we don't
 	// want them bleeding into the daemon log every 60s.
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
-		return []Model{}, nil
+		return fail("process start", err)
 	}
 	// Ensure the child process is always reaped.
 	defer func() {
@@ -957,7 +965,12 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 		_, _ = cmd.Process.Wait()
 	}()
 
-	writeACP := func(id int, method string, params map[string]any) error {
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
+	nextID := 1
+	requestACP := func(method string, params map[string]any) (json.RawMessage, error) {
+		id := nextID
+		nextID++
 		msg := map[string]any{
 			"jsonrpc": "2.0",
 			"id":      id,
@@ -966,20 +979,64 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 		}
 		data, err := json.Marshal(msg)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		data = append(data, '\n')
-		_, err = stdin.Write(data)
-		return err
+		if _, err = stdin.Write(data); err != nil {
+			return nil, err
+		}
+
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			var env struct {
+				ID     json.RawMessage `json:"id"`
+				Result json.RawMessage `json:"result"`
+				Error  json.RawMessage `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(line), &env); err != nil || string(env.ID) != fmt.Sprint(id) {
+				continue
+			}
+			if len(env.Error) > 0 && string(env.Error) != "null" {
+				var rpcErr struct {
+					Code    int             `json:"code"`
+					Message string          `json:"message"`
+					Data    json.RawMessage `json:"data"`
+				}
+				_ = json.Unmarshal(env.Error, &rpcErr)
+				detail := ""
+				if len(rpcErr.Data) > 0 && string(rpcErr.Data) != "null" {
+					if err := json.Unmarshal(rpcErr.Data, &detail); err != nil {
+						detail = strings.TrimSpace(string(rpcErr.Data))
+					}
+				}
+				return nil, &acpRPCError{Method: method, Code: rpcErr.Code, Message: rpcErr.Message, Data: detail}
+			}
+			if len(env.Result) == 0 {
+				return nil, fmt.Errorf("response contained neither result nor error")
+			}
+			return env.Result, nil
+		}
+		if err := scanner.Err(); err != nil {
+			return nil, err
+		}
+		if err := runCtx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, io.ErrUnexpectedEOF
 	}
 
-	// Send initialize + session/new.
-	if err := writeACP(1, "initialize", map[string]any{
+	// Each stage is response-driven. In particular, do not guess Grok's auth
+	// method or enqueue session/new before initialize/authenticate succeeds.
+	initResult, err := requestACP("initialize", map[string]any{
 		"protocolVersion":    1,
 		"clientInfo":         map[string]any{"name": p.clientName, "version": "0.1.0"},
 		"clientCapabilities": map[string]any{},
-	}); err != nil {
-		return []Model{}, nil
+	})
+	if err != nil {
+		return fail("initialize", err)
 	}
 
 	// session/new requires a valid cwd — use a temp directory we
@@ -987,70 +1044,38 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	// be in the middle of another task's worktree).
 	tmp, err := os.MkdirTemp("", p.tmpdirPrefix)
 	if err != nil {
-		return []Model{}, nil
+		return fail("temporary cwd", err)
 	}
 	defer os.RemoveAll(tmp)
 
-	// Agents that gate session ops behind an auth handshake (Grok Build)
-	// need `authenticate` before session/new; others leave authMethodID
-	// empty and this step is skipped, keeping their id sequence unchanged.
-	sessionNewID := 2
-	if p.authMethodID != "" {
-		if err := writeACP(2, "authenticate", map[string]any{
-			"methodId": p.authMethodID,
+	if p.selectAuthMethod != nil {
+		methodID, err := p.selectAuthMethod(initResult, childEnv)
+		if err != nil {
+			return fail("auth method selection", err)
+		}
+		if _, err := requestACP("authenticate", map[string]any{
+			"methodId": methodID,
 			"_meta":    map[string]any{"headless": true},
 		}); err != nil {
-			return []Model{}, nil
+			return fail(fmt.Sprintf("authenticate (%s)", methodID), err)
 		}
-		sessionNewID = 3
 	}
 
-	if err := writeACP(sessionNewID, "session/new", map[string]any{
+	sessionResult, err := requestACP("session/new", map[string]any{
 		"cwd":        tmp,
 		"mcpServers": []any{},
-	}); err != nil {
-		return []Model{}, nil
+	})
+	if err != nil {
+		return fail("session/new", err)
 	}
-	wantID := strconv.Itoa(sessionNewID)
-
-	// Read responses until we see the one for session/new.
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
-	deadline := time.After(12 * time.Second)
-	done := make(chan []Model, 1)
-	go func() {
-		defer close(done)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			var env struct {
-				ID     json.Number     `json:"id"`
-				Result json.RawMessage `json:"result"`
-			}
-			if err := json.Unmarshal([]byte(line), &env); err != nil {
-				continue
-			}
-			if env.ID.String() != wantID || len(env.Result) == 0 {
-				continue
-			}
-			done <- parseACPSessionNewModels(env.Result)
-			return
-		}
-	}()
-
-	select {
-	case models := <-done:
-		if models == nil {
-			return []Model{}, nil
-		}
-		return models, nil
-	case <-deadline:
-		return []Model{}, nil
-	case <-runCtx.Done():
-		return []Model{}, nil
+	models := parseACPSessionNewModels(sessionResult)
+	if models == nil {
+		return fail("session/new model parsing", fmt.Errorf("response contained no model catalog"))
 	}
+	if err := runCtx.Err(); err != nil {
+		return fail("completion", err)
+	}
+	return models, nil
 }
 
 // parseACPSessionNewModels extracts the model catalog from an ACP
@@ -1191,22 +1216,22 @@ func parseAntigravityModels(output string) []Model {
 // an authenticated Grok CLI; on any failure falls back to grokStaticModels.
 func discoverGrokModels(ctx context.Context, executablePath string) ([]Model, error) {
 	// Match the daemon's runtime launch: `--no-auto-update` (global) so a
-	// background update check can't stall discovery, and the same auth
-	// handshake — prefer the API key when XAI_API_KEY is set, else the cached
-	// login token — so session/new returns the real catalog instead of being
-	// rejected (which silently falls back to grokStaticModels).
-	authMethod := grokAuthMethodCachedToken
-	if strings.TrimSpace(os.Getenv("XAI_API_KEY")) != "" {
-		authMethod = grokAuthMethodAPIKey
-	}
+	// background update check can't stall discovery. Auth is selected only
+	// after initialize returns the methods this installed CLI actually offers.
 	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:   "grok",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-grok-discovery-",
 		acpArgs:      []string{"--no-auto-update", "agent", "--always-approve", "stdio"},
-		authMethodID: authMethod,
+		selectAuthMethod: func(initResult json.RawMessage, childEnv []string) (string, error) {
+			return selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY"))
+		},
+		strictErrors: true,
 	})
 	if err != nil || len(models) == 0 {
+		if err != nil {
+			slog.Debug("grok model discovery fell back to static catalog", "error", err)
+		}
 		return grokStaticModels(), nil
 	}
 	for i := range models {
@@ -1229,27 +1254,20 @@ func grokStaticModels() []Model {
 	return models
 }
 
-// annotateGrokThinking attaches the fixed --effort vocabulary to
-// every discovered Grok model. Per-model capability is not exposed by
-// session/new, so the full canonical set is offered and the CLI rejects
-// unsupported levels at runtime if a model cannot reason. grok tops out at
-// `xhigh`; this list must stay in lockstep with the grok entry in
-// providerThinkingEnums (thinking.go) so a persisted level is never silently
-// dropped at execution by ValidateThinkingLevel.
+// annotateGrokThinking attaches only capabilities confirmed by xAI's
+// per-model reasoning documentation. session/new does not advertise effort
+// catalogs, so unknown and composer models deliberately keep Thinking nil
+// instead of exposing values that may fail at runtime.
 func annotateGrokThinking(models []Model) {
-	levels := []ThinkingLevel{
-		{Value: "none", Label: "None"},
-		{Value: "minimal", Label: "Minimal"},
-		{Value: "low", Label: "Low"},
-		{Value: "medium", Label: "Medium"},
-		{Value: "high", Label: "High"},
-		{Value: "xhigh", Label: "Extra high"},
-	}
 	for i := range models {
-		models[i].Thinking = &ModelThinking{
-			DefaultLevel:    "",
-			SupportedLevels: levels,
+		if models[i].ID != "grok-4.5" {
+			continue
 		}
+		models[i].Thinking = &ModelThinking{SupportedLevels: []ThinkingLevel{
+			{Value: "low", Label: "Low"},
+			{Value: "medium", Label: "Medium"},
+			{Value: "high", Label: "High"},
+		}}
 	}
 }
 

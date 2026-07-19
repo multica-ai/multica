@@ -14,7 +14,9 @@ import { agentListOptions, memberListOptions } from "@multica/core/workspace/que
 import { canAssignAgent } from "@multica/views/issues/components";
 import { api, dispatchReasonCode } from "@multica/core/api";
 import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+// Direct module path, not the `../../editor` barrel: this controller is
+// headless, and the barrel would pull the whole Tiptap tree in behind it.
+import { useEditorUpload } from "../../editor/use-editor-upload";
 import {
   chatSessionsOptions,
   chatMessagesPageOptions,
@@ -60,6 +62,28 @@ export function deriveChatTitle(content: string): string {
     .trim();
   if (cleaned.length <= CHAT_TITLE_MAX) return cleaned;
   return cleaned.slice(0, CHAT_TITLE_MAX - 1).trimEnd() + "…";
+}
+
+/**
+ * After a send resolves: is the user still composing to the target they sent
+ * from? Decides whether to scrub the composer and open the sent session, or
+ * treat the send as fire-and-forget (the reply surfaces as unread instead).
+ *
+ * The active session answers this on its own, deliberately. The new-chat
+ * composer is ONE box per workspace (see DRAFT_NEW_SESSION), so moving the
+ * agent picker re-points where the next send goes without moving the view or
+ * the draft slot — that is not "navigating away" (MUL-4864). Counting it as
+ * such would leave a completed send's text sitting in the composer, primed to
+ * be sent a second time to the agent just picked.
+ *
+ * Shared by both send chains — the chat tab's controller and the floating
+ * ChatWindow — so the rule cannot drift between the two surfaces.
+ */
+export function isStillOnComposeTarget(
+  liveActiveSessionId: string | null,
+  sentFromSessionId: string | null,
+): boolean {
+  return liveActiveSessionId === sentFromSessionId;
 }
 
 // True when a session has an in-flight optimistic write — an `optimistic-`
@@ -313,7 +337,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
   }, [isActive, appForeground, activeSessionId, currentHasUnread]);
 
-  const { uploadWithToast } = useFileUpload(api);
+  const { uploadWithToast } = useEditorUpload();
 
   const sessionPromiseRef = useRef<Promise<string | null> | null>(null);
   const ensureSession = useCallback(
@@ -495,10 +519,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
         status: "queued",
         created_at: sentAt,
       });
+      // Cache primed → safe to publish the new active session, but only if the
+      // user hasn't navigated away mid-send. See isStillOnComposeTarget.
       const live = useChatStore.getState();
-      const stillOnSourceSession =
-        live.activeSessionId === activeSessionId &&
-        (activeSessionId !== null || live.selectedAgentId === selectedAgentId);
+      const stillOnSourceSession = isStillOnComposeTarget(live.activeSessionId, activeSessionId);
       if (stillOnSourceSession) {
         setActiveSession(sessionId);
       }
@@ -567,7 +591,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
     },
     [
       activeSessionId,
-      selectedAgentId,
       activeAgent,
       isAgentArchived,
       ensureSession,

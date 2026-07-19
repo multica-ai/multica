@@ -1,4 +1,4 @@
-import { forwardRef, useRef, useState, useImperativeHandle } from "react";
+import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -11,6 +11,10 @@ import enIssues from "../../locales/en/issues.json";
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+
+// Counts MockContentEditor mounts. This pins the description to exactly one
+// eager editor per issue and catches stale editor reuse across issue switches.
+const contentEditorMounts = vi.hoisted(() => ({ count: 0 }));
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => mockViewport.isMobile,
@@ -111,7 +115,21 @@ vi.mock("../../navigation", () => ({
 }));
 
 // Mock editor components (Tiptap requires real DOM)
-vi.mock("../../editor", () => ({
+vi.mock("../../editor", async () => ({
+  // Real lazy-mount controller (pure React, no Tiptap) so readonly-first
+  // shell → activate → ready flows behave exactly as in production.
+  ...(await vi.importActual<typeof import("../../editor/use-lazy-editor")>(
+    "../../editor/use-lazy-editor",
+  )),
+  // Real submit gate (pure React) — see comment-composers.test.tsx.
+  ...(await vi.importActual<typeof import("../../editor/use-upload-gate")>(
+    "../../editor/use-upload-gate",
+  )),
+  useEditorUpload: () => ({
+    uploadWithToast: vi.fn(),
+    upload: vi.fn(),
+    uploading: false,
+  }),
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
   // No-op so comment-card's AttachmentList can render without hitting the
@@ -130,15 +148,21 @@ vi.mock("../../editor", () => ({
     <div data-testid="readonly-content">{content}</div>
   ),
   ContentEditor: forwardRef(function MockContentEditor(
-    { defaultValue, onUpdate, placeholder, flushPendingOnUnmount }: any,
+    { defaultValue, onUpdate, placeholder, flushPendingOnUnmount, onReady }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
+    useEffect(() => {
+      contentEditorMounts.count += 1;
+      onReady?.();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       clearContent: () => { valueRef.current = ""; setValue(""); },
       focus: () => {},
+      focusAtCoords: () => {},
       uploadFile: () => {},
     }));
     return (
@@ -156,14 +180,19 @@ vi.mock("../../editor", () => ({
     );
   }),
   TitleEditor: forwardRef(function MockTitleEditor(
-    { defaultValue, placeholder, onBlur, onChange }: any,
+    { defaultValue, placeholder, onBlur, onChange, onReady }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
+    useEffect(() => {
+      onReady?.();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     useImperativeHandle(ref, () => ({
       getText: () => valueRef.current,
       focus: () => {},
+      focusAtCoords: () => {},
     }));
     return (
       <input
@@ -533,6 +562,7 @@ function hasHighlightedCommentBackground(root: ParentNode | null): boolean {
 describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    contentEditorMounts.count = 0;
     mockViewport.isMobile = false;
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
@@ -564,14 +594,27 @@ describe("IssueDetail (shared)", () => {
     ).toBe(true);
   });
 
+  it("renders comment bodies without Base UI collapsible panels", async () => {
+    const { container } = renderIssueDetail();
+
+    await screen.findByText("Started working on this");
+
+    expect(
+      container.querySelector('[data-slot="collapsible-content"]'),
+    ).toBeNull();
+  });
+
   it("renders issue title and description after loading", async () => {
     renderIssueDetail();
 
-    await waitFor(() => {
-      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
-    });
-
-    expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+    // The description is the one eager editor: keeping one renderer avoids the
+    // layout jump caused by swapping a long react-markdown tree for ProseMirror.
+    // Title and comment/reply composers remain readonly-first.
+    expect(await screen.findByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+    expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    expect(screen.queryByTestId("title-editor")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("rich-text-editor")).toHaveLength(1);
+    expect(contentEditorMounts.count).toBe(1);
   });
 
   it("opts the description editor into the unmount flush", async () => {
@@ -585,6 +628,45 @@ describe("IssueDetail (shared)", () => {
 
     const description = await screen.findByDisplayValue("Add JWT auth to the backend");
     expect(description).toHaveAttribute("data-flush-on-unmount", "true");
+  });
+
+  it("remounts the eager description on issue switch without carrying stale content", async () => {
+    // The web route reuses IssueDetail across issues. The keyed description
+    // editor must remount atomically for the new issue while the title remains
+    // on its cheap stand-in.
+    const queryClient = createTestQueryClient();
+    const issue2 = {
+      ...mockIssue,
+      id: "issue-2",
+      title: "Second issue",
+      description: "Second description",
+    };
+    // The cache seed marks the data stale, so the query refetches in the
+    // background — getIssue must answer per-id or the refetch would clobber
+    // issue-2 with issue-1's payload.
+    mockApiObj.getIssue.mockImplementation((issueId: string) =>
+      Promise.resolve(issueId === "issue-2" ? issue2 : mockIssue),
+    );
+    // Pre-seed issue-2 so its first render skips the loading skeleton.
+    queryClient.setQueryData(["issues", "ws-1", "detail", "issue-2"], issue2);
+    const ui = (issueId: string) => (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={queryClient}>
+          <IssueDetail issueId={issueId} />
+        </QueryClientProvider>
+      </I18nProvider>
+    );
+    const { rerender } = render(ui("issue-1"));
+
+    await screen.findByDisplayValue("Add JWT auth to the backend");
+    const mountsBeforeSwitch = contentEditorMounts.count;
+
+    rerender(ui("issue-2"));
+
+    expect(await screen.findByDisplayValue("Second description")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Add JWT auth to the backend")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("title-editor")).not.toBeInTheDocument();
+    expect(contentEditorMounts.count).toBe(mountsBeforeSwitch + 1);
   });
 
   it("renders the issue title leaf as a link to the issue detail page", async () => {
@@ -693,7 +775,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
     });
 
     expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
@@ -1294,11 +1376,7 @@ describe("IssueDetail (shared)", () => {
   it("sends empty description when editor is cleared", async () => {
     renderIssueDetail();
 
-    await waitFor(() => {
-      expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
-    });
-
-    const editor = screen.getByPlaceholderText("Add description...");
+    const editor = await screen.findByDisplayValue("Add JWT auth to the backend");
     fireEvent.change(editor, { target: { value: "" } });
 
     await waitFor(() => {

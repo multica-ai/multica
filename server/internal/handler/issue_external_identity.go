@@ -142,7 +142,7 @@ func (h *Handler) UpsertIssueExternalIdentity(w http.ResponseWriter, r *http.Req
 		IssueCreateOpt: service.IssueCreateOpts{
 			ActorID:  actualCreatorID,
 			Platform: func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
-			BroadcastPayload: func(issue db.Issue, _ []db.Attachment) map[string]any {
+			BroadcastPayload: func(issue db.Issue, _ []db.Attachment, _ []db.IssueLabel) map[string]any {
 				return map[string]any{"issue": issueToResponse(issue, prefix)}
 			},
 		},

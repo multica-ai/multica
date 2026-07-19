@@ -122,7 +122,7 @@ ACP-protocol agent, primarily aimed at the Chinese market. MCP config is passed 
 
 ### Hermes (Nous Research)
 
-ACP-protocol agent (shares the transport with Kimi). Session resumption works, and MCP config is passed through ACP `mcpServers`. Hermes discovers skills only from its home (`~/.hermes/skills/`), so when an agent has skills assigned Multica points `HERMES_HOME` at a per-task overlay of your `~/.hermes/` (real home mirrored by symlink; a derived `config.yaml` references your existing skills as external roots) and writes the assigned skills into its `skills/` directory for native discovery. Tasks with no assigned skills run against your real home unchanged.
+ACP-protocol agent (shares the transport with Kimi). Session resumption works, and MCP config is passed through ACP `mcpServers`. Hermes discovers skills only from its home (`~/.hermes/skills/`), so when an agent has skills assigned Multica points `HERMES_HOME` at a per-task overlay of your `~/.hermes/` (real home mirrored by symlink; a derived `config.yaml` references your existing skills as external roots) and writes the assigned skills into its `skills/` directory for native discovery. The SQLite `state.db` session store and its journal files remain task-local, so host conversation history is neither linked nor copied and live Windows WAL locks cannot block setup. Tasks with no assigned skills run against your real home unchanged.
 
 | | |
 |---|---|
@@ -152,7 +152,7 @@ Minimalist. **Session resumption is unusual** — the resume id is the path to a
 
 ### CodeBuddy (Tencent)
 
-A Claude Code–compatible CLI agent. Multica drives it with the same stream-json protocol as Claude Code: session resumption works via `--resume`, MCP config is passed through `--mcp-config`, and skills land in `.claude/skills/`. Models are discovered dynamically.
+A Claude Code–compatible CLI agent. Multica drives it with the same stream-json protocol as Claude Code: session resumption works via `--resume`, MCP config is passed through `--mcp-config`. CodeBuddy ships its own native config directory rather than reusing Claude's, so skills land in `.codebuddy/skills/` and the runtime brief is written to `CODEBUDDY.md`. Models are discovered dynamically.
 
 | | |
 |---|---|
@@ -194,13 +194,13 @@ Google's Antigravity CLI (`agy`). Pairs with Google's Antigravity service and ru
 
 ### Grok (xAI)
 
-xAI's Grok Build CLI (`grok`). Multica drives it over ACP via `grok --no-auto-update agent --always-approve stdio`, sharing the transport with Hermes, Kimi, Kiro CLI, Qoder, and Trae. It completes xAI's headless `authenticate` handshake after `initialize`, before any session operation. Session resumption works through ACP `session/load`. Models are discovered from `session/new`. MCP config is passed through ACP `mcpServers`. Skills are copied into `.grok/skills/`.
+xAI's Grok Build CLI (`grok`). Multica drives it over ACP via `grok --no-auto-update agent --always-approve stdio`, sharing the transport with Hermes, Kimi, Kiro CLI, Qoder, and Trae. It selects an auth method advertised by `initialize` and completes the headless `authenticate` handshake before any session operation. Session resumption works through ACP `session/load`. Models are discovered from `session/new`. MCP config is passed through ACP `mcpServers`. Skills are copied into `.grok/skills/`; user skills are discovered from `$GROK_HOME/skills/` (default `~/.grok/skills/`) and `~/.agents/skills/`.
 
 | | |
 |---|---|
 | Daemon looks for | `grok` |
 | Install | Install the Grok Build CLI and ensure `grok` is on `PATH` (often `~/.grok/bin`). |
-| Authentication | Run `grok login` (or complete the interactive login flow) so ACP sessions can authenticate. |
+| Authentication | Run `grok login` for cached-token auth, or set `XAI_API_KEY`. The CLI must advertise the corresponding ACP method. |
 | Notes | Override the binary with `MULTICA_GROK_PATH` and the default model with `MULTICA_GROK_MODEL` (e.g. `grok-4.5`). Minimum CLI version: `0.2.89`. |
 
 ## After installing

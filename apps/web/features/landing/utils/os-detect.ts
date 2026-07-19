@@ -7,8 +7,8 @@
  * Known limitation: Safari on macOS always reports `Intel Mac OS X`
  * in the UA string even on Apple Silicon, and Safari does not
  * implement userAgentData. This function therefore returns `arm64`
- * as the best default for any Mac — UI surfaces a small "On Intel
- * Mac? Use CLI." hint to cover the Intel minority.
+ * as the best default for any Mac — UI surfaces a small hint that
+ * points Intel users to the architecture-specific download below.
  */
 
 export type OSName = "mac" | "windows" | "linux" | "unknown";
@@ -85,7 +85,7 @@ export async function detectOS(): Promise<DetectResult> {
 
   let arch: Arch = "unknown";
   if (os === "mac") {
-    // Best default. Real Intel Mac users will see the disclaimer.
+    // Best default. Real Intel Mac users will see the architecture hint.
     arch = "arm64";
   } else if (/arm|aarch/i.test(ua)) {
     arch = "arm64";

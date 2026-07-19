@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor, configure } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
@@ -68,6 +68,18 @@ vi.mock("@multica/core/logger", () => ({
 
 import type { Attachment } from "@multica/core/types";
 import { useChatDraftRestore } from "./use-chat-draft-restore";
+
+// Every assertion here drives a real react-query fetch and mutation, so each
+// `waitFor` gates on a multi-hop async chain (fetch → effect → mutate → settle →
+// refetch). The reconciliation case chains the most hops — consume, settle, a
+// stale refetch on returning to the session, then a re-consume — and timed out
+// under the default 1s `waitFor` budget when the full Vitest suite saturated the
+// CI runner (the whole run took 405s, import alone 364s). Widen both the
+// async-utility and per-test budgets for this file so whole-suite contention
+// can't starve the chain; the defaults stay in force everywhere else (Vitest
+// isolates config per file).
+vi.setConfig({ testTimeout: 20000 });
+configure({ asyncUtilTimeout: 5000 });
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({

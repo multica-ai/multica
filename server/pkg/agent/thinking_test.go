@@ -451,10 +451,13 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"hermes", "", true},
 		{"hermes", "low", false}, // hermes has no thinking concept
 		{"grok", "", true},
-		{"grok", "none", true},
 		{"grok", "low", true},
-		{"grok", "xhigh", true},
-		{"grok", "max", false}, // grok tops out at xhigh; max is not a grok level
+		{"grok", "medium", true},
+		{"grok", "high", true},
+		{"grok", "none", false},
+		{"grok", "minimal", false},
+		{"grok", "xhigh", false},
+		{"grok", "max", false},
 		{"grok", "bogus", false},
 	}
 	for _, tc := range tests {
@@ -493,7 +496,7 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fake binary requires a POSIX shell")
 	}
-	t.Parallel()
+	// This test resets the package-global thinking cache, so it must remain serial.
 
 	// We need a `claude` whose --help advertises the full superset
 	// (low/medium/high/xhigh/max) so per-model projection actually has
@@ -548,7 +551,7 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fake binary requires a POSIX shell")
 	}
-	t.Parallel()
+	// This test resets the package-global thinking cache, so it must remain serial.
 	fakeClaude := writeFakeClaudeHelpBinary(t)
 	resetThinkingCacheForTests()
 	defer resetThinkingCacheForTests()
@@ -634,7 +637,7 @@ func TestValidateThinkingLevel_PreEffortCLIRejectsAllLevels(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fake binary requires a POSIX shell")
 	}
-	t.Parallel()
+	// This test resets the package-global thinking cache, so it must remain serial.
 
 	// End-to-end guard for the daemon's pre-execution check against a CLI
 	// that predates --effort: the catalog must offer no levels, so any
@@ -788,7 +791,7 @@ func writeFakeCodexModelsBinary(t *testing.T) string {
 // ── Cache key invalidation ───────────────────────────────────────────
 
 func TestThinkingCacheKeyDistinct(t *testing.T) {
-	t.Parallel()
+	// This test resets the package-global thinking cache, so it must remain serial.
 	resetThinkingCacheForTests()
 	defer resetThinkingCacheForTests()
 
@@ -800,15 +803,24 @@ func TestThinkingCacheKeyDistinct(t *testing.T) {
 	thinkingCachePut(b, map[string]*ModelThinking{"x": {DefaultLevel: "b"}})
 	thinkingCachePut(c, map[string]*ModelThinking{"x": {DefaultLevel: "c"}})
 
-	if got, _ := thinkingCacheGet(a); got["x"].DefaultLevel != "a" {
-		t.Errorf("cache key A: got %q, want a", got["x"].DefaultLevel)
+	assertLevel := func(name string, key thinkingCacheKey, want string) {
+		t.Helper()
+		models, ok := thinkingCacheGet(key)
+		if !ok {
+			t.Fatalf("cache key %s: entry missing", name)
+		}
+		model, ok := models["x"]
+		if !ok || model == nil {
+			t.Fatalf("cache key %s: model x missing", name)
+		}
+		if model.DefaultLevel != want {
+			t.Errorf("cache key %s: got %q, want %q", name, model.DefaultLevel, want)
+		}
 	}
-	if got, _ := thinkingCacheGet(b); got["x"].DefaultLevel != "b" {
-		t.Errorf("cache key B: got %q, want b", got["x"].DefaultLevel)
-	}
-	if got, _ := thinkingCacheGet(c); got["x"].DefaultLevel != "c" {
-		t.Errorf("cache key C: got %q, want c", got["x"].DefaultLevel)
-	}
+
+	assertLevel("A", a, "a")
+	assertLevel("B", b, "b")
+	assertLevel("C", c, "c")
 }
 
 // ── Shared injection fixture (Trump's MUL-2339 constraint) ───────────
