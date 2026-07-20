@@ -778,6 +778,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	var outputMu sync.Mutex
 	var output strings.Builder
 	var semanticObserved atomic.Bool
+	turnNotificationGate := &codexTurnNotificationGate{}
 
 	// turnDone is set before starting the reader goroutine so there is no
 	// race between the lifecycle goroutine writing and the reader reading.
@@ -790,6 +791,13 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		processDone:          make(chan struct{}),
 		handshakeTimeout:     handshakeTimeout,
 		notificationProtocol: "unknown",
+		acceptNotification:   turnNotificationGate.accept,
+		onDiscardedNotification: func(string, map[string]any) {
+			// Any app-server notification proves the process made semantic
+			// progress, even when it is intentionally excluded from the active
+			// turn. Preserve initialize-retry safety without replaying content.
+			semanticObserved.Store(true)
+		},
 		onMessage: func(msg Message) {
 			logCodexAgentMessage(b.cfg.Logger, msg)
 			if msg.Type == MessageText {
@@ -1059,6 +1067,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				}
 			}
 		}
+		turnNotificationGate.arm()
 		_, err = c.request(runCtx, "turn/start", turnParams)
 		if err != nil {
 			select {
@@ -1547,6 +1556,14 @@ type codexClient struct {
 	onMessage          func(Message)
 	onSemanticActivity func(description string)
 	onTurnDone         func(aborted bool)
+	// acceptNotification isolates the active turn from same-thread history
+	// replay emitted while thread/resume is restoring prior conversation.
+	// Unit-level protocol tests leave it nil and exercise dispatch directly.
+	acceptNotification func(method string, params map[string]any) bool
+	// onDiscardedNotification preserves out-of-band safety signals (such as
+	// suppressing an initialize retry after observed activity) without letting
+	// filtered history mutate current-turn output or lifecycle state.
+	onDiscardedNotification func(method string, params map[string]any)
 
 	notificationProtocol string // "unknown", "legacy", "raw"
 	turnStarted          bool
@@ -1557,6 +1574,66 @@ type codexClient struct {
 
 	turnErrorMu sync.Mutex
 	turnError   string // captured from turn/completed status=failed or terminal error notifications
+}
+
+// codexTurnNotificationGate keeps resume-time history replay from mutating the
+// output or ending the new turn. Codex app-server can emit notifications before
+// the turn/start RPC response, so the gate is armed before that request and uses
+// turn/started (or legacy task_started) as the actual current-turn boundary.
+// Its mutable lifecycle fields are only touched by the stdout reader goroutine;
+// armed is atomic because the lifecycle goroutine flips it.
+type codexTurnNotificationGate struct {
+	armed   atomic.Bool
+	started bool
+	turnID  string
+}
+
+func (g *codexTurnNotificationGate) arm() {
+	g.armed.Store(true)
+}
+
+func (g *codexTurnNotificationGate) accept(method string, params map[string]any) bool {
+	if !g.armed.Load() {
+		return false
+	}
+
+	if method == "codex/event" || strings.HasPrefix(method, "codex/event/") {
+		msg, _ := params["msg"].(map[string]any)
+		msgType, _ := msg["type"].(string)
+		if msgType == "task_started" {
+			g.started = true
+			return true
+		}
+		// Older Codex event streams can omit task_started. Once turn/start is
+		// armed, keep that compatibility; pre-arm replay is still excluded.
+		return true
+	}
+
+	switch {
+	case method == "turn/started":
+		g.started = true
+		g.turnID = extractNestedString(params, "turn", "id")
+		return true
+	case method == "turn/completed":
+		if !g.started {
+			// Older app-server versions can complete a turn without first
+			// emitting turn/started. The pre-arm boundary still rejects resume
+			// replay, while this keeps those versions functional.
+			return true
+		}
+		turnID := extractNestedString(params, "turn", "id")
+		return g.turnID == "" || turnID == "" || turnID == g.turnID
+	case method == "thread/status/changed" || strings.HasPrefix(method, "item/"):
+		if !g.started {
+			return true
+		}
+		turnID, _ := params["turnId"].(string)
+		return g.turnID == "" || turnID == "" || turnID == g.turnID
+	default:
+		// A terminal error may be the first notification produced by a failed
+		// turn/start, so it must remain observable even without turn/started.
+		return true
+	}
 }
 
 func (c *codexClient) setTurnError(msg string) {
@@ -1913,6 +1990,12 @@ func (c *codexClient) handleNotification(raw map[string]json.RawMessage) {
 	var params map[string]any
 	if p, ok := raw["params"]; ok {
 		_ = json.Unmarshal(p, &params)
+	}
+	if c.acceptNotification != nil && !c.acceptNotification(method, params) {
+		if c.onDiscardedNotification != nil {
+			c.onDiscardedNotification(method, params)
+		}
+		return
 	}
 
 	// Legacy codex/event notifications

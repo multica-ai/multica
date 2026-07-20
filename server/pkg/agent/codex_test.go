@@ -496,6 +496,67 @@ func TestCodexRawTurnCompleted(t *testing.T) {
 	}
 }
 
+func TestCodexTurnNotificationGateDropsResumeReplayAndOtherTurns(t *testing.T) {
+	t.Parallel()
+
+	gate := &codexTurnNotificationGate{}
+	previousCompleted := map[string]any{
+		"threadId": "thr-resumed",
+		"turn": map[string]any{
+			"id":     "turn-previous",
+			"status": "completed",
+		},
+	}
+	if gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("resume replay must stay blocked before the current turn is armed")
+	}
+
+	gate.arm()
+	if !gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("armed gate must preserve older streams that omit turn/started")
+	}
+	if !gate.accept("turn/started", map[string]any{
+		"threadId": "thr-resumed",
+		"turn":     map[string]any{"id": "turn-current"},
+	}) {
+		t.Fatal("current turn/started should open the lifecycle gate")
+	}
+	if gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("completion from another turn must not finish the current turn")
+	}
+	if !gate.accept("item/completed", map[string]any{
+		"threadId": "thr-resumed",
+		"turnId":   "turn-current",
+	}) {
+		t.Fatal("current-turn item should pass the gate")
+	}
+	if !gate.accept("turn/completed", map[string]any{
+		"threadId": "thr-resumed",
+		"turn": map[string]any{
+			"id":     "turn-current",
+			"status": "completed",
+		},
+	}) {
+		t.Fatal("current turn completion should pass the gate")
+	}
+
+	legacy := &codexTurnNotificationGate{}
+	legacyComplete := map[string]any{"msg": map[string]any{"type": "task_complete"}}
+	if legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("legacy resume replay must stay blocked before the current turn is armed")
+	}
+	legacy.arm()
+	if !legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("armed gate must preserve legacy streams that omit task_started")
+	}
+	if !legacy.accept("codex/event", map[string]any{"msg": map[string]any{"type": "task_started"}}) {
+		t.Fatal("legacy current task_started should open the lifecycle gate")
+	}
+	if !legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("legacy current task completion should pass the gate")
+	}
+}
+
 func TestCodexRawTurnCompletedSubtractsCachedInput(t *testing.T) {
 	t.Parallel()
 
@@ -2731,6 +2792,38 @@ func TestCodexExecuteTurnCompletionCanPrecedeTurnStartResponse(t *testing.T) {
 	}
 	if result.Output != "Done" {
 		t.Fatalf("expected output Done, got %q", result.Output)
+	}
+}
+
+func TestCodexExecuteResumeIgnoresPreviousTurnCompletion(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-resumed","turn":{"id":"turn-previous","status":"completed"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-resumed"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-resumed","turn":{"id":"turn-current"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-resumed","turnId":"turn-current","item":{"type":"agentMessage","id":"msg-current","text":"Current answer"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-resumed","turn":{"id":"turn-current","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		ResumeSessionID:           "thr-resumed",
+		ResumeExpected:            true,
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Current answer" {
+		t.Fatalf("expected current-turn output, got %q", result.Output)
 	}
 }
 
