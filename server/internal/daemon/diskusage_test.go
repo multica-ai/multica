@@ -236,6 +236,34 @@ func TestScanDiskUsage_ManagedCodexSandboxIsExactAndDeduplicated(t *testing.T) {
 	}
 }
 
+func TestScanDiskUsage_LegacyMetaAgeUsesMetaFileMTime(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	wsID := "llllllll-llll-llll-llll-llllllllllll"
+	taskDir := filepath.Join(root, wsID, "tttttttt")
+	writeFile(t, filepath.Join(taskDir, "workdir/main.go"), 10)
+	mustWriteMeta(t, taskDir, execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: "issue-legacy", WorkspaceID: wsID,
+	})
+	oldRoot := time.Now().Add(-30 * 24 * time.Hour)
+	if err := os.Chtimes(taskDir, oldRoot, oldRoot); err != nil {
+		t.Fatal(err)
+	}
+	recentMeta := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(filepath.Join(taskDir, ".gc_meta.json"), recentMeta, recentMeta); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := ScanDiskUsage(root, nil)
+	if err != nil {
+		t.Fatalf("ScanDiskUsage: %v", err)
+	}
+	if got := report.Tasks[0].AgeSeconds; got < int64(time.Hour.Seconds()) || got > int64((3*time.Hour).Seconds()) {
+		t.Fatalf("age_seconds=%d, want metadata age near 2h instead of stale task root age", got)
+	}
+}
+
 // TestScanDiskUsage_EmptyWorkspaceArtifactRatio guards the total=0 edge:
 // a workspace whose tasks have no measurable bytes (or no files at all) must
 // still report ArtifactRatio=0, never NaN. The CLI table renders this column,

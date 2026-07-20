@@ -251,15 +251,20 @@ func buildTaskUsage(taskDir, wsID, taskShort string, matcher artifactMatcher) Ta
 		Kind:           DiskUsageKindUnknown,
 	}
 
+	metaPresent := false
 	if meta, err := execenv.ReadGCMeta(taskDir); err == nil && meta != nil {
+		metaPresent = true
 		usage.Kind = string(meta.Kind)
 		if !meta.CompletedAt.IsZero() {
 			usage.AgeSeconds = int64(time.Since(meta.CompletedAt).Seconds())
+		} else if age, ok := gcMetaFileAge(taskDir); ok {
+			usage.AgeSeconds = int64(age.Seconds())
 		}
 	}
-	// Fall back to mtime when meta is missing or didn't carry a completed_at.
-	// Matches the orphanByMTime path the GC loop takes for the same case.
-	if usage.AgeSeconds <= 0 {
+	// With no readable metadata, use taskDir mtime just like orphanByMTime.
+	// Legacy readable metadata without completed_at uses its own file mtime,
+	// matching gcDecisionIssueResult's managed-only fallback.
+	if usage.AgeSeconds <= 0 && !metaPresent {
 		if info, err := os.Stat(taskDir); err == nil {
 			usage.AgeSeconds = int64(time.Since(info.ModTime()).Seconds())
 		}

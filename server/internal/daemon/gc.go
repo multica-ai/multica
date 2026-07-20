@@ -430,22 +430,32 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 	}
 
 	// Old metadata may not have completed_at. Keep that case conservative:
-	// after the longer orphan TTL, reclaim only the exact daemon-managed cache
-	// and preserve source, logs, output, auth, config, and session state.
+	// after the metadata file itself has been idle for the longer orphan TTL,
+	// reclaim only the exact daemon-managed cache. WriteGCMeta replaces this
+	// file after every completed task, so a recent reuse refreshes the signal
+	// even when activity below taskDir leaves the root directory mtime stale.
 	if d.cfg.GCArtifactTTL > 0 && meta.CompletedAt.IsZero() {
-		if info, err := os.Stat(taskDir); err == nil && time.Since(info.ModTime()) > d.cfg.GCOrphanTTL {
+		if age, ok := gcMetaFileAge(taskDir); ok && age > d.cfg.GCOrphanTTL {
 			d.logger.Info("gc: legacy task eligible for managed artifact cleanup",
 				"dir", filepath.Base(taskDir),
 				"kind", "issue",
 				"issue", meta.IssueID,
 				"status", result.Status,
-				"age", time.Since(info.ModTime()).Round(time.Hour),
+				"age", age.Round(time.Hour),
 			)
 			return gcActionCleanManagedArtifacts
 		}
 	}
 
 	return gcActionSkip
+}
+
+func gcMetaFileAge(taskDir string) (time.Duration, bool) {
+	info, err := os.Stat(filepath.Join(taskDir, ".gc_meta.json"))
+	if err != nil {
+		return 0, false
+	}
+	return time.Since(info.ModTime()), true
 }
 
 func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {

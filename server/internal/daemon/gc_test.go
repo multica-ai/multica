@@ -574,7 +574,7 @@ func TestShouldCleanTaskDir_LegacyMetaUsesManagedOnlyFallback(t *testing.T) {
 		Kind: execenv.GCKindIssue, IssueID: issueID, WorkspaceID: "ws1",
 	})
 	old := time.Now().Add(-73 * time.Hour)
-	if err := os.Chtimes(taskDir, old, old); err != nil {
+	if err := os.Chtimes(filepath.Join(taskDir, ".gc_meta.json"), old, old); err != nil {
 		t.Fatal(err)
 	}
 
@@ -585,6 +585,11 @@ func TestShouldCleanTaskDir_LegacyMetaUsesManagedOnlyFallback(t *testing.T) {
 	recentDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "recent-legacy-meta", &execenv.GCMeta{
 		Kind: execenv.GCKindIssue, IssueID: issueID, WorkspaceID: "ws1",
 	})
+	// Nested activity may leave taskDir's own mtime stale. A recently rewritten
+	// metadata file is the authoritative fallback and must defer cleanup.
+	if err := os.Chtimes(recentDir, old, old); err != nil {
+		t.Fatal(err)
+	}
 	if action := d.shouldCleanTaskDir(context.Background(), recentDir); action != gcActionSkip {
 		t.Fatalf("expected recent legacy meta to remain untouched, got %d", action)
 	}

@@ -13,14 +13,16 @@ const managedArtifactPatternPrefix = "managed:"
 // daemon-managed paths. Exact paths take precedence so a broad basename such
 // as .sandbox-bin cannot double-count a managed directory.
 type artifactMatcher struct {
-	basenames  map[string]struct{}
-	exactPaths map[string]string
+	basenames      map[string]struct{}
+	exactPaths     map[string]string
+	exactLeafNames map[string]struct{}
 }
 
 func newArtifactMatcher(patterns, managedSubpaths []string) artifactMatcher {
 	m := artifactMatcher{
-		basenames:  buildPatternSet(patterns),
-		exactPaths: make(map[string]string, len(managedSubpaths)),
+		basenames:      buildPatternSet(patterns),
+		exactPaths:     make(map[string]string, len(managedSubpaths)),
+		exactLeafNames: make(map[string]struct{}, len(managedSubpaths)),
 	}
 	for _, subpath := range managedSubpaths {
 		cleaned, ok := safeRelativePath(subpath)
@@ -29,11 +31,20 @@ func newArtifactMatcher(patterns, managedSubpaths []string) artifactMatcher {
 		}
 		display := filepath.ToSlash(cleaned)
 		m.exactPaths[cleaned] = managedArtifactPatternPrefix + display
+		m.exactLeafNames[filepath.Base(cleaned)] = struct{}{}
 	}
 	return m
 }
 
 func (m artifactMatcher) matchDirectory(absRoot, path string, entry os.DirEntry) (string, bool) {
+	_, exactCandidate := m.exactLeafNames[entry.Name()]
+	_, basenameMatch := m.basenames[entry.Name()]
+	if !exactCandidate && !basenameMatch {
+		return "", false
+	}
+
+	// Rel and containment validation are only needed for a directory whose
+	// leaf could actually match. Most workdir entries avoid this path entirely.
 	rel, err := filepath.Rel(absRoot, path)
 	if err != nil {
 		return "", false
@@ -45,7 +56,7 @@ func (m artifactMatcher) matchDirectory(absRoot, path string, entry os.DirEntry)
 	if label, ok := m.exactPaths[rel]; ok {
 		return label, true
 	}
-	if _, ok := m.basenames[entry.Name()]; ok {
+	if basenameMatch {
 		return entry.Name(), true
 	}
 	return "", false
