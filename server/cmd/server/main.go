@@ -137,7 +137,7 @@ func envNonNegativeDuration(name string, def time.Duration) time.Duration {
 	return v
 }
 
-func holdBeforeShutdown(sig os.Signal, duration time.Duration) {
+func holdBeforeShutdown(sig os.Signal, signals <-chan os.Signal, duration time.Duration) {
 	if duration <= 0 {
 		return
 	}
@@ -145,8 +145,18 @@ func holdBeforeShutdown(sig os.Signal, duration time.Duration) {
 		"signal", sig.String(),
 		"duration", duration.String(),
 	)
-	time.Sleep(duration)
-	slog.Info("shutdown hold complete", "duration", duration.String())
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		slog.Info("shutdown hold complete", "duration", duration.String())
+	case interruptSig := <-signals:
+		slog.Info("shutdown hold interrupted by signal",
+			"signal", interruptSig.String(),
+			"configured_duration", duration.String(),
+		)
+	}
 }
 
 func envBool(name string, def bool) bool {
@@ -481,7 +491,10 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
-	holdBeforeShutdown(sig, shutdownHoldDuration)
+	holdBeforeShutdown(sig, quit, shutdownHoldDuration)
+	// Restore the default behavior so another signal during graceful shutdown
+	// can still terminate the process instead of being left unread in quit.
+	signal.Stop(quit)
 
 	slog.Info("shutting down server")
 	autopilotCancel()

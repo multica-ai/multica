@@ -171,12 +171,37 @@ func TestEnvNonNegativeDuration(t *testing.T) {
 func TestHoldBeforeShutdown(t *testing.T) {
 	const hold = 10 * time.Millisecond
 	started := time.Now()
-	holdBeforeShutdown(syscall.SIGTERM, hold)
+	holdBeforeShutdown(syscall.SIGTERM, nil, hold)
 	if elapsed := time.Since(started); elapsed < hold {
 		t.Fatalf("holdBeforeShutdown returned after %s, before configured hold %s", elapsed, hold)
 	}
 }
 
+func TestHoldBeforeShutdownInterruptedBySecondSignal(t *testing.T) {
+	signals := make(chan os.Signal, 1)
+	signals <- syscall.SIGINT
+	done := make(chan struct{})
+
+	go func() {
+		holdBeforeShutdown(syscall.SIGTERM, signals, time.Minute)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("holdBeforeShutdown did not return after a second signal")
+	}
+	if len(signals) != 0 {
+		t.Fatal("holdBeforeShutdown did not consume the second signal")
+	}
+}
+
 func TestHoldBeforeShutdownDisabled(t *testing.T) {
-	holdBeforeShutdown(syscall.SIGTERM, 0)
+	signals := make(chan os.Signal, 1)
+	signals <- syscall.SIGINT
+	holdBeforeShutdown(syscall.SIGTERM, signals, 0)
+	if len(signals) != 1 {
+		t.Fatal("disabled hold should not consume another signal")
+	}
 }
