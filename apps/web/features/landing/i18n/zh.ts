@@ -294,7 +294,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
-        version: "0.5.0",
+        version: "0.4.5",
         date: "2026-07-20",
         title: "可自定义的 Issue 表格、实时排序的看板，以及更稳的智能体任务",
         changes: [],

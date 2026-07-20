@@ -270,7 +270,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
-          version: "0.5.0",
+          version: "0.4.5",
           date: "2026-07-20",
           title: "カスタマイズできる Issue テーブル、リアルタイムに並ぶボード、より安定したエージェント実行",
           changes: [],

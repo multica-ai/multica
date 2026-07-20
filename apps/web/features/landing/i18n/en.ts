@@ -294,7 +294,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
-        version: "0.5.0",
+        version: "0.4.5",
         date: "2026-07-20",
         title: "Customizable issue tables, live-sorting boards, and steadier agent runs",
         changes: [],

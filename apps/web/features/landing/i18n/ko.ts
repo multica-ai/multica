@@ -269,7 +269,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
-          version: "0.5.0",
+          version: "0.4.5",
           date: "2026-07-20",
           title: "맞춤 설정할 수 있는 Issue 테이블, 실시간으로 정렬되는 보드, 더 안정적인 에이전트 실행",
           changes: [],
