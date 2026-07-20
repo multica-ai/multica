@@ -1272,6 +1272,12 @@ func taskFailureReasonForAutopilotRun(task db.AgentTaskQueue) string {
 	if task.FailureReason.Valid && strings.TrimSpace(task.FailureReason.String) != "" {
 		return task.FailureReason.String
 	}
+	// A cancelled task carries no error text of its own; keep the run's failure
+	// reason traceable to the cancellation rather than a generic "failed"
+	// (MUL-4809 §9.2 — task cancelled run reason must be attributable).
+	if task.Status == "cancelled" {
+		return "task cancelled"
+	}
 	return "task failed"
 }
 

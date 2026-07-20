@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -14,9 +16,9 @@ import (
 // newCreateIssueRunFixture builds a create_issue autopilot whose run is linked to
 // an agent-authored issue but left UNBOUND (task_id NULL) — the crash-window state
 // SyncRunFromCreateIssueTask must repair (MUL-4809 §4.1 item 4). It returns the
-// service, the dispatch agent id, the run, and a helper that inserts a task on the
-// issue with a chosen agent and created_at offset from issue creation.
-func newCreateIssueRunFixture(t *testing.T) (*AutopilotService, string, db.AutopilotRun, func(agent string, offset time.Duration, status string) db.AgentTaskQueue) {
+// service, the dispatch agent id, the run, the pool, and a helper that inserts a
+// task on the issue with a chosen agent and created_at offset from issue creation.
+func newCreateIssueRunFixture(t *testing.T) (*AutopilotService, string, db.AutopilotRun, *pgxpool.Pool, func(agent string, offset time.Duration, status string) db.AgentTaskQueue) {
 	t.Helper()
 	ctx := context.Background()
 	pool := newTaskClaimRacePool(t)
@@ -115,7 +117,7 @@ func newCreateIssueRunFixture(t *testing.T) (*AutopilotService, string, db.Autop
 	bus := events.New()
 	taskSvc := NewTaskService(queries, pool, nil, bus)
 	svc := NewAutopilotService(queries, pool, bus, taskSvc)
-	return svc, agentID, run, insertTask
+	return svc, agentID, run, pool, insertTask
 }
 
 func isTerminalRunStatus(status string) bool {
@@ -129,7 +131,7 @@ func isTerminalRunStatus(status string) bool {
 // binds the run to the real dispatched task, and only that task finalizes it.
 func TestSyncRunFromCreateIssueTaskRepairsUnboundRunPrecisely(t *testing.T) {
 	ctx := context.Background()
-	svc, agentID, run, insertTask := newCreateIssueRunFixture(t)
+	svc, agentID, run, _, insertTask := newCreateIssueRunFixture(t)
 
 	dispatched := insertTask(agentID, 0, "completed")           // the autopilot's own task
 	comment := insertTask(agentID, 30*time.Second, "completed") // a later comment task on the same issue
@@ -165,7 +167,7 @@ func TestSyncRunFromCreateIssueTaskRepairsUnboundRunPrecisely(t *testing.T) {
 // enqueue crash), a stray terminal task must NOT finalize the run.
 func TestSyncRunFromCreateIssueTaskIgnoresTaskOutsideBindWindow(t *testing.T) {
 	ctx := context.Background()
-	svc, agentID, run, insertTask := newCreateIssueRunFixture(t)
+	svc, agentID, run, _, insertTask := newCreateIssueRunFixture(t)
 
 	stray := insertTask(agentID, autopilotBindRepairWindow+time.Minute, "completed")
 
@@ -179,5 +181,148 @@ func TestSyncRunFromCreateIssueTaskIgnoresTaskOutsideBindWindow(t *testing.T) {
 	}
 	if after.TaskID.Valid {
 		t.Fatalf("run bound to a task outside the bind window: task_id=%x", after.TaskID.Bytes)
+	}
+}
+
+// TestSyncRunFromCreateIssueTaskCompletesRegardlessOfIssueStatus covers MUL-4809
+// §4.1 / §9.2: the run is finalized purely by task outcome. Even when the agent
+// leaves the issue in an in_progress-category status (In Review), the completed
+// task must complete the run, and finalizing the run must not touch issue status.
+func TestSyncRunFromCreateIssueTaskCompletesRegardlessOfIssueStatus(t *testing.T) {
+	ctx := context.Background()
+	svc, agentID, run, pool, insertTask := newCreateIssueRunFixture(t)
+
+	if _, err := pool.Exec(ctx, `UPDATE issue SET status = 'in_review' WHERE id = $1`, run.IssueID); err != nil {
+		t.Fatalf("set issue in_review: %v", err)
+	}
+
+	dispatched := insertTask(agentID, 0, "completed")
+	svc.SyncRunFromCreateIssueTask(ctx, dispatched)
+
+	got, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.Status != "completed" {
+		t.Fatalf("run did not complete while issue was in_review: status=%q", got.Status)
+	}
+	var issueStatus string
+	if err := pool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, run.IssueID).Scan(&issueStatus); err != nil {
+		t.Fatalf("read issue status: %v", err)
+	}
+	if issueStatus != "in_review" {
+		t.Fatalf("run finalization changed issue status to %q", issueStatus)
+	}
+}
+
+// TestSyncRunFromCreateIssueTaskCancelledReasonTraceable covers MUL-4809 §9.2: a
+// cancelled dispatched task fails the run with a reason that names the cancellation
+// rather than a generic "task failed".
+func TestSyncRunFromCreateIssueTaskCancelledReasonTraceable(t *testing.T) {
+	ctx := context.Background()
+	svc, agentID, run, _, insertTask := newCreateIssueRunFixture(t)
+
+	dispatched := insertTask(agentID, 0, "cancelled")
+	svc.SyncRunFromCreateIssueTask(ctx, dispatched)
+
+	got, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.Status != "failed" {
+		t.Fatalf("cancelled task did not fail the run: status=%q", got.Status)
+	}
+	if !got.FailureReason.Valid || !strings.Contains(strings.ToLower(got.FailureReason.String), "cancel") {
+		t.Fatalf("cancelled run reason not traceable: %q", got.FailureReason.String)
+	}
+}
+
+// TestSyncRunFromCreateIssueTaskDoesNotRewriteTerminalRun covers MUL-4809 §9.2:
+// once a run has finalized, a later comment task on the same issue must not
+// resurrect or rewrite it — GetAutopilotRunByIssue excludes terminal runs, so the
+// sync is a no-op.
+func TestSyncRunFromCreateIssueTaskDoesNotRewriteTerminalRun(t *testing.T) {
+	ctx := context.Background()
+	svc, agentID, run, _, insertTask := newCreateIssueRunFixture(t)
+
+	dispatched := insertTask(agentID, 0, "completed")
+	svc.SyncRunFromCreateIssueTask(ctx, dispatched)
+	done, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if done.Status != "completed" {
+		t.Fatalf("run did not complete: status=%q", done.Status)
+	}
+
+	comment := insertTask(agentID, time.Minute, "failed")
+	svc.SyncRunFromCreateIssueTask(ctx, comment)
+	after, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if after.Status != "completed" {
+		t.Fatalf("comment task rewrote a terminal run: status=%q", after.Status)
+	}
+	if after.TaskID.Bytes != done.TaskID.Bytes {
+		t.Fatal("comment task rebound a terminal run's task_id")
+	}
+}
+
+// TestSyncRunFromCreateIssueTaskRetryKeepsRunRunningUntilFinal covers MUL-4809 §4.1
+// item 3 / §9.2: a retryable failure with a system retry already queued must NOT
+// fail the run; only the final terminal attempt (no further retry) does — so
+// failure-rate auto-pause stays accurate.
+func TestSyncRunFromCreateIssueTaskRetryKeepsRunRunningUntilFinal(t *testing.T) {
+	ctx := context.Background()
+	svc, agentID, run, pool, insertTask := newCreateIssueRunFixture(t)
+
+	// Bind the run to its dispatched task, as dispatchCreateIssue does.
+	dispatched := insertTask(agentID, 0, "running")
+	bound, err := svc.bindAutopilotRunTask(ctx, run.ID, dispatched.ID)
+	if err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if bound.Status != "running" {
+		t.Fatalf("bind did not move run to running: %q", bound.Status)
+	}
+
+	// The dispatched attempt fails, but a system retry is already queued (FailTask
+	// enqueues the retry before broadcasting the failure). The run must stay open.
+	var retryID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, retry_of_task_id, created_at)
+		 VALUES ($1, $2, $3, 'queued', 0, $4, now()) RETURNING id`,
+		dispatched.AgentID, dispatched.RuntimeID, dispatched.IssueID, dispatched.ID).Scan(&retryID); err != nil {
+		t.Fatalf("insert retry: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status = 'failed' WHERE id = $1`, dispatched.ID); err != nil {
+		t.Fatalf("fail dispatched: %v", err)
+	}
+	dispatched.Status = "failed"
+	svc.SyncRunFromCreateIssueTask(ctx, dispatched)
+	stillRunning, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if stillRunning.Status != "running" {
+		t.Fatalf("run finalized while a retry was pending: status=%q", stillRunning.Status)
+	}
+
+	// The retry fails with no further attempt queued — now the run fails.
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status = 'failed' WHERE id = $1`, retryID); err != nil {
+		t.Fatalf("fail retry: %v", err)
+	}
+	retryTask, err := svc.Queries.GetAgentTask(ctx, mustUUID(t, retryID))
+	if err != nil {
+		t.Fatalf("get retry task: %v", err)
+	}
+	svc.SyncRunFromCreateIssueTask(ctx, retryTask)
+	final, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if final.Status != "failed" {
+		t.Fatalf("run did not fail after the final retry failed: status=%q", final.Status)
 	}
 }
