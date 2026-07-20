@@ -247,6 +247,7 @@ multica issue session list <issue>
 multica issue session handoff <issue> <root-comment-id> \
   --summary "..." --done "..." --remaining "..."
 
+# CEREBRO-PATCH(handoff-brief-flags-verbatim): FIR-3565 — StringArray, not StringSlice.
 # --done and --remaining take the value verbatim, so a bullet may contain
 # commas. Repeat the flag for more than one bullet — never comma-separate them.
 multica issue session handoff <issue> <root-comment-id> \
