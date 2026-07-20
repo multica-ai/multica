@@ -1997,6 +1997,13 @@ func (c *codexClient) handleNotification(raw map[string]json.RawMessage) {
 	if p, ok := raw["params"]; ok {
 		_ = json.Unmarshal(p, &params)
 	}
+	// Filter multiplexed subagent threads before the current-turn gate. The
+	// gate mutates started/turnID on turn/started; letting another thread reach
+	// it first can replace the main turn ID and make subsequent main-thread
+	// items/completion look stale.
+	if c.isNotificationFromOtherThread(params) {
+		return
+	}
 	if c.acceptNotification != nil && !c.acceptNotification(method, params) {
 		if c.onDiscardedNotification != nil {
 			c.onDiscardedNotification(method, params)
@@ -2106,11 +2113,11 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 	// same stdio pipe; only our thread should drive turn lifecycle and output.
 	//
 	// The v2 app-server-protocol schema guarantees a top-level threadId on
-	// every notification, so this dispatch-level guard transparently covers
-	// every handler below. If a future codex revision introduces notifications
-	// without threadId, they fall through (ok=false) — re-audit this guard
-	// when bumping codex.
-	if threadID, ok := params["threadId"].(string); ok && c.threadID != "" && threadID != c.threadID {
+	// every notification. handleNotification performs this guard before the
+	// stateful current-turn gate; retain it here as defense in depth for direct
+	// callers. If a future codex revision introduces notifications without
+	// threadId, they fall through — re-audit this guard when bumping codex.
+	if c.isNotificationFromOtherThread(params) {
 		return
 	}
 
@@ -2200,6 +2207,11 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 			c.handleItemNotification(method, params)
 		}
 	}
+}
+
+func (c *codexClient) isNotificationFromOtherThread(params map[string]any) bool {
+	threadID, ok := params["threadId"].(string)
+	return ok && c.threadID != "" && threadID != c.threadID
 }
 
 func (c *codexClient) handleItemNotification(method string, params map[string]any) {

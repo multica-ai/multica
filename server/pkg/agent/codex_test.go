@@ -1238,6 +1238,55 @@ func TestCodexRawTurnCompletedFromSubagentIgnored(t *testing.T) {
 	}
 }
 
+func TestCodexTurnNotificationGateIgnoresSubagentTurnStarted(t *testing.T) {
+	t.Parallel()
+
+	gate := &codexTurnNotificationGate{}
+	gate.arm()
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thr_main"
+	c.acceptNotification = gate.accept
+
+	var (
+		gotText        string
+		doneCount      int
+		discardedCount int
+	)
+	c.onMessage = func(msg Message) {
+		if msg.Type == MessageText {
+			gotText = msg.Content
+		}
+	}
+	c.onTurnDone = func(aborted bool) {
+		doneCount++
+	}
+	c.onDiscardedNotification = func(string, map[string]any) {
+		discardedCount++
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr_main","turn":{"id":"turn-main"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr_subagent","turn":{"id":"turn-sub"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_main","turnId":"turn-main","item":{"type":"agentMessage","id":"msg-main","text":"Main answer"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr_main","turn":{"id":"turn-main","status":"completed"}}}`)
+
+	if gate.turnID != "turn-main" {
+		t.Fatalf("subagent turn/started replaced gate turnID: got %q", gate.turnID)
+	}
+	if c.turnID != "turn-main" {
+		t.Fatalf("subagent turn/started replaced client turnID: got %q", c.turnID)
+	}
+	if gotText != "Main answer" {
+		t.Fatalf("main turn text was lost after subagent start: got %q", gotText)
+	}
+	if doneCount != 1 {
+		t.Fatalf("main turn completion count = %d, want 1", doneCount)
+	}
+	if discardedCount != 0 {
+		t.Fatalf("subagent notification should be filtered before the gate, discarded callback count = %d", discardedCount)
+	}
+}
+
 // Regression for #1181: subagent agentMessage/final_answer must not
 // trigger turn completion or leak text into the main output stream.
 func TestCodexRawItemAgentMessageFinalAnswerFromSubagentIgnored(t *testing.T) {
