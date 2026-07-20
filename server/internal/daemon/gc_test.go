@@ -1583,3 +1583,148 @@ func TestShouldCleanTaskDir_LocalDirectoryFalsePreservesNormalClean(t *testing.T
 		t.Fatalf("expected gcActionClean for normal task, got %d", got)
 	}
 }
+
+func TestGCWorkspace_ProtectsUnmanagedDirectories(t *testing.T) {
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.cfg.GCOrphanTTL = 72 * time.Hour
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-unmanaged")
+
+	paths := []string{
+		filepath.Join(wsDir, "Output"),
+		filepath.Join(wsDir, "Output", "AgentOutput", "MUL-100"),
+		filepath.Join(wsDir, "custom-tools"),
+		filepath.Join(wsDir, "12345678"), // 8 hex chars but missing workdir/output/logs subdirs
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	old := time.Now().Add(-73 * time.Hour)
+	for _, path := range paths {
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("unmanaged directory %s must survive GC: %v", path, err)
+		}
+	}
+	if stats.orphaned != 0 {
+		t.Fatalf("stats.orphaned = %d, want 0", stats.orphaned)
+	}
+}
+
+func TestGCWorkspace_DoesNotFollowSymlink(t *testing.T) {
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.cfg.GCOrphanTTL = 0
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-symlink")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := t.TempDir()
+	keep := filepath.Join(target, "keep.txt")
+	if err := os.WriteFile(keep, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(wsDir, "deadbeef")); err != nil {
+		t.Fatal(err)
+	}
+
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("GC must not follow workspace symlinks: %v", err)
+	}
+}
+
+func TestGCWorkspace_RemovesOwnedNoMetaEnv(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, taskDir, workspaceID string)
+	}{
+		{
+			name: "prepare-time provenance",
+			setup: func(t *testing.T, taskDir, workspaceID string) {
+				t.Helper()
+				if err := execenv.WriteManagedEnvProvenance(taskDir, execenv.ManagedEnvProvenance{
+					WorkspaceID: workspaceID,
+					IssueID:     "issue-1",
+					AgentID:     "agent-1",
+				}); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "legacy task layout",
+			setup: func(t *testing.T, taskDir, _ string) {
+				t.Helper()
+				for _, name := range []string{"workdir", "output", "logs"} {
+					if err := os.Mkdir(filepath.Join(taskDir, name), 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspaceID := "ws-owned"
+			d := newGCTestDaemon(t, http.NewServeMux())
+			d.cfg.GCOrphanTTL = 72 * time.Hour
+			taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, workspaceID, "deadbeef", nil)
+			tt.setup(t, taskDir, workspaceID)
+			old := time.Now().Add(-73 * time.Hour)
+			if err := os.Chtimes(taskDir, old, old); err != nil {
+				t.Fatal(err)
+			}
+
+			stats := &gcStats{byPattern: map[string]int{}}
+			d.gcWorkspace(context.Background(), filepath.Dir(taskDir), stats)
+
+			if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+				t.Fatalf("owned orphan env must be removed; stat err = %v", err)
+			}
+			if stats.orphaned != 1 {
+				t.Fatalf("orphaned = %d, want 1", stats.orphaned)
+			}
+		})
+	}
+}
+
+func TestGCWorkspace_RejectsMismatchedOwnershipProofs(t *testing.T) {
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.cfg.GCOrphanTTL = 0
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-owner")
+
+	badMeta := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-owner", "meta-owner", &execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: "issue-1", WorkspaceID: "different-workspace",
+	})
+	badProvenance := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-owner", "cafebabe", nil)
+	if err := execenv.WriteManagedEnvProvenance(badProvenance, execenv.ManagedEnvProvenance{
+		WorkspaceID: "different-workspace", IssueID: "issue-1", AgentID: "agent-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+
+	for _, path := range []string{badMeta, badProvenance} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("mismatched ownership proof %s must survive GC: %v", path, err)
+		}
+	}
+	if stats.orphaned != 0 {
+		t.Fatalf("stats.orphaned = %d, want 0", stats.orphaned)
+	}
+}
