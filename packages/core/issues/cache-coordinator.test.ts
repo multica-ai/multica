@@ -69,6 +69,17 @@ const flatUpdatedSortKey = issueKeys.flat(
   {},
   updatedSort,
 );
+// Assignee-grouped boards fold the sort into their filter bag
+// (issueAssigneeGroupsOptions does `{ ...filter, ...sort }`).
+const assigneeGroupsUpdatedKey = issueKeys.assigneeGroups(WS_ID, {
+  ...updatedSort,
+});
+const assigneeGroupsPositionKey = issueKeys.assigneeGroups(WS_ID, {
+  sort_by: "position",
+});
+const myAssigneeGroupsUpdatedKey = issueKeys.myAssigneeGroups(WS_ID, "all", {
+  ...updatedSort,
+});
 
 function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
   return {
@@ -545,6 +556,24 @@ describe("invalidateUpdatedAtSortedIssueLists", () => {
     expect(qc.getQueryState(flatUpdatedSortKey)?.isInvalidated).toBe(true);
     expect(qc.getQueryState(wsKey)?.isInvalidated).toBe(false);
     expect(qc.getQueryState(flatKey)?.isInvalidated).toBe(false);
+  });
+
+  it("invalidates updated_at-sorted assignee-grouped boards (workspace + My Issues)", () => {
+    // Grouped boards carry the sort inside their filter bag, not a standalone
+    // sort key — they must still re-sort under "Updated date".
+    qc.setQueryData(assigneeGroupsUpdatedKey, { groups: [] });
+    qc.setQueryData(myAssigneeGroupsUpdatedKey, { groups: [] });
+    qc.setQueryData(assigneeGroupsPositionKey, { groups: [] });
+
+    invalidateUpdatedAtSortedIssueLists(qc, WS_ID);
+
+    expect(qc.getQueryState(assigneeGroupsUpdatedKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(myAssigneeGroupsUpdatedKey)?.isInvalidated).toBe(
+      true,
+    );
+    expect(qc.getQueryState(assigneeGroupsPositionKey)?.isInvalidated).toBe(
+      false,
+    );
   });
 
   it("is a no-op when no updated_at-sorted list is loaded", () => {

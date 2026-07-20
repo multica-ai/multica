@@ -454,34 +454,40 @@ export function invalidateIssueDerivatives(
   }
 }
 
+/** True when any object part of a query key encodes an "Updated date" ordering
+ *  (`sort_by: "updated_at"`). Bucketed status boards and flat tables keep the
+ *  sort in a standalone bag; assignee-grouped boards merge it into their filter
+ *  bag (see `issueAssigneeGroupsOptions`). Scanning every object part matches
+ *  all of those surfaces — workspace and My Issues — with one rule. */
+function queryKeyHasUpdatedAtSort(key: QueryKey): boolean {
+  return key.some(
+    (part) =>
+      !!part &&
+      typeof part === "object" &&
+      !Array.isArray(part) &&
+      (part as Record<string, unknown>).sort_by === "updated_at",
+  );
+}
+
 /**
  * Refetch every loaded issue list/board ordered by "Updated date" so a card
  * whose `updated_at` just advanced re-sorts to its true slot. Used by events
- * that bump `updated_at` without carrying the new timestamp or a field patch —
- * chiefly `comment:created`, which advances the parent issue's `updated_at`
- * server-side (MUL-5009) but reports nothing to the coordinator's field-diff
- * path. Only `updated_at`-sorted keys are touched; every other sort is left
- * alone. The refetch is authoritative (server order + tie-breaks), which also
- * surfaces a commented card sitting beyond the loaded window.
+ * that bump `updated_at` without carrying the new timestamp or a field patch:
+ * `comment:created` (MUL-5009) and the property/metadata WS events, all of
+ * which advance the issue's `updated_at` server-side but bypass the
+ * coordinator's field-diff path. Covers status boards, flat tables, AND
+ * assignee-grouped boards (workspace + My Issues); only `updated_at`-sorted
+ * keys are touched. The refetch is authoritative (server order + tie-breaks),
+ * which also surfaces a touched card sitting beyond the loaded window.
  */
 export function invalidateUpdatedAtSortedIssueLists(
   qc: QueryClient,
   wsId: string,
 ): void {
-  const seen = new Set<string>();
-  const invalidateIfUpdatedAt = (key: QueryKey, sort: IssueSortParam) => {
-    if (sort.sort_by !== "updated_at") return;
-    const hash = hashKey(key);
-    if (seen.has(hash)) return;
-    seen.add(hash);
-    qc.invalidateQueries({ queryKey: key, exact: true });
-  };
-  for (const [key] of bucketedListEntries(qc, wsId)) {
-    invalidateIfUpdatedAt(key, listContractFromKey(key).sort);
-  }
-  for (const [key] of flatListEntries(qc, wsId)) {
-    invalidateIfUpdatedAt(key, flatContractFromKey(key).sort);
-  }
+  qc.invalidateQueries({
+    queryKey: issueKeys.all(wsId),
+    predicate: (query) => queryKeyHasUpdatedAtSort(query.queryKey),
+  });
 }
 
 /** Invalidate the stale keys reported by {@link applyIssueChange}, deduped —
