@@ -334,7 +334,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
-		codexHome := filepath.Join(envRoot, "codex-home")
+		codexHome := filepath.Join(envRoot, codexHomeDirName)
 		// Under the Linux workspace-write sandbox the real HOME is read-only;
 		// give the task a writable HOME and grant write access to it in the
 		// Codex config so npm/Prisma can write their caches (MUL-4856).
@@ -546,7 +546,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// lives alongside the workdir. Re-run prepareCodexHomeWithOpts to ensure
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
-		codexHome := filepath.Join(env.RootDir, "codex-home")
+		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
 		// Refresh the per-task writable HOME (re-seed credential symlinks in
 		// case the user's real home changed) and recompute the sandbox
 		// writable_roots on reuse, mirroring the fresh Prepare path (MUL-4856).

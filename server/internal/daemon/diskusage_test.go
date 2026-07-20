@@ -193,6 +193,7 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 		`"workspace_id"`,
 		`"task_short"`,
 		`"artifact_ratio"`,
+		`"managed_artifact_subpaths"`,
 		`"total_task_count"`,
 		`"total_workspace_count"`,
 		`"total_artifact_ratio"`,
@@ -200,6 +201,38 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("JSON missing required field %s: %s", want, raw)
 		}
+	}
+}
+
+func TestScanDiskUsage_ManagedCodexSandboxIsExactAndDeduplicated(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	wsID := "mmmmmmmm-mmmm-mmmm-mmmm-mmmmmmmmmmmm"
+	taskDir := filepath.Join(root, wsID, "tttttttt")
+	writeFile(t, filepath.Join(taskDir, "codex-home/.sandbox-bin/codex.exe"), 300)
+	writeFile(t, filepath.Join(taskDir, "workdir/repo/.sandbox-bin/cache"), 400)
+
+	report, err := ScanDiskUsage(root, nil)
+	if err != nil {
+		t.Fatalf("ScanDiskUsage managed-only: %v", err)
+	}
+	if got := report.Tasks[0].SizeBytes; got != 700 {
+		t.Fatalf("size_bytes=%d, want 700", got)
+	}
+	if got := report.Tasks[0].ArtifactSizeBytes; got != 300 {
+		t.Fatalf("artifact_size_bytes=%d, want exact managed 300", got)
+	}
+	if got := strings.Join(report.ManagedArtifactSubpaths, ","); got != "codex-home/.sandbox-bin" {
+		t.Fatalf("managed artifact paths=%q, want codex-home/.sandbox-bin", got)
+	}
+
+	report, err = ScanDiskUsage(root, []string{".sandbox-bin"})
+	if err != nil {
+		t.Fatalf("ScanDiskUsage broad basename: %v", err)
+	}
+	if got := report.Tasks[0].ArtifactSizeBytes; got != 700 {
+		t.Fatalf("artifact_size_bytes=%d, want 700 without double counting", got)
 	}
 }
 
@@ -385,6 +418,9 @@ func TestScanDiskUsageRoots_SumsAcrossRoots(t *testing.T) {
 	}
 	if agg.TotalWorkspaceCount != 2 {
 		t.Fatalf("TotalWorkspaceCount = %d, want 2", agg.TotalWorkspaceCount)
+	}
+	if got := strings.Join(agg.ManagedArtifactSubpaths, ","); got != "codex-home/.sandbox-bin" {
+		t.Fatalf("managed artifact paths=%q, want codex-home/.sandbox-bin", got)
 	}
 }
 
