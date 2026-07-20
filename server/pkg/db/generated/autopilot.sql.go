@@ -877,6 +877,73 @@ func (q *Queries) GetLatestAutopilotRunByIssue(ctx context.Context, issueID pgty
 	return i, err
 }
 
+const getRetrySuccessorTask = `-- name: GetRetrySuccessorTask :one
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, dispatched_autopilot_run_id FROM agent_task_queue
+WHERE retry_of_task_id = $1
+ORDER BY created_at ASC, id ASC
+LIMIT 1
+`
+
+// The system-retry successor of a task (the task whose retry_of_task_id points at
+// it). System retries form a linear chain, so walking successors from the root
+// reaches the final attempt — used by the ON-boot reconcile to find a lineage's
+// terminal leaf (MUL-4809 §4.1 P0-3). ErrNoRows means this task is the leaf.
+func (q *Queries) GetRetrySuccessorTask(ctx context.Context, retryOfTaskID pgtype.UUID) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, getRetrySuccessorTask, retryOfTaskID)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.DispatchedAutopilotRunID,
+	)
+	return i, err
+}
+
 const getTaskByDispatchedAutopilotRun = `-- name: GetTaskByDispatchedAutopilotRun :one
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, dispatched_autopilot_run_id FROM agent_task_queue
 WHERE dispatched_autopilot_run_id = $1
@@ -1043,6 +1110,55 @@ func (q *Queries) IsAutopilotCollaborator(ctx context.Context, arg IsAutopilotCo
 	var is_collaborator bool
 	err := row.Scan(&is_collaborator)
 	return is_collaborator, err
+}
+
+const listActiveCreateIssueRuns = `-- name: ListActiveCreateIssueRuns :many
+SELECT r.id, r.autopilot_id, r.trigger_id, r.source, r.status, r.issue_id, r.task_id, r.triggered_at, r.completed_at, r.failure_reason, r.trigger_payload, r.result, r.created_at, r.squad_id, r.planned_at, r.webhook_delivery_id FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.status IN ('issue_created', 'running')
+  AND a.execution_mode = 'create_issue'
+`
+
+// Active create_issue runs (issue_created / running) for the ON-boot reconcile that
+// converges runs whose dispatched task already reached a terminal result while
+// task-driven finalization was gated off — the event bus does not replay those past
+// task events (MUL-4809 §4.1 P0-3). Joined to autopilot only to filter
+// execution_mode; no FK (join, not a constraint).
+func (q *Queries) ListActiveCreateIssueRuns(ctx context.Context) ([]AutopilotRun, error) {
+	rows, err := q.db.Query(ctx, listActiveCreateIssueRuns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AutopilotRun{}
+	for rows.Next() {
+		var i AutopilotRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.AutopilotID,
+			&i.TriggerID,
+			&i.Source,
+			&i.Status,
+			&i.IssueID,
+			&i.TaskID,
+			&i.TriggeredAt,
+			&i.CompletedAt,
+			&i.FailureReason,
+			&i.TriggerPayload,
+			&i.Result,
+			&i.CreatedAt,
+			&i.SquadID,
+			&i.PlannedAt,
+			&i.WebhookDeliveryID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAutopilotCollaborators = `-- name: ListAutopilotCollaborators :many

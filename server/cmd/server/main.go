@@ -437,6 +437,22 @@ func main() {
 		slog.Info("issue status backfill complete", "workspaces", n)
 	}()
 
+	// ON-boot reconcile for task-driven autopilot runs (MUL-4809 §4.1 P0-3). When
+	// the two-phase gate is flipped on, the event bus does not replay task events
+	// that fired while it was off, so this converges any create_issue run whose
+	// dispatched task already terminated. No-op while the gate is off; advisory-
+	// locked so a single replica walks during a rolling deploy.
+	go func() {
+		n, err := autopilotSvc.ReconcileTaskDrivenRunsAtBoot(sweepCtx, pool)
+		if err != nil {
+			slog.Error("autopilot task-driven run reconcile failed", "error", err)
+			return
+		}
+		if n > 0 {
+			slog.Info("autopilot task-driven run reconcile complete", "runs_finalized", n)
+		}
+	}()
+
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)

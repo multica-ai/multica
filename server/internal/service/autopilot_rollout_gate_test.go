@@ -81,28 +81,9 @@ func TestTaskDrivenModeIssueStatusIsNoOp(t *testing.T) {
 	}
 }
 
-// TestGateFlipFinalizesLegacyDispatchedRun is the enablement-boundary case: a run
-// dispatched while the gate was off is left unbound (issue_created), and its task is
-// provenance-stamped in either mode. After the gate flips on, the task's terminal
-// event repairs the binding precisely and finalizes the run — nothing is stranded
-// across the flip.
-func TestGateFlipFinalizesLegacyDispatchedRun(t *testing.T) {
-	ctx := context.Background()
-	svc, agentID, run, _, insertTask := newCreateIssueRunFixture(t) // gate ON (post-flip)
-
-	// A task the legacy dispatch stamped but never bound (run stays issue_created).
-	dispatched := insertTask(agentID, 0, "completed", run.ID)
-
-	svc.SyncRunFromCreateIssueTask(ctx, dispatched)
-
-	got, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
-	if err != nil {
-		t.Fatalf("get run: %v", err)
-	}
-	if got.Status != "completed" {
-		t.Fatalf("gate flip: legacy-dispatched run not finalized after enable: status=%q", got.Status)
-	}
-	if !got.TaskID.Valid || got.TaskID.Bytes != dispatched.ID.Bytes {
-		t.Fatalf("gate flip: run not repaired to its stamped task: task_id valid=%v", got.TaskID.Valid)
-	}
-}
+// The real gate-flip enablement boundary — an OFF-mode terminal task event that is
+// NOT replayed after the flip, converged only by the boot reconcile — is covered by
+// TestReconcileFinalizesRunWhoseTaskTerminatedWhileGateOff in autopilot_reconcile_test.go.
+// (The earlier TestGateFlipFinalizesLegacyDispatchedRun manually re-invoked the sync
+// after the flip, which only proved the finalizer handles an old row, not that a real
+// flip triggers convergence; it is replaced by the reconcile coverage.)

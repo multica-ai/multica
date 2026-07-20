@@ -486,6 +486,27 @@ WHERE dispatched_autopilot_run_id = $1
 ORDER BY created_at ASC, id ASC
 LIMIT 1;
 
+-- name: GetRetrySuccessorTask :one
+-- The system-retry successor of a task (the task whose retry_of_task_id points at
+-- it). System retries form a linear chain, so walking successors from the root
+-- reaches the final attempt — used by the ON-boot reconcile to find a lineage's
+-- terminal leaf (MUL-4809 §4.1 P0-3). ErrNoRows means this task is the leaf.
+SELECT * FROM agent_task_queue
+WHERE retry_of_task_id = $1
+ORDER BY created_at ASC, id ASC
+LIMIT 1;
+
+-- name: ListActiveCreateIssueRuns :many
+-- Active create_issue runs (issue_created / running) for the ON-boot reconcile that
+-- converges runs whose dispatched task already reached a terminal result while
+-- task-driven finalization was gated off — the event bus does not replay those past
+-- task events (MUL-4809 §4.1 P0-3). Joined to autopilot only to filter
+-- execution_mode; no FK (join, not a constraint).
+SELECT r.* FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.status IN ('issue_created', 'running')
+  AND a.execution_mode = 'create_issue';
+
 -- name: FailAutopilotRunsByIssue :exec
 -- Fails active autopilot runs linked to a given issue.
 -- Must be called BEFORE issue deletion (ON DELETE SET NULL clears issue_id).
