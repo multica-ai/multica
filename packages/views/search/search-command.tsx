@@ -138,6 +138,35 @@ interface SearchResults {
   projects: SearchProjectResult[];
 }
 
+function handleSearchInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+  if (event.key !== "Home" && event.key !== "End") return;
+
+  event.stopPropagation();
+
+  if (event.altKey || event.ctrlKey || event.metaKey) return;
+
+  const input = event.currentTarget;
+  const target = event.key === "Home" ? 0 : input.value.length;
+
+  event.preventDefault();
+
+  if (event.shiftKey) {
+    const selectionStart = input.selectionStart ?? target;
+    const selectionEnd = input.selectionEnd ?? target;
+    const anchor =
+      input.selectionDirection === "backward" ? selectionEnd : selectionStart;
+
+    if (event.key === "Home") {
+      input.setSelectionRange(0, anchor, "backward");
+    } else {
+      input.setSelectionRange(anchor, input.value.length, "forward");
+    }
+    return;
+  }
+
+  input.setSelectionRange(target, target);
+}
+
 export function SearchCommand() {
   const { t } = useT("search");
   const navPages: NavPage[] = [
@@ -481,6 +510,7 @@ export function SearchCommand() {
               placeholder={t(($) => $.placeholder)}
               value={query}
               onValueChange={handleValueChange}
+              onKeyDownCapture={handleSearchInputKeyDown}
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
             <kbd className="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline">

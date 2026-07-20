@@ -1,5 +1,5 @@
 import { act, type ReactNode } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -260,6 +260,26 @@ describe("SearchCommand", () => {
       expect(useSearchStore.getState().open).toBe(false);
     });
     expect(screen.queryByPlaceholderText("Type a command or search...")).not.toBeInTheDocument();
+  });
+
+  it("moves the search input caret with Home and End", async () => {
+    const user = userEvent.setup();
+
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...") as HTMLInputElement;
+    await user.type(input, "abcdef");
+    input.setSelectionRange(3, 3);
+
+    fireEvent.keyDown(input, { key: "Home" });
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(0);
+    expect(useSearchStore.getState().open).toBe(true);
+
+    fireEvent.keyDown(input, { key: "End" });
+    expect(input.selectionStart).toBe(6);
+    expect(input.selectionEnd).toBe(6);
+    expect(useSearchStore.getState().open).toBe(true);
   });
 
   it("shows only New Issue by default and hides Pages / low-frequency commands until query", () => {
