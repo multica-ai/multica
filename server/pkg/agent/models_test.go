@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1270,6 +1271,141 @@ func TestParseKimiSessionNewConfigOptions(t *testing.T) {
 		if m.ID == "on" || m.ID == "default" {
 			t.Errorf("thinking/mode select values leaked into the model catalog: %+v", models)
 		}
+	}
+}
+
+func TestParseACPThoughtLevelOptions(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{
+			name: "kimi 0.27.0 single on option",
+			raw: `{
+				"sessionId": "s1",
+				"configOptions": [
+					{"type": "select", "id": "thinking", "name": "Thinking", "category": "thought_level",
+					 "currentValue": "on", "options": [{"value": "on", "name": "Thinking On"}]}
+				]
+			}`,
+			want: []string{"on"},
+		},
+		{
+			name: "multiple effort levels",
+			raw: `{
+				"configOptions": [
+					{"type": "select", "id": "thinking", "category": "thought_level",
+					 "currentValue": "max",
+					 "options": [
+						{"value": "on", "name": "On"},
+						{"value": "max", "name": "Max"},
+						{"value": "high", "name": "High"}
+					 ]}
+				]
+			}`,
+			want: []string{"on", "max", "high"},
+		},
+		{
+			name: "fallback to id when category omitted",
+			raw: `{
+				"configOptions": [
+					{"type": "select", "id": "thinking", "currentValue": "on",
+					 "options": [{"value": "on", "name": "On"}]}
+				]
+			}`,
+			want: []string{"on"},
+		},
+		{
+			name: "model select ignored",
+			raw: `{
+				"configOptions": [
+					{"type": "select", "id": "model", "category": "model",
+					 "currentValue": "m", "options": [{"value": "m", "name": "M"}]}
+				]
+			}`,
+			want: nil,
+		},
+		{
+			name: "no configOptions",
+			raw:  `{"sessionId": "s1"}`,
+			want: nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := parseACPThoughtLevelOptions([]byte(tc.raw))
+			if tc.want == nil {
+				if got != nil {
+					t.Fatalf("expected nil, got %+v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("expected non-nil, got nil")
+			}
+			var values []string
+			for _, lvl := range got.SupportedLevels {
+				values = append(values, lvl.Value)
+			}
+			if !slices.Equal(values, tc.want) {
+				t.Errorf("got values %v, want %v", values, tc.want)
+			}
+		})
+	}
+}
+
+func TestDiscoverKimiModelsAnnotatesThinking(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_discover","configOptions":[{"type":"select","id":"model","category":"model","currentValue":"kimi-code/k3","options":[{"value":"kimi-code/k3","name":"K3"}]},{"type":"select","id":"thinking","category":"thought_level","currentValue":"on","options":[{"value":"on","name":"Thinking On"},{"value":"max","name":"Max"}]}]}}\n' "$id"
+      ;;
+  esac
+done
+`
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "kimi")
+	writeTestExecutable(t, fake, []byte(script))
+
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "kimi")
+	modelCacheMu.Unlock()
+
+	models, err := discoverKimiModels(ctx, fake)
+	if err != nil {
+		t.Fatalf("discoverKimiModels: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %+v", models)
+	}
+	if models[0].ID != "kimi-code/k3" {
+		t.Errorf("unexpected model id: %q", models[0].ID)
+	}
+	if models[0].Provider != "kimi" {
+		t.Errorf("unexpected provider: %q", models[0].Provider)
+	}
+	if models[0].Thinking == nil {
+		t.Fatalf("expected thinking catalog, got nil")
+	}
+	if len(models[0].Thinking.SupportedLevels) != 2 {
+		t.Fatalf("expected 2 thinking levels, got %+v", models[0].Thinking)
+	}
+	if models[0].Thinking.DefaultLevel != "on" {
+		t.Errorf("expected default level on, got %q", models[0].Thinking.DefaultLevel)
 	}
 }
 

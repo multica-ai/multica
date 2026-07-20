@@ -903,3 +903,138 @@ func TestReadKimiTurnFailureMissingLog(t *testing.T) {
 		t.Fatalf("expected found=false for missing log, got msg=%q", msg)
 	}
 }
+
+// fakeKimiACPSetConfigRecordingScript impersonates `kimi acp` and writes the
+// JSON-RPC request bodies it receives to requestsFile so tests can assert the
+// shape of session/set_config_option calls.
+func fakeKimiACPSetConfigRecordingScript(requestsFile string) string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  printf '%s\n' "$line" >> ` + strconv.Quote(requestsFile) + `
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_thinking"}}\n' "$id"
+      ;;
+    *'"method":"session/set_config_option"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[]}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKimiBackendSetsThinkingLevel verifies that a non-empty ThinkingLevel
+// is forwarded via session/set_config_option with configId "thinking" and
+// the chosen value before session/prompt.
+func TestKimiBackendSetsThinkingLevel(t *testing.T) {
+	t.Parallel()
+
+	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPSetConfigRecordingScript(requestsFile)))
+
+	result := runFakeKimi(t, fakePath, ExecOptions{ThinkingLevel: "max"})
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+	}
+
+	raw, err := os.ReadFile(requestsFile)
+	if err != nil {
+		t.Fatalf("read requests file: %v", err)
+	}
+
+	var found bool
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		if !strings.Contains(line, `"method":"session/set_config_option"`) {
+			continue
+		}
+		found = true
+		if !strings.Contains(line, `"configId":"thinking"`) {
+			t.Errorf("set_config_option missing configId=thinking: %s", line)
+		}
+		if !strings.Contains(line, `"value":"max"`) {
+			t.Errorf("set_config_option missing value=max: %s", line)
+		}
+		if !strings.Contains(line, `"sessionId":"ses_thinking"`) {
+			t.Errorf("set_config_option missing sessionId: %s", line)
+		}
+	}
+	if !found {
+		t.Fatalf("session/set_config_option call not recorded")
+	}
+}
+
+// fakeKimiACPSetConfigFailureScript impersonates `kimi acp` rejecting the
+// thinking-level change. The backend must fail the task (not silently run
+// on the default level).
+func fakeKimiACPSetConfigFailureScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_thinking_fail"}}\n' "$id"
+      ;;
+    *'"method":"session/set_config_option"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"Invalid params","data":{"value":"Unsupported thinking level"}}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKimiBackendSetThinkingLevelFailureFailsTask pins the fail-hard
+// behaviour: if the runtime rejects the requested thinking level, the task
+// must fail rather than falling back to the default.
+func TestKimiBackendSetThinkingLevelFailureFailsTask(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPSetConfigFailureScript()))
+
+	result := runFakeKimi(t, fakePath, ExecOptions{ThinkingLevel: "max"})
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, `could not set thinking level "max"`) {
+		t.Errorf("expected error to name the requested level, got %q", result.Error)
+	}
+	if !strings.Contains(result.Error, "Unsupported thinking level") {
+		t.Errorf("expected error to surface upstream message, got %q", result.Error)
+	}
+}
+
+// TestKimiBackendOmitsSetConfigOptionWhenNoThinkingLevel verifies that no
+// session/set_config_option call is made when ThinkingLevel is empty.
+func TestKimiBackendOmitsSetConfigOptionWhenNoThinkingLevel(t *testing.T) {
+	t.Parallel()
+
+	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPSetConfigRecordingScript(requestsFile)))
+
+	result := runFakeKimi(t, fakePath, ExecOptions{})
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+	}
+
+	raw, err := os.ReadFile(requestsFile)
+	if err != nil {
+		t.Fatalf("read requests file: %v", err)
+	}
+	if strings.Contains(string(raw), `"method":"session/set_config_option"`) {
+		t.Fatalf("set_config_option should not be called when ThinkingLevel is empty")
+	}
+}

@@ -478,6 +478,12 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"grok", "xhigh", false},
 		{"grok", "max", false},
 		{"grok", "bogus", false},
+		{"kimi", "", true},
+		{"kimi", "on", true},
+		{"kimi", "max", true},
+		{"kimi", "future-level", true}, // discovered levels may outpace the server enum
+		{"kimi", ".hidden", false},
+		{"kimi", "bad value", false},
 	}
 	for _, tc := range tests {
 		if got := IsKnownThinkingValue(tc.provider, tc.value); got != tc.want {

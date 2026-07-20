@@ -840,6 +840,16 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 // the `models.availableModels` block — parseACPSessionNewModels
 // handles both shapes.
 //
+// Kimi also advertises a per-session thinking-effort select under
+// `configOptions` with `category: "thought_level"` and `id: "thinking"`.
+// We capture the raw session/new response and attach the advertised
+// levels to every discovered model so the UI thinking picker works
+// for kimi the same way it does for claude/codex. If the runtime only
+// advertises "on" (kimi 0.27.0's current behavior), the picker shows
+// that single option. Levels may vary by model/version in future
+// builds; the discovery path is generic and follows whatever the CLI
+// returns.
+//
 // There is deliberately NO static fallback: the picker must reflect
 // what the installed CLI actually offers so the list stays in sync
 // with the account and CLI version. On failure we return an empty
@@ -847,11 +857,17 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 // UI then offers manual model entry, and cachedDiscovery never caches
 // empty results so the next load retries discovery.
 func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, error) {
+	var capturedThinking *ModelThinking
+	captureRaw := func(raw json.RawMessage) {
+		capturedThinking = parseACPThoughtLevelOptions(raw)
+	}
+
 	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:   "kimi",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kimi-discovery-",
 		strictErrors: true,
+		captureRaw:   captureRaw,
 	})
 	if err != nil || len(models) == 0 {
 		if err != nil {
@@ -865,8 +881,76 @@ func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, er
 		if models[i].Provider == "" {
 			models[i].Provider = "kimi"
 		}
+		if capturedThinking != nil {
+			models[i].Thinking = capturedThinking
+		}
 	}
 	return models, nil
+}
+
+// parseACPThoughtLevelOptions extracts the thinking-effort catalog from an
+// ACP session/new configOptions response. It looks for the select entry whose
+// category is "thought_level" (or id is "thinking" as a fallback) and returns
+// the advertised options as a ModelThinking catalog. nil means the runtime did
+// not surface a thinking control for this session/model.
+func parseACPThoughtLevelOptions(raw json.RawMessage) *ModelThinking {
+	var resp struct {
+		ConfigOptions []struct {
+			Type         string `json:"type"`
+			ID           string `json:"id"`
+			Category     string `json:"category"`
+			CurrentValue string `json:"currentValue"`
+			Options      []struct {
+				Value       string `json:"value"`
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"options"`
+		} `json:"configOptions"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil
+	}
+	for _, opt := range resp.ConfigOptions {
+		if opt.Type != "select" {
+			continue
+		}
+		if opt.Category != "thought_level" {
+			// Allow a bare "thinking" id only when the runtime omitted
+			// the category field.
+			if opt.Category != "" || opt.ID != "thinking" {
+				continue
+			}
+		}
+		if len(opt.Options) == 0 {
+			return nil
+		}
+		levels := make([]ThinkingLevel, 0, len(opt.Options))
+		seen := map[string]bool{}
+		for _, o := range opt.Options {
+			value := strings.TrimSpace(o.Value)
+			if value == "" || seen[value] {
+				continue
+			}
+			seen[value] = true
+			label := strings.TrimSpace(o.Name)
+			if label == "" || strings.EqualFold(label, "unknown") {
+				label = value
+			}
+			levels = append(levels, ThinkingLevel{
+				Value:       value,
+				Label:       label,
+				Description: strings.TrimSpace(o.Description),
+			})
+		}
+		if len(levels) == 0 {
+			return nil
+		}
+		return &ModelThinking{
+			SupportedLevels: levels,
+			DefaultLevel:    strings.TrimSpace(opt.CurrentValue),
+		}
+	}
+	return nil
 }
 
 // discoverKiroModels spins up a throwaway `kiro-cli acp` process and parses
@@ -951,6 +1035,11 @@ type acpDiscoveryProvider struct {
 	// Legacy discovery providers keep their empty-list behavior; Grok enables
 	// this so it can log the actual fallback reason.
 	strictErrors bool
+	// captureRaw receives the raw session/new response before it is parsed.
+	// It is used by providers (currently Kimi) that need to inspect config
+	// options beyond the model catalog. Shared callers leave this nil so the
+	// hook stays a no-op for Hermes/Kiro/Copilot/Qoder/Trae/Grok.
+	captureRaw func(json.RawMessage)
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
@@ -1107,6 +1196,9 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	})
 	if err != nil {
 		return fail("session/new", err)
+	}
+	if p.captureRaw != nil {
+		p.captureRaw(sessionResult)
 	}
 	models := parseACPSessionNewModels(sessionResult)
 	if len(models) == 0 {

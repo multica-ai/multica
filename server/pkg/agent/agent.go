@@ -60,8 +60,9 @@ type ExecOptions struct {
 	// "use the runtime/model default" —
 	// every backend that consumes this skips its --effort / reasoning_effort
 	// injection so the upstream CLI's own default applies. Currently honoured
-	// by the claude, codex, opencode, codebuddy, and grok (ACP
-	// `--effort` on `grok agent`) backends; other backends ignore
+	// by the claude, codex, opencode, codebuddy, grok (ACP
+	// `--effort` on `grok agent`), and kimi (ACP
+	// `session/set_config_option`) backends; other backends ignore
 	// the field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string

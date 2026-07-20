@@ -735,8 +735,9 @@ var providerThinkingEnums = map[string]map[string]bool{
 // IsKnownThinkingValue reports whether `value` is a recognised effort
 // token for the given provider. Empty string is always accepted (means
 // "use runtime default"). Unknown providers (no thinking concept) accept
-// only empty; Codex and OpenCode accept well-formed tokens here because their
-// daemon-local catalogs perform the exact per-model check before execution.
+// only empty; Codex, OpenCode, and Kimi accept well-formed tokens here because
+// their daemon-local catalogs perform the exact per-model check before
+// execution.
 //
 // This is the cheap synchronous gate the server uses on CreateAgent /
 // UpdateAgent. Unlike ValidateThinkingLevel it does NOT consult the live
@@ -745,7 +746,7 @@ func IsKnownThinkingValue(providerType, value string) bool {
 	if value == "" {
 		return true
 	}
-	if providerType == "codex" || providerType == "opencode" {
+	if providerType == "codex" || providerType == "opencode" || providerType == "kimi" {
 		return isValidDynamicThinkingValue(value)
 	}
 	enum, ok := providerThinkingEnums[providerType]
