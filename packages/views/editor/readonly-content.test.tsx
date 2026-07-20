@@ -16,6 +16,17 @@ vi.mock("../issues/hooks", () => ({
     resolveIssueIdentifierMock(identifier),
 }));
 
+// i18next is not initialized in this suite, so `t()` would resolve every label
+// to "". Resolve against the real EN bundle instead — the editor tree only ever
+// uses the `editor` namespace — so tests can select controls by accessible name.
+vi.mock("../i18n", async () => {
+  const editor = (await import("../locales/en/editor.json")).default;
+  return {
+    useT: () => ({ t: (select: (bundle: typeof editor) => string) => select(editor) }),
+    useTimeAgo: () => "just now",
+  };
+});
+
 vi.mock("@multica/core/api", () => ({
   api: { getAttachmentTextContent: getAttachmentTextContentMock },
   PreviewTooLargeError: class extends Error {},
@@ -406,37 +417,60 @@ describe("ReadonlyContent Mermaid rendering", () => {
     expect(container.querySelector("pre")).toBeNull();
   });
 
-  it("opens a fullscreen lightbox when the toolbar button is clicked", async () => {
+  it("opens the fullscreen viewer from the toolbar and closes it with Escape", async () => {
     const { container } = render(
       <ReadonlyContent
         content={["```mermaid", "graph LR", "  A[Start] --> B[Done]", "```"].join("\n")}
       />,
     );
 
-    const button = await waitFor(() => {
+    const expandButton = await waitFor(() => {
       const found = container.querySelector<HTMLButtonElement>(
-        ".mermaid-diagram-toolbar button",
+        '.mermaid-diagram-toolbar button[aria-label="Open diagram viewer"]',
       );
       expect(found).not.toBeNull();
       return found!;
     });
 
-    expect(document.querySelector(".mermaid-diagram-lightbox")).toBeNull();
+    expect(document.querySelector(".mermaid-viewer-canvas")).toBeNull();
 
-    fireEvent.click(button);
+    fireEvent.click(expandButton);
 
-    const lightboxFrame = document.querySelector<HTMLIFrameElement>(
-      ".mermaid-diagram-lightbox-frame",
-    );
-    expect(lightboxFrame).not.toBeNull();
-    expect(lightboxFrame?.getAttribute("sandbox")).toBe("");
-    expect(lightboxFrame?.srcdoc).toContain("mock diagram");
-    expect(lightboxFrame?.srcdoc).toContain("max-height: 100%");
+    const viewerFrame = await waitFor(() => {
+      const found = document.querySelector<HTMLIFrameElement>(".mermaid-viewer-frame");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(viewerFrame.getAttribute("sandbox")).toBe("");
+    expect(viewerFrame.srcdoc).toContain("mock diagram");
+    // The viewer draws at natural size and lets the host transform handle zoom;
+    // an inline-style max-width clamp here would cap how far it can scale.
+    expect(viewerFrame.srcdoc).toContain("width: 123px");
+    expect(viewerFrame.srcdoc).toContain("max-width: none");
 
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => {
-      expect(document.querySelector(".mermaid-diagram-lightbox")).toBeNull();
+      expect(document.querySelector(".mermaid-viewer-canvas")).toBeNull();
     });
+  });
+
+  it("keeps the inline toolbar outside the scroll container so wide diagrams stay openable", async () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={["```mermaid", "graph LR", "  A[Start] --> B[Done]", "```"].join("\n")}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector(".mermaid-diagram-toolbar")).not.toBeNull();
+    });
+
+    // Previously the toolbar was an absolutely-positioned child of the
+    // horizontally-scrolling element, so on a wide diagram it scrolled out of
+    // view along with the content and left no way to open or copy it.
+    const scroller = container.querySelector(".mermaid-diagram-scroll");
+    expect(scroller).not.toBeNull();
+    expect(scroller?.querySelector(".mermaid-diagram-toolbar")).toBeNull();
   });
 
   it("shows the compact error state instead of embedding Mermaid's parser error SVG", async () => {

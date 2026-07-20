@@ -749,7 +749,10 @@ func mergeEnv(base []string, extra map[string]string) []string {
 	env := make([]string, 0, len(base)+len(extra))
 	for _, entry := range base {
 		key, _, _ := strings.Cut(entry, "=")
-		if isFilteredChildEnvKey(key) {
+		// MULTICA_* in the daemon's own environment is not task context. Drop
+		// the inherited namespace for every backend and append only the values
+		// daemon.go explicitly assembled for this task below.
+		if isFilteredChildEnvKey(key) || strings.HasPrefix(strings.ToUpper(key), "MULTICA_") {
 			continue
 		}
 		env = append(env, entry)

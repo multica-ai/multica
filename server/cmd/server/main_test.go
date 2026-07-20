@@ -2,7 +2,10 @@ package main
 
 import (
 	"os"
+	"strconv"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -131,5 +134,74 @@ func TestEnvBool(t *testing.T) {
 				t.Errorf("envBool(%q, %v) = %v, want %v", tt.key, tt.def, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEnvNonNegativeDuration(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		def   time.Duration
+		want  time.Duration
+	}{
+		{name: "unset returns default", def: 3 * time.Second, want: 3 * time.Second},
+		{name: "empty returns default", value: "", def: 2 * time.Second, want: 2 * time.Second},
+		{name: "bare zero disables hold", value: "0", def: time.Second, want: 0},
+		{name: "zero duration disables hold", value: "0s", def: time.Second, want: 0},
+		{name: "positive duration", value: "5m", want: 5 * time.Minute},
+		{name: "invalid returns default", value: "later", def: 4 * time.Second, want: 4 * time.Second},
+		{name: "negative returns default", value: "-1s", def: 4 * time.Second, want: 4 * time.Second},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key := "TEST_NON_NEGATIVE_DURATION_" + strconv.Itoa(i)
+			if tt.name == "unset returns default" {
+				os.Unsetenv(key)
+			} else {
+				t.Setenv(key, tt.value)
+			}
+			if got := envNonNegativeDuration(key, tt.def); got != tt.want {
+				t.Fatalf("envNonNegativeDuration(%q, %s) = %s, want %s", key, tt.def, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHoldBeforeShutdown(t *testing.T) {
+	const hold = 10 * time.Millisecond
+	started := time.Now()
+	holdBeforeShutdown(syscall.SIGTERM, nil, hold)
+	if elapsed := time.Since(started); elapsed < hold {
+		t.Fatalf("holdBeforeShutdown returned after %s, before configured hold %s", elapsed, hold)
+	}
+}
+
+func TestHoldBeforeShutdownInterruptedBySecondSignal(t *testing.T) {
+	signals := make(chan os.Signal, 1)
+	signals <- syscall.SIGINT
+	done := make(chan struct{})
+
+	go func() {
+		holdBeforeShutdown(syscall.SIGTERM, signals, time.Minute)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("holdBeforeShutdown did not return after a second signal")
+	}
+	if len(signals) != 0 {
+		t.Fatal("holdBeforeShutdown did not consume the second signal")
+	}
+}
+
+func TestHoldBeforeShutdownDisabled(t *testing.T) {
+	signals := make(chan os.Signal, 1)
+	signals <- syscall.SIGINT
+	holdBeforeShutdown(syscall.SIGTERM, signals, 0)
+	if len(signals) != 1 {
+		t.Fatal("disabled hold should not consume another signal")
 	}
 }

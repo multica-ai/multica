@@ -46,12 +46,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
-import {
-  TriggerConfigSection,
-  getDefaultTriggerConfig,
-  toCronExpression,
-} from "./trigger-config";
-import type { TriggerConfig } from "./trigger-config";
+import { ScheduleEditor } from "./schedule-editor/schedule-editor";
+import { getDefaultScheduleConfig, type ScheduleConfig } from "./schedule-editor/model";
+import { browserTimezone } from "../../common/timezone-select";
+import { cronFields, parseCron, toCron } from "./schedule-editor/cron-mapping";
+import { useDescribeSchedule } from "./schedule-editor/describe";
+import { formatInTimeZone } from "../../common/format-in-time-zone";
+import { SegmentedToggle } from "../../common/segmented-toggle";
+import { useScheduleSubmitGate } from "./schedule-editor/validate";
 import type {
   AutopilotExecutionMode,
   AutopilotRun,
@@ -68,15 +70,10 @@ import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 
-function formatDate(date: string): string {
-  return new Date(date).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
+// A run that already happened is an instant in the reader's day, so it reads in
+// the reader's zone (no timeZone passed). A run that is still to come belongs to
+// the schedule that will fire it — see the trigger row, which passes the
+// trigger's own timezone.
 type RunStatus = "issue_created" | "running" | "skipped" | "completed" | "failed";
 
 const RUN_VISUAL: Record<RunStatus, { color: string; icon: typeof CheckCircle2; spin?: boolean }> = {
@@ -109,7 +106,7 @@ function WebhookPayloadSlot({ autopilotId, runId }: { autopilotId: string; runId
 }
 
 function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: string; agentName: string }) {
-  const { t } = useT("autopilots");
+  const { t, i18n } = useT("autopilots");
   const wsPaths = useWorkspacePaths();
   const status = (RUN_VISUAL[run.status as RunStatus] ? (run.status as RunStatus) : "issue_created");
   const visual = RUN_VISUAL[status];
@@ -155,7 +152,7 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
         ) : null}
       </span>
       <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-        {formatDate(run.triggered_at || run.created_at)}
+        {formatInTimeZone(run.triggered_at || run.created_at, undefined, i18n.language)}
       </span>
       {syntheticTask && !run.issue_id && (
         <TranscriptButton
@@ -219,7 +216,7 @@ function SkippedRunsGroup({
   agentId: string;
   agentName: string;
 }) {
-  const { t } = useT("autopilots");
+  const { t, i18n } = useT("autopilots");
   const [open, setOpen] = useState(false);
   const latestRun = runs[0];
   const ToggleIcon = open ? ChevronDown : ChevronRight;
@@ -242,7 +239,7 @@ function SkippedRunsGroup({
         </span>
         {latestRun && (
           <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-            {formatDate(latestRun.triggered_at || latestRun.created_at)}
+            {formatInTimeZone(latestRun.triggered_at || latestRun.created_at, undefined, i18n.language)}
           </span>
         )}
       </button>
@@ -258,7 +255,8 @@ function SkippedRunsGroup({
 }
 
 function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrigger; autopilotId: string; canWrite: boolean }) {
-  const { t } = useT("autopilots");
+  const { t, i18n } = useT("autopilots");
+  const describeSchedule = useDescribeSchedule();
   const deleteTrigger = useDeleteAutopilotTrigger();
   const rotateToken = useRotateAutopilotTriggerWebhookToken();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -323,6 +321,12 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
 
   const Icon = isWebhook ? Webhook : isApi ? Zap : Clock;
   const showWebhookUrlRow = isWebhook && webhookUrl;
+  // null when the expression is beyond the structured model — those rows keep
+  // showing the raw cron on its own.
+  const scheduleConfig = trigger.cron_expression
+    ? parseCron(trigger.cron_expression, trigger.timezone ?? "UTC")
+    : null;
+  const scheduleDescription = scheduleConfig ? describeSchedule(scheduleConfig) : null;
 
   // Delete control extracted so a webhook trigger can render it inline
   // with Copy / Rotate on the URL action row (where the other action
@@ -363,14 +367,31 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
           )}
         </div>
         {trigger.cron_expression && (
-          <div className="text-xs text-muted-foreground mt-0.5">
-            {trigger.cron_expression}
-            {trigger.timezone && ` (${trigger.timezone})`}
+          // The plain-language line leads; the raw expression drops to a
+          // secondary line so the two never run together as one blob.
+          <div className="mt-0.5 space-y-0.5">
+            <div className="text-xs text-muted-foreground">
+              {scheduleDescription ?? trigger.cron_expression}
+              {trigger.timezone && ` (${trigger.timezone})`}
+            </div>
+            {scheduleDescription !== null && scheduleConfig !== null && (
+              // Fields only: the zone already reads out in the sentence above,
+              // where a person can use it — same rule as the editor's readback.
+              <div className="font-mono text-[11px] text-muted-foreground/60">
+                {cronFields(scheduleConfig)}
+              </div>
+            )}
           </div>
         )}
         {trigger.next_run_at && (
           <div className="text-xs text-muted-foreground">
-            {t(($) => $.trigger_row.next_label, { date: formatDate(trigger.next_run_at) })}
+            {t(($) => $.trigger_row.next_label, {
+              date: formatInTimeZone(
+                trigger.next_run_at,
+                trigger.timezone ?? undefined,
+                i18n.language,
+              ),
+            })}
           </div>
         )}
         {showWebhookUrlRow && (
@@ -462,18 +483,27 @@ function AddTriggerDialog({
   autopilotId: string;
 }) {
   const { t } = useT("autopilots");
+  const wsId = useWorkspaceId();
   const createTrigger = useCreateAutopilotTrigger();
   const [kind, setKind] = useState<"schedule" | "webhook">("schedule");
-  const [config, setConfig] = useState<TriggerConfig>(getDefaultTriggerConfig);
+  const [config, setConfig] = useState<ScheduleConfig>(() =>
+    getDefaultScheduleConfig(browserTimezone()),
+  );
   const [label, setLabel] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const scheduleGate = useScheduleSubmitGate(wsId);
+  const canSubmit = !submitting && (kind !== "schedule" || scheduleGate.scheduleValid);
 
   const handleSubmit = async () => {
-    if (submitting) return;
+    if (!canSubmit) return;
     setSubmitting(true);
     try {
       if (kind === "schedule") {
-        const cronExpr = toCronExpression(config);
+        if (!(await scheduleGate.ensureAccepted(config))) {
+          setSubmitting(false);
+          return;
+        }
+        const cronExpr = toCron(config);
         if (!cronExpr.trim()) {
           setSubmitting(false);
           return;
@@ -496,7 +526,7 @@ function AddTriggerDialog({
       }
       onOpenChange(false);
       setKind("schedule");
-      setConfig(getDefaultTriggerConfig());
+      setConfig(getDefaultScheduleConfig(browserTimezone()));
       setLabel("");
     } catch (err) {
       toast.error(
@@ -513,43 +543,53 @@ function AddTriggerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogTitle>{t(($) => $.add_trigger_dialog.title)}</DialogTitle>
-        <div className="space-y-4 pt-2">
+        {/* DialogContent is a grid, so without min-w-0 this item's min-width is
+            its content's — and the cron readback is one unbreakable line that
+            would push the track past the dialog instead of truncating. */}
+        <div className="min-w-0 space-y-4 pt-2">
           <div>
             <label className="text-xs font-medium text-muted-foreground">
               {t(($) => $.add_trigger_dialog.type_label)}
             </label>
-            <div className="mt-1 grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
-              <button
-                type="button"
-                onClick={() => setKind("schedule")}
-                className={cn(
-                  "flex items-center justify-center gap-1.5 rounded px-3 py-1.5 text-sm transition-colors",
-                  kind === "schedule"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Clock className="h-3.5 w-3.5" />
-                {t(($) => $.add_trigger_dialog.type_schedule)}
-              </button>
-              <button
-                type="button"
-                onClick={() => setKind("webhook")}
-                className={cn(
-                  "flex items-center justify-center gap-1.5 rounded px-3 py-1.5 text-sm transition-colors",
-                  kind === "webhook"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Webhook className="h-3.5 w-3.5" />
-                {t(($) => $.add_trigger_dialog.type_webhook)}
-              </button>
+            <div className="mt-1">
+              <SegmentedToggle
+                value={kind}
+                onChange={setKind}
+                buttonClassName="px-3 py-1.5 text-sm"
+                options={[
+                  [
+                    "schedule",
+                    <span key="schedule" className="flex items-center justify-center gap-1.5">
+                      <Clock className="h-3.5 w-3.5" />
+                      {t(($) => $.add_trigger_dialog.type_schedule)}
+                    </span>,
+                  ],
+                  [
+                    "webhook",
+                    <span key="webhook" className="flex items-center justify-center gap-1.5">
+                      <Webhook className="h-3.5 w-3.5" />
+                      {t(($) => $.add_trigger_dialog.type_webhook)}
+                    </span>,
+                  ],
+                ]}
+              />
             </div>
           </div>
 
           {kind === "schedule" ? (
-            <TriggerConfigSection config={config} onChange={setConfig} />
+            <ScheduleEditor
+              value={config}
+              onChange={(next) => {
+                scheduleGate.clearRejection();
+                setConfig(next);
+              }}
+              wsId={wsId}
+              onValidityChange={scheduleGate.onValidityChange}
+              // Same reason as the autopilot dialog: the submit path reads the
+              // schedule, validates it over the network, then writes what it
+              // read — an edit landing inside that window would be discarded.
+              disabled={submitting}
+            />
           ) : (
             <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
               {t(($) => $.add_trigger_dialog.webhook_help)}
@@ -569,7 +609,7 @@ function AddTriggerDialog({
             />
           </div>
           <div className="flex justify-end pt-1">
-            <Button size="sm" onClick={handleSubmit} disabled={submitting}>
+            <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
               {submitting
                 ? t(($) => $.add_trigger_dialog.submitting)
                 : t(($) => $.add_trigger_dialog.submit)}
@@ -965,11 +1005,15 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         </div>
       </div>
 
-      <AddTriggerDialog
-        open={triggerDialogOpen}
-        onOpenChange={setTriggerDialogOpen}
-        autopilotId={autopilotId}
-      />
+      {/* Mounted only while open, like the edit dialog: otherwise a rejected
+          cron leaves scheduleValid=false behind for the next open. */}
+      {triggerDialogOpen && (
+        <AddTriggerDialog
+          open={triggerDialogOpen}
+          onOpenChange={setTriggerDialogOpen}
+          autopilotId={autopilotId}
+        />
+      )}
       {editDialogOpen && (
         <AutopilotDialog
           mode="edit"

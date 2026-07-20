@@ -100,6 +100,7 @@ type streamProtocolObservation struct {
 	resultBytes                int
 	lastAssistantBytes         int
 	scannerError               bool
+	lastEventType              string
 	anthropicBaseURLConfigured bool
 }
 
@@ -122,6 +123,7 @@ func logStreamProtocolObservation(logger *slog.Logger, obs streamProtocolObserva
 		"result_bytes", obs.resultBytes,
 		"last_assistant_bytes", obs.lastAssistantBytes,
 		"scanner_error", obs.scannerError,
+		"last_event_type", obs.lastEventType,
 		"anthropic_base_url_configured", obs.anthropicBaseURLConfigured,
 	)
 }

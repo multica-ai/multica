@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
@@ -1541,6 +1542,56 @@ func TestStderrTailEmptyWhenNothingWritten(t *testing.T) {
 	}
 }
 
+func TestStderrTailReturnsValidUTF8(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input []byte
+		max   int
+		want  string
+	}{
+		{
+			name:  "leading rune split by tail bound",
+			input: []byte("aa界bc"),
+			max:   4,
+			want:  "bc",
+		},
+		{
+			name:  "trailing incomplete rune",
+			input: append([]byte("ok"), []byte("界")[:2]...),
+			max:   16,
+			want:  "ok",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var sink bytes.Buffer
+			s := newStderrTail(&sink, tt.max)
+			if _, err := s.Write(tt.input); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+
+			if !bytes.Equal(sink.Bytes(), tt.input) {
+				t.Errorf("inner sink: got %q, want raw bytes %q", sink.Bytes(), tt.input)
+			}
+			got := s.Tail()
+			if !utf8.ValidString(got) {
+				t.Errorf("tail is not valid UTF-8: %q", got)
+			}
+			if len(got) > tt.max {
+				t.Errorf("tail exceeds bound: got %d bytes (%q), max %d", len(got), got, tt.max)
+			}
+			if got != tt.want {
+				t.Errorf("tail: got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -2660,6 +2711,46 @@ func TestFilterCodexCustomConfigOverridesDropsMcpServers(t *testing.T) {
 			got := filterCodexCustomConfigOverrides(tc.in, slog.Default())
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("filterCodexCustomConfigOverrides(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFilterCodexShellEnvConfigOverrides(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "root policy override",
+			in:   []string{"-c", `shell_environment_policy.include_only=["PATH"]`, "-c", `model="o3"`},
+			want: []string{"-c", `model="o3"`},
+		},
+		{
+			name: "profile policy override",
+			in:   []string{`--config=profiles.work.shell_environment_policy.ignore_default_excludes=false`, "--sandbox", "workspace-write"},
+			want: []string{"--sandbox", "workspace-write"},
+		},
+		{
+			name: "quoted policy key",
+			in:   []string{"--config", `profiles.work."shell_environment_policy".inherit="none"`},
+			want: []string{},
+		},
+		{
+			name: "unrelated override survives",
+			in:   []string{"-c", `model="o3"`, "-c", `profiles.work.model="gpt-5.6"`, "-c", `tools.shell_environment_policy="metadata"`},
+			want: []string{"-c", `model="o3"`, "-c", `profiles.work.model="gpt-5.6"`, "-c", `tools.shell_environment_policy="metadata"`},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := filterCodexShellEnvConfigOverrides(tc.in, slog.Default())
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("filterCodexShellEnvConfigOverrides(%v) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
 	}

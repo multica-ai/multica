@@ -326,6 +326,20 @@ WHERE id = $1 AND issue_id IS NULL;
 -- queued while the failing turn was still running — the retry continues the
 -- older turn first. Combined with creating the retry inside FailTask's
 -- transaction, this leaves no window for a newer input task to jump ahead.
+--
+-- fire_at arms a backoff before the retry: when non-NULL the child is inserted
+-- as 'deferred' with that fire_at and stays inert until the existing
+-- PromoteDueDeferredTasksForRuntime sweeper (run promote-first on every claim
+-- poll) flips it to 'queued'. Used for provider_network's final attempt so it
+-- waits ~5s instead of firing back-to-back with the immediate retry (MUL-4910).
+-- NULL keeps the historical behaviour: an immediately-claimable 'queued' child.
+--
+-- max_attempts overrides the inherited budget when non-NULL (NULL inherits
+-- p.max_attempts unchanged). Callers persist the reason-aware effective ceiling
+-- here so the row stays self-consistent — e.g. provider_network's chain records
+-- attempt=3, max_attempts=3 rather than leaking attempt=3, max_attempts=2 to the
+-- task API (MUL-4910). The Go retryAttemptCeiling already refuses to raise a
+-- disabled (max_attempts<=1) task, so this only ever widens, never revives.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, coalesced_comment_ids, trigger_summary, context,
@@ -334,16 +348,16 @@ INSERT INTO agent_task_queue (
     squad_id, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
-    chat_input_task_id
+    chat_input_task_id, fire_at
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
-    'queued',
+    CASE WHEN sqlc.narg(fire_at)::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
-    p.attempt + 1, p.max_attempts, p.id,
+    p.attempt + 1, COALESCE(sqlc.narg(max_attempts)::int, p.max_attempts), p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
     p.squad_id,
@@ -353,7 +367,7 @@ SELECT
     sqlc.narg(runtime_connected_apps),
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
-    p.chat_input_task_id
+    p.chat_input_task_id, sqlc.narg(fire_at)
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;

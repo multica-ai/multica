@@ -75,6 +75,7 @@ func TestStreamProtocolObservationDoesNotLogContent(t *testing.T) {
 		sawResult:                  true,
 		resultBytes:                len(resultSecret),
 		lastAssistantBytes:         len(assistantSecret),
+		lastEventType:              "result",
 		anthropicBaseURLConfigured: true,
 	})
 
@@ -87,6 +88,7 @@ func TestStreamProtocolObservationDoesNotLogContent(t *testing.T) {
 		"event_count=7",
 		"saw_result=true",
 		"result_bytes=20",
+		"last_event_type=result",
 		"anthropic_base_url_configured=true",
 	} {
 		if !strings.Contains(got, required) {
