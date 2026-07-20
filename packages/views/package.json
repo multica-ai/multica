@@ -89,6 +89,7 @@
     "hast-util-to-html": "^9.0.5",
     "katex": "catalog:",
     "lowlight": "^3.3.0",
+    "mdast-util-from-markdown": "^2.0.3",
     "mermaid": "catalog:",
     "motion": "^12.38.0",
     "pinyin-pro": "3.26.0",
