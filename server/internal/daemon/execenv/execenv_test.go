@@ -2555,6 +2555,30 @@ func TestEnsureCodexSandboxConfigDarwinFallsBack(t *testing.T) {
 	}
 }
 
+// TestEnsureCodexSandboxConfigWindowsFallsBack pins MUL-4957: Windows has no
+// enforceable filesystem sandbox, so an unenforceable workspace-write policy
+// makes Codex reject mutation commands (e.g. `multica issue create`) "by
+// policy". Windows must therefore get danger-full-access, mirroring macOS, and
+// must not emit any workspace-write keys.
+func TestEnsureCodexSandboxConfigWindowsFallsBack(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	policy := codexSandboxPolicyFor("windows", "0.144.5")
+	if err := ensureCodexSandboxConfig(configPath, policy, "0.144.5", testLogger()); err != nil {
+		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
+	}
+
+	s, _ := os.ReadFile(configPath)
+	if !strings.Contains(string(s), `sandbox_mode = "danger-full-access"`) {
+		t.Errorf("expected danger-full-access fallback on windows, got:\n%s", s)
+	}
+	if strings.Contains(string(s), "sandbox_workspace_write") {
+		t.Errorf("should not emit any workspace-write keys on windows fallback, got:\n%s", s)
+	}
+}
+
 func TestEnsureCodexSandboxConfigIsIdempotent(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -2752,11 +2776,17 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 		version  string
 		wantMode string
 		wantNet  bool
+		// wantHint is whether the policy carries an actionable upgrade hint.
+		// Only the macOS seatbelt fallback has one; Windows has no filesystem
+		// sandbox to restore, so it must not surface a misleading macOS hint.
+		wantHint bool
 	}{
-		{"linux any version", "linux", "0.100.0", "workspace-write", true},
-		{"linux unknown version", "linux", "", "workspace-write", true},
-		{"darwin old version", "darwin", "0.121.0", "danger-full-access", false},
-		{"darwin unknown version", "darwin", "", "danger-full-access", false},
+		{"linux any version", "linux", "0.100.0", "workspace-write", true, false},
+		{"linux unknown version", "linux", "", "workspace-write", true, false},
+		{"windows any version", "windows", "0.144.5", "danger-full-access", false, false},
+		{"windows unknown version", "windows", "", "danger-full-access", false, false},
+		{"darwin old version", "darwin", "0.121.0", "danger-full-access", false, true},
+		{"darwin unknown version", "darwin", "", "danger-full-access", false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2769,6 +2799,9 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 			}
 			if p.Reason == "" {
 				t.Error("expected non-empty Reason")
+			}
+			if (p.Hint != "") != tc.wantHint {
+				t.Errorf("hint present = %v, want %v (hint=%q)", p.Hint != "", tc.wantHint, p.Hint)
 			}
 		})
 	}

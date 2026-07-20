@@ -49,13 +49,24 @@ type codexSandboxPolicy struct {
 	WritableRoots []string
 	// Reason is a short human-readable label used in warn-level logs.
 	Reason string
+	// Hint is an optional, actionable remediation surfaced in warn-level logs
+	// when Mode is danger-full-access. It is empty when no operator action can
+	// restore a real sandbox (e.g. Windows has no filesystem sandbox backend at
+	// all), so the log omits the hint instead of showing an irrelevant one.
+	Hint string
 }
 
 // codexSandboxPolicyFor picks the right policy for the given platform and
 // detected Codex CLI version.
 //
-//   - Non-darwin: always workspace-write with network access (Landlock is not
-//     affected by the macOS Seatbelt bug).
+//   - Linux: workspace-write with network access. Landlock enforces the
+//     filesystem sandbox and is not affected by the macOS Seatbelt bug.
+//   - Windows: danger-full-access. Windows has no filesystem sandbox backend
+//     the daemon configures (see task_home.go), so a workspace-write policy is
+//     unenforceable. Worse than no sandbox, it pushes Codex into rejecting
+//     non-safe mutation commands "by policy" (e.g. `multica issue create`)
+//     instead of running them. Mirror the macOS fallback and run unsandboxed.
+//     See MUL-4957.
 //   - darwin with a version at or above CodexDarwinNetworkAccessFixedVersion:
 //     workspace-write with network access (upstream bug fixed).
 //   - darwin otherwise (including when the version is unknown): fall back to
@@ -63,6 +74,19 @@ type codexSandboxPolicy struct {
 func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
 	if goos == "" {
 		goos = runtime.GOOS
+	}
+	if goos == "windows" {
+		// Windows has no Landlock/Seatbelt-equivalent sandbox the daemon can
+		// configure (see task_home.go), so workspace-write cannot be enforced.
+		// An unenforceable sandbox is worse than none: Codex can neither run a
+		// non-safe command inside a sandbox nor, under approval_policy = "never",
+		// escalate it to the daemon's auto-approver, so it rejects the command
+		// "by policy" and `multica issue create` fails. Run unsandboxed, matching
+		// the macOS fallback. See MUL-4957.
+		return codexSandboxPolicy{
+			Mode:   "danger-full-access",
+			Reason: "codex on windows: no filesystem sandbox backend; workspace-write is unenforceable and forces reject-by-policy (MUL-4957)",
+		}
 	}
 	if goos != "darwin" {
 		return codexSandboxPolicy{
@@ -86,6 +110,7 @@ func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
 		Mode:          "danger-full-access",
 		NetworkAccess: false,
 		Reason:        reason,
+		Hint:          codexUpgradeHint(),
 	}
 }
 
@@ -262,12 +287,15 @@ func ensureCodexSandboxConfig(configPath string, policy codexSandboxPolicy, dete
 		if version == "" {
 			version = "unknown"
 		}
-		logger.Warn("codex sandbox: falling back to danger-full-access on macOS",
+		attrs := []any{
 			"reason", policy.Reason,
 			"codex_version", version,
-			"hint", codexUpgradeHint(),
 			"config_path", configPath,
-		)
+		}
+		if policy.Hint != "" {
+			attrs = append(attrs, "hint", policy.Hint)
+		}
+		logger.Warn("codex sandbox: running unsandboxed with danger-full-access", attrs...)
 	}
 
 	if err := os.WriteFile(configPath, []byte(updated), 0o644); err != nil {
