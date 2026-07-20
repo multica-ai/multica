@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -966,6 +967,43 @@ func TestUpdateComment_SuppressAgentIDsFiltersEditRetrigger(t *testing.T) {
 	}
 	if got := countQueuedCommentTriggerTasks(t, issueID, agentB); got != 0 {
 		t.Fatalf("suppressed agent queued tasks = %d, want 0", got)
+	}
+}
+
+func TestUpdateComment_SuppressionEditSemantics(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "Edit Suppression Semantics", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "edit suppression semantics", "", "")
+	commentID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+		"content":            "original content",
+		"suppress_agent_ids": []string{agentID},
+	})
+
+	readSuppressed := func() []pgtype.UUID {
+		t.Helper()
+		var ids []pgtype.UUID
+		if err := testPool.QueryRow(context.Background(),
+			`SELECT suppressed_agent_ids FROM comment WHERE id = $1`, commentID,
+		).Scan(&ids); err != nil {
+			t.Fatalf("read suppressed_agent_ids: %v", err)
+		}
+		return ids
+	}
+
+	// An attachment-only/content-preserving update is not a new routing action.
+	updateCommentForTriggerPreviewTest(t, commentID, map[string]any{"content": "original content"})
+	if ids := readSuppressed(); len(ids) != 1 || uuidToString(ids[0]) != agentID {
+		t.Fatalf("unchanged edit suppression = %v, want [%s]", ids, agentID)
+	}
+
+	// A content edit is a new routing action; omitting suppression replaces the
+	// old set with empty rather than silently inheriting stale transport policy.
+	updateCommentForTriggerPreviewTest(t, commentID, map[string]any{"content": "revised content"})
+	if ids := readSuppressed(); len(ids) != 0 {
+		t.Fatalf("changed edit suppression = %v, want empty", ids)
 	}
 }
 

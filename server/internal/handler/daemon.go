@@ -3008,6 +3008,15 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		if isNoteComment(c.Content) {
 			continue
 		}
+		// A comment can arrive while this agent already has a dispatched/running
+		// task. The creation-time trigger path then deliberately defers it to
+		// completion reconciliation. Preserve the original transport contract:
+		// an explicitly suppressed agent must stay suppressed here as well,
+		// otherwise the delayed path silently turns a no-wake protocol marker
+		// into a redundant follow-up run.
+		if commentSuppressesAgent(c, task.AgentID) {
+			continue
+		}
 		var parentComment *db.Comment
 		if c.ParentID.Valid {
 			// Scope to the issue's workspace; a comment's parent is always in the
@@ -3082,6 +3091,19 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 			"agent_id", agentID,
 			"undelivered_comments", scheduled)
 	}
+}
+
+func commentSuppressesAgent(comment db.Comment, agentID pgtype.UUID) bool {
+	if !agentID.Valid {
+		return false
+	}
+	want := uuidToString(agentID)
+	for _, suppressedID := range comment.SuppressedAgentIds {
+		if suppressedID.Valid && uuidToString(suppressedID) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // keepExplicitMentionTriggers filters a computed trigger set down to the ones

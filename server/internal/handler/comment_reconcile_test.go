@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -118,6 +119,100 @@ func TestCompleteTask_ReconcilesMemberCommentPostedDuringRun(t *testing.T) {
 	// A follow-up run must now be queued for the agent.
 	if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
 		t.Fatalf("expected exactly 1 follow-up task after reconciliation, got %d", n)
+	}
+}
+
+// TestCompleteTask_PreservesSuppressionDuringReconcile covers the delayed
+// routing race: a member comment posted while its assignee is already active
+// cannot be enqueued immediately and is revisited at task completion. The
+// persisted suppression contract must still prevent a follow-up wake.
+func TestCompleteTask_PreservesSuppressionDuringReconcile(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
+		VALUES ($1, 'reconcile suppression fixture', 'in_progress', 'none', $2, 'member', 999011, 0, 'agent', $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var triggerCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+		VALUES ($1, $2, 'member', $3, 'initial request', 'comment', now() - interval '10 minutes')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
+		t.Fatalf("setup: trigger comment: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
+		RETURNING id
+	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: running task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+
+	commentID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+		"content":            "suppressed mid-run follow-up",
+		"suppress_agent_ids": []string{agentID, agentID},
+	})
+	var persisted []pgtype.UUID
+	if err := testPool.QueryRow(ctx,
+		`SELECT suppressed_agent_ids FROM comment WHERE id = $1`, commentID,
+	).Scan(&persisted); err != nil {
+		t.Fatalf("load persisted suppression: %v", err)
+	}
+	if len(persisted) != 1 || !persisted[0].Valid || uuidToString(persisted[0]) != agentID {
+		t.Fatalf("persisted suppression = %v, want [%s]", persisted, agentID)
+	}
+
+	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 0 {
+		t.Fatalf("suppressed assignee must not receive a reconciled follow-up, got %d", n)
+	}
+}
+
+func TestCommentSuppressesAgent(t *testing.T) {
+	agent := util.MustParseUUID("11111111-1111-1111-1111-111111111111")
+	other := util.MustParseUUID("22222222-2222-2222-2222-222222222222")
+	tests := []struct {
+		name       string
+		suppressed []pgtype.UUID
+		agent      pgtype.UUID
+		want       bool
+	}{
+		{name: "empty metadata", agent: agent},
+		{name: "invalid target", suppressed: []pgtype.UUID{agent}},
+		{name: "different agent", suppressed: []pgtype.UUID{other}, agent: agent},
+		{name: "exact agent", suppressed: []pgtype.UUID{agent}, agent: agent, want: true},
+		{name: "duplicate exact agent", suppressed: []pgtype.UUID{agent, agent}, agent: agent, want: true},
+		{name: "invalid entries ignored", suppressed: []pgtype.UUID{{}, agent}, agent: agent, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comment := db.Comment{SuppressedAgentIds: tt.suppressed}
+			if got := commentSuppressesAgent(comment, tt.agent); got != tt.want {
+				t.Fatalf("commentSuppressesAgent() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
