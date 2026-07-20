@@ -27,7 +27,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | **OpenClaw** | Open source | ✅ | ✅ | `.agent_context/skills/` (fallback) | Bound to the agent, can't be switched per task |
 | **Pi** | Inflection AI | ✅ (session is a file path) | ❌ | `.pi/skills/` | Dynamic discovery |
 | **Qoder** | Alibaba | ✅ | ✅ | `.qoder/skills/` | Dynamic discovery |
-| **Qwen Code** | Alibaba | ✅ (`--resume`) | ❌ (native settings only) | `.qwen/skills/` | Static default + `--model` |
+| **Qwen Code** | Alibaba | ✅ (`--resume <id>`) | ❌ | `.qwen/skills/` | Static + flag |
 | **Trae** | ByteDance | ✅ (ACP `session/load`) | ✅ | `.traecli/skills/` | Dynamic discovery |
 | **Grok** | xAI | ✅ (ACP `session/load`) | ✅ | `.grok/skills/` | Dynamic discovery (ACP `session/new`) |
 
@@ -99,7 +99,7 @@ From Alibaba. An agentic coding CLI. Uses the ACP protocol over stdio (shares a 
 
 ### Qwen Code
 
-From Alibaba. CLI binary name is `qwen`. Multica launches Qwen Code with `qwen -p <prompt> --output-format stream-json --yolo`, parses its native JSONL text, thinking, tool-use, tool-result, and terminal-result events, and resumes sessions with `--resume <session-id>`. The selected model is passed through `--model`; Qwen Code also reports the effective model in its system stream event. Skills are injected into `.qwen/skills/`, and the runtime brief is written to `QWEN.md`, both native Qwen Code locations. **Managed `mcp_config` is deliberately rejected** rather than silently ignored: Qwen Code has no CLI MCP-config flag. Leave the field unset to inherit your own Qwen Code MCP settings from `.qwen/settings.json`.
+From Alibaba. Multica drives Qwen Code with its native non-interactive JSONL protocol, `qwen -p <prompt> --output-format stream-json`, and maps text, thinking, tool calls, tool results, session IDs, status, errors, and token usage into the normal task stream. **Session resumption works** through `--resume <id>`. The per-task runtime brief is written to `QWEN.md`; assigned skills are copied to `.qwen/skills/`; user skills are read from `$QWEN_HOME/skills/` (default `~/.qwen/skills/`). Select a default model with `MULTICA_QWEN_MODEL` or per task through Qwen's `--model` flag. Qwen Code has no ephemeral MCP-config flag, so a Multica-managed `mcp_config` is rejected explicitly rather than being silently ignored; configure persistent servers with `qwen mcp add` instead.
 
 ### Trae
 
@@ -124,12 +124,12 @@ The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continu
 
 ## MCP configuration: provider-specific support
 
-**Of the 17 tools, twelve consume `mcp_config`: Claude Code, CodeBuddy, Codex, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Qoder, Trae, and Grok**. Antigravity, Copilot, DevEco Code, and Pi accept the field but **ignore it** — no error, no warning, the config has no effect. Qwen Code instead rejects a managed `mcp_config` at launch because it has no equivalent CLI flag; omit the field to inherit Qwen native settings.
+**Of the 17 tools, twelve consume `mcp_config`: Claude Code, CodeBuddy, Codex, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Qoder, Trae, and Grok**. Antigravity, Copilot, DevEco Code, and Pi accept the field but ignore it. **Qwen Code rejects managed `mcp_config` explicitly**, because its CLI exposes no per-process MCP configuration channel; configure persistent servers with `qwen mcp add`.
 
 The runtime paths are provider-specific: Claude Code and CodeBuddy receive it through `--mcp-config` paired with `--strict-mcp-config`; Codex writes a daemon-managed `mcp_servers` block into the per-task `$CODEX_HOME/config.toml`; Cursor writes `.cursor/mcp.json` plus per-task project approvals under `CURSOR_DATA_DIR`; Hermes, Kimi, Kiro CLI, Qoder, Trae, and Grok receive ACP `mcpServers`; OpenCode receives inline config through `OPENCODE_CONFIG_CONTENT`; OpenClaw receives `mcp.servers` through Multica's per-task config wrapper. OpenCode's path does **not** rewrite the project's `opencode.json`.
 
 <Callout type="warning">
-If you set `mcp_config` in an agent configuration but pick a tool not marked ✅ in the MCP column, MCP is provider-specific: most unsupported tools ignore it, while Qwen Code rejects the run rather than silently dropping it.
+If you set `mcp_config` in an agent configuration but pick a tool not marked ✅ in the MCP column, your MCP servers have no effect on Antigravity, Copilot, DevEco Code, or Pi. For Qwen Code, task start instead fails with an actionable configuration error; configure its persistent MCP servers with `qwen mcp add`.
 </Callout>
 
 ## Where skill files go

@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 16 supported tools so the daemon can detect them.
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 17 supported tools so the daemon can detect them.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 16 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 17 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -31,9 +31,9 @@ multica daemon restart
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
 
-## The 16 supported tools
+## The 17 supported tools
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 16.
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 17.
 
 ### Claude Code (Anthropic)
 
@@ -172,14 +172,14 @@ Agentic coding CLI using the ACP protocol over stdio (shares the transport with 
 
 ### Qwen Code (Alibaba)
 
-Alibaba Qwen Code CLI (`qwen`). Multica runs it headlessly as `qwen -p <prompt> --output-format stream-json --yolo`; session resumption uses `--resume`, and the daemon reads native text, thinking, tool, and result JSONL events. Skills are injected into `.qwen/skills/`, and the task brief goes to `QWEN.md`. Managed `mcp_config` is rejected at launch because the CLI has no matching config flag; leave it unset to inherit MCP servers from Qwen settings.
+Qwen Code uses its native JSONL protocol in daemon mode: `qwen -p <prompt> --output-format stream-json`. Session resumption works through `--resume`; the task runtime brief is written to `QWEN.md`; assigned skills are copied to `.qwen/skills/`; and personal skills use `$QWEN_HOME/skills/` (default `~/.qwen/skills/`).
 
 | | |
 |---|---|
 | Daemon looks for | `qwen` |
-| Install | Install Qwen Code and ensure `qwen` is on `PATH`. |
-| Authentication | Run `qwen` once interactively and complete the provider login. |
-| Notes | Override the binary with `MULTICA_QWEN_PATH`, defaults with `MULTICA_QWEN_MODEL` and `MULTICA_QWEN_ARGS`. Minimum CLI version: `0.20.0`. |
+| Install | Install Qwen Code using Alibaba's current Qwen Code instructions, then ensure `qwen` is on `PATH`. |
+| Authentication | Run `qwen` once interactively and complete its configured authentication flow before starting the daemon. |
+| Notes | Minimum CLI version: `0.20.0`. Override the binary with `MULTICA_QWEN_PATH` and set a daemon-wide default model with `MULTICA_QWEN_MODEL`. Qwen has no temporary MCP-config flag, so Multica rejects agent `mcp_config`; configure persistent MCP servers with `qwen mcp add`. |
 
 ### Trae CLI (ByteDance)
 

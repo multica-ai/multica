@@ -7,46 +7,41 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 )
 
-// qwenBackend implements Backend by spawning Qwen Code with its native
-// non-interactive JSON-lines stream protocol.
+// qwenBackend drives Qwen Code's native non-interactive JSONL protocol:
+// qwen -p <prompt> --output-format stream-json. The event schema is based on
+// Qwen Code 0.20.0 captures in testdata/qwen-code-0.20.0-stream-json.jsonl.
 type qwenBackend struct {
 	cfg Config
 }
 
-// qwenBlockedArgs are flags owned by the daemon. Qwen Code's prompt is an
-// argument to -p (unlike Claude's stdin frame), so it must also be protected
-// from custom_args overrides.
+// qwenBlockedArgs are owned by Multica. Qwen accepts the task prompt and stream
+// protocol as flags, so custom args must not replace either. Model/session are
+// also selected by Multica, and safe mode disables the QWEN.md context file.
 var qwenBlockedArgs = map[string]blockedArgMode{
-	"-p":                         blockedWithValue,
-	"--prompt":                   blockedWithValue,
-	"-o":                         blockedWithValue,
-	"--model":                    blockedWithValue,
-	"--output-format":            blockedWithValue,
-	"--input-format":             blockedWithValue,
-	"--include-partial-messages": blockedStandalone,
-	"--yolo":                     blockedStandalone,
-	"-y":                         blockedStandalone,
-	"--approval-mode":            blockedWithValue,
-	"--prompt-interactive":       blockedWithValue,
-	"-i":                         blockedStandalone,
-	"--safe-mode":                blockedStandalone,
+	"-p":                   blockedWithValue,
+	"--prompt":             blockedWithValue,
+	"-i":                   blockedWithValue,
+	"--prompt-interactive": blockedWithValue,
+	"-o":                   blockedWithValue,
+	"--output-format":      blockedWithValue,
+	"-m":                   blockedWithValue,
+	"--model":              blockedWithValue,
+	"-r":                   blockedWithValue,
+	"--resume":             blockedWithValue,
+	"-c":                   blockedStandalone,
+	"--continue":           blockedStandalone,
+	"--chat-recording":     blockedWithValue,
+	"--safe-mode":          blockedStandalone,
 }
 
 func buildQwenArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{"-p", prompt, "--output-format", "stream-json", "--yolo"}
+	args := []string{"-p", prompt, "--output-format", "stream-json"}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
-	}
-	if opts.MaxTurns > 0 {
-		args = append(args, "--max-session-turns", strconv.Itoa(opts.MaxTurns))
-	}
-	if opts.SystemPrompt != "" {
-		args = append(args, "--append-system-prompt", opts.SystemPrompt)
 	}
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
@@ -64,8 +59,10 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	if _, err := exec.LookPath(execPath); err != nil {
 		return nil, fmt.Errorf("qwen executable not found at %q: %w", execPath, err)
 	}
+	// Qwen has no --mcp-config equivalent: its MCP servers are configured with
+	// `qwen mcp add` in QWEN_HOME/project settings. Do not silently drop ours.
 	if hasManagedMcpConfig(opts.McpConfig) {
-		return nil, fmt.Errorf("qwen does not support Multica-managed MCP configuration; remove mcp_config to inherit Qwen Code's native settings")
+		return nil, fmt.Errorf("qwen does not support Multica-managed MCP configuration; configure the server with `qwen mcp add` or remove mcp_config")
 	}
 
 	timeout := opts.Timeout
@@ -73,7 +70,7 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	args := buildQwenArgs(prompt, opts, b.cfg.Logger)
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
-	// Do not log args: they include the complete user prompt after -p.
+	// args contain the task prompt; never expose it in daemon logs.
 	b.cfg.Logger.Info("agent command", "exec", execPath, "provider", "qwen")
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
@@ -101,19 +98,8 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		defer close(msgCh)
 		defer close(resCh)
 
-		startTime := time.Now()
-		var lastAssistantText string
-		var finalResultText string
-		sawResult := false
-		resultIsError := false
-		var sessionID string
-		streamModel := opts.Model
-		usage := make(map[string]TokenUsage)
-		eventCount := 0
-		invalidEventCount := 0
-		assistantEventCount := 0
-		toolUseCount := 0
-
+		started := time.Now()
+		state := qwenStreamState{model: opts.Model, usage: make(map[string]TokenUsage)}
 		go func() {
 			<-runCtx.Done()
 			_ = stdout.Close()
@@ -126,113 +112,71 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			if line == "" {
 				continue
 			}
-			var msg qwenSDKMessage
-			if err := json.Unmarshal([]byte(line), &msg); err != nil {
-				invalidEventCount++
+			var event qwenStreamEvent
+			if err := json.Unmarshal([]byte(line), &event); err != nil {
+				state.invalidEventCount++
 				continue
 			}
-			eventCount++
-
-			switch msg.Type {
-			case "assistant":
-				assistantEventCount++
-				assistantText, tools, model := handleQwenAssistant(msg, msgCh, usage)
-				if model != "" {
-					streamModel = model
-				}
-				toolUseCount += tools
-				if tools == 0 {
-					lastAssistantText = assistantText
-				} else {
-					lastAssistantText = ""
-				}
-			case "user":
-				handleQwenUser(msg, msgCh)
-			case "system":
-				if msg.SessionID != "" {
-					sessionID = msg.SessionID
-				}
-				if msg.Model != "" {
-					streamModel = msg.Model
-				}
-				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
-			case "result":
-				sawResult = true
-				finalResultText = msg.ResultText
-				resultIsError = msg.IsError
-				if msg.SessionID != "" {
-					sessionID = msg.SessionID
-				}
-				if resultUsage := qwenResultUsage(msg, streamModel); len(resultUsage) > 0 {
-					usage = resultUsage
-				}
-			}
+			state.eventCount++
+			state.lastEventType = event.Type
+			handleQwenEvent(event, msgCh, &state)
 		}
 		scanErr := scanner.Err()
 		if scanErr != nil {
 			_ = stdout.Close()
 		}
 		exitErr := cmd.Wait()
-		duration := time.Since(startTime)
+		duration := time.Since(started)
 
-		finalStatus, finalOutput, finalError := finalizeStreamResult(
-			"qwen", timeout, runCtx.Err(), nil, exitErr, sessionID,
-			streamTerminalState{
-				lastAssistantText: lastAssistantText,
-				finalResultText:   finalResultText,
-				sawResult:         sawResult,
-				resultIsError:     resultIsError,
-				scanErr:           scanErr,
-			}, "",
-		)
-		if finalError != "" {
-			finalError = withAgentStderr(finalError, "qwen", stderrBuf.Tail())
+		status, output, errMsg := finalizeStreamResult("qwen", timeout, runCtx.Err(), nil, exitErr, state.sessionID, streamTerminalState{
+			lastAssistantText: state.lastAssistantText,
+			finalResultText:   state.finalResultText,
+			sawResult:         state.sawResult,
+			resultIsError:     state.resultIsError,
+			scanErr:           scanErr,
+		}, "")
+		if errMsg != "" {
+			errMsg = withAgentStderr(errMsg, "qwen", stderrBuf.Tail())
 		}
 		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
-			provider:            "qwen",
-			cliVersion:          b.cfg.CLIVersion,
-			model:               streamModel,
-			exitCode:            streamProcessExitCode(exitErr),
-			eventCount:          eventCount,
-			invalidEventCount:   invalidEventCount,
-			assistantEventCount: assistantEventCount,
-			toolUseCount:        toolUseCount,
-			sawResult:           sawResult,
-			resultIsError:       resultIsError,
-			resultBytes:         len(finalResultText),
-			lastAssistantBytes:  len(lastAssistantText),
-			scannerError:        scanErr != nil,
+			provider: "qwen", cliVersion: b.cfg.CLIVersion, model: state.model,
+			exitCode: streamProcessExitCode(exitErr), eventCount: state.eventCount,
+			invalidEventCount: state.invalidEventCount, assistantEventCount: state.assistantEventCount,
+			toolUseCount: state.toolUseCount, sawResult: state.sawResult, resultIsError: state.resultIsError,
+			resultBytes: len(state.finalResultText), lastAssistantBytes: len(state.lastAssistantText),
+			scannerError: scanErr != nil, lastEventType: state.lastEventType,
 		})
-		b.cfg.Logger.Info("qwen finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
-
-		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed")
-		resCh <- Result{Status: finalStatus, Output: finalOutput, Error: finalError, DurationMs: duration.Milliseconds(), SessionID: reportedSessionID, Usage: usage}
+		b.cfg.Logger.Info("qwen finished", "pid", cmd.Process.Pid, "status", status, "duration", duration.Round(time.Millisecond).String())
+		resCh <- Result{
+			Status: status, Output: output, Error: errMsg, DurationMs: duration.Milliseconds(),
+			SessionID: resolveSessionID(opts.ResumeSessionID, state.sessionID, status == "failed"), Usage: state.usage,
+		}
 	}()
-
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-type qwenSDKMessage struct {
-	Type       string          `json:"type"`
-	Message    json.RawMessage `json:"message,omitempty"`
-	SessionID  string          `json:"session_id,omitempty"`
-	Model      string          `json:"model,omitempty"`
-	ResultText string          `json:"result,omitempty"`
-	IsError    bool            `json:"is_error,omitempty"`
-	Usage      *qwenUsage      `json:"usage,omitempty"`
+type qwenStreamEvent struct {
+	Type      string          `json:"type"`
+	Subtype   string          `json:"subtype,omitempty"`
+	SessionID string          `json:"session_id,omitempty"`
+	Model     string          `json:"model,omitempty"`
+	Message   json.RawMessage `json:"message,omitempty"`
+	Result    string          `json:"result,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
+	Usage     *qwenUsage      `json:"usage,omitempty"`
+	Error     json.RawMessage `json:"error,omitempty"`
 }
 
-type qwenMessageContent struct {
-	Model   string             `json:"model"`
+type qwenMessage struct {
+	Model   string             `json:"model,omitempty"`
 	Content []qwenContentBlock `json:"content"`
 	Usage   *qwenUsage         `json:"usage,omitempty"`
 }
 
 type qwenUsage struct {
-	InputTokens              int64 `json:"input_tokens"`
-	OutputTokens             int64 `json:"output_tokens"`
-	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
-	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	InputTokens          int64 `json:"input_tokens"`
+	OutputTokens         int64 `json:"output_tokens"`
+	CacheReadInputTokens int64 `json:"cache_read_input_tokens"`
 }
 
 type qwenContentBlock struct {
@@ -246,23 +190,63 @@ type qwenContentBlock struct {
 	Content   json.RawMessage `json:"content,omitempty"`
 }
 
-func handleQwenAssistant(msg qwenSDKMessage, ch chan<- Message, usage map[string]TokenUsage) (string, int, string) {
-	var content qwenMessageContent
-	if err := json.Unmarshal(msg.Message, &content); err != nil {
+type qwenStreamState struct {
+	sessionID, model, lastAssistantText, finalResultText, lastEventType string
+	sawResult, resultIsError                                            bool
+	usage                                                               map[string]TokenUsage
+	eventCount, invalidEventCount, assistantEventCount, toolUseCount    int
+}
+
+func handleQwenEvent(event qwenStreamEvent, ch chan<- Message, state *qwenStreamState) {
+	if event.SessionID != "" {
+		state.sessionID = event.SessionID
+	}
+	if event.Model != "" {
+		state.model = event.Model
+	}
+	switch event.Type {
+	case "system":
+		trySend(ch, Message{Type: MessageStatus, Status: "running", SessionID: state.sessionID})
+	case "assistant":
+		state.assistantEventCount++
+		text, tools, model := handleQwenAssistant(event.Message, ch, state.usage)
+		if model != "" {
+			state.model = model
+		}
+		state.toolUseCount += tools
+		if tools == 0 && text != "" {
+			state.lastAssistantText = text
+		} else if tools > 0 {
+			state.lastAssistantText = ""
+		}
+	case "user":
+		handleQwenUser(event.Message, ch)
+	case "result":
+		state.sawResult = true
+		state.finalResultText = event.Result
+		state.resultIsError = event.IsError || event.Subtype == "error" || event.Subtype == "failed"
+		if usage := qwenResultUsage(event.Usage, state.model); len(usage) > 0 {
+			state.usage = usage
+		}
+	case "error":
+		// Be fail-closed if a later Qwen release emits a terminal error event.
+		state.sawResult = true
+		state.resultIsError = true
+		state.finalResultText = qwenErrorText(event)
+	}
+}
+
+func handleQwenAssistant(raw json.RawMessage, ch chan<- Message, usage map[string]TokenUsage) (string, int, string) {
+	var message qwenMessage
+	if json.Unmarshal(raw, &message) != nil {
 		return "", 0, ""
 	}
-	if content.Usage != nil && content.Model != "" {
-		u := usage[content.Model]
-		u.InputTokens += content.Usage.InputTokens
-		u.OutputTokens += content.Usage.OutputTokens
-		u.CacheReadTokens += content.Usage.CacheReadInputTokens
-		u.CacheWriteTokens += content.Usage.CacheCreationInputTokens
-		usage[content.Model] = u
+	if message.Usage != nil && message.Model != "" {
+		usage[message.Model] = qwenTokenUsage(message.Usage)
 	}
-
 	var text strings.Builder
-	toolCount := 0
-	for _, block := range content.Content {
+	tools := 0
+	for _, block := range message.Content {
 		switch block.Type {
 		case "thinking":
 			if block.Thinking != "" {
@@ -274,54 +258,60 @@ func handleQwenAssistant(msg qwenSDKMessage, ch chan<- Message, usage map[string
 				trySend(ch, Message{Type: MessageText, Content: block.Text})
 			}
 		case "tool_use":
-			toolCount++
+			tools++
 			var input map[string]any
-			if block.Input != nil {
+			if len(block.Input) > 0 {
 				_ = json.Unmarshal(block.Input, &input)
 			}
 			trySend(ch, Message{Type: MessageToolUse, Tool: block.Name, CallID: block.ID, Input: input})
 		}
 	}
-	return text.String(), toolCount, content.Model
+	return text.String(), tools, message.Model
 }
 
-func handleQwenUser(msg qwenSDKMessage, ch chan<- Message) {
-	var content qwenMessageContent
-	if err := json.Unmarshal(msg.Message, &content); err != nil {
+func handleQwenUser(raw json.RawMessage, ch chan<- Message) {
+	var message qwenMessage
+	if json.Unmarshal(raw, &message) != nil {
 		return
 	}
-	for _, block := range content.Content {
-		if block.Type != "tool_result" {
-			continue
+	for _, block := range message.Content {
+		if block.Type == "tool_result" {
+			trySend(ch, Message{Type: MessageToolResult, CallID: block.ToolUseID, Output: qwenToolResultOutput(block.Content)})
 		}
-		trySend(ch, Message{Type: MessageToolResult, CallID: block.ToolUseID, Output: qwenToolResultOutput(block.Content)})
 	}
+}
+
+func qwenTokenUsage(usage *qwenUsage) TokenUsage {
+	return TokenUsage{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, CacheReadTokens: usage.CacheReadInputTokens}
+}
+
+func qwenResultUsage(usage *qwenUsage, model string) map[string]TokenUsage {
+	if usage == nil || model == "" || (usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadInputTokens == 0) {
+		return nil
+	}
+	return map[string]TokenUsage{model: qwenTokenUsage(usage)}
 }
 
 func qwenToolResultOutput(raw json.RawMessage) string {
 	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
+	if json.Unmarshal(raw, &text) == nil {
 		return text
 	}
 	return string(raw)
 }
 
-func qwenResultUsage(msg qwenSDKMessage, fallbackModel string) map[string]TokenUsage {
-	model := msg.Model
-	if model == "" {
-		model = fallbackModel
+func qwenErrorText(event qwenStreamEvent) string {
+	if event.Result != "" {
+		return event.Result
 	}
-	if msg.Usage == nil || model == "" || !qwenUsageHasTokens(msg.Usage) {
-		return nil
+	var body struct {
+		Message string `json:"message"`
 	}
-	return map[string]TokenUsage{model: {
-		InputTokens:      msg.Usage.InputTokens,
-		OutputTokens:     msg.Usage.OutputTokens,
-		CacheReadTokens:  msg.Usage.CacheReadInputTokens,
-		CacheWriteTokens: msg.Usage.CacheCreationInputTokens,
-	}}
-}
-
-func qwenUsageHasTokens(usage *qwenUsage) bool {
-	return usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.CacheReadInputTokens > 0 || usage.CacheCreationInputTokens > 0
+	if json.Unmarshal(event.Error, &body) == nil && body.Message != "" {
+		return body.Message
+	}
+	if len(event.Error) > 0 {
+		return string(event.Error)
+	}
+	return "qwen returned an error event without details"
 }
