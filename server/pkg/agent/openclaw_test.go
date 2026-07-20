@@ -1061,14 +1061,46 @@ func TestBuildOpenclawArgsFiltersBlockedCustomArgs(t *testing.T) {
 			"--system-prompt", "You are helpful",
 			"--session-id", "hijacked",
 			"--message", "hijacked",
+			"-p", "bad prompt",
+			"--output-format", "stream-json",
+			"--json-input", "/tmp/openclaw-input.json",
+			"--workdir", "/tmp/work",
+			"--add-dir", "/tmp/repo",
+			"--mcp-config", "/tmp/mcp.json",
+			"--strict-mcp-config",
+			"--no-tui",
+			"--dangerously-bypass-approvals-and-sandbox",
 		},
 	}, slog.Default())
 
-	if idx := indexOf(args, "--model"); idx != -1 {
-		t.Errorf("--model should be filtered from custom_args: %v", args)
+	for _, blocked := range []string{
+		"--model",
+		"--system-prompt",
+		"-p",
+		"--output-format",
+		"--json-input",
+		"--workdir",
+		"--add-dir",
+		"--mcp-config",
+		"--strict-mcp-config",
+		"--no-tui",
+		"--dangerously-bypass-approvals-and-sandbox",
+	} {
+		if idx := indexOf(args, blocked); idx != -1 {
+			t.Errorf("%s should be filtered from custom_args: %v", blocked, args)
+		}
 	}
-	if idx := indexOf(args, "--system-prompt"); idx != -1 {
-		t.Errorf("--system-prompt should be filtered from custom_args: %v", args)
+	for _, consumedValue := range []string{
+		"bad prompt",
+		"stream-json",
+		"/tmp/openclaw-input.json",
+		"/tmp/work",
+		"/tmp/repo",
+		"/tmp/mcp.json",
+	} {
+		if idx := indexOf(args, consumedValue); idx != -1 {
+			t.Errorf("value for blocked flag %q should be consumed: %v", consumedValue, args)
+		}
 	}
 	// Whitelisted pass-through flag must survive filtering.
 	if idx := indexOf(args, "--agent"); idx == -1 || idx+1 >= len(args) || args[idx+1] != "research-bot" {
@@ -1080,6 +1112,94 @@ func TestBuildOpenclawArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 	if count := countOccurrences(args, "--message"); count != 1 {
 		t.Errorf("expected 1 --message (daemon-managed), got %d: %v", count, args)
+	}
+}
+
+func TestOpenclawExecuteUsesNativeAgentFlags(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "openclaw")
+	capturePath := filepath.Join(tempDir, "argv.txt")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"--version\" ]; then\n" +
+		"  echo 'openclaw 2026.7.1 c37871e'\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"printf '%s\\n' \"$@\" > \"$OPENCLAW_ARGV_CAPTURE\"\n" +
+		"printf '%s\\n' '{\"payloads\":[{\"text\":\"ok\"}],\"meta\":{\"durationMs\":1,\"agentMeta\":{\"sessionId\":\"sess-native\",\"model\":\"anthropic/claude-opus-4.7\"}}}'\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("openclaw", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"OPENCLAW_ARGV_CAPTURE": capturePath},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new openclaw backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "hello", ExecOptions{
+		Model:           "main",
+		ResumeSessionID: "resume-123",
+		Timeout:         5 * time.Second,
+		CustomArgs: []string{
+			"-p", "bad prompt",
+			"--output-format", "stream-json",
+			"--json-input", "/tmp/openclaw-input.json",
+			"--workdir", "/tmp/work",
+			"--add-dir", "/tmp/repo",
+			"--mcp-config", "/tmp/mcp.json",
+			"--strict-mcp-config",
+			"--no-tui",
+			"--dangerously-bypass-approvals-and-sandbox",
+			"--channel", "ops",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute returned synchronous error: %v", err)
+	}
+
+	for range session.Messages {
+	}
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" || result.Output != "ok" {
+			t.Fatalf("result = %#v, want completed output", result)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	data, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatalf("read captured argv: %v", err)
+	}
+	args := strings.Fields(string(data))
+	for _, want := range []string{"agent", "--local", "--json", "--session-id", "resume-123", "--timeout", "5", "--agent", "main", "--channel", "ops", "--message", "hello"} {
+		if idx := indexOf(args, want); idx == -1 {
+			t.Fatalf("captured argv missing %q: %v", want, args)
+		}
+	}
+	for _, blocked := range []string{
+		"-p",
+		"--output-format",
+		"--json-input",
+		"--workdir",
+		"--add-dir",
+		"--mcp-config",
+		"--strict-mcp-config",
+		"--no-tui",
+		"--dangerously-bypass-approvals-and-sandbox",
+	} {
+		if idx := indexOf(args, blocked); idx != -1 {
+			t.Fatalf("captured argv must not include Claude-style flag %q: %v", blocked, args)
+		}
 	}
 }
 
