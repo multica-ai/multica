@@ -66,7 +66,15 @@
     "status_archived": "已归档",
     "issue_status_blocked": "已阻塞",
     "active_issue_more": "还有 {{count}} 个",
-    "last_active_label": "最近活动 {{time}}"
+    "last_active_label": "最近活动 {{time}}",
+    "status_summary_label": "状态",
+    "filter_all": "全部",
+    "agents_section": "智能体",
+    "humans_section": "人员",
+    "archived_section": "已归档",
+    "no_role": "未设置角色",
+    "no_match_filter": "没有匹配该筛选的智能体",
+    "empty_roster": "还没有成员。添加智能体或成员以开始。"
   },
   "profile_card": {
     "unavailable": "小队不可用",
