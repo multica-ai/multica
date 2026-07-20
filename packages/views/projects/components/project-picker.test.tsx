@@ -39,6 +39,28 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
 }));
 
 describe("ProjectPicker", () => {
+  it("closes the dropdown after selecting a project", async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+    const onOpenChange = vi.fn();
+
+    render(
+      <I18nProvider locale="en" resources={{ en: { projects: enProjects } }}>
+        <ProjectPicker
+          projectId={null}
+          onUpdate={onUpdate}
+          onOpenChange={onOpenChange}
+          open
+          triggerRender={<PillButton />}
+        />
+      </I18nProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Launch Command Center" }));
+    expect(onUpdate).toHaveBeenCalledWith({ project_id: "project-1" });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it("shows a hover clear action for the selected project", async () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn();

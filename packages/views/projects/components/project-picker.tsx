@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Check, FolderKanban, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -38,9 +39,17 @@ export function ProjectPicker({
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const current = projects.find((p) => p.id === projectId);
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const isOpen = open ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
+
+  const handleUpdate = (updates: Partial<UpdateIssueRequest>) => {
+    onUpdate(updates);
+    setOpen(false);
+  };
 
   return (
-    <DropdownMenu defaultOpen={defaultOpen} open={open} onOpenChange={onOpenChange}>
+    <DropdownMenu open={isOpen} onOpenChange={setOpen}>
       <div className="group/project relative inline-flex min-w-0">
         <DropdownMenuTrigger
           className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
@@ -60,7 +69,7 @@ export function ProjectPicker({
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              onUpdate({ project_id: null });
+              handleUpdate({ project_id: null });
             }}
             className="pointer-events-none absolute inset-y-0 right-0 flex w-7 items-center justify-center rounded-r-full bg-background/95 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/project:pointer-events-auto group-hover/project:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
           >
@@ -70,7 +79,7 @@ export function ProjectPicker({
       </div>
       <DropdownMenuContent align={align} className="w-52">
         {projects.map((p) => (
-          <DropdownMenuItem key={p.id} onClick={() => onUpdate({ project_id: p.id })}>
+          <DropdownMenuItem key={p.id} onClick={() => handleUpdate({ project_id: p.id })}>
             <ProjectIcon project={p} size="md" className="mr-1" />
             <span className="truncate">{p.title}</span>
             {p.id === projectId && <Check className="ml-auto h-3.5 w-3.5 shrink-0" />}
@@ -78,7 +87,7 @@ export function ProjectPicker({
         ))}
         {projects.length > 0 && projectId && <DropdownMenuSeparator />}
         {projectId && (
-          <DropdownMenuItem onClick={() => onUpdate({ project_id: null })}>
+          <DropdownMenuItem onClick={() => handleUpdate({ project_id: null })}>
             <X className="h-3.5 w-3.5 text-muted-foreground" />
             {t(($) => $.picker.remove)}
           </DropdownMenuItem>
