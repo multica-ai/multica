@@ -66,6 +66,7 @@ export function onIssueCreated(
   }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   if (issue.project_id) {
@@ -155,6 +156,9 @@ export function onIssueUpdated(
     statusOrProjectChanged:
       issue.status !== undefined || issue.project_id !== undefined,
   });
+  // Group counts, branch membership and hierarchy are server-owned. Never
+  // guess deltas from a partial branch; refetch the active Table queries.
+  qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
 
   // Invalidate old parent's children (issue was removed from it)
   if (oldParentId) {
@@ -237,6 +241,7 @@ export function invalidateIssueLabelDerivatives(qc: QueryClient, wsId: string) {
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
   qc.invalidateQueries({
     queryKey: issueKeys.flatAll(wsId),
     predicate: (query) =>
@@ -276,6 +281,9 @@ export function onIssueMetadataChanged(
   // board/table sorted by "Updated date" would stay in the old order. This
   // event is server-committed, so refetch those keys to re-sort (MUL-5016).
   invalidateUpdatedAtSortedIssueLists(qc, wsId);
+  // Server-backed Table counts, membership and cursor boundaries may also
+  // depend on metadata-driven timestamps, so refresh its query graph too.
+  qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
 }
 
 /**
@@ -297,6 +305,7 @@ export function onIssuePropertiesChanged(
   // staleTime:Infinity (clean-room review F2).
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
   invalidatePropertyWindowQueries(qc, wsId);
   // A property write also bumps issue.updated_at server-side
   // (SetIssuePropertyValue / DeleteIssuePropertyValue). invalidatePropertyWindow

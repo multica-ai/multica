@@ -1,7 +1,7 @@
 "use client";
 
 import { ListTodo } from "lucide-react";
-import type { Issue } from "@multica/core/types";
+import type { Issue, IssueTableFacetsResponse } from "@multica/core/types";
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { PageHeader } from "../../layout/page-header";
@@ -14,11 +14,13 @@ function IssuesSurfaceHeader({
   workingIssues,
   isRefreshing,
   facetCountsExact,
+  tableFacetCounts,
 }: {
   issues: Issue[];
   workingIssues: Issue[] | undefined;
   isRefreshing: boolean;
   facetCountsExact: boolean;
+  tableFacetCounts?: IssueTableFacetsResponse;
 }) {
   const dateFilter = useViewStore((s) => s.dateFilter);
   const setDateFilter = useViewStore((s) => s.setDateFilter);
@@ -31,6 +33,7 @@ function IssuesSurfaceHeader({
       onDateFilterChange={setDateFilter}
       isRefreshing={isRefreshing}
       facetCountsExact={facetCountsExact}
+      tableFacetCounts={tableFacetCounts}
     />
   );
 }
@@ -55,9 +58,8 @@ export function IssuesPage() {
             issues={controller.surfaceIssues}
             workingIssues={workingIssues}
             isRefreshing={controller.isRefreshing}
-            facetCountsExact={
-              !(controller.viewMode === "table" && controller.hasNextFlatPage)
-            }
+            facetCountsExact={controller.viewMode !== "table"}
+            tableFacetCounts={controller.tableFacetCounts}
           />
         )}
         renderEmpty={() => (

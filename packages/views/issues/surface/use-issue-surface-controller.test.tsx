@@ -489,7 +489,7 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(result.current.isRefreshing).toBe(false));
   });
 
-  it("debounces table search and sends it with the server-side flat window", async () => {
+  it("debounces table search into the canonical server query without fetching the legacy flat window", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     listIssues.mockResolvedValue({ issues: [], total: 0 });
@@ -503,30 +503,20 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
     listIssues.mockClear();
 
     act(() => result.current.setTableSearch("  Release train  "));
 
     expect(result.current.tableSearch).toBe("  Release train  ");
-    expect(listIssues).not.toHaveBeenCalledWith(
-      expect.objectContaining({ q: "Release train" }),
-    );
-
+    expect(result.current.tableQuerySpec.search).toBeUndefined();
     await waitFor(() =>
-      expect(listIssues).toHaveBeenCalledWith(
-        expect.objectContaining({
-          project_id: "p1",
-          q: "Release train",
-          limit: 100,
-          offset: 0,
-        }),
-      ),
+      expect(result.current.tableQuerySpec.search).toBe("Release train"),
     );
+    expect(listIssues).not.toHaveBeenCalled();
     expect(result.current.isEmpty).toBe(false);
   });
 
-  it("sends the agents-working filter as a server ids facet so later pages can match", async () => {
+  it("sends the agents-working filter as a backend predicate without sending running ids", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     store.getState().toggleAgentRunningFilter();
@@ -543,7 +533,7 @@ describe("useIssueSurfaceController", () => {
       getChildIssueProgress: vi.fn(() => never()),
     } as unknown as ApiClient);
 
-    renderHook(
+    const { result } = renderHook(
       () =>
         useIssueSurfaceController({
           scope: { type: "project", projectId: "p1" },
@@ -552,29 +542,16 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    // Before the task snapshot lands the running set is empty — the facet
-    // must still be PRESENT (ids: []) so the server returns an empty window
-    // instead of every issue.
-    await waitFor(() =>
-      expect(listIssues).toHaveBeenCalledWith(
-        expect.objectContaining({ project_id: "p1", ids: [] }),
-      ),
-    );
-    // Once the snapshot resolves, the window re-keys to the running set.
-    await waitFor(() =>
-      expect(listIssues).toHaveBeenCalledWith(
-        expect.objectContaining({ project_id: "p1", ids: ["issue-running"] }),
-      ),
-    );
+    expect(result.current.tableQuerySpec.filters.working_only).toBe(true);
+    expect(listIssues).not.toHaveBeenCalled();
   });
 
-  it("resolves the working-chip scope from the ids window even while the filter is off", async () => {
+  it("keeps the table working-chip scope unknown without materializing a second issue window", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     const running = makeIssue({ id: "issue-running", status: "in_progress" });
-    // The running issue lives beyond the loaded page (main window returns
-    // nothing); only the ids-facet query can see it. A chip scoped to loaded
-    // rows would report 0 here while the filter itself would find the issue.
+    // A running issue may live in an unopened cursor branch. The header must
+    // stay unknown instead of deriving a false zero from visible rows.
     listIssues.mockImplementation((params?: ListIssuesParams) =>
       Promise.resolve(
         params?.ids
@@ -603,18 +580,11 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    await waitFor(() => {
-      expect(
-        result.current.workingScopeIssues?.map((issue) => issue.id),
-      ).toEqual(["issue-running"]);
-    });
-    // The main table window itself stayed unrestricted — the filter is off.
-    expect(listIssues).toHaveBeenCalledWith(
-      expect.objectContaining({ project_id: "p1", limit: 100, offset: 0 }),
-    );
+    await waitFor(() => expect(result.current.workingScopeIssues).toBeUndefined());
+    expect(listIssues).not.toHaveBeenCalled();
   });
 
-  it("reports the LATEST page's total so a stale first page cannot re-open the structure ceiling", async () => {
+  it("does not subscribe Table to the legacy offset window", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     // page 1 claims a small window (under the ceiling); by page 2 the real
@@ -643,14 +613,12 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    await waitFor(() => expect(result.current.flatTotal).toBe(900));
-    await act(async () => {
-      await result.current.fetchNextFlatPage();
-    });
-    await waitFor(() => expect(result.current.flatTotal).toBe(50_000));
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.isEmpty).toBe(false);
+    expect(listIssues).not.toHaveBeenCalled();
   });
 
-  it("materializes the working window past page one so the chip scope is complete", async () => {
+  it("does not materialize a multi-page working window for Table chrome", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     // 101 running issues spread over two pages: presenting page 1 alone as
@@ -695,12 +663,11 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    await waitFor(() => {
-      expect(result.current.workingScopeIssues).toHaveLength(101);
-    });
+    await waitFor(() => expect(result.current.workingScopeIssues).toBeUndefined());
+    expect(listIssues).not.toHaveBeenCalled();
   });
 
-  it("never materializes an over-ceiling working window and presents its scope as unknown", async () => {
+  it("never starts a legacy working-window request, regardless of result size", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     // The working window shares the MAIN table cache key while the filter is
@@ -744,16 +711,17 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    await waitFor(() => expect(idsCalls.length).toBeGreaterThan(0));
-    // Give any (buggy) auto-loop a chance to fire before asserting.
+    // Give any accidental auto-loop a chance to fire before asserting.
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    expect(idsCalls).toEqual([0]);
-    expect(result.current.workingScopeIssues).toBeUndefined();
+    expect(idsCalls).toEqual([]);
+    await waitFor(() =>
+      expect(result.current.workingScopeIssues).toBeUndefined(),
+    );
   });
 
-  it("presents the scope as unknown while a re-keyed working window is still resolving", async () => {
+  it("keeps the Table activity scope unknown across task-snapshot rekeys", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     // Running set A resolves to a complete window; then the set changes to B
@@ -795,11 +763,10 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    await waitFor(() => {
-      expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
-        "run-A",
-      ]);
-    });
+    await waitFor(() =>
+      expect(result.current.workingScopeIssues).toBeUndefined(),
+    );
+    expect(listIssues).not.toHaveBeenCalled();
 
     // The running set moves to B; B's ids window never resolves in this test.
     snapshotIssueId = "run-B";
@@ -814,7 +781,7 @@ describe("useIssueSurfaceController", () => {
     });
   });
 
-  it("treats a cold-load failure as an error state, not an empty workspace", async () => {
+  it("leaves Table empty/error ownership to the server-backed renderer", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     listIssues.mockRejectedValue(new Error("boom"));
@@ -828,12 +795,9 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    await waitFor(() => expect(result.current.flatWindowColdError).toBe(true));
-    // A failed fetch proves nothing about the window: claiming empty here
-    // swaps a 5xx/offline for a "create your first issue" screen (round-5
-    // review P2).
+    // The legacy list endpoint is not part of Table rendering anymore.
+    expect(listIssues).not.toHaveBeenCalled();
     expect(result.current.isEmpty).toBe(false);
-    expect(result.current.flatWindowError).toBe(true);
   });
 
   it("clears surface selection when the membership window changes (filters, search)", async () => {

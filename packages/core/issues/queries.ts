@@ -9,6 +9,11 @@ import type {
   GroupedIssuesResponse,
   Issue,
   IssueStatus,
+  IssueTableFacetsRequest,
+  IssueTableGroupSpec,
+  IssueTableGroupsRequest,
+  IssueTableQuerySpec,
+  IssueTableRowsRequest,
   ListGroupedIssuesParams,
   ListIssuesParams,
   ListIssuesCache,
@@ -47,6 +52,31 @@ export const issueKeys = {
     filter: IssueFlatFilter,
     sort?: IssueSortParam,
   ) => [...issueKeys.flatAll(wsId), "export", scope, filter, sort ?? {}] as const,
+  tableAll: (wsId: string) => [...issueKeys.all(wsId), "table-query"] as const,
+  tableGroups: (
+    wsId: string,
+    query: IssueTableQuerySpec,
+    group: IssueTableGroupsRequest["group"],
+  ) => [...issueKeys.tableAll(wsId), "groups", query, group] as const,
+  tableFacets: (
+    wsId: string,
+    request: IssueTableFacetsRequest,
+  ) => [...issueKeys.tableAll(wsId), "facets", request] as const,
+  tableRows: (
+    wsId: string,
+    query: IssueTableQuerySpec,
+    group: IssueTableGroupSpec,
+    groupKey: string | null,
+    hierarchy: boolean,
+    parentId: string | null,
+  ) => [
+    ...issueKeys.tableAll(wsId),
+    "rows",
+    query,
+    group,
+    groupKey,
+    { hierarchy, parentId },
+  ] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
@@ -373,6 +403,59 @@ export function issueFlatListOptions(
       return loaded < lastPage.total ? loaded : undefined;
     },
     placeholderData: keepPreviousData,
+  });
+}
+
+export function issueTableGroupsOptions(
+  wsId: string,
+  query: IssueTableQuerySpec,
+  group: IssueTableGroupsRequest["group"],
+) {
+  return infiniteQueryOptions({
+    queryKey: issueKeys.tableGroups(wsId, query, group),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      api.listIssueTableGroups({
+        query,
+        group,
+        page: { limit: 100, cursor: pageParam },
+      }),
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function issueTableRowsOptions(
+  wsId: string,
+  request: Omit<IssueTableRowsRequest, "page">,
+) {
+  return infiniteQueryOptions({
+    queryKey: issueKeys.tableRows(
+      wsId,
+      request.query,
+      request.group,
+      request.group_key,
+      request.hierarchy.enabled,
+      request.parent_id,
+    ),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      api.listIssueTableRows({
+        ...request,
+        page: { limit: 50, cursor: pageParam },
+      }),
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function issueTableFacetsOptions(
+  wsId: string,
+  request: IssueTableFacetsRequest,
+) {
+  return queryOptions({
+    queryKey: issueKeys.tableFacets(wsId, request),
+    queryFn: () => api.listIssueTableFacets(request),
   });
 }
 

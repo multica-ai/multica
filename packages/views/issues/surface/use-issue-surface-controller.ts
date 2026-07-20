@@ -1,28 +1,30 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type { QueryKey } from "@tanstack/react-query";
+import { api } from "@multica/core/api";
 import type {
   Issue,
   IssueAssigneeGroup,
   IssueStatus,
+  IssueTableFacetsResponse,
+  IssueTableQuerySpec,
   Project,
 } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
 import type {
   AssigneeGroupedIssuesFilter,
-  IssueFlatFilter,
   IssueSortParam,
   MyIssuesFilter,
 } from "@multica/core/issues/queries";
+import { issueTableFacetsOptions } from "@multica/core/issues/queries";
 import {
   buildIssueSurfaceQueryPlan,
   type IssueSurfaceQueryPlan,
 } from "@multica/core/issues/surface/query-plan";
 import type { IssueScope } from "@multica/core/issues/surface/scope";
-import { issueSurfaceFlatExportOptions } from "@multica/core/issues/surface/repository";
 import type { IssueDateFilter, SortField } from "@multica/core/issues/stores/view-store";
 import { propertyListOptions } from "@multica/core/properties";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
@@ -87,17 +89,11 @@ export interface IssueSurfaceController {
     projectMap: Map<string, Project>;
     childProgressMap: Map<string, ChildProgress>;
   }>;
-  fetchNextFlatPage: () => Promise<unknown>;
-  hasNextFlatPage: boolean;
-  isFetchingNextFlatPage: boolean;
-  flatTotal: number;
-  /** See IssueSurfaceData.flatWindowError. */
-  flatWindowError: boolean;
-  /** See IssueSurfaceData.flatWindowColdError. */
-  flatWindowColdError: boolean;
-  /** See IssueSurfaceData.refetchFlatWindow. */
-  refetchFlatWindow: () => Promise<unknown>;
   tableSearch: string;
+  /** Canonical server-owned Table membership. */
+  tableQuerySpec: IssueTableQuerySpec;
+  /** Exact disjunctive counts for the active Table membership. */
+  tableFacetCounts?: IssueTableFacetsResponse;
   setTableSearch: (query: string) => void;
   exportTableIssues: () => Promise<Issue[]>;
   isLoading: boolean;
@@ -151,7 +147,6 @@ export function useIssueSurfaceController({
   createDefaults,
 }: UseIssueSurfaceControllerInput): IssueSurfaceController {
   const wsId = useWorkspaceId();
-  const queryClient = useQueryClient();
   const queryPlan = useMemo<IssueSurfaceQueryPlan>(
     () => buildIssueSurfaceQueryPlan(scope),
     [scope],
@@ -268,62 +263,119 @@ export function useIssueSurfaceController({
   const { projectFilters: viewProjectFilters, includeNoProject: viewIncludeNoProject } =
     projectFilterState;
 
-  // The agents-working filter is a live client-side signal (WS-driven task
-  // snapshot), but the table window is server-paginated — filtering loaded
-  // pages would permanently hide matches on unfetched pages (round-2 review
-  // P1#1). Send the running set as a server `ids` facet instead: total,
-  // pagination, and export all see the same window, and snapshot changes
-  // re-key the query. An EMPTY set is sent as an empty facet (empty window),
-  // never dropped.
   const activity = useIssueSurfaceActivity();
-  const sortedRunningIds = useMemo(
-    () => [...activity.runningIssueIds].sort(),
-    [activity.runningIssueIds],
-  );
 
-  const baseTableFacets = useMemo<IssueFlatFilter>(
+  const tableQuerySpec = useMemo<IssueTableQuerySpec>(() => {
+    let queryScope: IssueTableQuerySpec["scope"];
+    switch (scope.type) {
+      case "workspace":
+        queryScope = {
+          kind: "workspace",
+          ...(scope.actorKind === "members"
+            ? { assignee_types: ["member" as const] }
+            : scope.actorKind === "agents"
+              ? { assignee_types: ["agent" as const, "squad" as const] }
+              : {}),
+        };
+        break;
+      case "project":
+        queryScope = { kind: "project", project_id: scope.projectId };
+        break;
+      case "my":
+        queryScope = {
+          kind: "my",
+          relation: scope.relation === "all" ? "any" : scope.relation,
+        };
+        break;
+      case "actor":
+        queryScope = {
+          kind: scope.relation === "assigned" ? "assignee" : "creator",
+          actor: { type: scope.actorType, id: scope.actorId },
+        };
+        break;
+      case "team":
+        throw new Error("Team issue scope is not supported by the Table query");
+    }
+
+    const date =
+      dateParams.date_field && dateParams.date_start && dateParams.date_end
+        ? {
+            field: dateParams.date_field,
+            start: dateParams.date_start,
+            end: dateParams.date_end,
+          }
+        : undefined;
+    return {
+      scope: queryScope,
+      filters: {
+        ...(statusFilters.length > 0 ? { statuses: statusFilters } : {}),
+        ...(priorityFilters.length > 0 ? { priorities: priorityFilters } : {}),
+        ...(assigneeFilters.length > 0 ? { assignees: assigneeFilters } : {}),
+        ...(includeNoAssignee ? { include_no_assignee: true } : {}),
+        ...(creatorFilters.length > 0 ? { creators: creatorFilters } : {}),
+        ...(viewProjectFilters.length > 0
+          ? { project_ids: viewProjectFilters }
+          : {}),
+        ...(viewIncludeNoProject ? { include_no_project: true } : {}),
+        ...(labelFilters.length > 0 ? { label_ids: labelFilters } : {}),
+        ...(Object.keys(effectivePropertyFilters).length > 0
+          ? { properties: effectivePropertyFilters }
+          : {}),
+        ...(date ? { date } : {}),
+        ...(agentRunningFilter ? { working_only: true } : {}),
+        include_sub_issues: showSubIssues,
+      },
+      ...(debouncedTableSearch ? { search: debouncedTableSearch } : {}),
+      sort: {
+        field: sort.sort_by ?? "position",
+        direction: sort.sort_direction ?? "asc",
+      },
+    };
+  }, [
+    agentRunningFilter,
+    assigneeFilters,
+    creatorFilters,
+    dateParams,
+    debouncedTableSearch,
+    effectivePropertyFilters,
+    includeNoAssignee,
+    labelFilters,
+    priorityFilters,
+    scope,
+    showSubIssues,
+    sort.sort_by,
+    sort.sort_direction,
+    statusFilters,
+    viewIncludeNoProject,
+    viewProjectFilters,
+  ]);
+
+  const tableFacetRequest = useMemo(
     () => ({
-      ...(debouncedTableSearch ? { q: debouncedTableSearch } : {}),
-      ...(statusFilters.length > 0 ? { statuses: statusFilters } : {}),
-      ...(priorityFilters.length > 0 ? { priorities: priorityFilters } : {}),
-      ...(assigneeFilters.length > 0
-        ? { assignee_filters: assigneeFilters }
-        : {}),
-      ...(includeNoAssignee ? { include_no_assignee: true } : {}),
-      ...(creatorFilters.length > 0
-        ? { creator_filters: creatorFilters }
-        : {}),
-      ...(viewProjectFilters.length > 0
-        ? { project_ids: viewProjectFilters }
-        : {}),
-      ...(viewIncludeNoProject ? { include_no_project: true } : {}),
-      ...(labelFilters.length > 0 ? { label_ids: labelFilters } : {}),
-      ...(showSubIssues === false ? { top_level_only: true } : {}),
+      query: tableQuerySpec,
+      facets: [
+        { kind: "status" as const },
+        { kind: "priority" as const },
+        { kind: "assignee" as const },
+        { kind: "creator" as const },
+        { kind: "project" as const },
+        { kind: "label" as const },
+        ...workspaceProperties
+          .filter((property) =>
+            ["select", "multi_select", "checkbox"].includes(property.type),
+          )
+          .map((property) => ({
+            kind: "property" as const,
+            property_id: property.id,
+          })),
+      ],
     }),
-    [
-      assigneeFilters,
-      creatorFilters,
-      debouncedTableSearch,
-      includeNoAssignee,
-      labelFilters,
-      priorityFilters,
-      showSubIssues,
-      statusFilters,
-      viewIncludeNoProject,
-      viewProjectFilters,
-    ],
+    [tableQuerySpec, workspaceProperties],
   );
-  // The running-restricted variant of the window. It IS the table window
-  // while the filter is on; while the filter is off the data hook still
-  // subscribes to it (same query key, so toggling the filter hits a warm
-  // cache) to give the working chip its authoritative in-window count —
-  // deriving that count from loaded rows says "0 working" whenever the only
-  // running issue sits on an unfetched page (round-3 review P2#3).
-  const workingFacets = useMemo<IssueFlatFilter>(
-    () => ({ ...baseTableFacets, ids: sortedRunningIds }),
-    [baseTableFacets, sortedRunningIds],
-  );
-  const tableFacets = agentRunningFilter ? workingFacets : baseTableFacets;
+  const tableFacetsQuery = useQuery({
+    ...issueTableFacetsOptions(wsId, tableFacetRequest),
+    enabled: usesTable,
+  });
 
   // Selection is only meaningful within the current membership window: batch
   // actions act on selected ids while export/common-field consumers intersect
@@ -380,8 +432,6 @@ export function useIssueSurfaceController({
     usesTable,
     ganttShowCompleted,
     sort,
-    tableFacets,
-    workingFacets,
     activity,
     statusFilters,
     priorityFilters,
@@ -401,17 +451,26 @@ export function useIssueSurfaceController({
   });
 
   const exportTableIssues = useCallback(async () => {
-    const exportIssues = await queryClient.fetchQuery(
-      issueSurfaceFlatExportOptions(wsId, queryPlan, sort, tableFacets),
-    );
-    return data.filterIssuesForExport(exportIssues);
-  }, [data, queryClient, queryPlan, sort, tableFacets, wsId]);
+    const issues: Issue[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = await api.listIssueTableRows({
+        query: tableQuerySpec,
+        group: { kind: "none" },
+        group_key: null,
+        hierarchy: { enabled: false },
+        parent_id: null,
+        page: { limit: 100, cursor },
+      });
+      issues.push(...page.rows.map((row) => row.issue));
+      cursor = page.next_cursor;
+    } while (cursor);
+    return issues;
+  }, [tableQuerySpec]);
 
   const { actions, openCreateIssue, moveIssue } = useIssueSurfaceActions({
     createDefaults: resolvedCreateDefaults,
   });
-
-  const { filterIssuesForExport: _filterIssuesForExport, ...surfaceData } = data;
 
   return {
     scopeKey,
@@ -419,18 +478,20 @@ export function useIssueSurfaceController({
     createDefaults: resolvedCreateDefaults,
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
-    ...surfaceData,
+    ...data,
     // Keep TableView mounted for an empty search result so its local search
     // control remains available to refine or clear the query. Include the
     // debounced value as well to avoid a brief empty-screen flash while a
     // cleared query is waiting to re-fetch the unsearched window.
     isEmpty:
-      surfaceData.isEmpty &&
+      data.isEmpty &&
       !(usesTable && (tableSearch.trim() || debouncedTableSearch)),
     sort,
     actions,
     selection,
     tableSearch,
+    tableQuerySpec,
+    tableFacetCounts: usesTable ? tableFacetsQuery.data : undefined,
     setTableSearch,
     openCreateIssue,
     moveIssue,

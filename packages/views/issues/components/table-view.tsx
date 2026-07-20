@@ -58,11 +58,12 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
   TableCell,
-  TableFooter,
   TableRow,
 } from "@multica/ui/components/ui/table";
 import { cn } from "@multica/ui/lib/utils";
+import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { issueKeys } from "@multica/core/issues/queries";
 import {
   TABLE_SYSTEM_COLUMNS,
   propertyIdFromViewKey,
@@ -84,10 +85,20 @@ import type {
   Issue,
   IssueProperty,
   IssuePropertyValue,
+  IssueTableGroupDescriptor,
+  IssueTableGroupSpec,
+  IssueTableQuerySpec,
+  IssueTableRowsResponse,
   Project,
   UpdateIssueRequest,
 } from "@multica/core/types";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQueries,
+  useQuery,
+  useQueryClient,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { LabelChip } from "../../labels/label-chip";
 import { useNavigation } from "../../navigation";
@@ -106,12 +117,8 @@ import {
 } from "./pickers";
 import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
 import {
-  TABLE_STRUCTURE_MAX_WINDOW,
   buildIssueTableCsv,
-  buildIssueTableRows,
   getIssueTableSelectionRange,
-  isTableStructureSuspended,
-  shouldAutoLoadNextWindowPage,
   type IssueTableDisplayRow,
 } from "./table-view-model";
 import type { ChildProgress } from "./list-row";
@@ -121,17 +128,11 @@ const SELECT_COLUMN_ID = "__select";
 const ADD_COLUMN_ID = "__add";
 
 type TableViewProps = {
-  issues: Issue[];
+  serverQuery: IssueTableQuerySpec;
   childProgressMap: Map<string, ChildProgress>;
-  fetchNextPage: () => Promise<unknown>;
-  hasNextPage: boolean;
-  isFetchingNextPage: boolean;
-  /** The window query is in error state — page auto-advance (structure loop
-   *  AND scroll sentinel) must stop and hand control to the explicit Retry. */
-  windowError: boolean;
-  total: number;
   search: string;
   onSearchChange: (query: string) => void;
+  onLoadedIssuesChange: (issues: Issue[]) => void;
   exportIssues: () => Promise<Issue[]>;
   resolveExportLookups: (needs: {
     projects: boolean;
@@ -141,6 +142,46 @@ type TableViewProps = {
     childProgressMap: Map<string, ChildProgress>;
   }>;
 };
+
+type ServerBranch = {
+  key: string;
+  groupKey: string | null;
+  parentId: string | null;
+  ancestorIds: string[];
+  cursors: Array<string | null>;
+};
+
+type ServerBranchState = {
+  identity: string;
+  branches: Map<string, ServerBranch>;
+};
+
+type ServerBranchPageTarget = {
+  branch: ServerBranch;
+  cursor: string | null;
+};
+
+type ServerBranchData = {
+  rows: IssueTableRowsResponse["rows"];
+  total: number;
+  nextCursor: string | null;
+  headUpdatedAt: number;
+  headFetching: boolean;
+  loading: boolean;
+  error: boolean;
+};
+
+function serverBranchKey(groupKey: string | null, parentId: string | null) {
+  return `${groupKey ?? "ungrouped"}::${parentId ?? "root"}`;
+}
+
+function tableGroupSpec(grouping: string): IssueTableGroupSpec {
+  if (grouping === "status") return { kind: "status" };
+  if (grouping === "assignee") return { kind: "assignee" };
+  const propertyId = propertyIdFromViewKey(grouping);
+  if (propertyId) return { kind: "property", property_id: propertyId };
+  return { kind: "none" };
+}
 
 type ColumnLabelKey =
   | "title"
@@ -646,15 +687,11 @@ function propertyDisplayValue(
 }
 
 export function TableView({
-  issues,
+  serverQuery,
   childProgressMap,
-  fetchNextPage,
-  hasNextPage,
-  isFetchingNextPage,
-  windowError,
-  total,
   search,
   onSearchChange,
+  onLoadedIssuesChange,
   exportIssues,
   resolveExportLookups,
 }: TableViewProps) {
@@ -666,7 +703,10 @@ export function TableView({
   const actions = useIssueSurfaceActionsOptional();
   const selection = useIssueSurfaceSelection();
   const { getActorName } = useActorName();
-  const { data: properties = [] } = useQuery(propertyListOptions(wsId));
+  const {
+    data: properties = [],
+    isSuccess: propertyCatalogSettled,
+  } = useQuery(propertyListOptions(wsId));
   const propertyById = useMemo(
     () => new Map(properties.map((property) => [property.id, property])),
     [properties],
@@ -675,11 +715,21 @@ export function TableView({
     () => new Set(properties.map((property) => property.id)),
     [properties],
   );
+  const groupablePropertyIds = useMemo(
+    () =>
+      new Set(
+        properties
+          .filter((property) => ["select", "checkbox"].includes(property.type))
+          .map((property) => property.id),
+      ),
+    [properties],
+  );
   const tableColumns = useViewStore((state) => state.tableColumns);
   const toggleTableColumn = useViewStore((state) => state.toggleTableColumn);
   const reorderTableColumn = useViewStore((state) => state.reorderTableColumn);
   const setTableColumnWidth = useViewStore((state) => state.setTableColumnWidth);
   const tableGrouping = useViewStore((state) => state.tableGrouping);
+  const setTableGrouping = useViewStore((state) => state.setTableGrouping);
   const tableCollapsedGroups = useViewStore((state) => state.tableCollapsedGroups);
   const toggleTableGroupCollapsed = useViewStore(
     (state) => state.toggleTableGroupCollapsed,
@@ -698,50 +748,505 @@ export function TableView({
 
   const groupingPropertyId = propertyIdFromViewKey(tableGrouping);
   const effectiveTableGrouping =
-    groupingPropertyId && !activePropertyIds.has(groupingPropertyId)
+    groupingPropertyId &&
+    propertyCatalogSettled &&
+    !groupablePropertyIds.has(groupingPropertyId)
       ? "none"
       : tableGrouping;
-
-  // Grouping and hierarchy are whole-window statements, so the window must
-  // be materialized for them — but only under an explicit ceiling: grouping
-  // is persisted view state and hierarchy is on by default, so an unbounded
-  // loop would re-download entire large workspaces on every visit (round-3
-  // review P1#1). Below the ceiling the remaining pages load sequentially
-  // (one per completed fetch — the toolbar's loaded-of-total line is the
-  // visible progress, and flipping the toggles off stops the loop), which
-  // also makes hierarchy apply without scrolling to the last page (round-3
-  // P1#2). Above the ceiling both features suspend and the toolbar notice
-  // explains why; the window keeps the one-page-per-scroll sentinel.
-  // Advancement gates (error stop, hard loaded-count ceiling, fresh total)
-  // live in shouldAutoLoadNextWindowPage — see its doc for the failure
-  // modes each gate closes (round-4 review P1#1/P1#2).
-  const structureSuspended = isTableStructureSuspended(total);
-  const structureWanted = effectiveTableGrouping !== "none" || tableHierarchy;
-  const structureGrouping = structureSuspended ? "none" : effectiveTableGrouping;
-  const structureHierarchy = tableHierarchy && !structureSuspended;
-  const loadedCount = issues.length;
   useEffect(() => {
     if (
-      shouldAutoLoadNextWindowPage({
-        windowWanted: structureWanted,
-        total,
-        loadedCount,
-        hasNextPage,
-        isFetchingNextPage,
-        hasError: windowError,
-      })
+      !groupingPropertyId ||
+      !propertyCatalogSettled ||
+      groupablePropertyIds.has(groupingPropertyId)
     ) {
-      void fetchNextPage();
+      return;
     }
+    setTableGrouping("none");
+    toast.info(t(($) => $.table.group_property_unavailable));
   }, [
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    loadedCount,
-    structureWanted,
-    total,
-    windowError,
+    groupablePropertyIds,
+    groupingPropertyId,
+    propertyCatalogSettled,
+    setTableGrouping,
+    t,
   ]);
+
+  const serverGroupSpec = useMemo(
+    () => tableGroupSpec(effectiveTableGrouping),
+    [effectiveTableGrouping],
+  );
+  const usesServerGrouping = serverGroupSpec.kind !== "none";
+  const serverGroupsQuery = useInfiniteQuery({
+    queryKey: [
+      ...issueKeys.tableAll(wsId),
+      "groups",
+      serverQuery,
+      serverGroupSpec,
+    ],
+    initialPageParam: null as string | null,
+    enabled: usesServerGrouping,
+    queryFn: ({ pageParam }) => {
+      if (serverGroupSpec.kind === "none") {
+        throw new Error("server grouping is not active");
+      }
+      return api.listIssueTableGroups({
+        query: serverQuery,
+        group: serverGroupSpec,
+        page: { limit: 100, cursor: pageParam },
+      });
+    },
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+  });
+  const {
+    data: serverGroupsData,
+    isPending: serverGroupsPending,
+    isError: serverGroupsError,
+    hasNextPage: hasNextServerGroupPage,
+    isFetchingNextPage: fetchingNextServerGroupPage,
+    refetch: refetchServerGroups,
+    fetchNextPage: fetchNextServerGroupPage,
+  } = serverGroupsQuery;
+  useEffect(() => {
+    const body =
+      serverGroupsQuery.error instanceof ApiError &&
+      serverGroupsQuery.error.body &&
+      typeof serverGroupsQuery.error.body === "object"
+        ? (serverGroupsQuery.error.body as { error?: unknown })
+        : null;
+    if (
+      serverGroupsQuery.error instanceof ApiError &&
+      serverGroupsQuery.error.status === 422 &&
+      body?.error === "unsupported_group"
+    ) {
+      setTableGrouping("none");
+      toast.info(t(($) => $.table.group_property_unavailable));
+    }
+  }, [serverGroupsQuery.error, setTableGrouping, t]);
+  const serverGroups = useMemo(
+    () => serverGroupsData?.pages.flatMap((page) => page.groups) ?? [],
+    [serverGroupsData?.pages],
+  );
+  const latestServerGroupPage =
+    serverGroupsData?.pages[serverGroupsData.pages.length - 1];
+  const groupedServerTotal = latestServerGroupPage?.total ?? 0;
+  const serverIdentity = useMemo(
+    () => JSON.stringify([serverQuery, serverGroupSpec, tableHierarchy]),
+    [serverGroupSpec, serverQuery, tableHierarchy],
+  );
+  const collapsedGroupSet = useMemo(
+    () => new Set(tableCollapsedGroups),
+    [tableCollapsedGroups],
+  );
+  const collapsedParentSet = useMemo(
+    () => new Set(tableCollapsedParents),
+    [tableCollapsedParents],
+  );
+  const [serverBranchState, setServerBranchState] =
+    useState<ServerBranchState>({
+      identity: "",
+      branches: new Map(),
+    });
+
+  // Changing membership, sort, group, or hierarchy starts a fresh branch
+  // graph, so cursors can never leak across queries. Group/child branches are
+  // activated by their viewport sentinel below; only the single ungrouped
+  // root is registered eagerly.
+  useEffect(() => {
+    setServerBranchState((previous) => {
+      const branches =
+        previous.identity === serverIdentity
+          ? new Map(previous.branches)
+          : new Map<string, ServerBranch>();
+      let changed = previous.identity !== serverIdentity;
+      if (!usesServerGrouping) {
+        const key = serverBranchKey(null, null);
+        if (!branches.has(key)) {
+          branches.set(key, {
+            key,
+            groupKey: null,
+            parentId: null,
+            ancestorIds: [],
+            cursors: [null],
+          });
+          changed = true;
+        }
+      }
+      if (!changed) return previous;
+      return { identity: serverIdentity, branches };
+    });
+  }, [serverIdentity, usesServerGrouping]);
+
+  const activeServerBranches = useMemo(
+    () =>
+      serverBranchState.identity === serverIdentity
+        ? serverBranchState.branches
+        : new Map<string, ServerBranch>(),
+    [serverBranchState, serverIdentity],
+  );
+  const serverBranchPageTargets = useMemo<ServerBranchPageTarget[]>(
+    () =>
+      [...activeServerBranches.values()].flatMap((branch) =>
+        branch.cursors.map((cursor) => ({ branch, cursor })),
+      ),
+    [activeServerBranches],
+  );
+  // useQueries compares and installs the supplied query list in an effect.
+  // Keeping this array stable prevents a settled branch from being installed
+  // again on every render (which can otherwise create a render loop once the
+  // virtualized table starts measuring rows).
+  const serverBranchQueries = useMemo(
+    () =>
+      serverBranchPageTargets.map(({ branch, cursor }) => ({
+        queryKey: [
+          ...issueKeys.tableRows(
+            wsId,
+            serverQuery,
+            serverGroupSpec,
+            branch.groupKey,
+            tableHierarchy,
+            branch.parentId,
+          ),
+          "page",
+          cursor,
+        ] as const,
+        queryFn: () =>
+          api.listIssueTableRows({
+            query: serverQuery,
+            group: serverGroupSpec,
+            group_key: branch.groupKey,
+            hierarchy: { enabled: tableHierarchy },
+            parent_id: branch.parentId,
+            page: { limit: 50, cursor },
+          }),
+        retry: false,
+        // Dynamic useQueries observers can be detached/reinstalled as sibling
+        // branches enter the viewport. An errored page must stay errored until
+        // the user explicitly retries it; otherwise remounts create a request
+        // loop and make the Retry control unstable.
+        refetchOnMount: false,
+        enabled:
+          (branch.groupKey === null ||
+            !collapsedGroupSet.has(branch.groupKey)) &&
+          !branch.ancestorIds.some((id) => collapsedParentSet.has(id)),
+      })),
+    [
+      collapsedGroupSet,
+      collapsedParentSet,
+      serverBranchPageTargets,
+      serverGroupSpec,
+      serverQuery,
+      tableHierarchy,
+      wsId,
+    ],
+  );
+  const combineServerBranchQueries = useCallback(
+    (results: Array<UseQueryResult<IssueTableRowsResponse, Error>>) => {
+      const byBranch: Record<string, ServerBranchData> = {};
+      for (let index = 0; index < serverBranchPageTargets.length; index += 1) {
+        const target = serverBranchPageTargets[index];
+        const result = results[index];
+        if (!target || !result) continue;
+        const current = byBranch[target.branch.key] ?? {
+          rows: [],
+          total: 0,
+          nextCursor: null,
+          headUpdatedAt: 0,
+          headFetching: false,
+          loading: false,
+          error: false,
+        };
+        const page = result.data;
+        if (page) {
+          current.rows.push(...page.rows);
+          current.total = page.total;
+          current.nextCursor = page.next_cursor;
+        }
+        if (target.cursor === null) {
+          current.headUpdatedAt = result.dataUpdatedAt;
+          current.headFetching = result.isFetching;
+        }
+        current.loading ||= result.isPending || result.isFetching;
+        current.error ||= result.isError;
+        byBranch[target.branch.key] = current;
+      }
+      return byBranch;
+    },
+    [serverBranchPageTargets],
+  );
+  // `combine` is structurally shared by React Query. It must return only plain
+  // objects/arrays: Map instances and freshly-created retry closures cannot be
+  // shared, and make useQueries publish a different snapshot on every render.
+  const serverBranchData = useQueries({
+    queries: serverBranchQueries,
+    combine: combineServerBranchQueries,
+  });
+
+  const activateServerBranch = useCallback(
+    (
+      groupKey: string | null,
+      parentId: string | null,
+      ancestorIds: string[],
+    ) => {
+      setServerBranchState((previous) => {
+        if (previous.identity !== serverIdentity) return previous;
+        const key = serverBranchKey(groupKey, parentId);
+        if (previous.branches.has(key)) return previous;
+        const branches = new Map(previous.branches);
+        branches.set(key, {
+          key,
+          groupKey,
+          parentId,
+          ancestorIds,
+          cursors: [null],
+        });
+        return { identity: previous.identity, branches };
+      });
+    },
+    [serverIdentity],
+  );
+
+  // A broad Table invalidation refetches every active page. As soon as the
+  // head starts refreshing, every later cursor is obsolete; discard them
+  // before their concurrent responses can create a duplicate or missing row.
+  // The revision check is a second line of defence for clients that restore a
+  // refreshed head directly into the cache without exposing a fetching frame.
+  const branchHeadRevisionRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    setServerBranchState((previous) => {
+      if (previous.identity !== serverIdentity) return previous;
+      let branches: Map<string, ServerBranch> | null = null;
+      for (const [key, branch] of previous.branches) {
+        const revision = serverBranchData[key]?.headUpdatedAt ?? 0;
+        if (revision === 0) continue;
+        const revisionKey = `${serverIdentity}:${key}`;
+        const seen = branchHeadRevisionRef.current[revisionKey];
+        branchHeadRevisionRef.current[revisionKey] = revision;
+        if (
+          branch.cursors.length > 1 &&
+          (serverBranchData[key]?.headFetching ||
+            (seen !== undefined && seen !== revision))
+        ) {
+          branches ??= new Map(previous.branches);
+          branches.set(key, { ...branch, cursors: [null] });
+        }
+      }
+      return branches
+        ? { identity: previous.identity, branches }
+        : previous;
+    });
+  }, [serverBranchData, serverIdentity]);
+
+  const loadNextServerBranchPage = useCallback(
+    (branchKey: string, cursor: string) => {
+      setServerBranchState((previous) => {
+        if (previous.identity !== serverIdentity) return previous;
+        const branch = previous.branches.get(branchKey);
+        if (!branch || branch.cursors.includes(cursor)) return previous;
+        const branches = new Map(previous.branches);
+        branches.set(branchKey, {
+          ...branch,
+          cursors: [...branch.cursors, cursor],
+        });
+        return { identity: previous.identity, branches };
+      });
+    },
+    [serverIdentity],
+  );
+
+  const retryServerBranch = useCallback(
+    (branchKey: string) => {
+      const branch = activeServerBranches.get(branchKey);
+      if (!branch) return;
+      void queryClient.refetchQueries({
+        queryKey: issueKeys.tableRows(
+          wsId,
+          serverQuery,
+          serverGroupSpec,
+          branch.groupKey,
+          tableHierarchy,
+          branch.parentId,
+        ),
+        exact: false,
+        type: "active",
+      });
+    },
+    [
+      activeServerBranches,
+      queryClient,
+      serverGroupSpec,
+      serverQuery,
+      tableHierarchy,
+      wsId,
+    ],
+  );
+
+  const serverGroupLabel = useCallback(
+    (descriptor: IssueTableGroupDescriptor) => {
+      const value = descriptor.value;
+      if (value.kind === "status") return t(($) => $.status[value.status]);
+      if (value.kind === "assignee") {
+        return value.actor
+          ? getActorName(value.actor.type, value.actor.id)
+          : t(($) => $.table.unassigned);
+      }
+      if (value.value_state === "unset") return t(($) => $.table.no_value);
+      if (value.value_state === "unavailable") {
+        return t(($) => $.table.value_unavailable);
+      }
+      const property = propertyById.get(value.property_id);
+      if (typeof value.value === "boolean") {
+        return value.value
+          ? t(($) => $.pickers.custom_property.true_label)
+          : t(($) => $.pickers.custom_property.false_label);
+      }
+      return (
+        property?.config.options?.find((option) => option.id === value.value)
+          ?.name ?? String(value.value ?? "")
+      );
+    },
+    [getActorName, propertyById, t],
+  );
+
+  const serverDisplayRows = useMemo<IssueTableDisplayRow[]>(() => {
+    const result: IssueTableDisplayRow[] = [];
+    const appendBranch = (
+      groupKey: string | null,
+      parentId: string | null,
+      depth: number,
+      ancestorIds: string[],
+    ) => {
+      const key = serverBranchKey(groupKey, parentId);
+      const data = serverBranchData[key];
+      if (!data) {
+        const registered = activeServerBranches.has(key);
+        result.push({
+          kind: "load_more",
+          key: `${registered ? "loading" : "activate"}:${key}`,
+          label: t(($) => $.table.loading_branch),
+          loading: registered,
+          autoLoad: !registered,
+          onLoad: registered
+            ? undefined
+            : () => activateServerBranch(groupKey, parentId, ancestorIds),
+        });
+        return;
+      }
+      if (data.rows.length === 0 && data.loading) {
+        result.push({
+          kind: "load_more",
+          key: `loading:${key}`,
+          label: t(($) => $.table.loading_branch),
+          loading: true,
+        });
+      }
+      for (const row of data.rows) {
+        const collapsed = collapsedParentSet.has(row.issue.id);
+        result.push({
+          kind: "issue",
+          key: row.issue.id,
+          issue: row.issue,
+          depth,
+          hasChildren: tableHierarchy && row.direct_child_count > 0,
+          collapsed,
+        });
+        if (tableHierarchy && row.direct_child_count > 0 && !collapsed) {
+          appendBranch(groupKey, row.issue.id, depth + 1, [
+            ...ancestorIds,
+            row.issue.id,
+          ]);
+        }
+      }
+      if (data.error) {
+        result.push({
+          kind: "load_more",
+          key: `retry:${key}`,
+          label: t(($) => $.table.load_more_failed_retry),
+          loading: false,
+          onLoad: () => retryServerBranch(key),
+        });
+      } else if (data.nextCursor) {
+        const nextCursor = data.nextCursor;
+        result.push({
+          kind: "load_more",
+          key: `more:${key}:${nextCursor}`,
+          label: t(($) => $.table.load_more),
+          loading: data.loading,
+          autoLoad: true,
+          onLoad: () => loadNextServerBranchPage(key, nextCursor),
+        });
+      }
+    };
+
+    if (usesServerGrouping) {
+      for (const descriptor of serverGroups) {
+        const collapsed = collapsedGroupSet.has(descriptor.key);
+        result.push({
+          kind: "group",
+          key: descriptor.key,
+          label: serverGroupLabel(descriptor),
+          count: descriptor.count,
+          collapsed,
+        });
+        if (!collapsed) appendBranch(descriptor.key, null, 0, []);
+      }
+    } else {
+      appendBranch(null, null, 0, []);
+    }
+    if (
+      usesServerGrouping &&
+      serverGroups.length === 0 &&
+      serverGroupsPending
+    ) {
+      result.push({
+        kind: "load_more",
+        key: "loading:groups",
+        label: t(($) => $.table.loading_branch),
+        loading: true,
+      });
+    } else if (usesServerGrouping && serverGroupsError) {
+      result.push({
+        kind: "load_more",
+        key: "retry:groups",
+        label: t(($) => $.table.load_failed_retry),
+        loading: false,
+        onLoad: () => void refetchServerGroups(),
+      });
+    } else if (usesServerGrouping && hasNextServerGroupPage) {
+      result.push({
+        kind: "load_more",
+        key: "more:groups",
+        label: t(($) => $.table.load_more),
+        loading: fetchingNextServerGroupPage,
+        autoLoad: true,
+        onLoad: () => void fetchNextServerGroupPage(),
+      });
+    }
+    return result;
+  }, [
+    collapsedGroupSet,
+    collapsedParentSet,
+    activeServerBranches,
+    activateServerBranch,
+    loadNextServerBranchPage,
+    retryServerBranch,
+    serverBranchData,
+    serverGroupLabel,
+    serverGroups,
+    serverGroupsPending,
+    serverGroupsError,
+    hasNextServerGroupPage,
+    fetchingNextServerGroupPage,
+    refetchServerGroups,
+    fetchNextServerGroupPage,
+    t,
+    tableHierarchy,
+    usesServerGrouping,
+  ]);
+
+  const ungroupedRootData = serverBranchData[serverBranchKey(null, null)];
+  const serverTotal = usesServerGrouping
+    ? groupedServerTotal
+    : (ungroupedRootData?.total ?? 0);
 
   const visibleColumnConfigs = useMemo(
     () =>
@@ -752,34 +1257,7 @@ export function TableView({
     [activePropertyIds, tableColumns],
   );
 
-  const displayRows = useMemo(
-    () =>
-      buildIssueTableRows(issues, {
-        grouping: structureGrouping,
-        properties,
-        collapsedGroups: new Set(tableCollapsedGroups),
-        collapsedParents: new Set(tableCollapsedParents),
-        hierarchy: structureHierarchy,
-        windowComplete: !hasNextPage,
-        getActorName,
-        getStatusLabel: (status) => t(($) => $.status[status]),
-        noValueLabel: t(($) => $.table.no_value),
-        unassignedLabel: t(($) => $.table.unassigned),
-        trueLabel: t(($) => $.pickers.custom_property.true_label),
-        falseLabel: t(($) => $.pickers.custom_property.false_label),
-      }),
-    [
-      getActorName,
-      hasNextPage,
-      issues,
-      properties,
-      t,
-      tableCollapsedGroups,
-      tableCollapsedParents,
-      structureGrouping,
-      structureHierarchy,
-    ],
-  );
+  const displayRows = serverDisplayRows;
   const visibleIssueIds = useMemo(
     () =>
       displayRows
@@ -787,9 +1265,19 @@ export function TableView({
         .map((row) => row.issue.id),
     [displayRows],
   );
+  const renderedIssues = useMemo(() => {
+    const byId = new Map<string, Issue>();
+    for (const row of displayRows) {
+      if (row.kind === "issue") byId.set(row.issue.id, row.issue);
+    }
+    return [...byId.values()];
+  }, [displayRows]);
+  useEffect(() => {
+    onLoadedIssuesChange(renderedIssues);
+  }, [onLoadedIssuesChange, renderedIssues]);
   const selectedIssues = useMemo(
-    () => issues.filter((issue) => selection.selectedIds.has(issue.id)),
-    [issues, selection.selectedIds],
+    () => renderedIssues.filter((issue) => selection.selectedIds.has(issue.id)),
+    [renderedIssues, selection.selectedIds],
   );
   const handleIssueSelection = useCallback(
     (issueId: string, shiftKey: boolean) => {
@@ -1226,30 +1714,8 @@ export function TableView({
     }
   };
 
-  const footer = (
-    <TableFooter className="border-0 bg-transparent">
-      <TableRow className="h-px border-0 hover:bg-transparent">
-        <TableCell
-          colSpan={table.getVisibleLeafColumns().length}
-          className="h-px p-0"
-        >
-          <InfiniteScrollSentinel
-            onVisible={() => {
-              // A failed window stops implicit loading too — otherwise every
-              // visibility transition retries into the same failure. The
-              // toolbar Retry is the explicit resume path.
-              if (hasNextPage && !isFetchingNextPage && !windowError) {
-                void fetchNextPage();
-              }
-            }}
-            loading={false}
-            rootMargin="320px"
-            className="h-px w-px"
-          />
-        </TableCell>
-      </TableRow>
-    </TableFooter>
-  );
+  const displayedTotal = serverTotal;
+  const displayedLoaded = renderedIssues.length;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -1261,24 +1727,10 @@ export function TableView({
           clearLabel={t(($) => $.table.search_clear)}
         />
         <span className="mr-auto min-w-0 truncate text-xs text-muted-foreground">
-          {t(($) => $.table.loaded_count, { count: issues.length, total })}
-          {windowError && hasNextPage && (
-            <button
-              type="button"
-              onClick={() => void fetchNextPage()}
-              className="ml-2 text-destructive underline-offset-2 hover:underline"
-            >
-              {t(($) => $.table.load_more_failed_retry)}
-            </button>
-          )}
-          {structureSuspended && structureWanted && (
-            <span className="ml-2">
-              {t(($) => $.table.structure_paused, {
-                total,
-                limit: TABLE_STRUCTURE_MAX_WINDOW,
-              })}
-            </span>
-          )}
+          {t(($) => $.table.loaded_count, {
+            count: displayedLoaded,
+            total: displayedTotal,
+          })}
         </span>
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -1327,7 +1779,6 @@ export function TableView({
         >
           <DataTable
             table={table}
-            footer={footer}
             virtualizeRows
             emptyMessage={t(($) => $.table.empty)}
             onRowClick={(row) => {
@@ -1336,14 +1787,52 @@ export function TableView({
               }
             }}
             renderRow={(row) => {
-              if (row.original.kind !== "group") return null;
-              return (
-                <IssueTableGroupRow
-                  group={row.original}
-                  colSpan={table.getVisibleLeafColumns().length}
-                  onToggle={() => toggleTableGroupCollapsed(row.original.key)}
-                />
-              );
+              if (row.original.kind === "group") {
+                return (
+                  <IssueTableGroupRow
+                    group={row.original}
+                    colSpan={table.getVisibleLeafColumns().length}
+                    onToggle={() => toggleTableGroupCollapsed(row.original.key)}
+                  />
+                );
+              }
+              if (row.original.kind === "load_more") {
+                const loadMoreRow = row.original;
+                return (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell
+                      colSpan={table.getVisibleLeafColumns().length}
+                      className="relative h-9 px-4 py-1"
+                    >
+                      {loadMoreRow.autoLoad &&
+                        loadMoreRow.onLoad &&
+                        !loadMoreRow.loading && (
+                        <InfiniteScrollSentinel
+                          onVisible={loadMoreRow.onLoad}
+                          loading={false}
+                          rootMargin="240px"
+                          className="absolute inset-y-0 left-0 w-px"
+                        />
+                      )}
+                      <button
+                        type="button"
+                        disabled={loadMoreRow.loading || !loadMoreRow.onLoad}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          loadMoreRow.onLoad?.();
+                        }}
+                        className="sticky left-4 flex items-center gap-2 text-xs text-muted-foreground enabled:hover:text-foreground disabled:cursor-default"
+                      >
+                        {loadMoreRow.loading && (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        )}
+                        {loadMoreRow.label}
+                      </button>
+                    </TableCell>
+                  </TableRow>
+                );
+              }
+              return null;
             }}
             className="min-h-0 flex-1"
           />

@@ -5,6 +5,167 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient server Table query", () => {
+  it("posts the canonical query to the group and branch endpoints", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            query_fingerprint: "sha256:query",
+            total: 1001,
+            groups: [
+              {
+                key: "status:todo",
+                value: { kind: "status", status: "todo" },
+                count: 1001,
+              },
+            ],
+            next_cursor: null,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            query_fingerprint: "sha256:query",
+            group_key: "status:todo",
+            parent_id: null,
+            total: 1001,
+            rows: [],
+            branch_total: 1001,
+            next_cursor: "next-page",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            query_fingerprint: "sha256:query",
+            total: 1001,
+            facets: [
+              {
+                kind: "status",
+                values: [
+                  { key: "todo", count: 501 },
+                  { key: "done", count: 500 },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const query = {
+      scope: { kind: "workspace" as const },
+      filters: { priorities: ["high" as const] },
+      sort: { field: "title" as const, direction: "asc" as const },
+    };
+
+    await expect(
+      client.listIssueTableGroups({
+        query,
+        group: { kind: "status" },
+        page: { limit: 100, cursor: null },
+      }),
+    ).resolves.toMatchObject({ total: 1001, groups: [{ count: 1001 }] });
+    await expect(
+      client.listIssueTableRows({
+        query,
+        group: { kind: "status" },
+        group_key: "status:todo",
+        hierarchy: { enabled: true },
+        parent_id: null,
+        page: { limit: 50, cursor: null },
+      }),
+    ).resolves.toMatchObject({ branch_total: 1001, next_cursor: "next-page" });
+    await expect(
+      client.listIssueTableFacets({
+        query,
+        facets: [{ kind: "status" }],
+      }),
+    ).resolves.toMatchObject({
+      total: 1001,
+      facets: [{ values: [{ key: "todo", count: 501 }, { key: "done", count: 500 }] }],
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.example.test/api/issues/table/groups",
+      "https://api.example.test/api/issues/table/rows",
+      "https://api.example.test/api/issues/table/facets",
+    ]);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      body: expect.stringContaining('"kind":"status"'),
+    });
+  });
+
+  it("falls back safely when Table responses are malformed", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ total: "not-a-number" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const query = {
+      scope: { kind: "workspace" as const },
+      filters: {},
+      sort: { field: "position" as const, direction: "asc" as const },
+    };
+
+    await expect(
+      client.listIssueTableGroups({
+        query,
+        group: { kind: "status" },
+        page: { limit: 100, cursor: null },
+      }),
+    ).resolves.toEqual({
+      query_fingerprint: "",
+      total: 0,
+      groups: [],
+      next_cursor: null,
+    });
+    await expect(
+      client.listIssueTableRows({
+        query,
+        group: { kind: "none" },
+        group_key: null,
+        hierarchy: { enabled: true },
+        parent_id: null,
+        page: { limit: 50, cursor: null },
+      }),
+    ).resolves.toEqual({
+      query_fingerprint: "",
+      group_key: null,
+      parent_id: null,
+      total: 0,
+      rows: [],
+      branch_total: 0,
+      next_cursor: null,
+    });
+    await expect(
+      client.listIssueTableFacets({
+        query,
+        facets: [{ kind: "status" }],
+      }),
+    ).resolves.toEqual({
+      query_fingerprint: "",
+      total: 0,
+      facets: [],
+    });
+  });
+});
+
 describe("ApiClient label response schemas", () => {
   it("falls back safely for malformed label catalog, label, and resource responses", async () => {
     const fetchMock = vi.fn().mockImplementation(() =>

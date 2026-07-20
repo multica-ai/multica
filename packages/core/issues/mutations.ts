@@ -208,6 +208,7 @@ export function useCreateIssue() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -349,6 +350,7 @@ export function useUpdateIssue() {
           vars.status !== undefined ||
           Object.prototype.hasOwnProperty.call(vars, "project_id"),
       });
+      qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
       if (ctx) {
         invalidateStaleListKeys(qc, ctx.change.staleKeys);
       }
@@ -465,6 +467,7 @@ export function useDeleteIssue() {
     onSettled: (_data, _err, _id, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -598,6 +601,7 @@ export function useBatchUpdateIssues() {
           _vars.updates.status !== undefined ||
           Object.prototype.hasOwnProperty.call(_vars.updates, "project_id"),
       });
+      qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
       if (ctx) {
         invalidateStaleListKeys(qc, ctx.staleKeys);
       }
@@ -733,6 +737,7 @@ export function useBatchDeleteIssues() {
     onSettled: (_data, _err, _ids, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
