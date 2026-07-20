@@ -70,6 +70,10 @@ case "$QWEN_MODE" in
     echo 'synthetic qwen stderr' >&2
     exit 7
     ;;
+  resume-missing)
+    cat "$QWEN_STDERR_FIXTURE" >&2
+    exit 1
+    ;;
   spin)
     while :; do :; done
     ;;
@@ -146,6 +150,21 @@ func TestQwenBackendStreamsNativeEvents(t *testing.T) {
 	}
 }
 
+func TestQwenBackendPreservesSuccessfulResumeSession(t *testing.T) {
+	t.Parallel()
+	backend := newFakeQwenBackend(t, nil)
+	session, err := backend.Execute(context.Background(), "continue task", ExecOptions{
+		Model: "qwen-test", ResumeSessionID: "sess-qwen-1", Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	_, result := awaitQwenResult(t, session)
+	if result.Status != "completed" || result.Output != "PONG" || result.SessionID != "sess-qwen-1" {
+		t.Fatalf("resumed result = %+v", result)
+	}
+}
+
 func newQwenTestContext() (context.Context, context.CancelFunc) {
 	return context.WithCancel(context.Background())
 }
@@ -154,18 +173,24 @@ func TestQwenBackendFailureTimeoutAndCancellation(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is POSIX-only")
 	}
+	resumeFixture, err := filepath.Abs(filepath.Join("testdata", "qwen-code-0.20.0-resume-not-found.stderr.txt"))
+	if err != nil {
+		t.Fatalf("resolve resume fixture: %v", err)
+	}
 	for _, tc := range []struct {
-		name   string
-		env    map[string]string
-		ctx    func() (context.Context, context.CancelFunc)
-		opts   ExecOptions
-		status string
-		needle string
+		name        string
+		env         map[string]string
+		ctx         func() (context.Context, context.CancelFunc)
+		opts        ExecOptions
+		status      string
+		needle      string
+		wantSession string
 	}{
-		{"result error", map[string]string{"QWEN_MODE": "error"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic Qwen authentication failure"},
-		{"process error", map[string]string{"QWEN_MODE": "exit"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic qwen stderr"},
-		{"timeout", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{Timeout: 20 * time.Millisecond}, "timeout", "timed out"},
-		{"cancel", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{}, "aborted", "cancelled"},
+		{"result error", map[string]string{"QWEN_MODE": "error"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic Qwen authentication failure", "sess-error"},
+		{"process error", map[string]string{"QWEN_MODE": "exit"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic qwen stderr", ""},
+		{"missing resume", map[string]string{"QWEN_MODE": "resume-missing", "QWEN_STDERR_FIXTURE": resumeFixture}, newQwenTestContext, ExecOptions{ResumeSessionID: "session-redacted"}, "failed", "No saved session found", ""},
+		{"timeout", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{Timeout: 20 * time.Millisecond}, "timeout", "timed out", ""},
+		{"cancel", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{}, "aborted", "cancelled", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := tc.ctx()
@@ -179,8 +204,8 @@ func TestQwenBackendFailureTimeoutAndCancellation(t *testing.T) {
 				t.Fatalf("Execute: %v", err)
 			}
 			_, result := awaitQwenResult(t, session)
-			if result.Status != tc.status || !strings.Contains(result.Error, tc.needle) {
-				t.Fatalf("result = %+v, want status=%q error containing %q", result, tc.status, tc.needle)
+			if result.Status != tc.status || !strings.Contains(result.Error, tc.needle) || result.SessionID != tc.wantSession {
+				t.Fatalf("result = %+v, want status=%q error containing %q session=%q", result, tc.status, tc.needle, tc.wantSession)
 			}
 		})
 	}
