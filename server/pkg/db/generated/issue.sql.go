@@ -1307,6 +1307,26 @@ func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataK
 	return i, err
 }
 
+const touchIssue = `-- name: TouchIssue :exec
+UPDATE issue SET
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+`
+
+type TouchIssueParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Bumps updated_at to now() so the issue reflects its latest activity even when
+// no column changes — e.g. a new comment counts as "touching" the issue, so the
+// "Updated date" sort surfaces recently-discussed cards. Workspace_id in the
+// WHERE clause is a SQL-layer tenant guard; see DeleteIssue.
+func (q *Queries) TouchIssue(ctx context.Context, arg TouchIssueParams) error {
+	_, err := q.db.Exec(ctx, touchIssue, arg.ID, arg.WorkspaceID)
+	return err
+}
+
 const updateIssue = `-- name: UpdateIssue :one
 UPDATE issue SET
     title = COALESCE($2, title),

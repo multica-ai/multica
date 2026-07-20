@@ -317,6 +317,18 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 		return
 	}
 
+	// A new comment counts as activity on the parent: bump updated_at so the
+	// "Updated date" sort surfaces the parent now that its children finished.
+	// Best-effort — the comment is already persisted.
+	if err := h.Queries.TouchIssue(ctx, db.TouchIssueParams{
+		ID:          parent.ID,
+		WorkspaceID: parent.WorkspaceID,
+	}); err != nil {
+		slog.Warn("child done: touch parent issue failed",
+			"error", err,
+			"parent_id", uuidToString(parent.ID))
+	}
+
 	h.publish(protocol.EventCommentCreated, uuidToString(parent.WorkspaceID), "system", "", map[string]any{
 		"comment":             commentToResponse(comment, nil, nil),
 		"issue_title":         parent.Title,

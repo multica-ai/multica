@@ -1398,6 +1398,16 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A new comment counts as activity on the issue: bump updated_at so the
+	// "Updated date" sort surfaces recently-discussed cards. Best-effort — the
+	// comment is already persisted, so a touch failure must not fail the request.
+	if err := h.Queries.TouchIssue(r.Context(), db.TouchIssueParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	}); err != nil {
+		slog.Warn("touch issue after comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
+	}
+
 	// Link uploaded attachments to this comment.
 	if len(attachmentIDs) > 0 {
 		h.linkAttachmentsByIDs(r.Context(), comment.ID, issue.ID, attachmentIDs)
