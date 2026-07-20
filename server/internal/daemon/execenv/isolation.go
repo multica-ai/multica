@@ -60,20 +60,65 @@ func runPreparationProcess(ctx context.Context, command []string, request prepar
 	if len(command) == 0 || strings.TrimSpace(command[0]) == "" {
 		return nil, errors.New("execenv: preparation helper command is empty")
 	}
+	if ctx.Err() != nil {
+		return nil, context.Cause(ctx)
+	}
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("execenv: encode preparation request: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	configurePreparationCommand(cmd)
+	cmd := exec.Command(command[0], command[1:]...)
+	controller, err := newPreparationProcessController(cmd)
+	if err != nil {
+		return nil, fmt.Errorf("execenv: create preparation process controller: %w", err)
+	}
+	defer controller.close()
 	cmd.WaitDelay = preparationWaitDelay
-	cmd.Stdin = bytes.NewReader(payload)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("execenv: create preparation stdin: %w", err)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err = cmd.Run()
+	if err := cmd.Start(); err != nil {
+		stdin.Close()
+		return nil, fmt.Errorf("execenv: start preparation helper: %w", err)
+	}
+	// The helper blocks decoding stdin. Attach it to the platform's process-tree
+	// boundary before releasing the finite request payload, so it cannot spawn a
+	// descendant in the gap between Start and ownership setup.
+	if err := controller.attach(cmd); err != nil {
+		stdin.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		_ = controller.finish()
+		return nil, fmt.Errorf("execenv: attach preparation helper process: %w", err)
+	}
+
+	writeDone := make(chan error, 1)
+	go func() {
+		_, writeErr := stdin.Write(payload)
+		closeErr := stdin.Close()
+		writeDone <- errors.Join(writeErr, closeErr)
+	}()
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
+
+	var stopErr error
+	select {
+	case err = <-waitDone:
+	case <-ctx.Done():
+		stopErr = controller.stop(cmd)
+		err = <-waitDone
+	}
+	writeErr := <-writeDone
+	finishErr := controller.finish()
+	if lifecycleErr := errors.Join(stopErr, finishErr); lifecycleErr != nil {
+		return nil, fmt.Errorf("execenv: stop preparation process tree: %w", lifecycleErr)
+	}
 	// The context cause is the daemon's stable failure contract. Prefer it over
 	// the platform-specific process exit text ("signal: killed", exit 1, ...).
 	if ctx.Err() != nil {
@@ -84,6 +129,9 @@ func runPreparationProcess(ctx context.Context, command []string, request prepar
 			return nil, fmt.Errorf("execenv: preparation helper failed: %w: %s", err, detail)
 		}
 		return nil, fmt.Errorf("execenv: preparation helper failed: %w", err)
+	}
+	if writeErr != nil {
+		return nil, fmt.Errorf("execenv: write preparation request: %w", writeErr)
 	}
 
 	var response preparationResponse
