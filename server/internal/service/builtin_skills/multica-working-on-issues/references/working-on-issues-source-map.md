@@ -115,12 +115,12 @@ and is hidden from the PR list.
 
 | Behavior | File:line | Drifted from |
 |---|---|---|
-| Create-time: agent-assigned, non-backlog issue enqueues immediately | `server/internal/handler/issue.go:2263-2264` | new citation |
-| `shouldEnqueueAgentTask` returns false for `backlog` (parking lot) | `server/internal/handler/issue.go:2644-2648` | new citation |
-| Backlog → non-backlog (not done/cancelled) enqueues on update | `server/internal/handler/issue.go:2537-2540` | `:2523` |
-| Same contract in batch update | `server/internal/handler/issue.go:3021-3024` | new citation |
-| Child → `done` notifies + wakes the parent, gated by the stage barrier | `server/internal/handler/issue_child_done.go:66` (`notifyParentOfChildDone`; doc comment at `:15`; barrier gate at `:115`) | func def `:51` |
-| Status change (incl. → `cancelled`) does NOT cancel in-flight tasks; only issue deletion does (MUL-4465) | no-cancel note in `server/internal/handler/issue.go:2652-2658` (`UpdateIssue`) and `:3170-3171` (`BatchUpdateIssues`); deletion still cancels at `:2863` (`DeleteIssue`) / `:3239` (`BatchDeleteIssues`) via `CancelTasksForIssue` (`server/internal/service/task.go:1229`) | new citation |
+| Create-time: agent/squad-assigned, non-backlog issue enqueues immediately | `server/internal/service/issue.go:330-331,481-506,520-524` | refreshed citation |
+| Backlog → non-backlog (not done/cancelled) enqueues on update | shared predicate `server/internal/service/issue_trigger.go:99-115`; single write `server/internal/handler/issue.go:2951-2960` | refreshed citation |
+| Same contract in batch update | `server/internal/handler/issue.go:3457-3466` | refreshed citation |
+| Child → terminal notifies + wakes the parent by default, gated by the stage barrier | `server/internal/handler/issue_child_done.go:82-149`; comment/dispatch boundary `:273-373` | refreshed citation |
+| Explicit single-child → `done` suppression keeps the parent system comment, writes a durable audit activity, and skips only the parent-assignee dispatcher | request field/validation/call `server/internal/handler/issue.go:2678-2682,2747-2750,2969-2973`; comment/audit/dispatch boundary `server/internal/handler/issue_child_done.go:342-408`; CLI flag/wire field `server/cmd/multica/cmd_issue.go:1423-1474` | new citation |
+| Status change (incl. → `cancelled`) does NOT cancel in-flight tasks; only issue deletion does (MUL-4465) | no-cancel note in `server/internal/handler/issue.go:2939-2950` (`UpdateIssue`) and `:3469-3470` (`BatchUpdateIssues`); deletion calls at `:3151-3158` / `:3538`; implementation `server/internal/service/task.go:1604-1612` | refreshed citation |
 
 Creation with `--status todo` (or any non-backlog status) on an agent-assigned
 issue fires the agent immediately; `--status backlog` parks it with the assignee
@@ -139,10 +139,10 @@ away, so no task is left orphaned.
 | Behavior | File:line |
 |---|---|
 | `issue.stage` column (nullable, `>= 1`) | `server/migrations/123_issue_stage.up.sql` |
-| Stage barrier: notify+wake fire only when the lowest unfinished stage is all-terminal; unstaged set = one implicit stage | `server/internal/handler/issue_child_done.go:231` (`stageBarrierClosed`) |
-| Per-stage summary + next stage for the wake comment | `server/internal/handler/issue_child_done.go:254` (`stageProgressSummary`) |
-| `--stage` on `issue create` / `issue update` | `server/cmd/multica/cmd_issue.go:328,350` |
-| `multica issue children <id>` (sub-issues grouped by stage) | `server/cmd/multica/cmd_issue.go:114,678`; route `GET /api/issues/{id}/children` → `ListChildIssues` |
+| Stage barrier: notify+wake fire only when the lowest unfinished stage is all-terminal; unstaged set = one implicit stage | `server/internal/handler/issue_child_done.go:444` (`stageBarrierClosed`) |
+| Per-stage summary + next stage for the wake comment | `server/internal/handler/issue_child_done.go:476` (`stageProgressSummary`) |
+| `--stage` on `issue create` / `issue update` | `server/cmd/multica/cmd_issue.go:470,493` |
+| `multica issue children <id>` (sub-issues grouped by stage) | `server/cmd/multica/cmd_issue.go:191,862`; route `GET /api/issues/{id}/children` → `ListChildIssues` |
 
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee. Promoting the next stage's `backlog` sub-issues to

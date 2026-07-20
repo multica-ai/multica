@@ -2675,6 +2675,11 @@ type UpdateIssueRequest struct {
 	// the issue can be run later via manual run/rerun. Optional; omitted or
 	// false keeps today's behavior. Mirrors comment suppress_agent_ids.
 	SuppressRun bool `json:"suppress_run,omitempty"`
+	// SuppressParentAssigneeTrigger applies only to an explicit child -> done
+	// status transition. The normal parent system comment is preserved, but the
+	// parent-assignee task dispatch is skipped after a durable audit row is
+	// written. Optional; omitted or false preserves the default wake behavior.
+	SuppressParentAssigneeTrigger bool `json:"suppress_parent_assignee_trigger,omitempty"`
 	// HandoffNote is an optional free-text instruction injected into the run's
 	// opening context when this write starts an agent/squad run ("交接说明" —
 	// MUL-3375). Only consumed when a run actually starts: SuppressRun=true or
@@ -2738,6 +2743,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.Priority = pgtype.Text{String: *req.Priority, Valid: true}
+	}
+	if req.SuppressParentAssigneeTrigger && (req.Status == nil || *req.Status != "done") {
+		writeError(w, http.StatusBadRequest, "suppress_parent_assignee_trigger is only valid when setting a child issue to done")
+		return
 	}
 	if req.Position != nil {
 		params.Position = pgtype.Float8{Float64: *req.Position, Valid: true}
@@ -2957,7 +2966,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// loops in PR #2918). The helper guards on transition + parent state and
 	// fails best-effort.
 	if statusChanged {
-		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		h.notifyParentOfChildDone(r.Context(), prevIssue, issue, childDoneNotificationOptions{
+			SuppressParentAssigneeTrigger: req.SuppressParentAssigneeTrigger,
+			ActorType:                     actorType,
+			ActorID:                       actorID,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -3244,6 +3257,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if !validateIssueEnum(w, "priority", *req.Updates.Priority, validIssuePriorities) {
 			return
 		}
+	}
+	if req.Updates.SuppressParentAssigneeTrigger {
+		writeError(w, http.StatusBadRequest, "suppress_parent_assignee_trigger is only supported for single-issue status updates")
+		return
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)

@@ -495,7 +495,7 @@ func init() {
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
-	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+	registerIssueStatusFlags(issueStatusCmd)
 
 	// issue reorder
 	registerIssueReorderFlags(issueReorderCmd)
@@ -1427,6 +1427,10 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	if err := validateIssueStatus(status); err != nil {
 		return err
 	}
+	suppressParentAssigneeTrigger, _ := cmd.Flags().GetBool("suppress-parent-assignee-trigger")
+	if suppressParentAssigneeTrigger && status != "done" {
+		return fmt.Errorf("--suppress-parent-assignee-trigger is only valid when setting a child issue to done")
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1442,6 +1446,9 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"status": status}
+	if suppressParentAssigneeTrigger {
+		body["suppress_parent_assignee_trigger"] = true
+	}
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update status: %w", err)
@@ -1454,6 +1461,16 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	return nil
+}
+
+// registerIssueStatusFlags keeps the narrowly scoped parent-trigger suppression
+// opt-in attached only to `issue status`. It deliberately does not appear on
+// generic issue update/assign commands: callers must make an explicit child ->
+// done transition, and the server preserves the parent system comment while
+// auditing and skipping only that transition's parent-assignee dispatch.
+func registerIssueStatusFlags(cmd *cobra.Command) {
+	cmd.Flags().String("output", "table", "Output format: table or json")
+	cmd.Flags().Bool("suppress-parent-assignee-trigger", false, "When setting a child to done, preserve the parent system comment but audit and skip the parent assignee task dispatch")
 }
 
 // ---------------------------------------------------------------------------

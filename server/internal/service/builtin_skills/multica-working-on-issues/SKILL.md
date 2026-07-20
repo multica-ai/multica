@@ -185,6 +185,13 @@ on it. These are the contracts, not advice:
 - **`done`** on a child issue posts a system comment on its parent. If a PR
   carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
   itself on merge — you do not also need to flip it manually.
+- A specifically authorized automation may use
+  `multica issue status <child-id> done --suppress-parent-assignee-trigger` to
+  preserve that normal parent system comment while skipping only the
+  parent-assignee task dispatch for this one transition. The opt-in is
+  default-off, valid only for a single child → `done` status request, and leaves
+  a durable activity-log audit row. Do not use it for member comments,
+  corrections, assignments, ordinary status changes, or broad trigger control.
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going (MUL-4465). To stop a running task,

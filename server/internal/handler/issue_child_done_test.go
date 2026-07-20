@@ -73,6 +73,25 @@ func updateChildStatus(t *testing.T, childID, status string) {
 	}
 }
 
+// updateChildStatusSuppressingParentTrigger drives the explicit automation
+// opt-in. The request still performs a normal child -> done transition; only
+// the parent-assignee task dispatch is suppressed after the parent comment and
+// durable audit row are written.
+func updateChildStatusSuppressingParentTrigger(t *testing.T, childID string) {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/issues/"+childID, map[string]any{
+		"status":                           "done",
+		"suppress_parent_assignee_trigger": true,
+	})
+	req = withURLParam(req, "id", childID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue suppressed child status: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // countSystemCommentsOn returns the number of platform-generated comments on
 // the given issue. The schema CHECK was widened in migration 107 to allow
 // author_type='system'; this query is the canary that the migration applied
@@ -170,6 +189,32 @@ func TestChildDoneNotificationIsIdempotent(t *testing.T) {
 	updateChildStatus(t, fx.child.ID, "done")
 	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
 		t.Fatalf("after second done: expected still 1 comment (idempotent), got %d", got)
+	}
+}
+
+func TestSuppressParentAssigneeTriggerRequiresDoneStatus(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/issues/"+fx.child.ID, map[string]any{
+		"status":                           "in_review",
+		"suppress_parent_assignee_trigger": true,
+	})
+	req = withURLParam(req, "id", fx.child.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateIssue invalid suppression scope: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var status string
+	if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id = $1`, fx.child.ID).Scan(&status); err != nil {
+		t.Fatalf("read child after rejected update: %v", err)
+	}
+	if status != "in_progress" {
+		t.Errorf("rejected suppression request changed child status to %q", status)
+	}
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
+		t.Errorf("rejected suppression request created %d parent comments, want 0", got)
 	}
 }
 
@@ -339,6 +384,77 @@ func TestChildDoneMentionsParentAssignee_Agent(t *testing.T) {
 	}
 	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 1 {
 		t.Errorf("expected 1 pending task for parent agent, got %d", got)
+	}
+}
+
+// TestChildDoneSuppressParentAssigneeTriggerKeepsCommentAndAudits proves the
+// opt-in stops exactly one side effect: the parent-assignee task. The ordinary
+// system comment (including its assignee mention) remains, the suppression is
+// durably attributable to the request actor, and a later member correction on
+// the same parent still follows the normal comment-trigger path.
+func TestChildDoneSuppressParentAssigneeTriggerKeepsCommentAndAudits(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	var agentID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID); err != nil {
+		t.Fatalf("locate test agent: %v", err)
+	}
+	setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID)
+		testPool.Exec(context.Background(),
+			`DELETE FROM activity_log WHERE issue_id = $1`, fx.child.ID)
+	})
+
+	updateChildStatusSuppressingParentTrigger(t, fx.child.ID)
+
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "mention://agent/"+agentID) {
+		t.Errorf("suppression must preserve the normal parent-assignee mention, got: %s", content)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 0 {
+		t.Fatalf("suppressed child completion queued %d parent tasks, want 0", got)
+	}
+
+	var actorType, actorID, detailsJSON string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT actor_type, actor_id::text, details::text
+		FROM activity_log
+		WHERE issue_id = $1 AND action = $2
+	`, fx.child.ID, childDoneParentTriggerSuppressedActivity).Scan(&actorType, &actorID, &detailsJSON); err != nil {
+		t.Fatalf("read suppression audit activity: %v", err)
+	}
+	if actorType != "member" || actorID != testUserID {
+		t.Errorf("audit actor = %s/%s, want member/%s", actorType, actorID, testUserID)
+	}
+	var details map[string]any
+	if err := json.Unmarshal([]byte(detailsJSON), &details); err != nil {
+		t.Fatalf("decode suppression audit details: %v", err)
+	}
+	if details["child_issue_id"] != fx.child.ID || details["child_status"] != "done" || details["parent_issue_id"] != fx.parent.ID {
+		t.Errorf("unexpected suppression audit details: %#v", details)
+	}
+	if details["system_comment_id"] != systemCommentIDOn(t, fx.parent.ID) {
+		t.Errorf("audit system_comment_id = %#v, want current parent system comment", details["system_comment_id"])
+	}
+
+	// The suppression is not sticky and does not alter ordinary member comment
+	// routing. A later correction still wakes the parent assignee exactly once.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+fx.parent.ID+"/comments", map[string]any{
+		"content": "Member correction after the automated child completion.",
+	})
+	req = withURLParam(req, "id", fx.parent.ID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment member correction: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 1 {
+		t.Errorf("ordinary member correction queued %d parent tasks, want 1", got)
 	}
 }
 

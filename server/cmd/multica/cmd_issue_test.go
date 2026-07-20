@@ -2820,6 +2820,78 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newIssueStatusTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "status"}
+	registerIssueStatusFlags(cmd)
+	return cmd
+}
+
+func TestRunIssueStatusParentTriggerSuppressionWireContract(t *testing.T) {
+	tests := []struct {
+		name      string
+		suppress  bool
+		wantField bool
+	}{
+		{name: "default omitted", suppress: false, wantField: false},
+		{name: "explicit opt-in", suppress: true, wantField: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/issues/INF-1200":
+					json.NewEncoder(w).Encode(map[string]any{
+						"id": "issue-1", "identifier": "INF-1200", "status": "in_progress",
+					})
+				case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Errorf("decode body: %v", err)
+					}
+					json.NewEncoder(w).Encode(map[string]any{
+						"id": "issue-1", "identifier": "INF-1200", "status": "done",
+					})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+			cmd := newIssueStatusTestCmd()
+			if tt.suppress {
+				_ = cmd.Flags().Set("suppress-parent-assignee-trigger", "true")
+			}
+			if err := runIssueStatus(cmd, []string{"INF-1200", "done"}); err != nil {
+				t.Fatalf("runIssueStatus: %v", err)
+			}
+			if body["status"] != "done" {
+				t.Fatalf("status = %#v, want done", body["status"])
+			}
+			got, present := body["suppress_parent_assignee_trigger"]
+			if present != tt.wantField {
+				t.Fatalf("suppression field presence = %v, want %v (body=%#v)", present, tt.wantField, body)
+			}
+			if present && got != true {
+				t.Fatalf("suppress_parent_assignee_trigger = %#v, want true", got)
+			}
+		})
+	}
+}
+
+func TestRunIssueStatusRejectsSuppressionOutsideDone(t *testing.T) {
+	cmd := newIssueStatusTestCmd()
+	_ = cmd.Flags().Set("suppress-parent-assignee-trigger", "true")
+	err := runIssueStatus(cmd, []string{"INF-1200", "in_review"})
+	if err == nil || !strings.Contains(err.Error(), "only valid when setting a child issue to done") {
+		t.Fatalf("expected narrow done-only validation error, got %v", err)
+	}
+}
+
 func newIssueListTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "list"}
 	cmd.Flags().String("output", "table", "")

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -9,9 +10,22 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+const childDoneParentTriggerSuppressedActivity = "child_done_parent_assignee_trigger_suppressed"
+
+// childDoneNotificationOptions is request-scoped control for the one optional
+// side effect of a child completion. A zero value is the historical behavior.
+// Actor identity is captured only so an applied suppression can leave a
+// durable, queryable audit row before the dispatcher is skipped.
+type childDoneNotificationOptions struct {
+	SuppressParentAssigneeTrigger bool
+	ActorType                     string
+	ActorID                       string
+}
 
 // notifyParentOfChildDone posts a top-level system comment on the parent
 // issue when a child issue transitions from non-done into done. This replaces
@@ -65,7 +79,7 @@ import (
 // Errors are logged at warn level and swallowed: this is a best-effort
 // notification on the side of a successful status update; failing it must
 // not roll back the user's status change.
-func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Issue) {
+func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Issue, opts childDoneNotificationOptions) {
 	if !issue.ParentIssueID.Valid {
 		return
 	}
@@ -132,7 +146,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if staged {
 		closedStage = issue.Stage.Int32
 	}
-	h.postChildDoneComment(ctx, parent, issue, children, staged, closedStage, false)
+	h.postChildDoneComment(ctx, parent, issue, children, staged, closedStage, false, opts)
 }
 
 // notifyParentsOfBatchChildDone emits child-done parent notifications for a
@@ -210,7 +224,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			if !stageBarrierClosed(children, g.children[0]) {
 				continue
 			}
-			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch)
+			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch, childDoneNotificationOptions{})
 			continue
 		}
 
@@ -241,7 +255,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		if !found {
 			continue
 		}
-		h.postChildDoneComment(ctx, parent, rep, children, true, bestStage, batch)
+		h.postChildDoneComment(ctx, parent, rep, children, true, bestStage, batch, childDoneNotificationOptions{})
 	}
 }
 
@@ -256,7 +270,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 // an unstaged set). `batch` selects batch-aware wording: a single update keeps
 // its historical byte-identical copy, while a batch that finished several
 // children at once must not claim "the last sub-issue just finished".
-func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db.Issue, children []db.Issue, staged bool, closedStage int32, batch bool) {
+func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db.Issue, children []db.Issue, staged bool, closedStage int32, batch bool, opts childDoneNotificationOptions) {
 	prefix := h.getIssuePrefix(ctx, completed.WorkspaceID)
 	identifier := prefix + "-" + strconv.Itoa(int(completed.Number))
 	childID := uuidToString(completed.ID)
@@ -331,7 +345,67 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	// author_type='system'); this keeps smuggled mentions from the child
 	// title inert and gives the platform a single place to apply the loop
 	// and idempotency guards.
+	parentHasDispatchableAssignee := parent.AssigneeType.Valid && parent.AssigneeID.Valid &&
+		(parent.AssigneeType.String == "agent" || parent.AssigneeType.String == "squad")
+	if opts.SuppressParentAssigneeTrigger && parentHasDispatchableAssignee {
+		// Suppression is fail-closed with respect to auditability: if the durable
+		// audit row cannot be written, retain the historical dispatch. The status
+		// update and normal system comment already succeeded, so this best-effort
+		// side effect must not turn the whole request into a misleading retry.
+		if err := h.auditChildDoneParentTriggerSuppression(ctx, opts, parent, completed, comment); err == nil {
+			slog.Info("child done: parent assignee trigger suppressed",
+				"child_id", childID,
+				"parent_id", parentID,
+				"comment_id", uuidToString(comment.ID),
+				"actor_type", opts.ActorType,
+				"actor_id", opts.ActorID)
+			return
+		} else {
+			slog.Error("child done: suppression audit failed; dispatching parent assignee trigger",
+				"error", err,
+				"child_id", childID,
+				"parent_id", parentID,
+				"comment_id", uuidToString(comment.ID),
+				"actor_type", opts.ActorType,
+				"actor_id", opts.ActorID)
+		}
+	}
 	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
+}
+
+// auditChildDoneParentTriggerSuppression records the exact actor and artifacts
+// involved in an applied suppression. The activity belongs to the child issue,
+// whose status mutation requested the opt-in; parent/comment ids make the
+// skipped dispatch independently traceable without mutating either artifact.
+func (h *Handler) auditChildDoneParentTriggerSuppression(ctx context.Context, opts childDoneNotificationOptions, parent, child db.Issue, comment db.Comment) error {
+	actorID, err := util.ParseUUID(opts.ActorID)
+	if err != nil {
+		return fmt.Errorf("parse suppression actor id: %w", err)
+	}
+	if opts.ActorType != "member" && opts.ActorType != "agent" {
+		return fmt.Errorf("invalid suppression actor type %q", opts.ActorType)
+	}
+	details, err := json.Marshal(map[string]any{
+		"child_issue_id":    uuidToString(child.ID),
+		"child_status":      child.Status,
+		"parent_issue_id":   uuidToString(parent.ID),
+		"system_comment_id": uuidToString(comment.ID),
+	})
+	if err != nil {
+		return fmt.Errorf("encode suppression audit details: %w", err)
+	}
+	_, err = h.Queries.CreateActivity(ctx, db.CreateActivityParams{
+		WorkspaceID: child.WorkspaceID,
+		IssueID:     child.ID,
+		ActorType:   pgtype.Text{String: opts.ActorType, Valid: true},
+		ActorID:     actorID,
+		Action:      childDoneParentTriggerSuppressedActivity,
+		Details:     details,
+	})
+	if err != nil {
+		return fmt.Errorf("create suppression audit activity: %w", err)
+	}
+	return nil
 }
 
 // isTerminalChildStatus reports whether a child issue status counts as
