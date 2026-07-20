@@ -161,6 +161,17 @@ function hashChart(chart: string): string {
   return (hash >>> 0).toString(36);
 }
 
+/**
+ * Height to reserve for a diagram that has not rendered yet: the real height
+ * when this exact chart already rendered in this session, otherwise the
+ * skeleton default. Exported so the near-viewport lazy shell
+ * (rich-content/lazy-rich-block.tsx) reserves the SAME space this component
+ * would, instead of maintaining a second guess at the size.
+ */
+export function reservedMermaidHeightPx(chart: string): number {
+  return readCachedLayout(chart)?.height ?? MERMAID_SKELETON_HEIGHT_PX;
+}
+
 function readCachedLayout(chart: string): Size | null {
   if (typeof window === "undefined") return null;
   try {

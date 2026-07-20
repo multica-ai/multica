@@ -28,9 +28,13 @@ import { Check, Copy } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../i18n";
-import { MermaidDiagram } from "../editor/mermaid-diagram";
-import { HtmlBlockPreview } from "../editor/html-block-preview";
+import { MermaidDiagram, reservedMermaidHeightPx } from "../editor/mermaid-diagram";
+import {
+  HtmlBlockPreview,
+  HTML_BLOCK_PREVIEW_HEIGHT_PX,
+} from "../editor/html-block-preview";
 import { highlightCode } from "../editor/syntax-highlight";
+import { LazyRichBlock } from "./lazy-rich-block";
 
 /**
  * Languages that may become a rich block. Anything else — including unknown
@@ -158,6 +162,11 @@ export function CodeBlockShell({
 /**
  * The rich leaf for an upgraded fence. Only reached when shouldUpgradeFence()
  * returned true, so the fence is known-closed here.
+ *
+ * Both leaves are expensive to instantiate (async Mermaid render / sandboxed
+ * iframe), so each is wrapped in the near-viewport lazy shell. The reserved
+ * height comes from the leaf itself, so the shell holds the same space the
+ * mounted block will occupy.
  */
 export function RichFenceBlock({
   language,
@@ -167,7 +176,15 @@ export function RichFenceBlock({
   body: string;
 }) {
   if (language === "mermaid") {
-    return <MemoMermaidDiagram chart={body} />;
+    return (
+      <LazyRichBlock reservedHeightPx={reservedMermaidHeightPx(body)}>
+        <MemoMermaidDiagram chart={body} />
+      </LazyRichBlock>
+    );
   }
-  return <MemoHtmlBlockPreview html={body} />;
+  return (
+    <LazyRichBlock reservedHeightPx={HTML_BLOCK_PREVIEW_HEIGHT_PX}>
+      <MemoHtmlBlockPreview html={body} />
+    </LazyRichBlock>
+  );
 }
