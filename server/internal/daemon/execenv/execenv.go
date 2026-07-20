@@ -27,10 +27,10 @@ type RepoContextForEnv struct {
 // fields the meta-skill template needs to render a human-readable summary
 // (URL for github_repo, generic label otherwise).
 type ProjectResourceForEnv struct {
-	ID           string          // server-assigned UUID
-	ResourceType string          // e.g. "github_repo"
-	ResourceRef  json.RawMessage // raw JSONB payload from the API
-	Label        string          // optional user-supplied label
+	ID           string          `json:"id"`              // server-assigned UUID
+	ResourceType string          `json:"resource_type"`   // e.g. "github_repo"
+	ResourceRef  json.RawMessage `json:"resource_ref"`    // raw JSONB payload from the API
+	Label        string          `json:"label,omitempty"` // optional user-supplied label
 }
 
 // PrepareParams holds all inputs needed to set up an execution environment.
