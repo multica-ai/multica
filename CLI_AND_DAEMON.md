@@ -152,7 +152,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Qoder CLI](https://docs.qoder.com/) | `qodercli` | Qoder ACP coding agent |
 | [Trae](https://docs.trae.cn/cli) | `traecli` | ByteDance TRAE CLI (ACP via `traecli acp serve`) |
 | [Grok Build CLI](https://docs.x.ai/) | `grok` | xAI Grok Build CLI (ACP via `grok agent stdio`) |
-| Qwen Code | `qwen` | Alibaba Qwen Code (`qwen -p` with stream-json) |
+| [Qwen Code](https://github.com/QwenLM/qwen-code) | `qwen` | Alibaba Qwen Code (`qwen -p` with stream-json) |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
