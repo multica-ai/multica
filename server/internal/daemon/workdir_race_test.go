@@ -347,35 +347,6 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 	}
 }
 
-func TestWaitForExecutionEnvironment_ReturnsWhenPrepareContextExpires(t *testing.T) {
-	release := make(chan struct{})
-	finished := make(chan struct{})
-	ctx, cancel := context.WithTimeoutCause(context.Background(), 25*time.Millisecond, errTaskPrepareTimeout)
-	defer cancel()
-
-	startedAt := time.Now()
-	_, err := waitForExecutionEnvironment(ctx, func() (*execenv.Environment, error) {
-		defer close(finished)
-		<-release
-		return &execenv.Environment{}, nil
-	})
-	if !errors.Is(err, errTaskPrepareTimeout) {
-		t.Fatalf("waitForExecutionEnvironment error = %v, want task prepare timeout", err)
-	}
-	if elapsed := time.Since(startedAt); elapsed > 500*time.Millisecond {
-		t.Fatalf("waitForExecutionEnvironment took %s, want prompt deadline return", elapsed)
-	}
-
-	// Let the simulated uninterruptible syscall finish so the test does not
-	// leave its helper goroutine behind.
-	close(release)
-	select {
-	case <-finished:
-	case <-time.After(time.Second):
-		t.Fatal("filesystem preparation goroutine did not finish after release")
-	}
-}
-
 func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 	oldRefresh := taskPrepareLeaseRefresh
 	oldTimeout := taskPrepareLeaseTimeout

@@ -134,6 +134,16 @@ type terminalTaskReport struct {
 	failureReason string
 }
 
+type executionEnvironmentCommand func() ([]string, error)
+
+func defaultExecutionEnvironmentCommand() ([]string, error) {
+	executable, err := resolveSelfExecutable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve execution-environment helper: %w", err)
+	}
+	return []string{executable, execenv.PreparationHelperArg}, nil
+}
+
 var (
 	isBrewInstall         = cli.IsBrewInstall
 	getBrewPrefix         = cli.GetBrewPrefix
@@ -335,6 +345,9 @@ type Daemon struct {
 
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
+	// executionEnvironmentCommand resolves the killable helper used for
+	// Prepare/Reuse. New always sets it; nil keeps focused unit tests in-process.
+	executionEnvironmentCommand executionEnvironmentCommand
 	// taskPrepareTimeout is the dispatched -> running hard deadline. New sets
 	// the production default; zero-valued test daemons fall back to the same
 	// default in effectiveTaskPrepareTimeout.
@@ -388,6 +401,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	}
 	d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
 	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
+	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
 	return d
@@ -3899,31 +3913,28 @@ func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, t
 	}
 }
 
-type executionEnvironmentResult struct {
-	env *execenv.Environment
-	err error
+func (d *Daemon) prepareExecutionEnvironment(ctx context.Context, params execenv.PrepareParams) (*execenv.Environment, error) {
+	if d.executionEnvironmentCommand == nil {
+		// Focused runTask tests construct a zero-valued Daemon and keep setup
+		// in-process. Production Daemons created by New always use isolation.
+		return execenv.Prepare(params, d.logger)
+	}
+	command, err := d.executionEnvironmentCommand()
+	if err != nil {
+		return nil, err
+	}
+	return execenv.PrepareIsolated(ctx, command, params, d.logger)
 }
 
-// waitForExecutionEnvironment makes the pre-start deadline observable around
-// execenv's synchronous filesystem setup. Some filesystem calls cannot be
-// interrupted by a Go context (for example, opening a FIFO or accessing a
-// wedged mount). Running only the local I/O step in a goroutine lets runTask
-// stop the prepare lease and fail the dispatched task when its deadline fires.
-// The closure must never perform a server-side state transition: an underlying
-// syscall may still return later, after this helper has reported the timeout.
-func waitForExecutionEnvironment(ctx context.Context, prepare func() (*execenv.Environment, error)) (*execenv.Environment, error) {
-	resultCh := make(chan executionEnvironmentResult, 1)
-	go func() {
-		env, err := prepare()
-		resultCh <- executionEnvironmentResult{env: env, err: err}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, context.Cause(ctx)
-	case result := <-resultCh:
-		return result.env, result.err
+func (d *Daemon) reuseExecutionEnvironment(ctx context.Context, params execenv.ReuseParams) (*execenv.Environment, error) {
+	if d.executionEnvironmentCommand == nil {
+		return execenv.Reuse(params, d.logger), nil
 	}
+	command, err := d.executionEnvironmentCommand()
+	if err != nil {
+		return nil, err
+	}
+	return execenv.ReuseIsolated(ctx, command, params, d.logger)
 }
 
 func (d *Daemon) effectiveTaskPrepareTimeout() time.Duration {
@@ -4206,23 +4217,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
 		var err error
-		env, err = waitForExecutionEnvironment(prepareCtx, func() (*execenv.Environment, error) {
-			return execenv.Reuse(execenv.ReuseParams{
-				WorkspacesRoot:        d.cfg.WorkspacesRoot,
-				Profile:               d.cfg.Profile,
-				WorkDir:               task.PriorWorkDir,
-				Provider:              provider,
-				CodexVersion:          codexVersion,
-				ResumeSessionID:       task.PriorSessionID,
-				OpenclawBin:           openclawBin,
-				McpConfig:             effectiveMcpConfig,
-				CursorMcpAuthSource:   cursorMcpAuthSource,
-				OpenclawGateway:       openclawGateway,
-				HermesSourceHome:      hermesSourceHome,
-				HermesSourceMustExist: hermesSourceMustExist,
-				HermesEnv:             hermesEnv,
-				Task:                  taskCtx,
-			}, d.logger), nil
+		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
+			WorkspacesRoot:        d.cfg.WorkspacesRoot,
+			Profile:               d.cfg.Profile,
+			WorkDir:               task.PriorWorkDir,
+			Provider:              provider,
+			CodexVersion:          codexVersion,
+			ResumeSessionID:       task.PriorSessionID,
+			OpenclawBin:           openclawBin,
+			McpConfig:             effectiveMcpConfig,
+			CursorMcpAuthSource:   cursorMcpAuthSource,
+			OpenclawGateway:       openclawGateway,
+			HermesSourceHome:      hermesSourceHome,
+			HermesSourceMustExist: hermesSourceMustExist,
+			HermesEnv:             hermesEnv,
+			Task:                  taskCtx,
 		})
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("reuse execution environment: %w", err)
@@ -4250,9 +4259,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if localAssignment != nil {
 			prepParams.LocalWorkDir = localAssignment.AbsPath
 		}
-		env, err = waitForExecutionEnvironment(prepareCtx, func() (*execenv.Environment, error) {
-			return execenv.Prepare(prepParams, d.logger)
-		})
+		env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 		}
