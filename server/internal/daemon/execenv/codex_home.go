@@ -83,6 +83,12 @@ type CodexHomeOptions struct {
 	// Only meaningful when the policy resolves to workspace-write; ignored on
 	// darwin danger-full-access. See task_home.go and MUL-4856.
 	WritableRoots []string
+	// CodexCustomArgs are the effective Codex CLI args this task will launch
+	// with (daemon defaults + profile-fixed + per-agent custom_args). Only the
+	// Windows sandbox decision reads them, to honor a `-c windows.sandbox=...`
+	// override that never lands in config.toml. See resolveWindowsSandboxState
+	// and MUL-4957.
+	CodexCustomArgs []string
 }
 
 // prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
@@ -91,6 +97,50 @@ type CodexHomeOptions struct {
 // works correctly.
 func prepareCodexHome(codexHome string, logger *slog.Logger) error {
 	return prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{GOOS: "linux"}, logger)
+}
+
+// resolveWindowsSandboxState determines, for a Windows task, whether a native
+// Codex sandbox is configured — across the per-task config.toml and the
+// effective custom args — failing closed (Undecidable) when it cannot tell.
+//
+// The distinction that matters for MUL-4957's first must-fix: an absent
+// per-task config is a genuine "no sandbox configured" only when the user also
+// has no shared ~/.codex/config.toml. If a shared config exists but the
+// per-task copy/read failed, the daemon cannot read the user's intent and must
+// NOT loosen to danger-full-access — it fails closed and logs the condition.
+func resolveWindowsSandboxState(configFile, sharedHome string, customArgs []string, logger *slog.Logger) windowsSandboxConfig {
+	configState := windowsSandboxAbsent
+	data, err := os.ReadFile(configFile)
+	switch {
+	case err == nil:
+		configState = windowsSandboxFromConfig(string(data))
+	case os.IsNotExist(err):
+		// No per-task config. Genuinely unconfigured only if there is no shared
+		// source config either; otherwise the copy failed → undecidable.
+		if sharedCodexConfigExists(sharedHome) {
+			configState = windowsSandboxUndecidable
+		}
+	default:
+		// A read error (permission/IO) on a file the daemon just wrote.
+		configState = windowsSandboxUndecidable
+	}
+
+	state := resolveWindowsSandbox(configState, windowsSandboxFromCustomArgs(customArgs))
+	if state == windowsSandboxUndecidable && logger != nil {
+		logger.Error("codex sandbox: cannot determine Windows native sandbox config; keeping workspace-write and refusing to loosen to danger-full-access",
+			"config_file", configFile)
+	}
+	return state
+}
+
+// sharedCodexConfigExists reports whether the shared ~/.codex/config.toml (the
+// copy source) exists — used to tell "user has no config" from "copy failed".
+func sharedCodexConfigExists(sharedHome string) bool {
+	if sharedHome == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(sharedHome, "config.toml"))
+	return err == nil
 }
 
 // prepareCodexHomeWithOpts creates a per-task CODEX_HOME directory and seeds
@@ -172,11 +222,15 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// need to fall back to danger-full-access because of openai/codex#10390,
 	// and on Windows the daemon defaults to danger-full-access unless the user
 	// opted into a native windows.sandbox; see codex_sandbox.go for the full
-	// rationale. Read the copied+sanitized config first so the policy can honor
-	// an explicit user windows.sandbox instead of overriding it.
+	// rationale. On Windows, resolve the native-sandbox state across the copied
+	// config and the effective custom args so an explicit user opt-in is honored
+	// and an undecidable config fails closed instead of loosening.
 	configFile := filepath.Join(codexHome, "config.toml")
-	existingConfig, _ := os.ReadFile(configFile)
-	policy := codexSandboxPolicyForConfig(opts.GOOS, opts.CodexVersion, string(existingConfig))
+	winState := windowsSandboxAbsent
+	if resolveGOOS(opts.GOOS) == "windows" {
+		winState = resolveWindowsSandboxState(configFile, sharedHome, opts.CodexCustomArgs, logger)
+	}
+	policy := codexSandboxPolicyForConfig(opts.GOOS, opts.CodexVersion, winState)
 	policy.WritableRoots = opts.WritableRoots
 	if err := ensureCodexSandboxConfig(configFile, policy, opts.CodexVersion, logger); err != nil {
 		logger.Warn("execenv: codex-home ensure sandbox config failed", "error", err)

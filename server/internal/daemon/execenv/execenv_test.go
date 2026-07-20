@@ -2565,8 +2565,8 @@ func TestEnsureCodexSandboxConfigWindowsFallsBack(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")
 
-	// No user config → unconfigured Windows → danger-full-access.
-	policy := codexSandboxPolicyForConfig("windows", "0.144.5", "")
+	// No native sandbox configured → danger-full-access.
+	policy := codexSandboxPolicyForConfig("windows", "0.144.5", windowsSandboxAbsent)
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.144.5", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -2599,7 +2599,11 @@ func TestEnsureCodexSandboxConfigWindowsRespectsUserSandbox(t *testing.T) {
 				t.Fatalf("write config: %v", err)
 			}
 
-			policy := codexSandboxPolicyForConfig("windows", "0.144.5", userConfig)
+			winState := resolveWindowsSandboxState(configPath, dir, nil, testLogger())
+			if winState != windowsSandboxNative {
+				t.Fatalf("resolveWindowsSandboxState = %v, want native", winState)
+			}
+			policy := codexSandboxPolicyForConfig("windows", "0.144.5", winState)
 			if err := ensureCodexSandboxConfig(configPath, policy, "0.144.5", testLogger()); err != nil {
 				t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 			}
@@ -2852,32 +2856,28 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 	}
 }
 
-// TestCodexSandboxPolicyForConfig pins the MUL-4957 must-fix: on Windows the
-// policy honors a user's explicit native windows.sandbox opt-in (keeping
-// workspace-write) and only falls back to danger-full-access when it is absent,
-// disabled, or unparseable. Linux and darwin ignore windows.sandbox entirely.
+// TestCodexSandboxPolicyForConfig maps resolved Windows sandbox states to
+// policies: native and undecidable both keep workspace-write (undecidable fails
+// closed), only absent gets danger-full-access. Linux/darwin ignore winState.
 func TestCodexSandboxPolicyForConfig(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name     string
 		goos     string
-		config   string
+		winState windowsSandboxConfig
 		wantMode string
 		wantNet  bool
 	}{
-		{"windows unelevated dotted", "windows", `windows.sandbox = "unelevated"`, "workspace-write", true},
-		{"windows elevated table", "windows", "[windows]\nsandbox = \"elevated\"\n", "workspace-write", true},
-		{"windows mixed case respected", "windows", `windows.sandbox = "Unelevated"`, "workspace-write", true},
-		{"windows disabled falls back", "windows", `windows.sandbox = "disabled"`, "danger-full-access", false},
-		{"windows unconfigured falls back", "windows", "", "danger-full-access", false},
-		{"windows unparseable falls back", "windows", "this is not = valid toml [[", "danger-full-access", false},
-		// Non-Windows platforms must not be swayed by a stray windows.sandbox key.
-		{"linux ignores windows.sandbox", "linux", `windows.sandbox = "unelevated"`, "workspace-write", true},
-		{"darwin ignores windows.sandbox", "darwin", `windows.sandbox = "unelevated"`, "danger-full-access", false},
+		{"windows native keeps workspace-write", "windows", windowsSandboxNative, "workspace-write", true},
+		{"windows undecidable fails closed", "windows", windowsSandboxUndecidable, "workspace-write", true},
+		{"windows absent falls back", "windows", windowsSandboxAbsent, "danger-full-access", false},
+		// Non-Windows platforms ignore winState entirely.
+		{"linux ignores winState", "linux", windowsSandboxNative, "workspace-write", true},
+		{"darwin ignores winState", "darwin", windowsSandboxNative, "danger-full-access", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p := codexSandboxPolicyForConfig(tc.goos, "0.144.5", tc.config)
+			p := codexSandboxPolicyForConfig(tc.goos, "0.144.5", tc.winState)
 			if p.Mode != tc.wantMode {
 				t.Errorf("mode = %q, want %q", p.Mode, tc.wantMode)
 			}
@@ -2889,6 +2889,127 @@ func TestCodexSandboxPolicyForConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestWindowsSandboxFromConfig verifies config.toml classification: only the
+// exact-lowercase variants Codex accepts are native; any other present value or
+// unparseable TOML is undecidable (fail closed); an absent key is absent.
+func TestWindowsSandboxFromConfig(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		config string
+		want   windowsSandboxConfig
+	}{
+		{"unelevated dotted", `windows.sandbox = "unelevated"`, windowsSandboxNative},
+		{"elevated table", "[windows]\nsandbox = \"elevated\"\n", windowsSandboxNative},
+		{"absent key", `model = "o3"`, windowsSandboxAbsent},
+		{"empty config", "", windowsSandboxAbsent},
+		{"mixed case is invalid to codex", `windows.sandbox = "Unelevated"`, windowsSandboxUndecidable},
+		{"disabled is invalid to codex", `windows.sandbox = "disabled"`, windowsSandboxUndecidable},
+		{"unparseable toml", "this is not = valid toml [[", windowsSandboxUndecidable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := windowsSandboxFromConfig(tc.config); got != tc.want {
+				t.Errorf("windowsSandboxFromConfig(%q) = %v, want %v", tc.config, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWindowsSandboxFromCustomArgs verifies detection of a native sandbox opted
+// into via `-c windows.sandbox=...` args — the second MUL-4957 must-fix, since
+// such args never land in config.toml.
+func TestWindowsSandboxFromCustomArgs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		args []string
+		want windowsSandboxConfig
+	}{
+		{"two-token bare", []string{"-c", "windows.sandbox=unelevated"}, windowsSandboxNative},
+		{"two-token quoted", []string{"-c", `windows.sandbox="unelevated"`}, windowsSandboxNative},
+		{"two-token spaced", []string{"-c", `windows.sandbox = "elevated"`}, windowsSandboxNative},
+		{"inline -c=", []string{"-c=windows.sandbox=unelevated"}, windowsSandboxNative},
+		{"--config long form", []string{"--config", "windows.sandbox=elevated"}, windowsSandboxNative},
+		{"last occurrence wins", []string{"-c", "windows.sandbox=unelevated", "-c", "windows.sandbox=elevated"}, windowsSandboxNative},
+		{"invalid value undecidable", []string{"-c", "windows.sandbox=disabled"}, windowsSandboxUndecidable},
+		{"unrelated override ignored", []string{"-c", "model=o3"}, windowsSandboxAbsent},
+		{"no args", nil, windowsSandboxAbsent},
+		{"dangling -c ignored", []string{"-c"}, windowsSandboxAbsent},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := windowsSandboxFromCustomArgs(tc.args); got != tc.want {
+				t.Errorf("windowsSandboxFromCustomArgs(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveWindowsSandbox verifies the fold precedence: undecidable > native
+// > absent.
+func TestResolveWindowsSandbox(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		states []windowsSandboxConfig
+		want   windowsSandboxConfig
+	}{
+		{"all absent", []windowsSandboxConfig{windowsSandboxAbsent, windowsSandboxAbsent}, windowsSandboxAbsent},
+		{"native in args", []windowsSandboxConfig{windowsSandboxAbsent, windowsSandboxNative}, windowsSandboxNative},
+		{"undecidable beats native", []windowsSandboxConfig{windowsSandboxNative, windowsSandboxUndecidable}, windowsSandboxUndecidable},
+		{"undecidable beats absent", []windowsSandboxConfig{windowsSandboxUndecidable, windowsSandboxAbsent}, windowsSandboxUndecidable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveWindowsSandbox(tc.states...); got != tc.want {
+				t.Errorf("resolveWindowsSandbox(%v) = %v, want %v", tc.states, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveWindowsSandboxStateFailsClosed pins the first MUL-4957 must-fix:
+// when a shared ~/.codex/config.toml exists but the per-task copy is missing,
+// the daemon cannot read the user's intent and must fail closed (undecidable),
+// NOT treat it as unconfigured and loosen. A genuinely configlesss user stays
+// absent.
+func TestResolveWindowsSandboxStateFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	t.Run("copy failed with shared config present -> undecidable", func(t *testing.T) {
+		t.Parallel()
+		sharedHome := t.TempDir()
+		if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`windows.sandbox = "unelevated"`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// Per-task config file is absent (copy failed).
+		missing := filepath.Join(t.TempDir(), "config.toml")
+		if got := resolveWindowsSandboxState(missing, sharedHome, nil, testLogger()); got != windowsSandboxUndecidable {
+			t.Errorf("got %v, want undecidable (fail closed)", got)
+		}
+	})
+
+	t.Run("no shared config -> absent", func(t *testing.T) {
+		t.Parallel()
+		sharedHome := t.TempDir() // no config.toml inside
+		missing := filepath.Join(t.TempDir(), "config.toml")
+		if got := resolveWindowsSandboxState(missing, sharedHome, nil, testLogger()); got != windowsSandboxAbsent {
+			t.Errorf("got %v, want absent", got)
+		}
+	})
+
+	t.Run("custom-arg opt-in detected even with no config file", func(t *testing.T) {
+		t.Parallel()
+		sharedHome := t.TempDir()
+		missing := filepath.Join(t.TempDir(), "config.toml")
+		args := []string{"-c", "windows.sandbox=unelevated"}
+		if got := resolveWindowsSandboxState(missing, sharedHome, args, testLogger()); got != windowsSandboxNative {
+			t.Errorf("got %v, want native", got)
+		}
+	})
 }
 
 func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {

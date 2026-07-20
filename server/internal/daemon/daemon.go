@@ -4093,6 +4093,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentEnvOverrides = task.Agent.CustomEnv
 		agentCustomArgs = task.Agent.CustomArgs
 	}
+	// Effective Codex CLI args the task will launch with (profile-fixed +
+	// daemon defaults + per-agent custom_args), mirroring buildCodexArgs'
+	// ordering. Threaded into execenv so the Windows sandbox decision can honor
+	// a `-c windows.sandbox=...` override that never lands in config.toml —
+	// otherwise the daemon would silently downgrade a user's isolation opt-in
+	// (MUL-4957).
+	var codexSandboxArgs []string
+	if provider == "codex" {
+		codexSandboxArgs = append(codexSandboxArgs, profileFixedArgs...)
+		codexSandboxArgs = append(codexSandboxArgs, defaultArgsForProvider(d.cfg, provider)...)
+		codexSandboxArgs = append(codexSandboxArgs, agentCustomArgs...)
+	}
 	// Hermes: resolve the overlay source home through one resolver contract —
 	// the selection parsed from custom_args (agent.ParseHermesProfileArgs) plus
 	// the agent's custom_env HERMES_HOME feed execenv.ResolveHermesProfile, which
@@ -4146,6 +4158,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
+			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		}, d.logger)
 	}
@@ -4166,6 +4179,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
+			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
 		}
 		if localAssignment != nil {
