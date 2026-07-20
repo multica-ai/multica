@@ -159,6 +159,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		providerRoot = filepath.Join(home, ".kiro", "skills")
 	case "qoder":
 		providerRoot = filepath.Join(home, ".qoder", "skills")
+	case "qwen":
+		providerRoot = filepath.Join(home, ".qwen", "skills")
 	case "traecli":
 		// Official TRAE CLI global skills live in ~/.traecli/skills.
 		// See https://docs.trae.cn/cli_skills

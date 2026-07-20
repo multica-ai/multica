@@ -388,6 +388,9 @@ func skillsDirPath(workDir, provider string) string {
 		// Qoder CLI discovers project-level skills under .qoder/skills/.
 		// See https://docs.qoder.com/cli/Skills.md
 		return filepath.Join(workDir, ".qoder", "skills")
+	case "qwen":
+		// Qwen Code discovers project skills from .qwen/skills/.
+		return filepath.Join(workDir, ".qwen", "skills")
 	case "traecli":
 		// Official TRAE CLI discovers project-level skills from .traecli/skills/
 		// in the workdir (global skills live in ~/.traecli/skills). See

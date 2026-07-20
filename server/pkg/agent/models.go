@@ -165,6 +165,8 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 			annotateCodebuddyThinking(ctx, models, executablePath)
 			return models, nil
 		})
+	case "qwen":
+		return qwenStaticModels(), nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
@@ -1649,4 +1651,11 @@ func codebuddyStaticModels() []Model {
 		{ID: "gpt-5.5", Label: "GPT 5.5", Provider: "openai"},
 		{ID: "deepseek-v3-2-volc-ioa", Label: "Deepseek V3 2 Volc IOA", Provider: "deepseek"},
 	}
+}
+
+// qwenStaticModels is a conservative offline default. Qwen Code emits its
+// selected model in the stream system event, while its complete catalog is
+// account-dependent and has no stable headless discovery command yet.
+func qwenStaticModels() []Model {
+	return []Model{{ID: "qwen3.8-max-preview", Label: "Qwen 3.8 Max Preview", Provider: "qwen", Default: true}}
 }

@@ -1,6 +1,7 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, DevEco Code,
-// OpenClaw, Hermes, Pi, Cursor, Kimi, Kiro, Antigravity, Qoder, Trae, Grok). It
+// OpenClaw, Hermes, Pi, Cursor, Kimi, Kiro, Antigravity, Qoder, Trae, Grok,
+// Qwen Code). It
 // mirrors the happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
 
@@ -192,6 +193,7 @@ var SupportedTypes = []string{
 	"qoder",
 	"traecli",
 	"grok",
+	"qwen",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -244,8 +246,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &traecliBackend{cfg: cfg}, nil
 	case "grok":
 		return &grokBackend{cfg: cfg}, nil
+	case "qwen":
+		return &qwenBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli, grok)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli, grok, qwen)", agentType)
 	}
 }
 
@@ -277,6 +281,7 @@ var launchHeaders = map[string]string{
 	"qoder":       "qodercli --acp",
 	"traecli":     "traecli acp serve",
 	"grok":        "grok agent stdio",
+	"qwen":        "qwen -p (stream-json)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

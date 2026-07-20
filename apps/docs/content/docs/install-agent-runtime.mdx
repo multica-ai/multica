@@ -170,6 +170,17 @@ Agentic coding CLI using the ACP protocol over stdio (shares the transport with 
 | Install | See the official CLI docs at [qoder.com/cli](https://qoder.com/cli). |
 | Authentication | Per the vendor's docs. |
 
+### Qwen Code (Alibaba)
+
+Alibaba Qwen Code CLI (`qwen`). Multica runs it headlessly as `qwen -p <prompt> --output-format stream-json --yolo`; session resumption uses `--resume`, and the daemon reads native text, thinking, tool, and result JSONL events. Skills are injected into `.qwen/skills/`, and the task brief goes to `QWEN.md`. Managed `mcp_config` is rejected at launch because the CLI has no matching config flag; leave it unset to inherit MCP servers from Qwen settings.
+
+| | |
+|---|---|
+| Daemon looks for | `qwen` |
+| Install | Install Qwen Code and ensure `qwen` is on `PATH`. |
+| Authentication | Run `qwen` once interactively and complete the provider login. |
+| Notes | Override the binary with `MULTICA_QWEN_PATH`, defaults with `MULTICA_QWEN_MODEL` and `MULTICA_QWEN_ARGS`. Minimum CLI version: `0.20.0`. |
+
 ### Trae CLI (ByteDance)
 
 ByteDance's official TRAE CLI (`traecli`, paired with the Trae IDE — **not** the open-source `bytedance/trae-agent`). It is ACP-native, so Multica drives it over stdio via `traecli acp serve --yolo`, sharing the transport with Hermes, Kimi, Kiro CLI, and Qoder. Session resumption works through ACP `session/load`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically (switched per task via `session/set_model`), and skills are copied into `.traecli/skills/`.
