@@ -84,14 +84,15 @@ type AgentResponse struct {
 	// members infer another member's integration footprint. Redacted to
 	// `nil` + `composio_toolkit_allowlist_redacted=true` for non-owners,
 	// mirroring the existing mcp_config redaction contract.
-	ComposioToolkitAllowlist         []string            `json:"composio_toolkit_allowlist,omitempty"`
-	ComposioToolkitAllowlistRedacted bool                `json:"composio_toolkit_allowlist_redacted,omitempty"`
-	OwnerID                          *string             `json:"owner_id"`
-	Skills                           []AgentSkillSummary `json:"skills"`
-	CreatedAt                        string              `json:"created_at"`
-	UpdatedAt                        string              `json:"updated_at"`
-	ArchivedAt                       *string             `json:"archived_at"`
-	ArchivedBy                       *string             `json:"archived_by"`
+	ComposioToolkitAllowlist         []string               `json:"composio_toolkit_allowlist,omitempty"`
+	ComposioToolkitAllowlistRedacted bool                   `json:"composio_toolkit_allowlist_redacted,omitempty"`
+	OwnerID                          *string                `json:"owner_id"`
+	Skills                           []AgentSkillSummary    `json:"skills"`
+	DisabledRuntimeSkills            []DisabledRuntimeSkill `json:"disabled_runtime_skills"`
+	CreatedAt                        string                 `json:"created_at"`
+	UpdatedAt                        string                 `json:"updated_at"`
+	ArchivedAt                       *string                `json:"archived_at"`
+	ArchivedBy                       *string                `json:"archived_by"`
 }
 
 // runtimeConfigGatewayTokenMask is the placeholder the API substitutes for
@@ -175,6 +176,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
+		DisabledRuntimeSkills:    decodeDisabledRuntimeSkills(a.DisabledRuntimeSkills),
 		CreatedAt:                timestampToString(a.CreatedAt),
 		UpdatedAt:                timestampToString(a.UpdatedAt),
 		ArchivedAt:               timestampToPtr(a.ArchivedAt),
@@ -556,16 +558,17 @@ type CoalescedCommentData struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID            string                      `json:"id"`
-	Name          string                      `json:"name"`
-	Instructions  string                      `json:"instructions"`
-	Skills        []service.AgentSkillData    `json:"skills,omitempty"`
-	SkillRefs     []service.AgentSkillRefData `json:"skill_refs,omitempty"`
-	CustomEnv     map[string]string           `json:"custom_env,omitempty"`
-	CustomArgs    []string                    `json:"custom_args,omitempty"`
-	McpConfig     json.RawMessage             `json:"mcp_config,omitempty"`
-	Model         string                      `json:"model,omitempty"`
-	ThinkingLevel string                      `json:"thinking_level,omitempty"`
+	ID                    string                      `json:"id"`
+	Name                  string                      `json:"name"`
+	Instructions          string                      `json:"instructions"`
+	Skills                []service.AgentSkillData    `json:"skills,omitempty"`
+	SkillRefs             []service.AgentSkillRefData `json:"skill_refs,omitempty"`
+	CustomEnv             map[string]string           `json:"custom_env,omitempty"`
+	CustomArgs            []string                    `json:"custom_args,omitempty"`
+	McpConfig             json.RawMessage             `json:"mcp_config,omitempty"`
+	Model                 string                      `json:"model,omitempty"`
+	ThinkingLevel         string                      `json:"thinking_level,omitempty"`
+	DisabledRuntimeSkills []DisabledRuntimeSkill      `json:"disabled_runtime_skills,omitempty"`
 	// RuntimeConfig is the agent's saved runtime_config JSON as-is. The
 	// daemon decodes it per-provider — e.g. the openclaw backend reads
 	// `mode` + `gateway.*` to choose between embedded and gateway routing
