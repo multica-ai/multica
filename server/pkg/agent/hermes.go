@@ -161,6 +161,11 @@ type hermesBackend struct {
 	cfg Config
 }
 
+var (
+	hermesReaderDrainGrace      = 2 * time.Second
+	hermesNotificationQuietTime = 250 * time.Millisecond
+)
+
 func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -264,6 +269,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
+	activity := make(chan struct{}, 1)
 
 	c := &hermesClient{
 		cfg:          b.cfg,
@@ -272,6 +278,12 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		pendingTools: make(map[string]*pendingToolCall),
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
+		},
+		onActivity: func() {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
 		},
 		onMessage: func(msg Message) {
 			if !streamingCurrentTurn.Load() {
@@ -509,24 +521,37 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				c.usageMu.Unlock()
 			default:
 			}
+			waitForHermesNotificationQuiescence(runCtx, activity, readerDone)
 		}
 
 		duration := time.Since(startTime)
 		b.cfg.Logger.Info("hermes finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		// Close stdin and cancel context to signal hermes acp to exit.
+		// Close stdin first so Hermes can observe EOF and exit cleanly. Keep the
+		// process alive while stdout/stderr drain; cancelling at the prompt
+		// response boundary can truncate final notifications that arrive just
+		// after the response.
 		stdin.Close()
-		cancel()
 
-		// Wait for the reader goroutine to finish so all output is accumulated.
-		<-readerDone
-		// Wait for the stderr copier as well so the provider-error sniffer
+		// Wait for the stdout reader and stderr copier so all output is
+		// accumulated and the provider-error sniffer
 		// has every byte the child wrote before we consult it for failure
 		// promotion. Skipping this leaves a small race where stopReason=
 		// end_turn arrives over stdout while the stderr 429 / usage-limit
 		// lines are still in transit, causing the promoted error message
-		// to fall through to the synthetic agent-text fallback.
-		<-stderrDone
+		// to fall through to the synthetic agent-text fallback. If Hermes does
+		// not honor stdin EOF within the bound, cancel it and join both readers
+		// before accessing their buffers.
+		if !waitForHermesPipeDrain(readerDone, stderrDone, hermesReaderDrainGrace) {
+			b.cfg.Logger.Warn("hermes did not close output pipes after stdin EOF; forcing shutdown",
+				"pid", cmd.Process.Pid,
+				"grace", hermesReaderDrainGrace.String(),
+			)
+			cancel()
+			<-readerDone
+			<-stderrDone
+		}
+		streamingCurrentTurn.Store(false)
 
 		outputMu.Lock()
 		finalOutput := output.String()
@@ -569,6 +594,55 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
+// waitForHermesNotificationQuiescence gives the stdout reader a bounded chance
+// to consume session updates emitted just after session/prompt returns. Hermes
+// may deliver the final agent_message_chunk after the response; closing stdin
+// or cancelling immediately at that boundary loses the user-visible answer.
+func waitForHermesNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}) {
+	quiet := time.NewTimer(hermesNotificationQuietTime)
+	defer quiet.Stop()
+	hard := time.NewTimer(hermesReaderDrainGrace)
+	defer hard.Stop()
+
+	for {
+		select {
+		case <-activity:
+			if !quiet.Stop() {
+				select {
+				case <-quiet.C:
+				default:
+				}
+			}
+			quiet.Reset(hermesNotificationQuietTime)
+		case <-quiet.C:
+			return
+		case <-readerDone:
+			return
+		case <-hard.C:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func waitForHermesPipeDrain(readerDone, stderrDone <-chan struct{}, timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for readerDone != nil || stderrDone != nil {
+		select {
+		case <-readerDone:
+			readerDone = nil
+		case <-stderrDone:
+			stderrDone = nil
+		case <-timer.C:
+			return false
+		}
+	}
+	return true
+}
+
 // ── hermesClient: ACP JSON-RPC 2.0 transport ──
 
 type hermesPromptResult struct {
@@ -586,8 +660,8 @@ type hermesClient struct {
 	sessionID    string
 	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
-	// onActivity observes accepted ACP session updates. Grok uses it to
-	// retain a short post-response drain window; other ACP backends leave it
+	// onActivity observes accepted ACP session updates. Hermes and Grok use it
+	// to retain a short post-response drain window; other ACP backends leave it
 	// nil and keep their existing lifecycle behavior.
 	onActivity func()
 	// acceptNotification can drop ACP session updates before dispatching to
