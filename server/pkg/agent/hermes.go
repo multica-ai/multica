@@ -325,11 +325,15 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	// Drive the ACP session lifecycle in a goroutine.
 	go func() {
-		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
 		defer func() {
 			stdin.Close()
+			// Cancellation must be reachable before Wait. A pathological child
+			// can close stdout/stderr (so the pipe drain succeeds) but keep the
+			// process alive; waiting first would then block until the overall
+			// task timeout and make a later deferred cancel ineffective.
+			cancel()
 			_ = cmd.Wait()
 		}()
 

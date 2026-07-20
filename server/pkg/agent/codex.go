@@ -1580,6 +1580,12 @@ type codexClient struct {
 // output or ending the new turn. Codex app-server can emit notifications before
 // the turn/start RPC response, so the gate is armed before that request and uses
 // turn/started (or legacy task_started) as the actual current-turn boundary.
+// Protocols that omit those start events also omit a reliable current-turn ID;
+// for compatibility, their post-arm events remain accepted. We therefore rely
+// on the single stdout reader's ordering guarantee that resume history emitted
+// before the thread/resume response is processed while the gate is still closed.
+// A replay emitted after arm but before a start event cannot be distinguished
+// from a valid legacy current-turn event without breaking those older streams.
 // Its mutable lifecycle fields are only touched by the stdout reader goroutine;
 // armed is atomic because the lifecycle goroutine flips it.
 type codexTurnNotificationGate struct {
