@@ -172,10 +172,7 @@ Two ways `mcp_config` differs from `custom_env`:
   field is `null` and `mcp_config_redacted` is `true`. Agent actors never see
   it, and a workspace may force redaction for everyone.
 
-Provider support is not uniform: Qwen Code has no Multica-managed MCP CLI flag, so
-the daemon rejects a non-null `mcp_config` rather than silently dropping it. Keep
-the field unset (`null`) to inherit Qwen Code native settings from
-`.qwen/settings.json`.
+Provider support is not uniform: Qwen Code accepts a managed `mcp_config` through a daemon-owned 0600 temporary JSON file passed with `--mcp-config`; it is removed when the run exits. Leave the field unset (`null`) to inherit Qwen Code native settings.
 
 ## Skill binding
 

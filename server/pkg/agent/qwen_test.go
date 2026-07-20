@@ -31,11 +31,11 @@ func TestBuildQwenArgsKeepsProtocolManaged(t *testing.T) {
 		ExtraArgs:       []string{"--output-format", "text", "--sandbox"},
 		CustomArgs: []string{
 			"--prompt=replace", "-o", "json", "--model", "other", "--resume", "other-session",
-			"--safe-mode", "--chat-recording", "false", "--debug",
+			"--safe-mode", "--chat-recording", "false", "--mcp-config", "injected-mcp.json", "--mcp-config=inline-mcp.json", "--debug",
 		},
 	}, slog.Default())
 	joined := strings.Join(args, " ")
-	for _, forbidden := range []string{"text", "replace", "other-session", "other", "--safe-mode", "--chat-recording"} {
+	for _, forbidden := range []string{"text", "replace", "other-session", "other", "--safe-mode", "--chat-recording", "injected-mcp.json", "inline-mcp.json"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("managed argument %q leaked into %v", forbidden, args)
 		}
@@ -57,10 +57,14 @@ func TestBuildQwenArgsKeepsProtocolManaged(t *testing.T) {
 func fakeQwenScript() string {
 	return `#!/bin/sh
 if [ -n "$QWEN_ARGS_FILE" ]; then printf '%s\n' "$@" > "$QWEN_ARGS_FILE"; fi
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--mcp-config" ] && [ -n "$QWEN_MCP_CAPTURE_FILE" ]; then cp "$2" "$QWEN_MCP_CAPTURE_FILE"; break; fi
+  shift
+done
 case "$QWEN_MODE" in
   error)
     printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-error","model":"qwen-test"}'
-    printf '%s\n' '{"type":"result","subtype":"error","session_id":"sess-error","is_error":true,"result":"synthetic Qwen failure"}'
+    printf '%s\n' '{"type":"result","subtype":"error_during_execution","session_id":"sess-error","is_error":true,"error":{"type":"authentication_error","message":"synthetic Qwen authentication failure"}}'
     ;;
   exit)
     echo 'synthetic qwen stderr' >&2
@@ -158,7 +162,7 @@ func TestQwenBackendFailureTimeoutAndCancellation(t *testing.T) {
 		status string
 		needle string
 	}{
-		{"result error", map[string]string{"QWEN_MODE": "error"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic Qwen failure"},
+		{"result error", map[string]string{"QWEN_MODE": "error"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic Qwen authentication failure"},
 		{"process error", map[string]string{"QWEN_MODE": "exit"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic qwen stderr"},
 		{"timeout", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{Timeout: 20 * time.Millisecond}, "timeout", "timed out"},
 		{"cancel", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{}, "aborted", "cancelled"},
@@ -182,12 +186,46 @@ func TestQwenBackendFailureTimeoutAndCancellation(t *testing.T) {
 	}
 }
 
-func TestQwenBackendRejectsManagedMCP(t *testing.T) {
-	t.Parallel()
-	backend := newFakeQwenBackend(t, nil)
-	_, err := backend.Execute(context.Background(), "task", ExecOptions{McpConfig: json.RawMessage(`{"mcpServers":{"demo":{"command":"echo"}}}`)})
-	if err == nil || !strings.Contains(err.Error(), "does not support Multica-managed MCP") {
-		t.Fatalf("managed MCP error = %v", err)
+func TestQwenBackendPassesManagedMCPThroughTempFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is POSIX-only")
+	}
+	capturePath := filepath.Join(t.TempDir(), "qwen.mcp.json")
+	argsPath := filepath.Join(t.TempDir(), "qwen.args")
+	mcpConfig := json.RawMessage(`{"mcpServers":{"demo":{"command":"echo","args":["hello"]}}}`)
+	backend := newFakeQwenBackend(t, map[string]string{"QWEN_ARGS_FILE": argsPath, "QWEN_MCP_CAPTURE_FILE": capturePath})
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{McpConfig: mcpConfig})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	_, result := awaitQwenResult(t, session)
+	if result.Status != "completed" {
+		t.Fatalf("result = %+v", result)
+	}
+	argsData, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read qwen args: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(argsData)), "\n")
+	mcpPath := ""
+	for i, arg := range args {
+		if arg == "--mcp-config" && i+1 < len(args) {
+			mcpPath = args[i+1]
+			break
+		}
+	}
+	if mcpPath == "" {
+		t.Fatalf("managed MCP argument missing from %v", args)
+	}
+	data, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatalf("read captured managed MCP file: %v", err)
+	}
+	if string(data) != string(mcpConfig) {
+		t.Fatalf("managed MCP file = %s, want %s", data, mcpConfig)
+	}
+	if _, err := os.Stat(mcpPath); !os.IsNotExist(err) {
+		t.Fatalf("managed MCP file should be removed after completion, stat err=%v", err)
 	}
 }
 
@@ -211,5 +249,31 @@ func TestQwenCode020FixtureParses(t *testing.T) {
 	}
 	if state.usage["qwen3.8-max-preview"].InputTokens != 46539 {
 		t.Fatalf("fixture usage = %+v", state.usage)
+	}
+}
+
+func TestQwenCode020ErrorFixturePreservesErrorMessage(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile(filepath.Join("testdata", "qwen-code-0.20.0-error-stream-json.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := qwenStreamState{usage: make(map[string]TokenUsage)}
+	messages := make(chan Message, 4)
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var event qwenStreamEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("fixture event: %v\n%s", err, line)
+		}
+		handleQwenEvent(event, messages, &state)
+	}
+	if !state.sawResult || !state.resultIsError {
+		t.Fatalf("unexpected terminal state: %+v", state)
+	}
+	if state.sessionID != "session-error-redacted" {
+		t.Fatalf("session ID = %q", state.sessionID)
+	}
+	if state.finalResultText != "Authentication failed: credential redacted" {
+		t.Fatalf("error detail = %q", state.finalResultText)
 	}
 }

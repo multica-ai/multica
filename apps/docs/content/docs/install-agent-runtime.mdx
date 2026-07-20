@@ -179,7 +179,7 @@ Qwen Code uses its native JSONL protocol in daemon mode: `qwen -p <prompt> --out
 | Daemon looks for | `qwen` |
 | Install | Install Qwen Code using Alibaba's current Qwen Code instructions, then ensure `qwen` is on `PATH`. |
 | Authentication | Run `qwen` once interactively and complete its configured authentication flow before starting the daemon. |
-| Notes | Minimum CLI version: `0.20.0`. Override the binary with `MULTICA_QWEN_PATH` and set a daemon-wide default model with `MULTICA_QWEN_MODEL`. Add daemon-wide non-managed flags with `MULTICA_QWEN_ARGS` (POSIX shellword parsing). Qwen has no temporary MCP-config flag, so Multica rejects agent `mcp_config`; configure persistent MCP servers with `qwen mcp add`. |
+| Notes | Minimum CLI version: `0.20.0`. Override the binary with `MULTICA_QWEN_PATH` and set a daemon-wide default model with `MULTICA_QWEN_MODEL`. Add daemon-wide non-managed flags with `MULTICA_QWEN_ARGS` (POSIX shellword parsing). Managed agent `mcp_config` is written to a 0600 temporary JSON file and passed through `--mcp-config`; the file is removed after the run. Leave the field null to inherit native Qwen Code MCP settings. |
 
 ### Trae CLI (ByteDance)
 

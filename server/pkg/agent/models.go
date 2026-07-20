@@ -166,7 +166,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 			return models, nil
 		})
 	case "qwen":
-		return qwenStaticModels(), nil
+		// Qwen Code has no account-independent headless model catalog. An
+		// empty list keeps the runtime default and manual model entry available
+		// without advertising a Token-Plan-specific model to other accounts.
+		return []Model{}, nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
@@ -1651,11 +1654,4 @@ func codebuddyStaticModels() []Model {
 		{ID: "gpt-5.5", Label: "GPT 5.5", Provider: "openai"},
 		{ID: "deepseek-v3-2-volc-ioa", Label: "Deepseek V3 2 Volc IOA", Provider: "deepseek"},
 	}
-}
-
-// qwenStaticModels is a conservative offline default. Qwen Code emits its
-// selected model in the stream system event, while its complete catalog is
-// account-dependent and has no stable headless discovery command yet.
-func qwenStaticModels() []Model {
-	return []Model{{ID: "qwen3.8-max-preview", Label: "Qwen 3.8 Max Preview", Provider: "qwen", Default: true}}
 }

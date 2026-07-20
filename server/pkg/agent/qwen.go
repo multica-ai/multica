@@ -35,6 +35,7 @@ var qwenBlockedArgs = map[string]blockedArgMode{
 	"-c":                   blockedStandalone,
 	"--continue":           blockedStandalone,
 	"--chat-recording":     blockedWithValue,
+	"--mcp-config":         blockedWithValue,
 	"--safe-mode":          blockedStandalone,
 }
 
@@ -59,15 +60,31 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	if _, err := exec.LookPath(execPath); err != nil {
 		return nil, fmt.Errorf("qwen executable not found at %q: %w", execPath, err)
 	}
-	// Qwen has no --mcp-config equivalent: its MCP servers are configured with
-	// `qwen mcp add` in QWEN_HOME/project settings. Do not silently drop ours.
-	if hasManagedMcpConfig(opts.McpConfig) {
-		return nil, fmt.Errorf("qwen does not support Multica-managed MCP configuration; configure the server with `qwen mcp add` or remove mcp_config")
-	}
-
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 	args := buildQwenArgs(prompt, opts, b.cfg.Logger)
+
+	// Qwen Code 0.20.0 accepts a JSON string or a file path through
+	// --mcp-config. Materialise a managed config into a 0600 temp file so it
+	// does not appear in argv or logs, then remove it when the process exits.
+	var mcpConfigPath string
+	var mcpFileCleanup func()
+	if hasManagedMcpConfig(opts.McpConfig) {
+		path, err := writeMcpConfigToTemp(opts.McpConfig)
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("write qwen mcp_config: %w", err)
+		}
+		mcpConfigPath = path
+		mcpFileCleanup = func() { cleanupMcpConfigTemp(mcpConfigPath) }
+		args = append(args, "--mcp-config", mcpConfigPath)
+	}
+	// Clean up if a later setup step returns before the result goroutine owns it.
+	defer func() {
+		if mcpFileCleanup != nil {
+			mcpFileCleanup()
+		}
+	}()
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
 	// args contain the task prompt; never expose it in daemon logs.
@@ -89,6 +106,8 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		cancel()
 		return nil, fmt.Errorf("start qwen: %w", err)
 	}
+	// cmd.Start succeeded; result goroutine now owns cleanup.
+	mcpFileCleanup = nil
 	b.cfg.Logger.Info("qwen started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
@@ -97,6 +116,9 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		if mcpConfigPath != "" {
+			defer cleanupMcpConfigTemp(mcpConfigPath)
+		}
 
 		started := time.Now()
 		state := qwenStreamState{model: opts.Model, usage: make(map[string]TokenUsage)}
@@ -223,8 +245,14 @@ func handleQwenEvent(event qwenStreamEvent, ch chan<- Message, state *qwenStream
 		handleQwenUser(event.Message, ch)
 	case "result":
 		state.sawResult = true
-		state.finalResultText = event.Result
 		state.resultIsError = event.IsError || event.Subtype == "error" || event.Subtype == "failed"
+		if state.resultIsError {
+			// Qwen 0.20.0 result errors omit result; their actionable detail
+			// is in error.message.
+			state.finalResultText = qwenErrorText(event)
+		} else {
+			state.finalResultText = event.Result
+		}
 		if usage := qwenResultUsage(event.Usage, state.model); len(usage) > 0 {
 			state.usage = usage
 		}

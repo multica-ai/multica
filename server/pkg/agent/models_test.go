@@ -11,7 +11,7 @@ import (
 
 func TestListModelsStaticProviders(t *testing.T) {
 	ctx := context.Background()
-	for _, provider := range []string{"claude", "codex", "cursor", "qwen"} {
+	for _, provider := range []string{"claude", "codex", "cursor"} {
 		got, err := ListModels(ctx, provider, "")
 		if err != nil {
 			t.Fatalf("ListModels(%q) error: %v", provider, err)
@@ -27,6 +27,16 @@ func TestListModelsStaticProviders(t *testing.T) {
 				t.Errorf("ListModels(%q)[%d] has empty Label", provider, i)
 			}
 		}
+	}
+}
+
+func TestListModelsQwenUsesRuntimeDefaultAndManualEntry(t *testing.T) {
+	got, err := ListModels(context.Background(), "qwen", "")
+	if err != nil {
+		t.Fatalf("ListModels(qwen) error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ListModels(qwen) = %+v, want no account-specific static catalog", got)
 	}
 }
 
