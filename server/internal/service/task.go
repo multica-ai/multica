@@ -906,6 +906,28 @@ func taskErrorType(reason string) string {
 	}
 }
 
+// dispatchedAutopilotRunCtxKey carries the autopilot run a create_issue dispatch is
+// enqueuing a task for, so the task INSERT stamps dispatched_autopilot_run_id
+// atomically (MUL-4809 §4.1 provenance). Only the autopilot create_issue dispatch
+// sets it via withDispatchedAutopilotRun; every other enqueue path leaves it unset
+// and stamps NULL, so an ordinary comment/chat task can never be mistaken for a
+// run's dispatched task during crash-window repair.
+type dispatchedAutopilotRunCtxKey struct{}
+
+// withDispatchedAutopilotRun returns a ctx that stamps the next enqueued task with
+// the dispatching autopilot run id, so a crash before run.task_id is bound can be
+// repaired by precise provenance lookup rather than a time/agent heuristic.
+func withDispatchedAutopilotRun(ctx context.Context, runID pgtype.UUID) context.Context {
+	return context.WithValue(ctx, dispatchedAutopilotRunCtxKey{}, runID)
+}
+
+func dispatchedAutopilotRunFromContext(ctx context.Context) pgtype.UUID {
+	if v, ok := ctx.Value(dispatchedAutopilotRunCtxKey{}).(pgtype.UUID); ok {
+		return v
+	}
+	return pgtype.UUID{}
+}
+
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
 // No context snapshot is stored — the agent fetches all data it needs at
 // runtime via the multica CLI.
@@ -1035,6 +1057,9 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
+		// Autopilot create_issue provenance: set only when this task is the
+		// autopilot's dispatched task (MUL-4809 §4.1); NULL otherwise.
+		DispatchedAutopilotRunID: dispatchedAutopilotRunFromContext(ctx),
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -1154,6 +1179,9 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
+		// Autopilot create_issue provenance for a squad-leader dispatch: set only
+		// when this task is the autopilot's dispatched task (MUL-4809 §4.1).
+		DispatchedAutopilotRunID: dispatchedAutopilotRunFromContext(ctx),
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)

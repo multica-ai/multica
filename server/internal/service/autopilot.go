@@ -722,6 +722,12 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// webhook dispatch has no actor and takes the plain entry points, where the
 	// autopilot-origin issue resolves to rule_owner. The *WithHandoff variants are
 	// the existing actor-carrying enqueue methods; the handoff note is empty here.
+	// Stamp the dispatched task with this run's provenance at INSERT (MUL-4809
+	// §4.1). If the process crashes between this enqueue and the run.task_id bind
+	// below, the run can be repaired by a precise lookup of the task carrying this
+	// run's id — no time-window guessing, and an ordinary comment task (never
+	// stamped) can never be misattributed as the run's dispatched work.
+	dispatchCtx := withDispatchedAutopilotRun(ctx, run.ID)
 	var dispatchedTask db.AgentTaskQueue
 	switch {
 	case ap.AssigneeType == "squad":
@@ -733,20 +739,20 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 			return fmt.Errorf("not allowed to invoke private squad leader")
 		}
 		if actorUserID.Valid {
-			dispatchedTask, err = s.TaskSvc.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, leader.ID, ap.AssigneeID, "", actorUserID)
+			dispatchedTask, err = s.TaskSvc.EnqueueTaskForSquadLeaderWithHandoff(dispatchCtx, issue, leader.ID, ap.AssigneeID, "", actorUserID)
 		} else {
-			dispatchedTask, err = s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{})
+			dispatchedTask, err = s.TaskSvc.EnqueueTaskForSquadLeader(dispatchCtx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{})
 		}
 		if err != nil {
 			return fmt.Errorf("enqueue squad leader task: %w", err)
 		}
 	case actorUserID.Valid:
-		dispatchedTask, err = s.TaskSvc.EnqueueTaskForIssueWithHandoff(ctx, issue, "", actorUserID)
+		dispatchedTask, err = s.TaskSvc.EnqueueTaskForIssueWithHandoff(dispatchCtx, issue, "", actorUserID)
 		if err != nil {
 			return fmt.Errorf("enqueue task for issue: %w", err)
 		}
 	default:
-		dispatchedTask, err = s.TaskSvc.EnqueueTaskForIssue(ctx, issue)
+		dispatchedTask, err = s.TaskSvc.EnqueueTaskForIssue(dispatchCtx, issue)
 		if err != nil {
 			return fmt.Errorf("enqueue task for issue: %w", err)
 		}
@@ -1040,47 +1046,23 @@ func (s *AutopilotService) bindAutopilotRunTask(ctx context.Context, runID, task
 		util.UUIDToString(runID), current.Status, util.UUIDToString(taskID))
 }
 
-// autopilotBindRepairWindow bounds how long after issue creation a task may have
-// been queued and still count as the run's dispatched task during crash-window
-// repair. The autopilot enqueues its task in the same call that creates the issue,
-// so the real dispatched task lands within milliseconds; the window only has to
-// absorb dispatch latency while staying far shorter than the gap before any
-// human/agent could comment and spawn an unrelated task on the same issue.
-const autopilotBindRepairWindow = 15 * time.Minute
-
 // repairUnboundCreateIssueRun binds an unbound create_issue run to the task it
-// actually dispatched and returns the bound run. The run's task_id was never set
-// (a crash between enqueue and bind, or a run dispatched by a pre-§4.1 pod), so the
-// dispatched task is recovered precisely — the first root task queued for the issue
-// by the run's dispatch target within the bind window (MUL-4809 §4.1 item 4). ok is
-// false when the run cannot be safely repaired; the caller must not finalize it then.
+// actually dispatched and returns the bound run. The run's task_id was never set —
+// a crash between task enqueue and the run.task_id bind, or an unbound run left by
+// a gate-off (legacy-mode) dispatch that is only now being finalized. The
+// dispatched task is recovered by PRECISE provenance: the task stamped with this
+// run's id at INSERT (dispatched_autopilot_run_id), not a time/agent heuristic. ok
+// is false when no such task exists — the caller must not finalize the run then, so
+// an ordinary comment/chat task on the same issue (never stamped) can never bind
+// here or finalize the run off the wrong outcome (MUL-4809 §4.1).
 func (s *AutopilotService) repairUnboundCreateIssueRun(ctx context.Context, run db.AutopilotRun) (db.AutopilotRun, bool) {
-	if !run.IssueID.Valid {
-		return db.AutopilotRun{}, false
-	}
-	issue, err := s.Queries.GetIssue(ctx, run.IssueID)
-	if err != nil {
-		slog.Warn("autopilot: failed to load issue for bind repair",
-			"issue_id", util.UUIDToString(run.IssueID), "error", err)
-		return db.AutopilotRun{}, false
-	}
-	// Autopilot-created issues are authored by the dispatched agent (the resolved
-	// leader), so the dispatched task's agent_id equals the issue creator. A
-	// different shape isn't a create_issue dispatch this repair can attribute.
-	if issue.CreatorType != "agent" || !issue.CreatorID.Valid || !issue.CreatedAt.Valid {
-		return db.AutopilotRun{}, false
-	}
-	dispatched, err := s.Queries.FindAutopilotDispatchedTaskForIssue(ctx, db.FindAutopilotDispatchedTaskForIssueParams{
-		IssueID:   run.IssueID,
-		AgentID:   issue.CreatorID,
-		CreatedAt: pgtype.Timestamptz{Time: issue.CreatedAt.Time.Add(autopilotBindRepairWindow), Valid: true},
-	})
+	dispatched, err := s.Queries.GetTaskByDispatchedAutopilotRun(ctx, run.ID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return db.AutopilotRun{}, false // no dispatched task in the window — don't finalize off a stray task
+			return db.AutopilotRun{}, false // no provably-dispatched task — don't finalize off a stray task
 		}
 		slog.Warn("autopilot: failed to find dispatched task for bind repair",
-			"issue_id", util.UUIDToString(run.IssueID), "error", err)
+			"run_id", util.UUIDToString(run.ID), "error", err)
 		return db.AutopilotRun{}, false
 	}
 	bound, err := s.bindAutopilotRunTask(ctx, run.ID, dispatched.ID)

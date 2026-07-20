@@ -207,6 +207,12 @@ func dispatchCreateIssueAutopilot(t *testing.T, title string) linkedIssueAutopil
 	if run.TaskID.Bytes != tasks[0].ID.Bytes {
 		t.Fatalf("run.task_id not bound to the dispatched task: run=%x task=%x", run.TaskID.Bytes, tasks[0].ID.Bytes)
 	}
+	// MUL-4809 §4.1 P0-1: the dispatch stamps the task's provenance at INSERT, so a
+	// crash before the bind can be repaired precisely. Verify the real dispatch path
+	// writes it (not just the bind), which is what makes repair unambiguous.
+	if !tasks[0].DispatchedAutopilotRunID.Valid || tasks[0].DispatchedAutopilotRunID.Bytes != run.ID.Bytes {
+		t.Fatalf("dispatched task not stamped with run provenance: stamp valid=%v", tasks[0].DispatchedAutopilotRunID.Valid)
+	}
 
 	return linkedIssueAutopilotFixture{taskSvc: taskSvc, svc: autopilotSvc, queries: queries, run: run, taskID: tasks[0].ID}
 }

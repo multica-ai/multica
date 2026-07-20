@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -15,10 +16,12 @@ import (
 
 // newCreateIssueRunFixture builds a create_issue autopilot whose run is linked to
 // an agent-authored issue but left UNBOUND (task_id NULL) — the crash-window state
-// SyncRunFromCreateIssueTask must repair (MUL-4809 §4.1 item 4). It returns the
-// service, the dispatch agent id, the run, the pool, and a helper that inserts a
-// task on the issue with a chosen agent and created_at offset from issue creation.
-func newCreateIssueRunFixture(t *testing.T) (*AutopilotService, string, db.AutopilotRun, *pgxpool.Pool, func(agent string, offset time.Duration, status string) db.AgentTaskQueue) {
+// SyncRunFromCreateIssueTask must repair (MUL-4809 §4.1). It returns the service,
+// the dispatch agent id, the run, the pool, and a helper that inserts a task on the
+// issue. Pass a valid dispatchedRunID to stamp the task's dispatched_autopilot_run_id
+// (the autopilot's own dispatched task); pass pgtype.UUID{} for an ordinary
+// comment/chat task that carries no provenance.
+func newCreateIssueRunFixture(t *testing.T) (*AutopilotService, string, db.AutopilotRun, *pgxpool.Pool, func(agent string, offset time.Duration, status string, dispatchedRunID pgtype.UUID) db.AgentTaskQueue) {
 	t.Helper()
 	ctx := context.Background()
 	pool := newTaskClaimRacePool(t)
@@ -65,9 +68,6 @@ func newCreateIssueRunFixture(t *testing.T) (*AutopilotService, string, db.Autop
 		t.Fatalf("CreateAutopilot: %v", err)
 	}
 
-	// Issue authored by the dispatch agent — dispatchCreateIssue sets the issue
-	// creator to the resolved leader, so the repair attributes the dispatched task
-	// by that creator.
 	var issueIDStr string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, origin_type, origin_id)
@@ -95,16 +95,12 @@ func newCreateIssueRunFixture(t *testing.T) (*AutopilotService, string, db.Autop
 		t.Fatalf("link run to issue: %v", err)
 	}
 
-	var issueCreatedAt time.Time
-	if err := pool.QueryRow(ctx, `SELECT created_at FROM issue WHERE id = $1`, issueIDStr).Scan(&issueCreatedAt); err != nil {
-		t.Fatalf("read issue created_at: %v", err)
-	}
-
-	insertTask := func(agent string, offset time.Duration, status string) db.AgentTaskQueue {
+	insertTask := func(agent string, offset time.Duration, status string, dispatchedRunID pgtype.UUID) db.AgentTaskQueue {
 		var id string
 		if err := pool.QueryRow(context.Background(),
-			`INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at) VALUES ($1, $2, $3, $4, 0, $5) RETURNING id`,
-			agent, runtimeID, issueIDStr, status, issueCreatedAt.Add(offset)).Scan(&id); err != nil {
+			`INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at, dispatched_autopilot_run_id)
+			 VALUES ($1, $2, $3, $4, 0, now() + $5::interval, $6) RETURNING id`,
+			agent, runtimeID, issueIDStr, status, fmt.Sprintf("%d seconds", int(offset.Seconds())), dispatchedRunID).Scan(&id); err != nil {
 			t.Fatalf("insert task: %v", err)
 		}
 		task, err := queries.GetAgentTask(context.Background(), mustUUID(t, id))
@@ -124,17 +120,18 @@ func isTerminalRunStatus(status string) bool {
 	return status == "completed" || status == "failed" || status == "skipped"
 }
 
-// TestSyncRunFromCreateIssueTaskRepairsUnboundRunPrecisely covers MUL-4809 §4.1
-// item 4: when a run's task_id was never bound (a crash between enqueue and bind),
-// finalization must attribute the run to the FIRST dispatched task only. A later
-// comment task on the same issue must not finalize the run — instead the repair
-// binds the run to the real dispatched task, and only that task finalizes it.
+// TestSyncRunFromCreateIssueTaskRepairsUnboundRunPrecisely covers MUL-4809 §4.1:
+// when a run's task_id was never bound (a crash between enqueue and bind),
+// finalization must attribute the run to the task carrying its provenance stamp —
+// never to an unstamped comment task on the same issue. The comment task finishing
+// first must not finalize the run; the repair binds the run to the stamped task,
+// and only that task finalizes it.
 func TestSyncRunFromCreateIssueTaskRepairsUnboundRunPrecisely(t *testing.T) {
 	ctx := context.Background()
 	svc, agentID, run, _, insertTask := newCreateIssueRunFixture(t)
 
-	dispatched := insertTask(agentID, 0, "completed")           // the autopilot's own task
-	comment := insertTask(agentID, 30*time.Second, "completed") // a later comment task on the same issue
+	dispatched := insertTask(agentID, 0, "completed", run.ID)                  // the autopilot's own (stamped) task
+	comment := insertTask(agentID, 30*time.Second, "completed", pgtype.UUID{}) // a later, unstamped comment task
 
 	// The comment task finishing first must NOT finalize the run, but repair must
 	// still bind the run to the real dispatched task.
@@ -161,15 +158,19 @@ func TestSyncRunFromCreateIssueTaskRepairsUnboundRunPrecisely(t *testing.T) {
 	}
 }
 
-// TestSyncRunFromCreateIssueTaskIgnoresTaskOutsideBindWindow covers the crash-window
-// guard: when the run's task_id was never bound and the only task on the issue was
-// queued long after issue creation (so the real dispatched task never existed — an
-// enqueue crash), a stray terminal task must NOT finalize the run.
-func TestSyncRunFromCreateIssueTaskIgnoresTaskOutsideBindWindow(t *testing.T) {
+// TestSyncRunFromCreateIssueTaskIgnoresUnstampedTask is the precise-provenance
+// counter-example Elon asked for (MUL-4809 §4.1 P0-1): when the run's task_id was
+// never bound and the ONLY task on the issue is an unstamped comment/assignment
+// task queued shortly after issue creation (the real dispatched task never existed
+// — e.g. a crash before enqueue), that stray task must NOT finalize the run. A
+// time-window heuristic would have bound it; precise provenance refuses to.
+func TestSyncRunFromCreateIssueTaskIgnoresUnstampedTask(t *testing.T) {
 	ctx := context.Background()
 	svc, agentID, run, _, insertTask := newCreateIssueRunFixture(t)
 
-	stray := insertTask(agentID, autopilotBindRepairWindow+time.Minute, "completed")
+	// Same agent, same issue, seconds after creation — but NOT stamped with the
+	// run's provenance, because it isn't the autopilot's dispatched task.
+	stray := insertTask(agentID, 10*time.Second, "completed", pgtype.UUID{})
 
 	svc.SyncRunFromCreateIssueTask(ctx, stray)
 	after, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
@@ -177,16 +178,16 @@ func TestSyncRunFromCreateIssueTaskIgnoresTaskOutsideBindWindow(t *testing.T) {
 		t.Fatalf("get run: %v", err)
 	}
 	if isTerminalRunStatus(after.Status) {
-		t.Fatalf("run finalized off a task outside the bind window: status=%q", after.Status)
+		t.Fatalf("run finalized off an unstamped stray task: status=%q", after.Status)
 	}
 	if after.TaskID.Valid {
-		t.Fatalf("run bound to a task outside the bind window: task_id=%x", after.TaskID.Bytes)
+		t.Fatalf("run bound to an unstamped stray task: task_id=%x", after.TaskID.Bytes)
 	}
 }
 
 // TestSyncRunFromCreateIssueTaskCompletesRegardlessOfIssueStatus covers MUL-4809
 // §4.1 / §9.2: the run is finalized purely by task outcome. Even when the agent
-// leaves the issue in an in_progress-category status (In Review), the completed
+// leaves the issue in an in_progress-Category status (In Review), the completed
 // task must complete the run, and finalizing the run must not touch issue status.
 func TestSyncRunFromCreateIssueTaskCompletesRegardlessOfIssueStatus(t *testing.T) {
 	ctx := context.Background()
@@ -196,7 +197,7 @@ func TestSyncRunFromCreateIssueTaskCompletesRegardlessOfIssueStatus(t *testing.T
 		t.Fatalf("set issue in_review: %v", err)
 	}
 
-	dispatched := insertTask(agentID, 0, "completed")
+	dispatched := insertTask(agentID, 0, "completed", run.ID)
 	svc.SyncRunFromCreateIssueTask(ctx, dispatched)
 
 	got, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
@@ -222,7 +223,7 @@ func TestSyncRunFromCreateIssueTaskCancelledReasonTraceable(t *testing.T) {
 	ctx := context.Background()
 	svc, agentID, run, _, insertTask := newCreateIssueRunFixture(t)
 
-	dispatched := insertTask(agentID, 0, "cancelled")
+	dispatched := insertTask(agentID, 0, "cancelled", run.ID)
 	svc.SyncRunFromCreateIssueTask(ctx, dispatched)
 
 	got, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
@@ -245,7 +246,7 @@ func TestSyncRunFromCreateIssueTaskDoesNotRewriteTerminalRun(t *testing.T) {
 	ctx := context.Background()
 	svc, agentID, run, _, insertTask := newCreateIssueRunFixture(t)
 
-	dispatched := insertTask(agentID, 0, "completed")
+	dispatched := insertTask(agentID, 0, "completed", run.ID)
 	svc.SyncRunFromCreateIssueTask(ctx, dispatched)
 	done, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
 	if err != nil {
@@ -255,7 +256,7 @@ func TestSyncRunFromCreateIssueTaskDoesNotRewriteTerminalRun(t *testing.T) {
 		t.Fatalf("run did not complete: status=%q", done.Status)
 	}
 
-	comment := insertTask(agentID, time.Minute, "failed")
+	comment := insertTask(agentID, time.Minute, "failed", pgtype.UUID{})
 	svc.SyncRunFromCreateIssueTask(ctx, comment)
 	after, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
 	if err != nil {
@@ -278,7 +279,7 @@ func TestSyncRunFromCreateIssueTaskRetryKeepsRunRunningUntilFinal(t *testing.T) 
 	svc, agentID, run, pool, insertTask := newCreateIssueRunFixture(t)
 
 	// Bind the run to its dispatched task, as dispatchCreateIssue does.
-	dispatched := insertTask(agentID, 0, "running")
+	dispatched := insertTask(agentID, 0, "running", run.ID)
 	bound, err := svc.bindAutopilotRunTask(ctx, run.ID, dispatched.ID)
 	if err != nil {
 		t.Fatalf("bind: %v", err)
