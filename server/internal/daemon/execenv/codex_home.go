@@ -169,11 +169,16 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	}
 
 	// Write a daemon-managed sandbox block into config.toml. On macOS we may
-	// need to fall back to danger-full-access because of openai/codex#10390;
-	// see codex_sandbox.go for the full rationale.
-	policy := codexSandboxPolicyFor(opts.GOOS, opts.CodexVersion)
+	// need to fall back to danger-full-access because of openai/codex#10390,
+	// and on Windows the daemon defaults to danger-full-access unless the user
+	// opted into a native windows.sandbox; see codex_sandbox.go for the full
+	// rationale. Read the copied+sanitized config first so the policy can honor
+	// an explicit user windows.sandbox instead of overriding it.
+	configFile := filepath.Join(codexHome, "config.toml")
+	existingConfig, _ := os.ReadFile(configFile)
+	policy := codexSandboxPolicyForConfig(opts.GOOS, opts.CodexVersion, string(existingConfig))
 	policy.WritableRoots = opts.WritableRoots
-	if err := ensureCodexSandboxConfig(filepath.Join(codexHome, "config.toml"), policy, opts.CodexVersion, logger); err != nil {
+	if err := ensureCodexSandboxConfig(configFile, policy, opts.CodexVersion, logger); err != nil {
 		logger.Warn("execenv: codex-home ensure sandbox config failed", "error", err)
 	}
 

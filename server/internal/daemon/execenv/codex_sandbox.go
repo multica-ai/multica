@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Background
@@ -50,23 +52,34 @@ type codexSandboxPolicy struct {
 	// Reason is a short human-readable label used in warn-level logs.
 	Reason string
 	// Hint is an optional, actionable remediation surfaced in warn-level logs
-	// when Mode is danger-full-access. It is empty when no operator action can
-	// restore a real sandbox (e.g. Windows has no filesystem sandbox backend at
-	// all), so the log omits the hint instead of showing an irrelevant one.
+	// when Mode is danger-full-access. It is empty when there is no generic
+	// action to surface (e.g. the Windows compatibility fallback, where
+	// enabling Codex's native sandbox is deferred follow-up work rather than a
+	// version bump), so the log omits the hint instead of showing an irrelevant
+	// one.
 	Hint string
 }
 
-// codexSandboxPolicyFor picks the right policy for the given platform and
-// detected Codex CLI version.
+// codexSandboxPolicyFor picks the default policy for the given platform and
+// detected Codex CLI version. It is the platform baseline; per-task user config
+// can refine it (see codexSandboxPolicyForConfig).
 //
 //   - Linux: workspace-write with network access. Landlock enforces the
 //     filesystem sandbox and is not affected by the macOS Seatbelt bug.
-//   - Windows: danger-full-access. Windows has no filesystem sandbox backend
-//     the daemon configures (see task_home.go), so a workspace-write policy is
-//     unenforceable. Worse than no sandbox, it pushes Codex into rejecting
-//     non-safe mutation commands "by policy" (e.g. `multica issue create`)
-//     instead of running them. Mirror the macOS fallback and run unsandboxed.
-//     See MUL-4957.
+//   - Windows: danger-full-access, as a deliberate compatibility choice.
+//     Codex 0.144.5 does ship a native Windows sandbox (windows.sandbox =
+//     "unelevated" via a Restricted Token, or "elevated"), but it is still
+//     experimental with open upstream reliability bugs (e.g. openai/codex
+//     #18451, #32314, #24098), so the daemon does not enable it by default.
+//     When no native windows.sandbox is configured, Codex cannot enforce
+//     workspace-write on Windows (it downgrades to read-only) and then rejects
+//     non-safe mutation commands "by policy" — e.g. `multica issue create`
+//     fails — because under approval_policy = "never" the request never reaches
+//     the daemon's auto-approver. danger-full-access sidesteps that. Enabling
+//     the native sandbox is tracked as separate follow-up work. See MUL-4957.
+//     A user who has explicitly opted into windows.sandbox keeps workspace-write
+//     instead of this fallback; that refinement lives in
+//     codexSandboxPolicyForConfig.
 //   - darwin with a version at or above CodexDarwinNetworkAccessFixedVersion:
 //     workspace-write with network access (upstream bug fixed).
 //   - darwin otherwise (including when the version is unknown): fall back to
@@ -76,16 +89,9 @@ func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
 		goos = runtime.GOOS
 	}
 	if goos == "windows" {
-		// Windows has no Landlock/Seatbelt-equivalent sandbox the daemon can
-		// configure (see task_home.go), so workspace-write cannot be enforced.
-		// An unenforceable sandbox is worse than none: Codex can neither run a
-		// non-safe command inside a sandbox nor, under approval_policy = "never",
-		// escalate it to the daemon's auto-approver, so it rejects the command
-		// "by policy" and `multica issue create` fails. Run unsandboxed, matching
-		// the macOS fallback. See MUL-4957.
 		return codexSandboxPolicy{
 			Mode:   "danger-full-access",
-			Reason: "codex on windows: no filesystem sandbox backend; workspace-write is unenforceable and forces reject-by-policy (MUL-4957)",
+			Reason: "codex on windows: compatibility fallback; no native windows.sandbox configured, so workspace-write cannot be enforced (MUL-4957)",
 		}
 	}
 	if goos != "darwin" {
@@ -111,6 +117,56 @@ func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
 		NetworkAccess: false,
 		Reason:        reason,
 		Hint:          codexUpgradeHint(),
+	}
+}
+
+// codexSandboxPolicyForConfig returns the platform default from
+// codexSandboxPolicyFor, refined by the user's existing per-task config.toml.
+//
+// It only differs from the default on Windows: when the user has explicitly
+// opted into a native Codex sandbox (windows.sandbox = "unelevated" |
+// "elevated"), the daemon keeps workspace-write so Codex enforces task
+// isolation with the user's chosen backend, instead of overriding their choice
+// with the danger-full-access compatibility fallback. A user who asked for
+// isolation must not have it silently disabled. See MUL-4957.
+//
+// This is intentionally the branch point for the eventual native-sandbox
+// rollout: flipping the Windows default later means writing windows.sandbox
+// ourselves and defaulting this predicate to true, not restructuring callers.
+func codexSandboxPolicyForConfig(goos, detectedVersion, existingConfig string) codexSandboxPolicy {
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	if goos == "windows" && userConfiguredWindowsSandbox(existingConfig) {
+		return codexSandboxPolicy{
+			Mode:          "workspace-write",
+			NetworkAccess: true,
+			Reason:        "codex on windows: user explicitly configured windows.sandbox; keeping workspace-write so Codex enforces task isolation",
+		}
+	}
+	return codexSandboxPolicyFor(goos, detectedVersion)
+}
+
+// userConfiguredWindowsSandbox reports whether the given config.toml content
+// explicitly selects a native Codex Windows sandbox backend
+// (windows.sandbox = "unelevated" | "elevated"). Any other value, an absent
+// key, or unparseable TOML counts as "not configured", so the caller falls back
+// to the safe danger-full-access compatibility default rather than assuming an
+// enforceable sandbox exists.
+func userConfiguredWindowsSandbox(config string) bool {
+	var probe struct {
+		Windows struct {
+			Sandbox string `toml:"sandbox"`
+		} `toml:"windows"`
+	}
+	if err := toml.Unmarshal([]byte(config), &probe); err != nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(probe.Windows.Sandbox)) {
+	case "unelevated", "elevated":
+		return true
+	default:
+		return false
 	}
 }
 

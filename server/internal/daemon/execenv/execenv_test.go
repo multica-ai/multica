@@ -2555,17 +2555,18 @@ func TestEnsureCodexSandboxConfigDarwinFallsBack(t *testing.T) {
 	}
 }
 
-// TestEnsureCodexSandboxConfigWindowsFallsBack pins MUL-4957: Windows has no
-// enforceable filesystem sandbox, so an unenforceable workspace-write policy
-// makes Codex reject mutation commands (e.g. `multica issue create`) "by
-// policy". Windows must therefore get danger-full-access, mirroring macOS, and
-// must not emit any workspace-write keys.
+// TestEnsureCodexSandboxConfigWindowsFallsBack pins MUL-4957: when a Windows
+// user has not opted into a native Codex sandbox, Codex cannot enforce
+// workspace-write and rejects mutation commands (e.g. `multica issue create`)
+// "by policy". The daemon therefore defaults Windows to danger-full-access and
+// emits no workspace-write keys.
 func TestEnsureCodexSandboxConfigWindowsFallsBack(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")
 
-	policy := codexSandboxPolicyFor("windows", "0.144.5")
+	// No user config → unconfigured Windows → danger-full-access.
+	policy := codexSandboxPolicyForConfig("windows", "0.144.5", "")
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.144.5", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -2576,6 +2577,49 @@ func TestEnsureCodexSandboxConfigWindowsFallsBack(t *testing.T) {
 	}
 	if strings.Contains(string(s), "sandbox_workspace_write") {
 		t.Errorf("should not emit any workspace-write keys on windows fallback, got:\n%s", s)
+	}
+}
+
+// TestEnsureCodexSandboxConfigWindowsRespectsUserSandbox pins the MUL-4957
+// must-fix: a Windows user who explicitly opted into a native Codex sandbox
+// (windows.sandbox = "unelevated"|"elevated") must NOT be silently downgraded
+// to danger-full-access. The daemon keeps workspace-write so Codex enforces
+// task isolation with the user's chosen backend, and preserves their
+// windows.sandbox line verbatim.
+func TestEnsureCodexSandboxConfigWindowsRespectsUserSandbox(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"unelevated", "elevated"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "config.toml")
+
+			userConfig := "model = \"o3\"\n\n[windows]\nsandbox = \"" + mode + "\"\n"
+			if err := os.WriteFile(configPath, []byte(userConfig), 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			policy := codexSandboxPolicyForConfig("windows", "0.144.5", userConfig)
+			if err := ensureCodexSandboxConfig(configPath, policy, "0.144.5", testLogger()); err != nil {
+				t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
+			}
+
+			data, _ := os.ReadFile(configPath)
+			s := string(data)
+			if !strings.Contains(s, `sandbox_mode = "workspace-write"`) {
+				t.Errorf("expected workspace-write kept for user-configured windows.sandbox, got:\n%s", s)
+			}
+			if strings.Contains(s, "danger-full-access") {
+				t.Errorf("must not downgrade a user-configured windows.sandbox to danger-full-access, got:\n%s", s)
+			}
+			if !strings.Contains(s, "network_access = true") {
+				t.Errorf("expected network_access = true under workspace-write, got:\n%s", s)
+			}
+			// The user's explicit opt-in must survive verbatim.
+			if !strings.Contains(s, `sandbox = "`+mode+`"`) {
+				t.Errorf("user windows.sandbox = %q must be preserved, got:\n%s", mode, s)
+			}
+		})
 	}
 }
 
@@ -2777,8 +2821,9 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 		wantMode string
 		wantNet  bool
 		// wantHint is whether the policy carries an actionable upgrade hint.
-		// Only the macOS seatbelt fallback has one; Windows has no filesystem
-		// sandbox to restore, so it must not surface a misleading macOS hint.
+		// Only the macOS seatbelt fallback has one; the Windows compatibility
+		// fallback has no generic upgrade action, so it must not surface a
+		// misleading macOS hint.
 		wantHint bool
 	}{
 		{"linux any version", "linux", "0.100.0", "workspace-write", true, false},
@@ -2802,6 +2847,45 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 			}
 			if (p.Hint != "") != tc.wantHint {
 				t.Errorf("hint present = %v, want %v (hint=%q)", p.Hint != "", tc.wantHint, p.Hint)
+			}
+		})
+	}
+}
+
+// TestCodexSandboxPolicyForConfig pins the MUL-4957 must-fix: on Windows the
+// policy honors a user's explicit native windows.sandbox opt-in (keeping
+// workspace-write) and only falls back to danger-full-access when it is absent,
+// disabled, or unparseable. Linux and darwin ignore windows.sandbox entirely.
+func TestCodexSandboxPolicyForConfig(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		goos     string
+		config   string
+		wantMode string
+		wantNet  bool
+	}{
+		{"windows unelevated dotted", "windows", `windows.sandbox = "unelevated"`, "workspace-write", true},
+		{"windows elevated table", "windows", "[windows]\nsandbox = \"elevated\"\n", "workspace-write", true},
+		{"windows mixed case respected", "windows", `windows.sandbox = "Unelevated"`, "workspace-write", true},
+		{"windows disabled falls back", "windows", `windows.sandbox = "disabled"`, "danger-full-access", false},
+		{"windows unconfigured falls back", "windows", "", "danger-full-access", false},
+		{"windows unparseable falls back", "windows", "this is not = valid toml [[", "danger-full-access", false},
+		// Non-Windows platforms must not be swayed by a stray windows.sandbox key.
+		{"linux ignores windows.sandbox", "linux", `windows.sandbox = "unelevated"`, "workspace-write", true},
+		{"darwin ignores windows.sandbox", "darwin", `windows.sandbox = "unelevated"`, "danger-full-access", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := codexSandboxPolicyForConfig(tc.goos, "0.144.5", tc.config)
+			if p.Mode != tc.wantMode {
+				t.Errorf("mode = %q, want %q", p.Mode, tc.wantMode)
+			}
+			if p.NetworkAccess != tc.wantNet {
+				t.Errorf("network_access = %v, want %v", p.NetworkAccess, tc.wantNet)
+			}
+			if p.Reason == "" {
+				t.Error("expected non-empty Reason")
 			}
 		})
 	}
