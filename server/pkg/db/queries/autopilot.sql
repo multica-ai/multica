@@ -471,6 +471,24 @@ SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE retry_of_task_id = $1
   AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
 
+-- name: FindAutopilotDispatchedTaskForIssue :one
+-- Recovers the task a create_issue run dispatched when the run's task_id was never
+-- bound — a crash between enqueue and bind, or a run dispatched by a pre-§4.1 pod
+-- mid rolling-deploy (MUL-4809 §4.1 item 4). The dispatched task is the FIRST root
+-- attempt (retry_of_task_id IS NULL) queued for the autopilot's issue, by the run's
+-- dispatch target (agent_id), within the bind crash window after issue creation.
+-- Ordinary comment/chat tasks on the same issue are queued later, by a different
+-- agent, or outside the window, so none of them matches — that is what stops a
+-- stray task from being misattributed as the run's dispatched work and finalizing
+-- the run off the wrong outcome.
+SELECT * FROM agent_task_queue
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND retry_of_task_id IS NULL
+  AND created_at <= $3
+ORDER BY created_at ASC, id ASC
+LIMIT 1;
+
 -- name: FailAutopilotRunsByIssue :exec
 -- Fails active autopilot runs linked to a given issue.
 -- Must be called BEFORE issue deletion (ON DELETE SET NULL clears issue_id).

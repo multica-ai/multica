@@ -1040,6 +1040,58 @@ func (s *AutopilotService) bindAutopilotRunTask(ctx context.Context, runID, task
 		util.UUIDToString(runID), current.Status, util.UUIDToString(taskID))
 }
 
+// autopilotBindRepairWindow bounds how long after issue creation a task may have
+// been queued and still count as the run's dispatched task during crash-window
+// repair. The autopilot enqueues its task in the same call that creates the issue,
+// so the real dispatched task lands within milliseconds; the window only has to
+// absorb dispatch latency while staying far shorter than the gap before any
+// human/agent could comment and spawn an unrelated task on the same issue.
+const autopilotBindRepairWindow = 15 * time.Minute
+
+// repairUnboundCreateIssueRun binds an unbound create_issue run to the task it
+// actually dispatched and returns the bound run. The run's task_id was never set
+// (a crash between enqueue and bind, or a run dispatched by a pre-§4.1 pod), so the
+// dispatched task is recovered precisely — the first root task queued for the issue
+// by the run's dispatch target within the bind window (MUL-4809 §4.1 item 4). ok is
+// false when the run cannot be safely repaired; the caller must not finalize it then.
+func (s *AutopilotService) repairUnboundCreateIssueRun(ctx context.Context, run db.AutopilotRun) (db.AutopilotRun, bool) {
+	if !run.IssueID.Valid {
+		return db.AutopilotRun{}, false
+	}
+	issue, err := s.Queries.GetIssue(ctx, run.IssueID)
+	if err != nil {
+		slog.Warn("autopilot: failed to load issue for bind repair",
+			"issue_id", util.UUIDToString(run.IssueID), "error", err)
+		return db.AutopilotRun{}, false
+	}
+	// Autopilot-created issues are authored by the dispatched agent (the resolved
+	// leader), so the dispatched task's agent_id equals the issue creator. A
+	// different shape isn't a create_issue dispatch this repair can attribute.
+	if issue.CreatorType != "agent" || !issue.CreatorID.Valid || !issue.CreatedAt.Valid {
+		return db.AutopilotRun{}, false
+	}
+	dispatched, err := s.Queries.FindAutopilotDispatchedTaskForIssue(ctx, db.FindAutopilotDispatchedTaskForIssueParams{
+		IssueID:   run.IssueID,
+		AgentID:   issue.CreatorID,
+		CreatedAt: pgtype.Timestamptz{Time: issue.CreatedAt.Time.Add(autopilotBindRepairWindow), Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.AutopilotRun{}, false // no dispatched task in the window — don't finalize off a stray task
+		}
+		slog.Warn("autopilot: failed to find dispatched task for bind repair",
+			"issue_id", util.UUIDToString(run.IssueID), "error", err)
+		return db.AutopilotRun{}, false
+	}
+	bound, err := s.bindAutopilotRunTask(ctx, run.ID, dispatched.ID)
+	if err != nil {
+		slog.Warn("autopilot: bind repair failed",
+			"run_id", util.UUIDToString(run.ID), "task_id", util.UUIDToString(dispatched.ID), "error", err)
+		return db.AutopilotRun{}, false
+	}
+	return bound, true
+}
+
 // retryRootTaskID walks the retry_of_task_id chain up from task to the first
 // attempt (the root). System retries form a short linear chain bounded by
 // max_attempts, so this is a handful of point lookups.
@@ -1079,40 +1131,42 @@ func (s *AutopilotService) SyncRunFromCreateIssueTask(ctx context.Context, task 
 		return // no in-flight run linked to this issue (covers ordinary issue/chat tasks)
 	}
 
-	if run.TaskID.Valid {
-		root, rerr := s.retryRootTaskID(ctx, task)
-		if rerr != nil {
-			slog.Warn("autopilot: failed to resolve task retry root",
-				"task_id", util.UUIDToString(task.ID), "error", rerr)
+	// When the run's task_id was never bound — a crash between enqueue and bind, or
+	// a run dispatched by a pre-§4.1 pod mid rolling-deploy — repair it before
+	// matching. The repair binds the run to the task it actually dispatched (the
+	// first root task the autopilot queued for the issue), so a later comment/chat
+	// task on the same issue can never be misattributed as the run's dispatched work
+	// and finalize the run off the wrong outcome (MUL-4809 §4.1 item 4).
+	if !run.TaskID.Valid {
+		repaired, ok := s.repairUnboundCreateIssueRun(ctx, run)
+		if !ok {
 			return
 		}
-		if root.Bytes != run.TaskID.Bytes {
-			return // not this run's dispatched-task lineage (e.g. a comment task)
-		}
-		// A still-queued system retry means another attempt is already in flight
-		// (FailTask enqueues it before broadcasting the failure) — wait for it.
-		if task.Status != "completed" {
-			pending, perr := s.Queries.HasPendingRetryForTask(ctx, task.ID)
-			if perr != nil {
-				slog.Warn("autopilot: failed to check pending retry",
-					"task_id", util.UUIDToString(task.ID), "error", perr)
-				return
-			}
-			if pending {
-				return
-			}
-		}
-	} else {
-		// Crash/rolling-deploy fallback: the run's task_id was never bound. Finalize
-		// only when no task is still active for the issue, mirroring the previous
-		// issue-scoped behavior so the run doesn't hang.
-		hasActive, herr := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
-		if herr != nil {
-			slog.Warn("autopilot: failed to check active tasks for unbound run",
-				"issue_id", util.UUIDToString(task.IssueID), "error", herr)
+		run = repaired
+	}
+
+	// Match the terminal task to the run's dispatched-task lineage: run.task_id plus
+	// the retry_of_task_id chain. A task outside that lineage (e.g. a comment task)
+	// leaves the run untouched.
+	root, rerr := s.retryRootTaskID(ctx, task)
+	if rerr != nil {
+		slog.Warn("autopilot: failed to resolve task retry root",
+			"task_id", util.UUIDToString(task.ID), "error", rerr)
+		return
+	}
+	if root.Bytes != run.TaskID.Bytes {
+		return // not this run's dispatched-task lineage (e.g. a comment task)
+	}
+	// A still-queued system retry means another attempt is already in flight
+	// (FailTask enqueues it before broadcasting the failure) — wait for it.
+	if task.Status != "completed" {
+		pending, perr := s.Queries.HasPendingRetryForTask(ctx, task.ID)
+		if perr != nil {
+			slog.Warn("autopilot: failed to check pending retry",
+				"task_id", util.UUIDToString(task.ID), "error", perr)
 			return
 		}
-		if hasActive {
+		if pending {
 			return
 		}
 	}

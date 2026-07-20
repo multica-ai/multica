@@ -515,6 +515,86 @@ func (q *Queries) FailAutopilotRunsByIssue(ctx context.Context, issueID pgtype.U
 	return err
 }
 
+const findAutopilotDispatchedTaskForIssue = `-- name: FindAutopilotDispatchedTaskForIssue :one
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id FROM agent_task_queue
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND retry_of_task_id IS NULL
+  AND created_at <= $3
+ORDER BY created_at ASC, id ASC
+LIMIT 1
+`
+
+type FindAutopilotDispatchedTaskForIssueParams struct {
+	IssueID   pgtype.UUID        `json:"issue_id"`
+	AgentID   pgtype.UUID        `json:"agent_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// Recovers the task a create_issue run dispatched when the run's task_id was never
+// bound — a crash between enqueue and bind, or a run dispatched by a pre-§4.1 pod
+// mid rolling-deploy (MUL-4809 §4.1 item 4). The dispatched task is the FIRST root
+// attempt (retry_of_task_id IS NULL) queued for the autopilot's issue, by the run's
+// dispatch target (agent_id), within the bind crash window after issue creation.
+// Ordinary comment/chat tasks on the same issue are queued later, by a different
+// agent, or outside the window, so none of them matches — that is what stops a
+// stray task from being misattributed as the run's dispatched work and finalizing
+// the run off the wrong outcome.
+func (q *Queries) FindAutopilotDispatchedTaskForIssue(ctx context.Context, arg FindAutopilotDispatchedTaskForIssueParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, findAutopilotDispatchedTaskForIssue, arg.IssueID, arg.AgentID, arg.CreatedAt)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+	)
+	return i, err
+}
+
 const getActiveAutopilotRuleVersion = `-- name: GetActiveAutopilotRuleVersion :one
 SELECT id, autopilot_id, workspace_id, published_by_type, published_by_id, config_summary, created_at FROM autopilot_rule_version
 WHERE workspace_id = $1 AND autopilot_id = $2
