@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -115,8 +116,10 @@ const (
 	commandFailureUnknown       commandFailureKind = "unknown"
 	commandFailureTimeout       commandFailureKind = "timeout"
 	commandFailureDNS           commandFailureKind = "dns"
+	commandFailureDNSTimeout    commandFailureKind = "dns-timeout"
 	commandFailureConnection    commandFailureKind = "connection"
 	commandFailureBrowserLaunch commandFailureKind = "browser-launch"
+	commandFailureNotFound      commandFailureKind = "not-found"
 )
 
 type commandFailure struct {
@@ -125,6 +128,34 @@ type commandFailure struct {
 
 func (failure commandFailure) Error() string {
 	return "agent-browser command failed"
+}
+
+// stageError names both the stage that failed and why it failed. Every caller-
+// visible failure flows through it so a reader gets a concrete cause instead of
+// a single opaque line, and so SafeError can allowlist the whole closed set.
+type stageError struct {
+	stage string
+	kind  commandFailureKind
+}
+
+func (err stageError) Error() string {
+	// The kind is dropped when it says nothing the stage has not already said:
+	// unknown carries no cause, and "dns dns" is just noise.
+	if err.kind == "" || err.kind == commandFailureUnknown || string(err.kind) == err.stage {
+		return fmt.Sprintf("internal browser stage %s failed", err.stage)
+	}
+	return fmt.Sprintf("internal browser stage %s %s failed", err.stage, err.kind)
+}
+
+// hasPageToCapture reports whether a failed stage can still yield a meaningful
+// screenshot. A name that does not resolve and a browser that never launched
+// have no page behind them, so attempting a capture only burns a stage timeout.
+func (err stageError) hasPageToCapture() bool {
+	switch err.kind {
+	case commandFailureDNS, commandFailureDNSTimeout, commandFailureBrowserLaunch:
+		return false
+	}
+	return err.stage != dnsStage
 }
 
 func classifyCommandFailure(ctx context.Context, err error) commandFailureKind {
@@ -143,6 +174,15 @@ func classifyCommandFailure(ctx context.Context, err error) commandFailureKind {
 		strings.Contains(stderr, "no such host"),
 		strings.Contains(stderr, "getaddrinfo"):
 		return commandFailureDNS
+	// Element lookups are checked before the generic timeout patterns: a missing
+	// control reports "timed out waiting for selector", which is a not-found, not
+	// a slow page. Misreading it as a timeout is what made every failure look alike.
+	case strings.Contains(stderr, "element not found"),
+		strings.Contains(stderr, "no element matching"),
+		strings.Contains(stderr, "no matching element"),
+		strings.Contains(stderr, "waiting for selector"),
+		strings.Contains(stderr, "selector resolved to no"):
+		return commandFailureNotFound
 	case strings.Contains(stderr, "timed out"), strings.Contains(stderr, "timeout"):
 		return commandFailureTimeout
 	case strings.Contains(stderr, "err_connection_refused"),
@@ -215,6 +255,37 @@ type Result struct {
 	Markers       []string `json:"markers"`
 	Errors        []string `json:"errors"`
 	ScreenshotPNG []byte   `json:"screenshot_png"`
+
+	// Failure diagnostics. Empty on success. FailureDetail is sourced only from
+	// this package's static target allowlist — never from browser output — so it
+	// can name the attempted address or the missing marker without leaking page
+	// content or a credential.
+	FailureStage  string `json:"failure_stage,omitempty"`
+	FailureCause  string `json:"failure_cause,omitempty"`
+	FailureDetail string `json:"failure_detail,omitempty"`
+}
+
+// A wrong internal hostname makes the resolver hang far longer than it takes to
+// learn the answer, and the browser then reports the wait as a plain timeout.
+// Resolving the host ourselves first turns that into a fast, honest "the address
+// does not exist" and keeps the browser's own timeouts for pages that do resolve.
+const dnsPreflightTimeout = 5 * time.Second
+
+const dnsStage = "dns"
+
+func resolveInternalHost(ctx context.Context, host string) error {
+	hostname := host
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		hostname = parsedHost
+	}
+	addresses, err := net.DefaultResolver.LookupHost(ctx, hostname)
+	if err != nil {
+		return err
+	}
+	if len(addresses) == 0 {
+		return fmt.Errorf("no addresses")
+	}
+	return nil
 }
 
 type Runner struct {
@@ -222,6 +293,8 @@ type Runner struct {
 	openTimeout    time.Duration
 	stageTimeout   time.Duration
 	cleanupTimeout time.Duration
+	dnsTimeout     time.Duration
+	resolveHost    func(context.Context, string) error
 	verificationMu sync.Mutex
 	observeStage   func(stageObservation)
 }
@@ -238,6 +311,7 @@ func NewRunner(commander Commander) *Runner {
 	return &Runner{
 		commander: commander, openTimeout: 75 * time.Second,
 		stageTimeout: 30 * time.Second, cleanupTimeout: 30 * time.Second,
+		dnsTimeout: dnsPreflightTimeout, resolveHost: resolveInternalHost,
 		observeStage: func(observation stageObservation) {
 			log.Printf("internal browser diagnostic app=%s stage=%s duration_ms=%d exit_class=%s target_host=%s",
 				observation.App, observation.Stage, observation.Duration.Milliseconds(), observation.ExitClass, observation.TargetHost)
@@ -271,31 +345,98 @@ func (r *Runner) runStage(ctx context.Context, target Target, stage, stdin strin
 		})
 	}
 	if err != nil {
-		if kind := safeCommandFailureKind(err); stage == "open" && kind != commandFailureUnknown {
-			return nil, fmt.Errorf("internal browser stage %s %s failed", stage, kind)
-		}
-		return nil, fmt.Errorf("internal browser stage %s failed", stage)
+		return nil, stageError{stage: stage, kind: safeCommandFailureKind(err)}
 	}
 	return output, nil
 }
 
+// preflightDNS resolves the target host before the browser ever launches, so an
+// unreachable name costs dnsTimeout instead of the full open timeout and comes
+// back labelled as an address problem rather than a generic slow page.
+func (r *Runner) preflightDNS(ctx context.Context, target Target) error {
+	if r.resolveHost == nil {
+		return nil
+	}
+	timeout := r.dnsTimeout
+	if timeout <= 0 {
+		timeout = dnsPreflightTimeout
+	}
+	dnsCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	started := time.Now()
+	err := r.resolveHost(dnsCtx, target.Host())
+	kind := commandFailureKind("success")
+	if err != nil {
+		kind = commandFailureDNS
+		if dnsCtx.Err() != nil {
+			kind = commandFailureDNSTimeout
+		}
+	}
+	if r.observeStage != nil {
+		r.observeStage(stageObservation{
+			App: target.Name, Stage: dnsStage, Duration: time.Since(started), ExitClass: kind, TargetHost: target.Host(),
+		})
+	}
+	if err != nil {
+		return stageError{stage: dnsStage, kind: kind}
+	}
+	return nil
+}
+
+// failure builds the diagnostic result that accompanies a failed verification:
+// the address that was tried, the stage and cause, and — when a page could exist
+// — a screenshot of what the browser was actually looking at.
+func (r *Runner) failure(target Target, baseArgs []string, detail string, err error) (Result, error) {
+	result := Result{
+		App: target.Name, InternalHost: target.Host(),
+		Markers: []string{}, Errors: []string{}, FailureDetail: detail,
+	}
+	var stage stageError
+	if !errors.As(err, &stage) {
+		return result, err
+	}
+	result.FailureStage = stage.stage
+	result.FailureCause = string(stage.kind)
+	if baseArgs == nil || !stage.hasPageToCapture() {
+		return result, err
+	}
+	timeout := r.stageTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	// Detached from the caller's context: the failure that brought us here is
+	// often that context expiring, and the screenshot is the point of this path.
+	shotCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if screenshot, shotErr := r.commander.CaptureScreenshot(shotCtx, baseArgs...); shotErr == nil {
+		result.ScreenshotPNG = screenshot
+	}
+	return result, err
+}
+
+// stages and failure kinds are enumerated so SafeError stays a closed set that
+// cannot echo an arbitrary error string back to the caller, while still covering
+// every stage/cause pair automatically as new ones are added.
+var safeStageErrors = buildSafeStageErrors()
+
+func buildSafeStageErrors() map[string]struct{} {
+	stages := []string{dnsStage, "open", "auth", "reload", "render", "navigation", "snapshot", "markers", "url", "errors", "screenshot"}
+	kinds := []commandFailureKind{
+		"", commandFailureUnknown, commandFailureTimeout, commandFailureDNS, commandFailureDNSTimeout,
+		commandFailureConnection, commandFailureBrowserLaunch, commandFailureNotFound,
+	}
+	allowed := make(map[string]struct{}, len(stages)*len(kinds))
+	for _, stage := range stages {
+		for _, kind := range kinds {
+			allowed[stageError{stage: stage, kind: kind}.Error()] = struct{}{}
+		}
+	}
+	return allowed
+}
+
 func SafeError(err error) string {
 	message := err.Error()
-	switch message {
-	case "internal browser stage open failed",
-		"internal browser stage open dns failed",
-		"internal browser stage open connection failed",
-		"internal browser stage open browser-launch failed",
-		"internal browser stage open timeout failed",
-		"internal browser stage auth failed",
-		"internal browser stage reload failed",
-		"internal browser stage render failed",
-		"internal browser stage navigation failed",
-		"internal browser stage snapshot failed",
-		"internal browser stage markers failed",
-		"internal browser stage url failed",
-		"internal browser stage errors failed",
-		"internal browser stage screenshot failed":
+	if _, ok := safeStageErrors[message]; ok {
 		return message
 	}
 	return "internal browser verification failed"
@@ -323,6 +464,10 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	r.verificationMu.Lock()
 	defer r.verificationMu.Unlock()
 
+	if err := r.preflightDNS(ctx, target); err != nil {
+		return r.failure(target, nil, target.URL, err)
+	}
+
 	session, err := sessionName()
 	if err != nil {
 		return Result{}, err
@@ -339,7 +484,7 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	}()
 
 	if _, err := r.runStage(ctx, target, "open", "", append(baseArgs, "open", target.URL)...); err != nil {
-		return Result{}, err
+		return r.failure(target, baseArgs, target.URL, err)
 	}
 	if target.Vault != "" || target.SessionCookie {
 		commands := make([][]string, 0, 4)
@@ -363,45 +508,46 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		payload, _ := json.Marshal(commands)
 		// This output is deliberately discarded: the stdin payload contains secrets.
 		if _, err := r.runStage(ctx, target, "auth", string(payload), append(baseArgs, "batch")...); err != nil {
-			return Result{}, err
+			return r.failure(target, baseArgs, target.URL, err)
 		}
 	}
 	if _, err := r.runStage(ctx, target, "reload", "", append(baseArgs, "reload")...); err != nil {
-		return Result{}, err
+		return r.failure(target, baseArgs, target.URL, err)
 	}
 	if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
-		return Result{}, err
+		return r.failure(target, baseArgs, target.URL, err)
 	}
 	if target.NavigateLinkName != "" {
 		if _, err := r.runStage(ctx, target, "navigation", "", append(baseArgs, "find", "role", "link", "click", "--name", target.NavigateLinkName)...); err != nil {
-			return Result{}, err
+			return r.failure(target, baseArgs, "link: "+target.NavigateLinkName, err)
 		}
 		if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
-			return Result{}, err
+			return r.failure(target, baseArgs, target.URL, err)
 		}
 	}
 	snapshot, err := r.runStage(ctx, target, "snapshot", "", append(baseArgs, "snapshot")...)
 	if err != nil {
-		return Result{}, err
+		return r.failure(target, baseArgs, target.URL, err)
 	}
 	for _, marker := range target.ExpectedText {
 		if !strings.Contains(string(snapshot), marker) {
-			return Result{}, fmt.Errorf("internal browser stage markers failed")
+			return r.failure(target, baseArgs, "missing marker: "+marker,
+				stageError{stage: "markers", kind: commandFailureNotFound})
 		}
 	}
 	finalURL, err := r.runStage(ctx, target, "url", "", append(baseArgs, "get", "url")...)
 	if err != nil {
-		return Result{}, err
+		return r.failure(target, baseArgs, target.URL, err)
 	}
 	rawErrors, err := r.runStage(ctx, target, "errors", "", append(baseArgs, "errors")...)
 	if err != nil {
-		return Result{}, err
+		return r.failure(target, baseArgs, target.URL, err)
 	}
 	screenshotCtx, cancel := context.WithTimeout(ctx, r.stageTimeout)
 	defer cancel()
 	screenshot, err := r.commander.CaptureScreenshot(screenshotCtx, baseArgs...)
 	if err != nil {
-		return Result{}, fmt.Errorf("internal browser stage screenshot failed")
+		return r.failure(target, nil, target.URL, stageError{stage: "screenshot", kind: safeCommandFailureKind(err)})
 	}
 	errors := decodeErrors(rawErrors)
 	return Result{

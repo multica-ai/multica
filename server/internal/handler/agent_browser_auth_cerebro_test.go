@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/internalbrowserqa"
 )
 
 func TestProvisionAgentBrowserAuthRejectsNonTaskToken(t *testing.T) {
@@ -46,12 +48,34 @@ func TestVerifyInternalAgentBrowserRejectsNonTaskToken(t *testing.T) {
 func TestWriteInternalBrowserVerificationErrorPreservesSafeStage(t *testing.T) {
 	rec := httptest.NewRecorder()
 
-	writeInternalBrowserVerificationError(rec, errors.New("internal browser stage auth failed"))
+	writeInternalBrowserVerificationError(rec, internalbrowserqa.Result{
+		App: "registry", InternalHost: "firtal-data-registry-private.internal:3000",
+		FailureStage: "auth", FailureCause: "not-found",
+	}, errors.New("internal browser stage auth failed"))
 
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "internal browser stage auth failed") {
+	body := rec.Body.String()
+	if !strings.Contains(body, "internal browser stage auth failed") {
 		t.Fatalf("body = %q, want safe stage", body)
+	}
+	// The diagnostics are the point of the 422: without the attempted address and
+	// the cause, a caller is back to guessing which of six apps is misconfigured.
+	for _, want := range []string{"firtal-data-registry-private.internal:3000", `"failure_stage":"auth"`, `"failure_cause":"not-found"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body = %q, want it to contain %q", body, want)
+		}
+	}
+}
+
+func TestWriteInternalBrowserVerificationErrorRejectsUnsafeDetail(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	writeInternalBrowserVerificationError(rec, internalbrowserqa.Result{},
+		errors.New("password=must-not-escape"))
+
+	if body := rec.Body.String(); strings.Contains(body, "must-not-escape") {
+		t.Fatalf("body leaked an unsafe error detail: %q", body)
 	}
 }

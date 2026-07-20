@@ -66,11 +66,18 @@ func (r *RemoteRunner) Verify(ctx context.Context, app string, credential Creden
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// The failure body carries the diagnostics — attempted address, stage,
+		// cause and a screenshot — so read it with the same limit as a success.
 		var failure struct {
 			Error string `json:"error"`
+			Result
 		}
-		_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<10)).Decode(&failure)
-		return Result{}, errors.New(SafeError(errors.New(failure.Error)))
+		_ = json.NewDecoder(io.LimitReader(resp.Body, maxScreenshotBytes+1<<20)).Decode(&failure)
+		diagnostic := failure.Result
+		if len(diagnostic.ScreenshotPNG) > maxScreenshotBytes || !bytes.HasPrefix(diagnostic.ScreenshotPNG, pngSignature) {
+			diagnostic.ScreenshotPNG = nil
+		}
+		return diagnostic, errors.New(SafeError(errors.New(failure.Error)))
 	}
 	var result Result
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxScreenshotBytes+1<<20)).Decode(&result); err != nil {
@@ -80,6 +87,16 @@ func (r *RemoteRunner) Verify(ctx context.Context, app string, credential Creden
 		return Result{}, fmt.Errorf("internal browser verification failed")
 	}
 	return result, nil
+}
+
+// FailureBody is the 422 contract: the safe error message plus the diagnostic
+// result. Kept in one place so the verifier runner and the API handler cannot
+// drift apart on what a failed verification looks like on the wire.
+func FailureBody(result Result, err error) any {
+	return struct {
+		Error string `json:"error"`
+		Result
+	}{Error: SafeError(err), Result: result}
 }
 
 type RunnerHTTPHandler struct {
@@ -117,7 +134,8 @@ func (h *RunnerHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.runner.Verify(r.Context(), request.App, request.Credential)
 	if err != nil {
-		http.Error(w, `{"error":"`+SafeError(err)+`"}`, http.StatusUnprocessableEntity)
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(FailureBody(result, err))
 		return
 	}
 	_ = json.NewEncoder(w).Encode(result)
