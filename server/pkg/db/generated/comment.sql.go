@@ -155,6 +155,10 @@ func (q *Queries) CountNewCommentsSince(ctx context.Context, arg CountNewComment
 }
 
 const createComment = `-- name: CreateComment :one
+WITH touched_issue AS (
+    UPDATE issue SET updated_at = now()
+    WHERE id = $1 AND workspace_id = $2
+)
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id
@@ -171,6 +175,15 @@ type CreateCommentParams struct {
 	SourceTaskID pgtype.UUID `json:"source_task_id"`
 }
 
+// A new comment counts as activity on its issue, so the same statement bumps
+// the parent issue's updated_at (workspace_id scopes the touch as a tenant
+// guard, matching the comment's own workspace). The touch is a leading
+// data-modifying CTE so the insert and the timestamp bump commit or roll back
+// together: an issue can never be left with a stale updated_at after a comment
+// persists. Centralizing it here means every comment entrypoint inherits the
+// behavior — no per-caller touch, and no future entrypoint can forget it. The
+// "Updated date" sort and the daemon GC TTL both read updated_at, so this
+// consistency is load-bearing, not cosmetic.
 func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (Comment, error) {
 	row := q.db.QueryRow(ctx, createComment,
 		arg.IssueID,

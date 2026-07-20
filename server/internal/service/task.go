@@ -4149,15 +4149,6 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	if err != nil {
 		return
 	}
-	// A new comment counts as activity on the issue: bump updated_at so the
-	// "Updated date" sort surfaces recently-discussed cards. Best-effort — the
-	// comment is already persisted, so a touch failure must not abort delivery.
-	if err := s.Queries.TouchIssue(ctx, db.TouchIssueParams{
-		ID:          issueID,
-		WorkspaceID: issue.WorkspaceID,
-	}); err != nil {
-		slog.Warn("touch issue after agent comment failed", "error", err, "issue_id", util.UUIDToString(issueID))
-	}
 	s.CancelDeferredEscalationsForIssueAgent(ctx, issueID, agentID)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventCommentCreated,

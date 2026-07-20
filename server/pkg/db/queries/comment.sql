@@ -393,6 +393,19 @@ SELECT c.* FROM comment c
 WHERE c.id = (SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1);
 
 -- name: CreateComment :one
+-- A new comment counts as activity on its issue, so the same statement bumps
+-- the parent issue's updated_at (workspace_id scopes the touch as a tenant
+-- guard, matching the comment's own workspace). The touch is a leading
+-- data-modifying CTE so the insert and the timestamp bump commit or roll back
+-- together: an issue can never be left with a stale updated_at after a comment
+-- persists. Centralizing it here means every comment entrypoint inherits the
+-- behavior — no per-caller touch, and no future entrypoint can forget it. The
+-- "Updated date" sort and the daemon GC TTL both read updated_at, so this
+-- consistency is load-bearing, not cosmetic.
+WITH touched_issue AS (
+    UPDATE issue SET updated_at = now()
+    WHERE id = $1 AND workspace_id = $2
+)
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id)
 VALUES ($1, $2, $3, $4, $5, $6, sqlc.narg(parent_id), sqlc.narg(source_task_id))
 RETURNING *;

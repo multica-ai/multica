@@ -268,10 +268,11 @@ const (
 // follow the parent record that actually governs their lifecycle.
 func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcAction {
 	// A task currently running on this env root must never be reclaimed —
-	// not even on the done/cancelled or orphan-404 paths. A new comment on
-	// an already-done issue can dispatch a follow-up task that reuses the
-	// prior workdir without bumping the issue's updated_at, so the regular
-	// TTL check alone wouldn't notice the resumed activity.
+	// not even on the done/cancelled or orphan-404 paths. A re-dispatched or
+	// still-running task can reuse the prior workdir of an already-done issue
+	// whose updated_at is older than the TTL (a task re-claim doesn't advance
+	// updated_at), so the regular TTL check alone wouldn't notice the resumed
+	// activity.
 	if d.isActiveEnvRoot(taskDir) {
 		return gcActionSkip
 	}

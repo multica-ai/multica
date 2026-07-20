@@ -527,9 +527,10 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsFullCleanup(t *testing.T) {
 	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// Done long enough ago to satisfy GCTTL — this would normally return
-		// gcActionClean. But the env root is in use (e.g. follow-up comment
-		// dispatched a task that reuses the prior workdir), and CreateComment
-		// does not bump issue.updated_at. Active-root guard must override.
+		// gcActionClean. But the env root is in use (e.g. a re-dispatched task
+		// reuses the prior workdir of an already-done issue whose updated_at is
+		// still stale, since a task re-claim doesn't advance it). Active-root
+		// guard must override.
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":     "done",
 			"updated_at": time.Now().Add(-30 * 24 * time.Hour),

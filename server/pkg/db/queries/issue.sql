@@ -121,15 +121,6 @@ UPDATE issue SET
 WHERE id = $1 AND workspace_id = $3
 RETURNING *;
 
--- name: TouchIssue :exec
--- Bumps updated_at to now() so the issue reflects its latest activity even when
--- no column changes — e.g. a new comment counts as "touching" the issue, so the
--- "Updated date" sort surfaces recently-discussed cards. Workspace_id in the
--- WHERE clause is a SQL-layer tenant guard; see DeleteIssue.
-UPDATE issue SET
-    updated_at = now()
-WHERE id = $1 AND workspace_id = $2;
-
 -- name: CreateIssueWithOrigin :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
