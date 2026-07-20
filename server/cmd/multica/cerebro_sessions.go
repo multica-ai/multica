@@ -179,8 +179,8 @@ func runIssueSessionHandoff(cmd *cobra.Command, args []string) error {
 
 	body := map[string]any{"root_comment_id": args[1]}
 	summary, _ := cmd.Flags().GetString("summary")
-	done, _ := cmd.Flags().GetStringSlice("done")
-	remaining, _ := cmd.Flags().GetStringSlice("remaining")
+	done, _ := cmd.Flags().GetStringArray("done")
+	remaining, _ := cmd.Flags().GetStringArray("remaining")
 	planRef, _ := cmd.Flags().GetString("plan-ref")
 	// Only send a handoff object when the caller supplied content; otherwise the
 	// server auto-summarises the thread.
@@ -228,6 +228,19 @@ func runIssueSessionHandoff(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(os.Stdout, result)
 }
 
+func registerIssueSessionHandoffFlags(cmd *cobra.Command) {
+	cmd.Flags().String("summary", "", "Handoff summary (omit to auto-summarise the thread)")
+	// StringArray, not StringSlice: a handoff bullet is prose and prose contains
+	// commas. StringSlice splits on every comma, which cut one sentence into
+	// several bullets mid-sentence (FIR-3565). Repeat the flag for more bullets.
+	cmd.Flags().StringArray("done", nil, "What was completed (repeat the flag for more items)")
+	cmd.Flags().StringArray("remaining", nil, "What is left to do (repeat the flag for more items)")
+	cmd.Flags().String("plan-ref", "", "Reference to a plan artifact/issue")
+	cmd.Flags().Bool("start-new", false, "Also open a new session and start a fresh run on it (one-command handoff)")
+	cmd.Flags().String("prompt", "", "Opening message for the new session (with --start-new; default points the fresh run at the brief)")
+	cmd.Flags().String("output", "json", "Output format: table or json")
+}
+
 func init() {
 	// Comment thread resolve / unresolve.
 	issueCommentResolveCmd.Flags().String("output", "json", "Output format: table or json")
@@ -240,13 +253,7 @@ func init() {
 	issueSessionRenameCmd.Flags().String("name", "", "New session name (required)")
 	issueSessionRenameCmd.Flags().String("output", "json", "Output format: table or json")
 
-	issueSessionHandoffCmd.Flags().String("summary", "", "Handoff summary (omit to auto-summarise the thread)")
-	issueSessionHandoffCmd.Flags().StringSlice("done", nil, "What was completed (repeatable)")
-	issueSessionHandoffCmd.Flags().StringSlice("remaining", nil, "What is left to do (repeatable)")
-	issueSessionHandoffCmd.Flags().String("plan-ref", "", "Reference to a plan artifact/issue")
-	issueSessionHandoffCmd.Flags().Bool("start-new", false, "Also open a new session and start a fresh run on it (one-command handoff)")
-	issueSessionHandoffCmd.Flags().String("prompt", "", "Opening message for the new session (with --start-new; default points the fresh run at the brief)")
-	issueSessionHandoffCmd.Flags().String("output", "json", "Output format: table or json")
+	registerIssueSessionHandoffFlags(issueSessionHandoffCmd)
 
 	issueSessionCmd.AddCommand(issueSessionListCmd)
 	issueSessionCmd.AddCommand(issueSessionRenameCmd)

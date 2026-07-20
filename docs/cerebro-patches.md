@@ -1708,3 +1708,9 @@ Approved by Jesper Hvejsel on FIR-3539 ("Fix det" + "find en måde hvor det ikke
 | Patch | Location | Reason |
 |---|---|---|
 | `eval-actor-resolver` | `server/internal/handler/handler.go`; wiring in `server/cmd/server/router.go` | Reuse the server-validated task/member actor identity in the fork-owned eval handler, so a client-supplied `X-Agent-ID` cannot impersonate an eval owner. |
+
+## FIR-3565 — Handoff brief flags take prose verbatim
+
+| Patch | Location | Reason |
+|---|---|---|
+| `handoff-brief-flags-verbatim` | `server/cmd/multica/cerebro_sessions.go`; skill docs in `server/internal/service/builtin_skills/multica-working-on-issues/` | `--done` / `--remaining` on `issue session handoff` were pflag `StringSlice`, which splits its value on every comma — so one prose sentence became several bullets cut mid-sentence. Switched to `StringArray` (value taken verbatim; repeat the flag for more bullets). Tests: `server/cmd/multica/cerebro_sessions_test.go`. |

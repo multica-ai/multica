@@ -155,6 +155,14 @@ brief); `rename` PATCHes `.../sessions/{rootCommentId}` (sessionId path param IS
 the thread root comment id). Omitting the brief flags lets the server
 auto-summarise (`generateHandoff`).
 
+<!-- CEREBRO-PATCH(handoff-brief-flags-verbatim): FIR-3565 — --done/--remaining are StringArray, not StringSlice. -->
+
+`--done` / `--remaining` are registered as pflag **StringArray** in
+`registerIssueSessionHandoffFlags` (`server/cmd/multica/cerebro_sessions.go`), so
+each occurrence is one bullet taken verbatim — commas inside a bullet are kept.
+StringSlice would split on every comma and cut a prose sentence into several
+bullets (FIR-3565). Regression tests: `server/cmd/multica/cerebro_sessions_test.go`.
+
 <!-- CEREBRO-PATCH(handoff-start-new-skill): FIR-2021 — source map for the one-command handoff (--start-new / start_new). -->
 
 One-command handoff (FIR-2021): `--start-new` (CLI) / `start_new: true` (MCP) /
