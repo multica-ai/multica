@@ -262,6 +262,7 @@ func TestLoadConfig_DiscoversQwenCode(t *testing.T) {
 	// absent providers; this test is about ordinary PATH discovery.
 	t.Setenv("SHELL", "/usr/bin/fish")
 	t.Setenv("MULTICA_QWEN_MODEL", "qwen3.8-max-preview")
+	t.Setenv("MULTICA_QWEN_ARGS", "--verbose --foo=bar")
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:0",
@@ -276,6 +277,9 @@ func TestLoadConfig_DiscoversQwenCode(t *testing.T) {
 	}
 	if entry.Path != qwen || entry.Command != "qwen" || entry.Model != "qwen3.8-max-preview" {
 		t.Fatalf("qwen entry = %+v, want path=%q command=qwen model=qwen3.8-max-preview", entry, qwen)
+	}
+	if got, want := strings.Join(cfg.QwenArgs, " "), "--verbose --foo=bar"; got != want {
+		t.Fatalf("QwenArgs = %q, want %q", got, want)
 	}
 }
 
