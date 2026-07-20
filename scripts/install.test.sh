@@ -130,6 +130,114 @@ STUB
   _run_installer "$tmp"
 }
 
+test_remote_ssh_install_prints_token_login_hint() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_sandbox "$tmp"
+  cat >"$tmp/stub-bin/brew" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  tap)
+    exit 0
+    ;;
+  install)
+    echo "simulated brew install failure" >&2
+    exit 42
+    ;;
+  list)
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+STUB
+  chmod +x "$tmp/stub-bin/brew"
+
+  (
+    export SSH_CONNECTION="192.0.2.10 54321 198.51.100.20 22"
+    _run_installer "$tmp"
+  )
+
+  if ! grep -q "Looks like a remote/SSH session" "$tmp/install.out"; then
+    echo "expected remote/SSH token-login hint in installer output" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if ! grep -q "https://multica.ai/settings?tab=tokens" "$tmp/install.out"; then
+    echo "expected direct API Tokens settings URL in installer output" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if ! grep -q "Settings > API Tokens" "$tmp/install.out"; then
+    echo "expected API Tokens tab name in installer output" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if ! grep -q "multica login --token <YOUR_TOKEN>" "$tmp/install.out"; then
+    echo "expected token login command in installer output" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if grep -q "multica config set server_url" "$tmp/install.out"; then
+    echo "did not expect default cloud server config command in installer output" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if grep -q "multica config set app_url" "$tmp/install.out"; then
+    echo "did not expect default cloud app config command in installer output" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+}
+
+test_local_install_does_not_print_token_login_hint() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_sandbox "$tmp"
+  cat >"$tmp/stub-bin/brew" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  tap)
+    exit 0
+    ;;
+  install)
+    echo "simulated brew install failure" >&2
+    exit 42
+    ;;
+  list)
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+STUB
+  chmod +x "$tmp/stub-bin/brew"
+
+  (
+    unset SSH_CONNECTION SSH_CLIENT SSH_TTY
+    _run_installer "$tmp"
+  )
+
+  if grep -q "Looks like a remote/SSH session" "$tmp/install.out"; then
+    echo "did not expect remote/SSH token-login hint in local installer output" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if grep -q "multica login --token <YOUR_TOKEN>" "$tmp/install.out"; then
+    echo "did not expect token login command in local installer output" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+}
+
 test_brew_install_failure_falls_back_to_release_binary
 test_brew_tap_failure_falls_back_to_release_binary
+test_remote_ssh_install_prints_token_login_hint
+test_local_install_does_not_print_token_login_hint
 echo "install.sh tests passed"

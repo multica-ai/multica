@@ -2,8 +2,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
-import type { AgentRuntime } from "@multica/core/types";
+import { fireEvent, render, screen } from "@testing-library/react";
+import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enRuntimes from "../../locales/en/runtimes.json";
@@ -39,6 +39,21 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
 vi.mock("@multica/core/runtimes", () => ({
   deriveRuntimeHealth: () => "online",
   runtimeUsageOptions: () => ({ kind: "usage" }),
+  runtimeProfileListOptions: () => ({ kind: "runtime-profiles" }),
+  parseRuntimeProfileBoundConflict: () => null,
+  useDeleteRuntimeProfile: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
+  useCreateRuntimeProfile: () => ({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
+  useUpdateRuntimeProfile: () => ({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
 }));
 
 vi.mock("@multica/core/agents", () => ({
@@ -99,9 +114,32 @@ function makeRuntime(overrides: Partial<AgentRuntime>): AgentRuntime {
   };
 }
 
-function makeRow(runtime: AgentRuntime, canDelete = true): RuntimeRow {
+function makeProfile(overrides: Partial<RuntimeProfile> = {}): RuntimeProfile {
+  return {
+    id: "profile-1",
+    workspace_id: "ws-1",
+    display_name: "Custom Codex",
+    protocol_family: "codex",
+    command_name: "custom-codex",
+    description: null,
+    fixed_args: [],
+    visibility: "workspace",
+    created_by: "user-1",
+    enabled: true,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeRow(
+  runtime: AgentRuntime,
+  canDelete = true,
+  profile: RuntimeProfile | null = null,
+): RuntimeRow {
   return {
     runtime,
+    profile,
     ownerMember: null,
     workload: { agentIds: [], runningCount: 0, queuedCount: 0 },
     canDelete,
@@ -118,6 +156,7 @@ function renderActionsCell(row: RuntimeRow) {
       <QueryClientProvider client={qc}>
         <RuntimeRowMenu
           runtime={row.runtime}
+          profile={row.profile}
           wsId="ws-1"
           canDelete={row.canDelete}
         />
@@ -151,6 +190,37 @@ describe("runtime list row menu", () => {
       makeRow(makeRuntime({ runtime_mode: "cloud", status: "online" })),
     );
     expect(screen.getByLabelText("Row actions")).toBeInTheDocument();
+  });
+
+  it("renders the kebab menu for a custom runtime when the profile is available", () => {
+    const profile = makeProfile();
+    renderActionsCell(
+      makeRow(
+        makeRuntime({ runtime_mode: "local", profile_id: profile.id }),
+        true,
+        profile,
+      ),
+    );
+    expect(screen.getByLabelText("Row actions")).toBeInTheDocument();
+  });
+
+  it("opens custom runtime editing from the unified row menu", () => {
+    const profile = makeProfile();
+    renderActionsCell(
+      makeRow(
+        makeRuntime({ runtime_mode: "local", profile_id: profile.id }),
+        true,
+        profile,
+      ),
+    );
+
+    fireEvent.click(screen.getByLabelText("Row actions"));
+    fireEvent.click(screen.getByText("Edit custom runtime"));
+
+    expect(
+      screen.getByRole("heading", { name: "Edit custom runtime" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Display name")).toHaveValue("Custom Codex");
   });
 
   it("hides the kebab menu when the caller lacks delete permission", () => {

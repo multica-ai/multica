@@ -465,6 +465,7 @@ func TestRuntimesAndReposSkillCoversClaimAndCheckoutChain(t *testing.T) {
 		"multica runtime list --output json",
 		"multica repo checkout <url>",
 		"MULTICA_DAEMON_PORT",
+		"resource_ref.ref",
 		"github_repo",
 		"local_directory",
 		"Runtime and repo commands affect active agent execution",
@@ -499,9 +500,11 @@ func TestProjectsAndResourcesSkillCoversDurableContext(t *testing.T) {
 		".multica/project/resources.json",
 		"multica project resource list <project-id> --output json",
 		"multica project resource add <project-id> --type github_repo --url <github-url> --output json",
+		"multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json",
 		"multica project resource add <project-id> --type local_directory",
 		"Project resources are durable and affect future tasks",
 		"github_repo.resource_ref.url",
+		"resource_ref.ref",
 		"references/projects-and-resources-source-map.md",
 	}
 	for _, want := range mustContain {

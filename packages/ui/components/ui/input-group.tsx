@@ -6,7 +6,9 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@multica/ui/lib/utils"
 import { Button } from "@multica/ui/components/ui/button"
 import { Input } from "@multica/ui/components/ui/input"
+import { SelectTrigger } from "@multica/ui/components/ui/select"
 import { Textarea } from "@multica/ui/components/ui/textarea"
+import { TimeInput } from "@multica/ui/components/ui/time-input"
 
 function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
@@ -54,6 +56,15 @@ function InputGroupAddon({
       data-slot="input-group-addon"
       data-align={align}
       className={cn(inputGroupAddonVariants({ align }), className)}
+      onMouseDown={(e) => {
+        if ((e.target as HTMLElement).closest("button")) {
+          return
+        }
+        // The addon acts as part of the input, so a click on it must not move
+        // focus: the blur would land before the click below could focus back,
+        // and the input's blur handlers (commit, close) would already have run.
+        e.preventDefault()
+      }}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest("button")) {
           return
@@ -132,6 +143,50 @@ function InputGroupInput({
   )
 }
 
+/** A Select that shares the group's box instead of bringing its own.
+ *
+ *  The group lights its border from `[data-slot=input-group-control]:focus-visible`,
+ *  and a trigger that kept its own slot would leave the box dark while the select
+ *  it contains is the very thing focused — so the trigger takes that slot. Its
+ *  border, ring and background are the group's now; what it keeps is its own
+ *  content width, so the control ends where its longest option does. */
+function InputGroupSelectTrigger({
+  className,
+  ...props
+}: React.ComponentProps<typeof SelectTrigger>) {
+  return (
+    <SelectTrigger
+      data-slot="input-group-control"
+      className={cn(
+        "h-full rounded-none border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+/** A TimeInput that shares the group's box instead of bringing its own.
+ *
+ *  The slot goes on the segments rather than on the field: the group lights its
+ *  border from the control that has focus, and what has focus here is an hour or
+ *  a minute, never their wrapper. */
+function InputGroupTimeInput({
+  className,
+  ...props
+}: React.ComponentProps<typeof TimeInput>) {
+  return (
+    <TimeInput
+      segmentSlot="input-group-control"
+      className={cn(
+        "h-full min-w-0 flex-1 justify-center rounded-none border-0 bg-transparent focus-within:border-transparent focus-within:ring-0 dark:bg-transparent",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
 function InputGroupTextarea({
   className,
   ...props
@@ -154,5 +209,7 @@ export {
   InputGroupButton,
   InputGroupText,
   InputGroupInput,
+  InputGroupSelectTrigger,
   InputGroupTextarea,
+  InputGroupTimeInput,
 }

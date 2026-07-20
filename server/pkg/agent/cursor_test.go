@@ -157,6 +157,30 @@ func TestNormalizeCursorStreamLine(t *testing.T) {
 	}
 }
 
+func TestObservedCursorEventTypeIsBoundedAndContentFree(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "known type", value: "tool_result", want: "tool_result"},
+		{name: "trimmed", value: "  step-finish  ", want: "step-finish"},
+		{name: "empty", value: " ", want: "unknown"},
+		{name: "content-like", value: "result secret-value", want: "invalid"},
+		{name: "oversized", value: strings.Repeat("x", 65), want: "invalid"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := observedCursorEventType(tc.value); got != tc.want {
+				t.Fatalf("observedCursorEventType(%q) = %q, want %q", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCursorHandleAssistantText(t *testing.T) {
 	t.Parallel()
 
@@ -255,10 +279,10 @@ func TestCursorUsageModelFallback(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name             string
-		evtModel         string
-		configuredModel  string
-		want             string
+		name            string
+		evtModel        string
+		configuredModel string
+		want            string
 	}{
 		{"event model wins", "gpt-5.3-codex", "composer-2.5", "gpt-5.3-codex"},
 		{"configured model fallback", "", "composer-2.5", "composer-2.5"},

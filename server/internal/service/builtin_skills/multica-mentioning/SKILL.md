@@ -124,8 +124,32 @@ These are all silent no-ops — no error, no run:
   (`RuntimeID` invalid or `ArchivedAt` set).
 - **A private agent you cannot access:** skipped — the mention path gates on
   `canAccessPrivateAgent` directly for both `@agent` and `@squad` (the
-  `canEnqueueSquadLeader` wrapper is the assignment/child-done path, not this
-  one).
+  `canEnqueueSquadLeader` wrapper is the squad assignment/promote path, not this
+  one; the child-done wake is ungated — see the multica-squads skill).
+
+One nuance for automation (MUL-4857): when an UNATTRIBUTED autopilot run (a
+schedule/webhook dispatch has no human originator, so the A2A gate has no human
+to key on) delegates by `@mention` while working on the issue that autopilot
+created, the invoke gate falls back to the **autopilot creator** as the effective
+invoking user — the same principal that admitted the first dispatch. So a mid-run
+`@agent` / `@squad` delegation fires exactly when the autopilot creator could
+invoke that target (owner / `public_to` match), and stays skipped otherwise. It
+is authorization only — the enqueued run's originator/attribution is unchanged.
+This fallback is bound to verified task lineage: it applies only when the
+delegating run's own task is the one working on that autopilot issue (author ==
+task agent, `task.issue_id` == this issue), so a run doing work elsewhere can
+never borrow another autopilot creator's authority by commenting on its issue.
+The same authority carries the plain assigned-squad-leader wake (a worker's
+result comment on the autopilot issue can still wake the leader), and it survives
+a busy target: if the mentioned agent is already running, the delegation is
+replayed at that run's completion under the same authority, so it is never lost.
+An edit is treated as a fresh action — it re-derives the comment's lineage from
+the editing action. Only the agent author editing its OWN comment re-stamps the
+lineage to the editing task; any other editor — including a workspace owner/admin
+editing an agent's comment — CLEARS it. So editing an old autopilot comment from
+an unrelated issue, or an admin editing an agent's comment (manage rights, not
+invoke rights), fails closed at the deferred completion-reconcile instead of
+reusing the original run's authority.
 
 ## Incorrect → Correct
 

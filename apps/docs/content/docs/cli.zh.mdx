@@ -38,6 +38,7 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 | 命令 | 用途 |
 |---|---|
 | `multica workspace list` | 列出你有权访问的所有工作区 |
+| `multica workspace create --name "..." --slug "..." [--issue-prefix "..."] [--description "..."] [--context "..."]` | 创建工作区（你会成为 owner）。`--name` 和 `--slug` 必填，slug 创建后不可修改；不会切换你当前的工作区。 |
 | `multica workspace get <slug>` | 查看一个工作区的详情 |
 | `multica workspace member list` | 列出当前工作区的成员 |
 | `multica workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | 修改 workspace 元数据（admin/owner 权限）。长文本可用 `--description-stdin` / `--context-stdin`。 |
@@ -54,14 +55,23 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 | `multica issue get <id>` | 查看单条 issue（接受 issue key 或 UUID） |
 | `multica issue create --title "..."` | 创建新 issue |
 | `multica issue update <id> ...` | 修改 issue（状态、优先级、分配人等） |
-| `multica issue assign <id> --agent <slug>` | 分配给智能体（立即触发任务） |
-| `multica issue status <id> --set <status>` | 快捷改状态 |
+| `multica issue assign <id> --to <name>` | 分配给成员、智能体或小队（分配给智能体会触发一次运行） |
+| `multica issue status <id> <status>` | 快捷改状态 |
 | `multica issue search <query>` | 关键字搜索 |
+| `multica issue children <id>` | 按 stage 分组查看子 issue |
+| `multica issue pull-requests <id>` | 查看关联 PR 及其状态 |
 | `multica issue runs <id>` | 查看 issue 上智能体跑过的任务 |
+| `multica issue run-messages <task-id>` | 查看某次执行的消息 |
+| `multica issue usage <id>` | 查看单个 issue 聚合 token 用量 |
 | `multica issue rerun <id>` | 给该 issue 当前的智能体分配人重新创建一条任务 |
+| `multica issue cancel-task <task-id>` | 取消排队中或运行中的任务 |
 | `multica issue comment <id> ...` | 嵌套：看 / 发评论 |
+| `multica issue comment resolve/unresolve <comment-id>` | 标记评论线程已解决 / 未解决 |
 | `multica issue subscriber <id> ...` | 嵌套：订阅 / 取消订阅 |
+| `multica issue metadata <id> ...` | 嵌套：读写 issue metadata |
+| `multica issue label <id> ...` | 嵌套：管理 issue 上的 label |
 | `multica project list/get/create/update/delete/status` | Project CRUD |
+| `multica label list/create/update/delete` | Workspace label CRUD |
 
 ## 智能体和 Skill
 
@@ -74,6 +84,8 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 | `multica agent archive <slug>` | 归档 |
 | `multica agent restore <slug>` | 恢复归档的智能体 |
 | `multica agent tasks <slug>` | 查看智能体的任务历史 |
+| `multica agent avatar <slug>` | 上传智能体头像 |
+| `multica agent env <slug> ...` | 读取或替换智能体的 custom environment variables |
 | `multica agent skills ...` | 嵌套：挂载 / 卸载 Skill |
 | `multica skill list/get/create/update/delete` | Skill CRUD |
 | `multica skill import ...` | 从 GitHub / ClawHub / 本机导入 Skill |
@@ -117,6 +129,10 @@ multica skill import --url https://skills.sh/acme/repo/review-helper --on-confli
 | `multica autopilot delete <id>` | 删除 |
 | `multica autopilot runs <id>` | 查看运行历史 |
 | `multica autopilot trigger <id>` | 手动触发一次 |
+| `multica autopilot trigger-add/update/delete <id>` | 管理 schedule 或 webhook trigger |
+| `multica autopilot trigger-rotate-url <id> <trigger-id>` | 轮换 webhook trigger URL |
+
+`multica autopilot create/update` 还支持 `--subscriber`，为 `create_issue` 模式创建的 issue 设置默认订阅人；`update` 支持 `--clear-subscribers` 清空默认订阅人。
 
 ## 守护进程和运行时
 
@@ -130,7 +146,9 @@ multica skill import --url https://skills.sh/acme/repo/review-helper --on-confli
 | `multica runtime list` | 列出当前工作区的 runtime |
 | `multica runtime usage` | 查看资源使用情况 |
 | `multica runtime activity` | 近期活动记录 |
-| `multica runtime update <id> ...` | 更新 runtime 配置 |
+| `multica runtime update <id> ...` | 在某个 runtime 上触发 CLI 更新 |
+| `multica runtime delete <id> [--cascade]` | 删除 runtime，可选择同时归档绑定的智能体 |
+| `multica runtime profile ...` | 管理自定义 runtime profile 和本机路径覆盖 |
 
 ## 杂项
 

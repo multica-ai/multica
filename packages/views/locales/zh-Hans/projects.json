@@ -15,7 +15,6 @@
     "unpin": "取消钉选",
     "delete": "删除",
     "no_matches": "没有匹配的项目",
-    "selected_one": "已选 {{count}} 项",
     "selected_other": "已选 {{count}} 项",
     "clear_selection": "清除选择"
   },
@@ -68,7 +67,11 @@
     "section_properties": "属性",
     "section_progress": "进度",
     "section_description": "描述",
+    "prop_start_date": "开始日期",
+    "prop_due_date": "截止日期",
+    "clear_date": "清除日期",
     "description_placeholder": "添加描述...",
+    "description_hint": "会作为项目上下文提供给智能体，应用于该项目下的每个任务。",
     "empty_issues_title": "还没有关联的 issue",
     "empty_issues_hint": "新建一个 issue，或把已有的 issue 关联到这个项目。",
     "empty_issues_new_button": "新建 issue",
@@ -131,7 +134,6 @@
   "toolbar": {
     "result_count_title": "当前结果 / 全部项目",
     "filter_label": "筛选",
-    "filter_active_count_one": "{{count}} 项筛选",
     "filter_active_count_other": "{{count}} 项筛选",
     "clear_filters": "清除筛选",
     "section_status": "状态",

@@ -168,6 +168,69 @@ func TestDeleteAgentRuntime_StructuredConflict(t *testing.T) {
 	}
 }
 
+func TestDeleteAgentRuntime_CustomProfileInstanceRefusesDirectDelete(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID, _ := createProfileBackedRuntime(t, ctx, "Custom Instance Delete Guard")
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.DeleteAgentRuntime(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "runtime_profile_instance_delete_unsupported" {
+		t.Fatalf("expected runtime_profile_instance_delete_unsupported, got %q", body.Code)
+	}
+
+	var rtRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&rtRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if rtRows != 1 {
+		t.Fatalf("expected custom runtime instance to survive refusal, count=%d", rtRows)
+	}
+}
+
+func TestDeleteAgentRuntime_OrphanedProfileAllowsDirectDelete(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID, profileID := createProfileBackedRuntime(t, ctx, "Orphaned Custom Instance Delete")
+	if _, err := testPool.Exec(ctx, `DELETE FROM runtime_profile WHERE id = $1`, profileID); err != nil {
+		t.Fatalf("delete profile row: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.DeleteAgentRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var rtRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&rtRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if rtRows != 0 {
+		t.Fatalf("expected orphaned custom runtime instance to be deleted, count=%d", rtRows)
+	}
+}
+
 // TestArchiveAgentsAndDeleteRuntime_HappyPath exercises the cascade endpoint
 // end-to-end: with the correct expected_active_agent_ids snapshot, it must
 // archive the active agent, delete the runtime row, and respond 200 with the
@@ -206,6 +269,71 @@ func TestArchiveAgentsAndDeleteRuntime_HappyPath(t *testing.T) {
 	}
 	if agentRows != 0 {
 		t.Fatalf("expected archived agent to be hard-deleted with runtime, found %d", agentRows)
+	}
+}
+
+func TestArchiveAgentsAndDeleteRuntime_CustomProfileInstanceRefusesDirectDelete(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID, _ := createProfileBackedRuntime(t, ctx, "Custom Instance Cascade Guard")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/archive-agents-and-delete",
+		map[string]any{"expected_active_agent_ids": []string{}})
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ArchiveAgentsAndDeleteRuntime(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "runtime_profile_instance_delete_unsupported" {
+		t.Fatalf("expected runtime_profile_instance_delete_unsupported, got %q", body.Code)
+	}
+
+	var rtRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&rtRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if rtRows != 1 {
+		t.Fatalf("expected custom runtime instance to survive refusal, count=%d", rtRows)
+	}
+}
+
+func TestArchiveAgentsAndDeleteRuntime_OrphanedProfileAllowsCascade(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID, profileID := createProfileBackedRuntime(t, ctx, "Orphaned Custom Instance Cascade")
+	if _, err := testPool.Exec(ctx, `DELETE FROM runtime_profile WHERE id = $1`, profileID); err != nil {
+		t.Fatalf("delete profile row: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/archive-agents-and-delete",
+		map[string]any{"expected_active_agent_ids": []string{}})
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ArchiveAgentsAndDeleteRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var rtRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&rtRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if rtRows != 0 {
+		t.Fatalf("expected orphaned custom runtime instance to be deleted, count=%d", rtRows)
 	}
 }
 
@@ -283,6 +411,40 @@ func createCascadeFixtureRuntime(t *testing.T, ctx context.Context, name string)
 		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
 	})
 	return runtimeID
+}
+
+func createProfileBackedRuntime(t *testing.T, ctx context.Context, name string) (string, string) {
+	t.Helper()
+	var profileID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO runtime_profile (
+			workspace_id, display_name, protocol_family, command_name,
+			fixed_args, visibility, created_by, enabled
+		)
+		VALUES ($1, $2, 'codex', 'custom-codex', '[]'::jsonb, 'workspace', $3, true)
+		RETURNING id
+	`, testWorkspaceID, name+" Profile", testUserID).Scan(&profileID); err != nil {
+		t.Fatalf("insert runtime profile: %v", err)
+	}
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, profile_id, last_seen_at
+		)
+		VALUES ($1, $2, $3, 'local', 'codex', 'online', $4, '{}'::jsonb, $5, $6, now())
+		RETURNING id
+	`, testWorkspaceID, "daemon-"+profileID, name, name+" device", testUserID, profileID).Scan(&runtimeID); err != nil {
+		t.Fatalf("insert profile-backed runtime: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE runtime_id = $1`, runtimeID)
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+		testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, profileID)
+	})
+	return runtimeID, profileID
 }
 
 func createCascadeFixtureAgent(t *testing.T, ctx context.Context, runtimeID, name string) string {

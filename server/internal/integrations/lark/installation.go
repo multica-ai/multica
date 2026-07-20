@@ -34,7 +34,7 @@ type InstallationParams struct {
 // with plaintext credentials — the only path to writing
 // lark_installation goes through here.
 type InstallationService struct {
-	queries *db.Queries
+	queries *ChannelStore
 	box     *secretbox.Box
 }
 
@@ -47,7 +47,7 @@ func NewInstallationService(queries *db.Queries, box *secretbox.Box) (*Installat
 	if box == nil {
 		return nil, errors.New("lark: InstallationService requires a non-nil secretbox.Box")
 	}
-	return &InstallationService{queries: queries, box: box}, nil
+	return &InstallationService{queries: NewChannelStore(queries), box: box}, nil
 }
 
 // Upsert creates a new installation or refreshes an existing one in
@@ -56,15 +56,15 @@ func NewInstallationService(queries *db.Queries, box *secretbox.Box) (*Installat
 // the hub's concern, not ours. The returned row is the post-write
 // state; the encrypted secret column is included for completeness but
 // callers SHOULD NOT log or persist it elsewhere.
-func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) (db.LarkInstallation, error) {
+func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) (Installation, error) {
 	if err := validateInstallationParams(p); err != nil {
-		return db.LarkInstallation{}, err
+		return Installation{}, err
 	}
 	sealed, err := s.box.Seal([]byte(p.AppSecret))
 	if err != nil {
-		return db.LarkInstallation{}, fmt.Errorf("encrypt app_secret: %w", err)
+		return Installation{}, fmt.Errorf("encrypt app_secret: %w", err)
 	}
-	return s.queries.UpsertLarkInstallation(ctx, db.UpsertLarkInstallationParams{
+	return s.queries.UpsertLarkInstallation(ctx, UpsertInstallationParams{
 		WorkspaceID:        p.WorkspaceID,
 		AgentID:            p.AgentID,
 		AppID:              p.AppID,
@@ -82,7 +82,7 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 // queryable; a subsequent re-install via Upsert flips status back to
 // 'active' atomically.
 func (s *InstallationService) Revoke(ctx context.Context, id pgtype.UUID) error {
-	return s.queries.SetLarkInstallationStatus(ctx, db.SetLarkInstallationStatusParams{
+	return s.queries.SetLarkInstallationStatus(ctx, SetInstallationStatusParams{
 		ID:     id,
 		Status: string(InstallationRevoked),
 	})
@@ -93,7 +93,7 @@ func (s *InstallationService) Revoke(ctx context.Context, id pgtype.UUID) error 
 // authenticate against the Lark API on behalf of an installation; do
 // NOT use this for read-only display surfaces. The plaintext value
 // must never round-trip through an HTTP response.
-func (s *InstallationService) DecryptAppSecret(inst db.LarkInstallation) (string, error) {
+func (s *InstallationService) DecryptAppSecret(inst Installation) (string, error) {
 	plain, err := s.box.Open(inst.AppSecretEncrypted)
 	if err != nil {
 		return "", fmt.Errorf("decrypt app_secret: %w", err)
@@ -107,16 +107,16 @@ func (s *InstallationService) DecryptAppSecret(inst db.LarkInstallation) (string
 // know the workspace and should use this so a forged installation_id
 // from a different workspace returns NotFound instead of leaking
 // existence.
-func (s *InstallationService) GetInWorkspace(ctx context.Context, id, workspaceID pgtype.UUID) (db.LarkInstallation, error) {
-	row, err := s.queries.GetLarkInstallationInWorkspace(ctx, db.GetLarkInstallationInWorkspaceParams{
+func (s *InstallationService) GetInWorkspace(ctx context.Context, id, workspaceID pgtype.UUID) (Installation, error) {
+	row, err := s.queries.GetLarkInstallationInWorkspace(ctx, GetInstallationInWorkspaceParams{
 		ID:          id,
 		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return db.LarkInstallation{}, ErrInstallationNotFound
+			return Installation{}, ErrInstallationNotFound
 		}
-		return db.LarkInstallation{}, err
+		return Installation{}, err
 	}
 	return row, nil
 }
@@ -124,7 +124,7 @@ func (s *InstallationService) GetInWorkspace(ctx context.Context, id, workspaceI
 // ListByWorkspace returns every installation rooted at the workspace,
 // active and revoked, oldest first. The status column lets the UI
 // distinguish "wired up" from "torn down but kept for audit".
-func (s *InstallationService) ListByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.LarkInstallation, error) {
+func (s *InstallationService) ListByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]Installation, error) {
 	return s.queries.ListLarkInstallationsByWorkspace(ctx, workspaceID)
 }
 

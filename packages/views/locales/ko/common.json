@@ -1,4 +1,32 @@
 {
+  "avatar_upload": {
+    "change": "아바타 변경",
+    "remove": "제거",
+    "select_image": "이미지 파일을 선택하세요.",
+    "updated": "아바타를 업데이트했어요",
+    "failed": "아바타 업로드에 실패했어요"
+  },
+  "avatar_crop": {
+    "title": "아바타 편집",
+    "zoom": "확대/축소",
+    "zoom_in": "확대",
+    "zoom_out": "축소",
+    "rotate": "회전",
+    "reset": "초기화",
+    "cancel": "취소",
+    "apply": "저장",
+    "uploading": "업로드 중…",
+    "loading": "불러오는 중…",
+    "load_failed": "이미지를 불러오지 못했어요"
+  },
+  "color_picker": {
+    "saturation": "채도와 명도",
+    "hue": "색조",
+    "hex": "16진수 색상",
+    "eyedropper": "화면에서 색상 선택",
+    "presets": "프리셋",
+    "random": "무작위"
+  },
   "save": "저장",
   "cancel": "취소",
   "delete": "삭제",
@@ -23,6 +51,21 @@
     "error_expired": "이 바인딩 링크는 유효하지 않거나 만료되었습니다(유효 시간 15분). 봇에게 새 링크를 다시 받아주세요.",
     "error_already_bound": "이 Lark 계정은 이미 다른 Multica 사용자에 연결되어 있습니다. 계정 이전은 먼저 명시적으로 연결을 해제해야 합니다.",
     "error_not_member": "현재 로그인한 Multica 계정이 이 워크스페이스의 멤버가 아닙니다.",
+    "error_unknown": "문제가 발생했어요. 다시 시도해 보고, 계속되면 워크스페이스 관리자에게 문의하세요."
+  },
+  "slack_bind": {
+    "page_title": "Slack 계정 연결",
+    "redeeming": "계정을 연결하는 중…",
+    "needs_auth_description": "연결을 완료하려면 Multica에 로그인하세요. 링크의 토큰이 Slack 계정을 이 Multica 사용자와 연결하므로 먼저 로그인해야 해요.",
+    "sign_in": "로그인",
+    "done_title": "연결되었어요.",
+    "done_description": "이제 Slack에서 봇에게 보내는 다음 메시지는 바로 에이전트로 전달돼요. 이 탭은 닫아도 됩니다.",
+    "error_title": "연결을 완료하지 못했어요",
+    "error_admin_hint": "계속 발생하면 Slack에서 봇에게 다시 메시지를 보내 새 링크를 받으세요.",
+    "error_missing_token": "링크에 토큰이 없어요. Slack에서 봇에게 다시 메시지를 보내 새 링크를 받으세요.",
+    "error_expired": "이 링크는 유효하지 않거나 만료됐어요(유효 기간 15분). 봇에게 다시 메시지를 보내 새 링크를 받으세요.",
+    "error_already_bound": "이 Slack 계정은 이미 다른 Multica 사용자에 연결되어 있어요. 이전하려면 먼저 명시적으로 연결을 해제해야 합니다.",
+    "error_not_member": "로그인한 Multica 계정이 이 워크스페이스의 멤버가 아니에요.",
     "error_unknown": "문제가 발생했어요. 다시 시도해 보고, 계속되면 워크스페이스 관리자에게 문의하세요."
   }
 }

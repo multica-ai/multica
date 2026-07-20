@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import {
   ChevronDown,
   ChevronLeft,
+  ExternalLink,
   Loader2,
   Pencil,
   Plus,
@@ -42,6 +43,8 @@ import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import {
   PROTOCOL_FAMILIES,
   buildRuntimeCatalog,
+  formatCommandLine,
+  parseCommandLine,
   validateProfileForm,
   type ProfileFormErrorField,
   type ProfileFormValues,
@@ -49,6 +52,7 @@ import {
   type RuntimeCatalogSections,
 } from "./runtime-profile-catalog";
 import { useT } from "../../i18n";
+import { customRuntimeDocsHref } from "./runtime-docs";
 
 // The dialog runs in two surfaces that swap inside one Popup:
 //   - "browse": custom-first master list + adaptive detail
@@ -60,19 +64,33 @@ type DialogState =
 
 export function RuntimeProfilesDialog({
   wsId,
+  intent = "manage",
+  machineName,
+  initialProfile,
   onProfileCreated,
   onClose,
 }: {
   wsId: string;
+  intent?: "create" | "edit" | "manage";
+  machineName?: string;
+  initialProfile?: RuntimeProfile;
   onProfileCreated?: (profile: RuntimeProfile) => void;
   onClose: () => void;
 }) {
-  const { t } = useT("runtimes");
+  const { t, i18n } = useT("runtimes");
   const { data: profiles = [], isLoading } = useQuery(
     runtimeProfileListOptions(wsId),
   );
 
-  const [state, setState] = useState<DialogState>({ surface: "browse" });
+  const [state, setState] = useState<DialogState>(() => {
+    if (intent === "create") {
+      return { surface: "form", mode: "create", step: "family" };
+    }
+    if (intent === "edit" && initialProfile) {
+      return { surface: "form", mode: "edit", profile: initialProfile };
+    }
+    return { surface: "browse" };
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Carries the chosen family from create-step-1 into the form.
   const [draftFamily, setDraftFamily] =
@@ -87,28 +105,41 @@ export function RuntimeProfilesDialog({
     entries.find((entry) => entry.id === selectedId) ?? null;
   const openCreateForm = () =>
     setState({ surface: "form", mode: "create", step: "family" });
+  const docsHref = customRuntimeDocsHref(i18n.language);
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
-        className="flex max-h-[88vh] flex-col gap-0 p-0 sm:max-w-3xl"
+        className={cn(
+          "flex max-h-[88vh] flex-col gap-0 overscroll-contain p-0",
+          intent === "manage" ? "sm:max-w-3xl" : "sm:max-w-2xl",
+        )}
         showCloseButton={false}
       >
         <DialogHeader className="border-b px-6 py-5">
           <div className="flex items-start justify-between gap-3">
             <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
-              <Server className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="truncate">{t(($) => $.profiles.dialog_title)}</span>
+              <Server
+                aria-hidden="true"
+                className="h-4 w-4 shrink-0 text-muted-foreground"
+              />
+              <span className="truncate">
+                {intent === "create"
+                  ? t(($) => $.profiles.form.create_title)
+                  : intent === "edit"
+                    ? t(($) => $.profiles.form.edit_title)
+                    : t(($) => $.profiles.dialog_title)}
+              </span>
             </DialogTitle>
             <div className="flex shrink-0 items-center gap-2">
-              {state.surface === "browse" && (
+              {state.surface === "browse" && catalog.customs.length > 0 && (
                 <Button
                   type="button"
                   size="sm"
                   className="h-8 px-2.5"
                   onClick={openCreateForm}
                 >
-                  <Plus className="h-3.5 w-3.5" />
+                  <Plus aria-hidden="true" className="h-3.5 w-3.5" />
                   {t(($) => $.profiles.add_new)}
                 </Button>
               )}
@@ -123,13 +154,28 @@ export function RuntimeProfilesDialog({
                   />
                 }
               >
-                <X className="h-4 w-4" />
+                <X aria-hidden="true" className="h-4 w-4" />
                 <span className="sr-only">{t(($) => $.profiles.close)}</span>
               </DialogClose>
             </div>
           </div>
           <DialogDescription className="text-xs">
-            {t(($) => $.profiles.dialog_description)}
+            <span className="block">
+              {intent === "create"
+                ? t(($) => $.profiles.create_dialog_description, {
+                    machine: machineName ?? t(($) => $.profiles.this_machine),
+                  })
+                : t(($) => $.profiles.dialog_description)}
+            </span>{" "}
+            <a
+              href={docsHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 inline-flex items-center gap-1 rounded-sm font-medium text-foreground underline underline-offset-2 transition-colors hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {t(($) => $.profiles.learn_more)}
+              <ExternalLink aria-hidden="true" className="h-3 w-3" />
+            </a>
           </DialogDescription>
         </DialogHeader>
 
@@ -142,6 +188,8 @@ export function RuntimeProfilesDialog({
               state.mode === "edit" ? state.profile.protocol_family : draftFamily
             }
             profile={state.mode === "edit" ? state.profile : null}
+            standaloneCreate={intent === "create"}
+            standaloneEdit={intent === "edit"}
             onPickFamily={(family) => {
               setDraftFamily(family);
               setState({ surface: "form", mode: "create", step: "details" });
@@ -153,10 +201,20 @@ export function RuntimeProfilesDialog({
                 setState({ surface: "browse" });
               }
             }}
-            onCancel={() => setState({ surface: "browse" })}
+            onCancel={() => {
+              if (intent !== "manage") {
+                onClose();
+              } else {
+                setState({ surface: "browse" });
+              }
+            }}
             onSaved={(profile) => {
               if (state.surface === "form" && state.mode === "create") {
                 onProfileCreated?.(profile);
+              }
+              if (intent !== "manage") {
+                onClose();
+                return;
               }
               setSelectedId(profile.id);
               setState({ surface: "browse" });
@@ -322,7 +380,7 @@ function EmptyCustomState({ onAddNew }: { onAddNew: () => void }) {
     <div className="rounded-md border bg-muted/20 p-4">
       <div className="flex items-start gap-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-background">
-          <Server className="h-4 w-4 text-muted-foreground" />
+          <Server aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
         </span>
         <div className="min-w-0 flex-1">
           <h5 className="text-sm font-medium">{t(($) => $.profiles.empty_title)}</h5>
@@ -335,7 +393,7 @@ function EmptyCustomState({ onAddNew }: { onAddNew: () => void }) {
             className="mt-3 h-8 px-2.5"
             onClick={onAddNew}
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus aria-hidden="true" className="h-3.5 w-3.5" />
             {t(($) => $.profiles.add_new)}
           </Button>
         </div>
@@ -471,6 +529,10 @@ function DetailPanel({
   }
 
   const profile = entry.profile;
+  const commandLine = formatCommandLine(
+    profile.command_name,
+    profile.fixed_args,
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -499,7 +561,7 @@ function DetailPanel({
             <span className="capitalize">{profile.protocol_family}</span>
           </DetailRow>
           <DetailRow label={t(($) => $.profiles.detail.command)}>
-            <span className="font-mono text-xs">{profile.command_name}</span>
+            <span className="font-mono text-xs">{commandLine}</span>
           </DetailRow>
           <DetailRow label={t(($) => $.profiles.detail.description)}>
             {profile.description ? (
@@ -576,6 +638,8 @@ function ProfileFormView({
   step,
   family,
   profile,
+  standaloneCreate,
+  standaloneEdit,
   onPickFamily,
   onBack,
   onCancel,
@@ -586,6 +650,8 @@ function ProfileFormView({
   step: "family" | "details";
   family: RuntimeProtocolFamily;
   profile: RuntimeProfile | null;
+  standaloneCreate: boolean;
+  standaloneEdit: boolean;
   onPickFamily: (family: RuntimeProtocolFamily) => void;
   onBack: () => void;
   onCancel: () => void;
@@ -597,6 +663,9 @@ function ProfileFormView({
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {t(($) => $.profiles.form.step_progress, { current: 1, total: 2 })}
+          </p>
           <h3 className="text-sm font-medium">
             {t(($) => $.profiles.form.step_family_label)}
           </h3>
@@ -605,15 +674,12 @@ function ProfileFormView({
           </p>
           <div
             className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3"
-            role="radiogroup"
             aria-label={t(($) => $.profiles.form.family_label)}
           >
             {PROTOCOL_FAMILIES.map((option) => (
               <button
                 key={option}
                 type="button"
-                role="radio"
-                aria-checked={option === family}
                 onClick={() => onPickFamily(option)}
                 className="flex items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
@@ -623,14 +689,22 @@ function ProfileFormView({
             ))}
           </div>
         </div>
-        <div className="flex shrink-0 justify-between gap-2 border-t bg-muted/30 px-6 py-3">
-          <Button type="button" variant="ghost" size="sm" onClick={onBack}>
-            <ChevronLeft className="h-3.5 w-3.5" />
-            {t(($) => $.profiles.form.back)}
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={onCancel}>
-            {t(($) => $.profiles.form.cancel)}
-          </Button>
+        <div
+          className={cn(
+            "flex shrink-0 gap-2 border-t bg-muted/30 px-6 py-3",
+            standaloneCreate ? "justify-end" : "justify-start",
+          )}
+        >
+          {standaloneCreate ? (
+            <Button type="button" variant="outline" size="sm" onClick={onCancel}>
+              {t(($) => $.profiles.form.cancel)}
+            </Button>
+          ) : (
+            <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+              <ChevronLeft aria-hidden="true" className="h-3.5 w-3.5" />
+              {t(($) => $.profiles.form.back)}
+            </Button>
+          )}
         </div>
       </div>
     );
@@ -642,6 +716,7 @@ function ProfileFormView({
       mode={mode}
       family={family}
       profile={profile}
+      hideEditHeading={standaloneEdit}
       onBack={onBack}
       onCancel={onCancel}
       onSaved={onSaved}
@@ -654,6 +729,7 @@ function ProfileDetailsForm({
   mode,
   family,
   profile,
+  hideEditHeading,
   onBack,
   onCancel,
   onSaved,
@@ -662,6 +738,7 @@ function ProfileDetailsForm({
   mode: "create" | "edit";
   family: RuntimeProtocolFamily;
   profile: RuntimeProfile | null;
+  hideEditHeading: boolean;
   onBack: () => void;
   onCancel: () => void;
   onSaved: (profile: RuntimeProfile) => void;
@@ -673,7 +750,9 @@ function ProfileDetailsForm({
 
   const [values, setValues] = useState<ProfileFormValues>({
     displayName: profile?.display_name ?? "",
-    commandName: profile?.command_name ?? "",
+    commandLine: profile
+      ? formatCommandLine(profile.command_name, profile.fixed_args)
+      : "",
     description: profile?.description ?? "",
   });
   const [errors, setErrors] = useState<ProfileFormErrorField[]>([]);
@@ -687,22 +766,34 @@ function ProfileDetailsForm({
     setValues((prev) => ({ ...prev, [key]: value }));
   };
 
+  const parsedCommand = useMemo(
+    () => parseCommandLine(values.commandLine),
+    [values.commandLine],
+  );
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError(null);
     setDuplicateName(false);
     const validationErrors = validateProfileForm(values);
+    if (!validationErrors.includes("commandLine") && !parsedCommand.ok) {
+      validationErrors.push("commandLine");
+    }
     setErrors(validationErrors);
     if (validationErrors.length > 0) return;
+    if (!parsedCommand.ok) return;
 
     const description = values.description.trim();
+    const commandName = parsedCommand.commandName;
+    const fixedArgs = parsedCommand.fixedArgs;
 
     try {
       if (mode === "create") {
         const created = await createProfile.mutateAsync({
           display_name: values.displayName.trim(),
           protocol_family: family,
-          command_name: values.commandName.trim(),
+          command_name: commandName,
+          fixed_args: fixedArgs,
           ...(description ? { description } : {}),
         });
         toast.success(t(($) => $.profiles.form.toast_created));
@@ -712,7 +803,8 @@ function ProfileDetailsForm({
           profileId: profile.id,
           patch: {
             display_name: values.displayName.trim(),
-            command_name: values.commandName.trim(),
+            command_name: commandName,
+            fixed_args: fixedArgs,
             description: description ? description : null,
           },
         });
@@ -735,6 +827,22 @@ function ProfileDetailsForm({
 
   const formId = `${idPrefix}-form`;
   const hasError = (field: ProfileFormErrorField) => errors.includes(field);
+  const parseErrorMessage =
+    !parsedCommand.ok && parsedCommand.error === "unclosed_quote"
+      ? t(($) => $.profiles.form.error_command_unclosed_quote)
+      : !parsedCommand.ok && parsedCommand.error === "trailing_escape"
+        ? t(($) => $.profiles.form.error_command_trailing_escape)
+      : !parsedCommand.ok && parsedCommand.error === "shell_expansion"
+        ? t(($) => $.profiles.form.error_command_shell_expansion)
+        : !parsedCommand.ok && parsedCommand.error === "shell_syntax"
+          ? t(($) => $.profiles.form.error_command_shell_syntax)
+          : null;
+  const commandError =
+    hasError("commandLine") && !values.commandLine.trim()
+      ? t(($) => $.profiles.form.error_command_required)
+      : hasError("commandLine") && !parsedCommand.ok
+        ? (parseErrorMessage ?? t(($) => $.profiles.form.error_command_required))
+        : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -743,11 +851,18 @@ function ProfileDetailsForm({
         onSubmit={handleSubmit}
         className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5"
       >
-        <h3 className="text-sm font-medium">
-          {mode === "create"
-            ? t(($) => $.profiles.form.step_details_label)
-            : t(($) => $.profiles.form.edit_title)}
-        </h3>
+        {mode === "create" && (
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {t(($) => $.profiles.form.step_progress, { current: 2, total: 2 })}
+          </p>
+        )}
+        {(mode === "create" || !hideEditHeading) && (
+          <h3 className="text-sm font-medium">
+            {mode === "create"
+              ? t(($) => $.profiles.form.step_details_label)
+              : t(($) => $.profiles.form.edit_title)}
+          </h3>
+        )}
 
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">
@@ -771,6 +886,8 @@ function ProfileDetailsForm({
           </Label>
           <Input
             id={`${idPrefix}-display-name`}
+            name="displayName"
+            autoComplete="off"
             value={values.displayName}
             onChange={(e) => setField("displayName", e.target.value)}
             placeholder={t(($) => $.profiles.form.display_name_placeholder)}
@@ -809,19 +926,45 @@ function ProfileDetailsForm({
           </Label>
           <Input
             id={`${idPrefix}-command`}
-            value={values.commandName}
-            onChange={(e) => setField("commandName", e.target.value)}
+            name="command"
+            autoComplete="off"
+            spellCheck={false}
+            value={values.commandLine}
+            onChange={(e) => setField("commandLine", e.target.value)}
             placeholder={t(($) => $.profiles.form.command_name_placeholder)}
-            aria-invalid={hasError("commandName")}
+            aria-invalid={hasError("commandLine")}
             aria-describedby={
-              hasError("commandName") ? `${idPrefix}-command-error` : undefined
+              hasError("commandLine") ? `${idPrefix}-command-error` : undefined
             }
             className="h-9 font-mono text-sm"
           />
-          {hasError("commandName") && (
+          {commandError && (
             <p id={`${idPrefix}-command-error`} className="text-xs text-destructive">
-              {t(($) => $.profiles.form.error_command_required)}
+              {commandError}
             </p>
+          )}
+          {parsedCommand.ok && (
+            <div className="space-y-1 rounded-md border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+              <div className="flex min-w-0 gap-1">
+                <span>{t(($) => $.profiles.form.command_preview_executable)}</span>
+                <span className="truncate font-mono text-foreground">
+                  {parsedCommand.commandName}
+                </span>
+              </div>
+              {parsedCommand.fixedArgs.length > 0 && (
+                <div className="flex min-w-0 flex-wrap gap-1">
+                  <span>{t(($) => $.profiles.form.command_preview_args)}</span>
+                  {parsedCommand.fixedArgs.map((arg, index) => (
+                    <span
+                      key={`${arg}-${index}`}
+                      className="rounded bg-background px-1 font-mono text-foreground"
+                    >
+                      {arg}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -834,18 +977,14 @@ function ProfileDetailsForm({
           </Label>
           <Textarea
             id={`${idPrefix}-description`}
+            name="description"
+            autoComplete="off"
             value={values.description}
             onChange={(e) => setField("description", e.target.value)}
             placeholder={t(($) => $.profiles.form.description_placeholder)}
             className="min-h-16 text-sm"
           />
         </div>
-
-        {/* NOTE: a `fixed_args` input is intentionally omitted in v1 — the
-            daemon does not yet pass these args to the agent launch command, so
-            exposing the field would promise admins a no-op. Re-add only once
-            it's wired end-to-end. See TODO(MUL-3284) in
-            server/internal/daemon/daemon.go. */}
 
         {/* NOTE: a visibility control is intentionally omitted in v1. The
             server forces every profile to 'workspace' because the read paths
@@ -862,16 +1001,22 @@ function ProfileDetailsForm({
       </form>
 
       <div className="flex shrink-0 justify-between gap-2 border-t bg-muted/30 px-6 py-3">
-        <Button type="button" variant="ghost" size="sm" onClick={onBack}>
-          <ChevronLeft className="h-3.5 w-3.5" />
-          {t(($) => $.profiles.form.back)}
-        </Button>
+        {mode === "create" ? (
+          <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+            <ChevronLeft aria-hidden="true" className="h-3.5 w-3.5" />
+            {t(($) => $.profiles.form.back)}
+          </Button>
+        ) : (
+          <span />
+        )}
         <div className="flex gap-2">
           <Button type="button" variant="outline" size="sm" onClick={onCancel}>
             {t(($) => $.profiles.form.cancel)}
           </Button>
           <Button type="submit" size="sm" form={formId} disabled={submitting}>
-            {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {submitting && (
+              <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+            )}
             {mode === "create"
               ? submitting
                 ? t(($) => $.profiles.form.creating)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -50,23 +51,32 @@ func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.
 // to IssueService.Create. The handler owns the parsing step that turns its
 // request payload into this struct; the service stays transport-agnostic.
 type IssueCreateParams struct {
-	WorkspaceID    pgtype.UUID
-	Title          string
-	Description    pgtype.Text
-	Status         string
-	Priority       string
-	AssigneeType   pgtype.Text
-	AssigneeID     pgtype.UUID
-	CreatorType    string // "agent" or "member"
-	CreatorID      pgtype.UUID
-	ParentIssueID  pgtype.UUID
-	ProjectID      pgtype.UUID
-	StartDate      pgtype.Date
-	DueDate        pgtype.Date
-	OriginType     pgtype.Text
-	OriginID       pgtype.UUID
-	AttachmentIDs  []pgtype.UUID
+	WorkspaceID   pgtype.UUID
+	Title         string
+	Description   pgtype.Text
+	Status        string
+	Priority      string
+	AssigneeType  pgtype.Text
+	AssigneeID    pgtype.UUID
+	CreatorType   string // "agent" or "member"
+	CreatorID     pgtype.UUID
+	ParentIssueID pgtype.UUID
+	ProjectID     pgtype.UUID
+	StartDate     pgtype.Date
+	DueDate       pgtype.Date
+	OriginType    pgtype.Text
+	OriginID      pgtype.UUID
+	AttachmentIDs []pgtype.UUID
+	// LabelIDs are the issue-scoped labels to attach to the new issue. They
+	// are validated and written inside the create transaction (see Create),
+	// so the issue is never committed with a partial or wrong label set. An
+	// unknown or non-issue label id fails the whole create with
+	// ErrIssueLabelNotFound rather than being silently dropped.
+	LabelIDs       []pgtype.UUID
 	AllowDuplicate bool
+	// Stage groups this issue into an ordered barrier group under its parent
+	// (NULL = unstaged). See issue_child_done.go for the staged-barrier wake.
+	Stage pgtype.Int4
 }
 
 // IssueCreateOpts groups optional knobs for IssueService.Create. Most
@@ -79,8 +89,11 @@ type IssueCreateOpts struct {
 	// package to depend on handler-layer types. If nil, the service
 	// emits a minimal `{"issue_id": <uuid>}` payload — enough for cache
 	// invalidation, but front-ends that expect the full response shape
-	// must provide BroadcastPayload.
-	BroadcastPayload func(issue db.Issue, attachments []db.Attachment) map[string]any
+	// must provide BroadcastPayload. The labels argument is the authoritative
+	// snapshot attached in the create transaction, so the emitted payload can
+	// carry the new issue's labels and every online client renders it already
+	// labeled instead of blank until a refetch.
+	BroadcastPayload func(issue db.Issue, attachments []db.Attachment, labels []db.IssueLabel) map[string]any
 
 	// ActorID overrides the actor ID used for broadcast + analytics
 	// when it differs from the creator on the row. Agent-created issues
@@ -121,6 +134,12 @@ var ErrParentIssueNotFound = errors.New("parent issue not found in this workspac
 // having to remember it. Callers translate this into 400.
 var ErrProjectNotFound = errors.New("project not found in this workspace")
 
+// ErrIssueLabelNotFound signals that one of the supplied LabelIDs does not
+// exist in the issue's workspace or is not an issue-scoped label. The whole
+// create is rejected so a new issue is never born with a partial or wrong
+// label set. Callers translate this into their transport's 400.
+var ErrIssueLabelNotFound = errors.New("issue label not found in this workspace")
+
 // IssueCreateResult is the typed return from IssueService.Create.
 //
 //   - On the happy path: Issue is the new row, Attachments lists the
@@ -128,8 +147,14 @@ var ErrProjectNotFound = errors.New("project not found in this workspace")
 //   - On ErrActiveDuplicate: DuplicateIssue is the row that blocked the
 //     create; Issue and Attachments are zero.
 type IssueCreateResult struct {
-	Issue          db.Issue
-	Attachments    []db.Attachment
+	Issue       db.Issue
+	Attachments []db.Attachment
+	// Labels is the authoritative set of labels attached to the new issue in
+	// the create transaction (empty when none were requested). Callers echo it
+	// on the create response + issue:created event so every client renders the
+	// new issue already labeled and a new client can detect that the backend
+	// understood label_ids (see the create handler's compatibility contract).
+	Labels         []db.IssueLabel
 	DuplicateIssue *db.Issue
 }
 
@@ -145,7 +170,7 @@ type IssueCreateResult struct {
 //  8. Publish EventIssueCreated to the bus (payload via opts.BroadcastPayload).
 //  9. Capture the IssueCreated analytics event.
 //  10. Enqueue an agent task or trigger the squad leader when the issue is
-//      assigned and not in `backlog`.
+//     assigned and not in `backlog`.
 //
 // Validation that lives in the service (parent existence, project
 // workspace membership, parent → project back-fill) is enforced here so
@@ -189,6 +214,15 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}); err != nil {
 			return IssueCreateResult{}, ErrProjectNotFound
 		}
+	}
+
+	// Validate labels before we increment the issue counter so a stale or
+	// wrong-scope selection fails the create cheaply. The de-duplicated rows
+	// are attached to the issue below, inside this same transaction, and
+	// echoed back as the authoritative snapshot in the result.
+	labels, err := validateIssueLabels(ctx, qtx, p.WorkspaceID, p.LabelIDs)
+	if err != nil {
+		return IssueCreateResult{}, err
 	}
 
 	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
@@ -239,6 +273,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			ProjectID:     projectID,
 			OriginType:    p.OriginType,
 			OriginID:      p.OriginID,
+			Stage:         p.Stage,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
@@ -257,10 +292,27 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			DueDate:       p.DueDate,
 			Number:        issueNumber,
 			ProjectID:     projectID,
+			Stage:         p.Stage,
 		})
 	}
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
+	}
+
+	// Attach labels inside the create transaction so the issue and its
+	// labels commit together — the old flow created the issue first and
+	// attached labels in a second, non-atomic round-trip whose partial
+	// failure left the issue mis-categorized. AttachLabelToIssue is
+	// workspace/resource_type-guarded and ON CONFLICT DO NOTHING, and the
+	// ids were already validated above.
+	for _, label := range labels {
+		if err := qtx.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+			IssueID:     issue.ID,
+			LabelID:     label.ID,
+			WorkspaceID: p.WorkspaceID,
+		}); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("attach issue label: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -274,11 +326,54 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		actorID = util.UUIDToString(issue.CreatorID)
 	}
 
-	s.publishIssueCreated(issue, attachments, p.CreatorType, actorID, opts)
+	s.publishIssueCreated(issue, attachments, labels, p.CreatorType, actorID, opts)
 	s.captureCreatedAnalytics(issue, p.CreatorType, actorID, opts)
 	s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID)
 
-	return IssueCreateResult{Issue: issue, Attachments: attachments}, nil
+	return IssueCreateResult{Issue: issue, Attachments: attachments, Labels: labels}, nil
+}
+
+// validateIssueLabels checks that every requested label exists in the
+// workspace and is issue-scoped, returning the de-duplicated label rows to
+// attach. Returning the full rows (not just ids) lets Create echo an
+// authoritative label snapshot on the create response + issue:created event
+// without a second query. It mirrors the workspace + resource_type='issue'
+// guard already enforced by AttachLabelToIssue so an unknown or wrong-scope id
+// surfaces as ErrIssueLabelNotFound instead of a silent no-op insert. Invalid
+// (zero) UUIDs are skipped. The label count per issue is small, so a GetLabel
+// per distinct id is fine and avoids introducing a new batch query.
+func validateIssueLabels(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, labelIDs []pgtype.UUID) ([]db.IssueLabel, error) {
+	if len(labelIDs) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(labelIDs))
+	deduped := make([]db.IssueLabel, 0, len(labelIDs))
+	for _, labelID := range labelIDs {
+		if !labelID.Valid {
+			continue
+		}
+		key := util.UUIDToString(labelID)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		label, err := qtx.GetLabel(ctx, db.GetLabelParams{
+			ID:          labelID,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrIssueLabelNotFound
+			}
+			return nil, fmt.Errorf("get issue label: %w", err)
+		}
+		if label.ResourceType != "issue" {
+			return nil, ErrIssueLabelNotFound
+		}
+		deduped = append(deduped, label)
+	}
+	return deduped, nil
 }
 
 // linkAttachments links the given attachment IDs to the newly created
@@ -313,13 +408,13 @@ func (s *IssueService) linkAttachments(ctx context.Context, issue db.Issue, ids 
 	return list
 }
 
-func (s *IssueService) publishIssueCreated(issue db.Issue, attachments []db.Attachment, creatorType, actorID string, opts IssueCreateOpts) {
+func (s *IssueService) publishIssueCreated(issue db.Issue, attachments []db.Attachment, labels []db.IssueLabel, creatorType, actorID string, opts IssueCreateOpts) {
 	if s.Bus == nil {
 		return
 	}
 	var payload map[string]any
 	if opts.BroadcastPayload != nil {
-		payload = opts.BroadcastPayload(issue, attachments)
+		payload = opts.BroadcastPayload(issue, attachments, labels)
 	} else {
 		// Minimal fallback so cache invalidations still fire even if the
 		// caller forgot to supply a builder. Front-ends that expect the
@@ -367,7 +462,10 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 	}
 	originID := util.UUIDToString(issue.OriginID)
 	switch issue.OriginType.String {
-	case "quick_create":
+	case "quick_create", "agent_create":
+		// Both link the issue back to the agent_task_queue row that created it
+		// (agent_create is the ordinary agent `issue create` path, MUL-4305);
+		// surface that task id and keep the manual source label.
 		return analytics.SourceManual, originID, ""
 	case "autopilot":
 		return analytics.SourceAutopilot, "", originID
@@ -459,11 +557,13 @@ func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issu
 	hasPending, err := s.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 		IssueID: issue.ID,
 		AgentID: squad.LeaderID,
+		// Key dedup on the reviewed head (TEN-356).
+		HeadSha: headShaText(s.TaskService.ResolveIssueReviewSHA(ctx, issue.ID)),
 	})
 	if err != nil || hasPending {
 		return
 	}
-	if _, err := s.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, triggerCommentID); err != nil {
+	if _, err := s.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, squad.ID, triggerCommentID); err != nil {
 		slog.Warn("enqueue squad leader task on create failed",
 			"issue_id", util.UUIDToString(issue.ID),
 			"squad_id", util.UUIDToString(squad.ID),

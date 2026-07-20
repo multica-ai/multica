@@ -3,8 +3,6 @@ package lark
 import (
 	"context"
 	"log/slog"
-
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // NoopConnector satisfies EventConnector by holding the run context
@@ -42,7 +40,7 @@ func NewNoopConnector(logger *slog.Logger) *NoopConnector {
 // long as the lease is held, the Hub's "uptime >= ResetBackoffAfter"
 // branch will reset the backoff on every supervisor cycle — which is
 // the right thing for a placeholder.
-func (c *NoopConnector) Run(ctx context.Context, inst db.LarkInstallation, _ EventEmitter) error {
+func (c *NoopConnector) Run(ctx context.Context, inst Installation, _ EventEmitter) error {
 	c.logger.Info("lark noop connector: holding lease (real long-conn not yet implemented)",
 		"installation_id", uuidString(inst.ID),
 		"app_id", inst.AppID,
@@ -60,7 +58,7 @@ func (c *NoopConnector) Run(ctx context.Context, inst db.LarkInstallation, _ Eve
 // connector factory once the wire-protocol implementation lands.
 func NoopConnectorFactory(logger *slog.Logger) ConnectorFactory {
 	c := NewNoopConnector(logger)
-	return func(_ db.LarkInstallation) (EventConnector, error) {
+	return func(_ Installation) (EventConnector, error) {
 		return c, nil
 	}
 }

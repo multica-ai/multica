@@ -1,9 +1,5 @@
 import Link from "next/link";
 import { ArrowRight, Download } from "lucide-react";
-import {
-  captureDownloadInitiated,
-  type DownloadInitiatedPayload,
-} from "@multica/core/analytics";
 import { useLocale } from "../../i18n";
 import type { DetectResult } from "../../utils/os-detect";
 import type { DownloadAssets } from "../../utils/parse-release-assets";
@@ -15,9 +11,6 @@ interface Props {
   /** True when the GitHub API fetch failed; disables all CTAs and
    *  surfaces a "version unavailable" line. */
   versionUnavailable: boolean;
-  /** Release tag (e.g. "v0.2.13"). Null when version lookup failed —
-   *  in that case CTAs are already disabled, no tracking fires. */
-  version: string | null;
 }
 
 /**
@@ -29,27 +22,11 @@ export function DownloadHero({
   detected,
   assets,
   versionUnavailable,
-  version,
 }: Props) {
   const { t } = useLocale();
   const d = t.download.hero;
 
   const content = resolveContent(detected, assets, versionUnavailable, d);
-
-  // Fires download_initiated on primary CTA click. `primary_cta: true`
-  // identifies the hero-recommended path; `matched_detect: true` is
-  // always true here by construction (the primary is computed from
-  // the detect result). All Platforms rows below emit with
-  // matched_detect=false when the user overrides.
-  const onPrimaryClick = (tracking: HeroTracking | undefined) => {
-    if (!tracking || !version) return;
-    captureDownloadInitiated({
-      ...tracking,
-      version,
-      primary_cta: true,
-      matched_detect: true,
-    });
-  };
 
   return (
     <section className="relative overflow-hidden bg-[#05070b] text-white">
@@ -67,7 +44,6 @@ export function DownloadHero({
             <PrimaryCta
               href={content.primary.href}
               disabled={content.primary.disabled}
-              onClick={() => onPrimaryClick(content.primary?.tracking)}
             >
               <Download className="size-4" aria-hidden />
               {content.primary.label}
@@ -80,7 +56,6 @@ export function DownloadHero({
             <Link
               href={content.alt.href}
               className={heroButtonClassName("ghost")}
-              onClick={() => onPrimaryClick(content.alt?.tracking)}
             >
               {content.alt.label}
             </Link>
@@ -107,11 +82,6 @@ export function DownloadHero({
 // Content resolver — maps (detect, assets) → CTA props
 // ------------------------------------------------------------
 
-type HeroTracking = Pick<
-  DownloadInitiatedPayload,
-  "platform" | "arch" | "format"
->;
-
 interface HeroContent {
   title: string;
   sub: string;
@@ -119,15 +89,14 @@ interface HeroContent {
     href: string;
     label: string;
     disabled: boolean;
-    tracking?: HeroTracking;
   };
-  alt?: { href: string; label: string; tracking?: HeroTracking };
+  alt?: { href: string; label: string };
   hint?: string;
 }
 
 type HeroDict = ReturnType<typeof useLocale>["t"]["download"]["hero"];
 
-function resolveContent(
+export function resolveContent(
   detected: DetectResult | null,
   assets: DownloadAssets,
   versionUnavailable: boolean,
@@ -142,17 +111,28 @@ function resolveContent(
   if (detected.os === "mac") {
     // Only Chromium high-entropy returns arch confidently. Safari
     // always reports Intel even on Apple Silicon, so we treat
-    // "non-confident" as arm64 + add a small Intel disclaimer.
+    // "non-confident" as arm64 + point Intel users to the matrix below.
     if (detected.arch === "x64" && detected.archConfident) {
+      const dmg = assets.macX64Dmg;
+      const zip = assets.macX64Zip;
       return {
         title: d.macIntel.title,
         sub: d.macIntel.sub,
-        primary: {
-          href: "#cli",
-          label: d.macIntel.disabledCta,
-          disabled: true,
-        },
-        hint: d.macIntel.intelHint,
+        primary: dmg
+          ? {
+              href: dmg,
+              label: d.macIntel.primary,
+              disabled: false,
+            }
+          : versionUnavailable
+            ? { href: "#", label: d.macIntel.primary, disabled: true }
+            : undefined,
+        alt: zip
+          ? {
+              href: zip,
+              label: d.macIntel.altZip,
+            }
+          : undefined,
       };
     }
     const dmg = assets.macArm64Dmg;
@@ -165,7 +145,6 @@ function resolveContent(
             href: dmg,
             label: d.macArm64.primary,
             disabled: false,
-            tracking: { platform: "mac", arch: "arm64", format: "dmg" },
           }
         : versionUnavailable
           ? { href: "#", label: d.macArm64.primary, disabled: true }
@@ -174,7 +153,6 @@ function resolveContent(
         ? {
             href: zip,
             label: d.macArm64.altZip,
-            tracking: { platform: "mac", arch: "arm64", format: "zip" },
           }
         : undefined,
       hint: detected.archConfident ? undefined : d.safariMacHint,
@@ -197,11 +175,6 @@ function resolveContent(
             href: url,
             label: copy.primary,
             disabled: false,
-            tracking: {
-              platform: "windows",
-              arch: isArm ? "arm64" : "x64",
-              format: "exe",
-            },
           }
         : versionUnavailable
           ? { href: "#", label: copy.primary, disabled: true }
@@ -225,11 +198,6 @@ function resolveContent(
           href: primaryUrl,
           label: d.linux.primary,
           disabled: false,
-          tracking: {
-            platform: "linux",
-            arch: isArmLinux ? "arm64" : "x64",
-            format: "appimage",
-          },
         }
       : versionUnavailable
         ? { href: "#", label: d.linux.primary, disabled: true }
@@ -246,12 +214,10 @@ function resolveContent(
 function PrimaryCta({
   href,
   disabled,
-  onClick,
   children,
 }: {
   href: string;
   disabled: boolean;
-  onClick?: () => void;
   children: React.ReactNode;
 }) {
   if (disabled) {
@@ -265,7 +231,7 @@ function PrimaryCta({
     );
   }
   return (
-    <a href={href} onClick={onClick} className={heroButtonClassName("solid")}>
+    <a href={href} className={heroButtonClassName("solid")}>
       {children}
     </a>
   );

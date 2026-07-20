@@ -21,7 +21,7 @@ multica daemon start
 启动后它会做四件事：
 
 1. 读取你登录时保存的凭证
-2. 探测本机 `PATH` 上已安装的 AI 编程工具（内置支持 12 款：[Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Gemini](/providers#gemini)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)）
+2. 探测本机 `PATH` 上已安装的 AI 编程工具（内置支持 16 款：[Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[CodeBuddy](/providers#codebuddy)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)、[Qoder](/providers#qoder)、[Trae CLI](/providers#trae)、[DevEco Code](/providers#deveco-code)、[Grok](/providers#grok)）
 3. 向服务器注册自己，以及每款检测到的工具对应的运行时
 4. 持续**每 3 秒轮询一次**是否有任务要领，**每 15 秒发一次心跳**
 
@@ -57,6 +57,55 @@ graph TD
 - **一个守护进程可以对应多个运行时**——装了多款工具、加入了多个工作区，每个组合就各一个
 - **同一个守护进程在同一个工作区同一款工具上只会有一条运行时**——重启守护进程不会产生重复记录
 - Multica 界面的 **Runtimes** 页面列的就是这些行
+
+## 自定义运行时配置
+
+内置 provider 探测覆盖常见工具；如果团队的 AI CLI 兼容 Multica 已支持的协议族、但需要不同的启动命令，可以定义**自定义运行时配置（custom runtime profile）**。常见场景包括：给 Codex 套一层团队内部 wrapper、固定使用某个版本的可执行文件，或者为团队 CLI 预设模型参数。
+
+如果只是按默认命令使用 Claude Code、Codex、Kimi 或其他内置 provider，不需要创建自定义配置；守护进程会自动探测它们。
+
+### 创建前确认
+
+- 至少在一台运行 Multica 守护进程的机器上安装好自定义命令，并确认同一条命令能在这台机器的终端中运行。
+- 确认这个工具实现了界面中某一种基础协议。选择协议族只是告诉 Multica 如何与进程通信，并不能让不兼容的 CLI 自动变得兼容。
+- 只有工作区所有者或管理员可以创建、编辑和删除自定义运行时配置。
+
+### 从 Runtimes 界面创建
+
+1. 打开 **运行时（Runtimes）**，进入已经安装该命令的机器。
+2. 点击**添加自定义运行时**。
+3. 选择这个命令实际实现的基础协议类型。
+4. 填写显示名称，以及你会在终端中执行的命令；命令可以带固定参数。建议补充用途描述，方便其他成员识别。
+5. 点击**创建运行时**。
+
+配置定义属于整个工作区，会同步到所有已连接的守护进程；每台机器只有在本机能找到对应命令时，才会注册自己的运行时。从哪台机器发起创建，该机器就会先显示一条临时的**注册中**记录。如果它迟迟没有变成在线，请确认命令已安装，并且该机器的守护进程能找到它。
+
+创建配置不会自动安装 CLI、完成登录，也不会把命令复制到其他机器。每一台需要提供该运行时的机器，都必须单独安装并登录底层工具。
+
+### 使用 CLI 管理
+
+同一组工作区配置也可以通过 CLI 管理：
+
+```bash
+multica runtime profile list
+multica runtime profile create --display-name "Composer" --protocol-family codex --command-name agent
+multica runtime profile update <profile-id> --command-name agent
+multica runtime profile delete <profile-id>
+```
+
+内置和自定义运行时都显示在同一份机器列表里。打开自定义运行时所在行的操作菜单，即可编辑或删除配置。删除配置后，各机器上由它注册的运行时实例会在守护进程同步后移除；如果仍有智能体依赖它，删除操作可能会被阻止。
+
+这里填写的是 argv 风格命令，不是 shell 字符串。Multica 存的是可执行文件名和固定参数，守护进程会直接用 `exec.Command(command_name, fixed_args...)` 启动。支持普通参数、引号和反斜杠转义；不支持管道、重定向、`&&`、`;`、反引号、`$VAR` / `$(...)` 展开。需要 shell 行为时，用 wrapper script 包一层。
+目前命令和参数的解析入口在 Runtimes UI；CLI 的 profile 命令负责管理 profile 记录和本机路径覆盖。
+
+如果桌面应用拉起的守护进程找不到你在终端里能运行的命令，可以在这台机器上固定绝对路径：
+
+```bash
+multica runtime profile set-path <profile-id> --path /abs/path/to/agent
+multica runtime profile unset-path <profile-id>
+```
+
+修改 profile 的命令或参数后，已开始的任务仍使用启动时的参数；守护进程重新注册后，新领取的任务才会使用新配置。混合版本部署时，建议先升级 server，再逐步升级 daemon：`fixed_args` 的录入在 server 侧 Runtimes UI，`failed_profiles` 注册报告也由 server 展示。旧组件可能会忽略自己不认识的字段，而不是明确报错；先升 server 能让 rollout 更可观察。
 
 <Callout type="info">
 **云端运行时即将开放**，目前处于等待名单阶段。上线后，你无需在本地运行守护进程，即可在 Multica Cloud 上直接执行智能体任务。在 [下载页面](https://multica.ai/download) 登记邮箱以获取通知。
@@ -108,4 +157,4 @@ Multica 对并发有两层限额：
 ## 下一步
 
 - [执行任务](/tasks) —— 守护进程领到任务后，它的完整生命周期
-- [Providers Matrix](/providers) —— 12 款 AI 编程工具的能力差异对照
+- [Providers Matrix](/providers) —— 16 款 AI 编程工具的能力差异对照

@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { checkQuickCreateCliVersion } from "./cli-version";
+import {
+  checkQuickCreateCliVersion,
+  checkQuickCreateFieldsCliVersion,
+  handoffSupported,
+  MIN_HANDOFF_CLI_VERSION,
+} from "./cli-version";
 
 describe("checkQuickCreateCliVersion", () => {
   it("returns ok for a tagged release at or above the minimum", () => {
@@ -22,5 +27,40 @@ describe("checkQuickCreateCliVersion", () => {
     expect(checkQuickCreateCliVersion("v0.2.15-235-gdaf0e935").state).toBe("ok");
     expect(checkQuickCreateCliVersion("v0.2.15-235-gdaf0e935-dirty").state).toBe("ok");
     expect(checkQuickCreateCliVersion("0.1.0-1-gabc1234").state).toBe("ok");
+  });
+});
+
+describe("checkQuickCreateFieldsCliVersion", () => {
+  it("requires the first daemon release that transports explicit fields", () => {
+    expect(checkQuickCreateFieldsCliVersion("0.4.2").state).toBe("too_old");
+    expect(checkQuickCreateFieldsCliVersion("0.4.3").state).toBe("ok");
+    expect(checkQuickCreateFieldsCliVersion("v0.4.3-1-gabc1234").state).toBe("ok");
+  });
+});
+
+// Mirrors server/pkg/agent/handoff_version_test.go so the frontend soft-gate
+// signal and the server's authoritative one agree by construction.
+describe("handoffSupported", () => {
+  it("supports a tagged release at or above the minimum", () => {
+    expect(handoffSupported(MIN_HANDOFF_CLI_VERSION)).toBe(true);
+    expect(handoffSupported("0.4.0")).toBe(true);
+    expect(handoffSupported("v0.3.28")).toBe(true);
+  });
+
+  it("does not support a tagged release below the minimum", () => {
+    expect(handoffSupported("0.3.26")).toBe(false);
+    expect(handoffSupported("0.2.21")).toBe(false);
+  });
+
+  it("fails closed on empty or unparsable input", () => {
+    expect(handoffSupported("")).toBe(false);
+    expect(handoffSupported(undefined)).toBe(false);
+    expect(handoffSupported(null)).toBe(false);
+    expect(handoffSupported("garbage")).toBe(false);
+  });
+
+  it("treats git-describe dev builds as supported regardless of base tag", () => {
+    expect(handoffSupported("v0.3.0-5-gabc1234")).toBe(true);
+    expect(handoffSupported("v0.1.0-235-gdaf0e935-dirty")).toBe(true);
   });
 });

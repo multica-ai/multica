@@ -92,6 +92,20 @@ func TestS3StorageKeyFromURL_CustomEndpointWithTrailingSlash(t *testing.T) {
 	}
 }
 
+func TestS3StorageKeyFromURL_CustomEndpointVirtualHostedStylePreservesNestedKey(t *testing.T) {
+	s := &S3Storage{
+		bucket:       "test-bucket",
+		endpointURL:  "https://objects.example.com",
+		usePathStyle: false,
+	}
+
+	rawURL := "https://test-bucket.objects.example.com/uploads/abc/file.png"
+
+	if got := s.KeyFromURL(rawURL); got != "uploads/abc/file.png" {
+		t.Fatalf("KeyFromURL(%q) = %q, want %q", rawURL, got, "uploads/abc/file.png")
+	}
+}
+
 func TestS3StorageKeyFromURL_VirtualHostedStylePreservesNestedKey(t *testing.T) {
 	s := &S3Storage{
 		bucket: "test-bucket",
@@ -155,16 +169,92 @@ func TestLooksLikeS3Hostname(t *testing.T) {
 	}
 }
 
+func TestS3UsePathStyleFromEnv(t *testing.T) {
+	t.Run("defaults to false without custom endpoint", func(t *testing.T) {
+		t.Setenv("S3_USE_PATH_STYLE", "")
+		if got := s3UsePathStyleFromEnv(""); got {
+			t.Fatalf("s3UsePathStyleFromEnv() = %v, want false", got)
+		}
+	})
+
+	t.Run("defaults to true with custom endpoint", func(t *testing.T) {
+		t.Setenv("S3_USE_PATH_STYLE", "")
+		if got := s3UsePathStyleFromEnv("https://objects.example.com"); !got {
+			t.Fatalf("s3UsePathStyleFromEnv() = %v, want true", got)
+		}
+	})
+
+	t.Run("can disable path style for custom endpoint", func(t *testing.T) {
+		t.Setenv("S3_USE_PATH_STYLE", "false")
+		if got := s3UsePathStyleFromEnv("https://objects.example.com"); got {
+			t.Fatalf("s3UsePathStyleFromEnv() = %v, want false", got)
+		}
+	})
+
+	t.Run("invalid value keeps default", func(t *testing.T) {
+		t.Setenv("S3_USE_PATH_STYLE", "maybe")
+		if got := s3UsePathStyleFromEnv("https://objects.example.com"); !got {
+			t.Fatalf("s3UsePathStyleFromEnv() = %v, want true", got)
+		}
+	})
+}
+
+func TestNewS3StorageFromEnv_ConfiguresEndpointPathStyle(t *testing.T) {
+	t.Run("defaults custom endpoints to path style", func(t *testing.T) {
+		t.Setenv("S3_BUCKET", "test-bucket")
+		t.Setenv("S3_REGION", "us-east-1")
+		t.Setenv("AWS_ACCESS_KEY_ID", "AKID")
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "SECRET")
+		t.Setenv("AWS_ENDPOINT_URL", "https://objects.example.com")
+		t.Setenv("S3_USE_PATH_STYLE", "")
+
+		store := NewS3StorageFromEnv()
+		if store == nil {
+			t.Fatal("NewS3StorageFromEnv() = nil")
+		}
+		if !store.usePathStyle {
+			t.Fatalf("usePathStyle = false, want true")
+		}
+		if !store.client.Options().UsePathStyle {
+			t.Fatalf("client UsePathStyle = false, want true")
+		}
+	})
+
+	t.Run("can disable path style for custom endpoints", func(t *testing.T) {
+		t.Setenv("S3_BUCKET", "test-bucket")
+		t.Setenv("S3_REGION", "us-east-1")
+		t.Setenv("AWS_ACCESS_KEY_ID", "AKID")
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "SECRET")
+		t.Setenv("AWS_ENDPOINT_URL", "https://objects.example.com")
+		t.Setenv("S3_USE_PATH_STYLE", "false")
+
+		store := NewS3StorageFromEnv()
+		if store == nil {
+			t.Fatal("NewS3StorageFromEnv() = nil")
+		}
+		if store.usePathStyle {
+			t.Fatalf("usePathStyle = true, want false")
+		}
+		if store.client.Options().UsePathStyle {
+			t.Fatalf("client UsePathStyle = true, want false")
+		}
+		if got, want := store.uploadedURL("uploads/file.txt"), "https://test-bucket.objects.example.com/uploads/file.txt"; got != want {
+			t.Fatalf("uploadedURL() = %q, want %q", got, want)
+		}
+	})
+}
+
 func TestS3StorageUploadedURL(t *testing.T) {
 	const key = "uploads/abc/file.png"
 
 	cases := []struct {
-		name        string
-		bucket      string
-		region      string
-		cdnDomain   string
-		endpointURL string
-		want        string
+		name         string
+		bucket       string
+		region       string
+		cdnDomain    string
+		endpointURL  string
+		usePathStyle bool
+		want         string
 	}{
 		{
 			name:   "default aws virtual hosted style",
@@ -186,36 +276,48 @@ func TestS3StorageUploadedURL(t *testing.T) {
 			want:      "https://cdn.example.com/uploads/abc/file.png",
 		},
 		{
-			name:        "endpoint only",
-			bucket:      "test-bucket",
-			region:      "us-east-1",
-			endpointURL: "http://localhost:9000",
-			want:        "http://localhost:9000/test-bucket/uploads/abc/file.png",
+			name:         "endpoint path style",
+			bucket:       "test-bucket",
+			region:       "us-east-1",
+			endpointURL:  "http://localhost:9000",
+			usePathStyle: true,
+			want:         "http://localhost:9000/test-bucket/uploads/abc/file.png",
 		},
 		{
-			name:        "endpoint with trailing slash",
-			bucket:      "test-bucket",
-			region:      "us-east-1",
-			endpointURL: "http://localhost:9000/",
-			want:        "http://localhost:9000/test-bucket/uploads/abc/file.png",
+			name:         "endpoint path style with trailing slash",
+			bucket:       "test-bucket",
+			region:       "us-east-1",
+			endpointURL:  "http://localhost:9000/",
+			usePathStyle: true,
+			want:         "http://localhost:9000/test-bucket/uploads/abc/file.png",
 		},
 		{
-			name:        "endpoint and cdn both set prefers cdn",
-			bucket:      "test-bucket",
-			region:      "us-east-1",
-			cdnDomain:   "cdn.example.com",
-			endpointURL: "http://localhost:9000",
-			want:        "https://cdn.example.com/uploads/abc/file.png",
+			name:         "endpoint virtual hosted style",
+			bucket:       "test-bucket",
+			region:       "us-east-1",
+			endpointURL:  "https://objects.example.com",
+			usePathStyle: false,
+			want:         "https://test-bucket.objects.example.com/uploads/abc/file.png",
+		},
+		{
+			name:         "endpoint and cdn both set prefers cdn",
+			bucket:       "test-bucket",
+			region:       "us-east-1",
+			cdnDomain:    "cdn.example.com",
+			endpointURL:  "http://localhost:9000",
+			usePathStyle: false,
+			want:         "https://cdn.example.com/uploads/abc/file.png",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &S3Storage{
-				bucket:      tc.bucket,
-				region:      tc.region,
-				cdnDomain:   tc.cdnDomain,
-				endpointURL: tc.endpointURL,
+				bucket:       tc.bucket,
+				region:       tc.region,
+				cdnDomain:    tc.cdnDomain,
+				endpointURL:  tc.endpointURL,
+				usePathStyle: tc.usePathStyle,
 			}
 			if got := s.uploadedURL(key); got != tc.want {
 				t.Fatalf("uploadedURL() = %q, want %q", got, tc.want)

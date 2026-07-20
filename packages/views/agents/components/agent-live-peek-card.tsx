@@ -91,8 +91,7 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
           initials={initials}
           avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
           isAgent
-          size={40}
-          className="rounded-md"
+          size="xl"
         />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{agent.name}</p>

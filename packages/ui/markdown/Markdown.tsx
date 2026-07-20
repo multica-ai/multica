@@ -12,6 +12,7 @@ import { CODE_LIGATURE_CLASS } from '@multica/ui/lib/code-style'
 import { CodeBlock, InlineCode } from './CodeBlock'
 import { isAllowedFileCardHref, preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
+import { preprocessIssueIdentifiers } from './issue-identifiers'
 import { preprocessMentionShortcodes } from './mentions'
 import 'katex/dist/katex.min.css'
 import './markdown.css'
@@ -75,6 +76,15 @@ export interface MarkdownProps {
    * the views-package `<Attachment>` component.
    */
   renderFileCard?: (props: { href: string; filename: string }) => React.ReactNode
+  /**
+   * When true, bare issue identifiers (e.g. `MUL-123`, `TES-1`) are rewritten
+   * to `mention://issue/<identifier>` links so `renderMention` can resolve them
+   * to a navigable issue chip. Off by default — enable only on surfaces whose
+   * `renderMention` knows how to resolve an identifier (see the app wrapper in
+   * packages/views/common/markdown.tsx). Detection is markdown-aware: code,
+   * existing links, URLs, and file/path tokens are skipped.
+   */
+  autolinkIssueIdentifiers?: boolean
 }
 
 // Sanitization schema — extends GitHub defaults to allow code highlighting classes
@@ -84,6 +94,10 @@ const sanitizeSchema = {
   protocols: {
     ...defaultSchema.protocols,
     href: [...(defaultSchema.protocols?.href ?? []), 'mention', 'slash'],
+    // Permit inline data-URI images (QR codes, charts, base64 screenshots).
+    // The scheme gate only allows `data:` through here; attributes.img below
+    // narrows it to image/* so non-image data URIs are still rejected.
+    src: [...(defaultSchema.protocols?.src ?? []), 'data'],
   },
   attributes: {
     ...defaultSchema.attributes,
@@ -100,8 +114,17 @@ const sanitizeSchema = {
       ['className', /^hljs/],
     ],
     img: [
-      ...(defaultSchema.attributes?.img ?? []),
+      // Drop the default plain `src` entry so the value allow-list below is the
+      // one findDefinition resolves — it returns the first match by name, so a
+      // bare `src` string would otherwise shadow (and disable) the allow-list.
+      ...(defaultSchema.attributes?.img ?? []).filter(
+        (attr) => (typeof attr === 'string' ? attr : attr[0]) !== 'src',
+      ),
       'alt',
+      // Allow inline data:image/* URIs while leaving every other src form
+      // (http/https/site-relative) exactly as before: the negative lookahead
+      // keeps all non-data values, and data: is narrowed to images only.
+      ['src', /^data:image\//i, /^(?!data:)/i],
     ],
   },
 }
@@ -113,6 +136,11 @@ const sanitizeSchema = {
 function urlTransform(url: string): string {
   if (url.startsWith('mention://')) return url
   if (url.startsWith('slash://skill/')) return url
+  // Allow inline data:image/* URIs — defaultUrlTransform strips every data: URL
+  // to '', which would blank the src even after rehype-sanitize keeps it. Kept
+  // in sync with the image/* narrowing in sanitizeSchema (protocols.src +
+  // attributes.img) so both gates agree on what a valid inline image is.
+  if (/^data:image\//i.test(url)) return url
   return defaultUrlTransform(url)
 }
 
@@ -424,22 +452,27 @@ export function Markdown({
   renderMention,
   renderImage,
   renderFileCard,
-  cdnDomain
+  cdnDomain,
+  autolinkIssueIdentifiers
 }: MarkdownProps): React.JSX.Element {
   const components = React.useMemo(
     () => createComponents(mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard),
     [mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard]
   )
 
-  // Preprocess: convert mention shortcodes, raw URLs, and file cards to renderable content
+  // Preprocess: convert mention shortcodes, bare issue identifiers, raw URLs,
+  // and file cards to renderable content. Issue-identifier autolinking runs
+  // BEFORE linkify/file-card so those passes treat the rewritten spans as
+  // existing markdown links and skip them.
   const processedContent = React.useMemo(
     () => {
       let result = preprocessMentionShortcodes(children)
+      if (autolinkIssueIdentifiers) result = preprocessIssueIdentifiers(result)
       result = preprocessLinks(result)
       result = preprocessFileCards(result, cdnDomain ?? '')
       return result
     },
-    [children, cdnDomain]
+    [children, cdnDomain, autolinkIssueIdentifiers]
   )
 
   return (

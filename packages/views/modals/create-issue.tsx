@@ -9,16 +9,29 @@ import {
   ArrowLeftRight,
   ArrowUp,
   CalendarClock,
+  CalendarDays,
   Check,
   ChevronRight,
+  CircleUser,
+  FolderKanban,
   Maximize2,
   Minimize2,
   MoreHorizontal,
+  Settings2,
+  Shapes,
+  Tag,
   X as XIcon,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, Attachment } from "@multica/core/types";
+import type {
+  Issue,
+  IssueStatus,
+  IssuePriority,
+  IssueAssigneeType,
+  IssuePropertyValue,
+  Attachment,
+} from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import {
   DialogContent,
@@ -29,25 +42,37 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
-import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
-import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
+import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, useUploadGate, useEditorUpload } from "../editor";
+import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
+import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
+import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
-import { issueDetailOptions } from "@multica/core/issues/queries";
-import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import {
-  api,
+  useIssueCreateSettingsStore,
+  type ManualCreateField,
+} from "@multica/core/issues/stores/issue-create-settings-store";
+import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
+import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
+import { useAttachLabelToIssue } from "@multica/core/labels";
+import {
+  propertyListOptions,
+  useSetIssueProperty,
+} from "@multica/core/properties";
+import {
   ApiError,
   DuplicateIssueErrorBodySchema,
   type DuplicateIssueErrorBody,
@@ -55,6 +80,12 @@ import {
 } from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { PillButton } from "../common/pill-button";
+import { ActorAvatar } from "../common/actor-avatar";
+import { PropertyIcon } from "../common/property-icon";
+import {
+  CustomPropertyValueDisplay,
+  CustomPropertyValueInput,
+} from "../issues/components/pickers/custom-property-picker";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 
@@ -77,14 +108,102 @@ function toDraftAttachment(attachment: Attachment): Attachment {
 // shell's local mode state.
 // ---------------------------------------------------------------------------
 
+// CreateRunHint is the create modal's passive pre-trigger label (MUL-3375 §4):
+// whether saving will start a run, driven by the unified backend predicate
+// (preview, isCreate) — never a frontend guess. No dialog, no blocking.
+//
+// Visually it borrows the comment header's avatar+text line, minus the
+// interactivity — purely a caption, never a link/hover-card. It renders its own
+// reveal band (a grid 0fr→1fr collapse) so it sits on a dedicated row above the
+// property toolbar without reflowing anything: collapsed it is 0px (the flex-1
+// editor absorbs the delta), and it expands only once the predicate resolves,
+// animating straight to the correct copy.
+function CreateRunHint({
+  assigneeType,
+  assigneeId,
+  status,
+}: {
+  assigneeType?: IssueAssigneeType;
+  assigneeId?: string;
+  status: IssueStatus;
+}) {
+  const { t } = useT("modals");
+  const { getActorName } = useActorName();
+  const isAgentLike = assigneeType === "agent" || assigneeType === "squad";
+  const preview = useIssueTriggerPreview({
+    isCreate: true,
+    assigneeType: assigneeType ?? null,
+    assigneeId: assigneeId ?? null,
+    status,
+    enabled: isAgentLike && !!assigneeId,
+  });
+
+  // Reveal only after the predicate resolves so the band animates to the final
+  // copy instead of flashing "parked" before the run preview lands.
+  const ready = isAgentLike && !!assigneeId && !preview.isLoading;
+  const willStart = preview.totalCount > 0;
+  const isSquad = assigneeType === "squad";
+  const triggerAgentId = preview.triggers[0]?.agent_id ?? assigneeId;
+
+  // Avatar + copy mirror the flow. A squad doesn't "work" — its leader
+  // evaluates and delegates — so the squad path keeps the squad as the subject
+  // (avatar + name) and uses the leader-delegates copy. A single agent picks
+  // the issue up directly; a parked issue shows whoever it was assigned to.
+  let avatarType: string;
+  let avatarId: string | undefined;
+  let text: string;
+  if (!willStart) {
+    avatarType = assigneeType ?? "agent";
+    avatarId = assigneeId;
+    text = t(($) => $.run_confirm.create_parked);
+  } else if (isSquad) {
+    avatarType = "squad";
+    avatarId = assigneeId;
+    text = t(($) => $.run_confirm.create_will_start_squad, {
+      name: getActorName("squad", assigneeId ?? ""),
+    });
+  } else {
+    avatarType = "agent";
+    avatarId = triggerAgentId;
+    text = t(($) => $.run_confirm.create_will_start, {
+      name: getActorName("agent", triggerAgentId ?? assigneeId ?? ""),
+    });
+  }
+
+  return (
+    <div
+      className={cn(
+        "grid shrink-0 transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
+        ready ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+      )}
+      aria-hidden={!ready}
+    >
+      <div className="overflow-hidden">
+        <div
+          aria-live="polite"
+          className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-[0.6875rem] text-muted-foreground"
+        >
+          {avatarId && (
+            <ActorAvatar
+              actorType={avatarType}
+              actorId={avatarId}
+              size="sm"
+              profileLink={false}
+            />
+          )}
+          <span className="truncate">{text}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ManualCreatePanel({
   onClose,
   onSwitchMode,
   data,
   isExpanded,
   setIsExpanded,
-  backlogHintIssueId,
-  setBacklogHintIssueId,
 }: {
   onClose: () => void;
   /** Called with the carry payload to seed the agent panel after switch. */
@@ -95,10 +214,9 @@ export function ManualCreatePanel({
    *  re-mount the Portal on mode swap and replay the open animation). */
   isExpanded: boolean;
   setIsExpanded: (v: boolean) => void;
-  backlogHintIssueId: string | null;
-  setBacklogHintIssueId: (id: string | null) => void;
 }) {
   const { t } = useT("modals");
+  const { t: tEditor } = useT("editor");
   const router = useNavigation();
   const p = useWorkspacePaths();
   const workspaceName = useCurrentWorkspace()?.name;
@@ -110,6 +228,7 @@ export function ManualCreatePanel({
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
+  const manualFields = useIssueCreateSettingsStore((s) => s.manualCreateFields);
 
   const [title, setTitle] = useState(draft.title);
   const [formResetKey, setFormResetKey] = useState(0);
@@ -118,7 +237,9 @@ export function ManualCreatePanel({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
   const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
-  const [priority, setPriority] = useState<IssuePriority>(draft.priority);
+  const [priority, setPriority] = useState<IssuePriority>(
+    (data?.priority as IssuePriority | undefined) ?? draft.priority,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(() => {
     if (data && "assignee_type" in data) {
@@ -133,19 +254,42 @@ export function ManualCreatePanel({
     return draft.assigneeId;
   });
   const [startDate, setStartDate] = useState<string | null>(draft.startDate);
-  const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
+  const [dueDate, setDueDate] = useState<string | null>(
+    (data?.due_date as string | undefined) ?? draft.dueDate,
+  );
+  const [labelIds, setLabelIds] = useState<string[]>(draft.labelIds);
+  const [propertyValues, setPropertyValues] = useState(draft.propertyValues ?? {});
+  const [customPropertyPickerId, setCustomPropertyPickerId] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | undefined>(
     (data?.project_id as string) || undefined,
   );
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
+  // Stage only applies to a sub-issue; kept local (not in the persisted draft)
+  // since it's a per-creation choice tied to the chosen parent.
+  const [stage, setStage] = useState<number | null>(
+    typeof data?.stage === "number" ? (data.stage as number) : null,
+  );
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
+  // Toolbar fields hidden via Settings → Issue reuse the overflow reveal
+  // pattern: the ⋯ menu item flips this open, which mounts the inline pill
+  // (the popover's anchor) AND opens the picker. Closing without a value
+  // unmounts the pill again; a field holding a non-default value always
+  // renders regardless of the setting so nothing applied is ever invisible.
+  const [fieldPickerOpen, setFieldPickerOpen] = useState<Exclude<
+    ManualCreateField,
+    "due_date" | "start_date"
+  > | null>(null);
   // Start date is a low-frequency field — by default it lives in the
   // overflow ⋯ menu. Clicking the menu item flips this open, which both
   // mounts the inline pill (the popover's anchor) AND opens the calendar.
   // When the popover closes without a value set, the pill unmounts again.
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
+  // Due date follows the same overflow pattern as start date: collapsed into
+  // the ⋯ menu by default, mounted inline (as the popover anchor) only when it
+  // has a value or the user just opened it from the menu.
+  const [dueDatePickerOpen, setDueDatePickerOpen] = useState(false);
   // Children live as full Issue objects — the picker always returns the whole
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
@@ -153,8 +297,15 @@ export function ManualCreatePanel({
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
+    enabled: !!parentIssueId,
+  });
+  // Sibling stages under the chosen parent, so the Stage picker can offer the
+  // already-used max stage (and one beyond) instead of flooring at Stage 1–3.
+  const { data: parentChildren = [] } = useQuery({
+    ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
 
@@ -176,7 +327,11 @@ export function ManualCreatePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { uploadWithToast } = useFileUpload(api);
+  const { uploadWithToast } = useEditorUpload();
+  // Gate every action that fixes this draft: Create and the switch to agent
+  // mode (which re-serializes the description into a
+  // prompt and would carry a stripped body across).
+  const uploadGate = useUploadGate(descEditorRef);
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
     if (result) {
@@ -200,17 +355,53 @@ export function ManualCreatePanel({
   };
   const updateStartDate = (v: string | null) => { setStartDate(v); setDraft({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
+  const updateLabelIds = (ids: string[]) => { setLabelIds(ids); setDraft({ labelIds: ids }); };
+  const updatePropertyValue = (propertyId: string, value: IssuePropertyValue | undefined) => {
+    const next = { ...propertyValues };
+    if (value === undefined) delete next[propertyId];
+    else next[propertyId] = value;
+    setPropertyValues(next);
+    setDraft({ propertyValues: next });
+  };
+
+  // Inline pill reveal per toolbar field: kept by Settings → Issue, holding a
+  // non-default value (a hidden field with a value must stay visible — the
+  // draft or a mode-switch carry may have set it), or just opened from the ⋯
+  // overflow (the picker popover needs the inline pill as its anchor).
+  const showField = {
+    status: manualFields.includes("status") || status !== "todo" || fieldPickerOpen === "status",
+    priority: manualFields.includes("priority") || priority !== "none" || fieldPickerOpen === "priority",
+    assignee: manualFields.includes("assignee") || assigneeId != null || fieldPickerOpen === "assignee",
+    labels: manualFields.includes("labels") || labelIds.length > 0 || fieldPickerOpen === "labels",
+    project: manualFields.includes("project") || projectId != null || fieldPickerOpen === "project",
+    due_date: manualFields.includes("due_date") || dueDate !== null || dueDatePickerOpen,
+    start_date: manualFields.includes("start_date") || startDate !== null || startDatePickerOpen,
+  };
+
+  // Field visibility lives in Settings → Issue; the modal closes first so the
+  // dialog doesn't linger over the settings page. The draft store already
+  // holds everything typed, so nothing is lost across the round-trip.
+  const openFieldSettings = () => {
+    onClose();
+    router.push(`${p.settings()}?tab=issue`);
+  };
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
+  const attachLabelMutation = useAttachLabelToIssue();
+  const setIssuePropertyMutation = useSetIssueProperty();
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
     setPriority("none");
     setStartDate(null);
     setDueDate(null);
+    setLabelIds([]);
+    setPropertyValues({});
+    setCustomPropertyPickerId(null);
     setProjectId(undefined);
     setParentIssueId(undefined);
+    setStage(null);
     setChildIssues([]);
     setDraft({
       title: "",
@@ -221,6 +412,8 @@ export function ManualCreatePanel({
       assigneeId,
       startDate: null,
       dueDate: null,
+      labelIds: [],
+      propertyValues: {},
       attachments: [],
     });
     descEditorRef.current?.clearContent();
@@ -229,6 +422,7 @@ export function ManualCreatePanel({
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
+    if (uploadGate.isBlocked()) return;
     setSubmitting(true);
     try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
@@ -245,9 +439,45 @@ export function ManualCreatePanel({
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
         attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
+        // The server attaches these in the same transaction as the create and
+        // echoes them back as `issue.labels`, so a stale selection fails the
+        // create instead of leaving a committed-but-unlabeled issue. A legacy
+        // backend that predates this ignores the field — handled by the
+        // compatibility fallback below.
+        label_ids: labelIds.length > 0 ? labelIds : undefined,
         parent_issue_id: parentIssueId,
+        // Stage is only meaningful for a sub-issue (relative to its siblings).
+        stage: parentIssueId && stage != null ? stage : undefined,
         project_id: projectId,
       });
+
+      // Custom-property values can only be addressed once the issue has an
+      // id. Keep the modal in its submitting state until every value settles
+      // so closing or "Create another" cannot race the fan-out.
+      const propertyEntries = Object.entries(propertyValues);
+      if (propertyEntries.length > 0) {
+        const results = await Promise.allSettled(
+          propertyEntries.map(([propertyId, value]) =>
+            setIssuePropertyMutation.mutateAsync({
+              issueId: issue.id,
+              propertyId,
+              value,
+            }),
+          ),
+        );
+        let failed = 0;
+        for (const result of results) {
+          if (result.status === "rejected") {
+            failed += 1;
+            console.error("[create-issue] custom property set failed", result.reason);
+          }
+        }
+        if (failed > 0) {
+          toast.error(
+            t(($) => $.create_issue.toast_set_properties_failed, { count: failed }),
+          );
+        }
+      }
 
       // Link queued children to the new parent. Deferred to after create
       // because the new issue's ID doesn't exist yet. Partial failures don't
@@ -283,22 +513,45 @@ export function ManualCreatePanel({
         }
       }
 
+      // Backend-compatibility fallback for the rolling deploy window: the web
+      // app auto-deploys on merge but the backend deploys manually, so a newer
+      // web build can briefly talk to a backend that predates atomic label
+      // creation. That backend silently ignores `label_ids` and returns an
+      // issue with no `labels` field. Only then do we fall back to the legacy
+      // per-label attach so the user's labels aren't silently dropped. When
+      // `labels` is present (current backend) the atomic path already ran, so
+      // we skip this — no double-write, no per-label fan-out.
+      if (labelIds.length > 0 && issue.labels === undefined) {
+        const results = await Promise.allSettled(
+          labelIds.map((labelId) =>
+            attachLabelMutation.mutateAsync({ issueId: issue.id, labelId }),
+          ),
+        );
+        let labelsFailed = 0;
+        for (const result of results) {
+          if (result.status === "rejected") {
+            labelsFailed += 1;
+            console.error("[create-issue] label attach fallback failed", result.reason);
+          }
+        }
+        if (labelsFailed > 0) {
+          toast.error(t(($) => $.create_issue.toast_link_labels_failed));
+        }
+      }
+
       setLastAssignee(assigneeType, assigneeId);
       setLastMode("manual");
       clearDraft();
-      const shouldShowBacklogHint =
-        status === "backlog" && assigneeType === "agent" && assigneeId &&
-        localStorage.getItem("multica:backlog-agent-hint-dismissed") !== "true";
-
-      if (shouldShowBacklogHint) {
-        setBacklogHintIssueId(issue.id);
-      } else if (keepOpen) {
+      // The old post-create "agent paused in Backlog" blocking panel is gone —
+      // a passive inline hint now warns before submit (MUL-3375). Just close or
+      // reset and confirm the create.
+      if (keepOpen) {
         resetForNextIssue();
       } else {
         onClose();
       }
 
-      if (!shouldShowBacklogHint) {
+      {
         toast.custom((toastId) => (
           <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[360px]">
             <div className="flex items-center gap-2 mb-2">
@@ -394,6 +647,10 @@ export function ManualCreatePanel({
   // needs it so the new issue is still created as a sub-issue when the user
   // flips from "Add sub issue" → "Create with agent".
   const switchToAgent = () => {
+    // Serializing mid-upload packs a description that has already lost the
+    // pending image into the agent prompt, and the draft it came from is
+    // cleared below — the file would be unrecoverable.
+    if (uploadGate.isBlocked()) return;
     const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
     const prompt = [title.trim(), desc].filter(Boolean).join("\n\n");
     // Title + description have been packed into the agent prompt — clear them
@@ -418,6 +675,8 @@ export function ManualCreatePanel({
           ? { squad_id: assigneeId }
           : {}),
       ...(projectId ? { project_id: projectId } : {}),
+      ...(priority !== "none" ? { priority } : {}),
+      ...(dueDate ? { due_date: dueDate } : {}),
       ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
       ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
     });
@@ -425,33 +684,6 @@ export function ManualCreatePanel({
 
   return (
     <>
-        {backlogHintIssueId ? (
-          <BacklogAgentHintContent
-            onKeepInBacklog={() => {
-              setBacklogHintIssueId(null);
-              onClose();
-            }}
-            onDismissPermanently={() => {
-              localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
-            }}
-            onMoveToTodo={() => {
-              updateIssueMutation.mutate(
-                { id: backlogHintIssueId, status: "todo" },
-                {
-                  onError: (err) =>
-                    toast.error(
-                      err instanceof Error && err.message
-                        ? err.message
-                        : t(($) => $.backlog_hint.toast_status_failed),
-                    ),
-                },
-              );
-              setBacklogHintIssueId(null);
-              onClose();
-            }}
-          />
-        ) : (
-          <>
             <DialogTitle className="sr-only">{t(($) => $.create_issue.sr_manual)}</DialogTitle>
 
             {/* Header */}
@@ -506,7 +738,6 @@ export function ManualCreatePanel({
                 placeholder={t(($) => $.create_issue.title_placeholder)}
                 className="text-lg font-semibold"
                 onChange={(v) => updateTitle(v)}
-                onSubmit={handleSubmit}
               />
             </div>
 
@@ -518,64 +749,105 @@ export function ManualCreatePanel({
                 placeholder={t(($) => $.create_issue.description_placeholder)}
                 onUpdate={(md) => setDraft({ description: md })}
                 onUploadFile={handleUpload}
+                onUploadingChange={uploadGate.onUploadingChange}
                 debounceMs={500}
                 attachments={draftAttachments}
               />
               {descDragOver && <FileDropOverlay />}
             </div>
 
-            {/* Property toolbar */}
+            {/* Pre-trigger preview — a passive caption above the toolbar; reveals
+                when an agent assignee will pick the issue up. */}
+            <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={status} />
+
+            {/* Property toolbar — each field renders per the Settings → Issue
+                selection (see showField above). */}
             <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
               {/* Status */}
-              <StatusPicker
-                status={status}
-                onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.status && (
+                <StatusPicker
+                  status={status}
+                  onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "status" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "status" : null)}
+                />
+              )}
 
               {/* Priority */}
-              <PriorityPicker
-                priority={priority}
-                onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.priority && (
+                <PriorityPicker
+                  priority={priority}
+                  onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "priority" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "priority" : null)}
+                />
+              )}
 
               {/* Assignee */}
-              <AssigneePicker
-                assigneeType={assigneeType ?? null}
-                assigneeId={assigneeId ?? null}
-                onUpdate={(u) => updateAssignee(
-                  u.assignee_type ?? undefined,
-                  u.assignee_id ?? undefined,
-                )}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.assignee && (
+                <AssigneePicker
+                  assigneeType={assigneeType ?? null}
+                  assigneeId={assigneeId ?? null}
+                  onUpdate={(u) => updateAssignee(
+                    u.assignee_type ?? undefined,
+                    u.assignee_id ?? undefined,
+                  )}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "assignee" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "assignee" : null)}
+                />
+              )}
 
-              {/* Due date */}
-              <DueDatePicker
-                dueDate={dueDate}
-                onUpdate={(u) => updateDueDate(u.due_date ?? null)}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {/* Labels — occupies the slot that used to hold Due date so the
+                  add-label entry is exposed directly on the dialog. Draft mode:
+                  selection is local until the issue is created (handleSubmit
+                  attaches the labels afterward). */}
+              {showField.labels && (
+                <LabelPicker
+                  selectedIds={labelIds}
+                  onSelectedIdsChange={updateLabelIds}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "labels" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "labels" : null)}
+                />
+              )}
 
               {/* Project */}
-              <ProjectPicker
-                projectId={projectId ?? null}
-                onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.project && (
+                <ProjectPicker
+                  projectId={projectId ?? null}
+                  onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "project" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
+                />
+              )}
+
+              {/* Stage — only relevant when creating a sub-issue under a parent */}
+              {parentIssueId && (
+                <StagePicker
+                  stage={stage}
+                  onUpdate={(u) => setStage(u.stage ?? null)}
+                  maxStage={maxSiblingStage(parentChildren)}
+                  triggerRender={<PillButton />}
+                  align="start"
+                />
+              )}
 
               {/* Start date — collapsed into the ⋯ menu by default since it's
-                  a low-frequency field. Renders inline only when the field
-                  has a value OR the user just opened it from the overflow
+                  a low-frequency field (exposable via Settings → Issue).
+                  Renders inline when configured visible, when the field has a
+                  value, OR when the user just opened it from the overflow
                   menu (the picker's calendar popover needs the inline pill
                   as its anchor). */}
-              {(startDate || startDatePickerOpen) && (
+              {showField.start_date && (
                 <StartDatePicker
                   startDate={startDate}
                   onUpdate={(u) => updateStartDate(u.start_date ?? null)}
@@ -585,6 +857,56 @@ export function ManualCreatePanel({
                   onOpenChange={setStartDatePickerOpen}
                 />
               )}
+
+              {/* Due date — collapsed into the ⋯ menu by default (moved off
+                  the toolbar to make room for Labels). Same reveal rule as
+                  start date. */}
+              {showField.due_date && (
+                <DueDatePicker
+                  dueDate={dueDate}
+                  onUpdate={(u) => updateDueDate(u.due_date ?? null)}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={dueDatePickerOpen}
+                  onOpenChange={setDueDatePickerOpen}
+                />
+              )}
+
+              {/* Workspace-defined fields use the same typed editors as issue
+                  detail, but write into the persisted draft until creation. */}
+              {workspaceProperties
+                .filter(
+                  (property) =>
+                    Object.prototype.hasOwnProperty.call(propertyValues, property.id) ||
+                    customPropertyPickerId === property.id,
+                )
+                .map((property) => {
+                  const value = propertyValues[property.id];
+                  return (
+                    <CustomPropertyValueInput
+                      key={property.id}
+                      property={property}
+                      value={value}
+                      onChange={(next) => updatePropertyValue(property.id, next)}
+                      open={customPropertyPickerId === property.id}
+                      onOpenChange={(open) =>
+                        setCustomPropertyPickerId(open ? property.id : null)
+                      }
+                      triggerRender={<PillButton />}
+                      trigger={
+                        <>
+                          <PropertyIcon property={property} className="size-3.5 text-xs" />
+                          <span className="max-w-32 truncate">{property.name}</span>
+                          {value !== undefined && (
+                            <span className="max-w-40 truncate text-muted-foreground">
+                              <CustomPropertyValueDisplay property={property} value={value} />
+                            </span>
+                          )}
+                        </>
+                      }
+                    />
+                  );
+                })}
 
               {/* Parent chip — appears when parent is set.
                   Placed before the ⋯ so it wraps to a new line with ⋯ if
@@ -647,7 +969,46 @@ export function ManualCreatePanel({
                   }
                 />
                 <DropdownMenuContent align="start" className="w-auto">
-                  {!startDate && (
+                  {/* Re-entry points for toolbar fields hidden via
+                      Settings → Issue. Listed in toolbar order; each opens
+                      the picker inline (mounting the pill as its anchor). */}
+                  {!showField.status && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("status")}>
+                      <StatusIcon status={status} className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_status)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.priority && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("priority")}>
+                      <PriorityIcon priority="none" className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_priority)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.assignee && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("assignee")}>
+                      <CircleUser className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_assignee)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.labels && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("labels")}>
+                      <Tag className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_labels)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.project && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("project")}>
+                      <FolderKanban className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_project)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.due_date && (
+                    <DropdownMenuItem onClick={() => setDueDatePickerOpen(true)}>
+                      <CalendarDays className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_due_date)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.start_date && (
                     <DropdownMenuItem onClick={() => setStartDatePickerOpen(true)}>
                       <CalendarClock className="h-3.5 w-3.5" />
                       {t(($) => $.create_issue.set_start_date)}
@@ -667,6 +1028,38 @@ export function ManualCreatePanel({
                   <DropdownMenuItem onClick={() => setChildPickerOpen(true)}>
                     <ArrowDown className="h-3.5 w-3.5" />
                     {t(($) => $.create_issue.add_subissue)}
+                  </DropdownMenuItem>
+                  {workspaceProperties.length > 0 && (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <Shapes className="h-3.5 w-3.5" />
+                        {t(($) => $.create_issue.custom_properties)}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-56">
+                        {workspaceProperties.map((property) => (
+                          <DropdownMenuItem
+                            key={property.id}
+                            disabled={Object.prototype.hasOwnProperty.call(
+                              propertyValues,
+                              property.id,
+                            )}
+                            onClick={() => setCustomPropertyPickerId(property.id)}
+                          >
+                            <PropertyIcon property={property} className="size-3.5 text-xs" />
+                            <span className="truncate">{property.name}</span>
+                            {Object.prototype.hasOwnProperty.call(
+                              propertyValues,
+                              property.id,
+                            ) && <Check className="ml-auto size-3.5" />}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={openFieldSettings}>
+                    <Settings2 className="h-3.5 w-3.5" />
+                    {t(($) => $.create_issue.customize_fields)}
                   </DropdownMenuItem>
                   {parentIssueId && parentIssue && (
                     <>
@@ -719,6 +1112,7 @@ export function ManualCreatePanel({
             <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-h-7 items-center gap-2">
                 <FileUploadButton
+                  multiple
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>
@@ -726,8 +1120,11 @@ export function ManualCreatePanel({
                 <button
                   type="button"
                   onClick={switchToAgent}
+                  disabled={uploadGate.uploading}
+                  aria-disabled={uploadGate.uploading || undefined}
+                  aria-busy={uploadGate.uploading || undefined}
                   title={t(($) => $.create_issue.switch_to_agent_tooltip)}
-                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer"
+                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
                   {t(($) => $.create_issue.switch_to_agent)}
@@ -748,36 +1145,37 @@ export function ManualCreatePanel({
                     </Tooltip>
                   </TooltipProvider>
                 ) : (
-                  <Button size="sm" onClick={handleSubmit} disabled={submitting}>
-                    {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
+                  <Button
+                    size="sm"
+                    onClick={handleSubmit}
+                    disabled={submitting || uploadGate.uploading}
+                    aria-disabled={uploadGate.uploading || undefined}
+                    aria-busy={uploadGate.uploading || undefined}
+                  >
+                    {submitting
+                      ? t(($) => $.create_issue.submitting)
+                      : uploadGate.uploading
+                        ? tEditor(($) => $.upload.in_progress)
+                        : t(($) => $.create_issue.submit)}
                   </Button>
                 )}
               </div>
             </div>
-          </>
-        )}
     </>
   );
 }
 
-/** className for DialogContent in manual mode — depends on isExpanded and the
- *  backlog-hint sub-state. Exported so the shell (which now owns the
- *  DialogContent) can apply the same visual treatment without duplicating it. */
-export function manualDialogContentClass(
-  isExpanded: boolean,
-  backlogHintIssueId: string | null,
-) {
+/** className for DialogContent in manual mode — depends on isExpanded.
+ *  Exported so the shell (which now owns the DialogContent) can apply the same
+ *  visual treatment without duplicating it. */
+export function manualDialogContentClass(isExpanded: boolean) {
   return cn(
     "p-0 gap-0 flex flex-col overflow-hidden",
     "!top-1/2 !left-1/2 !-translate-x-1/2",
-    backlogHintIssueId
-      ? "!max-w-[480px] !w-[calc(100vw-2rem)] !h-auto !-translate-y-1/2 !transition-none !duration-0"
-      : "!transition-all !duration-300 !ease-out",
-    !backlogHintIssueId && isExpanded
+    "!transition-all !duration-300 !ease-out",
+    isExpanded
       ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
-      : !backlogHintIssueId
-        ? "!max-w-2xl !w-full !h-96 !-translate-y-1/2"
-        : "",
+      : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",
   );
 }
 
@@ -791,20 +1189,17 @@ export function CreateIssueModal(props: {
   data?: Record<string, unknown> | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [backlogHintIssueId, setBacklogHintIssueId] = useState<string | null>(null);
   return (
     <DialogRoot open onOpenChange={(v) => { if (!v) props.onClose(); }}>
       <DialogContent
         finalFocus={false}
         showCloseButton={false}
-        className={manualDialogContentClass(isExpanded, backlogHintIssueId)}
+        className={manualDialogContentClass(isExpanded)}
       >
         <ManualCreatePanel
           {...props}
           isExpanded={isExpanded}
           setIsExpanded={setIsExpanded}
-          backlogHintIssueId={backlogHintIssueId}
-          setBacklogHintIssueId={setBacklogHintIssueId}
         />
       </DialogContent>
     </DialogRoot>

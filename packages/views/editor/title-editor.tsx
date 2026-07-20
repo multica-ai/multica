@@ -23,11 +23,24 @@ interface TitleEditorProps {
   onSubmit?: () => void;
   onBlur?: (value: string) => void;
   onChange?: (value: string) => void;
+  /**
+   * Called once when the Tiptap instance exists and its DOM is attached
+   * (creation is deferred past first paint by `immediatelyRender: false`).
+   * Same contract as ContentEditorProps.onReady.
+   */
+  onReady?: () => void;
 }
 
 interface TitleEditorRef {
   getText: () => string;
   focus: () => void;
+  /**
+   * Focus and place the caret at the document position under the given
+   * viewport coordinates — same contract as ContentEditorRef.focusAtCoords,
+   * so readonly-first hosts (useLazyEditor) can treat both editors alike.
+   * Must be called while the editor element is laid out (not display: none).
+   */
+  focusAtCoords: (coords: { x: number; y: number }) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -78,6 +91,7 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
       onSubmit,
       onBlur,
       onChange,
+      onReady,
     },
     ref,
   ) {
@@ -85,10 +99,12 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
     const onChangeRef = useRef(onChange);
+    const onReadyRef = useRef(onReady);
 
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
     onChangeRef.current = onChange;
+    onReadyRef.current = onReady;
 
     const editor = useEditor({
       immediatelyRender: false,
@@ -120,6 +136,16 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
         onBlurRef.current?.(ed.getText());
       },
     });
+
+    // Signal readonly-first hosts that the deferred editor now exists. Fired
+    // from a passive effect so it runs after the commit that attached the
+    // editor DOM — same pattern as ContentEditor.
+    const readyFiredRef = useRef(false);
+    useEffect(() => {
+      if (!editor || readyFiredRef.current) return;
+      readyFiredRef.current = true;
+      onReadyRef.current?.();
+    }, [editor]);
 
     // Auto-focus after mount — delay to wait for Dialog open animation
     useEffect(() => {
@@ -174,6 +200,12 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
       getText: () => editor?.getText() ?? "",
       focus: () => {
         editor?.commands.focus("end");
+      },
+      focusAtCoords: (coords: { x: number; y: number }) => {
+        if (!editor) return;
+        const pos = editor.view.posAtCoords({ left: coords.x, top: coords.y });
+        if (pos) editor.commands.focus(pos.pos);
+        else editor.commands.focus("end");
       },
     }));
 

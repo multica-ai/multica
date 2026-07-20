@@ -149,6 +149,9 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Cursor Agent](https://cursor.com/) | `cursor-agent` | Cursor's headless coding agent |
 | Kimi | `kimi` | Moonshot coding agent |
 | Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
+| [Qoder CLI](https://docs.qoder.com/) | `qodercli` | Qoder ACP coding agent |
+| [Trae](https://docs.trae.cn/cli) | `traecli` | ByteDance TRAE CLI (ACP via `traecli acp serve`) |
+| [Grok Build CLI](https://docs.x.ai/) | `grok` | xAI Grok Build CLI (ACP via `grok agent stdio`) |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -170,13 +173,14 @@ Daemon behavior is configured via flags or environment variables:
 | Heartbeat interval | `--heartbeat-interval` | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` |
 | Agent timeout | `--agent-timeout` | `MULTICA_AGENT_TIMEOUT` | `0` (no cap; bounded by the watchdogs) |
 | Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` |
+| OpenCode idle watchdog | — | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` (`0` falls back to the generic idle watchdog; cannot extend it) |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
 | Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
 | Workspaces root | — | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` |
 | GC enabled | — | `MULTICA_GC_ENABLED` | `true` (set `false`/`0` to disable) |
-| GC scan interval | — | `MULTICA_GC_INTERVAL` | `1h` |
+| GC scan interval | — | `MULTICA_GC_INTERVAL` | `2h` |
 | GC TTL (done/cancelled issues) | — | `MULTICA_GC_TTL` | `24h` |
 | GC orphan TTL (no `.gc_meta.json`) | — | `MULTICA_GC_ORPHAN_TTL` | `72h` |
 | GC artifact TTL (open issues) | — | `MULTICA_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
@@ -220,6 +224,16 @@ Agent-specific overrides:
 | `MULTICA_KIMI_MODEL` | Override the Kimi model used |
 | `MULTICA_KIRO_PATH` | Custom path to the `kiro-cli` binary |
 | `MULTICA_KIRO_MODEL` | Override the Kiro model used |
+| `MULTICA_QODER_PATH` | Custom path to the `qodercli` binary |
+| `MULTICA_QODER_MODEL` | Override the Qoder model used |
+| `MULTICA_TRAECLI_PATH` | Custom path to the `traecli` binary |
+| `MULTICA_TRAECLI_MODEL` | Override the Trae model used (a model id from your logged-in traecli catalog, e.g. `Doubao-Seed-2.1-Pro`) |
+| `MULTICA_GROK_PATH` | Custom path to the `grok` binary (defaults to `grok` on PATH; often `~/.grok/bin/grok`) |
+| `MULTICA_GROK_MODEL` | Override the Grok model used (e.g. `grok-4.5`) |
+
+If a previously generated `~/.multica/hooks` wrapper is first on `PATH` and calls the same command name again, the daemon skips that hooks directory during built-in agent discovery and records the real binary path behind it. If your interactive shell still recurses when you run `claude`, `codex`, or `hermes` manually, remove the hooks entry from your shell startup file or replace the wrapper body with an absolute `exec /path/to/real-binary "$@"`.
+
+The daemon launches Qoder as `qodercli --yolo --acp`, matching Qoder’s ACP “bypass permissions” mode so tool runs do not block on interactive approval in headless runs.
 
 `MULTICA_CLAUDE_ARGS` and `MULTICA_CODEX_ARGS` are parsed with POSIX shellword quoting, so values such as `--model "gpt-5.1 codex" --sandbox read-only` are split like a shell command line. Agent arguments are applied in this order: hardcoded Multica defaults, daemon-wide env defaults, then per-agent `custom_args` from the task.
 
@@ -326,9 +340,13 @@ multica issue list --priority urgent --assignee "Agent Name"
 multica issue list --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 multica issue list --full-id
 multica issue list --limit 20 --output json
+multica issue list --status todo --sort position       # board order (the default)
+multica issue list --sort created_at --direction desc  # newest first
 ```
 
 Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--metadata`, `--limit`. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
+
+Results come back in board order (`position`, ascending) by default. Pass `--sort` to change the column (`position`, `title`, `created_at`, `start_date`, `due_date`, `priority`) and `--direction asc|desc` to flip the order. `position` is always ascending (it is the manual drag order), so `--direction` is rejected when `--sort` is `position` or omitted — use it only with `title`, `created_at`, `start_date`, `due_date`, or `priority`.
 
 Use `--metadata key=value` (repeatable; combined with AND) to filter by per-issue metadata. The value is JSON-parsed: `true`/`false` become bool, numbers become numbers, anything else is a string. Wrap as `'"42"'` to force a string when the value would otherwise sniff as a number:
 
@@ -357,7 +375,23 @@ Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assig
 
 ```bash
 multica issue update <id> --title "New title" --priority urgent
+multica issue update <id> --position 4.5
 ```
+
+`--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
+
+### Reorder Issue
+
+Move an issue within its current status column. The new ordering value is computed the same way the board's drag-and-drop computes it, so the CLI and UI agree on where the issue lands.
+
+```bash
+multica issue reorder <id> --top              # top of its status column
+multica issue reorder <id> --bottom           # bottom of its status column
+multica issue reorder <id> --before <other>   # directly above another issue in the same column
+multica issue reorder <id> --after  <other>   # directly below another issue in the same column
+```
+
+Pick exactly one of `--top`, `--bottom`, `--before`, or `--after`. Reorder stays inside the issue's current column, so `--before` / `--after` must name an issue in that same column. To move an issue to a different column, change its status first with `issue status`, then reorder within the new column.
 
 ### Assign Issue
 
@@ -404,12 +438,12 @@ multica issue comment list <issue-id> --thread <comment-id> --tail 30 \
 # Most recently active threads (root + every descendant), grouped by
 # thread. Returns N complete conversational arcs, oldest-active first so
 # the freshest thread sits closest to "now" in an agent prompt.
-multica issue comment list <issue-id> --recent 20
+multica issue comment list <issue-id> --recent 10
 
 # Scroll older threads. Under --recent, --before / --before-id are a
 # THREAD cursor (thread last_activity_at + root id), emitted on stderr as
 # `Next thread cursor: --before <ts> --before-id <root-id>`.
-multica issue comment list <issue-id> --recent 20 \
+multica issue comment list <issue-id> --recent 10 \
     --before <ts> --before-id <root-id>
 
 # Incremental polling. Combines with --thread or --recent; filters out
@@ -514,7 +548,13 @@ multica issue run-messages <task-id> --output json
 
 # Incremental fetch (only messages after a given sequence number)
 multica issue run-messages <task-id> --since 42 --output json
+
+# Aggregated token usage for an issue (sum across all its task runs)
+multica issue usage <issue-id>
+multica issue usage <issue-id> --output json
 ```
+
+The `usage` command returns the aggregated token usage for an issue, summed across all of its task runs: input tokens, output tokens, cache read/write tokens, and the run count (`task_count`). It wraps `GET /api/issues/<id>/usage` — the same figures the issue detail view shows. Use `--output json` to feed billing/cost tooling.
 
 The `runs` command shows all past and current executions for an issue, including running tasks. Table output uses short task UUID prefixes by default; pass `--full-id` to print canonical task UUIDs. The `run-messages` command accepts full task UUIDs directly; copied short task prefixes must be scoped with `--issue <issue-id>` so the CLI only checks that issue's runs. It shows the detailed message log (tool calls, thinking, text, errors) for a single run. Use `--since` for efficient polling of in-progress runs.
 
@@ -546,16 +586,17 @@ multica project get <id> --output json
 multica project create --title "2026 Week 16 Sprint" --icon "🏃" --lead "Lambda"
 ```
 
-Flags: `--title` (required), `--description`, `--status`, `--icon`, `--lead`.
+Flags: `--title` (required), `--description`, `--status`, `--icon`, `--lead`, `--start-date`, `--due-date`. Dates are calendar days (`YYYY-MM-DD`).
 
 ### Update Project
 
 ```bash
 multica project update <id> --title "New title" --status in_progress
 multica project update <id> --lead "Lambda"
+multica project update <id> --due-date 2026-04-15
 ```
 
-Flags: `--title`, `--description`, `--status`, `--icon`, `--lead`.
+Flags: `--title`, `--description`, `--status`, `--icon`, `--lead`, `--start-date`, `--due-date`. For the date flags, pass an empty string (e.g. `--start-date ""`) to clear the date.
 
 ### Change Status
 
@@ -648,14 +689,18 @@ multica autopilot create \
   --title "Nightly bug triage" \
   --description "Scan todo issues and prioritize." \
   --agent "Lambda" \
-  --mode create_issue
+  --mode create_issue \
+  --subscriber "Alice"
 
 multica autopilot update <id> --status paused
 multica autopilot update <id> --description "New prompt"
+multica autopilot update <id> --subscriber "Alice" --subscriber "Bob"
+multica autopilot update <id> --clear-subscribers
 multica autopilot delete <id>
 ```
 
 `--mode` accepts `create_issue` (creates a new issue on each run and assigns it to the agent) or `run_only` (enqueues a direct agent task without creating an issue). `--agent` accepts either a name or UUID.
+`--subscriber` accepts a workspace member name or user ID and may be repeated; on update it replaces the autopilot's subscriber template. Subscribers receive inbox notifications for issues created by a `create_issue` autopilot. Use `--clear-subscribers` to remove all autopilot subscribers.
 
 ### Manual Trigger
 

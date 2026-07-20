@@ -15,6 +15,7 @@
 import posthog from "posthog-js";
 import { redactExceptionProperties } from "./redact-exception";
 import { shouldDropException } from "./exception-dedupe";
+import { isBenignException } from "./benign-exceptions";
 
 export const EVENT_SCHEMA_VERSION = 2;
 
@@ -40,17 +41,6 @@ let initialized = false;
 let pendingIdentify: { userId: string; props?: Record<string, unknown> } | null = null;
 let currentUserId: string | null = null;
 let analyticsEnvironment = "dev";
-// Likewise pageviews: the initial "/" pageview is the anchor of the
-// acquisition funnel, and the Next.js router fires it on mount before the
-// config fetch resolves. We keep the first pending pageview so that step
-// doesn't silently drop.
-let pendingPageview: string | undefined | null = null;
-// Last $pageview path actually emitted (already section-normalized). Used to
-// collapse consecutive views of the same section so navigating between
-// resources under one section doesn't fire a billed event per resource. See
-// capturePageview / normalizePageviewPath. Cleared on reset so a fresh
-// session re-emits its first pageview.
-let lastCapturedPath: string | null = null;
 // Frontend-emitted events (captureEvent) and person-property updates
 // (setPersonProperties) can also arrive before init — same config-race as
 // identify/pageview. We replay them in order once init succeeds. These
@@ -66,20 +56,6 @@ const pendingOps: PendingOp[] = [];
 // switch silently drops client_type + app_version from every subsequent
 // event until a full reload.
 let superProperties: Record<string, unknown> = {};
-
-export {
-  captureDownloadIntent,
-  captureDownloadPageViewed,
-  captureDownloadInitiated,
-  type DownloadIntentSource,
-  type DownloadDetectPayload,
-  type DownloadInitiatedPayload,
-} from "./download";
-
-export {
-  captureFeedbackOpened,
-  type FeedbackOpenedSource,
-} from "./feedback";
 
 export interface AnalyticsConfig {
   key: string;
@@ -166,6 +142,11 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     capture_exceptions: true,
     before_send: (event) => {
       if (event && event.event === "$exception") {
+        // Drop known-benign browser noise (e.g. ResizeObserver loop) entirely
+        // — checked on the raw message before redaction. These dominate the
+        // stream and carry no signal, so they skip both redaction and the
+        // dedupe fuse. See benign-exceptions.ts.
+        if (isBenignException(event.properties)) return null;
         redactExceptionProperties(event.properties);
         if (shouldDropException(event.properties)) return null;
       }
@@ -197,12 +178,6 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     currentUserId = pendingIdentify.userId;
     posthog.identify(pendingIdentify.userId, pendingIdentify.props);
     pendingIdentify = null;
-  }
-  // And any first pageview we captured while config was loading.
-  if (pendingPageview !== null) {
-    posthog.capture("$pageview", pendingPageview ? { $current_url: pendingPageview } : undefined);
-    lastCapturedPath = pendingPageview ?? null;
-    pendingPageview = null;
   }
   // Replay buffered events / person-property updates in their original
   // order — funnel correctness depends on sequence (e.g. a user submits
@@ -246,8 +221,6 @@ export function identify(userId: string, userProperties?: Record<string, unknown
 export function resetAnalytics(): void {
   currentUserId = null;
   pendingIdentify = null;
-  pendingPageview = null;
-  lastCapturedPath = null;
   pendingOps.length = 0;
   if (!initialized) return;
   posthog.reset();
@@ -367,62 +340,8 @@ function normalizeEnvironment(value: string | undefined): string {
   }
 }
 
-// A UUID or an issue key (e.g. MUL-123) appearing as a path segment
-// identifies a single resource. Resource-level granularity carries no
-// aggregate funnel signal and explodes $pageview volume — every distinct
-// issue / agent / project navigated to would fire its own billed event.
-const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ISSUE_KEY_SEGMENT = /^[A-Z][A-Z0-9]*-\d+$/;
-
 /**
- * Normalize a raw path to its section route for $pageview reporting:
- * `/acme/issues/8d5c…` and `/acme/issues/MUL-12` both collapse to
- * `/acme/issues`. We strip the query string / hash (volatile filter / sort /
- * search state, and occasionally OAuth `code` / `state`) and drop any
- * resource-id segment after the first. The leading segment — the workspace
- * slug or a top-level route word like `login` — is always kept, so a slug
- * that happens to look like an id (`team-1`) is never dropped.
- *
- * Exported for unit testing; callers should go through capturePageview.
- */
-export function normalizePageviewPath(path?: string): string | undefined {
-  if (!path) return path ?? undefined;
-  const clean = path.split(/[?#]/)[0] ?? "";
-  const segments = clean.split("/").filter((s) => s.length > 0);
-  const kept = segments.filter(
-    (seg, i) => i === 0 || !(UUID_SEGMENT.test(seg) || ISSUE_KEY_SEGMENT.test(seg)),
-  );
-  return "/" + kept.join("/");
-}
-
-/**
- * Capture a page view. Call once per client-side navigation. We disable
- * posthog's automatic pageview tracking in init() so this module owns the
- * event shape.
- *
- * The path is normalized to its section route (see normalizePageviewPath) and
- * consecutive views of the same section are collapsed — both keep PostHog at
- * section granularity instead of paying for a billed event per resource and
- * per query-string change. Callers can therefore pass the raw path freely.
- *
- * Calls before initAnalytics() buffer the most-recent path so the first
- * pageview isn't dropped on slow /api/config fetches. Subsequent pre-init
- * pageviews overwrite the buffer; after init flushes, every navigation
- * captures synchronously as expected.
- */
-export function capturePageview(path?: string): void {
-  const normalized = normalizePageviewPath(path);
-  if (!initialized) {
-    pendingPageview = normalized ?? "";
-    return;
-  }
-  if (normalized && normalized === lastCapturedPath) return;
-  lastCapturedPath = normalized ?? null;
-  posthog.capture("$pageview", normalized ? { $current_url: normalized } : undefined);
-}
-
-/**
- * On the very first anonymous pageview in a browser session, read UTM +
+ * On the very first anonymous page load in a browser session, read UTM +
  * referrer and stash them in a cookie that the backend reads during signup.
  *
  * Never use raw `document.referrer` as attribution — it can leak OAuth

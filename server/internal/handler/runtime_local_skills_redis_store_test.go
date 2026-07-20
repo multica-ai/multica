@@ -11,11 +11,13 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const redisTestDB = 14
+
 // newRedisTestClient connects to the Redis instance indicated by REDIS_TEST_URL
-// and flushes it so each test starts from a clean slate. The helper skips the
-// calling test if the env var is unset — matches the DATABASE_URL gating in
-// the rest of the suite so `go test ./...` still works on a stock laptop
-// without a running Redis.
+// and flushes this package's logical test DB so each test starts from a clean
+// slate. The helper skips the calling test if the env var is unset — matches
+// the DATABASE_URL gating in the rest of the suite so `go test ./...` still
+// works on a stock laptop without a running Redis.
 func newRedisTestClient(t *testing.T) *redis.Client {
 	t.Helper()
 	url := os.Getenv("REDIS_TEST_URL")
@@ -26,6 +28,7 @@ func newRedisTestClient(t *testing.T) *redis.Client {
 	if err != nil {
 		t.Fatalf("parse REDIS_TEST_URL: %v", err)
 	}
+	opts.DB = redisTestDB
 	rdb := redis.NewClient(opts)
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {
@@ -72,7 +75,10 @@ func TestRedisLocalSkillListStore_CreateGetComplete(t *testing.T) {
 			FileCount:   2,
 		},
 	}
-	if err := store.Complete(ctx, req.ID, skills, true); err != nil {
+	mcpServers := []RuntimeLocalMcpServerSummary{
+		{Name: "fetch", Transport: "stdio", Source: "User config", Enabled: true},
+	}
+	if err := store.Complete(ctx, req.ID, skills, true, mcpServers, true); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 
@@ -85,6 +91,9 @@ func TestRedisLocalSkillListStore_CreateGetComplete(t *testing.T) {
 	}
 	if len(got.Skills) != 1 || got.Skills[0].Key != "review-helper" {
 		t.Fatalf("skills not persisted: %+v", got.Skills)
+	}
+	if !got.McpSupported || len(got.McpServers) != 1 || got.McpServers[0].Name != "fetch" {
+		t.Fatalf("MCP inventory not persisted: %+v", got.McpServers)
 	}
 }
 
@@ -264,6 +273,64 @@ func TestRedisLocalSkillImportStore_PreservesCreatorID(t *testing.T) {
 	}
 	if got.TargetSkillID != "target-skill-99" {
 		t.Fatalf("target_skill_id lost round trip: %q", got.TargetSkillID)
+	}
+}
+
+func TestRedisLocalSkillImportStore_CompletePreservesFiles(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	store := NewRedisLocalSkillImportStore(rdb)
+
+	req, err := store.Create(ctx, LocalSkillImportRequestInput{
+		RuntimeID: "runtime-1",
+		CreatorID: "user-1",
+		SkillKey:  "review-helper",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	completedAt := time.Now().UTC().Format(time.RFC3339)
+	skill := SkillWithFilesResponse{
+		SkillResponse: SkillResponse{
+			ID:          "skill-1",
+			WorkspaceID: testWorkspaceID,
+			Name:        "Review Helper",
+			Description: "Review PRs",
+			Content:     "# Review Helper",
+			CreatedAt:   completedAt,
+			UpdatedAt:   completedAt,
+		},
+		Files: []SkillFileResponse{
+			{
+				ID:        "file-1",
+				SkillID:   "skill-1",
+				Path:      "rules.md",
+				Content:   "Use the review checklist.",
+				CreatedAt: completedAt,
+				UpdatedAt: completedAt,
+			},
+		},
+	}
+	if err := store.Complete(ctx, req.ID, skill); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+
+	got, err := store.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != RuntimeLocalSkillCompleted {
+		t.Fatalf("status = %s, want completed", got.Status)
+	}
+	if got.Skill == nil {
+		t.Fatal("completed skill lost round trip")
+	}
+	if len(got.Skill.Files) != 1 {
+		t.Fatalf("files lost round trip: %+v", got.Skill.Files)
+	}
+	if got.Skill.Files[0].Path != "rules.md" || got.Skill.Files[0].Content != "Use the review checklist." {
+		t.Fatalf("file corrupted round trip: %+v", got.Skill.Files[0])
 	}
 }
 

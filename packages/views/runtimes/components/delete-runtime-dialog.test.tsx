@@ -145,6 +145,8 @@ function makeAgent(id: string, overrides: Partial<Agent> = {}): Agent {
     runtime_config: {},
     custom_args: [],
     visibility: "private",
+    permission_mode: "private",
+    invocation_targets: [],
     status: "idle",
     max_concurrent_tasks: 1,
     model: "claude-sonnet-4-5",
@@ -331,6 +333,41 @@ describe("DeleteRuntimeDialog", () => {
     });
     expect(
       screen.getByText(/managed by a running local daemon/i),
+    ).toBeInTheDocument();
+  });
+
+  it("explains that deleting a profile-backed runtime only removes the current instance", () => {
+    renderDialog({
+      runtime: makeRuntime({
+        runtime_mode: "local",
+        status: "online",
+        profile_id: "profile-1",
+      }),
+      cachedAgents: [],
+    });
+
+    expect(
+      screen.getByText(/registered from a custom runtime profile/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/delete the custom runtime profile/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/managed by a running local daemon/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the profile-backed runtime explanation in cascade mode", () => {
+    renderDialog({
+      runtime: makeRuntime({ profile_id: "profile-1" }),
+      cachedAgents: [makeAgent("a-1", { name: "Alpha" })],
+    });
+
+    expect(
+      screen.getByText(/registered from a custom runtime profile/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Archive 1 agent and delete this Runtime/),
     ).toBeInTheDocument();
   });
 

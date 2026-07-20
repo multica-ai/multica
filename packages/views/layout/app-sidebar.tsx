@@ -5,6 +5,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../navigation";
 import { HelpLauncher } from "./help-launcher";
+import { JoinDiscordCard } from "./join-discord-card";
 import {
   DndContext,
   PointerSensor,
@@ -17,6 +18,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { CSS } from "@dnd-kit/utilities";
 import {
   Inbox,
+  MessageSquare,
   ListTodo,
   Bot,
   Monitor,
@@ -39,6 +41,7 @@ import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
+import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
 import { StatusIcon } from "../issues/components/status-icon";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
@@ -69,11 +72,13 @@ import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/pat
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
+import { inboxKeys, deduplicateInboxItems, inboxUnreadSummaryOptions, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
+import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { countUnreadChatMessages } from "@multica/core/chat/unread";
+import { useChatStore } from "@multica/core/chat";
 import { api, ApiError } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
-import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { issueDetailOptions } from "@multica/core/issues/queries";
@@ -82,6 +87,11 @@ import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { useT } from "../i18n";
+import {
+  useShortcut,
+} from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
+import { useAppForeground } from "../common/use-app-foreground";
 
 // Top-level nav items stay active when the user is on a child route
 // (e.g. "Projects" stays lit on /:slug/projects/:id). Pinned items keep
@@ -100,12 +110,14 @@ const EMPTY_PINS: PinnedItem[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
+const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>> = [];
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see AppSidebar body).
 // Only parameterless paths are valid nav destinations.
 type NavKey =
   | "inbox"
+  | "chat"
   | "myIssues"
   | "issues"
   | "projects"
@@ -120,6 +132,7 @@ type NavKey =
 // Static schema (key + icon) — labels resolved at render via useT("layout").
 type NavLabelKey =
   | "inbox"
+  | "chat"
   | "my_issues"
   | "issues"
   | "projects"
@@ -133,6 +146,7 @@ type NavLabelKey =
 
 const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "inbox", labelKey: "inbox", icon: Inbox },
+  { key: "chat", labelKey: "chat", icon: MessageSquare },
   { key: "myIssues", labelKey: "my_issues", icon: CircleUser },
 ];
 
@@ -286,7 +300,7 @@ function PinRow({
     if (issueQuery.isPending) return <PinSkeleton />;
     if (issueQuery.isError || !issueQuery.data) return null;
     const issue = issueQuery.data;
-    const label = issue.identifier ? `${issue.identifier} ${issue.title}` : issue.title;
+    const label = issue.title;
     const iconNode = (
       /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
       <StatusIcon status={issue.status} className="!size-3.5 shrink-0" />
@@ -363,7 +377,49 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
     [inboxItems],
   );
-  const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
+  // Chat tab unread badge: IM-style total of unread *messages* across chat
+  // threads (countUnreadChatMessages is the shared definition — mobile's tab
+  // badge derives from the same function, keeping the platforms in agreement).
+  const { data: chatSessions = [] } = useQuery({
+    ...chatSessionsOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  // The session the user is reading right now must not count: the thread list
+  // renders its row badge as 0 (auto mark-read is about to clear it), and a
+  // reply landing in the open conversation would otherwise flash a sidebar
+  // count with no matching row. "Reading right now" = a session is active, a
+  // chat surface is actually showing it (chat page route or the floating
+  // window), AND the app is in the foreground. When the app is backgrounded,
+  // auto mark-read is suppressed (MUL-4485) so the reply stays unread — the
+  // badge must count it, or the notification is silently eaten while the user
+  // is away. A remembered selection while both surfaces are closed also still
+  // counts, for the same reason.
+  const activeChatSessionId = useChatStore((s) => s.activeSessionId);
+  const floatingChatOpen = useChatStore((s) => s.isOpen);
+  const appForeground = useAppForeground();
+  const chatHref = p.chat();
+  const viewedChatSessionId =
+    appForeground && (floatingChatOpen || isNavActive(pathname, chatHref))
+      ? activeChatSessionId
+      : null;
+  const chatUnreadCount = React.useMemo(
+    () => countUnreadChatMessages(chatSessions, viewedChatSessionId),
+    [chatSessions, viewedChatSessionId],
+  );
+  // Cross-workspace unread summary backs the workspace-switcher dot. One
+  // shared cache entry across workspaces; gated on an active workspace since
+  // the endpoint resolves through the workspace-member middleware.
+  const { data: unreadSummary = EMPTY_INBOX_SUMMARY } = useQuery({
+    ...inboxUnreadSummaryOptions(),
+    enabled: !!wsId,
+  });
+  const otherWorkspaceUnread = React.useMemo(
+    () => hasOtherWorkspaceUnread(unreadSummary, wsId),
+    [unreadSummary, wsId],
+  );
+  // Which workspaces have unread, so the switcher dropdown can point at the
+  // specific one(s) rather than just the aggregate avatar dot.
+  const unreadWsIds = React.useMemo(() => unreadWorkspaceIds(unreadSummary), [unreadSummary]);
   const { data: pinnedItems = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
@@ -373,6 +429,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
+  const getPinHref = useCallback(
+    (pin: PinnedItem) => (pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id)),
+    [p],
+  );
 
   // Local presentational copy of pinnedItems for drop-animation stability.
   // Follows TQ at rest; frozen during a drag gesture so a mid-drag cache
@@ -390,6 +450,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     setLocalPinnedWsId(wsId ?? null);
   }, [wsId]);
   const visiblePinned = localPinnedWsId === (wsId ?? null) ? localPinned : EMPTY_PINS;
+  const isActivePinnedRoute = visiblePinned.some((pin) => pathname === getPinHref(pin));
 
   const handleDragStart = useCallback(() => {
     isDraggingRef.current = true;
@@ -439,33 +500,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     },
   });
 
-  // Global "C" shortcut: opens whichever create mode the user landed on last
-  // (agent vs manual), persisted in useCreateModeStore. The mode switch lives
-  // inside both modal footers so users can flip without remembering which
-  // shortcut goes where — `c` always means "open the create flow I prefer".
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "c" && e.key !== "C") return;
-      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      const tag = (e.target as HTMLElement)?.tagName;
-      const isEditable =
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        tag === "SELECT" ||
-        (e.target as HTMLElement)?.isContentEditable;
-      if (isEditable) return;
-      if (useModalStore.getState().modal) return;
-      e.preventDefault();
-      // Auto-fill project when on a project detail page. The manual form
-      // consumes `project_id`; quick-create also honours it as a seed for
-      // its project picker, so passing it through is safe for both modes.
-      const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-      const data = projectMatch ? { project_id: projectMatch[1] } : undefined;
-      openCreateIssueWithPreference(data);
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [pathname]);
+  const createIssueShortcut = useShortcut("createIssue");
 
   return (
       <Sidebar variant="inset">
@@ -480,7 +515,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <SidebarMenuButton>
                       <span className="relative">
                         <WorkspaceAvatar name={workspace?.name ?? "M"} avatarUrl={workspace?.avatar_url} size="sm" />
-                        {myInvitations.length > 0 && (
+                        {/* Shared brand dot: a pending invitation OR another
+                            workspace with unread inbox items. The active
+                            workspace's own unread stays on the Inbox nav count
+                            (below), so it is deliberately excluded here. */}
+                        {(myInvitations.length > 0 || otherWorkspaceUnread) && (
                           <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
                       </span>
@@ -502,7 +541,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       name={user?.name ?? ""}
                       initials={(user?.name ?? "U").charAt(0).toUpperCase()}
                       avatarUrl={resolvePublicFileUrl(user?.avatar_url)}
-                      size={32}
+                      size="lg"
                     />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium leading-tight">
@@ -527,6 +566,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       >
                         <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
                         <span className="flex-1 truncate">{ws.name}</span>
+                        {/* Points at the specific workspace holding unread
+                            inbox items. Sits in the same right-edge slot as the
+                            active-workspace check; the active workspace is
+                            excluded (its unread is the Inbox nav count), so dot
+                            and check never collide on one row. */}
+                        {ws.id !== workspace?.id && unreadWsIds.has(ws.id) && (
+                          <span className="size-2 rounded-full bg-brand" />
+                        )}
                         {ws.id === workspace?.id && (
                           <Check className="h-3.5 w-3.5 text-primary" />
                         )}
@@ -608,7 +655,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   <DraftDot />
                 </span>
                 <span>{t(($) => $.sidebar.new_issue)}</span>
-                <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">{t(($) => $.sidebar.new_issue_shortcut)}</kbd>
+                {createIssueShortcut ? (
+                  <ShortcutKeycaps shortcut={createIssueShortcut} decorative className="pointer-events-none ml-auto" />
+                ) : null}
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -632,9 +681,18 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         <item.icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
                         {item.key === "inbox" && unreadCount > 0 && (
-                          <span className="ml-auto text-xs">
-                            {unreadCount > 99 ? "99+" : unreadCount}
-                          </span>
+                          <CappedNumberFlow
+                            value={unreadCount}
+                            animated={false}
+                            className="ml-auto text-xs"
+                          />
+                        )}
+                        {item.key === "chat" && chatUnreadCount > 0 && (
+                          <CappedNumberFlow
+                            value={chatUnreadCount}
+                            animated={false}
+                            className="ml-auto text-xs"
+                          />
                         )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -664,7 +722,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <PinRow
                               key={pin.id}
                               pin={pin}
-                              href={pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id)}
+                              href={getPinHref(pin)}
                               pathname={pathname}
                               onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
                               wsId={wsId ?? ""}
@@ -685,7 +743,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               <SidebarMenu className="gap-0.5">
                 {workspaceNav.map((item) => {
                   const href = p[item.key]();
-                  const isActive = isNavActive(pathname, href);
+                  const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
@@ -719,9 +777,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       >
                         <item.icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
-                        {item.key === "runtimes" && hasRuntimeUpdates && (
-                          <span className="ml-auto size-1.5 rounded-full bg-destructive" />
-                        )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
@@ -732,6 +787,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarContent>
 
         <SidebarFooter className="p-2">
+          <JoinDiscordCard />
           <div className="flex justify-end">
             <HelpLauncher />
           </div>

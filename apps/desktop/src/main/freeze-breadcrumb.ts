@@ -35,8 +35,18 @@ export function writeFreezeBreadcrumb(filePath: string, breadcrumb: FreezeBreadc
  * would double-count it AND mislabel a recovered window as `recovered: false`.
  * Best-effort; a stale breadcrumb only costs one duplicate report.
  */
-export function clearFreezeBreadcrumb(filePath: string): void {
+export function clearFreezeBreadcrumb(filePath: string, ownerId?: string): void {
   try {
+    if (ownerId !== undefined) {
+      const parsed = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        (parsed as FreezeBreadcrumb).ownerId !== ownerId
+      ) {
+        return;
+      }
+    }
     rmSync(filePath, { force: true });
   } catch {
     // Nothing to clear / permissions — ignore.

@@ -124,6 +124,7 @@ func init() {
 	autopilotCreateCmd.Flags().String("priority", "none", "Priority for created issues (none, low, medium, high, urgent)")
 	autopilotCreateCmd.Flags().String("project", "", "Project ID (optional)")
 	autopilotCreateCmd.Flags().String("issue-title-template", "", "Template for issue titles (create_issue mode). Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected at create-time.")
+	autopilotCreateCmd.Flags().StringArray("subscriber", nil, "Member subscriber to notify for issues this autopilot creates (name or user ID; repeatable)")
 	autopilotCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// update
@@ -135,6 +136,8 @@ func init() {
 	autopilotUpdateCmd.Flags().String("status", "", "New status (active, paused)")
 	autopilotUpdateCmd.Flags().String("mode", "", "New execution mode (create_issue or run_only)")
 	autopilotUpdateCmd.Flags().String("issue-title-template", "", "New issue title template. Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected.")
+	autopilotUpdateCmd.Flags().StringArray("subscriber", nil, "Replace subscribers with this member (name or user ID; repeatable)")
+	autopilotUpdateCmd.Flags().Bool("clear-subscribers", false, "Remove all autopilot subscribers")
 	autopilotUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// delete
@@ -313,6 +316,13 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("issue-title-template"); v != "" {
 		body["issue_title_template"] = v
 	}
+	if subscriberRefs, _ := cmd.Flags().GetStringArray("subscriber"); len(subscriberRefs) > 0 {
+		subscribers, err := resolveAutopilotSubscriberInputs(ctx, client, subscriberRefs)
+		if err != nil {
+			return err
+		}
+		body["subscribers"] = subscribers
+	}
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/autopilots", body, &result); err != nil {
@@ -356,6 +366,7 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 		if resolveErr != nil {
 			return fmt.Errorf("resolve agent: %w", resolveErr)
 		}
+		body["assignee_type"] = "agent"
 		body["assignee_id"] = agentID
 	}
 	if cmd.Flags().Changed("project") {
@@ -388,6 +399,20 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("issue-title-template") {
 		v, _ := cmd.Flags().GetString("issue-title-template")
 		body["issue_title_template"] = v
+	}
+	clearSubscribers, _ := cmd.Flags().GetBool("clear-subscribers")
+	subscriberRefs, _ := cmd.Flags().GetStringArray("subscriber")
+	if clearSubscribers && len(subscriberRefs) > 0 {
+		return fmt.Errorf("--subscriber and --clear-subscribers are mutually exclusive")
+	}
+	if clearSubscribers {
+		body["subscribers"] = []map[string]string{}
+	} else if cmd.Flags().Changed("subscriber") {
+		subscribers, err := resolveAutopilotSubscriberInputs(ctx, client, subscriberRefs)
+		if err != nil {
+			return err
+		}
+		body["subscribers"] = subscribers
 	}
 
 	if len(body) == 0 {
@@ -711,6 +736,33 @@ func runAutopilotTriggerDelete(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Trigger %s deleted.\n", triggerRef.ID)
 	return nil
+}
+
+func resolveAutopilotSubscriberInputs(ctx context.Context, client *cli.APIClient, refs []string) ([]map[string]string, error) {
+	inputs := make([]map[string]string, 0, len(refs))
+	seen := map[string]struct{}{}
+	memberOnly := assigneeKinds{member: true}
+	for _, ref := range refs {
+		if strings.TrimSpace(ref) == "" {
+			return nil, fmt.Errorf("--subscriber cannot be empty")
+		}
+		userType, userID, err := resolveAssignee(ctx, client, ref, memberOnly)
+		if err != nil {
+			return nil, fmt.Errorf("resolve subscriber %q: %w", ref, err)
+		}
+		if userType != "member" {
+			return nil, fmt.Errorf("subscriber %q resolved to %s; autopilot subscribers must be members", ref, userType)
+		}
+		if _, ok := seen[userID]; ok {
+			continue
+		}
+		seen[userID] = struct{}{}
+		inputs = append(inputs, map[string]string{
+			"user_type": "member",
+			"user_id":   userID,
+		})
+	}
+	return inputs, nil
 }
 
 // ---------------------------------------------------------------------------

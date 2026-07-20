@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // WSLongConnConnector is the production EventConnector that holds the
@@ -188,7 +187,7 @@ func NewWSLongConnConnector(cfg WSConnectorConfig) (*WSLongConnConnector, error)
 // binary Frame envelopes until either the ctx is cancelled or the
 // connection errors, and returns. Nil return = clean exit; non-nil
 // return = connection failed (Hub steps up backoff).
-func (c *WSLongConnConnector) Run(ctx context.Context, inst db.LarkInstallation, emit EventEmitter) error {
+func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit EventEmitter) error {
 	log := c.cfg.Logger.With(
 		"installation_id", uuidString(inst.ID),
 		"app_id", inst.AppID,
@@ -501,19 +500,19 @@ type WSEndpoint struct {
 // the connection. The decoder receives the JSON payload bytes — the
 // outer binary Frame envelope is stripped by the connector.
 type FrameDecoder interface {
-	Decode(payload []byte, inst db.LarkInstallation) (msg InboundMessage, ok bool, err error)
+	Decode(payload []byte, inst Installation) (msg InboundMessage, ok bool, err error)
 }
 
 // CredentialsProvider supplies the plaintext InstallationCredentials a
 // connector needs for its EndpointFetcher call.
 type CredentialsProvider interface {
-	Credentials(ctx context.Context, inst db.LarkInstallation) (InstallationCredentials, error)
+	Credentials(ctx context.Context, inst Installation) (InstallationCredentials, error)
 }
 
 // CredentialsProviderFunc adapts a free function.
-type CredentialsProviderFunc func(ctx context.Context, inst db.LarkInstallation) (InstallationCredentials, error)
+type CredentialsProviderFunc func(ctx context.Context, inst Installation) (InstallationCredentials, error)
 
-func (f CredentialsProviderFunc) Credentials(ctx context.Context, inst db.LarkInstallation) (InstallationCredentials, error) {
+func (f CredentialsProviderFunc) Credentials(ctx context.Context, inst Installation) (InstallationCredentials, error) {
 	return f(ctx, inst)
 }
 
@@ -525,9 +524,9 @@ func (f EndpointFetcherFunc) Endpoint(ctx context.Context, creds InstallationCre
 }
 
 // FrameDecoderFunc adapts a plain function to FrameDecoder.
-type FrameDecoderFunc func(payload []byte, inst db.LarkInstallation) (InboundMessage, bool, error)
+type FrameDecoderFunc func(payload []byte, inst Installation) (InboundMessage, bool, error)
 
-func (f FrameDecoderFunc) Decode(payload []byte, inst db.LarkInstallation) (InboundMessage, bool, error) {
+func (f FrameDecoderFunc) Decode(payload []byte, inst Installation) (InboundMessage, bool, error) {
 	return f(payload, inst)
 }
 
@@ -542,6 +541,10 @@ type GorillaDialer struct {
 	// (e.g. for custom proxy auth or a fixed proxy URL). To disable proxy
 	// entirely, pass a func that returns (nil, nil).
 	Proxy func(*http.Request) (*url.URL, error)
+
+	// ProxyURL is an optional fixed HTTP CONNECT proxy URL for the
+	// WebSocket handshake. When set, it takes precedence over Proxy.
+	ProxyURL string
 }
 
 func NewGorillaDialer() *GorillaDialer {
@@ -559,7 +562,13 @@ func (g *GorillaDialer) DialContext(ctx context.Context, urlStr string, requestH
 	}
 	// Shallow copy so we don't mutate the shared dialer's Proxy field.
 	dd := *d
-	if g.Proxy != nil {
+	if g.ProxyURL != "" {
+		proxyURL, err := url.Parse(g.ProxyURL)
+		if err != nil {
+			return nil, nil, fmt.Errorf("lark ws dialer: parse proxy url %q: %w", g.ProxyURL, err)
+		}
+		dd.Proxy = http.ProxyURL(proxyURL)
+	} else if g.Proxy != nil {
 		dd.Proxy = g.Proxy
 	}
 	if dd.Proxy == nil {

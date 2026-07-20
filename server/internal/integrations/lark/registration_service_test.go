@@ -291,7 +291,7 @@ type fakeInstallerBinder struct {
 	err   error
 }
 
-func (f *fakeInstallerBinder) BindInstallerTx(_ context.Context, _ *db.Queries, p InstallerBindParams) error {
+func (f *fakeInstallerBinder) BindInstallerTx(_ context.Context, _ *ChannelStore, p InstallerBindParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, p)

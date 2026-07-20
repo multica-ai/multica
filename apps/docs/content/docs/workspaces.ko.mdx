@@ -19,10 +19,10 @@ import { Callout } from "fumadocs-ui/components/callout";
 **이슈 접두사는 변경하지 마세요.** 이슈 번호는 현재 접두사로 렌더링되므로, 접두사를 변경하면 `MUL-5`가 즉시 `NEW-5`가 됩니다. 모든 외부 링크, Slack 멘션, 댓글 속 과거 참조가 기존 번호와 맞지 않게 됩니다. 이슈 접두사는 "생성 시 정하고 절대 건드리지 않는" 값으로 다루세요.
 </Callout>
 
-워크스페이스는 웹 UI에서 생성할 수도 있고, 커맨드 라인에서 생성할 수도 있습니다.
+워크스페이스는 웹 UI에서 생성할 수도 있고, 커맨드 라인에서 생성할 수도 있습니다. `--name`과 `--slug`는 모두 필수이며, 생성해도 현재 워크스페이스는 **전환되지 않습니다**. 생성한 워크스페이스에서 작업하려면 이어서 `multica workspace switch <slug>`를 실행하세요.
 
 ```bash
-multica workspace create
+multica workspace create --name "Support Team" --slug support-team --issue-prefix SUP
 ```
 
 ## 이슈 번호

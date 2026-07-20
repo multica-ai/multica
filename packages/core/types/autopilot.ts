@@ -49,6 +49,16 @@ export interface Autopilot {
   // List endpoint returns []; only the detail endpoint populates this.
   // Treat undefined as empty on older servers.
   subscribers?: AutopilotSubscriber[];
+  // Whether the requesting user may edit / delete / trigger / manage this
+  // autopilot (creator, workspace owner/admin, or a granted collaborator).
+  // Present on list and detail responses; absent on older servers — treat
+  // undefined as "unknown" rather than "denied" (the server is the gate).
+  can_write?: boolean;
+  // Whether the requesting user may manage the collaborator (access) list —
+  // narrower than can_write: held only by the creator and workspace
+  // owners/admins, NOT by granted collaborators. Detail-endpoint-only; absent
+  // on older servers (fall back to can_write).
+  can_manage_access?: boolean;
 }
 
 export interface WebhookEventFilter {
@@ -60,6 +70,19 @@ export interface AutopilotSubscriber {
   user_type: "member";
   user_id: string;
   created_at: string;
+}
+
+// A workspace member explicitly granted write access to an autopilot, on top
+// of the implicit "creator ∪ owner/admin" set. Members-only for now.
+export interface AutopilotCollaborator {
+  user_type: "member";
+  user_id: string;
+  granted_by: string;
+  created_at: string;
+}
+
+export interface AutopilotCollaboratorsResponse {
+  collaborators: AutopilotCollaborator[];
 }
 
 export interface AutopilotTrigger {
@@ -99,6 +122,11 @@ export interface AutopilotRun {
   triggered_at: string;
   completed_at: string | null;
   failure_reason: string | null;
+  // Stable, localizable, enumeration-safe classification of a non-success run
+  // (skipped/failed), derived server-side from failure_reason (MUL-4525). The
+  // "run now" UI localizes this instead of echoing the raw English reason.
+  // Older servers omit it.
+  reason_code?: string;
   trigger_payload: unknown;
   result: unknown;
   created_at: string;
@@ -156,6 +184,14 @@ export interface UpdateAutopilotTriggerRequest {
   event_filters?: WebhookEventFilter[] | null;
 }
 
+export interface CronPreviewResponse {
+  // Next occurrences as RFC3339 UTC timestamps, ascending. An empty array
+  // means the expression never fires; `null` is the client-side sentinel for
+  // "the response could not be read" (schema drift), which callers must not
+  // present as "never fires".
+  next_runs: string[] | null;
+}
+
 export interface ListAutopilotsResponse {
   autopilots: Autopilot[];
   total: number;
@@ -164,6 +200,9 @@ export interface ListAutopilotsResponse {
 export interface GetAutopilotResponse {
   autopilot: Autopilot;
   triggers: AutopilotTrigger[];
+  // Members explicitly granted write access. Absent on older servers — treat
+  // undefined as an empty list.
+  collaborators?: AutopilotCollaborator[];
 }
 
 export interface ListAutopilotRunsResponse {
@@ -200,6 +239,8 @@ export interface WebhookDelivery {
   signature_status: WebhookSignatureStatus;
   status: WebhookDeliveryStatus;
   attempt_count: number;
+  dispatch_attempts: number;
+  available_at: string;
   content_type: string | null;
   response_status: number | null;
   autopilot_run_id: string | null;

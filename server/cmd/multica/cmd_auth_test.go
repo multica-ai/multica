@@ -10,9 +10,16 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Unsetenv("MULTICA_AGENT_ID")
-	os.Unsetenv("MULTICA_TASK_ID")
-	os.Unsetenv("MULTICA_TOKEN")
+	for _, key := range []string{
+		"MULTICA_AGENT_ID",
+		"MULTICA_TASK_ID",
+		"MULTICA_TOKEN",
+		"MULTICA_DAEMON_PORT",
+		"MULTICA_WORKSPACE_ID",
+		"MULTICA_SERVER_URL",
+	} {
+		os.Unsetenv(key)
+	}
 	os.Exit(m.Run())
 }
 
@@ -128,6 +135,50 @@ func TestResolveCallbackBinding(t *testing.T) {
 	}
 }
 
+func TestBrowserLoginInstructionsSSHRemoteHint(t *testing.T) {
+	const loginURL = "https://multica.ai/login?cli_callback=http%3A%2F%2Flocalhost%3A43689%2Fcallback"
+
+	got := browserLoginInstructions(loginURL, "localhost", 43689, true)
+	if !strings.Contains(got, "ssh -L 43689:127.0.0.1:43689 <user>@<remote-host>") {
+		t.Fatalf("remote SSH instructions missing tunnel command:\n%s", got)
+	}
+	if !strings.Contains(got, loginURL) {
+		t.Fatalf("instructions missing login URL:\n%s", got)
+	}
+
+	got = browserLoginInstructions(loginURL, "localhost", 43689, false)
+	if strings.Contains(got, "ssh -L") {
+		t.Fatalf("local instructions should not include SSH tunnel command:\n%s", got)
+	}
+
+	got = browserLoginInstructions(loginURL, "192.168.1.25", 43689, true)
+	if strings.Contains(got, "ssh -L") {
+		t.Fatalf("non-loopback callback should not include SSH tunnel command:\n%s", got)
+	}
+}
+
+func TestCallbackHostFlagValueReadsParentSetupFlag(t *testing.T) {
+	var got string
+	setup := &cobra.Command{Use: "setup"}
+	setup.Flags().String(callbackHostFlag, "", "")
+	cloud := &cobra.Command{
+		Use: "cloud",
+		Run: func(cmd *cobra.Command, args []string) {
+			got = callbackHostFlagValue(cmd)
+		},
+	}
+	cloud.Flags().String(callbackHostFlag, "", "")
+	setup.AddCommand(cloud)
+	setup.SetArgs([]string{"--callback-host", "10.0.0.5", "cloud"})
+
+	if err := setup.Execute(); err != nil {
+		t.Fatalf("execute setup cloud: %v", err)
+	}
+	if got != "10.0.0.5" {
+		t.Fatalf("callback host = %q, want parent flag value", got)
+	}
+}
+
 // TestLoginTokenFlagWiring asserts the production loginCmd flag is registered
 // the way #1994 needs it to be: a String flag (not Bool) with a NoOptDefVal
 // so `--token` (no value) keeps its legacy prompt-mode behavior. This is the
@@ -144,6 +195,47 @@ func TestLoginTokenFlagWiring(t *testing.T) {
 	}
 	if tokenFlag.NoOptDefVal != tokenPromptSentinel {
 		t.Fatalf("loginCmd --token NoOptDefVal = %q, want %q (legacy `multica login --token` prompt mode would break)", tokenFlag.NoOptDefVal, tokenPromptSentinel)
+	}
+}
+
+// TestLoginTokenHelpOutputRendersCleanly renders loginCmd's flag help through
+// the same pflag path `multica login -h` uses (FlagUsagesWrapped) and locks the
+// user-visible help contract that regressed. The original bug had two causes,
+// both invisible to the flag-wiring/parsing tests above:
+//   - The NoOptDefVal sentinel was "\x00prompt". pflag renders NoOptDefVal
+//     verbatim into the flag column AND uses "\x00" as its own column-alignment
+//     marker, so the split-at-first-NUL logic mispadded the line and printed a
+//     raw NUL to the terminal.
+//   - The usage string wrapped the PAT example in backticks, so pflag's
+//     UnquoteUsage hijacked it as the flag's value placeholder and stripped a
+//     backtick pair from the description.
+//
+// A comment can't prevent either from recurring; only rendering the real output
+// and asserting on it can. This is the regression guard for that output.
+func TestLoginTokenHelpOutputRendersCleanly(t *testing.T) {
+	help := loginCmd.Flags().FlagUsages()
+
+	// No control byte may reach the terminal. pflag emits only spaces and
+	// newlines for layout, so any other sub-0x20 rune (notably the NUL the old
+	// "\x00prompt" sentinel leaked) means the help rendering is corrupted.
+	for _, r := range help {
+		if r < 0x20 && r != '\n' && r != '\t' {
+			t.Fatalf("login help contains control byte %#x; rendered flag usage:\n%q", r, help)
+		}
+	}
+
+	// The --token line must show the standard optional-value form. This single
+	// assertion pins both root causes: the placeholder is `string` (backticks
+	// removed, so UnquoteUsage no longer hijacks the PAT example) and the
+	// optional value is the printable `prompt` (no NUL-prefixed sentinel).
+	if want := `--token string[="prompt"]`; !strings.Contains(help, want) {
+		t.Fatalf("login help missing %q; rendered flag usage:\n%q", want, help)
+	}
+
+	// The description must survive intact — a swallowed backtick pair used to
+	// truncate it, so assert the tail of the sentence is still present.
+	if want := "to be prompted interactively."; !strings.Contains(help, want) {
+		t.Fatalf("login help missing description tail %q; rendered flag usage:\n%q", want, help)
 	}
 }
 

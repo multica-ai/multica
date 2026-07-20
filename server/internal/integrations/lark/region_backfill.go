@@ -5,8 +5,6 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
-
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // BackfillRegionFromLegacyOverride is the upgrade-repair path for self-host
@@ -32,7 +30,7 @@ import (
 //
 // Callers should fire this from a goroutine at boot, like
 // BackfillBotUnionIDs, so a slow DB write cannot block listener startup.
-func BackfillRegionFromLegacyOverride(ctx context.Context, queries *db.Queries, httpOverride, callbackOverride string, log *slog.Logger) {
+func BackfillRegionFromLegacyOverride(ctx context.Context, queries *ChannelStore, httpOverride, callbackOverride string, log *slog.Logger) {
 	if log == nil {
 		log = slog.Default()
 	}

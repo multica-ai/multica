@@ -33,26 +33,30 @@ func TestQuickCreateIssueParentTrustBoundary(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// Resolve the seeded runtime + agent for this workspace, then bump the
-	// runtime metadata to a CLI version that clears MinQuickCreateCLIVersion.
-	// The seed runtime uses metadata '{}'::jsonb which would otherwise trip
-	// the daemon-version gate before we ever reach the parent_issue_id check.
+	// Resolve the agent this request targets, then bump the CLI version on the
+	// runtime BOUND TO that agent — that is the runtime the version gate checks
+	// (the handler uses agent.RuntimeID). Picking an arbitrary `LIMIT 1`
+	// agent_runtime is wrong when the shared test workspace holds more than one
+	// runtime (other handler tests register their own): the LIMIT 1 row need
+	// not be the agent's runtime, so the agent's real runtime stays on the
+	// seed's empty '{}' metadata and trips the daemon-version gate before we
+	// ever reach the parent_issue_id check.
 	var runtimeID, agentID string
-	if err := testPool.QueryRow(ctx,
-		`SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&runtimeID); err != nil {
-		t.Fatalf("fetch runtime: %v", err)
-	}
 	if err := testPool.QueryRow(ctx,
 		`SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
 	).Scan(&agentID); err != nil {
 		t.Fatalf("fetch agent: %v", err)
 	}
+	if err := testPool.QueryRow(ctx,
+		`SELECT runtime_id FROM agent WHERE id = $1`,
+		agentID,
+	).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch agent runtime: %v", err)
+	}
 	if _, err := testPool.Exec(ctx,
 		`UPDATE agent_runtime SET metadata = jsonb_build_object('cli_version', $1::text) WHERE id = $2`,
-		agent.MinQuickCreateCLIVersion, runtimeID,
+		agent.MinQuickCreateFieldsCLIVersion, runtimeID,
 	); err != nil {
 		t.Fatalf("bump runtime cli_version: %v", err)
 	}
@@ -130,6 +134,8 @@ func TestQuickCreateIssueParentTrustBoundary(t *testing.T) {
 		req := newRequest("POST", "/api/issues/quick-create", map[string]any{
 			"agent_id":        agentID,
 			"prompt":          "Create a follow-up issue for the local parent",
+			"priority":        " HIGH ",
+			"due_date":        " 2026-08-01 ",
 			"parent_issue_id": localParentID,
 			"attachment_ids":  []string{attachmentID},
 		})
@@ -163,6 +169,12 @@ func TestQuickCreateIssueParentTrustBoundary(t *testing.T) {
 		}
 		if qc.ParentIssueID != localParentID {
 			t.Fatalf("expected parent_issue_id=%q in context, got %q", localParentID, qc.ParentIssueID)
+		}
+		if qc.Priority != "high" {
+			t.Fatalf("expected priority=high in context, got %q", qc.Priority)
+		}
+		if qc.DueDate != "2026-08-01" {
+			t.Fatalf("expected due_date=2026-08-01 in context, got %q", qc.DueDate)
 		}
 		if len(qc.AttachmentIDs) != 1 || qc.AttachmentIDs[0] != attachmentID {
 			t.Fatalf("expected attachment_ids=[%q] in context, got %#v", attachmentID, qc.AttachmentIDs)
@@ -220,5 +232,77 @@ func TestQuickCreateIssueParentTrustBoundary(t *testing.T) {
 		if got := countQuickCreateTasks(t); got != before {
 			t.Fatalf("bogus attachment id must not enqueue a task: expected %d quick-create tasks, got %d", before, got)
 		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		field string
+		value string
+	}{
+		{name: "invalid priority", field: "priority", value: "none"},
+		{name: "invalid due date", field: "due_date", value: "tomorrow"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := countQuickCreateTasks(t)
+			body := map[string]any{
+				"agent_id": agentID,
+				"prompt":   "Try an invalid explicit field",
+				tc.field:   tc.value,
+			}
+			w := httptest.NewRecorder()
+			req := newRequest("POST", "/api/issues/quick-create", body)
+			testHandler.QuickCreateIssue(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+			if got := countQuickCreateTasks(t); got != before {
+				t.Fatalf("invalid field must not enqueue a task: expected %d, got %d", before, got)
+			}
+		})
+	}
+
+	t.Run("legacy daemon only rejects requests using explicit fields", func(t *testing.T) {
+		if _, err := testPool.Exec(ctx,
+			`UPDATE agent_runtime SET metadata = jsonb_build_object('cli_version', '0.4.2') WHERE id = $1`,
+			runtimeID,
+		); err != nil {
+			t.Fatalf("set legacy daemon version: %v", err)
+		}
+		defer testPool.Exec(ctx,
+			`UPDATE agent_runtime SET metadata = jsonb_build_object('cli_version', $1::text) WHERE id = $2`,
+			agent.MinQuickCreateFieldsCLIVersion, runtimeID,
+		)
+
+		before := countQuickCreateTasks(t)
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/quick-create", map[string]any{
+			"agent_id": agentID,
+			"prompt":   "Explicit priority needs the new daemon transport",
+			"priority": "high",
+		})
+		testHandler.QuickCreateIssue(w, req)
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("explicit fields on 0.4.2: expected 422, got %d: %s", w.Code, w.Body.String())
+		}
+		if got := countQuickCreateTasks(t); got != before {
+			t.Fatalf("unsupported explicit fields must not enqueue: expected %d, got %d", before, got)
+		}
+
+		w = httptest.NewRecorder()
+		req = newRequest("POST", "/api/issues/quick-create", map[string]any{
+			"agent_id": agentID,
+			"prompt":   "Basic quick create remains backward compatible",
+		})
+		testHandler.QuickCreateIssue(w, req)
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("basic quick create on 0.4.2: expected 202, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp QuickCreateIssueResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, resp.TaskID)
+		})
 	})
 }

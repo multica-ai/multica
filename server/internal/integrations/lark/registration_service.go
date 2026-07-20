@@ -11,11 +11,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// pgUniqueViolation is the Postgres SQLSTATE for a unique-constraint violation.
+// A rebind upsert that trips the (channel_type, config->>'app_id') index after
+// the dead-owner reclaim ran means a LIVE owner still holds the slot.
+const pgUniqueViolation = "23505"
 
 // RegistrationSessionStatus is the discriminated state a `begin`
 // session lives in. The HTTP status endpoint serializes the underlying
@@ -106,7 +112,7 @@ type RegistrationService struct {
 	cfg         RegistrationServiceConfig
 	client      *RegistrationClient
 	api         APIClient
-	queries     *db.Queries
+	queries     *ChannelStore
 	tx          TxStarter
 	installs    *InstallationService
 	binder      InstallerBinder
@@ -167,7 +173,7 @@ func NewRegistrationService(
 		cfg:         cfg.withDefaults(),
 		client:      client,
 		api:         api,
-		queries:     queries,
+		queries:     NewChannelStore(queries),
 		tx:          tx,
 		installs:    installs,
 		binder:      binder,
@@ -244,6 +250,10 @@ func (s *registrationSession) snapshot() RegistrationSessionState {
 		InstallationID: s.installationID,
 		ErrorReason:    s.errorReason,
 		ErrorMessage:   s.errorMessage,
+		// InitiatorID is immutable after BeginInstall, so it is safe to
+		// read outside the mutex too — it is included here so the status
+		// handler can scope reads to the session's initiator.
+		InitiatorID: s.initiatorID,
 	}
 }
 
@@ -272,18 +282,22 @@ func (s *registrationSession) markError(reason, msg string, gcAfter time.Time) {
 
 // RegistrationSessionState is the read-only snapshot the handler
 // serializes to the frontend. Internal mutex is hidden by construction.
+// InitiatorID is not serialized to the client — the handler uses it only
+// to authorize the status read (session initiator or workspace admin).
 type RegistrationSessionState struct {
 	ID             string
 	Status         RegistrationSessionStatus
 	InstallationID pgtype.UUID
 	ErrorReason    string
 	ErrorMessage   string
+	InitiatorID    pgtype.UUID
 }
 
 // BeginInstallParams is the trusted input from the handler — the
 // workspace, agent, and initiating user have already been authenticated
-// and authorized at the router (admin role on the workspace; agent
-// belongs to the workspace).
+// and authorized by the handler (canManageAgent: the agent's owner OR a
+// workspace owner/admin; agent belongs to the workspace). The service
+// re-checks agent↔workspace membership below as defense-in-depth.
 type BeginInstallParams struct {
 	WorkspaceID pgtype.UUID
 	AgentID     pgtype.UUID
@@ -323,11 +337,11 @@ func (s *RegistrationService) BeginInstall(ctx context.Context, p BeginInstallPa
 	if !p.WorkspaceID.Valid || !p.AgentID.Valid || !p.InitiatorID.Valid {
 		return BeginInstallResult{}, errors.New("lark registration: workspace, agent, and initiator are required")
 	}
-	// Agent ownership pre-check — without this, a workspace admin
-	// could open an install session against another workspace's agent
-	// by guessing the UUID, and the device_code minted against Lark
-	// would still produce credentials. The handler does the same
-	// check; doing it here too keeps the service self-defending.
+	// Agent↔workspace pre-check — without this, a caller could open an
+	// install session against another workspace's agent by guessing the
+	// UUID, and the device_code minted against Lark would still produce
+	// credentials. The handler already loads this agent to run
+	// canManageAgent; re-checking here keeps the service self-defending.
 	//
 	// We keep the agent: its name pre-fills the bot name on Lark's
 	// PersonalAgent creation form (see botNamePreset) so the installed
@@ -563,7 +577,23 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	defer tx.Rollback(ctx)
 	qtx := s.queries.WithTx(tx)
 
-	inst, err := qtx.UpsertLarkInstallation(ctx, db.UpsertLarkInstallationParams{
+	// If the same Feishu app (app_id) is held by a DEAD prior owner — a revoked
+	// placeholder left by a DIFFERENT agent in this workspace, or an orphan whose
+	// workspace/agent was deleted (#4810) — that row still occupies the
+	// (channel_type, config->>'app_id') unique slot and blocks the
+	// UpsertChannelInstallation INSERT below. Reclaim it first — the transaction
+	// wraps both the delete and the upsert so a failure between them rolls back
+	// cleanly. A live owner is left in place (the SAME agent's own revoked row is
+	// reactivated in place by the upsert; an active/archived agent stays owned),
+	// so the upsert surfaces the conflict below instead of stealing the bot.
+	if err := qtx.ReclaimDeadInstallationByAppID(ctx, sess.workspaceID, sess.agentID, res.ClientID); err != nil {
+		s.cfg.Logger.Warn("lark registration: reclaim dead installation",
+			"session_id", sess.id, "err", err)
+		sess.markError(RegistrationReasonInternalError, err.Error(), s.gcDeadline())
+		return
+	}
+
+	inst, err := qtx.UpsertLarkInstallation(ctx, UpsertInstallationParams{
 		WorkspaceID:        sess.workspaceID,
 		AgentID:            sess.agentID,
 		AppID:              res.ClientID,
@@ -576,7 +606,16 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	if err != nil {
 		s.cfg.Logger.Warn("lark registration: upsert installation",
 			"session_id", sess.id, "err", err)
-		sess.markError(RegistrationReasonInstallationConflict, err.Error(), s.gcDeadline())
+		// A unique violation here means the app_id slot is held by a LIVE owner
+		// (the reclaim above already cleared every dead one). Surface who holds
+		// it — another agent in this workspace, an archived agent, or a different
+		// workspace — instead of leaking the raw Postgres error.
+		msg := err.Error()
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+			msg = s.liveOwnerConflictMessage(ctx, sess.workspaceID, res.ClientID)
+		}
+		sess.markError(RegistrationReasonInstallationConflict, msg, s.gcDeadline())
 		return
 	}
 
@@ -608,6 +647,28 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 		"workspace_id", uuidString(sess.workspaceID),
 		"agent_id", uuidString(sess.agentID),
 		"installation_id", uuidString(inst.ID))
+}
+
+// liveOwnerConflictMessage builds the user-facing copy for a rebind refused
+// because the Feishu app's routing slot is held by a LIVE owner. It names which
+// kind of owner so the user knows how to recover, instead of the old catch-all
+// "connected to a different Multica workspace" that lied when the real owner sat
+// in the SAME workspace (#4810). Looked up on the base pool, not the aborted
+// upsert tx. If the slot turns out free (a concurrent disconnect between the
+// upsert and this read), a generic message is enough — the user can just retry.
+func (s *RegistrationService) liveOwnerConflictMessage(ctx context.Context, requestingWorkspaceID pgtype.UUID, appID string) string {
+	owner, err := s.queries.InstallationOwnerByAppID(ctx, appID)
+	if err != nil {
+		return "This Feishu app is already connected to another agent. Disconnect it there first, then connect it here."
+	}
+	switch {
+	case owner.WorkspaceID != requestingWorkspaceID:
+		return "This Feishu app is already connected to a different Multica workspace. Disconnect it there before connecting it here."
+	case owner.AgentArchivedAt.Valid:
+		return "This Feishu app is connected to an archived agent in this workspace. Restore that agent, or disconnect its bot, before connecting it here."
+	default:
+		return "This Feishu app is already connected to another agent in this workspace. Disconnect it there first, then connect it here."
+	}
 }
 
 func (s *RegistrationService) gcDeadline() time.Time {

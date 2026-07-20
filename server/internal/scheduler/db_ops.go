@@ -314,11 +314,16 @@ func encodeResult(in map[string]any) (string, error) {
 	return string(b), nil
 }
 
-// latestPlanInfo returns the latest known plan_time for (job, scope)
+// LatestPlanInfo returns the latest known plan_time for (job, scope)
 // plus the fields the catch-up planner needs to decide whether the row
 // is still claimable at the same plan_time (FAILED-with-retry) or
 // finished and the next plan_time should advance past it.
-type latestPlanInfo struct {
+//
+// Exported so a JobSpec.PlansForScope hook can inspect the same view
+// the built-in Cadence planner uses — in particular Found / PlanTime
+// to know where to resume plan enumeration, and RetryEligible to keep
+// the cursor on a FAILED-with-retry plan_time.
+type LatestPlanInfo struct {
 	Found       bool
 	PlanTime    time.Time
 	Status      string
@@ -336,7 +341,7 @@ type latestPlanInfo struct {
 // passed; the every_plan planner uses this to keep the cursor on the
 // retry-eligible bucket so tryClaim's retry-from-FAILED branch can
 // fire.
-func (i latestPlanInfo) RetryEligible(now time.Time) bool {
+func (i LatestPlanInfo) RetryEligible(now time.Time) bool {
 	if !i.Found {
 		return false
 	}
@@ -359,8 +364,8 @@ func latestPlan(
 	pool *pgxpool.Pool,
 	jobName string,
 	scope Scope,
-) (latestPlanInfo, error) {
-	var info latestPlanInfo
+) (LatestPlanInfo, error) {
+	var info LatestPlanInfo
 	var nextRetry pgtype.Timestamptz
 	err := pool.QueryRow(ctx, `
 		SELECT plan_time, status, attempt, max_attempts, next_retry_at

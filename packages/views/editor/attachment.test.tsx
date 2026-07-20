@@ -262,6 +262,40 @@ describe("Attachment — image dispatch", () => {
     );
   });
 
+  it("prefers a local disk /uploads URL over API markdown in split-origin self-host", () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `https://api.example.test/api/attachments/${id}/download`;
+    const mediaUrl = "https://api.example.test/uploads/workspaces/ws-1/shot.png";
+    const att = makeRecord({
+      id,
+      url: "/uploads/workspaces/ws-1/shot.png",
+      markdown_url: markdownUrl,
+      download_url: `/api/attachments/${id}/download`,
+    });
+    resolverState.attachments = [att];
+
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: markdownUrl,
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(mediaUrl);
+
+    fireEvent.click(screen.getByTitle("View"));
+
+    const imageSrcs = [...document.querySelectorAll("img")].map((img) =>
+      img.getAttribute("src"),
+    );
+    expect(imageSrcs).toEqual([mediaUrl, mediaUrl]);
+  });
+
   it("opens preview with the same resolved media URL when a reopened draft record has no download_url", () => {
     configStore.setState({ cdnDomain: "cdn.example.test" });
     const id = "11111111-2222-3333-4444-555555555555";

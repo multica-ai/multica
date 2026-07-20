@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -70,6 +71,32 @@ func TestDeleteRuntimeProfile_ArchivedAgentCascade(t *testing.T) {
 		t.Fatalf("archive agent: %v", err)
 	}
 
+	// Give the archived agent a channel installation (+ a dependent binding).
+	// channel_* has no FK to agent (MUL-3515 §4), so this DeleteRuntimeProfile
+	// teardown entry point must sweep it explicitly — otherwise the bot's app_id
+	// slot stays occupied after the agent is hard-deleted, and the bot can never
+	// rebind anywhere (#4810). This pins that sweep on the profile-delete path.
+	const rpApp = "cli_rp_cascade"
+	const rpChat = "cc000000-0000-4000-8000-0000000000f7"
+	_, _ = testPool.Exec(ctx, `DELETE FROM channel_installation WHERE config->>'app_id' = $1`, rpApp)
+	_, _ = testPool.Exec(ctx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, rpChat)
+	var rpInstallID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id, status)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text), $4, 'active')
+RETURNING id`, testWorkspaceID, agentID, rpApp, testUserID).Scan(&rpInstallID); err != nil {
+		t.Fatalf("seed channel installation: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
+VALUES ($1, $2, 'feishu', 'oc_rp', 'p2p')`, rpChat, rpInstallID); err != nil {
+		t.Fatalf("seed chat-session binding: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE config->>'app_id' = $1`, rpApp)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, rpChat)
+	})
+
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles/"+profileID, nil)
 	req = withURLParams(req, "id", testWorkspaceID, "profileId", profileID)
@@ -97,6 +124,20 @@ func TestDeleteRuntimeProfile_ArchivedAgentCascade(t *testing.T) {
 	}
 	if agentRows != 0 {
 		t.Fatalf("expected archived agent hard-deleted by cascade, found %d", agentRows)
+	}
+
+	var instRows, bindingRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM channel_installation WHERE id = $1`, rpInstallID).Scan(&instRows); err != nil {
+		t.Fatalf("count channel installation: %v", err)
+	}
+	if instRows != 0 {
+		t.Fatalf("archived agent's channel installation not swept on runtime-profile delete: %d rows (its bot's app_id slot stays occupied, #4810)", instRows)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM channel_chat_session_binding WHERE installation_id = $1`, rpInstallID).Scan(&bindingRows); err != nil {
+		t.Fatalf("count channel chat-session binding: %v", err)
+	}
+	if bindingRows != 0 {
+		t.Fatalf("channel chat-session binding not swept: %d dangling rows", bindingRows)
 	}
 }
 
@@ -137,6 +178,51 @@ func TestDeleteRuntimeProfile_ActiveAgentBlocks(t *testing.T) {
 	}
 }
 
+func TestDeleteRuntimeProfile_MissingProfileWithOrphanRuntimesCleansUp(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	profileID := insertRuntimeProfileFixture(t, ctx, "Orphaned Profile Cleanup", "codex", "orphaned-profile-codex")
+	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "Orphaned Profile Runtime", "codex")
+	if _, err := testPool.Exec(ctx, `DELETE FROM runtime_profile WHERE id = $1`, profileID); err != nil {
+		t.Fatalf("delete profile row: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles/"+profileID, nil)
+	req = withURLParams(req, "id", testWorkspaceID, "profileId", profileID)
+	testHandler.DeleteRuntimeProfile(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var rtRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&rtRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if rtRows != 0 {
+		t.Fatalf("expected orphaned runtime row deleted, found %d", rtRows)
+	}
+}
+
+func TestDeleteRuntimeProfile_MissingProfileNoOrphansStillReturns404(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	missingProfileID := "00000000-0000-0000-0000-000000415800"
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles/"+missingProfileID, nil)
+	req = withURLParams(req, "id", testWorkspaceID, "profileId", missingProfileID)
+	testHandler.DeleteRuntimeProfile(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
 
 // TestCreateRuntimeProfile_ForcesWorkspaceVisibility is the regression guard
 // for the visibility leak: visibility=private is not user-settable in v1
@@ -181,5 +267,63 @@ func TestCreateRuntimeProfile_ForcesWorkspaceVisibility(t *testing.T) {
 	}
 	if dbVis != "workspace" {
 		t.Fatalf("stored visibility = %q, want workspace", dbVis)
+	}
+}
+
+func TestCreateRuntimeProfile_ValidatesCommandAndFixedArgs(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cases := []struct {
+		name        string
+		commandName string
+		fixedArgs   []string
+		wantStatus  int
+	}{
+		{
+			name:        "split command and args accepted",
+			commandName: "agent",
+			fixedArgs:   []string{"--model", "composer-2.5"},
+			wantStatus:  http.StatusCreated,
+		},
+		{
+			name:        "command line rejected",
+			commandName: "agent --model composer-2.5",
+			wantStatus:  http.StatusBadRequest,
+		},
+		{
+			name:        "nul arg rejected",
+			commandName: "agent",
+			fixedArgs:   []string{"bad\x00arg"},
+			wantStatus:  http.StatusBadRequest,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles", map[string]any{
+				"display_name":    "Validation " + tc.name,
+				"protocol_family": "codex",
+				"command_name":    tc.commandName,
+				"fixed_args":      tc.fixedArgs,
+			})
+			req = withURLParam(req, "id", testWorkspaceID)
+			testHandler.CreateRuntimeProfile(w, req)
+			if w.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", w.Code, tc.wantStatus, w.Body.String())
+			}
+			if w.Code == http.StatusCreated {
+				var resp RuntimeProfileResponse
+				if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+					t.Fatalf("decode response: %v", err)
+				}
+				t.Cleanup(func() {
+					testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, resp.ID)
+				})
+				if got := strings.Join(resp.FixedArgs, " "); got != strings.Join(tc.fixedArgs, " ") {
+					t.Fatalf("fixed_args = %v, want %v", resp.FixedArgs, tc.fixedArgs)
+				}
+			}
+		})
 	}
 }

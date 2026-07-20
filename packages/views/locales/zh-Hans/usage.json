@@ -41,6 +41,8 @@
   "leaderboard": {
     "title": "排行榜",
     "caption": "{{count}} 个智能体",
+    "caption_with_deleted": "{{count}} 个智能体 · {{deleted}} 个已删除",
+    "deleted_agents": "已删除的智能体",
     "header_agent": "智能体",
     "header_tokens": "Token",
     "header_cost": "费用",
