@@ -26,8 +26,12 @@
  */
 
 import { createContext, isValidElement, memo, useContext, useMemo, useRef } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
-import type { ReactNode } from "react";
+import ReactMarkdown, {
+  type Components,
+  type ExtraProps,
+  type Options as ReactMarkdownOptions,
+} from "react-markdown";
+import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import rehypeKatex from "rehype-katex";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -43,7 +47,7 @@ import {
   markdownSanitizeSchema,
   markdownUrlTransform,
 } from "@multica/ui/markdown";
-import { useNavigation } from "../navigation";
+import { AppLink } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectChip } from "../projects/components/project-chip";
@@ -117,30 +121,35 @@ function AutolinkedIssueMentionLink({ identifier }: { identifier: string }) {
   return <IssueMentionLink issueId={issue.id} label={identifier} />;
 }
 
+/**
+ * Project mention chip.
+ *
+ * Rendered as a real anchor via AppLink, matching IssueMentionCard: a mention is
+ * a link, so it must be reachable by Tab and activatable by Enter, and expose a
+ * URL to copy / open in a new tab. A `<span onClick>` looks identical and works
+ * for a mouse, which is exactly why the regression is easy to miss — the readonly
+ * renderer used one, and unifying the surfaces would have propagated it to Chat,
+ * which previously had the accessible version.
+ *
+ * AppLink also owns plain-click, modifier-click and the desktop new-tab adapter,
+ * so none of that is reimplemented here. The wrapper only shields surrounding
+ * click handlers (e.g. collapsed-comment expanders) from mention clicks.
+ */
 function ProjectMentionLink({ projectId, label }: { projectId: string; label?: string }) {
-  const { push, openInNewTab } = useNavigation();
   const p = useWorkspacePaths();
-  const path = p.projectDetail(projectId);
   return (
-    <span
-      className="inline align-middle"
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.metaKey || e.ctrlKey || e.shiftKey) {
-          if (openInNewTab) {
-            openInNewTab(path, label);
-          }
-          return;
-        }
-        push(path);
-      }}
-    >
-      <ProjectChip
-        projectId={projectId}
-        fallbackLabel={label}
-        className="cursor-pointer hover:bg-accent transition-colors"
-      />
+    <span className="inline align-middle" onClick={(e) => e.stopPropagation()}>
+      <AppLink
+        href={p.projectDetail(projectId)}
+        newTabTitle={label}
+        className="project-mention not-prose inline-flex"
+      >
+        <ProjectChip
+          projectId={projectId}
+          fallbackLabel={label}
+          className="cursor-pointer hover:bg-accent transition-colors"
+        />
+      </AppLink>
     </span>
   );
 }
@@ -197,11 +206,42 @@ function getTextContent(node: ReactNode): string {
   if (node == null || typeof node === "boolean") return "";
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(getTextContent).join("");
-  if (isValidElement(node)) {
-    const props = node.props as { children?: ReactNode };
-    return getTextContent(props.children);
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return getTextContent(node.props.children);
   }
   return "";
+}
+
+// Props react-markdown actually passes to a component override: the intrinsic
+// element's own props plus the source hast node (`ExtraProps`). Deriving them
+// keeps the renderers checked against react-markdown's real contract instead of
+// a hand-written approximation that a cast would have to silence.
+type RichCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
+type RichPreProps = ComponentPropsWithoutRef<"pre"> & ExtraProps;
+
+/**
+ * Source offset of a hast node, narrowed in one place. Offsets are how a
+ * rendered block is matched back to its fence in the processed Markdown (see
+ * streaming-fence.ts); a node without position cannot be matched.
+ */
+function nodeStartOffset(node: ExtraProps["node"]): number | undefined {
+  return node?.position?.start.offset;
+}
+
+/**
+ * Reads a hast element property as a string. hast property values are a union
+ * (string | number | boolean | array | null), so this narrows at runtime rather
+ * than asserting — a `data-*` attribute that is not a string yields "" instead
+ * of a value that lies about its type.
+ */
+function stringProperty(node: ExtraProps["node"], key: string): string {
+  const value = node?.properties?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+function isMultiLineNode(node: ExtraProps["node"]): boolean {
+  const position = node?.position;
+  return position != null && position.start.line !== position.end.line;
 }
 
 /**
@@ -210,20 +250,10 @@ function getTextContent(node: ReactNode): string {
  * wraps `code` children in a `<pre>` whose monospace/overflow styles clamp a
  * diagram or preview iframe.
  */
-function RichCode({
-  className,
-  children,
-  node,
-  ...props
-}: {
-  className?: string;
-  children?: ReactNode;
-  node?: { position?: { start: { offset?: number; line: number }; end: { line: number } } };
-} & Record<string, unknown>) {
+function RichCode({ className, children, node, ...props }: RichCodeProps) {
   const language = /language-(\w+)/.exec(className || "")?.[1];
-  const isBlock =
-    node?.position && node.position.start.line !== node.position.end.line;
-  const isFenceClosed = useIsFenceClosed(node?.position?.start.offset);
+  const isBlock = isMultiLineNode(node);
+  const isFenceClosed = useIsFenceClosed(nodeStartOffset(node));
 
   if (isBlock && shouldUpgradeFence(language, isFenceClosed)) {
     // isRichFenceLanguage is re-checked for the type narrow; shouldUpgradeFence
@@ -242,26 +272,32 @@ function RichCode({
 }
 
 /**
+ * Reads the language token and source offset from the `<code>` element that
+ * react-markdown hands to a `pre` override. `isValidElement`'s type parameter
+ * narrows the child's props, so no cast is needed to reach `node`.
+ */
+function readFencedCodeChild(children: ReactNode): {
+  language?: string;
+  offset?: number;
+} {
+  const child = Array.isArray(children) ? children[0] : children;
+  if (!isValidElement<{ className?: string } & ExtraProps>(child)) return {};
+  return {
+    // Whole class token only: `language-htmlbars` must not read as `html`.
+    language: /(?:^|\s)language-(\w+)(?:\s|$)/.exec(child.props.className ?? "")?.[1],
+    offset: nodeStartOffset(child.props.node),
+  };
+}
+
+/**
  * `pre` renderer. react-markdown calls this BEFORE invoking the `code`
  * renderer, so `children` is the unrendered `<code>` element from the AST: the
  * decision to unwrap is made from that child's own hast node (class token +
  * source offset), not by checking `children.type === MermaidDiagram`, which
  * never matches.
  */
-function RichPre({ children }: { children?: ReactNode }) {
-  const child = Array.isArray(children) ? children[0] : children;
-  let language: string | undefined;
-  let offset: number | undefined;
-
-  if (isValidElement(child)) {
-    const childProps = child.props as {
-      className?: string;
-      node?: { position?: { start: { offset?: number } } };
-    };
-    language = /(?:^|\s)language-(\w+)(?:\s|$)/.exec(childProps.className ?? "")?.[1];
-    offset = childProps.node?.position?.start.offset;
-  }
-
+function RichPre({ children }: RichPreProps) {
+  const { language, offset } = readFencedCodeChild(children);
   const isFenceClosed = useIsFenceClosed(offset);
 
   // Upgraded fences escape the <pre><code> envelope entirely. An OPEN
@@ -306,12 +342,18 @@ const COMPONENTS: Partial<Components> = {
 
   // FileCard — intercept <div data-type="fileCard"> from preprocessMarkdown
   div: ({ node, children, ...props }) => {
-    const dataType = node?.properties?.dataType as string | undefined;
-    if (dataType === "fileCard") {
-      const rawHref = (node?.properties?.dataHref as string) || "";
+    if (stringProperty(node, "dataType") === "fileCard") {
+      const rawHref = stringProperty(node, "dataHref");
       const href = isAllowedFileCardHref(rawHref) ? rawHref : "";
-      const filename = (node?.properties?.dataFilename as string) || "";
-      return <AttachmentRenderer attachment={{ kind: "url", url: href, filename }} />;
+      return (
+        <AttachmentRenderer
+          attachment={{
+            kind: "url",
+            url: href,
+            filename: stringProperty(node, "dataFilename"),
+          }}
+        />
+      );
     }
     return <div {...props}>{children}</div>;
   },
@@ -323,21 +365,24 @@ const COMPONENTS: Partial<Components> = {
     </div>
   ),
 
-  code: RichCode as NonNullable<Components["code"]>,
-  pre: RichPre as NonNullable<Components["pre"]>,
+  code: RichCode,
+  pre: RichPre,
 };
 
+// `satisfies` rather than a cast: the plugin lists are still checked against
+// react-markdown's own option types, so a bad plugin tuple fails here instead of
+// being silenced.
 const REMARK_PLUGINS = [
   [remarkMath, { singleDollarTextMath: false }],
   remarkBreaks,
   [remarkGfm, { singleTilde: false }],
-] as never;
+] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
 
 const REHYPE_PLUGINS = [
   rehypeRaw,
   [rehypeSanitize, markdownSanitizeSchema],
   rehypeKatex,
-] as never;
+] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
 // ---------------------------------------------------------------------------
 // Component

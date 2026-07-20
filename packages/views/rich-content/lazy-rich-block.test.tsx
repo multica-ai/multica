@@ -8,6 +8,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
+import { createRoot, hydrateRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { LazyRichBlock } from "./lazy-rich-block";
 
 type IOCallback = (entries: { isIntersecting: boolean }[]) => void;
@@ -134,7 +137,7 @@ describe("LazyRichBlock", () => {
     expect(topPx).toBeGreaterThan(600);
   });
 
-  it("mounts immediately when IntersectionObserver is unavailable", () => {
+  it("mounts via an effect when IntersectionObserver is unavailable", () => {
     vi.unstubAllGlobals();
     vi.stubGlobal("IntersectionObserver", undefined);
 
@@ -145,6 +148,133 @@ describe("LazyRichBlock", () => {
     );
 
     // Degrading to eager mount is correct; rendering nothing would not be.
+    // The mount happens in an effect (not in the initial state) so the first
+    // committed frame still matches what a server render would produce — see
+    // the SSR suite below.
     expect(screen.getByTestId("expensive")).toBeInTheDocument();
+  });
+});
+
+/**
+ * Server/client determinism.
+ *
+ * The initial `mounted` state must not be derived from feature detection. If it
+ * were, the server (no `window`) and the browser (has IntersectionObserver)
+ * would disagree on the very first frame: React would find different markup
+ * during hydration, and the server render would silently bypass the lazy gate
+ * it exists to enforce. `"use client"` does not exempt a component from Next's
+ * server render, so this has to hold.
+ */
+describe("LazyRichBlock SSR", () => {
+  /**
+   * Render the way a server would.
+   *
+   * jsdom always provides `window`, so simply calling renderToString here would
+   * take the SAME feature-detection branch as the browser and could not observe
+   * the mismatch at all. Removing IntersectionObserver for the duration
+   * reproduces the real asymmetry: on a server the detection says
+   * "unsupported", in the browser it says "supported". A component whose first
+   * frame depends on that answer renders differently in the two environments —
+   * which is precisely the bug.
+   */
+  function serverRender(ui: Parameters<typeof renderToString>[0]): string {
+    const browserObserver = globalThis.IntersectionObserver;
+    vi.stubGlobal("IntersectionObserver", undefined);
+    try {
+      return renderToString(ui);
+    } finally {
+      vi.stubGlobal("IntersectionObserver", browserObserver);
+    }
+  }
+
+  it("renders the placeholder, not the block, on the server", () => {
+    const html = serverRender(
+      <LazyRichBlock reservedHeightPx={280}>
+        <Expensive />
+      </LazyRichBlock>,
+    );
+
+    expect(html).toContain("data-rich-block-shell");
+    // The expensive subtree must not be in server output: SSR has no viewport,
+    // so nothing is near it.
+    expect(html).not.toContain("expensive");
+    expect(html).not.toContain("data-mounted");
+  });
+
+  it("hydrates the server markup without a mismatch", async () => {
+    const html = serverRender(
+      <LazyRichBlock reservedHeightPx={280}>
+        <Expensive />
+      </LazyRichBlock>,
+    );
+
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    document.body.appendChild(container);
+
+    const errors: string[] = [];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.map(String).join(" "));
+    });
+
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    await act(async () => {
+      root = hydrateRoot(
+        container,
+        <LazyRichBlock reservedHeightPx={280}>
+          <Expensive />
+        </LazyRichBlock>,
+      );
+    });
+
+    const hydrationErrors = errors.filter((e) =>
+      /hydrat|did not match|mismatch/i.test(e),
+    );
+    expect(hydrationErrors).toEqual([]);
+
+    errorSpy.mockRestore();
+    await act(async () => {
+      root?.unmount();
+    });
+    container.remove();
+  });
+
+  it("produces the same first frame on server and client", () => {
+    // Same component, both environments, IntersectionObserver present on the
+    // client — the frames must be identical before any effect runs.
+    const serverHtml = serverRender(
+      <LazyRichBlock reservedHeightPx={280}>
+        <Expensive />
+      </LazyRichBlock>,
+    );
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    // No act(): flushing effects is exactly what we must NOT do here, because
+    // the comparison is against the first committed frame.
+    flushSync(() => {
+      root.render(
+        <LazyRichBlock reservedHeightPx={280}>
+          <Expensive />
+        </LazyRichBlock>,
+      );
+    });
+    const clientFirstFrame = container.innerHTML;
+
+    // Normalize inline-style serialization only: React's server renderer emits
+    // `min-height:280px` while the browser's CSSOM round-trips it as
+    // `min-height: 280px;`. That difference is cosmetic — React hydration does
+    // not string-compare markup — and the hydration test above is the
+    // authoritative check. Everything else is compared verbatim.
+    const normalize = (html: string) =>
+      html.replace(/style="([^"]*)"/g, (_, css: string) =>
+        `style="${css.replace(/\s*;\s*$/, "").replace(/:\s+/g, ":")}"`,
+      );
+
+    expect(normalize(clientFirstFrame)).toBe(normalize(serverHtml));
+
+    act(() => root.unmount());
+    container.remove();
   });
 });

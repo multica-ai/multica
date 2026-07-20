@@ -83,7 +83,7 @@ export function StaticCodeBody({
     const code = body.replace(/\n$/, "");
     try {
       const tree = highlightCode(code, language);
-      return toHtml(tree) as string;
+      return toHtml(tree);
     } catch {
       return null;
     }

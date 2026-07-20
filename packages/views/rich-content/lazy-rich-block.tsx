@@ -51,13 +51,31 @@ export function LazyRichBlock({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  // Environments without IntersectionObserver (jsdom, SSR, older webviews)
-  // mount immediately: degrading to today's eager behaviour is correct, and
-  // silently rendering nothing would not be.
-  const [mounted, setMounted] = useState(() => !supportsIntersectionObserver());
+  // ALWAYS false on the first render, on both server and client.
+  //
+  // Deriving this from feature detection (`typeof window`, IntersectionObserver
+  // presence) would make the first frame environment-dependent: the server, with
+  // no `window`, would render the full Mermaid/HTML subtree while the browser's
+  // hydration pass renders a placeholder — a markup mismatch, and an SSR that
+  // silently bypasses the lazy gate it is supposed to honour. `"use client"`
+  // does not opt a component out of Next's server render, so the only safe
+  // initial state is the one both environments can agree on.
+  //
+  // Everything environment-specific happens in the effect below, which never
+  // runs on the server.
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     if (mounted) return;
+
+    // No IntersectionObserver (jsdom, older webviews): fall back to mounting
+    // eagerly. This runs in an effect rather than in the initial state so the
+    // first committed frame still matches the server's.
+    if (!supportsIntersectionObserver()) {
+      setMounted(true);
+      return;
+    }
+
     const el = ref.current;
     if (!el) return;
 
