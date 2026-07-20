@@ -83,7 +83,7 @@ func (d *Daemon) autoUpdateLoop(ctx context.Context) {
 }
 
 // tryAutoUpdate runs one check-and-maybe-upgrade cycle. Bails early on any of:
-// already updating (server-triggered upgrade in flight), active tasks (defer
+// update ownership already held, active tasks (defer
 // to next tick — we never interrupt running agents), version fetch failure,
 // or no newer release. The function never returns an error: a check that
 // fails today will be retried at the next tick, and we don't want a transient
@@ -96,7 +96,7 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 	// the Runtimes page is already in flight, let it finish and re-check next
 	// tick (by which time we'll either be on the new binary or it failed and
 	// we can retry).
-	if d.updating.Load() {
+	if d.isUpdating() {
 		d.logger.Debug("auto-update: skip — update already in progress")
 		return
 	}
@@ -104,7 +104,7 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 	// HTTPS call to GitHub, and there is no point paying that cost (or the
 	// rate-limit budget) when we already know we are going to defer. A task
 	// that starts between this load and the barrier check below is caught
-	// by the strict re-check under claimMu inside trySetClaimBarrier.
+	// by the strict re-check under claimMu inside tryBeginUpdate.
 	if running := d.activeTasks.Load(); running > 0 {
 		d.logger.Debug("auto-update: skip — tasks running", "active", running)
 		return
@@ -122,36 +122,19 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 		return
 	}
 
-	// CAS the updating flag so a concurrent server-triggered handleUpdate
-	// dropped onto a heartbeat tick can't double-fire. Release on every exit
-	// path before triggerRestart — once that lands, the daemon ctx is
-	// cancelled and the flag dies with the process.
-	if !d.updating.CompareAndSwap(false, true) {
-		d.logger.Debug("auto-update: skip — update already in progress (raced)")
-		return
-	}
-	released := false
-	defer func() {
-		if !released {
-			d.updating.Store(false)
-		}
-	}()
-
 	// Strict barrier: between the cheap pre-fetch idle check and now the
 	// release fetch took anywhere from tens of milliseconds (typical) to
-	// seconds (slow link, GitHub hiccup), plenty of time for a poller to
-	// claim a fresh task. trySetClaimBarrier checks claimsInFlight +
-	// activeTasks under claimMu and only flips pauseClaims to true if both
-	// are zero, so once it returns true we can run the upgrade knowing that
-	// no in-flight task will be cancelled by triggerRestart.
-	if !d.trySetClaimBarrier() {
-		d.logger.Info("auto-update: deferring — task or claim in flight at barrier check")
+	// seconds (slow link, GitHub hiccup), plenty of time for a task, drain, or
+	// heartbeat-triggered update to acquire lifecycle ownership. The update
+	// owner atomically covers all three cases and requires full idle here.
+	if !d.tryBeginUpdate(true) {
+		d.logger.Info("auto-update: deferring — lifecycle barrier unavailable or daemon not idle")
 		return
 	}
-	barrierReleased := false
+	keepBarrier := false
 	defer func() {
-		if !barrierReleased {
-			d.releaseClaimBarrier()
+		if !keepBarrier {
+			d.releaseUpdate()
 		}
 	}()
 
@@ -166,11 +149,8 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 
 	d.logger.Info("auto-update: upgrade completed, restarting", "target", release.TagName, "output", output)
 	// triggerRestart cancels the root context, which causes Run() to return
-	// and the parent (cmd_daemon.go) to re-exec the new binary. Leave both
-	// the updating flag and the claim barrier held — process exit is
-	// imminent and clearing either would open a window for new claims / a
-	// second auto-update tick to fire mid-shutdown.
-	released = true
-	barrierReleased = true
+	// and the parent (cmd_daemon.go) to re-exec the new binary. Keep ownership
+	// only if a restart was actually scheduled; otherwise resume claims.
 	d.triggerRestart()
+	keepBarrier = d.RestartBinary() != ""
 }
