@@ -14,6 +14,31 @@ import (
 // the ONLY status semantics any automation may branch on.
 var Categories = []string{"backlog", "todo", "in_progress", "done", "cancelled"}
 
+// CategoryForStatusToken maps the compatibility issue.status projection to its
+// machine Category (MUL-4809 §4.2). Automation must branch on Category, never on
+// the raw status token: the two built-in legacy statuses in_review and blocked
+// both belong to the in_progress Category, while every other token already equals
+// its Category — the five Category keys, and custom statuses which project to
+// their own Category. This is the DB-free resolver for call sites that already
+// hold issue.status; a status_id → issue_status.category lookup would be redundant
+// because the compat projection already carries the Category for every status.
+func CategoryForStatusToken(status string) string {
+	switch status {
+	case "in_review", "blocked":
+		return "in_progress"
+	default:
+		return status
+	}
+}
+
+// IsTerminalCategory reports whether a machine Category is terminal — the work is
+// finished (done) or abandoned (cancelled). in_review and blocked are NOT terminal
+// (they are in_progress), which is why machine logic keys off Category and not the
+// display token (MUL-4809 §4.2).
+func IsTerminalCategory(category string) bool {
+	return category == "done" || category == "cancelled"
+}
+
 // categoryAliasSet is the set of Category alias tokens. Each resolves to the
 // workspace's current default status for that Category.
 var categoryAliasSet = map[string]struct{}{

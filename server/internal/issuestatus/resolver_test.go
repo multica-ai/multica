@@ -188,3 +188,46 @@ func TestIsReservedStatusToken(t *testing.T) {
 		}
 	}
 }
+
+// TestCategoryForStatusToken covers the compat-projection → Category mapping used
+// by machine logic (MUL-4809 §4.2). The two legacy tokens collapse to in_progress;
+// everything else (Category keys, custom-status projections) maps to itself.
+func TestCategoryForStatusToken(t *testing.T) {
+	cases := map[string]string{
+		"backlog":     "backlog",
+		"todo":        "todo",
+		"in_progress": "in_progress",
+		"in_review":   "in_progress",
+		"blocked":     "in_progress",
+		"done":        "done",
+		"cancelled":   "cancelled",
+	}
+	for token, want := range cases {
+		if got := CategoryForStatusToken(token); got != want {
+			t.Errorf("CategoryForStatusToken(%q) = %q, want %q", token, got, want)
+		}
+	}
+}
+
+// TestIsTerminalCategory covers the terminal-Category predicate: only done and
+// cancelled are terminal; in_review/blocked map to in_progress and are not.
+func TestIsTerminalCategory(t *testing.T) {
+	terminal := []string{"done", "cancelled"}
+	nonTerminal := []string{"backlog", "todo", "in_progress"}
+	for _, c := range terminal {
+		if !IsTerminalCategory(c) {
+			t.Errorf("IsTerminalCategory(%q) = false, want true", c)
+		}
+	}
+	for _, c := range nonTerminal {
+		if IsTerminalCategory(c) {
+			t.Errorf("IsTerminalCategory(%q) = true, want false", c)
+		}
+	}
+	// The in_progress display tokens resolve through their Category, never terminal.
+	for _, token := range []string{"in_review", "blocked"} {
+		if IsTerminalCategory(CategoryForStatusToken(token)) {
+			t.Errorf("%q resolved as terminal, want non-terminal", token)
+		}
+	}
+}
