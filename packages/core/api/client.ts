@@ -784,7 +784,12 @@ export class ApiClient {
     await this.fetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
-  async batchUpdateIssues(issueIds: string[], updates: UpdateIssueRequest): Promise<{ updated: number }> {
+  // `runs_started` counts the agent runs this batch actually enqueued (MUL-5010);
+  // optional so an older backend that omits it still parses.
+  async batchUpdateIssues(
+    issueIds: string[],
+    updates: UpdateIssueRequest,
+  ): Promise<{ updated: number; runs_started?: number }> {
     return this.fetch("/api/issues/batch-update", {
       method: "POST",
       body: JSON.stringify({ issue_ids: issueIds, updates }),

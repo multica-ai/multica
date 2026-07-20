@@ -325,7 +325,11 @@ export function useUpdateIssue() {
       // optimistic state). An UpdateIssue snapshot taken before a concurrent
       // property write resolves would otherwise overwrite the newer bag
       // (clean-room review F3 response-ordering race).
-      const { properties: _staleBag, ...reconcilable } = serverIssue;
+      // `runs_started` is likewise dropped: it describes THIS write's enqueue
+      // outcome, not the issue (MUL-5010). The caller reads it off the
+      // mutateAsync result; letting it into the cache would leave a stale
+      // "1 run started" hanging off the entity for every later reader.
+      const { properties: _staleBag, runs_started: _runsStarted, ...reconcilable } = serverIssue;
       const reconcile = applyIssueChange(qc, wsId, serverIssue.id, reconcilable as typeof serverIssue, {
         changed: issueChangedDims(intent, serverIssue),
         baseIssue: serverIssue,

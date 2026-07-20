@@ -50,16 +50,23 @@ func (h *Handler) issueTriggerPreviewProbe(r *http.Request, actorType, actorID, 
 // WillEnqueueRun, carrying an optional handoff note into the run's opening
 // context. The squad path still flows through enqueueSquadLeaderTask so the
 // leader access gate and pending dedup stay in one place.
-func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) {
+//
+// Reports whether a run was actually enqueued. WillEnqueueRun saying "yes" is
+// the predicate; the insert can still no-op on the (issue_id, agent_id) pending
+// unique index, so callers that report the outcome to the user must use this
+// return value rather than the predicate (MUL-5010).
+func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) bool {
 	switch trigger.AssigneeType {
 	case "agent":
 		// The member who performed this assign/promote is the accountable human
 		// for the run (MUL-4302 §4). An agent actor is not a human, so only a
 		// member actor is threaded; otherwise attribution falls back to the chain.
-		_, _ = h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID))
+		task, err := h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID))
+		return err == nil && task.ID.Valid
 	case "squad":
-		h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote)
+		return h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote)
 	}
+	return false
 }
 
 // memberActorUserID returns the acting member's user id as a pgtype.UUID when the

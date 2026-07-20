@@ -462,6 +462,9 @@ export const IssueSchema = z.object({
   properties: IssuePropertyValuesSchema,
   reactions: z.array(z.unknown()).optional(),
   labels: z.array(z.unknown()).optional(),
+  // Write-scoped: only PUT /api/issues/:id emits it (MUL-5010). Optional so
+  // every read path — and any older backend — parses unchanged.
+  runs_started: z.number().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 }).loose();
