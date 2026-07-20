@@ -8,6 +8,9 @@ import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { renderWithI18n } from "../../test/i18n";
 
 const uploadWithToast = vi.hoisted(() => vi.fn());
+const editorDefaultValues = vi.hoisted(() => ({
+  values: [] as Array<string | undefined>,
+}));
 
 vi.mock("@multica/core/api", () => ({
   api: {},
@@ -69,6 +72,7 @@ vi.mock("../../editor", async () => ({
     },
     ref: Ref<unknown>,
   ) {
+    editorDefaultValues.values.push(defaultValue);
     const valueRef = useRef(defaultValue ?? "");
     // Mirrors the real editor's `uploading` node attrs — see the sibling
     // composer suite for the same stand-in.
@@ -169,6 +173,25 @@ function getSaveButton() {
 beforeEach(() => {
   uploadWithToast.mockReset();
   useCommentDraftStore.setState({ drafts: {} });
+  editorDefaultValues.values = [];
+});
+
+describe("comment edit — draft snapshot", () => {
+  it("does not feed the persisted edit draft back as a new editor default", async () => {
+    renderCard();
+    await startEditing();
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "test.de" },
+    });
+
+    expect(
+      useCommentDraftStore
+        .getState()
+        .getDraft("edit:issue-1:comment-1"),
+    ).toBe("test.de");
+    expect(editorDefaultValues.values.at(-1)).toBe("Original body");
+  });
 });
 
 // MUL-4808 — comment edit had no upload gate: saving mid-upload persisted the

@@ -111,8 +111,7 @@ function hasUploadingNode(editor: Editor): boolean {
 // Types
 // ---------------------------------------------------------------------------
 
-interface ContentEditorProps {
-  defaultValue?: string;
+interface ContentEditorBaseProps {
   onUpdate?: (markdown: string) => void;
   placeholder?: string;
   className?: string;
@@ -192,6 +191,24 @@ interface ContentEditorProps {
   onReady?: () => void;
 }
 
+type ContentEditorValueProps =
+  | {
+      /** Initial markdown, read once when the editor mounts. */
+      defaultValue?: string;
+      value?: never;
+    }
+  | {
+      /**
+       * Externally synchronized markdown. Use only when changes from outside
+       * this editor must replace its document (for example realtime server
+       * updates or switching the document held by a stable editor instance).
+       */
+      value: string;
+      defaultValue?: never;
+    };
+
+type ContentEditorProps = ContentEditorBaseProps & ContentEditorValueProps;
+
 interface ContentEditorRef {
   getMarkdown: () => string;
   clearContent: () => void;
@@ -231,18 +248,18 @@ interface ContentEditorRef {
    * always resolves to the latest render's closure, write the old document
    * into the NEW destination. Taking the markdown back lets the host commit it
    * where it was actually typed. Flushing also marks the editor clean, so the
-   * dirty guard stops suppressing the incoming `defaultValue` sync.
+   * dirty guard stops suppressing the incoming synchronized `value`.
    *
    * Distinct from `flushPendingOnUnmount`: this is for a LIVE editor changing
    * targets, so it reads the current document rather than a cached copy.
    */
   flushPendingUpdate: () => string | null;
   /**
-   * Force `markdown` into the document, bypassing the `defaultValue` sync
+   * Force `markdown` into the document, bypassing the synchronized `value`
    * guards.
    *
-   * Those guards SKIP permanently rather than defer: `lastDefaultValueRef`
-   * advances before they run, so a `defaultValue` they refuse is never
+   * Those guards SKIP permanently rather than defer: `lastSyncedValueRef`
+   * advances before they run, so a `value` they refuse is never
    * re-applied. That is correct for their usual case (the cache will send
    * another value), but not for a host that re-points ONE instance at a
    * different document and must land it exactly once — chat's draft switch,
@@ -262,7 +279,8 @@ interface ContentEditorRef {
 const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
   function ContentEditor(
     {
-      defaultValue = "",
+      defaultValue,
+      value,
       onUpdate,
       placeholder: placeholderText = "",
       className,
@@ -300,11 +318,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     >(undefined);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
-    // `content` already consumes the initial defaultValue when Tiptap mounts.
-    // Track the prop separately so the external-sync effect only handles real
-    // changes after mount, not Markdown serializer canonicalization from that
-    // first parse.
-    const lastDefaultValueRef = useRef(defaultValue);
+    // `content` already consumes the initial synchronized value when Tiptap
+    // mounts. Track later changes separately so the sync effect does not parse
+    // the initial document twice when Markdown serialization canonicalizes it.
+    const lastSyncedValueRef = useRef(value);
     // Live placeholder text. Passed into the Placeholder extension as a getter
     // (not a static string) so the plugin re-reads it on every decoration pass —
     // the sync effect below updates this ref and nudges a repaint. Tiptap
@@ -420,7 +437,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       return issue ? { id: issue.id, identifier: issue.identifier } : null;
     };
 
-    const initialContent = defaultValue ? preprocessMarkdown(defaultValue) : "";
+    const initialMarkdown = value ?? defaultValue ?? "";
+    const initialContent = initialMarkdown
+      ? preprocessMarkdown(initialMarkdown)
+      : "";
     // With `immediatelyRender: false` the Tiptap instance is created after
     // mount, so an imperative `focus()` fired on the same tick (e.g. chat
     // auto-focusing a brand-new conversation) would hit a null editor and no-op.
@@ -466,7 +486,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       content: mountChunked ? "" : initialContent,
       contentType: mountChunked
         ? undefined
-        : defaultValue
+        : initialMarkdown
           ? "markdown"
           : undefined,
       extensions: createEditorExtensions({
@@ -588,18 +608,26 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     }, []);
 
     // Replace the live document with external markdown. Shared by the
-    // `defaultValue` sync effect below and the imperative `adoptContent`, so
+    // synchronized `value` effect below and the imperative `adoptContent`, so
     // both land content identically — chunked parse for large docs, no
     // onUpdate echo, caret preserved. Callers own the decision to apply;
     // the guards live in the effect, not here.
     const applyExternalContent = useCallback(
       (markdown: string) => {
         if (!editor || editor.isDestroyed) return;
+        const before = normalizeEditorMarkdown(editor);
+
+        // A controlled host commonly echoes the exact Markdown this editor
+        // just emitted. Recognize that acknowledgment before preprocessing:
+        // preprocessing a half-typed token can change its meaning (for
+        // example `dev.de` used to become a link during a debounce pause).
+        if (normalizeMarkdown(markdown) === before) return;
+
         const incoming = markdown ? preprocessMarkdown(markdown) : "";
         const incomingNormalized = normalizeMarkdown(incoming);
         // Normalized-equal short-circuit. Avoids a no-op transaction when the
-        // cache reflects a write this same editor just emitted.
-        if (incomingNormalized === normalizeEditorMarkdown(editor)) return;
+        // preprocessed input serializes to the document already on screen.
+        if (incomingNormalized === before) return;
 
         // `emitUpdate: false`. Tiptap v3's setContent defaults to
         // `emitUpdate: true`; without this we would re-trigger onUpdate →
@@ -639,34 +667,37 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       [editor],
     );
 
-    // Sync external `defaultValue` changes into the editor.
+    // Sync explicit external `value` changes into the editor. `defaultValue`
+    // is deliberately mount-only, matching React's normal uncontrolled-input
+    // contract; drafts therefore cannot feed their own debounced writes back
+    // into the live editor.
     // Tiptap v3 `useEditor` reads `content` only at mount (ueberdosis/tiptap#5831);
     // without this effect, a WS-driven description update keeps the editor
     // showing stale content until the issue is closed and reopened.
     useEffect(() => {
-      if (!editor || editor.isDestroyed) return;
+      if (!editor || editor.isDestroyed || value === undefined) return;
 
-      const previousDefaultValue = lastDefaultValueRef.current;
-      lastDefaultValueRef.current = defaultValue;
+      const previousValue = lastSyncedValueRef.current;
+      lastSyncedValueRef.current = value;
 
-      // The initial defaultValue was already parsed through useEditor's
+      // The initial value was already parsed through useEditor's
       // `content` option (or in onCreate for the chunked path). Comparing that
       // source Markdown to Tiptap's canonical serialization can differ even
       // when they represent the same document, and used to cause an immediate
       // second full parse. Only later prop changes belong to this sync effect.
-      if (defaultValue === previousDefaultValue) return;
+      if (value === previousValue) return;
 
-      // Guard 0: never clobber an in-flight upload. An external `defaultValue`
+      // Guard 0: never clobber an in-flight upload. An external `value`
       // change can arrive mid-upload — e.g. chat lazy-creates a session on the
       // first file upload, which flips `activeSessionId` → the draft key →
-      // `defaultValue`. If we `setContent` over a document that still holds an
+      // `value`. If we `setContent` over a document that still holds an
       // `uploading` image/fileCard node, that node is wiped and the upload's
       // finalize can no longer find it (the file vanishes, leaving an empty
       // `!file[name]()`). Like the dirty guards below, an uploading node is
       // local state that an external sync must not overwrite.
       //
       // NOTE: this (like every guard here) SKIPS the sync permanently for this
-      // value — `lastDefaultValueRef` has already advanced, so the effect will
+      // value — `lastSyncedValueRef` has already advanced, so the effect will
       // not re-run for it. A host that must still land this content once the
       // block clears has to say so explicitly, via `adoptContent`.
       if (hasUploadingNode(editor)) return;
@@ -691,8 +722,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // here avoids overwriting unsaved local edits.
       if (isDirty) return;
 
-      applyExternalContent(defaultValue);
-    }, [defaultValue, editor, applyExternalContent]);
+      applyExternalContent(value);
+    }, [value, editor, applyExternalContent]);
 
     // Sync external `placeholder` changes into the mounted editor.
     // The Placeholder extension is configured with a getter over `placeholderRef`
@@ -765,7 +796,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         if (md === lastEmittedRef.current) return null;
         // Advance the emit watermark so the editor reads as clean — the host
         // is taking responsibility for these bytes, and the dirty guard must
-        // now let the incoming defaultValue through.
+        // now let the incoming synchronized value through.
         lastEmittedRef.current = md;
         return md;
       },

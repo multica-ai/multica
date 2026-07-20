@@ -1,4 +1,4 @@
-import { forwardRef, useRef, useImperativeHandle } from "react";
+import { forwardRef, useEffect, useRef, useImperativeHandle } from "react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -57,6 +57,7 @@ vi.mock("../../editor", async () => ({
   ContentEditor: forwardRef(function MockContentEditor(
     props: {
       defaultValue?: string;
+      value?: string;
       onUpdate?: (md: string) => void;
       placeholder?: string;
       onUploadFile?: (file: File) => Promise<UploadResult | null>;
@@ -68,14 +69,18 @@ vi.mock("../../editor", async () => ({
   ) {
     const {
       defaultValue,
+      value,
       onUpdate,
       placeholder,
       onUploadFile,
       onUploadingChange,
     } = props;
     editorProps.last = props as unknown as Record<string, unknown>;
-    const valueRef = useRef<string>(defaultValue ?? "");
+    const valueRef = useRef<string>(value ?? defaultValue ?? "");
     const uploadingRef = useRef(0);
+    useEffect(() => {
+      if (value !== undefined) valueRef.current = value;
+    }, [value]);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       clearContent: () => {
@@ -128,6 +133,7 @@ vi.mock("../../editor", async () => ({
     return (
       <textarea
         data-testid="editor"
+        defaultValue={value ?? defaultValue}
         placeholder={placeholder}
         onChange={(e) => {
           valueRef.current = e.target.value;
@@ -542,7 +548,7 @@ describe("ChatInput async send", () => {
         "__draft_new__",
         "bring this back",
       );
-      expect(editorProps.last?.defaultValue).toBe("bring this back");
+      expect(editorProps.last?.value).toBe("bring this back");
       // The single terminal transition — the owner may now delete the server row.
       expect(onRestoreDraftApplied).toHaveBeenCalledTimes(1);
     });
@@ -568,7 +574,7 @@ describe("ChatInput async send", () => {
     );
 
     await waitFor(() => {
-      expect(editorProps.last?.defaultValue).toBe("already typing");
+      expect(editorProps.last?.value).toBe("already typing");
     });
     expect(onRestoreDraftApplied).not.toHaveBeenCalled();
     expect(state.setInputDraft).not.toHaveBeenCalledWith(
@@ -730,7 +736,7 @@ describe("ChatInput async send", () => {
 // A failed fire-and-forget send must restore into the session it was sent
 // FROM, never into whatever session the user navigated to in the meantime.
 // The send affordance must not hang off `isEmpty` alone. ChatInput does not
-// remount on a session switch and ContentEditor's defaultValue-sync uses
+// remount on a session switch and ContentEditor's synchronized value uses
 // emitUpdate:false, so a draft that arrives from the store — a restore parked
 // by useChatDraftRestore, or any draft typed in another session — never moves
 // `isEmpty`. Pinning the button to it left the user staring at their own text
@@ -756,7 +762,7 @@ describe("ChatInput send affordance", () => {
     expect(sendButton()).toBeDisabled();
 
     // Switch to the session holding the parked draft. The editor adopts it via
-    // the defaultValue sync (emitUpdate:false → no onUpdate → isEmpty untouched).
+    // the value sync (emitUpdate:false → no onUpdate → isEmpty untouched).
     state.activeSessionId = "session-b";
     rerender(element({}));
 
