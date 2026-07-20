@@ -1829,6 +1829,7 @@ SELECT
     p.chat_input_task_id, $2
 FROM agent_task_queue p
 WHERE p.id = $1
+ON CONFLICT (retry_of_task_id) WHERE retry_of_task_id IS NOT NULL DO NOTHING
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, dispatched_autopilot_run_id
 `
 
@@ -1892,6 +1893,11 @@ type CreateRetryTaskParams struct {
 // attempt=3, max_attempts=3 rather than leaking attempt=3, max_attempts=2 to the
 // task API (MUL-4910). The Go retryAttemptCeiling already refuses to raise a
 // disabled (max_attempts<=1) task, so this only ever widens, never revives.
+// Idempotent under a race between FailTask, the sweeper's HandleFailedTasks, and the
+// autopilot reconcile back-fill: retry_of_task_id is uniquely constrained
+// (idx_agent_task_retry_of_task_id_unique), so a second creator conflicts and returns
+// no row instead of a duplicate attempt. Callers treat ErrNoRows as "successor already
+// exists" (MUL-4809 §4.1 P0-2).
 func (q *Queries) CreateRetryTask(ctx context.Context, arg CreateRetryTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createRetryTask,
 		arg.ID,

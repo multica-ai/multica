@@ -932,6 +932,185 @@ func TestWebhookDeliveryWorker_PendingCollisionFailsDeliveryAndRun(t *testing.T)
 	}
 }
 
+// installAutopilotRunFailTransitionFault makes every UPDATE that moves an autopilot_run
+// to 'failed' raise, simulating a transient error during the collision fail-transition.
+func installAutopilotRunFailTransitionFault(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `
+CREATE OR REPLACE FUNCTION mul4809_run_fail_fault() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	IF NEW.status = 'failed' THEN
+		RAISE EXCEPTION 'forced autopilot_run fail-transition fault';
+	END IF;
+	RETURN NEW;
+END;
+$$;`); err != nil {
+		t.Fatalf("install run-fail fault fn: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+CREATE TRIGGER mul4809_run_fail_fault_trg
+BEFORE UPDATE ON autopilot_run
+FOR EACH ROW EXECUTE FUNCTION mul4809_run_fail_fault();`); err != nil {
+		t.Fatalf("install run-fail fault trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DROP TRIGGER IF EXISTS mul4809_run_fail_fault_trg ON autopilot_run`)
+		testPool.Exec(context.Background(), `DROP FUNCTION IF EXISTS mul4809_run_fail_fault()`)
+	})
+}
+
+// TestWebhookDeliveryWorker_CollisionTransientErrorRetriesThenConverges is the P0-1
+// "transient collision error stays retryable" counter-example driven through the real
+// WebhookDeliveryWorker (MUL-4809 §4.1 P0-1). When the dispatch collision's
+// fail-transition hits a transient error, the delivery must NOT be recorded failed over
+// a still-active run — it must be retried. After the error clears, the next processing
+// converges the run and the delivery to failed together.
+func TestWebhookDeliveryWorker_CollisionTransientErrorRetriesThenConverges(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WorkerCollisionRetry Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "create_issue")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	post := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "collision-retry"}, map[string]string{
+		"Idempotency-Key": "worker-collision-retry",
+	})
+	deliveryID := requireAcceptedWebhookResponse(t, post)
+	first := processQueuedWebhookDelivery(t, deliveryID)
+	run, err := testHandler.Queries.GetAutopilotRun(context.Background(), first.AutopilotRunID)
+	if err != nil || !run.IssueID.Valid {
+		t.Fatalf("load create_issue run: run=%#v err=%v", run, err)
+	}
+	issueID := uuidToString(run.IssueID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// Pre-bind crash + a stray pending comment task so the repair's dispatched enqueue
+	// collides and takes the fail-transition path.
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID); err != nil {
+		t.Fatalf("remove dispatched task: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE autopilot_run SET status = 'issue_created', task_id = NULL WHERE id = $1`, first.AutopilotRunID); err != nil {
+		t.Fatalf("reset run: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+		SELECT a.id, a.runtime_id, $2::uuid, 'queued', 0, now() FROM agent a WHERE a.id = $1`,
+		agentID, issueID); err != nil {
+		t.Fatalf("insert stray pending task: %v", err)
+	}
+
+	// The collision's fail-transition errors on this pass.
+	installAutopilotRunFailTransitionFault(t)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE webhook_delivery SET status = 'queued', autopilot_run_id = NULL, available_at = now(),
+		    dispatch_attempts = 0, lease_token = NULL, lease_expires_at = NULL WHERE id = $1`, deliveryID); err != nil {
+		t.Fatalf("requeue delivery: %v", err)
+	}
+
+	worked, err := testHandler.WebhookDeliveryWorker.ProcessNext(context.Background())
+	if err != nil || !worked {
+		t.Fatalf("fault pass: worked=%v err=%v", worked, err)
+	}
+	deferred, err := testHandler.Queries.GetWebhookDelivery(context.Background(), parseUUID(deliveryID))
+	if err != nil {
+		t.Fatalf("load deferred delivery: %v", err)
+	}
+	if deferred.Status == deliveryStatusFailed {
+		t.Fatal("a transient fail-transition error must not terminate the delivery")
+	}
+	if deferred.Status != deliveryStatusQueued {
+		t.Fatalf("expected the delivery to stay retryable (queued), got %q", deferred.Status)
+	}
+	runMid, err := testHandler.Queries.GetAutopilotRun(context.Background(), first.AutopilotRunID)
+	if err != nil {
+		t.Fatalf("load run mid: %v", err)
+	}
+	if runMid.Status != "issue_created" {
+		t.Fatalf("run must stay active while the delivery is retryable, got %q", runMid.Status)
+	}
+
+	// Clear the fault + backoff and reprocess: the fail-transition now succeeds, so the
+	// run and the delivery converge to failed together.
+	if _, err := testPool.Exec(context.Background(), `DROP TRIGGER IF EXISTS mul4809_run_fail_fault_trg ON autopilot_run`); err != nil {
+		t.Fatalf("clear fault: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `UPDATE webhook_delivery SET available_at = now() WHERE id = $1`, deliveryID); err != nil {
+		t.Fatalf("clear backoff: %v", err)
+	}
+	worked, err = testHandler.WebhookDeliveryWorker.ProcessNext(context.Background())
+	if err != nil || !worked {
+		t.Fatalf("recovery pass: worked=%v err=%v", worked, err)
+	}
+	final, err := testHandler.Queries.GetWebhookDelivery(context.Background(), parseUUID(deliveryID))
+	if err != nil {
+		t.Fatalf("load final delivery: %v", err)
+	}
+	if final.Status != deliveryStatusFailed {
+		t.Fatalf("recovered delivery must be failed, got %q", final.Status)
+	}
+	got, err := testHandler.Queries.GetAutopilotRun(context.Background(), first.AutopilotRunID)
+	if err != nil {
+		t.Fatalf("load final run: %v", err)
+	}
+	if got.Status != "failed" {
+		t.Fatalf("run must converge to failed together with the delivery, got %q", got.Status)
+	}
+}
+
+// TestReconcileFailsDispatchlessRunWhenDeliveryPermanentlyFailed pins the durable
+// backstop for the P0-1 exhaustion invariant (MUL-4809 §4.1 P0-1): if a collision run's
+// fail-transition kept erroring until its delivery exhausted its retries (delivery
+// permanently failed, run still active with no dispatched task), the reconcile converges
+// the run off the delivery's durable terminal state — no failed delivery is left beside a
+// live run.
+func TestReconcileFailsDispatchlessRunWhenDeliveryPermanentlyFailed(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "ReconcileDispatchless Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "create_issue")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	post := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "dispatchless"}, map[string]string{
+		"Idempotency-Key": "reconcile-dispatchless",
+	})
+	deliveryID := requireAcceptedWebhookResponse(t, post)
+	first := processQueuedWebhookDelivery(t, deliveryID)
+	run, err := testHandler.Queries.GetAutopilotRun(context.Background(), first.AutopilotRunID)
+	if err != nil || !run.IssueID.Valid {
+		t.Fatalf("load create_issue run: run=%#v err=%v", run, err)
+	}
+	issueID := uuidToString(run.IssueID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// Strand it: no dispatched task, run active, delivery permanently failed.
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID); err != nil {
+		t.Fatalf("remove dispatched task: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE autopilot_run SET status = 'issue_created', task_id = NULL WHERE id = $1`, first.AutopilotRunID); err != nil {
+		t.Fatalf("reset run: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE webhook_delivery SET status = 'failed' WHERE id = $1`, deliveryID); err != nil {
+		t.Fatalf("fail delivery: %v", err)
+	}
+
+	if _, err := testHandler.AutopilotService.ReconcileTaskDrivenRuns(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	got, err := testHandler.Queries.GetAutopilotRun(context.Background(), first.AutopilotRunID)
+	if err != nil {
+		t.Fatalf("load run: %v", err)
+	}
+	if got.Status != "failed" {
+		t.Fatalf("reconcile did not converge the dispatchless run off the failed delivery: %q", got.Status)
+	}
+}
+
 func TestWebhookHandler_InvalidSignatureCountsAgainstRateLimit(t *testing.T) {
 	// Only requests classified as bad credentials consume the shared-IP debt
 	// budget; valid traffic behind the same NAT does not.

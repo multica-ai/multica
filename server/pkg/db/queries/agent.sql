@@ -372,6 +372,12 @@ SELECT
     p.chat_input_task_id, sqlc.narg(fire_at)
 FROM agent_task_queue p
 WHERE p.id = $1
+-- Idempotent under a race between FailTask, the sweeper's HandleFailedTasks, and the
+-- autopilot reconcile back-fill: retry_of_task_id is uniquely constrained
+-- (idx_agent_task_retry_of_task_id_unique), so a second creator conflicts and returns
+-- no row instead of a duplicate attempt. Callers treat ErrNoRows as "successor already
+-- exists" (MUL-4809 §4.1 P0-2).
+ON CONFLICT (retry_of_task_id) WHERE retry_of_task_id IS NOT NULL DO NOTHING
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :many

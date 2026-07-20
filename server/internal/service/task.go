@@ -3036,10 +3036,18 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				RuntimeMcpOverlay:    retryOverlay.Overlay,
 				RuntimeConnectedApps: retryOverlay.ConnectedApps,
 			})
-			if cerr != nil {
+			switch {
+			case errors.Is(cerr, pgx.ErrNoRows):
+				// A concurrent creator (autopilot reconcile back-fill / sweeper) already
+				// made this task's single retry successor; the retry_of_task_id unique
+				// constraint turned our INSERT into a no-op. Not an error — the retry
+				// exists, so leave retried nil and skip the broadcast below (MUL-4809 §4.1).
+				retried = nil
+			case cerr != nil:
 				return fmt.Errorf("create retry task: %w", cerr)
+			default:
+				retried = &child
 			}
-			retried = &child
 		}
 		return nil
 	}); err != nil {
@@ -3324,6 +3332,14 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Another path (FailTask's in-tx retry, a concurrent sweeper, or the autopilot
+		// reconcile back-fill) already created this task's retry successor; the
+		// retry_of_task_id unique constraint made our INSERT a no-op. Idempotent success
+		// — the retry exists, so return without error and without a duplicate broadcast
+		// (MUL-4809 §4.1 P0-2).
+		return nil, nil
+	}
 	if err != nil {
 		slog.Warn("task auto-retry failed",
 			"parent_task_id", util.UUIDToString(parent.ID),
@@ -3610,8 +3626,23 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	for _, t := range tasks {
 		// Auto-retry first so the issue stays in_progress rather than
 		// flapping todo → in_progress within a tick.
-		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {
+		child, retryErr := s.MaybeRetryFailedTask(ctx, t)
+		switch {
+		case child != nil:
 			retried++
+			if t.IssueID.Valid {
+				retriedIssues[util.UUIDToString(t.IssueID)] = true
+			}
+		case retryErr != nil && retryEligible(t.FailureReason.String, t):
+			// The retry creation hit a transient error, but this failure IS
+			// retry-eligible so a retry is still owed. Treat the issue as
+			// retry-pending: don't reset it to todo and don't let a create_issue
+			// autopilot run finalize off this non-final attempt. The autopilot
+			// reconcile back-fills the missing retry on a later tick (MUL-4809
+			// §4.1 P0-2); silently dropping the error here is what previously
+			// let the run fail prematurely.
+			slog.Warn("task auto-retry errored; deferring to reconcile back-fill",
+				"task_id", util.UUIDToString(t.ID), "error", retryErr)
 			if t.IssueID.Valid {
 				retriedIssues[util.UUIDToString(t.IssueID)] = true
 			}

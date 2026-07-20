@@ -272,7 +272,13 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 	if isAutopilotRunComplete(*run) {
 		if autopilot.ExecutionMode == "create_issue" && run.IssueID.Valid {
 			if repairErr := s.ensureWebhookCreateIssueTask(ctx, autopilot, run); repairErr != nil {
-				return run, repairErr
+				// The repair did not durably finish, so the run may still be active/
+				// unbound. Return no run alongside the error: the worker treats a nil
+				// run as a transient error and retries the delivery, rather than
+				// permanently recording it failed over a live run (MUL-4809 §4.1 P0-1).
+				// A durable terminal outcome (a dispatch collision that failed the run)
+				// is surfaced as (failedRun, nil) by ensureWebhookCreateIssueTask, not here.
+				return nil, repairErr
 			}
 		}
 		return run, nil
@@ -287,7 +293,8 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 		case taskErr == nil:
 			updated, bindErr := s.bindAutopilotRunTask(ctx, run.ID, task.ID)
 			if bindErr != nil {
-				return run, fmt.Errorf("dispatch for webhook delivery: repair task linkage: %w", bindErr)
+				// Uncertain outcome — keep the delivery retryable (MUL-4809 §4.1 P0-1).
+				return nil, fmt.Errorf("dispatch for webhook delivery: repair task linkage: %w", bindErr)
 			}
 			// Only wake the daemon when this call actually (re)bound the task; if a
 			// racing finalizer already completed the run, updated is that terminal
@@ -297,13 +304,54 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 			}
 			return &updated, nil
 		case !errors.Is(taskErr, pgx.ErrNoRows):
-			return run, fmt.Errorf("dispatch for webhook delivery: lookup linked task: %w", taskErr)
+			// Uncertain outcome — keep the delivery retryable (MUL-4809 §4.1 P0-1).
+			return nil, fmt.Errorf("dispatch for webhook delivery: lookup linked task: %w", taskErr)
 		}
 	}
 	// Webhook worker dispatch has no member actor and no human reason-code
 	// surface, so actorUserID is invalid and the reason code is dropped.
 	dispatched, _, err := s.dispatchAutopilotRun(ctx, autopilot, triggerID, "webhook", run, pgtype.UUID{})
+	if err != nil {
+		// Only surface the run to the worker when the dispatch actually committed a
+		// terminal transition (e.g. a doomed dispatch that failRun'd the run): that is
+		// an authoritative business failure and the delivery should record it. Otherwise
+		// the run may still be active and the delivery must stay retryable rather than be
+		// permanently failed over a live run (MUL-4809 §4.1 P0-1).
+		if dispatched != nil && isAutopilotRunTerminalStatus(dispatched.Status) {
+			return dispatched, nil
+		}
+		return nil, err
+	}
 	return dispatched, err
+}
+
+// FailActiveRunForWebhookDelivery converges an autopilot run left active after its
+// webhook delivery has PERMANENTLY failed (exhausted the worker's retries). The
+// transient-error dispatch path returns (nil, err) so the delivery is retried rather
+// than recorded failed over a live run; but if the underlying error never clears, the
+// delivery eventually exhausts and the run — e.g. a create_issue dispatch collision
+// whose fail-transition kept erroring — would otherwise be stranded active/unbound
+// beside a failed delivery. The worker calls this on exhaustion to guarantee the two
+// converge together (MUL-4809 §4.1 P0-1). Idempotent: a no-op when no run is linked to
+// the delivery or it was already finalized by another path.
+func (s *AutopilotService) FailActiveRunForWebhookDelivery(ctx context.Context, deliveryID pgtype.UUID, reason string) {
+	run, err := s.Queries.GetAutopilotRunByWebhookDelivery(ctx, deliveryID)
+	if err != nil {
+		return // no run linked (or a transient lookup error) — nothing to converge
+	}
+	if isAutopilotRunTerminalStatus(run.Status) {
+		return // already finalized (the common case: dispatch succeeded / failRun won)
+	}
+	failed, won, ferr := s.failRun(ctx, run.ID, reason)
+	if ferr != nil || !won {
+		return // transient error or a racing path already finalized it
+	}
+	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
+	if err != nil {
+		return
+	}
+	s.captureAutopilotRunFailed(autopilot, failed, failed.Source, reason)
+	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), failed, "failed")
 }
 
 // ensureWebhookCreateIssueTask repairs the create_issue crash window on a reclaimed
@@ -1250,9 +1298,20 @@ func (s *AutopilotService) SyncRunFromCreateIssueTask(ctx context.Context, task 
 	if root.Bytes != run.TaskID.Bytes {
 		return // not this run's dispatched-task lineage (e.g. a comment task)
 	}
-	// A still-queued system retry means another attempt is already in flight
-	// (FailTask enqueues it before broadcasting the failure) — wait for it.
+	// Don't finalize the run off a non-final attempt. A system retry is expected when
+	// this failed task is still retry-eligible — either already enqueued (pending) or
+	// still owed because the retry has not been created yet: a crash between the
+	// sweeper's fail-commit and HandleFailedTasks, or a transient CreateRetryTask
+	// error. In every case the run must wait for the final leaf; the retry is created
+	// inline by FailTask or back-filled by the autopilot reconcile, and its outcome
+	// finalizes the run. retryEligible mirrors the reconcile so the two stay in
+	// lock-step, and it subsumes the pending check (a pending retry implies the parent
+	// was eligible) — the HasPendingRetryForTask call is kept as defense in depth
+	// against reason-classification drift (MUL-4809 §4.1 P0-2).
 	if task.Status != "completed" {
+		if retryEligible(task.FailureReason.String, task) {
+			return
+		}
 		pending, perr := s.Queries.HasPendingRetryForTask(ctx, task.ID)
 		if perr != nil {
 			slog.Warn("autopilot: failed to check pending retry",
@@ -1468,7 +1527,12 @@ func (s *AutopilotService) reconcileCreateIssueRun(ctx context.Context, run db.A
 		root, err = s.Queries.GetTaskByDispatchedAutopilotRun(ctx, run.ID)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
-		return reconcileNotReady // no dispatched task yet — legitimately still pending
+		// No dispatched task. Usually the run is just mid-dispatch (still pending), but
+		// it can also be a stranded webhook collision run whose fail-transition never
+		// succeeded before its delivery exhausted its retries. Converge that off the
+		// delivery's durable terminal state so a permanently-failed delivery never sits
+		// beside a live run (MUL-4809 §4.1 P0-1) — no time heuristic.
+		return s.reconcileDispatchlessRun(ctx, run)
 	}
 	if err != nil {
 		return reconcileRetryLater // transient error — revisit, do not strand the run
@@ -1488,16 +1552,21 @@ func (s *AutopilotService) reconcileCreateIssueRun(ctx context.Context, run db.A
 	if !isAutopilotTaskTerminal(leaf.Status) {
 		return reconcileNotReady // the final attempt is still in flight
 	}
-	// A failed leaf that is still retry-eligible has a retry the failure handler has
-	// not created yet: the bulk sweeper marks a task failed, then creates its retry in
-	// a separate step, so there is an observable window where the leaf is terminal-
-	// failed but not final. Finalizing the run now would fail it before the retry runs,
-	// and a later successful retry cannot un-fail a terminal run. Leave it; a later
-	// tick converges it once the lineage settles past the retry-creation window. The
-	// same retryEligible contract the retry path uses keeps the two decisions in
-	// lock-step (MUL-4809 §4.1 P0-2).
+	// A failed leaf that is still retry-eligible is owed a retry the failure handler has
+	// not created yet: the bulk sweeper marks a task failed, then creates its retry in a
+	// separate step, so a crash (or a transient CreateRetryTask error) in between leaves
+	// the leaf terminal-failed but not final. Finalizing the run now would fail it before
+	// the retry runs, and a later successful retry cannot un-fail a terminal run. Rather
+	// than skip forever (a plain periodic reconcile never creates the retry itself),
+	// back-fill the owed retry here. MaybeRetryFailedTask is idempotent — the
+	// retry_of_task_id unique constraint no-ops a duplicate when the sweeper or another
+	// replica raced us — so this is a safe recovery, not a double attempt. A later tick
+	// converges the run off the retry's outcome (MUL-4809 §4.1 P0-2).
 	if leaf.Status == "failed" && retryEligible(leaf.FailureReason.String, leaf) {
-		return reconcileNotReady
+		if _, err := s.TaskSvc.MaybeRetryFailedTask(ctx, leaf); err != nil {
+			return reconcileRetryLater // transient — revisit and back-fill next tick
+		}
+		return reconcileNotReady // retry now exists (or already did); converge next tick
 	}
 	before := run.Status
 	// Replay the terminal leaf through the normal finalizer: it repairs an unbound run
@@ -1511,6 +1580,44 @@ func (s *AutopilotService) reconcileCreateIssueRun(ctx context.Context, run db.A
 		return reconcileFinalized
 	}
 	return reconcileNotReady
+}
+
+// reconcileDispatchlessRun converges an active create_issue run that has no dispatched
+// task. Normally that just means the dispatch is still in flight (not ready). But a
+// webhook run whose delivery has PERMANENTLY failed will never get a task — e.g. a
+// dispatch collision whose fail-transition kept erroring until the delivery exhausted
+// its retries — so it is finalized off the delivery's durable terminal state, the only
+// non-heuristic signal that the dispatch is done (MUL-4809 §4.1 P0-1). This is the
+// durable backstop to the worker's best-effort FailActiveRunForWebhookDelivery: it
+// still converges the run after a fault that also blocked that immediate attempt clears.
+func (s *AutopilotService) reconcileDispatchlessRun(ctx context.Context, run db.AutopilotRun) reconcileOutcome {
+	if !run.WebhookDeliveryID.Valid {
+		return reconcileNotReady // not webhook-originated: no durable "dispatch done" signal
+	}
+	delivery, err := s.Queries.GetWebhookDelivery(ctx, run.WebhookDeliveryID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return reconcileNotReady
+	}
+	if err != nil {
+		return reconcileRetryLater
+	}
+	if delivery.Status != "failed" {
+		return reconcileNotReady // dispatch may still be in flight / retrying
+	}
+	// Delivery permanently failed and no task was ever dispatched: the dispatch is
+	// durably done. CAS-fail the run so it converges with the delivery.
+	failed, won, ferr := s.failRun(ctx, run.ID, "webhook dispatch failed: no task dispatched")
+	if ferr != nil {
+		return reconcileRetryLater
+	}
+	if !won {
+		return reconcileNotReady // already finalized by another path
+	}
+	if autopilot, aerr := s.Queries.GetAutopilot(ctx, run.AutopilotID); aerr == nil {
+		s.captureAutopilotRunFailed(autopilot, failed, failed.Source, failed.FailureReason.String)
+		s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), failed, "failed")
+	}
+	return reconcileFinalized
 }
 
 // SyncRunFromTask updates the autopilot run when a run_only task completes or fails.

@@ -3,6 +3,10 @@ package service
 import (
 	"context"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // TestReconcileFinalizesRunWhoseTaskTerminatedWhileGateOff is the "no event replay"
@@ -115,62 +119,6 @@ func TestReconcileAtBootNoopWhenGateOff(t *testing.T) {
 // the retry runs, and a later successful retry cannot un-fail a terminal run. The
 // reconcile must SKIP the run while the leaf is still retry-eligible, then converge it
 // on a later tick once the (now-completed) retry successor settles the lineage.
-func TestReconcileSkipsRetryEligibleFailedLeafThenConverges(t *testing.T) {
-	ctx := context.Background()
-	svc, agentID, run, pool, insertTask := newCreateIssueRunFixture(t) // gate ON
-
-	// Stamped dispatched root: terminal-failed, still within its retry budget.
-	dispatched := insertTask(agentID, 0, "failed", run.ID) // attempt=1, max_attempts=2 by default
-	if _, err := pool.Exec(ctx,
-		`UPDATE agent_task_queue SET failure_reason = 'runtime_offline' WHERE id = $1`,
-		dispatched.ID); err != nil {
-		t.Fatalf("set failure_reason: %v", err)
-	}
-
-	// Tick 1: the retry successor does not exist yet, so the leaf is a retry-eligible
-	// failed root. The reconcile must NOT finalize the run.
-	res, err := svc.ReconcileTaskDrivenRuns(ctx)
-	if err != nil {
-		t.Fatalf("reconcile (pre-retry): %v", err)
-	}
-	if res.finalized != 0 {
-		t.Fatalf("reconcile finalized a run whose failed leaf is still retry-eligible: finalized=%d", res.finalized)
-	}
-	mid, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
-	if err != nil {
-		t.Fatalf("get run: %v", err)
-	}
-	if mid.Status != "issue_created" {
-		t.Fatalf("reconcile prematurely finalized a retry-eligible run: status=%q", mid.Status)
-	}
-
-	// The sweeper now creates the retry, which succeeds. The lineage has settled.
-	var retryID string
-	if err := pool.QueryRow(ctx,
-		`INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, retry_of_task_id, created_at)
-		 VALUES ($1, $2, $3, 'completed', 0, $4, now()) RETURNING id`,
-		dispatched.AgentID, dispatched.RuntimeID, dispatched.IssueID, dispatched.ID).Scan(&retryID); err != nil {
-		t.Fatalf("insert retry: %v", err)
-	}
-
-	// Tick 2: the leaf is now the completed retry. The reconcile converges the run to
-	// completed (off the retry leaf), not failed (off the earlier attempt).
-	res, err = svc.ReconcileTaskDrivenRuns(ctx)
-	if err != nil {
-		t.Fatalf("reconcile (post-retry): %v", err)
-	}
-	if res.finalized < 1 {
-		t.Fatalf("reconcile did not converge the settled lineage: finalized=%d", res.finalized)
-	}
-	got, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
-	if err != nil {
-		t.Fatalf("get run: %v", err)
-	}
-	if got.Status != "completed" {
-		t.Fatalf("settled lineage did not converge to completed: status=%q", got.Status)
-	}
-}
-
 // TestReconcileConvergesOnLaterTickAfterTransientError is the P0-3 "first round query
 // fails, next round succeeds" counter-example (MUL-4809 §4.1 P0-3). A one-shot boot
 // scan would permanently strand a run whose reconcile query hit a transient DB error.
@@ -284,5 +232,221 @@ func TestReconcileAtBootLockLoserSkipsThenTakesOver(t *testing.T) {
 	}
 	if got.Status != "completed" {
 		t.Fatalf("run not converged after lock takeover: status=%q", got.Status)
+	}
+}
+
+// TestReconcileBackfillsMissingRetryForOrphanedFailedLeaf is the P0-2 "durable
+// recovery" counter-example (MUL-4809 §4.1 P0-2): the bulk sweeper committed the fail
+// but crashed before HandleFailedTasks, so the dispatched leaf is terminal-failed with
+// an infra reason yet has no retry successor. A plain periodic reconcile that only
+// SKIPS such a leaf would strand the run forever. The reconcile must instead BACK-FILL
+// the owed retry (idempotently), leave the run pending, and converge it once the retry
+// settles.
+func TestReconcileBackfillsMissingRetryForOrphanedFailedLeaf(t *testing.T) {
+	ctx := context.Background()
+	svc, agentID, run, pool, insertTask := newCreateIssueRunFixture(t) // gate ON
+
+	dispatched := insertTask(agentID, 0, "failed", run.ID) // attempt 1/max_attempts 2 by default
+	if _, err := pool.Exec(ctx,
+		`UPDATE agent_task_queue SET failure_reason = 'runtime_offline', completed_at = now() - interval '10 minutes' WHERE id = $1`,
+		dispatched.ID); err != nil {
+		t.Fatalf("set orphaned failed state: %v", err)
+	}
+
+	countSuccessors := func() int {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE retry_of_task_id = $1`, dispatched.ID).Scan(&n); err != nil {
+			t.Fatalf("count successors: %v", err)
+		}
+		return n
+	}
+
+	// Tick 1: back-fill the missing retry; do not finalize while it is pending.
+	res, err := svc.ReconcileTaskDrivenRuns(ctx)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.finalized != 0 {
+		t.Fatalf("must not finalize while the back-filled retry is pending, finalized=%d", res.finalized)
+	}
+	if n := countSuccessors(); n != 1 {
+		t.Fatalf("reconcile did not back-fill the owed retry: successors=%d", n)
+	}
+	mid, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if mid.Status != "issue_created" {
+		t.Fatalf("run finalized before the back-filled retry ran: %q", mid.Status)
+	}
+
+	// Tick 2 (retry still queued) must not create a duplicate — idempotent back-fill.
+	if _, err := svc.ReconcileTaskDrivenRuns(ctx); err != nil {
+		t.Fatalf("reconcile (idempotency tick): %v", err)
+	}
+	if n := countSuccessors(); n != 1 {
+		t.Fatalf("reconcile created a duplicate retry: successors=%d", n)
+	}
+
+	// The back-filled retry runs and completes; a later tick converges the run.
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE retry_of_task_id = $1`, dispatched.ID); err != nil {
+		t.Fatalf("complete retry: %v", err)
+	}
+	res, err = svc.ReconcileTaskDrivenRuns(ctx)
+	if err != nil {
+		t.Fatalf("reconcile (converge tick): %v", err)
+	}
+	if res.finalized < 1 {
+		t.Fatalf("reconcile did not converge the settled lineage: finalized=%d", res.finalized)
+	}
+	got, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.Status != "completed" {
+		t.Fatalf("run did not converge off the back-filled retry: %q", got.Status)
+	}
+}
+
+// installRetryInsertFault makes every agent_task_queue INSERT that carries a
+// retry_of_task_id raise, simulating a transient failure while creating a retry.
+func installRetryInsertFault(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+CREATE OR REPLACE FUNCTION mul4809_retry_insert_fault() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	IF NEW.retry_of_task_id IS NOT NULL THEN
+		RAISE EXCEPTION 'forced retry-create fault';
+	END IF;
+	RETURN NEW;
+END;
+$$;`); err != nil {
+		t.Fatalf("install retry-insert fault fn: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+CREATE TRIGGER mul4809_retry_insert_fault_trg
+BEFORE INSERT ON agent_task_queue
+FOR EACH ROW EXECUTE FUNCTION mul4809_retry_insert_fault();`); err != nil {
+		t.Fatalf("install retry-insert fault trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS mul4809_retry_insert_fault_trg ON agent_task_queue`)
+		pool.Exec(context.Background(), `DROP FUNCTION IF EXISTS mul4809_retry_insert_fault()`)
+	})
+}
+
+// TestHandleFailedTasksRetryErrorDefersRunNotPrematureFail is the P0-2 "transient
+// retry-create error" counter-example (MUL-4809 §4.1 P0-2): MaybeRetryFailedTask errors
+// on its first attempt. HandleFailedTasks must not silently drop that error and let the
+// run fail prematurely — it must keep the issue retry-pending, and the create_issue
+// listener must not finalize the run off the non-final attempt. After the fault clears,
+// the reconcile back-fills the retry and the run converges off the final leaf.
+func TestHandleFailedTasksRetryErrorDefersRunNotPrematureFail(t *testing.T) {
+	ctx := context.Background()
+	svc, agentID, run, pool, insertTask := newCreateIssueRunFixture(t) // gate ON
+
+	// A bound dispatched task, terminal-failed with an infra reason, no retry yet.
+	dispatched := insertTask(agentID, 0, "failed", run.ID)
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET failure_reason = 'runtime_offline' WHERE id = $1`, dispatched.ID); err != nil {
+		t.Fatalf("set failure reason: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE autopilot_run SET task_id = $2 WHERE id = $1`, run.ID, dispatched.ID); err != nil {
+		t.Fatalf("bind run to dispatched task: %v", err)
+	}
+	// Put the issue in_progress so a spurious reset-to-todo would be observable.
+	if _, err := pool.Exec(ctx, `UPDATE issue SET status = 'in_progress' WHERE id = $1`, dispatched.IssueID); err != nil {
+		t.Fatalf("set issue in_progress: %v", err)
+	}
+
+	// MaybeRetryFailedTask errors (retry INSERT fault). HandleFailedTasks must keep the
+	// issue retry-pending rather than resetting it to todo.
+	installRetryInsertFault(t, pool)
+	failedTask, err := svc.Queries.GetAgentTask(ctx, dispatched.ID)
+	if err != nil {
+		t.Fatalf("reload failed task: %v", err)
+	}
+	svc.TaskSvc.HandleFailedTasks(ctx, []db.AgentTaskQueue{failedTask})
+
+	issueAfter, err := svc.Queries.GetIssue(ctx, dispatched.IssueID)
+	if err != nil {
+		t.Fatalf("get issue: %v", err)
+	}
+	if issueAfter.Status != "in_progress" {
+		t.Fatalf("retry-create error must not reset the issue: status=%q", issueAfter.Status)
+	}
+
+	// The listener firing on the failed task must NOT finalize the run — a retry is owed.
+	svc.SyncRunFromCreateIssueTask(ctx, failedTask)
+	mid, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if mid.Status != "issue_created" {
+		t.Fatalf("run was prematurely finalized while a retry was owed: %q", mid.Status)
+	}
+
+	// Fault clears; the reconcile back-fills the owed retry, which then completes and
+	// converges the run off the final leaf.
+	if _, err := pool.Exec(ctx, `DROP TRIGGER IF EXISTS mul4809_retry_insert_fault_trg ON agent_task_queue`); err != nil {
+		t.Fatalf("clear fault: %v", err)
+	}
+	if _, err := svc.ReconcileTaskDrivenRuns(ctx); err != nil {
+		t.Fatalf("reconcile (back-fill): %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE retry_of_task_id = $1`, dispatched.ID); err != nil {
+		t.Fatalf("complete back-filled retry: %v", err)
+	}
+	if _, err := svc.ReconcileTaskDrivenRuns(ctx); err != nil {
+		t.Fatalf("reconcile (converge): %v", err)
+	}
+	got, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.Status != "completed" {
+		t.Fatalf("run did not converge off the final leaf after recovery: %q", got.Status)
+	}
+}
+
+// TestMaybeRetryFailedTaskIdempotentUnderUniqueConstraint pins the concurrency-safe
+// back-fill contract (MUL-4809 §4.1 P0-2): the retry_of_task_id unique index turns a
+// second retry-create for the same parent into a no-op, so racing creators (FailTask,
+// sweeper, reconcile back-fill) never produce a duplicate attempt.
+func TestMaybeRetryFailedTaskIdempotentUnderUniqueConstraint(t *testing.T) {
+	ctx := context.Background()
+	svc, agentID, run, pool, insertTask := newCreateIssueRunFixture(t)
+
+	parent := insertTask(agentID, 0, "failed", run.ID)
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET failure_reason = 'runtime_offline' WHERE id = $1`, parent.ID); err != nil {
+		t.Fatalf("set failure reason: %v", err)
+	}
+	reloaded, err := svc.Queries.GetAgentTask(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("reload parent: %v", err)
+	}
+
+	first, err := svc.TaskSvc.MaybeRetryFailedTask(ctx, reloaded)
+	if err != nil {
+		t.Fatalf("first retry: %v", err)
+	}
+	if first == nil {
+		t.Fatal("first retry should create a successor")
+	}
+	// Second call on the same still-failed parent must no-op (unique constraint), not
+	// create a duplicate or error.
+	second, err := svc.TaskSvc.MaybeRetryFailedTask(ctx, reloaded)
+	if err != nil {
+		t.Fatalf("second retry must be idempotent, got error: %v", err)
+	}
+	if second != nil {
+		t.Fatalf("second retry created a duplicate successor: %s", util.UUIDToString(second.ID))
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE retry_of_task_id = $1`, parent.ID).Scan(&n); err != nil {
+		t.Fatalf("count successors: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected exactly one retry successor, got %d", n)
 	}
 }

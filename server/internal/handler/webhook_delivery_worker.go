@@ -248,6 +248,12 @@ func (w *WebhookDeliveryWorker) complete(
 
 func (w *WebhookDeliveryWorker) retryOrFail(ctx context.Context, delivery db.WebhookDelivery, cause error) error {
 	if delivery.DispatchAttempts+1 >= webhookWorkerMaxAttempts {
+		// The delivery has permanently failed. A transient dispatch error (returned as
+		// a nil run) is what routed us here, so a run may still be active/unbound —
+		// converge it first, then record the delivery failed, so we never leave a failed
+		// delivery beside a live run (MUL-4809 §4.1 P0-1).
+		w.h.AutopilotService.FailActiveRunForWebhookDelivery(ctx, delivery.ID,
+			"webhook delivery permanently failed: "+cause.Error())
 		return w.complete(ctx, delivery, deliveryStatusFailed, pgtype.UUID{}, cause.Error())
 	}
 	backoff := time.Second * time.Duration(1<<min(delivery.DispatchAttempts, 6))
