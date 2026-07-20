@@ -856,6 +856,82 @@ func TestWebhookDeliveryWorker_RepairsCreateIssueTaskCrashWindow(t *testing.T) {
 	}
 }
 
+// TestWebhookDeliveryWorker_PendingCollisionFailsDeliveryAndRun drives the REAL
+// WebhookDeliveryWorker (not just the service entry point) through a create_issue
+// dispatch collision and asserts the persisted delivery row, closing the P0-1 loop at
+// the worker level (MUL-4809 §4.1 P0-1). The dispatched task's crash-window repair
+// collides with an unrelated pending comment task the agent already holds, so the run
+// is finalized as a traceable dispatch collision. The forbidden
+// `delivery=dispatched && run active/unbound` state must never appear: the delivery
+// row must read `failed` and the run must be `failed`, not bound to the stray task.
+func TestWebhookDeliveryWorker_PendingCollisionFailsDeliveryAndRun(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WorkerCollision Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "create_issue")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	post := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "collision"}, map[string]string{
+		"Idempotency-Key": "worker-collision",
+	})
+	deliveryID := requireAcceptedWebhookResponse(t, post)
+	first := processQueuedWebhookDelivery(t, deliveryID)
+	run, err := testHandler.Queries.GetAutopilotRun(context.Background(), first.AutopilotRunID)
+	if err != nil || !run.IssueID.Valid {
+		t.Fatalf("load create_issue run: run=%#v err=%v", run, err)
+	}
+	issueID := uuidToString(run.IssueID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// Model a pre-bind crash: drop the stamped dispatched task and reset the run to
+	// issue_created + NULL task_id so the worker re-enters the repair path.
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID); err != nil {
+		t.Fatalf("remove dispatched task: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE autopilot_run SET status = 'issue_created', task_id = NULL WHERE id = $1`,
+		first.AutopilotRunID); err != nil {
+		t.Fatalf("reset run to pre-bind crash state: %v", err)
+	}
+
+	// The agent now holds its one pending task per (issue, agent): an UNSTAMPED comment
+	// task. The repair's dispatched-task enqueue collides with it (idx_one_pending_task
+	// _per_issue_agent), leaving the run no provably-dispatched task to bind.
+	var strayID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+		SELECT a.id, a.runtime_id, $2::uuid, 'queued', 0, now() FROM agent a WHERE a.id = $1
+		RETURNING id`,
+		agentID, issueID).Scan(&strayID); err != nil {
+		t.Fatalf("insert stray pending task: %v", err)
+	}
+
+	// Requeue the delivery so the worker reclaims it and re-runs dispatch → repair.
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE webhook_delivery
+		SET status = 'queued', autopilot_run_id = NULL, available_at = now(),
+		    lease_token = NULL, lease_expires_at = NULL
+		WHERE id = $1`, deliveryID); err != nil {
+		t.Fatalf("requeue delivery: %v", err)
+	}
+
+	final := processQueuedWebhookDelivery(t, deliveryID)
+	if final.Status != deliveryStatusFailed {
+		t.Fatalf("dispatch collision must record delivery=failed, got %q", final.Status)
+	}
+	got, err := testHandler.Queries.GetAutopilotRun(context.Background(), first.AutopilotRunID)
+	if err != nil {
+		t.Fatalf("load run after collision: %v", err)
+	}
+	if got.Status != "failed" {
+		t.Fatalf("dispatch collision must fail the run, got %q", got.Status)
+	}
+	if got.TaskID.Valid && uuidToString(got.TaskID) == strayID {
+		t.Fatal("run must not be bound to the unrelated pending comment task")
+	}
+}
+
 func TestWebhookHandler_InvalidSignatureCountsAgainstRateLimit(t *testing.T) {
 	// Only requests classified as bad credentials consume the shared-IP debt
 	// budget; valid traffic behind the same NAT does not.

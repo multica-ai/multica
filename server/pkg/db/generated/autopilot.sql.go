@@ -1112,20 +1112,32 @@ func (q *Queries) IsAutopilotCollaborator(ctx context.Context, arg IsAutopilotCo
 	return is_collaborator, err
 }
 
-const listActiveCreateIssueRuns = `-- name: ListActiveCreateIssueRuns :many
+const listActiveCreateIssueRunsPaged = `-- name: ListActiveCreateIssueRunsPaged :many
 SELECT r.id, r.autopilot_id, r.trigger_id, r.source, r.status, r.issue_id, r.task_id, r.triggered_at, r.completed_at, r.failure_reason, r.trigger_payload, r.result, r.created_at, r.squad_id, r.planned_at, r.webhook_delivery_id FROM autopilot_run r
 JOIN autopilot a ON a.id = r.autopilot_id
 WHERE r.status IN ('issue_created', 'running')
   AND a.execution_mode = 'create_issue'
+  AND (r.created_at, r.id) > ($1::timestamptz, $2::uuid)
+ORDER BY r.created_at ASC, r.id ASC
+LIMIT $3
 `
 
-// Active create_issue runs (issue_created / running) for the ON-boot reconcile that
-// converges runs whose dispatched task already reached a terminal result while
-// task-driven finalization was gated off — the event bus does not replay those past
-// task events (MUL-4809 §4.1 P0-3). Joined to autopilot only to filter
-// execution_mode; no FK (join, not a constraint).
-func (q *Queries) ListActiveCreateIssueRuns(ctx context.Context) ([]AutopilotRun, error) {
-	rows, err := q.db.Query(ctx, listActiveCreateIssueRuns)
+type ListActiveCreateIssueRunsPagedParams struct {
+	CursorCreatedAt pgtype.Timestamptz `json:"cursor_created_at"`
+	CursorID        pgtype.UUID        `json:"cursor_id"`
+	RowLimit        int32              `json:"row_limit"`
+}
+
+// One keyset page of active create_issue runs (issue_created / running) for the
+// periodic task-driven reconcile that converges runs whose dispatched task already
+// reached a terminal result while task-driven finalization was gated off — the event
+// bus does not replay those past task events (MUL-4809 §4.1 P0-3). Ordered by
+// (created_at, id); the caller pages forward with @cursor_created_at/@cursor_id and
+// passes ('-infinity', zero-uuid) for the first page. Batching avoids materializing
+// every active run at once. Joined to autopilot only to filter execution_mode; no FK
+// (join, not a constraint).
+func (q *Queries) ListActiveCreateIssueRunsPaged(ctx context.Context, arg ListActiveCreateIssueRunsPagedParams) ([]AutopilotRun, error) {
+	rows, err := q.db.Query(ctx, listActiveCreateIssueRunsPaged, arg.CursorCreatedAt, arg.CursorID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

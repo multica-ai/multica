@@ -496,16 +496,22 @@ WHERE retry_of_task_id = $1
 ORDER BY created_at ASC, id ASC
 LIMIT 1;
 
--- name: ListActiveCreateIssueRuns :many
--- Active create_issue runs (issue_created / running) for the ON-boot reconcile that
--- converges runs whose dispatched task already reached a terminal result while
--- task-driven finalization was gated off — the event bus does not replay those past
--- task events (MUL-4809 §4.1 P0-3). Joined to autopilot only to filter
--- execution_mode; no FK (join, not a constraint).
+-- name: ListActiveCreateIssueRunsPaged :many
+-- One keyset page of active create_issue runs (issue_created / running) for the
+-- periodic task-driven reconcile that converges runs whose dispatched task already
+-- reached a terminal result while task-driven finalization was gated off — the event
+-- bus does not replay those past task events (MUL-4809 §4.1 P0-3). Ordered by
+-- (created_at, id); the caller pages forward with @cursor_created_at/@cursor_id and
+-- passes ('-infinity', zero-uuid) for the first page. Batching avoids materializing
+-- every active run at once. Joined to autopilot only to filter execution_mode; no FK
+-- (join, not a constraint).
 SELECT r.* FROM autopilot_run r
 JOIN autopilot a ON a.id = r.autopilot_id
 WHERE r.status IN ('issue_created', 'running')
-  AND a.execution_mode = 'create_issue';
+  AND a.execution_mode = 'create_issue'
+  AND (r.created_at, r.id) > (@cursor_created_at::timestamptz, @cursor_id::uuid)
+ORDER BY r.created_at ASC, r.id ASC
+LIMIT @row_limit;
 
 -- name: FailAutopilotRunsByIssue :exec
 -- Fails active autopilot runs linked to a given issue.
