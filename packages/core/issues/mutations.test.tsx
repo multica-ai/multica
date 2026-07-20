@@ -10,6 +10,7 @@ import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import {
   useBatchUpdateIssues,
+  useCreateIssue,
   useLoadMoreByAssigneeGroup,
   useLoadMoreByStatus,
   useResolveComment,
@@ -384,6 +385,78 @@ describe("useLoadMoreByAssigneeGroup", () => {
       "issue-1",
       "issue-2",
     ]);
+  });
+});
+
+describe("useCreateIssue — parent children cache refresh", () => {
+  const PARENT_ID = "parent-1";
+  const childKey = issueKeys.children(WS_ID, PARENT_ID);
+
+  let qc: QueryClient;
+  let createIssue: ReturnType<typeof vi.fn<(data: unknown) => Promise<Issue>>>;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    createIssue = vi.fn();
+    setApiInstance({ createIssue } as unknown as ApiClient);
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("inserts a created child into an already loaded parent children cache", async () => {
+    const child = makeIssue(2, { parent_issue_id: PARENT_ID });
+    qc.setQueryData<Issue[]>(childKey, [
+      makeIssue(1, { parent_issue_id: PARENT_ID }),
+    ]);
+    createIssue.mockResolvedValue(child);
+
+    const { result } = renderHook(() => useCreateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        title: "Child",
+        parent_issue_id: PARENT_ID,
+      });
+    });
+
+    expect(qc.getQueryData<Issue[]>(childKey)?.map((i) => i.id)).toEqual([
+      "issue-1",
+      "issue-2",
+    ]);
+  });
+
+  it("invalidates parent children queries even when the children cache is not loaded", async () => {
+    const child = makeIssue(1, { parent_issue_id: PARENT_ID });
+    createIssue.mockResolvedValue(child);
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+
+    const { result } = renderHook(() => useCreateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        title: "Child",
+        parent_issue_id: PARENT_ID,
+      });
+    });
+
+    expect(qc.getQueryData<Issue[]>(childKey)).toBeUndefined();
+    const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(invalidatedKeys).toContainEqual(childKey);
+    expect(invalidatedKeys).toContainEqual(issueKeys.childProgress(WS_ID));
+    expect(invalidatedKeys).toContainEqual(issueKeys.childrenByParentsAll(WS_ID));
   });
 });
 
