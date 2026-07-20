@@ -32,6 +32,7 @@ func TestDispatchAutopilotForPlanIsIdempotent(t *testing.T) {
 	bus := events.New()
 	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
 	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	autopilotSvc.FeatureFlags = autopilotTaskDrivenFlags(true)
 
 	var agentID string
 	if err := testPool.QueryRow(ctx,
@@ -155,6 +156,7 @@ func TestDispatchAutopilotSuppressesRecentDuplicateIssue(t *testing.T) {
 	bus := events.New()
 	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
 	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	autopilotSvc.FeatureFlags = autopilotTaskDrivenFlags(true)
 
 	var agentID string
 	if err := testPool.QueryRow(ctx,

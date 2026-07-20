@@ -113,6 +113,8 @@ func newCreateIssueRunFixture(t *testing.T) (*AutopilotService, string, db.Autop
 	bus := events.New()
 	taskSvc := NewTaskService(queries, pool, nil, bus)
 	svc := NewAutopilotService(queries, pool, bus, taskSvc)
+	// These fixtures exercise the task-driven finalization path; force the gate on.
+	svc.FeatureFlags = autopilotTaskDrivenFlags(true)
 	return svc, agentID, run, pool, insertTask
 }
 

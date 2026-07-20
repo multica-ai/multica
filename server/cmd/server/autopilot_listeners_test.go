@@ -146,6 +146,9 @@ func dispatchCreateIssueAutopilot(t *testing.T, title string) linkedIssueAutopil
 	bus := events.New()
 	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
 	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	// This fixture asserts task-driven behavior (bind + running); force the gate on
+	// for both dispatch and the terminal listeners registered below (MUL-4809 §4.1).
+	autopilotSvc.FeatureFlags = autopilotTaskDrivenFlags(true)
 	registerAutopilotListeners(bus, autopilotSvc)
 
 	var agentID string
@@ -481,6 +484,7 @@ func TestAutopilotCreateIssueDispatchCreatesIssueWhenRuntimeOffline(t *testing.T
 	bus := events.New()
 	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
 	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	autopilotSvc.FeatureFlags = autopilotTaskDrivenFlags(true)
 
 	var runtimeID, agentID string
 	if err := testPool.QueryRow(ctx, `
@@ -593,6 +597,7 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 	bus := events.New()
 	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
 	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	autopilotSvc.FeatureFlags = autopilotTaskDrivenFlags(true)
 
 	var runtimeID, agentID string
 	if err := testPool.QueryRow(ctx, `

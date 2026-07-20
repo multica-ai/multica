@@ -410,6 +410,9 @@ func main() {
 	taskSvc.Analytics = analyticsClient
 	taskSvc.Metrics = businessMetrics
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
+	// The background task-terminal / issue listeners consult the two-phase rollout
+	// gate (MUL-4809 §4.1 P0-3); without this they would default to legacy mode.
+	autopilotSvc.FeatureFlags = flags
 	registerAutopilotListeners(bus, autopilotSvc)
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
