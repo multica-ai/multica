@@ -1,0 +1,78 @@
+{
+  "page": {
+    "title": "Inbox",
+    "back": "Inbox"
+  },
+  "menu": {
+    "mark_all_read": "Alles als gelezen markeren",
+    "archive_all": "Alles archiveren",
+    "archive_all_read": "Alle gelezen archiveren",
+    "archive_completed": "Voltooide archiveren"
+  },
+  "list": {
+    "empty": "Geen meldingen",
+    "mark_done_tooltip": "Markeren als voltooid",
+    "archive_tooltip": "Archiveren",
+    "time": {
+      "just_now": "zojuist",
+      "minutes": "{{count}}m",
+      "hours": "{{count}}u",
+      "days": "{{count}}d"
+    },
+    "archived_title": "Gearchiveerd",
+    "archived_empty": "Geen gearchiveerde meldingen",
+    "unarchive_tooltip": "Dearchiveren"
+  },
+  "detail": {
+    "select_prompt": "Selecteer een melding om details te bekijken",
+    "empty": "Je inbox is leeg",
+    "original_input": "Oorspronkelijke invoer",
+    "edit_advanced": "Bewerken als geavanceerd formulier",
+    "archive": "Archiveren",
+    "unarchive": "Dearchiveren"
+  },
+  "types": {
+    "issue_assigned": "Toegewezen",
+    "issue_subscribed": "Geabonneerd",
+    "unassigned": "Toewijzing verwijderd",
+    "assignee_changed": "Toegewezene gewijzigd",
+    "status_changed": "Status gewijzigd",
+    "priority_changed": "Prioriteit gewijzigd",
+    "start_date_changed": "Startdatum gewijzigd",
+    "due_date_changed": "Einddatum gewijzigd",
+    "new_comment": "Nieuwe reactie",
+    "mentioned": "Vermeld",
+    "review_requested": "Review aangevraagd",
+    "task_completed": "Task voltooid",
+    "task_failed": "Task mislukt",
+    "agent_blocked": "Agent geblokkeerd",
+    "agent_completed": "Agent voltooid",
+    "reaction_added": "Gereageerd",
+    "quick_create_done": "Aangemaakt met agent",
+    "quick_create_failed": "Aanmaken met agent mislukt"
+  },
+  "labels": {
+    "set_status_to": "Status ingesteld op",
+    "set_priority_to": "Prioriteit ingesteld op",
+    "assigned_to": "Toegewezen aan {{name}}",
+    "removed_assignee": "Toegewezene verwijderd",
+    "set_start_date_to": "Startdatum ingesteld op {{date}}",
+    "removed_start_date": "Startdatum verwijderd",
+    "set_due_date_to": "Einddatum ingesteld op {{date}}",
+    "removed_due_date": "Einddatum verwijderd",
+    "reacted_to_comment": "Reageerde met {{emoji}} op je reactie",
+    "created_with_agent": "Aangemaakt met agent: {{identifier}}",
+    "failed_with_detail": "Mislukt: {{detail}}"
+  },
+  "errors": {
+    "mark_read_failed": "Markeren als gelezen mislukt",
+    "archive_failed": "Archiveren mislukt",
+    "mark_done_failed": "Markeren als voltooid mislukt",
+    "mark_all_read_failed": "Alles als gelezen markeren mislukt",
+    "archive_all_failed": "Alles archiveren mislukt",
+    "archive_all_read_failed": "Archiveren van gelezen items mislukt",
+    "archive_completed_failed": "Archiveren van voltooide items mislukt",
+    "unarchive_failed": "Dearchiveren mislukt",
+    "archived_load_failed": "Laden van gearchiveerde meldingen mislukt"
+  }
+}

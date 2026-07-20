@@ -4,6 +4,9 @@ export { docsHrefForLocale } from "@/lib/docs-href";
 export type Locale = SupportedLocale;
 export type LandingDictionaryLocale = "en" | "zh" | "ko" | "ja";
 
+// "nl" is a supported app locale (SupportedLocale) but the landing site's
+// Dutch dictionary/translation isn't ready yet, so it's excluded here and
+// falls back to the English landing dict via toLandingDictionaryLocale.
 export const locales: Locale[] = ["en", "zh-Hans", "ko", "ja"];
 
 export const localeLabels: Record<Locale, string> = {
@@ -11,6 +14,7 @@ export const localeLabels: Record<Locale, string> = {
   "zh-Hans": "\u4e2d\u6587",
   ko: "\ud55c\uad6d\uc5b4",
   ja: "\u65e5\u672c\u8a9e",
+  nl: "Nederlands",
 };
 
 export function toLandingDictionaryLocale(

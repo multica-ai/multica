@@ -116,6 +116,10 @@ const labelsByLocale: Record<string, ContextMenuLabels> = {
     openLink: "브라우저에서 링크 열기",
     copyLinkAddress: "링크 주소 복사",
   },
+  nl: {
+    openLink: "Link openen in browser",
+    copyLinkAddress: "Linkadres kopiëren",
+  },
 };
 
 // pickLabels resolves the OS-preferred language to one of the four
@@ -134,5 +138,6 @@ function pickLabels(): ContextMenuLabels {
   }
   if (preferred.startsWith("ja")) return labelsByLocale.ja;
   if (preferred.startsWith("ko")) return labelsByLocale.ko;
+  if (preferred.startsWith("nl")) return labelsByLocale.nl;
   return labelsByLocale.en;
 }

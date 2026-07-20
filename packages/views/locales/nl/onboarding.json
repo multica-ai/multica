@@ -1,0 +1,384 @@
+{
+  "step_header": {
+    "step_of": "Stap {{current}} van {{total}}"
+  },
+  "welcome": {
+    "wordmark": "Welkom bij Multica",
+    "headline_line1": "Je AI-teamgenoten,",
+    "headline_line2": "in",
+    "headline_emphasis": "één workspace.",
+    "lede": "Wijs ze werk toe zoals je een collega zou doen — ze pakken het op, werken de status bij en reageren als het klaar is.",
+    "lede_web": "Desktop bevat de runtime — niets te installeren. Ga verder op het web om je eigen CLI te verbinden.",
+    "lede_desktop": "Aan het eind reageert een echte agent op je eerste issue.",
+    "download_desktop": "Desktop downloaden",
+    "continue_on_web": "Doorgaan op web",
+    "start_exploring": "Beginnen met verkennen",
+    "skip_existing": "Ik heb dit al eens gedaan",
+    "illustration_caption": "Elke issue, elke thread, elke beslissing — gedeeld door je team en agents.",
+    "illustration": {
+      "card1_actor_name": "Jij",
+      "card1_actor_initial": "N",
+      "card1_body_prefix": " kun je een korte lanceerpost opstellen? Baseer je op ",
+      "card1_body_suffix": " de onderzoeksbevindingen.",
+      "card1_mention_content": "@Content Agent",
+      "card1_mention_research": "@Research Agent",
+      "card2_actor_name": "Content Agent",
+      "card2_body": "Komt goed. Ik haal de quotes van Research op en schrijf rond de invalshoek \"tijdsbesparing\"…",
+      "card3_actor_name": "Research Agent",
+      "card3_body": "De gebruikersgesprekken van deze week samengevat — 12 gesprekken, 4 terugkerende thema's, 3 pull-quotes.",
+      "card3_timestamp": "15 min geleden",
+      "card4_actor_name": "Review Agent",
+      "card4_body": "Het concept van maandag beoordeeld — 4 opmerkingen over de toon achtergelaten. Ik wacht op het nieuwe.",
+      "card5_actor_name": "Coding Agent",
+      "card5_body_prefix": "De exportfunctie opgeleverd ",
+      "card5_body_suffix": " gemeld. Preview-link staat in de PR.",
+      "card5_mention_you": "@jij",
+      "card5_timestamp": "zojuist"
+    }
+  },
+  "common": {
+    "back": "Terug",
+    "continue": "Doorgaan",
+    "skip": "Overslaan",
+    "cancel": "Annuleren",
+    "close": "Sluiten"
+  },
+  "source_backfill": {
+    "eyebrow": "Korte vraag",
+    "lede": "We merkten dat je dit niet hebt gekozen bij het aanmelden — het helpt ons te begrijpen wie Multica nuttig vindt. Eén vraag, daarna ga je verder met je werk.",
+    "submit": "Versturen",
+    "hint_ready": "Ziet er goed uit. Druk op Versturen wanneer je klaar bent."
+  },
+  "questions": {
+    "eyebrow_about_you": "Over jou",
+    "source": {
+      "question": "Hoe heb je over Multica gehoord?",
+      "friends_colleagues": "Vrienden of collega's",
+      "search": "Google / zoeken",
+      "social_x": "X / Twitter",
+      "social_linkedin": "LinkedIn",
+      "social_youtube": "YouTube",
+      "social_github": "GitHub",
+      "social_misc": "Andere social media",
+      "blog_newsletter": "Blog / nieuwsbrief",
+      "ai_assistant": "ChatGPT / Claude / Cursor",
+      "from_work": "Op het werk",
+      "event_conference": "Conferentie / meetup",
+      "dont_remember": "Weet ik niet meer",
+      "other": "Anders",
+      "other_placeholder": "bijv. een podcast waar ik naar luister"
+    },
+    "role": {
+      "question": "Wat past het best bij jou?",
+      "engineer": "Engineer / ontwikkelaar",
+      "product": "Productmanager",
+      "designer": "Ontwerper",
+      "founder": "Oprichter / directie",
+      "marketing": "Marketing / groei",
+      "writer": "Schrijver / content",
+      "research": "Onderzoeker / analist",
+      "ops": "Operations / projectbeheer",
+      "student": "Student / persoonlijk gebruik",
+      "other": "Anders",
+      "other_placeholder": "bijv. docent, supportlead"
+    },
+    "use_case": {
+      "question": "Waarvoor wil je Multica gebruiken?",
+      "ship_code": "Code opleveren met AI-agents",
+      "manage_team": "Tasks voor mijn team beheren",
+      "personal_tasks": "Mijn eigen tasks organiseren",
+      "plan_research": "Plannen, brainstormen, onderzoeken",
+      "write_publish": "Schrijven, bewerken, publiceren",
+      "automate_ops": "Ops & workflows automatiseren",
+      "evaluate": "Gewoon verkennen",
+      "other": "Anders",
+      "other_placeholder": "bijv. coördinatie van een studiegroep"
+    }
+  },
+  "option_card": {
+    "other_label": "Anders",
+    "other_aria": "Beschrijf iets anders"
+  },
+  "step_question": {
+    "hint_pick": "Kies er een om door te gaan — of sla over als je het liever niet zegt.",
+    "hint_continue": "Ziet er goed uit. Druk op Doorgaan wanneer je klaar bent."
+  },
+  "runtime_aside": {
+    "what_eyebrow": "Wat is een agent-runtime?",
+    "what_prefix": "De \"computer\" die je verbindt, is wat we intern een ",
+    "what_term": "agent-runtime",
+    "what_suffix": " noemen: een klein achtergrondproces op de computer, gekoppeld aan één AI-codeertool — Claude Code, Codex, enzovoort. Eén tool, één agent-runtime. De agent-runtime is wat de tasks die je agent oppakt daadwerkelijk uitvoert.",
+    "good_eyebrow": "Goed om te weten",
+    "swap_title": "Altijd omwisselbaar",
+    "swap_body": "De runtime van elke agent is gewoon een instelling. Wijzig die wanneer je maar wilt.",
+    "add_more_title": "Later meer toevoegen",
+    "add_more_body": "Je kunt nog een computer verbinden voor een teamgenoot, of een aparte per agent.",
+    "learn_more": "Meer over agent-runtimes →"
+  },
+  "cli_install": {
+    "copy_aria": "Kopiëren",
+    "intro": "Je hebt een agent-runtime op deze computer nodig (Claude Code, Codex, Cursor, …) om je agent te laten draaien. Werkt ook op servers en externe dev-machines.",
+    "step1_label": "Installeer de Multica CLI",
+    "step2_label": "Start de daemon"
+  },
+  "cloud_waitlist": {
+    "intro_main": "Cloud-runtimes zijn nog niet live. Laat je e-mailadres achter en we nemen contact op zodra ze dat wel zijn.",
+    "intro_warning": "Let op: agents kunnen geen tasks uitvoeren zonder een runtime — als je nu op Overslaan drukt, is je workspace alleen-lezen totdat je er een installeert.",
+    "email_label": "E-mail",
+    "email_placeholder": "jij@werk.com",
+    "reason_label": "Waarom cloud?",
+    "optional": "Optioneel",
+    "reason_placeholder": "bijv. we willen agents 24/7 laten draaien, of mijn team werkt op verschillende apparaten.",
+    "join": "Aanmelden voor wachtlijst",
+    "on_list": "Je staat op de lijst",
+    "success_toast": "Je staat op de lijst. We mailen je zodra cloud-runtimes live zijn.",
+    "failed_toast": "Aanmelden voor wachtlijst mislukt"
+  },
+  "first_issue": {
+    "error_title": "Er ging iets mis",
+    "retry": "Opnieuw proberen",
+    "retry_failed": "Opnieuw proberen mislukt",
+    "finishing": "Afronden",
+    "opening": "Bijna klaar — je workspace wordt geopend."
+  },
+  "step_agent": {
+    "eyebrow": "Je eerste agent",
+    "headline": "Maak kennis met je eerste teamgenoot.",
+    "lede_prefix": "Je antwoorden wijzen op een ",
+    "lede_suffix": ". Kies welke van de vier bij je past — elk sjabloon is klaar om zijn eerste issue op te pakken. Je kunt de instructies later bijstellen via de agent-instellingenpagina.",
+    "footer_hint": "Eén agent is genoeg om te beginnen. Voeg er later meer toe via de zijbalk.",
+    "create_action": "{{name}} aanmaken",
+    "create_failed": "Aanmaken van agent mislukt",
+    "recommended_badge": "Aanbevolen",
+    "templates": {
+      "coding": {
+        "label": "Coding Agent",
+        "blurb": "Schrijft, refactort en levert code op. Leest je repo.",
+        "instructions": "Je bent een Coding Agent in een productteam. Pak code-issues op — implementeer functies, los bugs op, schrijf tests en open pull requests. Lees de repository voordat je begint, volg bestaande codeconventies en houd diffs gefocust. Vraag om verduidelijking wanneer de acceptatiecriteria dubbelzinnig zijn."
+      },
+      "planning": {
+        "label": "Planning Agent",
+        "blurb": "Splitst werk op, stelt specs op, houdt het bord netjes.",
+        "instructions": "Je bent een Planning Agent. Zet losse ideeën en open issues om in afgebakend, uitvoerbaar werk: splits ze op in subtasks, schrijf acceptatiecriteria en stel eigenaren en volgorde voor. Verkies duidelijkheid boven snelheid. Wanneer je vastloopt door ontbrekende context, stel dan één specifieke vraag in plaats van te gokken."
+      },
+      "writing": {
+        "label": "Writing Agent",
+        "blurb": "Stelt op, vat samen, onderzoekt. Geschikt voor langere teksten.",
+        "instructions": "Je bent een Writing Agent. Stel documenten op, vat lange inhoud samen en onderzoek onderwerpen op het web wanneer nodig. Structureer je uitvoer als afgewerkt proza dat een lezer direct kan gebruiken — geen opsomming. Vermeld bronnen wanneer je eruit put. Sluit aan bij de toon die de gebruiker in de issue vaststelt."
+      },
+      "assistant": {
+        "label": "Assistant",
+        "blurb": "Algemeen. Een goede standaard wanneer de task onduidelijk is.",
+        "instructions": "Je bent een algemene teamgenoot. Handel uiteenlopende tasks af — licht coderen, schrijven, onderzoeken, plannen — en blijf pragmatisch over de scope. Wanneer de task dubbelzinnig is, stel dan één verhelderende vraag voordat je erin duikt. Kies standaard voor korte, nuttige uitvoer boven uitputtende."
+      }
+    },
+    "about_eyebrow": "Wat is een agent",
+    "about_headline": "Een AI-teamgenoot die in je workspace leeft.",
+    "about_body": "Agents verschijnen in elke toewijzingskiezer, net als elke andere collega — behalve dat ze 24/7 kunnen werken op de runtime die je ze geeft.",
+    "ways_eyebrow": "Manieren om met een agent te werken",
+    "way_assign_title": "Wijs een issue toe",
+    "way_assign_body": "Het pakt de task op en koppelt terug in de thread.",
+    "way_mention_title": "@vermeld in een reactie",
+    "way_mention_body": "Betrek het in een gesprek voor een snelle inschatting.",
+    "way_chat_title": "Chat één-op-één",
+    "way_chat_body": "Stel snelle vragen zonder een issue aan te maken.",
+    "way_autopilot_title": "Zet het op Autopilot",
+    "way_autopilot_body": "Dagelijkse triage, wekelijks overzicht, maandelijkse audit — volgens schema.",
+    "add_more_hint": "Voeg altijd meer agents toe. Een klein team gespecialiseerde agents verslaat één manusje-van-alles.",
+    "docs_link": "Je eerste agent aanmaken →"
+  },
+  "welcome_after_onboarding": {
+    "loading_helper": "Je Helper voorbereiden…",
+    "error_title": "Kon setup niet voltooien",
+    "error_generic": "Er ging iets mis. Probeer het opnieuw.",
+    "retry": "Opnieuw proberen",
+    "dismiss_error": "Sluiten",
+    "error_close": "Sluiten",
+    "user_context_heading": "Over mij",
+    "user_context_role_label": "Rol",
+    "user_context_use_case_label": "Wat ik met Multica wil doen",
+    "runtime": {
+      "greeting": "Hoi, welkom bij Multica",
+      "subtitle": "Ik ben je eerste agent-assistent.",
+      "capabilities": "Vraag me alles over hoe je Multica gebruikt. Je kunt me ook dingen laten doen in je workspace — issues aanmaken, cron-tasks opzetten, nieuwe agents bouwen…",
+      "section_label": "Kies een of meer tasks om mee te beginnen:",
+      "assign_empty": "Kies er een of meer",
+      "assign_count": "Wijs {{count}} task aan mij toe →",
+      "assign_count_plural": "Wijs {{count}} tasks aan mij toe →",
+      "cards": {
+        "intro": {
+          "subtitle": "Laat me in 1–2 alinea's uitleggen wat Multica is en wat het kan."
+        },
+        "tour": {
+          "subtitle": "Ik loop met je door hoe issue, agent, squad en autopilot samenkomen."
+        },
+        "welcome_page": {
+          "subtitle": "Ik bouw een HTML-slidedeck van één bestand voor je — afgestemd op je rol, klaar om te kopiëren en in een browser te openen."
+        }
+      },
+      "success": {
+        "title": "Helemaal klaar!",
+        "subtitle": "Hou vol — je {{agentName}} is ermee bezig ☕",
+        "tip_inbox": "Als er voortgang is, zie je die in je Inbox.",
+        "tip_chat": "Live chatten? Klik op de chatbubbel rechtsonder.",
+        "got_it": "Begrepen →"
+      }
+    },
+    "skip": {
+      "loading": "Je workspace opzetten…",
+      "title": "Welkom bij Multica!",
+      "subtitle": "We hebben twee tasks toegevoegd om je te helpen bij de volgende stap.",
+      "got_it": "Begrepen",
+      "status_in_progress": "In uitvoering",
+      "status_todo": "Te doen",
+      "cards": {
+        "install_runtime": {
+          "title": "Een runtime verbinden",
+          "subtitle": "Installeer Codex of Kimi om agents online te brengen."
+        },
+        "create_agent": {
+          "title": "Je eerste agent aanmaken",
+          "subtitle": "Zodra een runtime online is, bouw je je eerste Multica-agent."
+        }
+      }
+    }
+  },
+  "step_workspace": {
+    "eyebrow_first": "Je eerste workspace",
+    "eyebrow_resume": "Doorgaan of opnieuw beginnen",
+    "headline_first": "Geef je workspace een naam.",
+    "headline_resume": "Ga verder met {{name}}, of begin een andere.",
+    "lede_first": "Een workspace is waar je issues, agents en projects leven. Je kunt later teamgenoten uitnodigen of meer workspaces opzetten.",
+    "lede_resume": "Hervat de setup met de workspace die je al hebt, of maak er een nieuwe naast — je kunt bij een willekeurig aantal workspaces horen.",
+    "name_label": "Workspacenaam",
+    "name_placeholder": "Acme Inc, Mijn Lab, Nevenprojecten…",
+    "url_label": "URL",
+    "slug_placeholder": "acme",
+    "issue_prefix_label": "Issue-prefix",
+    "issue_prefix_prefix": "Issues zien er zo uit ",
+    "issue_prefix_suffix": ". Je kunt dit later in de instellingen wijzigen.",
+    "create_new_title": "Een nieuwe workspace aanmaken",
+    "create_new_subtitle": "Begin opnieuw — een aparte ruimte voor een andere kant van je werk.",
+    "hint_opening": "{{name}} openen.",
+    "hint_creating": "{{name}} aanmaken.",
+    "hint_creating_pending": "{{name}} aanmaken…",
+    "hint_creating_fallback": "je workspace",
+    "hint_name_first": "Geef je workspace een naam om hem aan te maken.",
+    "hint_pick": "Kies je workspace of begin een nieuwe.",
+    "cta_open": "{{name}} openen",
+    "cta_create_named": "{{name}} aanmaken",
+    "cta_create_workspace": "Workspace aanmaken",
+    "cta_creating": "Aanmaken…",
+    "slug_format_error": "Alleen kleine letters, cijfers en koppeltekens",
+    "slug_taken_error": "Die workspace-URL is al in gebruik.",
+    "slug_reserved_error": "Die workspace-URL is gereserveerd en kan niet worden gebruikt.",
+    "slug_conflict_toast": "Kies een andere workspace-URL",
+    "create_failed_toast": "Aanmaken van workspace mislukt",
+    "side_create_eyebrow": "Wat er in een workspace zit",
+    "side_existing_eyebrow": "Je workspace",
+    "side_things_eyebrow": "Dingen die je hier doet",
+    "side_next_eyebrow": "Wat er volgt",
+    "side_preview_name": "Je workspace",
+    "side_preview_slug": "workspace",
+    "perk_assign": "Wijs issues toe aan agents zoals je een teamgenoot zou doen",
+    "perk_chat": "Chat met elke agent zonder een issue aan te maken",
+    "perk_invite": "Nodig teamgenoten uit — ze zien alleen deze workspace",
+    "perk_switch": "Schakel altijd naar andere workspaces vanaf linksboven",
+    "next_runtime": "Verbind een computer zodat je agents ergens kunnen draaien",
+    "next_agent": "Maak Multica Helper aan vanaf je verbonden runtime",
+    "next_starter": "Open één onboarding-issue voor je volgende stap",
+    "preview": {
+      "inbox_label": "Inbox",
+      "inbox_meta": "je meldingen",
+      "issues_label": "Issues",
+      "issues_meta": "gedeeld takenbord",
+      "agents_label": "Agents",
+      "agents_meta": "je AI-teamgenoten",
+      "projects_label": "Projects",
+      "projects_meta": "groepeer gerelateerde issues",
+      "autopilot_label": "Autopilot",
+      "autopilot_meta": "geplande automatisering",
+      "runtimes_label": "Runtimes",
+      "runtimes_meta": "waar agents draaien",
+      "skills_label": "Skills",
+      "skills_meta": "herbruikbare draaiboeken",
+      "more_label": "En meer",
+      "more_meta": "en meer"
+    },
+    "creation_disabled_eyebrow": "Aanmaken van workspaces is uitgeschakeld",
+    "creation_disabled_headline": "Vraag je beheerder om een uitnodiging.",
+    "creation_disabled_lede": "Deze Multica-instantie staat het aanmaken van nieuwe workspaces niet toe. Zodra een beheerder je uitnodigt voor een workspace, accepteer je de uitnodiging en vernieuw je om door te gaan.",
+    "creation_disabled_logout": "Uitloggen",
+    "creation_disabled_eyebrow_resume": "Je workspace",
+    "creation_disabled_headline_resume": "Ga verder met {{name}}.",
+    "creation_disabled_lede_resume": "Aanmaken van workspaces is uitgeschakeld op deze instantie, dus je gaat verder in je bestaande workspace."
+  },
+  "step_runtime": {
+    "scanning_headline": "Deze computer verbinden…",
+    "scanning_lede_prefix": "Je agent werkt via een AI-codeertool die je al hebt — zoals ",
+    "scanning_lede_suffix": ", en andere. We controleren deze computer op de tools die je hebt geïnstalleerd.",
+    "found_headline": "Deze computer is verbonden. Kies een agent-runtime.",
+    "found_lede": "Dit zijn de agent-runtimes die we op deze computer hebben gevonden. Kies er een voor je eerste agent — je kunt later wisselen of meer toevoegen.",
+    "runtime_count_one": "{{count}} agent-runtime",
+    "runtime_count_other": "{{count}} agent-runtimes",
+    "status_all_online": "alle online",
+    "status_none_online": "geen online",
+    "status_n_online": "{{count}} online",
+    "online_label": "online",
+    "offline_label": "offline",
+    "empty_headline": "Nog geen agent-runtime gevonden op deze computer.",
+    "empty_lede_prefix": "Een agent-runtime is een AI-codeertool waarmee we verbinden — zoals ",
+    "empty_lede_suffix": ". Installeer er een en vernieuw, of kies hieronder een pad.",
+    "empty_skip_title": "Voorlopig overslaan",
+    "empty_skip_subtitle": "Ga je workspace binnen in alleen-lezenmodus. Je agent kan geen tasks uitvoeren totdat een agent-runtime op deze computer is verbonden — maar je kunt nog wel bladeren, plannen en teamgenoten uitnodigen.",
+    "empty_skip_action": "Overslaan",
+    "empty_waitlist_title": "Een cloudcomputer gebruiken",
+    "empty_waitlist_subtitle": "We draaien een computer voor je in de cloud. Nog niet live.",
+    "empty_waitlist_action": "Binnenkort",
+    "skip": "Voorlopig overslaan",
+    "refresh": "Vernieuwen",
+    "refreshing": "Vernieuwen…",
+    "hint_selected": "Geselecteerd: {{name}}",
+    "hint_pick": "Kies hierboven een agent-runtime om door te gaan.",
+    "hint_waiting": "Wachten op het eerste resultaat…",
+    "hint_skip_or_refresh": "Vernieuw nadat je er een hebt geïnstalleerd, of sla over om je workspace binnen te gaan.",
+    "start_exploring": "Beginnen met verkennen"
+  },
+  "step_platform": {
+    "eyebrow": "Een computer verbinden",
+    "headline": "Verbind een computer om je agent te draaien.",
+    "lede": "Je agent draait op een echte computer die je met Multica verbindt. Kies hoe je er een wilt verbinden.",
+    "hint_default": "Kies een manier om te verbinden — of sla over en verbind later een computer.",
+    "hint_downloaded": "Rond de setup af op de downloadpagina en kom dan terug naar dit tabblad.",
+    "download_title": "Deze computer gebruiken",
+    "download_title_after": "De downloadpagina openen…",
+    "download_subtitle": "Installeer onze desktop-app om deze computer te verbinden. Geen setup — kies je platform op de volgende pagina.",
+    "download_subtitle_after": "Geopend in een nieuw tabblad. Kies daar je installatieprogramma en rond de setup af op desktop.",
+    "download_button": "Downloaden",
+    "cli_title": "Verbinden vanuit de terminal",
+    "cli_subtitle": "Verbind een server, externe dev-machine of een headless computer. Terminal vereist.",
+    "cli_action": "Stappen tonen",
+    "cloud_title": "Een cloudcomputer gebruiken",
+    "cloud_subtitle": "We draaien een computer voor je in de cloud. Nog niet live.",
+    "cloud_action": "Binnenkort",
+    "cli_dialog_title": "Verbinden vanuit de terminal",
+    "cli_dialog_description": "Dezelfde verbinding als Desktop, opgezet vanuit de terminal. Gebruik het voor servers, externe dev-machines of een headless computer.",
+    "cli_dialog_pick_hint": "Kies hierboven een computer.",
+    "cli_dialog_connect": "Verbinden & doorgaan",
+    "runtimes_connected_one": "{{count}} computer verbonden",
+    "runtimes_connected_other": "{{count}} computers verbonden",
+    "live_listening": "Live · Wachten op je computer",
+    "stage_normal_prefix": "Voer de bovenstaande opdracht uit. Zodra ",
+    "stage_normal_suffix": " klaar is met browser-aanmelding, verschijnt je computer hier automatisch (meestal 10–30 seconden).",
+    "stage_midway_prefix": "Nog steeds aan het luisteren. Zorg dat je het browsertabblad hebt afgerond dat ",
+    "stage_midway_suffix": " opende — het heeft je goedkeuring van de aanmelding nodig voordat je computer kan verbinden.",
+    "stage_slow_prefix": "Duurt langer dan gebruikelijk. Controleer de terminal waar je ",
+    "stage_slow_suffix": " hebt uitgevoerd op fouten.",
+    "stage_stalled_prefix": "Er komt nog niets door. Als je niet vertrouwd bent met de terminal, ",
+    "stage_stalled_term": "Desktop",
+    "stage_stalled_suffix": " is het soepelere pad — één klik en deze computer is verbonden. Sluit dit venster en kies Desktop, of druk op Overslaan om door te gaan."
+  },
+  "errors": {
+    "skip_failed": "Voltooien van onboarding mislukt"
+  }
+}

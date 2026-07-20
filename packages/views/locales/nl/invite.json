@@ -1,0 +1,54 @@
+{
+  "header": {
+    "back": "Terug",
+    "log_out": "Uitloggen"
+  },
+  "not_found": {
+    "title": "Uitnodiging niet gevonden",
+    "description": "Deze uitnodiging is mogelijk verlopen, ingetrokken of hoort niet bij jouw account.",
+    "go_to_dashboard": "Ga naar dashboard"
+  },
+  "accepted": {
+    "title": "Je bent lid geworden van {{workspace_name}}!",
+    "redirecting": "Doorverwijzen naar workspace..."
+  },
+  "declined": {
+    "title": "Uitnodiging geweigerd",
+    "description": "Je wordt niet toegevoegd aan deze workspace.",
+    "go_to_dashboard": "Ga naar dashboard"
+  },
+  "main": {
+    "join_title": "Deelnemen aan {{workspace_name}}",
+    "fallback_workspace_name": "workspace",
+    "invited_role_admin": "heeft je uitgenodigd om deel te nemen als beheerder.",
+    "invited_role_member": "heeft je uitgenodigd om deel te nemen als lid.",
+    "already_handled_accepted": "Deze uitnodiging is al geaccepteerd.",
+    "already_handled_declined": "Deze uitnodiging is al geweigerd.",
+    "expired": "Deze uitnodiging is verlopen.",
+    "decline": "Weigeren",
+    "declining": "Weigeren...",
+    "accept": "Accepteren & deelnemen",
+    "joining": "Deelnemen..."
+  },
+  "errors": {
+    "accept_failed": "Accepteren van uitnodiging mislukt",
+    "decline_failed": "Weigeren van uitnodiging mislukt"
+  },
+  "batch": {
+    "log_out": "Uitloggen",
+    "empty_title": "Geen openstaande uitnodigingen",
+    "empty_hint": "Ga verder met het opzetten van je eigen workspace.",
+    "empty_continue": "Doorgaan naar setup",
+    "title": "Je bent uitgenodigd",
+    "subtitle": "Kies de workspaces waaraan je wilt deelnemen. De rest kun je later altijd nog afhandelen vanuit de zijbalk.",
+    "submit_skip": "Overslaan en mijn eigen workspace opzetten",
+    "submit_join_one": "Deelnemen aan 1 workspace",
+    "submit_join_other": "Deelnemen aan {{count}} workspaces",
+    "joining": "Deelnemen...",
+    "error_generic": "Verwerken van uitnodigingen mislukt. Probeer het opnieuw.",
+    "row_workspace_fallback": "Workspace",
+    "row_inviter_fallback": "Iemand",
+    "row_invited_admin": "{{inviter}} heeft je uitgenodigd als beheerder",
+    "row_invited_member": "{{inviter}} heeft je uitgenodigd als lid"
+  }
+}

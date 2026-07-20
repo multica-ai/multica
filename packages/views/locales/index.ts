@@ -99,6 +99,31 @@ import jaUsage from "./ja/usage.json";
 import jaUi from "./ja/ui.json";
 import jaSquads from "./ja/squads.json";
 import jaBilling from "./ja/billing.json";
+import nlCommon from "./nl/common.json";
+import nlAuth from "./nl/auth.json";
+import nlSettings from "./nl/settings.json";
+import nlIssues from "./nl/issues.json";
+import nlAgents from "./nl/agents.json";
+import nlEditor from "./nl/editor.json";
+import nlOnboarding from "./nl/onboarding.json";
+import nlInvite from "./nl/invite.json";
+import nlLabels from "./nl/labels.json";
+import nlMembers from "./nl/members.json";
+import nlMyIssues from "./nl/my-issues.json";
+import nlSearch from "./nl/search.json";
+import nlInbox from "./nl/inbox.json";
+import nlWorkspace from "./nl/workspace.json";
+import nlProjects from "./nl/projects.json";
+import nlAutopilots from "./nl/autopilots.json";
+import nlSkills from "./nl/skills.json";
+import nlChat from "./nl/chat.json";
+import nlModals from "./nl/modals.json";
+import nlRuntimes from "./nl/runtimes.json";
+import nlLayout from "./nl/layout.json";
+import nlUsage from "./nl/usage.json";
+import nlUi from "./nl/ui.json";
+import nlSquads from "./nl/squads.json";
+import nlBilling from "./nl/billing.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
 // desktop App.tsx) import from here so adding a locale or namespace happens
@@ -211,5 +236,32 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: jaUi,
     squads: jaSquads,
     billing: jaBilling,
+  },
+  nl: {
+    common: nlCommon,
+    auth: nlAuth,
+    settings: nlSettings,
+    issues: nlIssues,
+    agents: nlAgents,
+    editor: nlEditor,
+    onboarding: nlOnboarding,
+    invite: nlInvite,
+    labels: nlLabels,
+    members: nlMembers,
+    "my-issues": nlMyIssues,
+    search: nlSearch,
+    inbox: nlInbox,
+    workspace: nlWorkspace,
+    projects: nlProjects,
+    autopilots: nlAutopilots,
+    skills: nlSkills,
+    chat: nlChat,
+    modals: nlModals,
+    runtimes: nlRuntimes,
+    layout: nlLayout,
+    usage: nlUsage,
+    ui: nlUi,
+    squads: nlSquads,
+    billing: nlBilling,
   },
 };

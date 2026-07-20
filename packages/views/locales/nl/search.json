@@ -1,0 +1,46 @@
+{
+  "title": "Zoeken",
+  "description": "Zoek in pagina's, issues, projects en leden",
+  "placeholder": "Typ een opdracht of zoekopdracht...",
+  "groups": {
+    "pages": "Pagina's",
+    "commands": "Opdrachten",
+    "members": "Leden",
+    "projects": "Projects",
+    "issues": "Issues",
+    "recent": "Recent"
+  },
+  "pages": {
+    "inbox": "Inbox",
+    "my_issues": "Mijn issues",
+    "issues": "Issues",
+    "projects": "Projects",
+    "agents": "Agents",
+    "runtimes": "Runtimes",
+    "skills": "Skills",
+    "settings": "Instellingen"
+  },
+  "commands": {
+    "current_theme_aria": "Huidig thema",
+    "new_issue": "Nieuwe issue",
+    "new_project": "Nieuw project",
+    "copy_issue_link": "Issue-link kopiëren",
+    "copy_identifier": "Identifier kopiëren ({{identifier}})",
+    "fold_all_comments": "Alle reacties inklappen",
+    "unfold_all_comments": "Alle reacties uitklappen",
+    "switch_to_light": "Overschakelen naar licht thema",
+    "switch_to_dark": "Overschakelen naar donker thema",
+    "use_system_theme": "Systeemthema gebruiken"
+  },
+  "toast": {
+    "link_copied": "Link gekopieerd",
+    "copied_identifier": "{{identifier}} gekopieerd"
+  },
+  "empty": {
+    "no_results": "Geen resultaten gevonden.",
+    "type_to_search": "Typ om te zoeken in issues en projects"
+  },
+  "trigger": {
+    "label": "Zoeken..."
+  }
+}

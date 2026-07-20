@@ -1,0 +1,171 @@
+{
+  "page": {
+    "title": "Chat",
+    "select_prompt": "Kies een gesprek of start een nieuw gesprek met +",
+    "agent_link_no_access": "Je hebt geen toegang om met deze agent te chatten."
+  },
+  "fab": {
+    "running": "Multica is bezig...",
+    "unread_one": "{{count}} ongelezen chat",
+    "unread_other": "{{count}} ongelezen chats",
+    "default": "Vraag het Multica"
+  },
+  "input": {
+    "placeholder_no_agent": "Maak een agent aan om te beginnen met chatten",
+    "placeholder_archived": "Deze sessie is gearchiveerd",
+    "placeholder_archived_agent": "Deze agent is gearchiveerd",
+    "placeholder_named": "Bericht aan {{name}}…",
+    "placeholder_default": "Begin een bericht…",
+    "send_tooltip": "Versturen",
+    "stop_tooltip": "Stoppen",
+    "send_failed_toast": "Verzenden van bericht mislukt",
+    "send_blocked_toast": "Bericht niet verzonden — je hebt geen toestemming meer om deze agent te gebruiken",
+    "attachment_bind_failed_toast": "Bericht verzonden, maar bestanden zijn niet bijgevoegd. Probeer het zo meteen opnieuw.",
+    "add_tooltip": "Toevoegen",
+    "upload_file": "Afbeelding of bestanden"
+  },
+  "message_list": {
+    "show_details": "Details tonen",
+    "replied_in": "Geantwoord in {{elapsed}}",
+    "failed_after": "Mislukt na {{elapsed}}",
+    "finished_in": "Voltooid in {{elapsed}}",
+    "no_response": "De agent heeft deze beurt afgerond zonder tekstantwoord.",
+    "failure": {
+      "agent_error": "De agent liep tegen een fout aan en kon het antwoord niet voltooien. Probeer het opnieuw.",
+      "timeout": "De agent deed er te lang over en stopte voordat het klaar was. Probeer het opnieuw of splits je verzoek in kleinere stappen.",
+      "codex_semantic_inactivity": "De agent werd inactief en stopte voordat het klaar was. Probeer het opnieuw.",
+      "runtime_offline": "De agent is nu offline en kon dus niet antwoorden. Probeer het opnieuw zodra die weer online is.",
+      "runtime_recovery": "De agent is opnieuw gestart voordat het klaar was. Probeer het opnieuw.",
+      "manual": "Dit antwoord is geannuleerd.",
+      "fallback": "Er ging iets mis en de agent kon het antwoord niet voltooien. Probeer het opnieuw."
+    },
+    "tools_one": "{{count}} tool",
+    "tools_other": "{{count}} tools",
+    "tool_result_named": "{{tool}}-resultaat: ",
+    "tool_result_unnamed": "resultaat: ",
+    "process_steps_one": "{{count}} stap",
+    "process_steps_other": "{{count}} stappen",
+    "copy_action": "Kopiëren",
+    "copied_toast": "Gekopieerd",
+    "copy_failed_toast": "Kopiëren mislukt",
+    "loading_older": "Oudere berichten laden…"
+  },
+  "session_history": {
+    "untitled": "Naamloos",
+    "time": {
+      "just_now": "zojuist",
+      "minutes": "{{count}}m geleden",
+      "hours": "{{count}}u geleden",
+      "days": "{{count}}d geleden"
+    },
+    "row_delete_aria": "Chatsessie verwijderen",
+    "row_rename_aria": "Chatsessie hernoemen",
+    "row_stop_aria": "Huidige run stoppen",
+    "stop_action": "Stoppen",
+    "row_subtitle": {
+      "working": "Bezig",
+      "completed": "Voltooid",
+      "new_reply": "Nieuw antwoord"
+    },
+    "stop_dialog": {
+      "title": "Deze run stoppen?",
+      "description_with_title": "Hiermee wordt de huidige agent-task in \"{{title}}\" geannuleerd. Gedeeltelijke uitvoer blijft in de chat staan.",
+      "description_default": "Hiermee wordt de huidige agent-task geannuleerd. Gedeeltelijke uitvoer blijft in de chat staan.",
+      "cancel": "Doorgaan",
+      "confirm": "Run stoppen",
+      "confirming": "Stoppen..."
+    },
+    "delete_dialog": {
+      "title": "Chatsessie verwijderen",
+      "description_with_title": "\"{{title}}\" en de bijbehorende berichten worden permanent verwijderd. Deze actie kan niet ongedaan worden gemaakt.",
+      "description_default": "Deze chatsessie en de bijbehorende berichten worden permanent verwijderd. Deze actie kan niet ongedaan worden gemaakt.",
+      "cancel": "Annuleren",
+      "confirm": "Verwijderen",
+      "confirming": "Verwijderen..."
+    }
+  },
+  "window": {
+    "new_chat_tooltip": "Nieuwe chat",
+    "restore_tooltip": "Herstellen",
+    "expand_tooltip": "Uitklappen",
+    "minimize_tooltip": "Minimaliseren",
+    "another_running": "Een andere chat is bezig",
+    "another_unread": "Een andere chat heeft ongelezen antwoorden",
+    "running": "Bezig",
+    "unread": "Ongelezen",
+    "no_previous": "Geen eerdere chats",
+    "untitled": "Nieuwe chat",
+    "my_agents": "Mijn agents",
+    "others": "Overige",
+    "no_agents": "Geen agents",
+    "history_group": "Chatgeschiedenis",
+    "agent_filter_placeholder": "Agents zoeken..."
+  },
+  "empty_state": {
+    "first_time_title": "Chat met je agents",
+    "first_time_intro": "✨ Ze kennen je workspace —",
+    "first_time_pillars": "issues, projects, skills",
+    "first_time_pillars_suffix": ".",
+    "first_time_actions": "Vraag om een samenvatting, plan je dag of geef een snelle task uit handen.",
+    "returning_title_named": "Hoi, ik ben {{name}}",
+    "returning_title_default": "Welkom bij Multica",
+    "returning_subtitle": "Probeer te vragen",
+    "chat_with_named": "Chat met {{name}}"
+  },
+  "starter_prompts": {
+    "list_open": "Toon mijn openstaande tasks op prioriteit",
+    "summarize_today": "Vat samen wat ik vandaag heb gedaan",
+    "plan_next": "Plan waar ik hierna aan werk"
+  },
+  "no_agent_banner": "Je hebt een agent nodig om te beginnen met chatten.",
+  "archived_agent_banner": "{{name}} is gearchiveerd — dit gesprek is alleen-lezen.",
+  "offline_banner": {
+    "fallback_name": "de agent",
+    "unstable": "De verbinding van {{name}} is instabiel — antwoorden kunnen vertraagd zijn.",
+    "offline": "{{name}} is offline — je bericht wordt bezorgd zodra die terug is."
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "Offline",
+      "reconnecting": "Opnieuw verbinden",
+      "queued": "In wachtrij",
+      "waiting_local_directory": "Wachten op lokale map",
+      "starting_up": "Opstarten",
+      "thinking": "Nadenken",
+      "typing": "Typen"
+    },
+    "tools": {
+      "running_command": "Een opdracht uitvoeren",
+      "reading_files": "Bestanden lezen",
+      "searching_code": "De code doorzoeken",
+      "making_edits": "Wijzigingen aanbrengen",
+      "searching_web": "Het web doorzoeken",
+      "fallback": "Bezig"
+    }
+  },
+  "list": {
+    "typing": "Typen…",
+    "failed": "Verzenden mislukt",
+    "you_prefix": "Jij: ",
+    "no_messages": "Nog geen berichten",
+    "no_response_preview": "Geen tekstantwoord",
+    "quick_agents": "Frequente agents",
+    "add": "Toevoegen",
+    "add_agent": "Een frequente agent toevoegen",
+    "unpin_agent": "Verwijderen uit frequent",
+    "waiting": "Wachten op antwoord",
+    "pin": "Vastzetten",
+    "unpin": "Losmaken",
+    "pinned": "Vastgezet",
+    "archive": "Archiveren",
+    "unarchive": "Dearchiveren",
+    "archived_title": "Gearchiveerd"
+  },
+  "header": {
+    "view_profile": "Agentprofiel bekijken",
+    "rename": "Chat hernoemen",
+    "archive": "Chat archiveren",
+    "unarchive": "Chat dearchiveren",
+    "delete": "Chat verwijderen"
+  }
+}

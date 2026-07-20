@@ -1,0 +1,71 @@
+{
+  "avatar_upload": {
+    "change": "Avatar wijzigen",
+    "remove": "Verwijderen",
+    "select_image": "Kies een afbeeldingsbestand.",
+    "updated": "Avatar bijgewerkt",
+    "failed": "Uploaden van avatar mislukt"
+  },
+  "avatar_crop": {
+    "title": "Avatar bewerken",
+    "zoom": "Zoom",
+    "zoom_in": "Inzoomen",
+    "zoom_out": "Uitzoomen",
+    "rotate": "Draaien",
+    "reset": "Resetten",
+    "cancel": "Annuleren",
+    "apply": "Opslaan",
+    "uploading": "Bezig met uploaden…",
+    "loading": "Laden…",
+    "load_failed": "Kon afbeelding niet laden"
+  },
+  "color_picker": {
+    "saturation": "Verzadiging en helderheid",
+    "hue": "Tint",
+    "hex": "Hexkleur",
+    "eyedropper": "Kies een kleur van het scherm",
+    "presets": "Voorinstellingen",
+    "random": "Willekeurig"
+  },
+  "save": "Opslaan",
+  "cancel": "Annuleren",
+  "delete": "Verwijderen",
+  "confirm": "Bevestigen",
+  "loading": "Laden...",
+  "time": {
+    "just_now": "zojuist",
+    "minutes_ago": "{{count}}m geleden",
+    "hours_ago": "{{count}}u geleden",
+    "days_ago": "{{count}}d geleden"
+  },
+  "lark_bind": {
+    "page_title": "Koppel je Lark-account",
+    "redeeming": "Koppeltoken inwisselen…",
+    "needs_auth_description": "Log in bij Multica om de koppeling te voltooien. Het token in de link koppelt je Lark-account aan deze Multica-gebruiker, dus je moet eerst zijn ingelogd.",
+    "sign_in": "Inloggen",
+    "done_title": "Je bent gekoppeld.",
+    "done_description": "Je volgende bericht aan de bot in Lark gaat rechtstreeks naar de agent. Je kunt dit tabblad sluiten.",
+    "error_title": "Kon de koppeling niet voltooien",
+    "error_admin_hint": "Als dit blijft gebeuren, vraag dan de workspacebeheerder om de koppellink opnieuw te versturen vanuit Lark.",
+    "error_missing_token": "In de link ontbreekt het koppeltoken. Vraag de bot om een nieuwe te sturen in Lark.",
+    "error_expired": "Deze koppellink is ongeldig of verlopen (links zijn 15 minuten geldig). Vraag de bot om een nieuwe te sturen.",
+    "error_already_bound": "Dit Lark-account is al gekoppeld aan een andere Multica-gebruiker. Accountoverdrachten vereisen eerst een expliciete ontkoppeling.",
+    "error_not_member": "Je bent ingelogd op een Multica-account dat geen lid is van deze workspace.",
+    "error_unknown": "Er is iets misgegaan. Probeer het opnieuw en neem contact op met de workspacebeheerder als het probleem aanhoudt."
+  },
+  "slack_bind": {
+    "page_title": "Koppel je Slack-account",
+    "redeeming": "Je account koppelen…",
+    "needs_auth_description": "Log in bij Multica om de koppeling te voltooien. Het token in de link koppelt je Slack-account aan deze Multica-gebruiker, dus je moet eerst zijn ingelogd.",
+    "sign_in": "Inloggen",
+    "done_title": "Je bent gekoppeld.",
+    "done_description": "Je volgende bericht aan de bot in Slack gaat rechtstreeks naar de agent. Je kunt dit tabblad sluiten.",
+    "error_title": "Kon de koppeling niet voltooien",
+    "error_admin_hint": "Als dit blijft gebeuren, stuur de bot dan opnieuw een bericht in Slack om een nieuwe link te krijgen.",
+    "error_missing_token": "In de link ontbreekt het token. Stuur de bot opnieuw een bericht in Slack om een nieuwe te krijgen.",
+    "error_expired": "Deze link is ongeldig of verlopen (links zijn 15 minuten geldig). Stuur de bot opnieuw een bericht om een nieuwe te krijgen.",
+    "error_already_bound": "Dit Slack-account is al gekoppeld aan een andere Multica-gebruiker. Accountoverdrachten vereisen eerst een expliciete ontkoppeling.",
+    "error_not_member": "Je bent ingelogd op een Multica-account dat geen lid is van deze workspace.",
+    "error_unknown": "Er is iets misgegaan. Probeer het opnieuw en neem contact op met de workspacebeheerder als het probleem aanhoudt."
+  }
+}

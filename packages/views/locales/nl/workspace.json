@@ -1,0 +1,34 @@
+{
+  "create_form": {
+    "name_label": "Workspacenaam",
+    "name_placeholder": "Mijn workspace",
+    "url_label": "Workspace-URL",
+    "url_placeholder": "mijn-workspace",
+    "submit": "Workspace aanmaken",
+    "submitting": "Bezig met aanmaken...",
+    "errors": {
+      "slug_format": "Alleen kleine letters, cijfers en koppeltekens",
+      "slug_taken": "Die workspace-URL is al in gebruik.",
+      "slug_reserved": "Die workspace-URL is gereserveerd en kan niet worden gebruikt.",
+      "slug_conflict_toast": "Kies een andere workspace-URL",
+      "create_failed": "Aanmaken van workspace mislukt"
+    }
+  },
+  "new_page": {
+    "back": "Terug",
+    "log_out": "Uitloggen",
+    "title": "Welkom bij Multica",
+    "description": "Eén workspace waar jij en je AI-teamgenoten zij aan zij werken — issues oppakken, reacties achterlaten en dezelfde context delen.",
+    "invite_hint": "Je kunt teamgenoten uitnodigen zodra je workspace klaar is."
+  },
+  "creation_disabled": {
+    "title": "Aanmaken van workspaces is uitgeschakeld",
+    "description": "Deze Multica-instantie staat het aanmaken van nieuwe workspaces niet toe. Vraag je beheerder om een uitnodiging voor een bestaande workspace."
+  },
+  "no_access": {
+    "title": "Workspace niet beschikbaar",
+    "description": "Deze workspace bestaat niet of je hebt er geen toegang toe.",
+    "go_to_workspaces": "Ga naar mijn workspaces",
+    "sign_in_different": "Inloggen als een andere gebruiker"
+  }
+}
