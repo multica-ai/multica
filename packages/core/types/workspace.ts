@@ -89,3 +89,18 @@ export interface Invitation {
   inviter_email?: string;
   workspace_name?: string;
 }
+
+export interface ShareLink {
+  id: string;
+  workspace_id: string;
+  code: string;
+  created_by: string;
+  role: MemberRole;
+  expires_at: string | null;
+  max_uses: number | null;
+  use_count: number;
+  is_active: boolean;
+  created_at: string;
+  creator_name?: string;
+  creator_email?: string;
+}

@@ -677,6 +677,20 @@
         "label": "Member",
         "description": "Create and work on issues"
       }
-    }
+    },
+    "share_links_title": "Share links ({{count}})",
+    "share_links_create_title": "Create share link",
+    "share_links_create_button": "Generate",
+    "share_links_creating": "Generating...",
+    "share_link_uses": "{{used}} / {{max}} uses",
+    "share_link_expires": "Expires {{date}}",
+    "share_link_copy_tooltip": "Copy link",
+    "share_link_revoke_tooltip": "Revoke link",
+    "toast_share_link_created": "Share link created",
+    "toast_share_link_failed": "Failed to create share link",
+    "toast_share_link_revoked": "Share link revoked",
+    "toast_share_link_revoke_failed": "Failed to revoke share link",
+    "toast_share_link_copied": "Link copied",
+    "toast_share_link_copy_failed": "Failed to copy link"
   }
 }

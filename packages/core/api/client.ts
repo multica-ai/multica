@@ -104,6 +104,7 @@ import type {
   PinnedItemType,
   ReorderPinsRequest,
   Invitation,
+  ShareLink,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -1808,6 +1809,31 @@ export class ApiClient {
   async declineInvitation(invitationId: string): Promise<void> {
     await this.fetch(`/api/invitations/${invitationId}/decline`, {
       method: "POST",
+    });
+  }
+
+  // Share Links
+  async createShareLink(workspaceId: string, data: { role?: string; expires_in?: number; max_uses?: number }): Promise<ShareLink> {
+    return this.fetch(`/api/workspaces/${workspaceId}/share-links`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listShareLinks(workspaceId: string): Promise<ShareLink[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/share-links`);
+  }
+
+  async revokeShareLink(workspaceId: string, linkId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/share-links/${linkId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async joinByShareLink(code: string): Promise<{ member: MemberWithUser; workspace_id: string }> {
+    return this.fetch("/api/share-links/join", {
+      method: "POST",
+      body: JSON.stringify({ code }),
     });
   }
 
