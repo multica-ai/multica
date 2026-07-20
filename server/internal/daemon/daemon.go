@@ -4278,7 +4278,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
-	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, d.logger); err != nil {
+	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
 	}
 	backend, err := agent.New(provider, agent.Config{
@@ -5409,20 +5409,37 @@ func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayH
 	}
 }
 
+// codexShellAuthorizedCustomEnvNames returns names from the current agent's
+// custom_env that pass the same daemon blocklist used when assembling the child
+// environment. Returning names only keeps credential values out of the managed
+// Codex config path.
+func codexShellAuthorizedCustomEnvNames(customEnv map[string]string) []string {
+	names := make([]string, 0, len(customEnv))
+	for key := range customEnv {
+		if key == "" || isBlockedEnvKey(key) {
+			continue
+		}
+		names = append(names, key)
+	}
+	return names
+}
+
 // configureCodexTaskShellEnvironment writes the managed shell policy only
 // after the task and agent custom environment are fully assembled. This makes
 // the allowlist reflect the child environment that will actually be launched,
-// including platform-specific essentials and non-secret custom_env values.
+// including platform-specific essentials and blocklist-checked custom_env
+// credentials.
 // Failure is fatal: launching with an unowned or malformed policy could either
 // drop the task-scoped token again or expose inherited daemon credentials.
-func configureCodexTaskShellEnvironment(provider, codexHome string, inherited []string, agentEnv map[string]string, logger *slog.Logger) error {
+func configureCodexTaskShellEnvironment(provider, codexHome string, inherited []string, agentEnv, agentCustomEnv map[string]string, logger *slog.Logger) error {
 	if provider != "codex" {
 		return nil
 	}
 	if strings.TrimSpace(codexHome) == "" {
 		return errors.New("configure Codex shell environment: task CODEX_HOME is missing")
 	}
-	includeOnly := execenv.CodexShellEnvAllowlist(inherited, agentEnv)
+	authorizedExplicit := codexShellAuthorizedCustomEnvNames(agentCustomEnv)
+	includeOnly := execenv.CodexShellEnvAllowlist(inherited, agentEnv, authorizedExplicit)
 	configPath := filepath.Join(codexHome, "config.toml")
 	if err := execenv.EnsureCodexShellEnvPolicyConfig(configPath, includeOnly, logger); err != nil {
 		return fmt.Errorf("configure Codex shell environment: %w", err)
