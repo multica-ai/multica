@@ -9,6 +9,7 @@ import {
   type MyIssuesFilter,
 } from "./queries";
 import { projectKeys } from "../projects/queries";
+import { agentTaskSnapshotKeys } from "../agents/queries";
 import {
   addIssueToBuckets,
   findIssueLocation,
@@ -679,6 +680,7 @@ type TimelineCache = TimelineEntry[];
 
 export function useCreateComment(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({
       content,
@@ -719,6 +721,14 @@ export function useCreateComment(issueId: string) {
       // task now dedupes follow-up triggers), so cached previews for this
       // issue are stale the moment the create lands.
       qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreview(issueId) });
+      // A saved comment can immediately enqueue an issue task (assignee
+      // follow-up, @agent, @squad). Refresh the active-task caches that drive
+      // the issue-header and workspace "agents working" indicators without
+      // waiting for a separate task lifecycle event.
+      qc.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
+      if (wsId) {
+        qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+      }
     },
     // No onSettled invalidate. The `comment:created` WS broadcast keeps
     // the timeline cache fresh after a successful create, and reconnect

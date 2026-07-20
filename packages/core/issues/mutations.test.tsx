@@ -10,6 +10,7 @@ import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import {
   useBatchUpdateIssues,
+  useCreateComment,
   useLoadMoreByAssigneeGroup,
   useLoadMoreByStatus,
   useResolveComment,
@@ -19,7 +20,9 @@ import {
   issueKeys,
   type IssueSortParam,
 } from "./queries";
+import { agentTaskSnapshotKeys } from "../agents/queries";
 import type {
+  Comment,
   GroupedIssuesResponse,
   Issue,
   ListIssuesCache,
@@ -63,11 +66,64 @@ function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
   };
 }
 
+function makeComment(overrides: Partial<Comment> = {}): Comment {
+  return {
+    id: "comment-1",
+    issue_id: "issue-1",
+    author_type: "member",
+    author_id: "user-1",
+    content: "please continue",
+    type: "comment",
+    parent_id: null,
+    reactions: [],
+    attachments: [],
+    created_at: "2025-01-01T00:00:00Z",
+    updated_at: "2025-01-01T00:00:00Z",
+    resolved_at: null,
+    resolved_by_type: null,
+    resolved_by_id: null,
+    ...overrides,
+  };
+}
 function createWrapper(qc: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
   };
 }
+
+describe("useCreateComment", () => {
+  let qc: QueryClient;
+  let createComment: ReturnType<typeof vi.fn<() => Promise<Comment>>>;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    createComment = vi.fn().mockResolvedValue(makeComment({ issue_id: "issue-1" }));
+    setApiInstance({ createComment } as unknown as ApiClient);
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("refreshes active-task caches after a saved comment can trigger agent work", async () => {
+    qc.setQueryData(issueKeys.tasks("issue-1"), []);
+    qc.setQueryData(agentTaskSnapshotKeys.list(WS_ID), []);
+
+    const { result } = renderHook(() => useCreateComment("issue-1"), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ content: "please continue" });
+    });
+
+    expect(qc.getQueryState(issueKeys.tasks("issue-1"))?.isInvalidated).toBe(true);
+    expect(
+      qc.getQueryState(agentTaskSnapshotKeys.list(WS_ID))?.isInvalidated,
+    ).toBe(true);
+  });
+});
 
 describe("useLoadMoreByStatus", () => {
   let qc: QueryClient;

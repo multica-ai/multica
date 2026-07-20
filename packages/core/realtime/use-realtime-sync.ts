@@ -684,7 +684,16 @@ export function useRealtimeSync(
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (!comment?.issue_id) return;
+      invalidateTimeline(comment.issue_id);
+      const wsId = getCurrentWsId();
+      if (wsId) {
+        // Comments can enqueue issue tasks before or without an immediate
+        // task:* fanout reaching this tab. Refresh the live work indicators
+        // that read task caches instead of waiting for focus/manual reload.
+        qc.invalidateQueries({ queryKey: issueKeys.tasks(comment.issue_id) });
+        qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+      }
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {
