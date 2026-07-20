@@ -4093,17 +4093,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentEnvOverrides = task.Agent.CustomEnv
 		agentCustomArgs = task.Agent.CustomArgs
 	}
-	// Effective Codex CLI args the task will launch with (profile-fixed +
-	// daemon defaults + per-agent custom_args), mirroring buildCodexArgs'
-	// ordering. Threaded into execenv so the Windows sandbox decision can honor
-	// a `-c windows.sandbox=...` override that never lands in config.toml —
-	// otherwise the daemon would silently downgrade a user's isolation opt-in
-	// (MUL-4957).
+	// Effective Codex CLI args the task will launch with, normalized through the
+	// same agent.NormalizeCodexLaunchArgs pipeline buildCodexArgs uses (shell
+	// unquoting + blocked-flag filtering), preserving its ExtraArgs
+	// (profile-fixed + daemon defaults) vs CustomArgs (per-agent custom_args)
+	// split so the filtering matches launch exactly. Threaded into execenv so
+	// the Windows sandbox decision can honor a `-c windows.sandbox=...` override
+	// that never lands in config.toml — even when it arrives shell-quoted —
+	// instead of silently downgrading a user's isolation opt-in (MUL-4957).
 	var codexSandboxArgs []string
 	if provider == "codex" {
-		codexSandboxArgs = append(codexSandboxArgs, profileFixedArgs...)
-		codexSandboxArgs = append(codexSandboxArgs, defaultArgsForProvider(d.cfg, provider)...)
-		codexSandboxArgs = append(codexSandboxArgs, agentCustomArgs...)
+		extraArgs := append(append([]string{}, profileFixedArgs...), defaultArgsForProvider(d.cfg, provider)...)
+		codexSandboxArgs = agent.NormalizeCodexLaunchArgs(extraArgs, agentCustomArgs, effectiveMcpConfig, d.logger)
 	}
 	// Hermes: resolve the overlay source home through one resolver contract —
 	// the selection parsed from custom_args (agent.ParseHermesProfileArgs) plus

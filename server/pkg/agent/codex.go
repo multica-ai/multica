@@ -123,22 +123,41 @@ type codexBackend struct {
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
-	extra := filterCustomArgs(opts.ExtraArgs, codexBlockedArgs, logger)
-	custom := filterCustomArgs(opts.CustomArgs, codexBlockedArgs, logger)
+	return append(args, NormalizeCodexLaunchArgs(opts.ExtraArgs, opts.CustomArgs, opts.McpConfig, logger)...)
+}
+
+// NormalizeCodexLaunchArgs returns the user-supplied Codex args (extra then
+// custom) exactly as buildCodexArgs hands them to the launched process: shell
+// quoting stripped, protocol-critical flags removed, and — when a managed
+// mcp_config owns the mcp_servers namespace — stray `-c mcp_servers.*`
+// overrides dropped. buildCodexArgs only prepends the fixed
+// `app-server --listen stdio://` transport flags to this result.
+//
+// It is exported so the daemon can reconstruct the *effective* launch args when
+// deciding the Windows sandbox mode. A `-c windows.sandbox=…` opt-in may arrive
+// shell-quoted (users commonly type custom_args with shell syntax, e.g.
+// `'-c' 'windows.sandbox=unelevated'`), and only after this same normalization
+// does it match the `-c windows.sandbox=…` shape the sandbox detector looks
+// for. Reconstructing the args any other way lets the two drift, silently
+// downgrading a user's isolation opt-in (MUL-4957).
+func NormalizeCodexLaunchArgs(extraArgs, customArgs []string, mcpConfig json.RawMessage, logger *slog.Logger) []string {
+	extra := filterCustomArgs(extraArgs, codexBlockedArgs, logger)
+	custom := filterCustomArgs(customArgs, codexBlockedArgs, logger)
 	// Only claim ownership of the `mcp_servers` namespace when the agent
 	// actually has a managed mcp_config in the MCP Tab. Otherwise existing
 	// users who configure MCP via `custom_args: ["-c", "mcp_servers.…"]`
-	// would silently lose those entries after this PR ships. With managed
-	// mcp_config present, daemon-written `$CODEX_HOME/config.toml` is the
-	// authoritative source and stray `-c mcp_servers.*` overrides are
-	// dropped to keep last-wins from re-shadowing it.
-	if hasManagedCodexMcpConfig(opts.McpConfig) {
+	// would silently lose those entries. With managed mcp_config present,
+	// daemon-written `$CODEX_HOME/config.toml` is the authoritative source and
+	// stray `-c mcp_servers.*` overrides are dropped to keep last-wins from
+	// re-shadowing it.
+	if hasManagedCodexMcpConfig(mcpConfig) {
 		extra = filterCodexCustomConfigOverrides(extra, logger)
 		custom = filterCodexCustomConfigOverrides(custom, logger)
 	}
-	args = append(args, extra...)
-	args = append(args, custom...)
-	return args
+	out := make([]string, 0, len(extra)+len(custom))
+	out = append(out, extra...)
+	out = append(out, custom...)
+	return out
 }
 
 // hasManagedCodexMcpConfig reports whether the agent's mcp_config field is

@@ -2,6 +2,7 @@ package execenv
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -2599,7 +2600,7 @@ func TestEnsureCodexSandboxConfigWindowsRespectsUserSandbox(t *testing.T) {
 				t.Fatalf("write config: %v", err)
 			}
 
-			winState := resolveWindowsSandboxState(configPath, dir, nil, testLogger())
+			winState := resolveWindowsSandboxState(configPath, nil, sharedConfigPresent, nil, testLogger())
 			if winState != windowsSandboxNative {
 				t.Fatalf("resolveWindowsSandboxState = %v, want native", winState)
 			}
@@ -2971,42 +2972,94 @@ func TestResolveWindowsSandbox(t *testing.T) {
 	}
 }
 
-// TestResolveWindowsSandboxStateFailsClosed pins the first MUL-4957 must-fix:
-// when a shared ~/.codex/config.toml exists but the per-task copy is missing,
-// the daemon cannot read the user's intent and must fail closed (undecidable),
-// NOT treat it as unconfigured and loosen. A genuinely configlesss user stays
-// absent.
+// TestStatSharedCodexConfig verifies the shared-config tri-state used to tell a
+// genuinely config-less user from one whose config could not be stat'd.
+func TestStatSharedCodexConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("present", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(`model = "o3"`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := statSharedCodexConfig(dir); got != sharedConfigPresent {
+			t.Errorf("got %v, want present", got)
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		t.Parallel()
+		if got := statSharedCodexConfig(t.TempDir()); got != sharedConfigAbsent {
+			t.Errorf("got %v, want absent", got)
+		}
+	})
+
+	t.Run("empty home is absent", func(t *testing.T) {
+		t.Parallel()
+		if got := statSharedCodexConfig(""); got != sharedConfigAbsent {
+			t.Errorf("got %v, want absent", got)
+		}
+	})
+}
+
+// TestResolveWindowsSandboxStateFailsClosed pins the MUL-4957 fail-closed
+// invariant across every path where the daemon cannot confidently confirm the
+// user configured no native sandbox: a missing per-task copy of an existing (or
+// un-stat'able) shared config, and a failed config sync that leaves a stale
+// copy behind, all keep the restrictive workspace-write policy. Only a
+// genuinely config-less user with no custom-arg opt-in resolves to absent (the
+// one state that earns the danger-full-access compatibility fallback).
 func TestResolveWindowsSandboxStateFailsClosed(t *testing.T) {
 	t.Parallel()
 
-	t.Run("copy failed with shared config present -> undecidable", func(t *testing.T) {
+	t.Run("shared config present but per-task copy missing -> undecidable", func(t *testing.T) {
 		t.Parallel()
-		sharedHome := t.TempDir()
-		if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`windows.sandbox = "unelevated"`), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		// Per-task config file is absent (copy failed).
 		missing := filepath.Join(t.TempDir(), "config.toml")
-		if got := resolveWindowsSandboxState(missing, sharedHome, nil, testLogger()); got != windowsSandboxUndecidable {
+		if got := resolveWindowsSandboxState(missing, nil, sharedConfigPresent, nil, testLogger()); got != windowsSandboxUndecidable {
 			t.Errorf("got %v, want undecidable (fail closed)", got)
 		}
 	})
 
-	t.Run("no shared config -> absent", func(t *testing.T) {
+	t.Run("shared config stat undecidable -> undecidable", func(t *testing.T) {
 		t.Parallel()
-		sharedHome := t.TempDir() // no config.toml inside
+		// The shared source could not be stat'd (permission/IO), so an absent
+		// per-task copy cannot be trusted as "the user has no config".
 		missing := filepath.Join(t.TempDir(), "config.toml")
-		if got := resolveWindowsSandboxState(missing, sharedHome, nil, testLogger()); got != windowsSandboxAbsent {
+		if got := resolveWindowsSandboxState(missing, nil, sharedConfigUndecidable, nil, testLogger()); got != windowsSandboxUndecidable {
+			t.Errorf("got %v, want undecidable (fail closed)", got)
+		}
+	})
+
+	t.Run("config sync error with stale absent-looking copy -> undecidable", func(t *testing.T) {
+		t.Parallel()
+		// A leftover per-task config that reads as "no sandbox" must NOT be
+		// trusted when the sync that should have refreshed it failed — the
+		// reuse-path fail-open Elon's round-3 must-fix 1 called out.
+		dir := t.TempDir()
+		stale := filepath.Join(dir, "config.toml")
+		if err := os.WriteFile(stale, []byte(`model = "o3"`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		syncErr := errors.New("copy failed")
+		if got := resolveWindowsSandboxState(stale, syncErr, sharedConfigPresent, nil, testLogger()); got != windowsSandboxUndecidable {
+			t.Errorf("got %v, want undecidable (fail closed on sync error)", got)
+		}
+	})
+
+	t.Run("no shared config and successful sync -> absent", func(t *testing.T) {
+		t.Parallel()
+		missing := filepath.Join(t.TempDir(), "config.toml")
+		if got := resolveWindowsSandboxState(missing, nil, sharedConfigAbsent, nil, testLogger()); got != windowsSandboxAbsent {
 			t.Errorf("got %v, want absent", got)
 		}
 	})
 
 	t.Run("custom-arg opt-in detected even with no config file", func(t *testing.T) {
 		t.Parallel()
-		sharedHome := t.TempDir()
 		missing := filepath.Join(t.TempDir(), "config.toml")
 		args := []string{"-c", "windows.sandbox=unelevated"}
-		if got := resolveWindowsSandboxState(missing, sharedHome, args, testLogger()); got != windowsSandboxNative {
+		if got := resolveWindowsSandboxState(missing, nil, sharedConfigAbsent, args, testLogger()); got != windowsSandboxNative {
 			t.Errorf("got %v, want native", got)
 		}
 	})

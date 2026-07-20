@@ -99,32 +99,60 @@ func prepareCodexHome(codexHome string, logger *slog.Logger) error {
 	return prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{GOOS: "linux"}, logger)
 }
 
+// sharedConfigPresence is the tri-state existence of the shared
+// ~/.codex/config.toml copy source. It is three-valued so a stat that fails for
+// a reason other than "not found" (permission/IO) never masquerades as a
+// confident "the user has no config" — which would let the daemon loosen to
+// danger-full-access on doubt. See resolveWindowsSandboxState (MUL-4957).
+type sharedConfigPresence int
+
+const (
+	// sharedConfigAbsent: the shared config.toml is confidently not present
+	// (os.IsNotExist), so an absent per-task copy is a genuine "unconfigured".
+	sharedConfigAbsent sharedConfigPresence = iota
+	// sharedConfigPresent: the shared config.toml exists.
+	sharedConfigPresent
+	// sharedConfigUndecidable: the stat failed for a reason other than
+	// not-found; the daemon cannot tell whether the user has a config.
+	sharedConfigUndecidable
+)
+
+// statSharedCodexConfig classifies the shared ~/.codex/config.toml (the copy
+// source) into the tri-state above, distinguishing a genuine absence from a
+// stat that could not complete.
+func statSharedCodexConfig(sharedHome string) sharedConfigPresence {
+	if sharedHome == "" {
+		return sharedConfigAbsent
+	}
+	_, err := os.Stat(filepath.Join(sharedHome, "config.toml"))
+	switch {
+	case err == nil:
+		return sharedConfigPresent
+	case os.IsNotExist(err):
+		return sharedConfigAbsent
+	default:
+		return sharedConfigUndecidable
+	}
+}
+
 // resolveWindowsSandboxState determines, for a Windows task, whether a native
 // Codex sandbox is configured — across the per-task config.toml and the
 // effective custom args — failing closed (Undecidable) when it cannot tell.
 //
-// The distinction that matters for MUL-4957's first must-fix: an absent
-// per-task config is a genuine "no sandbox configured" only when the user also
-// has no shared ~/.codex/config.toml. If a shared config exists but the
-// per-task copy/read failed, the daemon cannot read the user's intent and must
-// NOT loosen to danger-full-access — it fails closed and logs the condition.
-func resolveWindowsSandboxState(configFile, sharedHome string, customArgs []string, logger *slog.Logger) windowsSandboxConfig {
-	configState := windowsSandboxAbsent
-	data, err := os.ReadFile(configFile)
-	switch {
-	case err == nil:
-		configState = windowsSandboxFromConfig(string(data))
-	case os.IsNotExist(err):
-		// No per-task config. Genuinely unconfigured only if there is no shared
-		// source config either; otherwise the copy failed → undecidable.
-		if sharedCodexConfigExists(sharedHome) {
-			configState = windowsSandboxUndecidable
-		}
-	default:
-		// A read error (permission/IO) on a file the daemon just wrote.
-		configState = windowsSandboxUndecidable
-	}
-
+// Two signals it does NOT gather itself (the caller does) keep the fail-closed
+// logic unit-testable without faulting the filesystem, and close MUL-4957's
+// round-3 must-fix where a failed sync could be misread as "unconfigured":
+//
+//   - configSyncErr: the error (if any) from syncing the shared config.toml
+//     into this per-task home. Non-nil means the per-task config.toml is
+//     unreliable — stale from a prior run, or never (re)written — so neither its
+//     contents nor its absence reflect the user's intent. Fail closed.
+//   - sharedPresence: whether the shared config.toml source exists. Only a
+//     confident absence lets an absent per-task copy count as genuinely
+//     unconfigured; a present-or-undecidable source whose per-task copy is
+//     missing means the copy silently did not land, so fail closed.
+func resolveWindowsSandboxState(configFile string, configSyncErr error, sharedPresence sharedConfigPresence, customArgs []string, logger *slog.Logger) windowsSandboxConfig {
+	configState := classifyPerTaskWindowsSandbox(configFile, configSyncErr, sharedPresence)
 	state := resolveWindowsSandbox(configState, windowsSandboxFromCustomArgs(customArgs))
 	if state == windowsSandboxUndecidable && logger != nil {
 		logger.Error("codex sandbox: cannot determine Windows native sandbox config; keeping workspace-write and refusing to loosen to danger-full-access",
@@ -133,14 +161,32 @@ func resolveWindowsSandboxState(configFile, sharedHome string, customArgs []stri
 	return state
 }
 
-// sharedCodexConfigExists reports whether the shared ~/.codex/config.toml (the
-// copy source) exists — used to tell "user has no config" from "copy failed".
-func sharedCodexConfigExists(sharedHome string) bool {
-	if sharedHome == "" {
-		return false
+// classifyPerTaskWindowsSandbox inspects the per-task config.toml given the
+// outcome of syncing it from the shared source, failing closed whenever the
+// file cannot be trusted or read.
+func classifyPerTaskWindowsSandbox(configFile string, configSyncErr error, sharedPresence sharedConfigPresence) windowsSandboxConfig {
+	// A failed shared→per-task sync leaves config.toml stale or missing; neither
+	// its contents nor its absence reflect the user's intent. Fail closed.
+	if configSyncErr != nil {
+		return windowsSandboxUndecidable
 	}
-	_, err := os.Stat(filepath.Join(sharedHome, "config.toml"))
-	return err == nil
+	data, err := os.ReadFile(configFile)
+	switch {
+	case err == nil:
+		return windowsSandboxFromConfig(string(data))
+	case os.IsNotExist(err):
+		// Sync succeeded and the per-task config is absent. That is a genuine
+		// "no config" only when the shared source is confidently absent too; a
+		// present or undecidable source whose copy is missing means the copy
+		// did not land → fail closed rather than loosen.
+		if sharedPresence == sharedConfigAbsent {
+			return windowsSandboxAbsent
+		}
+		return windowsSandboxUndecidable
+	default:
+		// A read error (permission/IO) on a file the daemon just wrote.
+		return windowsSandboxUndecidable
+	}
 }
 
 // prepareCodexHomeWithOpts creates a per-task CODEX_HOME directory and seeds
@@ -180,12 +226,19 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// into a stale local copy.
 	logCodexAuthState(filepath.Join(codexHome, "auth.json"), logger)
 
-	// Sync isolated files from the shared source.
+	// Sync isolated files from the shared source. Track the config.toml sync
+	// outcome specifically: on Windows a failed sync makes the per-task config
+	// untrustworthy, so the sandbox decision must fail closed rather than read a
+	// stale or absent copy as "unconfigured" and loosen (MUL-4957).
+	var configSyncErr error
 	for _, name := range codexCopiedFiles {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
 		if err := syncCopiedFile(src, dst); err != nil {
 			logger.Warn("execenv: codex-home sync failed", "file", name, "error", err)
+			if name == "config.toml" {
+				configSyncErr = err
+			}
 		}
 	}
 	// Drop `[[skills.config]]` entries inherited from the user's
@@ -228,7 +281,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	configFile := filepath.Join(codexHome, "config.toml")
 	winState := windowsSandboxAbsent
 	if resolveGOOS(opts.GOOS) == "windows" {
-		winState = resolveWindowsSandboxState(configFile, sharedHome, opts.CodexCustomArgs, logger)
+		winState = resolveWindowsSandboxState(configFile, configSyncErr, statSharedCodexConfig(sharedHome), opts.CodexCustomArgs, logger)
 	}
 	policy := codexSandboxPolicyForConfig(opts.GOOS, opts.CodexVersion, winState)
 	policy.WritableRoots = opts.WritableRoots
