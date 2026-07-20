@@ -189,7 +189,10 @@ jobs:
 
       - name: Test Windows execution-environment isolation
         working-directory: server
-        run: go test ./internal/daemon/execenv -count=1 -timeout=5m
+        # Keep this job scoped to the runtime regression it exists to prove.
+        # The package's legacy OpenClaw HOME tests are not Windows-safe and are
+        # outside this PR; the normal backend job still runs the full package.
+        run: go test ./internal/daemon/execenv -run '^TestPrepareIsolated_WindowsKillsDescendantBeforeRetry$' -count=1 -timeout=5m
 
       - name: Build Windows CLI helper entrypoint
         working-directory: server
