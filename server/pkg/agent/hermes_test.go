@@ -2275,6 +2275,58 @@ done
 `
 }
 
+// fakeACPRecordingScriptWithCurrentModel is like fakeACPRecordingScript but
+// makes session/new and session/resume advertise a `models.currentModelId`,
+// so tests can drive the "session is already on this model" branch of the
+// set_model gate.
+func fakeACPRecordingScriptWithCurrentModel(recordPath, sessionID, currentModelID string) string {
+	return `#!/bin/sh
+RECORD_PATH=` + recordPath + `
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$RECORD_PATH"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*|*'"method":"session/resume"'*|*'"method":"session/load"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"` + sessionID + `","models":{"currentModelId":"` + currentModelID + `"}}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// assertNoRecordedFrame fails if any recorded JSON-RPC frame used the given
+// method. The mirror of findRecordedFrame, for asserting a call was skipped.
+func assertNoRecordedFrame(t *testing.T, recordPath, method string) {
+	t.Helper()
+	data, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read record file: %v", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			continue
+		}
+		if frame["method"] == method {
+			t.Fatalf("unexpected recorded frame for method %q in %s", method, string(data))
+		}
+	}
+}
+
 // findRecordedFrame returns the first recorded JSON-RPC frame whose
 // `method` matches the requested one. Used by the resume / capability
 // tests below to inspect what we actually sent on the wire.
@@ -2345,6 +2397,97 @@ func TestHermesSetModelPreservesCustomModelIDWithColon(t *testing.T) {
 	}
 	if params["modelId"] != "custom:lfm2.5:8b" {
 		t.Errorf("session/set_model.modelId must be passed verbatim, got %v", params["modelId"])
+	}
+}
+
+// TestHermesSkipsRedundantSetModelWhenAlreadyCurrent pins the MUL-5029 fix:
+// when session/new already reports the requested model as current, we must
+// NOT replay session/set_model. Hermes' set_model re-runs provider
+// auto-detection and can mis-route a `provider:model` id (e.g.
+// custom:deepseek-v4-pro) to OpenRouter, failing with an auth error on the
+// first turn. Re-selecting the model the session is already on is pure
+// downside, so the call is skipped.
+func TestHermesSkipsRedundantSetModelWhenAlreadyCurrent(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScriptWithCurrentModel(recordPath, "ses_new", "custom:deepseek-v4-pro")))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+		Model:   "custom:deepseek-v4-pro",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	assertNoRecordedFrame(t, recordPath, "session/set_model")
+}
+
+// TestHermesSendsSetModelWhenModelDiffersFromCurrent is the counterpart to the
+// skip test: when the requested model differs from the session's current one,
+// the explicit switch must still be sent verbatim.
+func TestHermesSendsSetModelWhenModelDiffersFromCurrent(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScriptWithCurrentModel(recordPath, "ses_new", "custom:some-default-model")))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+		Model:   "custom:deepseek-v4-pro",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/set_model")
+	params, ok := frame["params"].(map[string]any)
+	if !ok {
+		t.Fatalf("session/set_model params: got %T, want map", frame["params"])
+	}
+	if params["modelId"] != "custom:deepseek-v4-pro" {
+		t.Errorf("session/set_model.modelId = %v, want custom:deepseek-v4-pro", params["modelId"])
 	}
 }
 

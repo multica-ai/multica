@@ -342,6 +342,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var finalError string
 		var sessionID string
 		effectiveModel := strings.TrimSpace(opts.Model)
+		// The model id the runtime reports as current right after
+		// session/new or session/resume. Used to skip a redundant
+		// session/set_model when we would otherwise re-select the model the
+		// session is already on (see the set_model gate below).
+		var sessionCurrentModel string
 
 		// 1. Initialize handshake.
 		initResult, err := c.request(runCtx, "initialize", map[string]any{
@@ -397,8 +402,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					"actual", sessionID,
 				)
 			}
+			sessionCurrentModel = extractACPCurrentModelID(result)
 			if effectiveModel == "" {
-				effectiveModel = extractACPCurrentModelID(result)
+				effectiveModel = sessionCurrentModel
 			}
 		} else {
 			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model, mcpServers))
@@ -415,8 +421,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
+			sessionCurrentModel = extractACPCurrentModelID(result)
 			if effectiveModel == "" {
-				effectiveModel = extractACPCurrentModelID(result)
+				effectiveModel = sessionCurrentModel
 			}
 		}
 
@@ -431,7 +438,22 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// if we silently fell back to hermes' default model the
 		// user would think their pick was honoured while the
 		// task actually ran on something else.
-		if opts.Model != "" {
+		//
+		// Skip the call when the session already reports this exact model as
+		// current. Hermes' set_model re-runs provider auto-detection on the
+		// model id, and for a `provider:model` id whose parsed provider equals
+		// the session's current provider it can mis-route to a different
+		// provider (e.g. custom:deepseek-v4-pro → OpenRouter) and fail with an
+		// auth error. Re-selecting the model the session is already on is pure
+		// downside. An empty sessionCurrentModel (older runtime or unparsable
+		// state) falls through and still sends set_model, preserving prior
+		// behaviour. See MUL-5029 / NousResearch/hermes-agent#59089.
+		if opts.Model != "" && effectiveModel == sessionCurrentModel {
+			b.cfg.Logger.Info("hermes session already on requested model; skipping redundant set_model",
+				"model", opts.Model,
+				"session_id", sessionID,
+			)
+		} else if opts.Model != "" {
 			if _, err := c.request(runCtx, "session/set_model", map[string]any{
 				"sessionId": sessionID,
 				"modelId":   opts.Model,
