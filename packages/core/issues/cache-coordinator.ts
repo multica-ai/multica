@@ -94,19 +94,27 @@ export interface IssueCacheChangeResult {
 }
 
 /** The server contract a bucketed list key encodes. `myListSorted` keys are
- *  `["issues", wsId, "my", scope, filter, sort]`; the workspace list carries
- *  no filter. The `byStatus` shape check upstream keeps grouped/flat caches
- *  under the same prefixes out of this path. */
-function listContractFromKey(
-  key: QueryKey,
-): { scope: string | undefined; filter: MyIssuesFilter } {
+ *  `["issues", wsId, "my", scope, filter, sort]`; the workspace list is
+ *  `["issues", wsId, "list", sort]` and carries no filter. The `byStatus`
+ *  shape check upstream keeps grouped/flat caches under the same prefixes out
+ *  of this path. */
+function listContractFromKey(key: QueryKey): {
+  scope: string | undefined;
+  filter: MyIssuesFilter;
+  sort: IssueSortParam;
+} {
   if (key[2] === "my") {
     return {
       scope: typeof key[3] === "string" ? key[3] : undefined,
       filter: (key[4] ?? {}) as MyIssuesFilter,
+      sort: (key[5] ?? {}) as IssueSortParam,
     };
   }
-  return { scope: undefined, filter: {} };
+  return {
+    scope: undefined,
+    filter: {},
+    sort: (key[3] ?? {}) as IssueSortParam,
+  };
 }
 
 function bucketedListEntries(
@@ -154,6 +162,19 @@ function patchFieldChanged<K extends keyof Issue>(
   return !base || !Object.is(patch[field], base[field]);
 }
 
+/** Whether the patch changes at least one issue field relative to `base`.
+ *  Every persisted edit also advances `updated_at` server-side even though the
+ *  optimistic request payload does not carry that timestamp, so this doubles
+ *  as "did updated_at advance" for `updated_at`-sorted surfaces. */
+function patchChangesAnyIssueField(
+  patch: Partial<Issue>,
+  base: Issue | undefined,
+): boolean {
+  return Object.keys(patch).some((field) =>
+    patchFieldChanged(patch, base, field as keyof Issue),
+  );
+}
+
 /** Whether a patch can change a flat window's membership or ordering. A
  * loaded row is always patched optimistically; only windows whose server
  * contract depends on the changed field need the follow-up refetch. */
@@ -164,9 +185,7 @@ function flatWindowNeedsReconcile(
   changed: IssueChangedDims,
 ) {
   const { scope, filter, sort } = flatContractFromKey(key);
-  const anyIssueFieldChanged = Object.keys(patch).some((field) =>
-    patchFieldChanged(patch, base, field as keyof Issue),
-  );
+  const anyIssueFieldChanged = patchChangesAnyIssueField(patch, base);
 
   if (listFilterDependsOn(scope, filter, changed)) return true;
   if (filter.q && patchFieldChanged(patch, base, "title")) return true;
@@ -245,9 +264,22 @@ export function applyIssueChange(
   let prevIssue: Issue | undefined = baseIssue;
 
   for (const [key, data] of bucketedListEntries(qc, wsId)) {
-    const { scope, filter } = listContractFromKey(key);
+    const { scope, filter, sort } = listContractFromKey(key);
     const loc = findIssueLocation(data, id);
     const filterTouched = listFilterDependsOn(scope, filter, changed);
+
+    // "Updated date" sort: every persisted edit advances updated_at, but the
+    // optimistic patch carries no server timestamp and a loaded card keeps its
+    // slot, so the board has drifted out of order. The right slot is server
+    // knowledge — mark the key stale so the refetch re-sorts it. This mirrors
+    // the updated_at case in flatWindowNeedsReconcile and, like it, does not
+    // gate on this list's membership (an off-window member should surface too).
+    if (
+      sort.sort_by === "updated_at" &&
+      patchChangesAnyIssueField(patch, loc?.issue ?? baseIssue)
+    ) {
+      staleKeys.push(key);
+    }
 
     if (loc) {
       if (!prevIssue) prevIssue = loc.issue;
@@ -420,6 +452,42 @@ export function invalidateIssueDerivatives(
   if (opts.statusOrProjectChanged) {
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
   }
+}
+
+/** True when any object part of a query key encodes an "Updated date" ordering
+ *  (`sort_by: "updated_at"`). Bucketed status boards and flat tables keep the
+ *  sort in a standalone bag; assignee-grouped boards merge it into their filter
+ *  bag (see `issueAssigneeGroupsOptions`). Scanning every object part matches
+ *  all of those surfaces — workspace and My Issues — with one rule. */
+function queryKeyHasUpdatedAtSort(key: QueryKey): boolean {
+  return key.some(
+    (part) =>
+      !!part &&
+      typeof part === "object" &&
+      !Array.isArray(part) &&
+      (part as Record<string, unknown>).sort_by === "updated_at",
+  );
+}
+
+/**
+ * Refetch every loaded issue list/board ordered by "Updated date" so a card
+ * whose `updated_at` just advanced re-sorts to its true slot. Used by events
+ * that bump `updated_at` without carrying the new timestamp or a field patch:
+ * `comment:created` (MUL-5009) and the property/metadata WS events, all of
+ * which advance the issue's `updated_at` server-side but bypass the
+ * coordinator's field-diff path. Covers status boards, flat tables, AND
+ * assignee-grouped boards (workspace + My Issues); only `updated_at`-sorted
+ * keys are touched. The refetch is authoritative (server order + tie-breaks),
+ * which also surfaces a touched card sitting beyond the loaded window.
+ */
+export function invalidateUpdatedAtSortedIssueLists(
+  qc: QueryClient,
+  wsId: string,
+): void {
+  qc.invalidateQueries({
+    queryKey: issueKeys.all(wsId),
+    predicate: (query) => queryKeyHasUpdatedAtSort(query.queryKey),
+  });
 }
 
 /** Invalidate the stale keys reported by {@link applyIssueChange}, deduped —

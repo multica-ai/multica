@@ -6,6 +6,7 @@ import {
   applyIssueChange,
   invalidateIssueDerivatives,
   invalidateStaleListKeys,
+  invalidateUpdatedAtSortedIssueLists,
   type IssueFlatCache,
 } from "./cache-coordinator";
 import {
@@ -270,6 +271,11 @@ export function onIssueMetadataChanged(
     old ? { ...old, metadata } : old,
   );
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  // A metadata write bumps issue.updated_at server-side (SetIssueMetadataKey /
+  // DeleteIssueMetadataKey), but the patches above keep each card's slot, so a
+  // board/table sorted by "Updated date" would stay in the old order. This
+  // event is server-committed, so refetch those keys to re-sort (MUL-5016).
+  invalidateUpdatedAtSortedIssueLists(qc, wsId);
 }
 
 /**
@@ -292,6 +298,13 @@ export function onIssuePropertiesChanged(
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   invalidatePropertyWindowQueries(qc, wsId);
+  // A property write also bumps issue.updated_at server-side
+  // (SetIssuePropertyValue / DeleteIssuePropertyValue). invalidatePropertyWindow
+  // Queries only refetches property-filtered/-sorted windows, so a status board
+  // or flat table sorted by "Updated date" (no property param) would keep the
+  // old order. Refetch those too. Only committed callers reach here (WS event +
+  // mutation onSuccess); the optimistic leg uses patchIssueProperties (MUL-5016).
+  invalidateUpdatedAtSortedIssueLists(qc, wsId);
 }
 
 /** Patch only deterministic entity snapshots. Optimistic mutation legs use
