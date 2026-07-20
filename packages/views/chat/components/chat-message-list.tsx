@@ -194,6 +194,16 @@ export function ChatMessageList({
         customScrollParent={scrollContainerEl}
         data={messages}
         firstItemIndex={firstIndex}
+        // Open pinned to the newest message. The list is remounted per session
+        // (`key={activeSessionId}` upstream), so this initial position is
+        // re-applied on every session switch. Without it a fresh Virtuoso
+        // renders from the top and the only thing that can scroll it down is
+        // `followOutput`, which reacts to post-mount data growth — leaving the
+        // landing spot racy: cached sessions resolve synchronously and stick at
+        // the top, while fetched ones sometimes catch a growth tick and land at
+        // the bottom. `align: "end"` bottom-aligns even a last message taller
+        // than the viewport, so switching sessions always shows the latest reply.
+        initialTopMostItemIndex={{ index: "LAST", align: "end" }}
         increaseViewportBy={{ top: 400, bottom: 600 }}
         atBottomThreshold={120}
         atBottomStateChange={setIsNearBottom}

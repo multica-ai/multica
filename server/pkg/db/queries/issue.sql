@@ -65,6 +65,17 @@ LIMIT $2 OFFSET $3;
 SELECT * FROM issue
 WHERE id = $1;
 
+-- name: GetIssueGCStatus :one
+SELECT workspace_id, status, updated_at
+FROM issue
+WHERE id = $1;
+
+-- name: ListIssueGCStatuses :many
+SELECT id, status, updated_at
+FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND id = ANY(sqlc.arg('issue_ids')::uuid[]);
+
 -- name: GetIssueInWorkspace :one
 SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2;

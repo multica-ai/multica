@@ -668,6 +668,25 @@ func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginPara
 	return i, err
 }
 
+const getIssueGCStatus = `-- name: GetIssueGCStatus :one
+SELECT workspace_id, status, updated_at
+FROM issue
+WHERE id = $1
+`
+
+type GetIssueGCStatusRow struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Status      string             `json:"status"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetIssueGCStatus(ctx context.Context, id pgtype.UUID) (GetIssueGCStatusRow, error) {
+	row := q.db.QueryRow(ctx, getIssueGCStatus, id)
+	var i GetIssueGCStatusRow
+	err := row.Scan(&i.WorkspaceID, &i.Status, &i.UpdatedAt)
+	return i, err
+}
+
 const getIssueInWorkspace = `-- name: GetIssueInWorkspace :one
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties FROM issue
 WHERE id = $1 AND workspace_id = $2
@@ -827,6 +846,44 @@ func (q *Queries) ListChildrenByParents(ctx context.Context, arg ListChildrenByP
 			&i.Stage,
 			&i.Properties,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueGCStatuses = `-- name: ListIssueGCStatuses :many
+SELECT id, status, updated_at
+FROM issue
+WHERE workspace_id = $1
+  AND id = ANY($2::uuid[])
+`
+
+type ListIssueGCStatusesParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	IssueIds    []pgtype.UUID `json:"issue_ids"`
+}
+
+type ListIssueGCStatusesRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	Status    string             `json:"status"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListIssueGCStatuses(ctx context.Context, arg ListIssueGCStatusesParams) ([]ListIssueGCStatusesRow, error) {
+	rows, err := q.db.Query(ctx, listIssueGCStatuses, arg.WorkspaceID, arg.IssueIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueGCStatusesRow{}
+	for rows.Next() {
+		var i ListIssueGCStatusesRow
+		if err := rows.Scan(&i.ID, &i.Status, &i.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

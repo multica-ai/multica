@@ -314,9 +314,9 @@ func TestAttributionForMergedComment_HonorsFailClosedPolicy(t *testing.T) {
 // real enqueue / coalesce path stamps it) that sets originator_user_id but leaves
 // accountable_user_id NULL — or different — is rejected at the database, so a future
 // code path that bypasses finalizeAttribution fails loudly instead of silently
-// mis-attributing an audited run (the #5192 comment-merge bug class). The legacy-row
-// exemption (originator_source IS NULL) is covered by
-// TestAttributionInvariantCheck_ExemptsLegacyRows.
+// mis-attributing an audited run (the #5192 comment-merge bug class). The strict
+// post-backfill handling of source-NULL rows is covered by
+// TestAttributionInvariantCheck_RejectsUnbackfilledLegacyRows.
 func TestAttributionInvariantCheck_RejectsBypass(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
@@ -355,36 +355,21 @@ func TestAttributionInvariantCheck_RejectsBypass(t *testing.T) {
 	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, okTaskID) })
 }
 
-// TestAttributionInvariantCheck_ExemptsLegacyRows is the upgrade-safety test Elon
-// required (MUL-4302, Option A): a pre-migration row — originator set, accountable
-// NULL, and originator_source NULL (its column did not exist yet) — must survive the
-// NOT VALID CHECK and, crucially, must still accept a later status UPDATE by the new
-// backend (claim / complete / cancel), even though that UPDATE does not touch the
-// attribution columns. This reproduces the cross-deployment stale-task scenario the
-// two-phase rollout protects; without the `originator_source IS NULL` exemption the
-// UPDATE would fail the CHECK on the whole updated row.
-func TestAttributionInvariantCheck_ExemptsLegacyRows(t *testing.T) {
+// TestAttributionInvariantCheck_RejectsUnbackfilledLegacyRows verifies the second
+// phase of the two-phase rollout (MUL-4302). Once the out-of-band backfill is complete,
+// originator_source=NULL no longer exempts a row from the one-way invariant. A stale
+// writer or missed backfill that tries to persist originator set with accountable NULL
+// must fail loudly instead of recreating the legacy shape.
+func TestAttributionInvariantCheck_RejectsUnbackfilledLegacyRows(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
 	_, userA, agentID, issueID := seedAttributionFixture(t, pool)
 
-	// A legacy-shaped row: originator set, accountable + source NULL. The exemption
-	// admits it (as it admits the real pre-migration rows the migration cannot rewrite).
-	var legacyID string
-	if err := pool.QueryRow(ctx, `
+	if _, err := pool.Exec(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, originator_user_id)
-		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), $2, 'queued', 0, $3) RETURNING id`,
-		agentID, issueID, userA).Scan(&legacyID); err != nil {
-		t.Fatalf("legacy-shaped row must be admitted by the exemption, got %v", err)
-	}
-	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, legacyID) })
-
-	// The status transitions the new backend performs on such a stale task must all
-	// succeed — this is exactly what a bare invariant CHECK would have broken.
-	for _, status := range []string{"running", "completed", "cancelled"} {
-		if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status = $2 WHERE id = $1`, legacyID, status); err != nil {
-			t.Fatalf("status UPDATE to %q on a legacy row must succeed, got %v", status, err)
-		}
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), $2, 'queued', 0, $3)`,
+		agentID, issueID, userA); err == nil {
+		t.Fatal("expected the strict CHECK to reject an unbackfilled legacy row, but insert succeeded")
 	}
 }
 

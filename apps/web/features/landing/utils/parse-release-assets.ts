@@ -21,6 +21,8 @@ export interface GitHubAsset {
 export interface DownloadAssets {
   macArm64Dmg?: string;
   macArm64Zip?: string;
+  macX64Dmg?: string;
+  macX64Zip?: string;
   winX64Exe?: string;
   winArm64Exe?: string;
   linuxAmd64AppImage?: string;
@@ -63,9 +65,13 @@ export function parseReleaseAssets(raw: GitHubAsset[]): DownloadAssets {
     const url = asset.browser_download_url;
 
     if (platform === "mac") {
-      if (archLower !== "arm64") continue; // we only ship arm64 today
-      if (extLower === "dmg") out.macArm64Dmg = url;
-      else if (extLower === "zip") out.macArm64Zip = url;
+      if (archLower === "arm64") {
+        if (extLower === "dmg") out.macArm64Dmg = url;
+        else if (extLower === "zip") out.macArm64Zip = url;
+      } else if (archLower === "x64") {
+        if (extLower === "dmg") out.macX64Dmg = url;
+        else if (extLower === "zip") out.macX64Zip = url;
+      }
     } else if (platform === "windows") {
       if (extLower !== "exe") continue;
       if (archLower === "x64") out.winX64Exe = url;

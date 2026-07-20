@@ -655,6 +655,7 @@
     "copy_filtered": "필터 결과 복사",
     "copied": "복사했습니다",
     "waiting_events": "이벤트를 기다리는 중...",
+    "antigravity_live_unavailable": "Antigravity는 현재 실시간 실행 이벤트를 제공하지 않습니다. 작업이 완료되면 실행 기록을 확인할 수 있습니다.",
     "no_data": "기록된 실행 데이터가 없습니다.",
     "sort_label": "정렬",
     "sort_chronological": "오래된 순",

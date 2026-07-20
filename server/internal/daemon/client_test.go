@@ -214,6 +214,38 @@ func TestIsTransientError(t *testing.T) {
 	}
 }
 
+func TestIsIssueGCBatchUnsupported(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "old server unmatched route",
+			err:  &requestError{StatusCode: http.StatusNotFound, Body: "404 page not found"},
+			want: true,
+		},
+		{
+			name: "workspace access denied",
+			err:  &requestError{StatusCode: http.StatusNotFound, Body: `{"error":"not found"}`},
+			want: false,
+		},
+		{
+			name: "transient server error",
+			err:  &requestError{StatusCode: http.StatusInternalServerError, Body: "failure"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isIssueGCBatchUnsupported(tt.err); got != tt.want {
+				t.Fatalf("isIssueGCBatchUnsupported() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPostJSONWithRetry_TransientThenSuccess(t *testing.T) {
 	defer noSleepRetry(t)()
 

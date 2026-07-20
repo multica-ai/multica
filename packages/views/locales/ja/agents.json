@@ -647,6 +647,7 @@
     "copy_filtered": "フィルター結果をコピー",
     "copied": "コピーしました",
     "waiting_events": "イベントを待機中...",
+    "antigravity_live_unavailable": "Antigravity は現在、リアルタイム実行イベントを提供していません。タスク完了後に実行記録を確認できます。",
     "no_data": "記録された実行データがありません。",
     "sort_label": "並び替え",
     "sort_chronological": "古い順",

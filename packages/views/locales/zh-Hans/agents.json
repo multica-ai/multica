@@ -747,6 +747,7 @@
     "copy_filtered": "复制筛选结果",
     "copied": "已复制",
     "waiting_events": "等待事件中...",
+    "antigravity_live_unavailable": "Antigravity 暂不提供实时执行事件。task 完成后即可查看执行记录。",
     "no_data": "未记录执行数据。",
     "sort_label": "排序",
     "sort_chronological": "时间顺序",

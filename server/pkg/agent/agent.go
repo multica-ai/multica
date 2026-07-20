@@ -32,6 +32,12 @@ type ExecOptions struct {
 	MaxTurns                  int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
+	// IdleWatchdogTimeout optionally narrows the daemon's generic no-message
+	// watchdog for this execution. Zero keeps the daemon-wide window, and a
+	// value above that window cannot extend the global safety bound. The
+	// daemon-wide zero still disables the watchdog entirely, and an in-flight
+	// tool continues to use the separate tool watchdog budget.
+	IdleWatchdogTimeout time.Duration
 	// HandshakeTimeout bounds startup RPCs for providers with a long-lived
 	// protocol transport. It is currently consumed by Codex app-server;
 	// zero uses the provider default rather than disabling the bound.
@@ -130,18 +136,28 @@ type TokenUsage struct {
 // Result is the final outcome after an agent session completes.
 type Result struct {
 	Status     string // "completed", "failed", "aborted", "timeout", "cancelled"
-	Output     string // accumulated text output
+	Output     string // final user-facing output selected by the backend
 	Error      string // error message if failed
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	// codexInitializeRetrySafe is provider-internal evidence that an
+	// initialize timeout happened before semantic activity and after the
+	// process tree was reaped. It is intentionally not part of the public
+	// result contract.
+	codexInitializeRetrySafe bool
 }
 
 // Config configures a Backend instance.
 type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli, traecli, grok)
+	CLIVersion     string            // detected version paired with ExecutablePath; observation only, never used to choose behavior
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
+	TaskID         string
+	RuntimeID      string
+	DaemonVersion  string
+	CodexVersion   string
 }
 
 // New creates a Backend for the given agent type.

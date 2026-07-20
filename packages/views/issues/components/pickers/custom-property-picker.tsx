@@ -47,24 +47,69 @@ export function CustomPropertyValueEditor({
   property: IssueProperty;
   defaultOpen?: boolean;
 }) {
-  const { t } = useT("issues");
-  const [open, setOpen] = useState(defaultOpen);
   const setProperty = useSetIssueProperty();
   const unsetProperty = useUnsetIssueProperty();
-
   const value = issue.properties[property.id];
-  const hasValue = value !== undefined;
-
   const onError = (error: unknown) =>
     toast.error(error instanceof Error ? error.message : String(error));
 
-  const commit = (next: IssuePropertyValue) =>
-    setProperty.mutate(
-      { issueId: issue.id, propertyId: property.id, value: next },
-      { onError },
-    );
-  const clear = () =>
-    unsetProperty.mutate({ issueId: issue.id, propertyId: property.id }, { onError });
+  return (
+    <CustomPropertyValueInput
+      property={property}
+      value={value}
+      defaultOpen={defaultOpen}
+      onChange={(next) => {
+        if (next === undefined) {
+          unsetProperty.mutate(
+            { issueId: issue.id, propertyId: property.id },
+            { onError },
+          );
+          return;
+        }
+        setProperty.mutate(
+          { issueId: issue.id, propertyId: property.id, value: next },
+          { onError },
+        );
+      }}
+    />
+  );
+}
+
+/**
+ * Mutation-free custom-property editor. Create flows use this while an issue
+ * still exists only as a draft; issue detail wraps it above with the normal
+ * optimistic mutations.
+ */
+export function CustomPropertyValueInput({
+  property,
+  value,
+  onChange,
+  defaultOpen = false,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  trigger,
+  triggerRender,
+}: {
+  property: IssueProperty;
+  value: IssuePropertyValue | undefined;
+  onChange: (value: IssuePropertyValue | undefined) => void;
+  defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  trigger?: React.ReactNode;
+  triggerRender?: React.ReactElement<Record<string, unknown>>;
+}) {
+  const { t } = useT("issues");
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = controlledOnOpenChange ?? setInternalOpen;
+  const hasValue = value !== undefined;
+
+  const commit = (next: IssuePropertyValue) => onChange(next);
+  const clear = () => onChange(undefined);
+  const valueTrigger = trigger ?? (
+    <CustomPropertyValueDisplay property={property} value={value} />
+  );
 
   const emptyLabel = (
     <span className="text-muted-foreground">
@@ -100,7 +145,8 @@ export function CustomPropertyValueEditor({
         open={open}
         onOpenChange={setOpen}
         align="start"
-        trigger={<CustomPropertyValueDisplay property={property} value={value} />}
+        trigger={valueTrigger}
+        triggerRender={triggerRender}
         footer={clearFooter}
       >
         <p className="px-2 py-1.5 text-xs text-muted-foreground">
@@ -119,7 +165,8 @@ export function CustomPropertyValueEditor({
           onOpenChange={setOpen}
           align="start"
           searchable={options.length > 7}
-          trigger={<CustomPropertyValueDisplay property={property} value={value} />}
+          trigger={valueTrigger}
+          triggerRender={triggerRender}
           footer={clearFooter}
         >
           {options.map((option) => (
@@ -154,7 +201,8 @@ export function CustomPropertyValueEditor({
           onOpenChange={setOpen}
           align="start"
           searchable={options.length > 7}
-          trigger={<CustomPropertyValueDisplay property={property} value={value} />}
+          trigger={valueTrigger}
+          triggerRender={triggerRender}
           footer={clearFooter}
         >
           {options.map((option) => (
@@ -174,8 +222,11 @@ export function CustomPropertyValueEditor({
       const date = typeof value === "string" ? dateOnlyToLocalDate(value) : undefined;
       return (
         <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden">
-            <CustomPropertyValueDisplay property={property} value={value} />
+          <PopoverTrigger
+            className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+            render={triggerRender}
+          >
+            {valueTrigger}
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0" align="start">
             <Calendar
@@ -212,7 +263,8 @@ export function CustomPropertyValueEditor({
           open={open}
           onOpenChange={setOpen}
           align="start"
-          trigger={<CustomPropertyValueDisplay property={property} value={value} />}
+          trigger={valueTrigger}
+          triggerRender={triggerRender}
           footer={clearFooter}
         >
           <PickerItem
@@ -245,6 +297,8 @@ export function CustomPropertyValueEditor({
           onCommit={commit}
           onClear={clear}
           emptyLabel={emptyLabel}
+          trigger={valueTrigger}
+          triggerRender={triggerRender}
         />
       );
   }
@@ -259,6 +313,8 @@ function TextishPropertyEditor({
   onCommit,
   onClear,
   emptyLabel,
+  trigger,
+  triggerRender,
 }: {
   property: IssueProperty;
   value: IssuePropertyValue | undefined;
@@ -267,6 +323,8 @@ function TextishPropertyEditor({
   onCommit: (next: IssuePropertyValue) => void;
   onClear: () => void;
   emptyLabel: React.ReactNode;
+  trigger?: React.ReactNode;
+  triggerRender?: React.ReactElement<Record<string, unknown>>;
 }) {
   const { t } = useT("issues");
   const [draft, setDraft] = useState("");
@@ -301,12 +359,15 @@ function TextishPropertyEditor({
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden">
-        {value === undefined ? (
+      <PopoverTrigger
+        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+        render={triggerRender}
+      >
+        {trigger ?? (value === undefined ? (
           emptyLabel
         ) : (
           <CustomPropertyValueDisplay property={property} value={value} />
-        )}
+        ))}
       </PopoverTrigger>
       <PopoverContent className="w-64 p-2" align="start">
         <form

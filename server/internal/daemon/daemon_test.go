@@ -240,6 +240,108 @@ func TestLayerCustomEnvAndHermesHome(t *testing.T) {
 	}
 }
 
+func TestRepoCheckoutModeFor(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, provider, goos, want string
+	}{
+		{name: "Linux Codex isolates Git metadata", provider: "codex", goos: "linux", want: repoCheckoutModeIsolated},
+		{name: "macOS Codex keeps worktree", provider: "codex", goos: "darwin"},
+		{name: "Windows Codex keeps worktree", provider: "codex", goos: "windows"},
+		{name: "Linux Claude keeps worktree", provider: "claude", goos: "linux"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := repoCheckoutModeFor(tt.provider, tt.goos); got != tt.want {
+				t.Fatalf("repoCheckoutModeFor(%q, %q) = %q, want %q", tt.provider, tt.goos, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-Codex runtime is unchanged", func(t *testing.T) {
+		t.Parallel()
+		codexHome := t.TempDir()
+		if err := configureCodexTaskShellEnvironment("claude", codexHome, nil, nil, nil, slog.Default()); err != nil {
+			t.Fatalf("configureCodexTaskShellEnvironment: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(codexHome, "config.toml")); !os.IsNotExist(err) {
+			t.Fatalf("non-Codex runtime unexpectedly wrote config.toml: %v", err)
+		}
+	})
+
+	t.Run("Codex policy uses platform and explicit task environment", func(t *testing.T) {
+		t.Parallel()
+		codexHome := t.TempDir()
+		inherited := []string{
+			"SystemRoot=C:\\Windows",
+			"USERPROFILE=C:\\Users\\test",
+			"OPENAI_API_KEY=host-secret",
+			"MULTICA_LLM_API_KEY=daemon-secret",
+		}
+		agentEnv := map[string]string{
+			"CUSTOM_ACCESS_TOKEN": "agent-secret",
+			"CUSTOM_FLAG":         "enabled",
+			"UNAUTHORIZED_TOKEN":  "daemon-secret",
+			"MULTICA_SERVER_URL":  "https://task.example",
+			"MULTICA_TOKEN":       "mat_task",
+		}
+		agentCustomEnv := map[string]string{
+			"CUSTOM_ACCESS_TOKEN": "agent-secret",
+			"CUSTOM_FLAG":         "enabled",
+		}
+		if err := configureCodexTaskShellEnvironment("codex", codexHome, inherited, agentEnv, agentCustomEnv, slog.Default()); err != nil {
+			t.Fatalf("configureCodexTaskShellEnvironment: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+		if err != nil {
+			t.Fatalf("read config.toml: %v", err)
+		}
+		config := string(data)
+		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_ACCESS_TOKEN", "CUSTOM_FLAG", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
+			if !strings.Contains(config, want) {
+				t.Errorf("config.toml missing %q:\n%s", want, config)
+			}
+		}
+		for _, unwanted := range []string{"OPENAI_API_KEY", "MULTICA_LLM_API_KEY", "UNAUTHORIZED_TOKEN", "MULTICA_*", "agent-secret", "daemon-secret", "mat_task"} {
+			if strings.Contains(config, unwanted) {
+				t.Errorf("config.toml unexpectedly contains %q:\n%s", unwanted, config)
+			}
+		}
+	})
+
+	t.Run("Codex without task home fails closed", func(t *testing.T) {
+		t.Parallel()
+		err := configureCodexTaskShellEnvironment("codex", "", nil, map[string]string{"MULTICA_TOKEN": "mat_task"}, nil, slog.Default())
+		if err == nil || !strings.Contains(err.Error(), "CODEX_HOME is missing") {
+			t.Fatalf("error = %v, want missing CODEX_HOME", err)
+		}
+	})
+}
+
+func TestCodexShellAuthorizedCustomEnvNamesUsesDaemonBlocklist(t *testing.T) {
+	t.Parallel()
+
+	got := codexShellAuthorizedCustomEnvNames(map[string]string{
+		"CUSTOM_ACCESS_TOKEN": "agent-secret",
+		"custom_secret":       "agent-secret",
+		"MULTICA_TOKEN":       "must-not-authorize",
+		"PATH":                "/must/not/override",
+		"HOME":                "/must/not/override",
+		"CODEX_HOME":          "/must/not/override",
+		"":                    "must-not-authorize",
+	})
+	slices.Sort(got)
+	want := []string{"CUSTOM_ACCESS_TOKEN", "custom_secret"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("codexShellAuthorizedCustomEnvNames() = %#v, want %#v", got, want)
+	}
+}
+
 func TestTaskScopedAuthToken(t *testing.T) {
 	t.Parallel()
 
@@ -407,7 +509,9 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		// directly. Inlining the full runtime brief duplicates that context and
 		// can trip upstream provider safety filters on otherwise harmless tasks.
 		{provider: "hermes", want: false},
-		{provider: "kiro", want: true},
+		// Kiro CLI loads a root AGENTS.md in ACP sessions. Inlining the same
+		// runtime brief duplicates it at the start of every user turn.
+		{provider: "kiro", want: false},
 		{provider: "kimi", want: true},
 		{provider: "traecli", want: true},
 		{provider: "codex", want: false},
@@ -1772,6 +1876,94 @@ func TestExecuteAndDrain_IdleWatchdog_FiresWhenNoMessageEverArrives(t *testing.T
 	}
 }
 
+func TestExecuteAndDrain_IdleWatchdog_UsesPerRunOverride(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 500 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	start := time.Now()
+	result, _, err := d.executeAndDrain(
+		ctx,
+		idleWatchdogBackend{emitOne: true},
+		"p",
+		agent.ExecOptions{IdleWatchdogTimeout: 50 * time.Millisecond},
+		slog.Default(),
+		"t-idle-override",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected status=idle_watchdog, got %q (err=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "50ms") {
+		t.Fatalf("expected error to report the per-run threshold, got %q", result.Error)
+	}
+	if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
+		t.Fatalf("per-run watchdog override did not fire promptly: %s", elapsed)
+	}
+}
+
+func TestExecuteAndDrain_IdleWatchdog_GlobalDisableWinsOverPerRunOverride(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 0
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+
+	result, _, err := d.executeAndDrain(
+		ctx,
+		idleWatchdogBackend{emitOne: true},
+		"p",
+		agent.ExecOptions{IdleWatchdogTimeout: 20 * time.Millisecond},
+		slog.Default(),
+		"t-idle-global-off",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "cancelled" {
+		t.Fatalf("global watchdog disable must win; got status=%q (err=%q)", result.Status, result.Error)
+	}
+}
+
+func TestExecuteAndDrain_IdleWatchdog_PerRunOverrideCannotExtendGlobalWindow(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	result, _, err := d.executeAndDrain(
+		ctx,
+		idleWatchdogBackend{emitOne: true},
+		"p",
+		agent.ExecOptions{IdleWatchdogTimeout: 500 * time.Millisecond},
+		slog.Default(),
+		"t-idle-global-bound",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected status=idle_watchdog, got %q (err=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "50ms") {
+		t.Fatalf("provider override must not extend the global threshold, got %q", result.Error)
+	}
+}
+
 func TestExecuteAndDrain_IdleWatchdog_DisabledWhenZero(t *testing.T) {
 	t.Parallel()
 
@@ -1893,6 +2085,30 @@ func TestExecuteAndDrain_IdleWatchdog_DoesNotFireDuringInFlightToolCall(t *testi
 	}
 	if result.Status != "completed" {
 		t.Fatalf("expected status=completed, got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
+func TestExecuteAndDrain_IdleWatchdog_PerRunOverrideStillUsesToolWindow(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 500 * time.Millisecond
+	d.cfg.AgentToolWatchdog = 500 * time.Millisecond
+
+	result, _, err := d.executeAndDrain(
+		context.Background(),
+		longToolCallBackend{toolSilence: 200 * time.Millisecond},
+		"p",
+		agent.ExecOptions{IdleWatchdogTimeout: 50 * time.Millisecond},
+		slog.Default(),
+		"t-long-tool-override",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("per-run idle override must not replace the tool window; got status=%q (err=%q)", result.Status, result.Error)
 	}
 }
 
@@ -2333,6 +2549,17 @@ type reportTaskResultRecorder struct {
 	payload map[string]any
 }
 
+func TestTerminalTaskReportTimeoutCoversRetrySchedule(t *testing.T) {
+	client := NewClient("http://example.invalid")
+	worstCase := time.Duration(len(defaultTerminalRetrySchedule)+1) * client.client.Timeout
+	for _, delay := range defaultTerminalRetrySchedule {
+		worstCase += delay
+	}
+	if terminalTaskReportTimeout < worstCase {
+		t.Fatalf("terminal report timeout = %s, want at least retry worst case %s", terminalTaskReportTimeout, worstCase)
+	}
+}
+
 func (r *reportTaskResultRecorder) handler(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -2388,6 +2615,63 @@ func TestReportTaskResult_CompletedHitsCompleteEndpoint(t *testing.T) {
 	}
 	if rec.payload["session_id"] != "ses-1" {
 		t.Errorf("session_id: got %v", rec.payload["session_id"])
+	}
+}
+
+func TestReportTaskResult_CancelledParentStillReportsTerminalState(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		result     TaskResult
+		wantSuffix string
+	}{
+		{
+			name: "complete",
+			result: TaskResult{
+				Status:     "completed",
+				Comment:    "all good",
+				BranchName: "agent/foo",
+				SessionID:  "ses-complete",
+				WorkDir:    "/tmp/complete",
+			},
+			wantSuffix: "/complete",
+		},
+		{
+			name: "fail",
+			result: TaskResult{
+				Status:        "blocked",
+				Comment:       "provider unavailable",
+				SessionID:     "ses-fail",
+				WorkDir:       "/tmp/fail",
+				FailureReason: "agent_error.provider_unavailable",
+			},
+			wantSuffix: "/fail",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if !strings.HasSuffix(req.URL.Path, tc.wantSuffix) {
+					t.Errorf("terminal callback path = %q, want suffix %q", req.URL.Path, tc.wantSuffix)
+				}
+				calls.Add(1)
+				w.WriteHeader(http.StatusOK)
+			}))
+			t.Cleanup(srv.Close)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+			d.reportTaskResult(ctx, "task-cancelled-parent", tc.result, slog.Default())
+
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("terminal callback calls = %d, want 1", got)
+			}
+		})
 	}
 }
 
@@ -2595,6 +2879,76 @@ func TestReportTaskResult_PermanentCompleteFallsBackToFail(t *testing.T) {
 	}
 	if got := failCalls.Load(); got != 1 {
 		t.Fatalf("permanent /complete should fall back to /fail exactly once, got %d", got)
+	}
+}
+
+func TestReportTaskResult_CancelledParentStillRunsPermanentFailureFallback(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var completeCalls, failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/complete"):
+			completeCalls.Add(1)
+			w.WriteHeader(http.StatusBadRequest)
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(ctx, "task-cancelled-fallback", TaskResult{
+		Status:  "completed",
+		Comment: "ok",
+	}, slog.Default())
+
+	if got := completeCalls.Load(); got != 1 {
+		t.Fatalf("complete calls = %d, want 1", got)
+	}
+	if got := failCalls.Load(); got != 1 {
+		t.Fatalf("fallback fail calls = %d, want 1", got)
+	}
+}
+
+func TestHandleTask_BareErrorReportsFailureWithCancelledParent(t *testing.T) {
+	t.Parallel()
+
+	var failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasSuffix(req.URL.Path, "/fail") {
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+		}
+		failCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "codex"}},
+		cancelPollInterval: time.Hour,
+	}
+	d.runner = taskRunnerFunc(func(runCtx context.Context, _ Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
+		if !errors.Is(runCtx.Err(), context.Canceled) {
+			t.Errorf("runner context error = %v, want context.Canceled", runCtx.Err())
+		}
+		return TaskResult{}, errors.New("runner exited during shutdown")
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	d.handleTask(ctx, Task{ID: "task-bare-error", RuntimeID: "rt-1"}, 0)
+
+	if got := failCalls.Load(); got != 1 {
+		t.Fatalf("fail callback calls = %d, want 1", got)
 	}
 }
 

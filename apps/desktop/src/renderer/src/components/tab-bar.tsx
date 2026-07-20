@@ -185,7 +185,10 @@ function SortableTabItem({
   canCloseOthers: boolean;
   isNew: boolean;
   shouldReduceMotion: boolean;
-  /** Hairline on the tab's left edge — hidden next to the active tab. */
+  /**
+   * Hairline on the tab's left edge — hidden next to the active tab, and
+   * faded out while either of the two tabs it divides is hovered.
+   */
   showSeparator: boolean;
 }) {
   const setActiveTab = useTabStore((s) => s.setActiveTab);
@@ -356,9 +359,12 @@ function SortableTabItem({
           />
         )}
         {showSeparator && (
+          // Fades in step with the neighbouring hover pill: both use a bare
+          // transition-opacity, so the hairline clears exactly as the pill
+          // arrives rather than lingering 2px off its rounded edge.
           <span
             aria-hidden
-            className="pointer-events-none absolute left-0 top-1/2 h-4 w-px -translate-y-1/2 bg-border"
+            className="pointer-events-none absolute left-0 top-1/2 h-4 w-px -translate-y-1/2 bg-surface-border transition-opacity group-hover/tab:opacity-0 prev-tab-hover:opacity-0"
           />
         )}
         <ContextMenu>
@@ -650,7 +656,7 @@ export function TabBar() {
                       unpinnedCount > 0 && (
                         <div
                           aria-hidden
-                          className="mx-1 mb-2.5 h-4 w-px shrink-0 self-end bg-border"
+                          className="mx-1 mb-2.5 h-4 w-px shrink-0 self-end bg-surface-border"
                         />
                       )}
                   </Fragment>

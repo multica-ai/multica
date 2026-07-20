@@ -18,14 +18,18 @@
       "minutes": "{{count}}分",
       "hours": "{{count}}時間",
       "days": "{{count}}日"
-    }
+    },
+    "archived_title": "アーカイブ済み",
+    "archived_empty": "アーカイブされた通知はありません",
+    "unarchive_tooltip": "アーカイブ解除"
   },
   "detail": {
     "select_prompt": "詳細を表示する通知を選択してください",
     "empty": "インボックスは空です",
     "original_input": "元の入力",
     "edit_advanced": "詳細フォームで編集",
-    "archive": "アーカイブ"
+    "archive": "アーカイブ",
+    "unarchive": "アーカイブ解除"
   },
   "types": {
     "issue_assigned": "割り当て済み",
@@ -67,6 +71,8 @@
     "mark_all_read_failed": "すべて既読にできませんでした",
     "archive_all_failed": "すべてアーカイブできませんでした",
     "archive_all_read_failed": "既読の項目をアーカイブできませんでした",
-    "archive_completed_failed": "完了した項目をアーカイブできませんでした"
+    "archive_completed_failed": "完了した項目をアーカイブできませんでした",
+    "unarchive_failed": "アーカイブ解除に失敗しました",
+    "archived_load_failed": "アーカイブ済み通知を読み込めませんでした"
   }
 }

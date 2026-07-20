@@ -1,6 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, screen } from "electron";
 import { homedir } from "os";
 import { join } from "path";
+import { pathToFileURL } from "url";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
@@ -10,6 +11,7 @@ import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
 import { installNavigationGestures } from "./navigation-gestures";
+import { installNavigationGuard } from "./navigation-guard";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -28,6 +30,13 @@ import {
   readAndClearFreezeBreadcrumb,
   clearFreezeBreadcrumb,
 } from "./freeze-breadcrumb";
+import {
+  loadWindowState,
+  resolveWindowOptions,
+  saveWindowStateToFile,
+  snapshotWindowState,
+  windowStateFilePath,
+} from "./window-state";
 import {
   encodeIssueWindowArgument,
   parseIssueWindowRequest,
@@ -242,10 +251,22 @@ function createRendererWebPreferences(
 }
 
 function loadRenderer(window: BrowserWindow): void {
+  const rendererEntry = join(__dirname, "../renderer/index.html");
+  const rendererURL =
+    is.dev && process.env["ELECTRON_RENDERER_URL"]
+      ? process.env["ELECTRON_RENDERER_URL"]
+      : pathToFileURL(rendererEntry).toString();
+
+  // Installed before the load so the very first navigation is already covered.
+  // Both the main window and every issue window load through here, so guarding
+  // this one site covers both — see navigation-guard.ts for what is and is not
+  // in scope (it is origin hardening; in-app routing never reaches it).
+  installNavigationGuard(window, rendererURL);
+
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
     void window.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
-    void window.loadFile(join(__dirname, "../renderer/index.html"));
+    void window.loadFile(rendererEntry);
   }
 }
 
@@ -285,9 +306,23 @@ function createWindow(): BrowserWindow {
   lastKnownSystemLocale = systemLocale;
 
   mainRendererMessages.resetReady();
+
+  // Restore prior size/position/maximized/fullscreen (#5244), constraining
+  // bounds to the work area of the display the window will land on.
+  const stateFile = windowStateFilePath(app.getPath("userData"));
+  const savedWindowState = loadWindowState(stateFile);
+  const windowOpts = resolveWindowOptions(
+    savedWindowState,
+    screen.getAllDisplays().map((d) => d.workArea),
+    screen.getPrimaryDisplay().workArea,
+  );
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: windowOpts.width,
+    height: windowOpts.height,
+    ...(windowOpts.x != null && windowOpts.y != null
+      ? { x: windowOpts.x, y: windowOpts.y }
+      : {}),
     minWidth: 900,
     minHeight: 600,
     titleBarStyle: "hiddenInset",
@@ -305,6 +340,25 @@ function createWindow(): BrowserWindow {
     webPreferences: createRendererWebPreferences(systemLocale),
   });
   const window = mainWindow;
+
+  // Persist bounds on resize/move (debounced) and on close so the next
+  // launch restores size/position and max/fullscreen flags. getNormalBounds
+  // is used so maximized/fullscreen still saves the restore size.
+  let persistTimer: ReturnType<typeof setTimeout> | null = null;
+  const persistWindowState = () => {
+    const snap = snapshotWindowState(window);
+    if (snap) saveWindowStateToFile(stateFile, snap);
+  };
+  const schedulePersistWindowState = () => {
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = setTimeout(persistWindowState, 400);
+  };
+  window.on("resize", schedulePersistWindowState);
+  window.on("move", schedulePersistWindowState);
+  window.on("close", () => {
+    if (persistTimer) clearTimeout(persistTimer);
+    persistWindowState();
+  });
 
   window.on("closed", () => {
     if (mainWindow === window) {
@@ -324,6 +378,12 @@ function createWindow(): BrowserWindow {
   );
 
   window.on("ready-to-show", () => {
+    // Restore max/fullscreen after normal bounds are applied.
+    if (windowOpts.isFullScreen) {
+      window.setFullScreen(true);
+    } else if (windowOpts.isMaximized) {
+      window.maximize();
+    }
     window.show();
   });
 

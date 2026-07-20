@@ -197,6 +197,9 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	if got.path != "/opt/bin/company-codex" {
 		t.Errorf("profileLaunchSpecs[prof-1].path = %q, want /opt/bin/company-codex", got.path)
 	}
+	if got.version != "9.9.9" {
+		t.Errorf("profileLaunchSpecs[prof-1].version = %q, want 9.9.9", got.version)
+	}
 	if strings.Join(got.fixedArgs, " ") != "--model composer-2.5" {
 		t.Errorf("profileLaunchSpecs[prof-1].fixedArgs = %v, want [--model composer-2.5]", got.fixedArgs)
 	}
@@ -395,13 +398,13 @@ func stubProfilePathExecutable(t *testing.T, executable map[string]bool) {
 func TestCustomCommandPathForRuntime(t *testing.T) {
 	d := freshDaemon("")
 	d.profileLaunchSpecs = map[string]profileLaunchSpec{
-		"prof-1": {path: "/opt/bin/company-codex", fixedArgs: []string{"--model", "composer-2.5"}},
+		"prof-1": {path: "/opt/bin/company-codex", version: "9.8.7", fixedArgs: []string{"--model", "composer-2.5"}},
 	}
 	// rt-custom is a custom-profile runtime; rt-builtin is a normal one.
 	d.runtimeIndex["rt-custom"] = Runtime{ID: "rt-custom", Provider: "codex", ProfileID: "prof-1"}
 	d.runtimeIndex["rt-builtin"] = Runtime{ID: "rt-builtin", Provider: "claude"}
 
-	if spec, ok := d.customProfileLaunchForRuntime("rt-custom"); !ok || spec.path != "/opt/bin/company-codex" || strings.Join(spec.fixedArgs, " ") != "--model composer-2.5" {
+	if spec, ok := d.customProfileLaunchForRuntime("rt-custom"); !ok || spec.path != "/opt/bin/company-codex" || spec.version != "9.8.7" || strings.Join(spec.fixedArgs, " ") != "--model composer-2.5" {
 		t.Errorf("custom runtime: got (%+v, %v), want profile launch spec", spec, ok)
 	}
 	if spec, ok := d.customProfileLaunchForRuntime("rt-builtin"); ok || spec.path != "" {

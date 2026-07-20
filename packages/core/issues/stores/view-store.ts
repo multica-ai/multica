@@ -9,7 +9,7 @@ import { ALL_STATUSES } from "../config";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type ViewMode = "board" | "list" | "gantt" | "swimlane";
+export type ViewMode = "board" | "list" | "table" | "gantt" | "swimlane";
 export type GanttZoom = "day" | "week" | "month";
 /**
  * Board grouping. Besides the two built-ins, a select-type custom property
@@ -20,14 +20,69 @@ export type GanttZoom = "day" | "week" | "month";
 export type IssueGrouping = "status" | "assignee" | `property:${string}`;
 export type SwimlaneGrouping = "parent" | "project" | "assignee";
 /**
- * Sort key. `property:<definitionId>` sorts client-side by a custom property
- * value (number/date types); the server sort param only understands the
- * static fields, so property sorts fall back to `position` server-side and
- * re-sort in the surface data hook.
+ * Sort key. `property:<definitionId>` is resolved server-side against the
+ * active property catalog; stale or unsupported definitions degrade to
+ * position order.
  */
-export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title" | `property:${string}`;
+export type SortField =
+  | "position"
+  | "status"
+  | "priority"
+  | "start_date"
+  | "due_date"
+  | "created_at"
+  | "updated_at"
+  | "title"
+  | `property:${string}`;
 export type SortDirection = "asc" | "desc";
 export type IssueDateField = "created_at" | "updated_at";
+
+export type TableSystemColumnKey =
+  | "title"
+  | "identifier"
+  | "status"
+  | "priority"
+  | "assignee"
+  | "labels"
+  | "project"
+  | "start_date"
+  | "due_date"
+  | "created_at"
+  | "updated_at"
+  | "child_progress"
+  | "creator";
+export type TableColumnKey = TableSystemColumnKey | `property:${string}`;
+export interface TableColumnConfig {
+  key: TableColumnKey;
+  width?: number;
+}
+export type TableGrouping = "none" | "status" | "assignee" | `property:${string}`;
+export type TableCalculation = "none" | "sum" | "average" | "count";
+
+export const TABLE_SYSTEM_COLUMNS: readonly TableSystemColumnKey[] = [
+  "title",
+  "identifier",
+  "status",
+  "priority",
+  "assignee",
+  "labels",
+  "project",
+  "start_date",
+  "due_date",
+  "created_at",
+  "updated_at",
+  "child_progress",
+  "creator",
+];
+
+export const DEFAULT_TABLE_COLUMNS: readonly TableColumnConfig[] = [
+  { key: "title", width: 360 },
+  { key: "status", width: 150 },
+  { key: "priority", width: 130 },
+  { key: "assignee", width: 180 },
+  { key: "due_date", width: 140 },
+  { key: "labels", width: 220 },
+];
 
 export interface IssueDateFilter {
   field: IssueDateField;
@@ -64,10 +119,12 @@ export type StaticIssueGrouping = Exclude<IssueGrouping, `property:${string}`>;
 
 export const SORT_OPTIONS: { value: StaticSortField; label: string }[] = [
   { value: "position", label: "Manual" },
+  { value: "status", label: "Status" },
   { value: "priority", label: "Priority" },
   { value: "start_date", label: "Start date" },
   { value: "due_date", label: "Due date" },
   { value: "created_at", label: "Created date" },
+  { value: "updated_at", label: "Updated date" },
   { value: "title", label: "Title" },
 ];
 
@@ -133,6 +190,13 @@ export interface IssueViewState {
    *  `swimlaneOrders`, plus the sentinel `"none"` for the pinned
    *  no-X lane and `"__orphans__"` for the parent-grouping fallback. */
   collapsedSwimlanes: Record<SwimlaneGrouping, string[]>;
+  /** Ordered table columns. Title is mandatory and normalized to the front. */
+  tableColumns: TableColumnConfig[];
+  tableGrouping: TableGrouping;
+  tableCollapsedGroups: string[];
+  tableCollapsedParents: string[];
+  tableHierarchy: boolean;
+  tableCalculation: TableCalculation;
   setViewMode: (mode: ViewMode) => void;
   setGanttZoom: (zoom: GanttZoom) => void;
   toggleGanttShowCompleted: () => void;
@@ -162,6 +226,14 @@ export interface IssueViewState {
   setSwimlaneOrder: (order: string[]) => void;
   /** Toggle a lane key in the currently active swimlane grouping. */
   toggleSwimlaneCollapsed: (key: string) => void;
+  toggleTableColumn: (key: TableColumnKey) => void;
+  reorderTableColumn: (active: TableColumnKey, over: TableColumnKey) => void;
+  setTableColumnWidth: (key: TableColumnKey, width?: number) => void;
+  setTableGrouping: (grouping: TableGrouping) => void;
+  toggleTableGroupCollapsed: (key: string) => void;
+  toggleTableParentCollapsed: (issueId: string) => void;
+  toggleTableHierarchy: () => void;
+  setTableCalculation: (calculation: TableCalculation) => void;
 }
 
 export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): IssueViewState => ({
@@ -198,6 +270,12 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   swimlaneGrouping: "assignee",
   swimlaneOrders: { parent: [], project: [], assignee: [] },
   collapsedSwimlanes: { parent: [], project: [], assignee: [] },
+  tableColumns: DEFAULT_TABLE_COLUMNS.map((column) => ({ ...column })),
+  tableGrouping: "none",
+  tableCollapsedGroups: [],
+  tableCollapsedParents: [],
+  tableHierarchy: true,
+  tableCalculation: "none",
 
   setViewMode: (mode) => set({ viewMode: mode }),
   setGanttZoom: (zoom) => set({ ganttZoom: zoom }),
@@ -341,6 +419,52 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         collapsedSwimlanes: { ...state.collapsedSwimlanes, [grouping]: next },
       };
     }),
+  toggleTableColumn: (key) =>
+    set((state) => {
+      if (key === "title") return state;
+      const exists = state.tableColumns.some((column) => column.key === key);
+      return {
+        tableColumns: exists
+          ? state.tableColumns.filter((column) => column.key !== key)
+          : [...state.tableColumns, { key }],
+      };
+    }),
+  reorderTableColumn: (active, over) =>
+    set((state) => {
+      if (active === "title" || over === "title" || active === over) return state;
+      const from = state.tableColumns.findIndex((column) => column.key === active);
+      const to = state.tableColumns.findIndex((column) => column.key === over);
+      if (from < 0 || to < 0) return state;
+      const tableColumns = [...state.tableColumns];
+      const [moved] = tableColumns.splice(from, 1);
+      if (!moved) return state;
+      tableColumns.splice(to, 0, moved);
+      return { tableColumns };
+    }),
+  setTableColumnWidth: (key, width) =>
+    set((state) => ({
+      tableColumns: state.tableColumns.map((column) =>
+        column.key === key
+          ? { ...column, ...(width === undefined ? { width: undefined } : { width }) }
+          : column,
+      ),
+    })),
+  setTableGrouping: (tableGrouping) => set({ tableGrouping }),
+  toggleTableGroupCollapsed: (key) =>
+    set((state) => ({
+      tableCollapsedGroups: state.tableCollapsedGroups.includes(key)
+        ? state.tableCollapsedGroups.filter((item) => item !== key)
+        : [...state.tableCollapsedGroups, key],
+    })),
+  toggleTableParentCollapsed: (issueId) =>
+    set((state) => ({
+      tableCollapsedParents: state.tableCollapsedParents.includes(issueId)
+        ? state.tableCollapsedParents.filter((id) => id !== issueId)
+        : [...state.tableCollapsedParents, issueId],
+    })),
+  toggleTableHierarchy: () =>
+    set((state) => ({ tableHierarchy: !state.tableHierarchy })),
+  setTableCalculation: (tableCalculation) => set({ tableCalculation }),
 });
 
 export const viewStorePersistOptions = (name: string) => ({
@@ -375,6 +499,12 @@ export const viewStorePersistOptions = (name: string) => ({
     swimlaneGrouping: state.swimlaneGrouping,
     swimlaneOrders: state.swimlaneOrders,
     collapsedSwimlanes: state.collapsedSwimlanes,
+    tableColumns: state.tableColumns,
+    tableGrouping: state.tableGrouping,
+    tableCollapsedGroups: state.tableCollapsedGroups,
+    tableCollapsedParents: state.tableCollapsedParents,
+    tableHierarchy: state.tableHierarchy,
+    tableCalculation: state.tableCalculation,
   }),
   // Default Zustand merge is shallow, so a persisted `cardProperties` snapshot
   // saved before a new toggle was introduced wins entirely and the new key is
@@ -401,6 +531,20 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
   // persisted value isn't a plain object.
   const isRecord = (v: unknown): v is Record<string, unknown> =>
     v !== null && typeof v === "object" && !Array.isArray(v);
+  const persistedTableColumns = Array.isArray(p.tableColumns)
+    ? p.tableColumns.filter(
+        (column): column is TableColumnConfig =>
+          !!column &&
+          typeof column === "object" &&
+          typeof (column as TableColumnConfig).key === "string",
+      )
+    : current.tableColumns;
+  const dedupedTableColumns = Array.from(
+    new Map(persistedTableColumns.map((column) => [column.key, column])).values(),
+  ).filter((column) => column.key !== "title");
+  const persistedTitle = persistedTableColumns.find(
+    (column) => column.key === "title",
+  );
   return {
     ...current,
     ...p,
@@ -414,6 +558,16 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
     collapsedSwimlanes: isRecord(p.collapsedSwimlanes)
       ? { ...current.collapsedSwimlanes, ...p.collapsedSwimlanes }
       : current.collapsedSwimlanes,
+    tableColumns: [
+      persistedTitle ?? current.tableColumns[0] ?? { key: "title" },
+      ...dedupedTableColumns,
+    ],
+    tableCollapsedGroups: Array.isArray(p.tableCollapsedGroups)
+      ? p.tableCollapsedGroups
+      : current.tableCollapsedGroups,
+    tableCollapsedParents: Array.isArray(p.tableCollapsedParents)
+      ? p.tableCollapsedParents
+      : current.tableCollapsedParents,
   };
 }
 

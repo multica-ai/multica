@@ -3,31 +3,44 @@ import type { RuntimeMachine } from "./runtime-machines";
 import { UpdateSection } from "./update-section";
 
 /**
- * Pick one viewer-owned runtime as the command channel for a machine-wide
- * daemon update. An online runtime wins so the daemon can receive the request
- * immediately; an offline row still keeps version/managed-state display
- * available without enabling the update action.
+ * Pick one runtime the viewer may manage as the command channel for a
+ * machine-wide daemon update. Workspace admins may manage any runtime; other
+ * members must own the runtime. An online runtime wins so the daemon can
+ * receive the request immediately.
  */
 export function machineUpdateRuntime(
   machine: RuntimeMachine,
   currentUserId: string | undefined,
+  canManageAnyRuntime: boolean,
 ): AgentRuntime | null {
-  if (machine.mode !== "local" || !currentUserId) return null;
+  if (machine.mode !== "local") return null;
 
-  const owned = machine.runtimes.filter(
-    (runtime) => runtime.owner_id === currentUserId,
+  const manageable = canManageAnyRuntime
+    ? machine.runtimes
+    : currentUserId
+      ? machine.runtimes.filter((runtime) => runtime.owner_id === currentUserId)
+      : [];
+  return (
+    manageable.find((runtime) => runtime.status === "online") ??
+    manageable[0] ??
+    null
   );
-  return owned.find((runtime) => runtime.status === "online") ?? owned[0] ?? null;
 }
 
 export function MachineCliSection({
   machine,
   currentUserId,
+  canManageAnyRuntime,
 }: {
   machine: RuntimeMachine;
   currentUserId: string | undefined;
+  canManageAnyRuntime: boolean;
 }) {
-  const updateRuntime = machineUpdateRuntime(machine, currentUserId);
+  const updateRuntime = machineUpdateRuntime(
+    machine,
+    currentUserId,
+    canManageAnyRuntime,
+  );
 
   if (machine.mode !== "local") {
     return machine.cliVersion ? (

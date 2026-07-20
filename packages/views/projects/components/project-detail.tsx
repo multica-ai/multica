@@ -457,7 +457,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <ContentEditor
             ref={descEditorRef}
             key={projectId}
-            defaultValue={project.description || ""}
+            value={project.description || ""}
             placeholder={t(($) => $.detail.description_placeholder)}
             onUpdate={(md) => handleUpdateField({ description: md || null })}
             debounceMs={1500}
@@ -550,7 +550,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
           <IssueSurface
             scope={issueScope}
-            modes={["board", "list", "swimlane", "gantt"]}
+            modes={["board", "list", "table", "swimlane", "gantt"]}
           />
           </div>
         </ResizablePanel>
