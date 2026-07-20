@@ -477,7 +477,7 @@
     "feature_issue_sync_label": "이슈 동기화",
     "feature_issue_sync_description": "이슈 상세 사이드바에 연결된 GitLab 이슈 참조를 표시합니다.",
     "issue_sync_label_label": "동기화 트리거 라벨",
-    "issue_sync_label_description": "이 라벨이 붙은 GitLab 이슈가 Multica로 가져옵니다. 기본값은 agent입니다. 에이전트에 배정하려면 에이전트 이름과 같은 라벨(또는 agent::AgentName)을 추가하세요.",
+    "issue_sync_label_description": "이 라벨(또는 라벨::AgentName)이 붙은 GitLab 이슈가 Multica로 가져옵니다. 기본값은 agent입니다. agent::AgentName은 같은 이름 에이전트 배정을 시도하며, 없으면 미배정으로 이슈만 만듭니다.",
     "feature_comment_sync_label": "댓글 가져오기",
     "feature_comment_sync_description": "GitLab 이슈의 새 댓글을 Multica로 가져옵니다. Multica는 GitLab으로 댓글을 자동 게시하지 않습니다.",
     "namespace_label": "GitLab 네임스페이스 또는 그룹 경로",

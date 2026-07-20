@@ -747,6 +747,30 @@ func containsLabel(labels []struct {
 	return false
 }
 
+// hasGitLabIssueSyncTrigger reports whether the issue should be imported into
+// Multica. True when the configured sync label is present exactly, or when any
+// label uses the "{syncLabel}::{agentName}" form (e.g. "agent::Implementer"
+// with sync label "agent"). A prefixed label alone is enough to create the
+// Multica issue; agent assignment is best-effort and may leave it unassigned.
+func hasGitLabIssueSyncTrigger(labels []struct {
+	Title string `json:"title"`
+}, syncLabel string) bool {
+	if syncLabel == "" {
+		return false
+	}
+	if containsLabel(labels, syncLabel) {
+		return true
+	}
+	prefix := syncLabel + "::"
+	for _, l := range labels {
+		title := strings.TrimSpace(l.Title)
+		if strings.HasPrefix(title, prefix) && len(title) > len(prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // gitlabLabelAgentNameCandidates returns possible Multica agent names encoded
 // in GitLab labels. Each label title is a candidate as-is; if it uses the
 // "{syncLabel}::{name}" form, the suffix is also a candidate (so "agent::Coder"
@@ -864,7 +888,7 @@ func (h *Handler) handleGitLabIssueEvent(ctx context.Context, conn db.GitlabConn
 	if ws, err := h.Queries.GetWorkspace(ctx, conn.WorkspaceID); err == nil {
 		syncLabel = workspaceGitLabIssueSyncLabel(ws.Settings)
 	}
-	hasSyncLabel := containsLabel(p.Labels, syncLabel)
+	hasSyncLabel := hasGitLabIssueSyncTrigger(p.Labels, syncLabel)
 
 	assigneeUsername := ""
 	if len(p.Assignees) > 0 {
@@ -892,9 +916,9 @@ func (h *Handler) handleGitLabIssueEvent(ctx context.Context, conn db.GitlabConn
 	)
 
 	// Creating and field-syncing Multica issues requires the configured sync
-	// label (default "agent"). Removing the label does not delete the Multica
-	// issue — the link stays and close/reopen status transitions still apply
-	// when a row exists.
+	// trigger: the bare label (default "agent") or "{label}::{agentName}".
+	// Removing the trigger does not delete the Multica issue — the link stays
+	// and close/reopen status transitions still apply when a row exists.
 	if hasSyncLabel {
 		if !rowExists && (action == "open" || action == "update") {
 			// Create Multica issue.

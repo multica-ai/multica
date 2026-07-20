@@ -63,6 +63,42 @@ func TestGitLabLabelAgentNameCandidates(t *testing.T) {
 	}
 }
 
+func TestHasGitLabIssueSyncTrigger(t *testing.T) {
+	label := func(titles ...string) []struct {
+		Title string `json:"title"`
+	} {
+		out := make([]struct {
+			Title string `json:"title"`
+		}, len(titles))
+		for i, t := range titles {
+			out[i].Title = t
+		}
+		return out
+	}
+
+	if !hasGitLabIssueSyncTrigger(label("agent"), "agent") {
+		t.Fatal("bare sync label should trigger")
+	}
+	if !hasGitLabIssueSyncTrigger(label("agent::Implementer"), "agent") {
+		t.Fatal("prefixed agent name alone should trigger import")
+	}
+	if !hasGitLabIssueSyncTrigger(label("bug", "agent::Coder"), "agent") {
+		t.Fatal("prefixed label among others should trigger")
+	}
+	if hasGitLabIssueSyncTrigger(label("agent:"), "agent") {
+		t.Fatal("single-colon form should not trigger")
+	}
+	if hasGitLabIssueSyncTrigger(label("agent::"), "agent") {
+		t.Fatal("empty name after prefix should not trigger")
+	}
+	if hasGitLabIssueSyncTrigger(label("Implementer"), "agent") {
+		t.Fatal("agent name alone without sync prefix should not trigger")
+	}
+	if hasGitLabIssueSyncTrigger(label("agents"), "agent") {
+		t.Fatal("unrelated label should not trigger")
+	}
+}
+
 func TestMatchAgentByGitLabLabels(t *testing.T) {
 	coderID := parseUUID("11111111-1111-1111-1111-111111111111")
 	researchID := parseUUID("22222222-2222-2222-2222-222222222222")
@@ -375,12 +411,12 @@ func TestHandleGitLabIssueEvent_AssignsAgentByName(t *testing.T) {
 		})
 	})
 
-	// Prefixed form: agent::Handler Test Agent
+	// Prefixed form alone (no bare "agent" label) must still import + assign.
 	payload := `{
 		"object_kind": "issue",
 		"object_attributes": {"iid": 88, "title": "Assign me", "description": "", "action": "open"},
 		"project": {"id": 888, "path_with_namespace": "testorg-agent-name/repo", "namespace": "testorg-agent-name"},
-		"labels": [{"title": "agent"}, {"title": "agent::Handler Test Agent"}],
+		"labels": [{"title": "agent::Handler Test Agent"}],
 		"assignees": []
 	}`
 	t.Setenv("GITLAB_WEBHOOK_SECRET", "s")
@@ -410,7 +446,7 @@ func TestHandleGitLabIssueEvent_AssignsAgentByName(t *testing.T) {
 		t.Fatalf("assignee_id: got %v, want %s", issue.AssigneeID, uuidToString(seeded.ID))
 	}
 
-	// Exact agent name as a second label form.
+	// Exact agent name still requires the bare sync label (name alone is not a trigger).
 	payload2 := `{
 		"object_kind": "issue",
 		"object_attributes": {"iid": 89, "title": "Assign exact", "description": "", "action": "open"},
@@ -438,6 +474,37 @@ func TestHandleGitLabIssueEvent_AssignsAgentByName(t *testing.T) {
 	}
 	if !issue2.AssigneeID.Valid || uuidToString(issue2.AssigneeID) != uuidToString(seeded.ID) {
 		t.Fatalf("exact assignee_id: got %v, want %s", issue2.AssigneeID, uuidToString(seeded.ID))
+	}
+
+	// Unknown agent name with prefix: still import, leave unassigned.
+	payload3 := `{
+		"object_kind": "issue",
+		"object_attributes": {"iid": 90, "title": "Unknown agent", "description": "", "action": "open"},
+		"project": {"id": 888, "path_with_namespace": "testorg-agent-name/repo", "namespace": "testorg-agent-name"},
+		"labels": [{"title": "agent::NoSuchAgent"}],
+		"assignees": []
+	}`
+	req3 := httptest.NewRequest(http.MethodPost, "/api/webhooks/gitlab", strings.NewReader(payload3))
+	req3.Header.Set("X-Gitlab-Token", "s")
+	req3.Header.Set("X-Gitlab-Event", "Issue Hook")
+	w3 := httptest.NewRecorder()
+	testHandler.HandleGitLabWebhook(w3, req3)
+	if w3.Code != http.StatusNoContent {
+		t.Fatalf("unknown: expected 204, got %d", w3.Code)
+	}
+	row3, err := testHandler.Queries.GetGitLabIssueByProjectAndIID(ctx, db.GetGitLabIssueByProjectAndIIDParams{
+		WorkspaceID: wsUUID, ProjectPath: "testorg-agent-name/repo", GlIssueIid: 90,
+	})
+	if err != nil {
+		t.Fatalf("unknown: gitlab_issue not created: %v", err)
+	}
+	issue3, err := testHandler.Queries.GetIssue(ctx, row3.IssueID)
+	if err != nil {
+		t.Fatalf("unknown: issue not created: %v", err)
+	}
+	if issue3.AssigneeType.Valid {
+		t.Fatalf("unknown agent should leave issue unassigned, got type=%q id=%v",
+			issue3.AssigneeType.String, issue3.AssigneeID)
 	}
 }
 

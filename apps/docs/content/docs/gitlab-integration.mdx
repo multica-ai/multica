@@ -43,17 +43,23 @@ The label name is configured per workspace under **Settings → GitLab → Sync 
 
 ### Assigning a Multica agent by name
 
-On create, Multica also looks at the issue’s other GitLab labels and tries to match a **workspace agent by name** (unique per workspace):
+Import is triggered by either:
 
-| GitLab label | Matches agent named |
-|---|---|
-| `Coder` | `Coder` (exact title, case-insensitive) |
-| `agent::Coder` | `Coder` (prefix is the sync trigger label + `::`) |
+- the bare **sync trigger label** (default `agent`), or
+- a **prefixed** label `{syncLabel}::{agentName}` (e.g. `agent::Implementer` alone is enough)
+
+On create, Multica tries to match a **workspace agent by name** (unique per workspace):
+
+| GitLab label | Imports? | Assigns agent named |
+|---|---|---|
+| `agent` | Yes | — (unassigned unless another label matches a name) |
+| `agent::Coder` | Yes | `Coder` (if that agent exists) |
+| `agent` + `Coder` | Yes | `Coder` |
+| `Coder` alone | No | — (no sync trigger) |
 
 Rules:
 
-- The **sync trigger label** is still required to import the issue.
-- Exactly **one** user-agent must match. Zero matches → create unassigned. Two or more different agents → create unassigned (ambiguous).
+- Exactly **one** user-agent must match. Zero matches → still create, **unassigned**. Two or more different agents → create unassigned (ambiguous).
 - System / persona agents are never assigned this way.
 - Assignment runs **only on create** (not when labels change later).
 - Assigning an agent uses the same enqueue path as assigning in Multica, so the agent can pick up the issue immediately.

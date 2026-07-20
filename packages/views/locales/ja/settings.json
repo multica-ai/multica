@@ -625,7 +625,7 @@
     "feature_issue_sync_label": "イシュー同期",
     "feature_issue_sync_description": "イシュー詳細サイドバーにリンクされた GitLab イシューの参照を表示します。",
     "issue_sync_label_label": "同期トリガーラベル",
-    "issue_sync_label_description": "このラベルが付いた GitLab イシューが Multica に取り込まれます。デフォルトは agent です。エージェントに割り当てるには、エージェント名と一致するラベル（または agent::AgentName）を追加してください。",
+    "issue_sync_label_description": "このラベル（または ラベル::AgentName）が付いた GitLab イシューが Multica に取り込まれます。デフォルトは agent です。agent::AgentName は同名エージェントへの割り当てを試します。見つからなくてもイシューは未割り当てで作成されます。",
     "feature_comment_sync_label": "コメント取り込み",
     "feature_comment_sync_description": "GitLab イシューの新しいコメントを Multica に取り込みます。Multica から GitLab へは自動投稿しません。",
     "namespace_label": "GitLab ネームスペースまたはグループパス",

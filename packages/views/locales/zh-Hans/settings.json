@@ -632,7 +632,7 @@
     "feature_issue_sync_label": "issue 同步",
     "feature_issue_sync_description": "在 issue 详情侧栏中显示关联的 GitLab issue 引用。",
     "issue_sync_label_label": "同步触发标签",
-    "issue_sync_label_description": "带有该标签的 GitLab issue 会导入 Multica。默认为 agent。若要指派 agent，再加一个与 agent 名称相同的标签（或 agent::AgentName）。",
+    "issue_sync_label_description": "带有该标签（或 标签::AgentName）的 GitLab issue 会导入 Multica。默认为 agent。agent::AgentName 会尝试指派同名 agent；找不到时仍会创建 issue，只是不指派。",
     "feature_comment_sync_label": "评论导入",
     "feature_comment_sync_description": "将 GitLab issue 的新评论导入 Multica。Multica 不会自动把评论发回 GitLab。",
     "namespace_label": "GitLab 命名空间或群组路径",
