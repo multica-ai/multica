@@ -12,6 +12,8 @@ import { renderToString } from "react-dom/server";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { LazyRichBlock } from "./lazy-rich-block";
+import { RichContentScrollRootProvider } from "./scroll-root";
+import { resetMountedBlocks } from "./mounted-block-registry";
 
 type IOCallback = (entries: { isIntersecting: boolean }[]) => void;
 
@@ -26,6 +28,7 @@ let observers: FakeObserver[] = [];
 
 beforeEach(() => {
   observers = [];
+  resetMountedBlocks();
   class FakeIntersectionObserver {
     private readonly self: FakeObserver;
     constructor(callback: IOCallback, options?: IntersectionObserverInit) {
@@ -137,6 +140,36 @@ describe("LazyRichBlock", () => {
     expect(topPx).toBeGreaterThan(600);
   });
 
+  // Chat scrolls inside its own element. With the default (viewport) root,
+  // rootMargin expands the wrong box, so a block only loads once it is already
+  // visible — the preloading is silently dead in the surface that needs it most.
+  it("observes against the surface's scroll root when one is provided", () => {
+    const scrollRoot = document.createElement("div");
+    document.body.appendChild(scrollRoot);
+
+    render(
+      <RichContentScrollRootProvider scrollRoot={scrollRoot}>
+        <LazyRichBlock reservedHeightPx={280}>
+          <Expensive />
+        </LazyRichBlock>
+      </RichContentScrollRootProvider>,
+    );
+
+    expect(observers[0]?.options?.root).toBe(scrollRoot);
+    scrollRoot.remove();
+  });
+
+  it("falls back to the viewport root for page-scrolled surfaces", () => {
+    // Issue description / Comment scroll with the page; a null root is correct.
+    render(
+      <LazyRichBlock reservedHeightPx={280}>
+        <Expensive />
+      </LazyRichBlock>,
+    );
+
+    expect(observers[0]?.options?.root ?? null).toBeNull();
+  });
+
   it("mounts via an effect when IntersectionObserver is unavailable", () => {
     vi.unstubAllGlobals();
     vi.stubGlobal("IntersectionObserver", undefined);
@@ -152,6 +185,88 @@ describe("LazyRichBlock", () => {
     // committed frame still matches what a server render would produce — see
     // the SSR suite below.
     expect(screen.getByTestId("expensive")).toBeInTheDocument();
+  });
+});
+
+/**
+ * Virtualized-row recycling.
+ *
+ * Chat's list unmounts rows that scroll far enough away. A `mounted` flag held
+ * only in component state disappears with the row, so scrolling back would
+ * re-run Mermaid, rebuild the sandboxed iframe and drop the viewer's pan/zoom —
+ * turning the one-time mount cost into a per-pass cost. The latch therefore
+ * lives outside the component, keyed by content.
+ */
+describe("LazyRichBlock across row recycling", () => {
+  const SOURCE = "flowchart LR\n  A --> B";
+
+  beforeEach(() => {
+    resetMountedBlocks();
+  });
+
+  it("re-mounts a recycled block immediately, without waiting to be seen again", () => {
+    const first = render(
+      <LazyRichBlock reservedHeightPx={280} sourceKey={SOURCE}>
+        <Expensive />
+      </LazyRichBlock>,
+    );
+    enterViewport();
+    expect(first.getByTestId("expensive")).toBeInTheDocument();
+
+    // Virtuoso recycles the row: the whole subtree is unmounted.
+    first.unmount();
+    observers = [];
+
+    // The row comes back. No intersection is reported this time — the block was
+    // already built once, so it must not wait to be observed again.
+    const second = render(
+      <LazyRichBlock reservedHeightPx={280} sourceKey={SOURCE}>
+        <Expensive />
+      </LazyRichBlock>,
+    );
+
+    expect(second.getByTestId("expensive")).toBeInTheDocument();
+  });
+
+  it("does not resurrect a different block that was never mounted", () => {
+    const first = render(
+      <LazyRichBlock reservedHeightPx={280} sourceKey={SOURCE}>
+        <Expensive />
+      </LazyRichBlock>,
+    );
+    enterViewport();
+    first.unmount();
+    observers = [];
+
+    // Different content => different key => still deferred.
+    const other = render(
+      <LazyRichBlock reservedHeightPx={280} sourceKey="graph TD\n  X --> Y">
+        <Expensive />
+      </LazyRichBlock>,
+    );
+
+    expect(other.queryByTestId("expensive")).toBeNull();
+  });
+
+  it("keeps deferring when no sourceKey is supplied", () => {
+    // Without an identity there is nothing to remember; the block must not be
+    // treated as already-mounted.
+    const first = render(
+      <LazyRichBlock reservedHeightPx={280}>
+        <Expensive />
+      </LazyRichBlock>,
+    );
+    enterViewport();
+    first.unmount();
+    observers = [];
+
+    const second = render(
+      <LazyRichBlock reservedHeightPx={280}>
+        <Expensive />
+      </LazyRichBlock>,
+    );
+
+    expect(second.queryByTestId("expensive")).toBeNull();
   });
 });
 

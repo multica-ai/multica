@@ -120,7 +120,13 @@ describe("RichContent import boundary", () => {
     // readonly renderer into the editor is the classic way this collapses.
     const offenders = walk(join(VIEWS_ROOT, "editor"))
       .filter((p) => !/readonly-content\.tsx$/.test(p))
-      .map((path) => ({ path: relative(VIEWS_ROOT, path), text: readFileSync(path, "utf8") }))
+      .map((path) => ({
+        path: relative(VIEWS_ROOT, path),
+        // stripComments, consistently with the other checks: an editor file may
+        // *mention* RichContent in a doc comment (explaining why a helper is
+        // shaped the way it is). Only real code references are violations.
+        text: stripComments(readFileSync(path, "utf8")),
+      }))
       .filter(({ text }) => /\bRichContent\b/.test(text))
       .map(({ path }) => path);
 

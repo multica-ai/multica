@@ -22,13 +22,17 @@
  * does not pull the editor's Tiptap graph into Chat.
  */
 
-import { memo, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toHtml } from "hast-util-to-html";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../i18n";
-import { MermaidDiagram, reservedMermaidHeightPx } from "../editor/mermaid-diagram";
+import {
+  MermaidDiagram,
+  MERMAID_SKELETON_HEIGHT_PX,
+  reservedMermaidHeightPx,
+} from "../editor/mermaid-diagram";
 import {
   HtmlBlockPreview,
   HTML_BLOCK_PREVIEW_HEIGHT_PX,
@@ -175,16 +179,46 @@ export function RichFenceBlock({
   language: RichFenceLanguage;
   body: string;
 }) {
-  if (language === "mermaid") {
-    return (
-      <LazyRichBlock reservedHeightPx={reservedMermaidHeightPx(body)}>
-        <MemoMermaidDiagram chart={body} />
-      </LazyRichBlock>
-    );
-  }
+  // Split into two components so the Mermaid-only height hook is never called
+  // conditionally.
+  if (language === "mermaid") return <MermaidFenceBlock chart={body} />;
+  return <HtmlFenceBlock html={body} />;
+}
+
+/**
+ * Reserved height for a diagram: the skeleton default on the first frame, then
+ * the session-cached real height once mounted.
+ *
+ * The cache lives in sessionStorage, which the server does not have. Reading it
+ * during render therefore produces 280px on the server and the cached height in
+ * a browser with a warm cache — different `style="min-height:…"` on the very
+ * frame React hydrates, which React reports as an attribute mismatch and does
+ * NOT repair. Deferring the read to an effect keeps the first frame identical
+ * everywhere and still gets the zero-shift benefit immediately after.
+ */
+function useReservedMermaidHeightPx(chart: string): number {
+  const [height, setHeight] = useState(MERMAID_SKELETON_HEIGHT_PX);
+  useEffect(() => {
+    const cached = reservedMermaidHeightPx(chart);
+    setHeight((current) => (current === cached ? current : cached));
+  }, [chart]);
+  return height;
+}
+
+function MermaidFenceBlock({ chart }: { chart: string }) {
   return (
-    <LazyRichBlock reservedHeightPx={HTML_BLOCK_PREVIEW_HEIGHT_PX}>
-      <MemoHtmlBlockPreview html={body} />
+    <LazyRichBlock reservedHeightPx={useReservedMermaidHeightPx(chart)} sourceKey={chart}>
+      <MemoMermaidDiagram chart={chart} />
+    </LazyRichBlock>
+  );
+}
+
+function HtmlFenceBlock({ html }: { html: string }) {
+  // The preview iframe is a fixed height, so this needs no cache and is already
+  // identical on server and client.
+  return (
+    <LazyRichBlock reservedHeightPx={HTML_BLOCK_PREVIEW_HEIGHT_PX} sourceKey={html}>
+      <MemoHtmlBlockPreview html={html} />
     </LazyRichBlock>
   );
 }

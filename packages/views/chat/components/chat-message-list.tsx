@@ -21,6 +21,7 @@ import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Copy } fr
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { RichContent } from "../../rich-content";
+import { RichContentScrollRootProvider } from "../../rich-content/scroll-root";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { AttachmentList } from "../../issues/components/comment-card";
 import type { AgentAvailability } from "@multica/core/agents";
@@ -216,6 +217,10 @@ export function ChatMessageList({
           <ChatMessageSkeleton />
         </div>
       ) : (
+      // Chat scrolls inside its own element, so rich blocks must measure
+      // "near-viewport" against that element rather than the browser viewport —
+      // otherwise a diagram only starts loading once it is already on screen.
+      <RichContentScrollRootProvider scrollRoot={scrollContainerEl}>
       <Virtuoso
         customScrollParent={scrollContainerEl}
         data={renderItems}
@@ -252,6 +257,7 @@ export function ChatMessageList({
           </div>
         )}
       />
+      </RichContentScrollRootProvider>
       )}
     </div>
   );

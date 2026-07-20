@@ -28,7 +28,27 @@
  *    actually scrolled past", not by the whole transcript.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { useRichContentScrollRoot } from "./scroll-root";
+import {
+  hasBlockMounted,
+  markBlockMounted,
+  mountedBlockKey,
+} from "./mounted-block-registry";
+
+// Restoring an already-mounted block must happen before paint, or a recycled
+// Virtuoso row would flash its placeholder on the way back into view.
+// useLayoutEffect does not run on the server (and warns if called there), so the
+// server takes the plain-effect branch — neither runs during SSR, so the first
+// frame is unaffected either way.
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 /**
  * How far outside the viewport a block starts mounting. Sized to cover
@@ -44,13 +64,22 @@ function supportsIntersectionObserver(): boolean {
 
 export function LazyRichBlock({
   reservedHeightPx,
+  sourceKey,
   children,
 }: {
   /** Expected height of the mounted block; reserved before and after mount. */
   reservedHeightPx: number;
+  /**
+   * Stable identity for this block's content. Used to remember that it has
+   * already been mounted, so a virtualized row that gets recycled and later
+   * re-created does not pay the mount cost again.
+   */
+  sourceKey?: string;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const scrollRoot = useRichContentScrollRoot();
+  const registryKey = sourceKey == null ? null : mountedBlockKey("rich", sourceKey);
   // ALWAYS false on the first render, on both server and client.
   //
   // Deriving this from feature detection (`typeof window`, IntersectionObserver
@@ -64,6 +93,15 @@ export function LazyRichBlock({
   // Everything environment-specific happens in the effect below, which never
   // runs on the server.
   const [mounted, setMounted] = useState(false);
+
+  // Restore a block this session has already built. Kept out of the initial
+  // state for the same reason as everything else here: the registry is empty on
+  // the server, so seeding from it would make the first frame differ between
+  // server and client.
+  useIsomorphicLayoutEffect(() => {
+    if (mounted || registryKey == null) return;
+    if (hasBlockMounted(registryKey)) setMounted(true);
+  }, [mounted, registryKey]);
 
   useEffect(() => {
     if (mounted) return;
@@ -87,11 +125,22 @@ export function LazyRichBlock({
           observer.disconnect();
         }
       },
-      { rootMargin: NEAR_VIEWPORT_ROOT_MARGIN },
+      {
+        // Clip against the surface's own scroll container when there is one.
+        // With the default (viewport) root, rootMargin would expand the wrong
+        // box and a Chat block would only load once already visible.
+        root: scrollRoot,
+        rootMargin: NEAR_VIEWPORT_ROOT_MARGIN,
+      },
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [mounted]);
+  }, [mounted, scrollRoot]);
+
+  // Record the mount so a recycled row can skip straight to the built block.
+  useEffect(() => {
+    if (mounted && registryKey != null) markBlockMounted(registryKey);
+  }, [mounted, registryKey]);
 
   return (
     <div

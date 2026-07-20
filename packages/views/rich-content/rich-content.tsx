@@ -40,6 +40,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
+import { useConfigStore } from "@multica/core/config";
 import type { Attachment } from "@multica/core/types";
 import {
   isAllowedFileCardHref,
@@ -417,9 +418,20 @@ export const RichContent = memo(function RichContent({
   phase = "settled",
   className,
 }: RichContentProps) {
+  // Subscribed, not read once. The CDN config is fetched asynchronously after
+  // auth, so content that renders first would otherwise keep its legacy CDN
+  // links as plain anchors permanently — the preprocess step that turns them
+  // into file cards had already run against an empty domain and nothing would
+  // re-run it. Subscribing puts the value in the memo dependencies below, so a
+  // late config arrival reprocesses exactly once.
+  const cdnDomain = useConfigStore((s) => s.cdnDomain);
+
   const processed = useMemo(
-    () => highlightToHtml(preprocessMarkdown(content, { autolinkIssueIdentifiers: true })),
-    [content],
+    () =>
+      highlightToHtml(
+        preprocessMarkdown(content, { cdnDomain, autolinkIssueIdentifiers: true }),
+      ),
+    [content, cdnDomain],
   );
 
   // Derived from the SAME string handed to ReactMarkdown, so offsets line up
