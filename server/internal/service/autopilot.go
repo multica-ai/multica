@@ -291,38 +291,81 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 	return dispatched, err
 }
 
-// ensureWebhookCreateIssueTask repairs the create_issue crash window after the
-// issue/run transaction commits but before the ordinary task enqueue commits.
-// Any existing issue task is sufficient evidence that ownership has already
-// moved downstream; otherwise enqueue exactly the same assignee path used by
-// the original dispatch.
+// ensureWebhookCreateIssueTask repairs the create_issue crash window on a reclaimed
+// webhook delivery: the issue/run committed but the dispatched task's enqueue or the
+// run.task_id bind did not. It always ends with the run bound (via CAS) to a task
+// PROVEN to be this run's dispatched task — never on the loose "any issue task
+// exists" evidence, and never gated on the issue status (MUL-4809 §4.1 P0-2; a run
+// is finalized by task outcome, so the issue being in_review/blocked must not stop
+// the repair and leave the run hanging).
 func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, autopilot db.Autopilot, run db.AutopilotRun) error {
-	tasks, err := s.Queries.ListTasksByIssue(ctx, run.IssueID)
-	if err != nil {
-		return fmt.Errorf("dispatch for webhook delivery: inspect issue tasks: %w", err)
-	}
-	if len(tasks) > 0 {
+	// Already bound (dispatch finished) or already finalized — nothing to repair.
+	if run.TaskID.Valid || isAutopilotRunTerminalStatus(run.Status) {
 		return nil
 	}
+
+	// Enqueue committed but the bind crashed: the task carries this run's provenance
+	// stamp. Bind it precisely — a stray comment task on the same issue is unstamped
+	// and never matches here.
+	dispatched, err := s.Queries.GetTaskByDispatchedAutopilotRun(ctx, run.ID)
+	switch {
+	case err == nil:
+		return s.bindAndWakeWebhookTask(ctx, run, dispatched)
+	case !errors.Is(err, pgx.ErrNoRows):
+		return fmt.Errorf("dispatch for webhook delivery: lookup dispatched task: %w", err)
+	}
+
+	// No task was ever dispatched (crash before enqueue). Enqueue the same assignee
+	// path the original dispatch would, stamped with this run's provenance, and bind
+	// the run to it in the same repair.
 	issue, err := s.Queries.GetIssue(ctx, run.IssueID)
 	if err != nil {
 		return fmt.Errorf("dispatch for webhook delivery: load linked issue: %w", err)
 	}
-	if issue.Status != "todo" && issue.Status != "in_progress" {
-		return nil
-	}
+	dispatchCtx := withDispatchedAutopilotRun(ctx, run.ID)
+	var task db.AgentTaskQueue
 	if autopilot.AssigneeType == "squad" {
-		leader, _, err := s.resolveAutopilotLeader(ctx, autopilot)
-		if err != nil {
-			return fmt.Errorf("dispatch for webhook delivery: resolve squad leader: %w", err)
+		leader, _, lerr := s.resolveAutopilotLeader(ctx, autopilot)
+		if lerr != nil {
+			return fmt.Errorf("dispatch for webhook delivery: resolve squad leader: %w", lerr)
 		}
-		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, autopilot.AssigneeID, pgtype.UUID{}); err != nil {
-			return fmt.Errorf("dispatch for webhook delivery: repair squad task: %w", err)
-		}
-		return nil
+		task, err = s.TaskSvc.EnqueueTaskForSquadLeader(dispatchCtx, issue, leader.ID, autopilot.AssigneeID, pgtype.UUID{})
+	} else {
+		task, err = s.TaskSvc.EnqueueTaskForIssue(dispatchCtx, issue)
 	}
-	if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
-		return fmt.Errorf("dispatch for webhook delivery: repair issue task: %w", err)
+	if err != nil {
+		// The agent already holds the one pending task allowed per (issue, agent)
+		// (idx_one_pending_task_per_issue_agent). That task will process the issue;
+		// we must not enqueue a duplicate, and must NOT bind the run to a task that
+		// isn't its own dispatch. Treat the delivery as handled rather than
+		// crash-looping the webhook worker; the stuck-run monitor reconciles a run
+		// left unbound by this rare race.
+		if isAutopilotUniqueViolation(err) {
+			slog.Warn("autopilot webhook repair: a pending task already exists; leaving run unbound",
+				"run_id", util.UUIDToString(run.ID), "issue_id", util.UUIDToString(run.IssueID))
+			return nil
+		}
+		return fmt.Errorf("dispatch for webhook delivery: repair dispatched task: %w", err)
+	}
+	return s.bindAndWakeWebhookTask(ctx, run, task)
+}
+
+// isAutopilotUniqueViolation reports whether err is (or wraps) a Postgres unique
+// constraint violation (SQLSTATE 23505).
+func isAutopilotUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// bindAndWakeWebhookTask CAS-binds the run to its dispatched task and, unless a
+// racing finalizer already ended the run, wakes the daemon to claim the task.
+func (s *AutopilotService) bindAndWakeWebhookTask(ctx context.Context, run db.AutopilotRun, task db.AgentTaskQueue) error {
+	bound, bindErr := s.bindAutopilotRunTask(ctx, run.ID, task.ID)
+	if bindErr != nil {
+		return fmt.Errorf("dispatch for webhook delivery: bind dispatched task: %w", bindErr)
+	}
+	if !isAutopilotRunTerminalStatus(bound.Status) {
+		s.TaskSvc.NotifyTaskEnqueued(ctx, task)
 	}
 	return nil
 }

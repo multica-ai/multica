@@ -70,8 +70,8 @@ func newCreateIssueRunFixture(t *testing.T) (*AutopilotService, string, db.Autop
 
 	var issueIDStr string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, origin_type, origin_id)
-		VALUES ($1, 'ci run issue', 'todo', 'none', 'agent', $2,
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number, origin_type, origin_id)
+		VALUES ($1, 'ci run issue', 'todo', 'none', 'agent', $2, 'agent', $2,
 		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1, 'autopilot', $3)
 		RETURNING id::text
 	`, workspaceID, agentID, util.UUIDToString(ap.ID)).Scan(&issueIDStr); err != nil {
