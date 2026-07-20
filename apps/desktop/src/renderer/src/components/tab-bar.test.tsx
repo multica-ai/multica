@@ -10,10 +10,8 @@ import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 
 type MockTab = {
   id: string;
-  path: string;
-  url?: string;
+  url: string;
   title: string;
-  icon: string;
   pinned: boolean;
 };
 
@@ -23,8 +21,8 @@ const state = vi.hoisted(() => ({
     acme: {
       activeTabId: "tA",
       tabs: [
-        { id: "tA", path: "/acme/issues", title: "Issues", icon: "ListTodo", pinned: false },
-        { id: "tB", path: "/acme/projects", title: "Projects", icon: "ListTodo", pinned: false },
+        { id: "tA", url: "/acme/issues", title: "Issues", pinned: false },
+        { id: "tB", url: "/acme/projects", title: "Projects", pinned: false },
       ] as MockTab[],
     },
   } as Record<string, { activeTabId: string; tabs: MockTab[] }>,
@@ -33,7 +31,7 @@ const state = vi.hoisted(() => ({
   closeOtherTabs: vi.fn<(tabId: string) => void>(),
   setActiveTab: vi.fn<(tabId: string) => void>(),
   moveTab: vi.fn<(from: number, to: number) => void>(),
-  addTab: vi.fn<(path: string, title: string, icon: string) => string>(),
+  addTab: vi.fn<(path: string, title: string) => string>(),
   openIssueWindow: vi.fn(),
 }));
 
@@ -61,11 +59,13 @@ vi.mock("@/stores/tab-store", () => {
     state.activeWorkspaceSlug
       ? (state.byWorkspace[state.activeWorkspaceSlug] ?? null)
       : null;
-  const resolveRouteIcon = () => "ListTodo";
-  return { useTabStore, useActiveGroup, resolveRouteIcon };
+  return { useTabStore, useActiveGroup };
 });
 
-vi.mock("@multica/core/paths", () => ({
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  // Spread the real module so pure helpers (resolveRouteIconName, used to
+  // derive each tab's icon from its url) keep working.
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
   paths: {
     workspace: (slug: string) => ({
       issues: () => `/${slug}/issues`,
@@ -81,8 +81,8 @@ function reset() {
     acme: {
       activeTabId: "tA",
       tabs: [
-        { id: "tA", path: "/acme/issues", title: "Issues", icon: "ListTodo", pinned: false },
-        { id: "tB", path: "/acme/projects", title: "Projects", icon: "ListTodo", pinned: false },
+        { id: "tA", url: "/acme/issues", title: "Issues", pinned: false },
+        { id: "tB", url: "/acme/projects", title: "Projects", pinned: false },
       ],
     },
   };
@@ -125,8 +125,8 @@ afterAll(() => vi.unstubAllGlobals());
 describe("TabBar hover action buttons", () => {
   it("renders a Pin button on every unpinned tab and an Unpin button on every pinned tab", () => {
     state.byWorkspace.acme.tabs = [
-      { id: "tA", path: "/acme/issues", title: "Issues", icon: "ListTodo", pinned: true },
-      { id: "tB", path: "/acme/projects", title: "Projects", icon: "ListTodo", pinned: false },
+      { id: "tA", url: "/acme/issues", title: "Issues", pinned: true },
+      { id: "tB", url: "/acme/projects", title: "Projects", pinned: false },
     ];
     const { getAllByLabelText } = render(<TabBar />);
     expect(getAllByLabelText("Unpin tab")).toHaveLength(1);
@@ -142,8 +142,8 @@ describe("TabBar hover action buttons", () => {
 
   it("clicking the Unpin button on a pinned tab calls togglePin", () => {
     state.byWorkspace.acme.tabs = [
-      { id: "tA", path: "/acme/issues", title: "Issues", icon: "ListTodo", pinned: true },
-      { id: "tB", path: "/acme/projects", title: "Projects", icon: "ListTodo", pinned: false },
+      { id: "tA", url: "/acme/issues", title: "Issues", pinned: true },
+      { id: "tB", url: "/acme/projects", title: "Projects", pinned: false },
     ];
     const { getByLabelText } = render(<TabBar />);
     fireEvent.click(getByLabelText("Unpin tab"));
@@ -152,8 +152,8 @@ describe("TabBar hover action buttons", () => {
 
   it("hides the X close button on a pinned tab but keeps it on an unpinned tab", () => {
     state.byWorkspace.acme.tabs = [
-      { id: "tA", path: "/acme/issues", title: "Issues", icon: "ListTodo", pinned: true },
-      { id: "tB", path: "/acme/projects", title: "Projects", icon: "ListTodo", pinned: false },
+      { id: "tA", url: "/acme/issues", title: "Issues", pinned: true },
+      { id: "tB", url: "/acme/projects", title: "Projects", pinned: false },
     ];
     const { queryAllByLabelText } = render(<TabBar />);
     // Only the unpinned tab exposes a Close affordance — pinned tab requires
@@ -163,17 +163,34 @@ describe("TabBar hover action buttons", () => {
 
   it("keeps the full title visible on a pinned tab (no icon-only collapse)", () => {
     state.byWorkspace.acme.tabs = [
-      { id: "tA", path: "/acme/issues", title: "Issues", icon: "ListTodo", pinned: true },
+      { id: "tA", url: "/acme/issues", title: "Issues", pinned: true },
     ];
     const { getByLabelText } = render(<TabBar />);
     const pinnedTab = getByLabelText("Issues (pinned)");
     expect(within(pinnedTab).getByText("Issues")).toBeTruthy();
   });
 
+  // MUL-4370: the tab icon is derived from the tab's url, so it matches the
+  // sidebar even for tabs restored from persisted state written by a build
+  // whose route→icon map was wrong (autopilots used to persist "ListTodo").
+  it("derives each tab's icon from its url", () => {
+    state.byWorkspace.acme.tabs = [
+      { id: "tA", url: "/acme/autopilots", title: "Autopilots", pinned: false },
+      { id: "tB", url: "/acme/projects/proj-1", title: "Project", pinned: false },
+      { id: "tC", url: "/acme/issues?filter=urgent", title: "Issues", pinned: false },
+    ];
+    const { getByLabelText } = render(<TabBar />);
+    expect(getByLabelText("Autopilots").querySelector(".lucide-zap.size-3\\.5")).toBeTruthy();
+    expect(
+      getByLabelText("Project").querySelector(".lucide-folder-kanban.size-3\\.5"),
+    ).toBeTruthy();
+    expect(getByLabelText("Issues").querySelector(".lucide-list-todo.size-3\\.5")).toBeTruthy();
+  });
+
   it("renders the Pin glyph as the leading icon on a pinned tab and the route icon on an unpinned tab", () => {
     state.byWorkspace.acme.tabs = [
-      { id: "tA", path: "/acme/issues", title: "Issues", icon: "ListTodo", pinned: true },
-      { id: "tB", path: "/acme/projects", title: "Projects", icon: "ListTodo", pinned: false },
+      { id: "tA", url: "/acme/issues", title: "Issues", pinned: true },
+      { id: "tB", url: "/acme/projects", title: "Projects", pinned: false },
     ];
     const { getByLabelText } = render(<TabBar />);
     const pinnedTab = getByLabelText("Issues (pinned)");
@@ -182,8 +199,8 @@ describe("TabBar hover action buttons", () => {
     // slot icon is size-3.5; the hover Pin/Unpin action button is size-2.5,
     // so we qualify on size to avoid matching the action glyph.
     expect(pinnedTab.querySelector(".lucide-pin.size-3\\.5")).toBeTruthy();
-    expect(pinnedTab.querySelector(".lucide-list-todo")).toBeNull();
-    expect(unpinnedTab.querySelector(".lucide-list-todo.size-3\\.5")).toBeTruthy();
+    expect(pinnedTab.querySelector(".lucide-folder-kanban")).toBeNull();
+    expect(unpinnedTab.querySelector(".lucide-folder-kanban.size-3\\.5")).toBeTruthy();
     expect(unpinnedTab.querySelector(".lucide-pin.size-3\\.5")).toBeNull();
   });
 });
@@ -192,9 +209,8 @@ describe("TabBar overflow", () => {
   it("keeps tabs readable in a bounded horizontal scroller", () => {
     state.byWorkspace.acme.tabs = Array.from({ length: 8 }, (_, index) => ({
       id: `t${index}`,
-      path: `/acme/tab-${index}`,
+      url: `/acme/tab-${index}`,
       title: `Tab ${index}`,
-      icon: "ListTodo",
       pinned: index === 0,
     }));
 
@@ -251,9 +267,8 @@ describe("TabBar overflow", () => {
   it("scrolls only the tab strip when the active tab moves out of view", () => {
     state.byWorkspace.acme.tabs = Array.from({ length: 6 }, (_, index) => ({
       id: `t${index}`,
-      path: `/acme/tab-${index}`,
+      url: `/acme/tab-${index}`,
       title: `Tab ${index}`,
-      icon: "ListTodo",
       pinned: false,
     }));
     state.byWorkspace.acme.activeTabId = "t0";
@@ -287,9 +302,8 @@ describe("TabBar overflow", () => {
   it("smoothly reveals a newly added active tab", () => {
     state.byWorkspace.acme.tabs = Array.from({ length: 6 }, (_, index) => ({
       id: `t${index}`,
-      path: `/acme/tab-${index}`,
+      url: `/acme/tab-${index}`,
       title: `Tab ${index}`,
-      icon: "ListTodo",
       pinned: false,
     }));
     state.byWorkspace.acme.activeTabId = "t0";
@@ -327,9 +341,8 @@ describe("TabBar overflow", () => {
       ...state.byWorkspace.acme.tabs,
       {
         id: "t6",
-        path: "/acme/tab-6",
+        url: "/acme/tab-6",
         title: "Tab 6",
-        icon: "ListTodo",
         pinned: false,
       },
     ];
@@ -347,9 +360,8 @@ describe("TabBar overflow", () => {
   it("keeps background additions offscreen and acknowledges them at the edge", () => {
     state.byWorkspace.acme.tabs = Array.from({ length: 6 }, (_, index) => ({
       id: `t${index}`,
-      path: `/acme/tab-${index}`,
+      url: `/acme/tab-${index}`,
       title: `Tab ${index}`,
-      icon: "ListTodo",
       pinned: false,
     }));
     state.byWorkspace.acme.activeTabId = "t0";
@@ -385,9 +397,8 @@ describe("TabBar overflow", () => {
       ...state.byWorkspace.acme.tabs,
       {
         id: "t6",
-        path: "/acme/tab-6",
+        url: "/acme/tab-6",
         title: "Tab 6",
-        icon: "ListTodo",
         pinned: false,
       },
     ];
@@ -407,10 +418,8 @@ describe("TabBar context menu", () => {
     state.byWorkspace.acme.tabs = [
       {
         id: "tA",
-        path: "/acme/issues/issue-1",
         url: "/acme/issues/issue-1?comment=comment-1",
         title: "MUL-1: Fix tabs",
-        icon: "ListTodo",
         pinned: false,
       },
     ];
@@ -429,10 +438,8 @@ describe("TabBar context menu", () => {
     state.byWorkspace.acme.tabs = [
       {
         id: "tA",
-        path: "/acme/issues",
         url: "/acme/issues",
         title: "Issues",
-        icon: "ListTodo",
         pinned: false,
       },
     ];
@@ -446,9 +453,9 @@ describe("TabBar context menu", () => {
 
   it("closes other tabs from the context menu", async () => {
     state.byWorkspace.acme.tabs = [
-      { id: "tA", path: "/acme/issues", title: "Issues", icon: "ListTodo", pinned: true },
-      { id: "tB", path: "/acme/projects", title: "Projects", icon: "ListTodo", pinned: false },
-      { id: "tC", path: "/acme/agents", title: "Agents", icon: "Bot", pinned: false },
+      { id: "tA", url: "/acme/issues", title: "Issues", pinned: true },
+      { id: "tB", url: "/acme/projects", title: "Projects", pinned: false },
+      { id: "tC", url: "/acme/agents", title: "Agents", pinned: false },
     ];
 
     const { findByText, getByLabelText } = render(<TabBar />);

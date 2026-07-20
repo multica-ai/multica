@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabHistory } from "@/hooks/use-tab-history";
 import { useActiveTitleSync } from "@/hooks/use-tab-sync";
-import { useTabStore, resolveRouteIcon } from "@/stores/tab-store";
+import { useTabStore } from "@/stores/tab-store";
 import {
   SidebarProvider,
   SidebarTrigger,
@@ -153,9 +153,8 @@ function useInternalLinkHandler() {
     const handler = (e: Event) => {
       const path = (e as CustomEvent).detail?.path;
       if (!path) return;
-      const icon = resolveRouteIcon(path);
       const store = useTabStore.getState();
-      const tabId = store.openTab(path, path, icon);
+      const tabId = store.openTab(path, path);
       store.setActiveTab(tabId);
     };
     window.addEventListener("multica:navigate", handler);

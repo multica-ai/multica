@@ -7,22 +7,7 @@ import {
   type RefObject,
 } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import {
-  Inbox,
-  CircleUser,
-  ListTodo,
-  Bot,
-  Monitor,
-  BookOpenText,
-  Settings,
-  X,
-  Plus,
-  Pin,
-  PinOff,
-  ListX,
-  AppWindow,
-  type LucideIcon,
-} from "lucide-react";
+import { X, Plus, Pin, PinOff, ListX, AppWindow } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -50,24 +35,10 @@ import {
 } from "@multica/ui/components/ui/context-menu";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
-import {
-  useTabStore,
-  useActiveGroup,
-  resolveRouteIcon,
-  type Tab,
-} from "@/stores/tab-store";
+import { useTabStore, useActiveGroup, type Tab } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
+import { routeIconForPath } from "@multica/views/layout/route-icon-components";
 import { parseIssueWindowPath } from "../../../shared/issue-window";
-
-const TAB_ICONS: Record<string, LucideIcon> = {
-  Inbox,
-  CircleUser,
-  ListTodo,
-  Bot,
-  Monitor,
-  BookOpenText,
-  Settings,
-};
 
 const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
@@ -210,7 +181,10 @@ function SortableTabItem({
   // pinned" indicator (RFC §3 D1v-iv FINAL). The route information is still
   // present in the title, and this avoids a hard left accent border that read
   // as visually heavy in light mode.
-  const LeadingIcon = tab.pinned ? Pin : TAB_ICONS[tab.icon];
+  // Derived from the tab's own url through the same registry the sidebar
+  // nav uses, so a route's tab icon always matches its sidebar icon and no
+  // persisted icon name can go stale.
+  const LeadingIcon = tab.pinned ? Pin : routeIconForPath(tab.url);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -499,7 +473,7 @@ function NewTabButton() {
     const activeSlug = useTabStore.getState().activeWorkspaceSlug;
     if (!activeSlug) return;
     const path = paths.workspace(activeSlug).issues();
-    const tabId = addTab(path, "Issues", resolveRouteIcon(path));
+    const tabId = addTab(path, "Issues");
     if (tabId) setActiveTab(tabId);
   };
 
