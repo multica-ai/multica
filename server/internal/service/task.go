@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -3600,8 +3601,10 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				workspaceID = util.UUIDToString(issue.WorkspaceID)
 				// Reset stuck in_progress issues only when no other active
 				// task exists for the issue and no retry was just enqueued.
+				// Category, not the raw token, is the machine semantics (MUL-4809
+				// §4.2): in_review and blocked are in_progress and must reset too.
 				issueKey := util.UUIDToString(t.IssueID)
-				if issue.Status == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
+				if issuestatus.CategoryForStatusToken(issue.Status) == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {
