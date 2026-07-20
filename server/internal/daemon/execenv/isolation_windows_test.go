@@ -53,7 +53,18 @@ func TestWindowsPreparationJobHelperProcess(t *testing.T) {
 	if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
 		os.Exit(4)
 	}
-	select {}
+	// Block until the parent tears this whole process tree down via the Job
+	// Object. A bare select{} is unsafe here: once the helper reaches it, the Go
+	// runtime can find every goroutine parked with no possible wakeup and reap
+	// the process itself with "all goroutines are asleep - deadlock!" (exit
+	// status 2). That races the parent's kill and surfaces as a spurious
+	// "helper failed" instead of the context.Canceled the parent test asserts,
+	// which is the flake this job hit on main. Sleeping keeps a pending timer —
+	// a wakeable source — so the runtime never declares a deadlock; the process
+	// still dies the instant the Job Object kills the tree.
+	for {
+		time.Sleep(time.Hour)
+	}
 }
 
 func TestWindowsPreparationDelayedWriter(t *testing.T) {
