@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { QueryClient, hashKey } from "@tanstack/react-query";
 import {
   applyIssueChange,
+  invalidateUpdatedAtSortedIssueLists,
   rollbackIssueChange,
   type IssueFlatCache,
 } from "./cache-coordinator";
@@ -55,6 +56,18 @@ const flatSearchKey = issueKeys.flat(
   "workspace:all",
   { q: "Issue 1" },
   sort,
+);
+const updatedSort: IssueSortParam = {
+  sort_by: "updated_at",
+  sort_direction: "desc",
+};
+const wsUpdatedKey = issueKeys.listSorted(WS_ID, updatedSort);
+const myAllUpdatedKey = issueKeys.myListSorted(WS_ID, "all", {}, updatedSort);
+const flatUpdatedSortKey = issueKeys.flat(
+  WS_ID,
+  "workspace:all",
+  {},
+  updatedSort,
 );
 
 function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
@@ -212,6 +225,41 @@ describe("applyIssueChange", () => {
     });
 
     expect(result.staleKeys.map(hashKey)).toContain(hashKey(flatSearchKey));
+  });
+
+  it("same-status field edit re-sorts an updated_at-sorted board but not a position-sorted one", () => {
+    // Same card loaded in a position-sorted board and an updated_at-sorted one.
+    qc.setQueryData<ListIssuesCache>(wsKey, bucketed([issue()]));
+    qc.setQueryData<ListIssuesCache>(wsUpdatedKey, bucketed([issue()]));
+
+    const patch = { priority: "high" as const };
+    const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
+      changed: issueChangedDims(patch, issue()),
+      baseIssue: issue(),
+    });
+
+    // The card is patched in place in both (no status/position move).
+    expect(ids(qc, wsKey, "todo")).toEqual(["issue-1"]);
+    expect(ids(qc, wsUpdatedKey, "todo")).toEqual(["issue-1"]);
+    // Only the updated_at-sorted board is marked for a server re-sort; the
+    // edit advanced updated_at so its loaded slot drifted.
+    const stale = result.staleKeys.map(hashKey);
+    expect(stale).toContain(hashKey(wsUpdatedKey));
+    expect(stale).not.toContain(hashKey(wsKey));
+  });
+
+  it("marks an updated_at-sorted board stale even when the edited card is beyond its window", () => {
+    // Card not in the loaded window (empty bucket, non-zero total): an edit
+    // that bumps updated_at can still surface it, so the key must refetch.
+    qc.setQueryData<ListIssuesCache>(myAllUpdatedKey, bucketed([], 3));
+
+    const patch = { title: "renamed" };
+    const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
+      changed: issueChangedDims(patch, issue()),
+      baseIssue: issue(),
+    });
+
+    expect(result.staleKeys.map(hashKey)).toContain(hashKey(myAllUpdatedKey));
   });
 
   it("status change: rebuckets loaded cards, patches inbox, adjusts counts for absent-but-member lists", () => {
@@ -461,5 +509,49 @@ describe("applyIssueChange", () => {
 
     expect(qc.getQueryData(groupedKey)).toBe(grouped);
     expect(result.staleKeys.map(hashKey)).not.toContain(hashKey(groupedKey));
+  });
+});
+
+describe("invalidateUpdatedAtSortedIssueLists", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+
+  afterEach(() => {
+    qc.clear();
+  });
+
+  it("invalidates only the updated_at-sorted board, myList, and flat keys", () => {
+    // Two boards, two flat windows: one pair sorted by position, one by
+    // updated_at. Only the updated_at pair should be refetched.
+    qc.setQueryData<ListIssuesCache>(wsKey, bucketed([makeIssue(1)]));
+    qc.setQueryData<ListIssuesCache>(wsUpdatedKey, bucketed([makeIssue(1)]));
+    qc.setQueryData<ListIssuesCache>(myAllUpdatedKey, bucketed([makeIssue(1)]));
+    qc.setQueryData<IssueFlatCache>(flatKey, {
+      pages: [{ issues: [makeIssue(1)], total: 1 }],
+      pageParams: [0],
+    });
+    qc.setQueryData<IssueFlatCache>(flatUpdatedSortKey, {
+      pages: [{ issues: [makeIssue(1)], total: 1 }],
+      pageParams: [0],
+    });
+
+    invalidateUpdatedAtSortedIssueLists(qc, WS_ID);
+
+    expect(qc.getQueryState(wsUpdatedKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(myAllUpdatedKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(flatUpdatedSortKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(wsKey)?.isInvalidated).toBe(false);
+    expect(qc.getQueryState(flatKey)?.isInvalidated).toBe(false);
+  });
+
+  it("is a no-op when no updated_at-sorted list is loaded", () => {
+    qc.setQueryData<ListIssuesCache>(wsKey, bucketed([makeIssue(1)]));
+
+    invalidateUpdatedAtSortedIssueLists(qc, WS_ID);
+
+    expect(qc.getQueryState(wsKey)?.isInvalidated).toBe(false);
   });
 });
