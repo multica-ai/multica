@@ -308,12 +308,13 @@ function createWindow(): BrowserWindow {
   mainRendererMessages.resetReady();
 
   // Restore prior size/position/maximized/fullscreen (#5244), constraining
-  // intersecting bounds to the selected display's work area.
+  // bounds to the work area of the display the window will land on.
   const stateFile = windowStateFilePath(app.getPath("userData"));
   const savedWindowState = loadWindowState(stateFile);
   const windowOpts = resolveWindowOptions(
     savedWindowState,
     screen.getAllDisplays().map((d) => d.workArea),
+    screen.getPrimaryDisplay().workArea,
   );
 
   mainWindow = new BrowserWindow({

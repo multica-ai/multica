@@ -179,6 +179,59 @@ describe("resolveWindowOptions", () => {
     });
   });
 
+  it("shrinks completely off-screen bounds to the primary work area", () => {
+    const opts = resolveWindowOptions(
+      { x: 5000, y: 0, width: 2000, height: 1200 },
+      [{ x: 0, y: 0, width: 1440, height: 900 }],
+    );
+    // Size collapses onto the current work area; coordinates stay omitted so
+    // Electron centers the window instead of restoring it off-screen.
+    expect(opts).toEqual({
+      width: 1440,
+      height: 900,
+      isMaximized: false,
+      isFullScreen: false,
+    });
+  });
+
+  it("clamps off-screen bounds to the supplied primary display, not just displays[0]", () => {
+    const opts = resolveWindowOptions(
+      { x: 9000, y: 9000, width: 2560, height: 1600 },
+      [
+        { x: 0, y: 0, width: 1920, height: 1080 },
+        { x: 1920, y: 0, width: 1280, height: 800 },
+      ],
+      { x: 1920, y: 0, width: 1280, height: 800 },
+    );
+    expect(opts).toEqual({
+      width: 1280,
+      height: 800,
+      isMaximized: false,
+      isFullScreen: false,
+    });
+  });
+
+  it("shrinks default dimensions when the work area is smaller than the default", () => {
+    const opts = resolveWindowOptions({}, [{ x: 0, y: 0, width: 1024, height: 768 }]);
+    expect(opts).toMatchObject({ width: 1024, height: 768 });
+  });
+
+  it("keeps saved size when no displays are reported", () => {
+    const opts = resolveWindowOptions({ x: 0, y: 0, width: 1500, height: 950 }, []);
+    expect(opts).toMatchObject({ width: 1500, height: 950 });
+  });
+
+  it("ignores degenerate work areas when picking the off-screen clamp target", () => {
+    const opts = resolveWindowOptions(
+      { x: 5000, y: 0, width: 2000, height: 1200 },
+      [
+        { x: 0, y: 0, width: 0, height: 0 },
+        { x: 0, y: 0, width: 1366, height: 768 },
+      ],
+    );
+    expect(opts).toMatchObject({ width: 1366, height: 768 });
+  });
+
   it("restores maximized / fullscreen flags", () => {
     const opts = resolveWindowOptions({ isMaximized: true, isFullScreen: true }, displays);
     expect(opts.isMaximized).toBe(true);

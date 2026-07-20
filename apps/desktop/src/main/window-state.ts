@@ -115,14 +115,24 @@ function intersectionArea(a: Rectangle, b: Rectangle): number {
   return width * height;
 }
 
+function isUsableWorkArea(wa: DisplayWorkArea | undefined | null): wa is DisplayWorkArea {
+  return wa != null && wa.width > 0 && wa.height > 0;
+}
+
 /**
  * Resolve persisted geometry against the connected display work areas.
  * Intersecting bounds are resized and repositioned to remain fully visible;
  * disconnected bounds keep their size and state flags but omit coordinates.
+ *
+ * Size is always clamped to the work area the window will actually land on.
+ * When saved bounds intersect no display, Electron centers the window on the
+ * primary display, so `primaryWorkArea` is the clamp target for that path.
+ * It falls back to the first usable entry in `displays` when not supplied.
  */
 export function resolveWindowOptions(
   saved: WindowState,
   displays: DisplayWorkArea[],
+  primaryWorkArea?: DisplayWorkArea,
 ): {
   width: number;
   height: number;
@@ -158,8 +168,14 @@ export function resolveWindowOptions(
       }, null)
     : null;
 
-  const resolvedWidth = workArea ? Math.min(width, workArea.width) : width;
-  const resolvedHeight = workArea ? Math.min(height, workArea.height) : height;
+  // Clamp size against the display the window lands on: the intersected one
+  // when the saved bounds are still visible, otherwise the primary display
+  // Electron will center on. Without this the off-screen and no-saved-state
+  // paths could restore a window larger than the current work area (#5244).
+  const clampTarget = workArea ?? [primaryWorkArea, ...displays].find(isUsableWorkArea) ?? null;
+
+  const resolvedWidth = clampTarget ? Math.min(width, clampTarget.width) : width;
+  const resolvedHeight = clampTarget ? Math.min(height, clampTarget.height) : height;
   return {
     width: resolvedWidth,
     height: resolvedHeight,
