@@ -198,7 +198,7 @@ func runtimeConfigPath(workDir, provider string) string {
 		// file"). CodeBuddy only reads CLAUDE.md if the user manually
 		// migrates/symlinks it in.
 		return filepath.Join(workDir, "CODEBUDDY.md")
-	case "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli", "grok":
+	case "codex", "copilot", "droid", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli", "grok":
 		return filepath.Join(workDir, "AGENTS.md")
 	default:
 		return ""

@@ -1,7 +1,7 @@
 // Package agent provides a unified interface for executing prompts via
-// coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, DevEco Code,
-// OpenClaw, Hermes, Pi, Cursor, Kimi, Kiro, Antigravity, Qoder, Trae, Grok). It
-// mirrors the happy-cli AgentBackend pattern, translated to idiomatic Go.
+// coding agents (Claude Code, CodeBuddy, Codex, Copilot, Droid, OpenCode, DevEco Code,
+// OpenClaw, Hermes, Pi, Cursor, Kimi, Kiro, Antigravity, Qoder, Trae, Grok). It mirrors the
+// happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
 
 import (
@@ -150,7 +150,7 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli, traecli, grok)
+	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, droid, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli, traecli, grok)
 	CLIVersion     string            // detected version paired with ExecutablePath; observation only, never used to choose behavior
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
@@ -161,25 +161,27 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli", "grok".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "droid", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli", "grok".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
 // runtime_profile.protocol_family CHECK constraint (migration 120, widened by
-// migration 134 to add qoder, migration 136 to add traecli, migration 175 to
-// add deveco, and migration 179 to add grok): a custom runtime profile may only
-// be based on a backend Multica officially supports.
+// migration 134 to add qoder, migration 136 to add traecli, migration 175
+// to add deveco, migration 179 to add grok, and migration 202 to add droid): a custom
+// runtime profile may only be based on a backend Multica officially supports.
 // qoder is exposed here so Qoder CN (`qoderclicn`) users can point the Qoder
 // backend at a non-default binary instead of misrouting through Kiro/ACP with
 // incompatible arguments (#4883). traecli (Trae) has a New backend, launch
 // header and provider branding but was previously missing from this whitelist,
-// so the family picker rejected it (#4945). grok is the xAI Grok Build CLI
+// so the family picker rejected it (#4945). droid (Factory Droid) is a
+// first-class CLI backend added in #4211. grok is the xAI Grok Build CLI
 // ACP backend (`grok agent --always-approve stdio`).
 var SupportedTypes = []string{
 	"claude",
 	"codebuddy",
 	"codex",
 	"copilot",
+	"droid",
 	"opencode",
 	"deveco",
 	"openclaw",
@@ -220,6 +222,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &codexBackend{cfg: cfg}, nil
 	case "copilot":
 		return &copilotBackend{cfg: cfg}, nil
+	case "droid":
+		return &droidBackend{cfg: cfg}, nil
 	case "opencode":
 		return &opencodeBackend{cfg: cfg}, nil
 	case "deveco":
@@ -245,7 +249,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "grok":
 		return &grokBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli, grok)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, droid, opencode, deveco, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli, grok)", agentType)
 	}
 }
 
@@ -266,6 +270,7 @@ var launchHeaders = map[string]string{
 	"codebuddy":   "codebuddy (stream-json)",
 	"codex":       "codex app-server",
 	"copilot":     "copilot (json)",
+	"droid":       "droid exec (stream-json)",
 	"cursor":      "cursor-agent (stream-json)",
 	"deveco":      "deveco run (json)",
 	"hermes":      "hermes acp",
