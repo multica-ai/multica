@@ -93,6 +93,7 @@ func TestClassifyRules(t *testing.T) {
 
 		// 7. Provider network.
 		{"stream disconnected", "stream disconnected before completion", ReasonAgentProviderNetwork},
+		{"stream ended without terminal result", "claude stream ended without terminal result", ReasonAgentProviderNetwork},
 		{"connection closed mid-response", "API Error: Connection closed mid-response. The response above may be incomplete.", ReasonAgentProviderNetwork},
 		{"connection closed with exit status wins over process failure", "claude exited with error: exit status 1\nAPI Error: Connection closed mid-response.", ReasonAgentProviderNetwork},
 		{"error sending request", "error sending request for url (https://api.example.com/v1)", ReasonAgentProviderNetwork},

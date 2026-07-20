@@ -167,9 +167,12 @@ func Classify(rawError string) Reason {
 	//    instead of falling through to agent_error.unknown / process_failure
 	//    and terminating the task (MUL-4910). Checked before rule 13 so the
 	//    "... exited with error: exit status N ..." variant still routes here.
+	//    A Claude-style stream that exits cleanly without its terminal result
+	//    is also an incomplete provider stream and is safe to resume.
 	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
 	case containsAny(lower,
 		"stream disconnected",
+		"stream ended without terminal result",
 		"connection closed",
 		"mid-response",
 		"error sending request",
