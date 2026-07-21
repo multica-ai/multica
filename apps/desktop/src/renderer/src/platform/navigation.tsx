@@ -117,7 +117,7 @@ function tryRouteToPinnedNewTab(path: string): boolean {
   const newPathname = splitTabUrl(path).pathname;
   if (currentPathname === newPathname) return false;
 
-  store.openTab(path, path, { activate: true });
+  store.openTab(path, "", { activate: true });
   return true;
 }
 
@@ -189,7 +189,7 @@ export function DesktopNavigationProvider({
           store.switchWorkspace(slug, path);
           return;
         }
-        store.openTab(path, title ?? path, { activate: opts?.activate });
+        store.openTab(path, title ?? "", { activate: opts?.activate });
       },
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),

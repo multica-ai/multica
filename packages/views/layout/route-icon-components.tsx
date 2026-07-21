@@ -9,8 +9,11 @@ import {
   Users,
   BarChart3,
   Monitor,
+  Server,
   BookOpenText,
   Settings,
+  File,
+  FileQuestion,
   type LucideIcon,
 } from "lucide-react";
 import { resolveRouteIconName, type RouteIconName } from "@multica/core/paths";
@@ -33,8 +36,11 @@ export const ROUTE_ICON_COMPONENTS: Record<RouteIconName, LucideIcon> = {
   Users,
   BarChart3,
   Monitor,
+  Server,
   BookOpenText,
   Settings,
+  File,
+  FileQuestion,
 };
 
 /**

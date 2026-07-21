@@ -32,6 +32,7 @@ const state = vi.hoisted(() => ({
   setActiveTab: vi.fn<(tabId: string) => void>(),
   moveTab: vi.fn<(from: number, to: number) => void>(),
   addTab: vi.fn<(path: string, title: string) => string>(),
+  updateTab: vi.fn<(tabId: string, patch: { title?: string }) => void>(),
   openIssueWindow: vi.fn(),
 }));
 
@@ -49,6 +50,7 @@ vi.mock("@/stores/tab-store", () => {
     setActiveTab: state.setActiveTab,
     moveTab: state.moveTab,
     addTab: state.addTab,
+    updateTab: state.updateTab,
   };
   const useTabStore = Object.assign(
     (selector?: (s: typeof store) => unknown) =>
@@ -63,14 +65,30 @@ vi.mock("@/stores/tab-store", () => {
 });
 
 vi.mock("@multica/core/paths", async (importOriginal) => ({
-  // Spread the real module so pure helpers (resolveRouteIconName, used to
-  // derive each tab's icon from its url) keep working.
+  // Spread the real module so pure helpers (parseTabSubject etc.) keep working.
   ...(await importOriginal<typeof import("@multica/core/paths")>()),
   paths: {
     workspace: (slug: string) => ({
       issues: () => `/${slug}/issues`,
     }),
   },
+}));
+
+// The tab bar's presentation (URL/cache → visual + title) is covered by the
+// views tab-presentation tests. Here we stub it so the strip-behavior tests
+// (overflow, pin, close, context menu) don't need the whole query stack. By
+// default `title` mirrors the persisted tab title (matching the real hook's
+// fallback); a test can set `pres.title` to simulate a resolved title that
+// differs, to exercise the active-tab persist effect.
+const pres = vi.hoisted(() => ({ title: null as string | null }));
+vi.mock("@multica/views/layout", () => ({
+  useTabPresentation: (_url: string, fallbackTitle?: string) => ({
+    visual: { kind: "icon", icon: "ListTodo" },
+    title: pres.title ?? fallbackTitle ?? "",
+  }),
+  ResourceLeadingVisual: ({ visual }: { visual: { kind: string; icon?: string } }) => (
+    <span data-testid="tab-leading" data-visual-kind={visual.kind} data-icon={visual.icon} />
+  ),
 }));
 
 import { TabBar } from "./tab-bar";
@@ -92,7 +110,9 @@ function reset() {
   state.setActiveTab.mockReset();
   state.moveTab.mockReset();
   state.addTab.mockReset();
+  state.updateTab.mockReset();
   state.openIssueWindow.mockReset();
+  pres.title = null;
 }
 
 beforeEach(() => {
@@ -170,38 +190,59 @@ describe("TabBar hover action buttons", () => {
     expect(within(pinnedTab).getByText("Issues")).toBeTruthy();
   });
 
-  // MUL-4370: the tab icon is derived from the tab's url, so it matches the
-  // sidebar even for tabs restored from persisted state written by a build
-  // whose route→icon map was wrong (autopilots used to persist "ListTodo").
-  it("derives each tab's icon from its url", () => {
+  // MUL-4370: each tab renders the shared ResourceLeadingVisual keyed off its
+  // URL. (Which visual/title a URL resolves to is covered by the views
+  // tab-presentation tests; here we only assert the strip wires it in.)
+  it("renders the resource leading visual for every tab", () => {
     state.byWorkspace.acme.tabs = [
       { id: "tA", url: "/acme/autopilots", title: "Autopilots", pinned: false },
       { id: "tB", url: "/acme/projects/proj-1", title: "Project", pinned: false },
-      { id: "tC", url: "/acme/issues?filter=urgent", title: "Issues", pinned: false },
     ];
     const { getByLabelText } = render(<TabBar />);
-    expect(getByLabelText("Autopilots").querySelector(".lucide-zap.size-3\\.5")).toBeTruthy();
     expect(
-      getByLabelText("Project").querySelector(".lucide-folder-kanban.size-3\\.5"),
+      getByLabelText("Autopilots").querySelector('[data-testid="tab-leading"]'),
     ).toBeTruthy();
-    expect(getByLabelText("Issues").querySelector(".lucide-list-todo.size-3\\.5")).toBeTruthy();
+    expect(
+      getByLabelText("Project").querySelector('[data-testid="tab-leading"]'),
+    ).toBeTruthy();
   });
 
-  it("renders the Pin glyph as the leading icon on a pinned tab and the route icon on an unpinned tab", () => {
+  // Pin is a secondary state, not an identity: a pinned tab keeps its resource
+  // leading visual rather than collapsing to a Pin glyph (PRD).
+  it("keeps the resource leading visual on a pinned tab (pin does not replace it)", () => {
     state.byWorkspace.acme.tabs = [
       { id: "tA", url: "/acme/issues", title: "Issues", pinned: true },
       { id: "tB", url: "/acme/projects", title: "Projects", pinned: false },
     ];
     const { getByLabelText } = render(<TabBar />);
     const pinnedTab = getByLabelText("Issues (pinned)");
-    const unpinnedTab = getByLabelText("Projects");
-    // lucide-react renders the icon name into the class list. The leading
-    // slot icon is size-3.5; the hover Pin/Unpin action button is size-2.5,
-    // so we qualify on size to avoid matching the action glyph.
-    expect(pinnedTab.querySelector(".lucide-pin.size-3\\.5")).toBeTruthy();
-    expect(pinnedTab.querySelector(".lucide-folder-kanban")).toBeNull();
-    expect(unpinnedTab.querySelector(".lucide-folder-kanban.size-3\\.5")).toBeTruthy();
-    expect(unpinnedTab.querySelector(".lucide-pin.size-3\\.5")).toBeNull();
+    // The leading slot is the resource visual (size-3.5), not a Pin glyph. The
+    // only Pin lives in the size-2.5 hover action button.
+    expect(pinnedTab.querySelector('[data-testid="tab-leading"]')).toBeTruthy();
+    expect(pinnedTab.querySelector(".lucide-pin.size-3\\.5")).toBeNull();
+  });
+});
+
+describe("TabBar active-tab title persistence", () => {
+  it("persists the resolved title only for the active tab", () => {
+    pres.title = "MUL-1: Fixed";
+    state.byWorkspace.acme.tabs = [
+      { id: "tA", url: "/acme/issues/i1", title: "Issues", pinned: false },
+      { id: "tB", url: "/acme/projects", title: "Projects", pinned: false },
+    ];
+    state.byWorkspace.acme.activeTabId = "tA";
+    render(<TabBar />);
+    expect(state.updateTab).toHaveBeenCalledWith("tA", { title: "MUL-1: Fixed" });
+    expect(state.updateTab).not.toHaveBeenCalledWith("tB", expect.anything());
+    expect(state.updateTab).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-persist when the resolved title already matches (no loop)", () => {
+    // Active tab's persisted title equals the resolved title.
+    pres.title = "Issues";
+    state.byWorkspace.acme.activeTabId = "tA"; // tA.title === "Issues"
+    render(<TabBar />);
+    expect(state.updateTab).not.toHaveBeenCalled();
   });
 });
 

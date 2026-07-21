@@ -5,6 +5,11 @@ export {
   CollectionPageState,
 } from "./collection-page";
 export { ROUTE_ICON_COMPONENTS, routeIconForPath } from "./route-icon-components";
+export {
+  useTabPresentation,
+  ResourceLeadingVisual,
+} from "./tab-presentation";
+export type { TabPresentationResult } from "./tab-presentation";
 export { DashboardGuard } from "./dashboard-guard";
 export { DashboardLayout } from "./dashboard-layout";
 export { useDashboardGuard } from "./use-dashboard-guard";

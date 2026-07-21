@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { paths, ROUTE_ICON_NAMES, DEFAULT_ROUTE_ICON_NAME } from "@multica/core/paths";
+import { paths, WORKSPACE_PAGES, DEFAULT_ROUTE_ICON_NAME } from "@multica/core/paths";
 import { ROUTE_ICON_COMPONENTS, routeIconForPath } from "./route-icon-components";
 
 describe("ROUTE_ICON_COMPONENTS", () => {
-  it("has a component for every declared route icon name", () => {
-    const missing = Object.values(ROUTE_ICON_NAMES).filter(
-      (name) => !ROUTE_ICON_COMPONENTS[name],
-    );
+  it("has a component for every page icon", () => {
+    const missing = Object.values(WORKSPACE_PAGES)
+      .map((page) => page.icon)
+      .filter((name) => !ROUTE_ICON_COMPONENTS[name]);
     expect(missing).toEqual([]);
   });
 });
