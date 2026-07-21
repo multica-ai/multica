@@ -11,7 +11,10 @@ import {
   onIssueDeleted,
   onIssueLabelsChanged,
   onIssueMetadataChanged,
+  onIssuePropertiesChanged,
   onIssueUpdated,
+  patchIssueLabels,
+  patchIssueProperties,
 } from "./ws-updaters";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
@@ -181,6 +184,25 @@ describe("onIssueLabelsChanged", () => {
       labelA,
     ]);
   });
+
+  it("defers label-filtered flat-window invalidation until commit", () => {
+    const flatKey = issueKeys.flat(
+      WS_ID,
+      "workspace:all",
+      { label_ids: [labelB.id] },
+      { sort_by: "position" },
+    );
+    qc.setQueryData(flatKey, {
+      pages: [{ issues: [baseIssue], total: 1 }],
+      pageParams: [0],
+    });
+
+    patchIssueLabels(qc, WS_ID, ISSUE_ID, [labelB]);
+    expect(qc.getQueryState(flatKey)?.isInvalidated).toBe(false);
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
+    expectInvalidated(qc, flatKey);
+  });
 });
 
 describe("onIssueMetadataChanged", () => {
@@ -217,6 +239,74 @@ describe("onIssueMetadataChanged", () => {
 
     expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.list(WS_ID))).toBeUndefined();
+  });
+
+  it("re-sorts an updated_at-sorted board but not a position-sorted one", () => {
+    // A metadata write bumps updated_at server-side (MUL-5016), so a board
+    // sorted by "Updated date" must refetch; a position-sorted board must not.
+    const boardUpdatedKey = issueKeys.listSorted(WS_ID, {
+      sort_by: "updated_at",
+      sort_direction: "desc",
+    });
+    const boardPositionKey = issueKeys.listSorted(WS_ID, { sort_by: "position" });
+    qc.setQueryData<ListIssuesCache>(boardUpdatedKey, makeListCache(baseIssue));
+    qc.setQueryData<ListIssuesCache>(boardPositionKey, makeListCache(baseIssue));
+
+    onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { foo: "bar" });
+
+    expectInvalidated(qc, boardUpdatedKey);
+    expect(qc.getQueryState(boardPositionKey)?.isInvalidated).toBe(false);
+  });
+});
+
+describe("issue property snapshots", () => {
+  it("keeps optimistic patches local, then invalidates property windows after commit", () => {
+    const qc = new QueryClient();
+    const flatKey = issueKeys.flat(
+      WS_ID,
+      "workspace:all",
+      {},
+      { sort_by: "property:estimate", properties: { estimate: ["3"] } },
+    );
+    qc.setQueryData(flatKey, {
+      pages: [{ issues: [baseIssue], total: 1 }],
+      pageParams: [0],
+    });
+
+    patchIssueProperties(qc, WS_ID, ISSUE_ID, { estimate: 3 });
+
+    expect(qc.getQueryState(flatKey)?.isInvalidated).toBe(false);
+    expect(
+      qc.getQueryData<{ pages: { issues: Issue[] }[] }>(flatKey)?.pages[0]
+        ?.issues[0]?.properties,
+    ).toEqual({ estimate: 3 });
+
+    onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, { estimate: 4 });
+
+    expectInvalidated(qc, flatKey);
+  });
+
+  it("re-sorts an updated_at-sorted board but not a position-sorted one after commit", () => {
+    // A property write also bumps updated_at server-side (MUL-5016), so a board
+    // sorted by "Updated date" (no property param) must refetch on commit while
+    // a position-sorted board stays put.
+    const qc = new QueryClient();
+    const boardUpdatedKey = issueKeys.listSorted(WS_ID, {
+      sort_by: "updated_at",
+      sort_direction: "desc",
+    });
+    const boardPositionKey = issueKeys.listSorted(WS_ID, { sort_by: "position" });
+    qc.setQueryData<ListIssuesCache>(boardUpdatedKey, makeListCache(baseIssue));
+    qc.setQueryData<ListIssuesCache>(boardPositionKey, makeListCache(baseIssue));
+
+    // Optimistic leg patches only — no premature refetch of either board.
+    patchIssueProperties(qc, WS_ID, ISSUE_ID, { estimate: 3 });
+    expect(qc.getQueryState(boardUpdatedKey)?.isInvalidated).toBe(false);
+
+    onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, { estimate: 4 });
+
+    expectInvalidated(qc, boardUpdatedKey);
+    expect(qc.getQueryState(boardPositionKey)?.isInvalidated).toBe(false);
   });
 });
 

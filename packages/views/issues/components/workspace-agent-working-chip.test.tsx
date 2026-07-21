@@ -202,6 +202,34 @@ describe("WorkspaceAgentWorkingChip", () => {
     ).toBeTruthy();
   });
 
+  it("renders an indeterminate state when the scope is unknown, never a number", () => {
+    // 3 agents ARE running workspace-wide, but the surface could not resolve
+    // which of them belong to the current window (table window resolving /
+    // failed / too large). Publishing any count here — 0 from an empty
+    // fallback or 3 from the workspace — would be a precise-looking wrong
+    // answer (round-5 review P2). The chip must say "unknown" instead.
+    mockState.snapshot = [
+      makeTask({ id: "t-1", agent_id: "agent-1", issue_id: "issue-1" }),
+      makeTask({ id: "t-2", agent_id: "agent-2", issue_id: "issue-2" }),
+      makeTask({ id: "t-3", agent_id: "agent-3", issue_id: "issue-3" }),
+    ];
+
+    renderWithI18n(
+      <WorkspaceAgentWorkingChip
+        value={false}
+        onToggle={() => {}}
+        workingIssues={undefined}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Agents working: —" }),
+    ).toBeTruthy();
+    // No avatar stack: heads next to an unknown label would still read as a
+    // claim about who is in scope.
+    expect(mockState.avatarAgentIds).toBeUndefined();
+  });
+
   it("shows 0 when nothing is running", () => {
     mockState.snapshot = [];
 

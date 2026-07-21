@@ -306,6 +306,9 @@ export function AgentCreatePanel({
   const editorRef = useRef<ContentEditorRef>(null);
   const [hasContent, setHasContent] = useState(initialPrompt.trim().length > 0);
   const [submitting, setSubmitting] = useState(false);
+  // See create-issue's handleSubmit: `submitting` state can't gate two presses
+  // landing in the same tick, and ⌘+Enter makes that trivial to hit.
+  const submittingRef = useRef(false);
   const [justSent, setJustSent] = useState(false);
   const [sentCount, setSentCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -342,7 +345,7 @@ export function AgentCreatePanel({
 
   const submit = async () => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
-    if (!md || !actor || submitting || versionBlocked) return;
+    if (!md || !actor || submittingRef.current || versionBlocked) return;
     // Submit-time re-read of the queue. Blocking here is what guarantees
     // `getMarkdown()`'s blob-url strip never erases a pasted/dropped image
     // whose attachment id hasn't reached `pendingAttachments` yet — the
@@ -351,6 +354,7 @@ export function AgentCreatePanel({
     const activeAttachmentIds = pendingAttachments
       .filter((a) => contentReferencesAttachment(md, a))
       .map((a) => a.id);
+    submittingRef.current = true;
     setSubmitting(true);
     setError(null);
     try {
@@ -424,6 +428,7 @@ export function AgentCreatePanel({
           : t(($) => $.create_issue.agent.error_unknown),
       );
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -713,7 +718,8 @@ export function AgentCreatePanel({
               onClick={submit}
               disabled={!hasContent || !actor || submitting || versionBlocked || uploadGate.uploading}
               aria-disabled={uploadGate.uploading || undefined}
-              aria-busy={uploadGate.uploading || undefined}
+              // Sending is a busy state too, not just uploading.
+              aria-busy={uploadGate.uploading || submitting || undefined}
               title={
                 versionBlocked
                   ? t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })

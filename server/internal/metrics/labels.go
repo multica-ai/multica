@@ -131,6 +131,7 @@ var (
 		"opencode":      "opencode",
 		"deveco":        "deveco",
 		"pi":            "pi",
+		"qwen":          "qwen",
 		"other":         "other",
 	}
 	knownTerminalStatuses = map[string]string{

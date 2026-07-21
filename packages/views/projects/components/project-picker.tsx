@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Check, FolderKanban, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -21,7 +22,7 @@ export function ProjectPicker({
   triggerRender,
   align = "start",
   defaultOpen = false,
-  open,
+  open: controlledOpen,
   onOpenChange,
 }: {
   projectId: string | null;
@@ -38,9 +39,17 @@ export function ProjectPicker({
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const current = projects.find((p) => p.id === projectId);
+  // Normalize to an always-boolean controlled `open`, matching the other
+  // pickers (status/priority/assignee/labels). Base UI's Menu latches a
+  // controlled `open={true}` — a later `undefined` does NOT close it — so
+  // callers wiring `open={cond ? true : undefined}` (create-issue dialog)
+  // would leave the popup stuck open after selecting a project.
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
 
   return (
-    <DropdownMenu defaultOpen={defaultOpen} open={open} onOpenChange={onOpenChange}>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <div className="group/project relative inline-flex min-w-0">
         <DropdownMenuTrigger
           className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}

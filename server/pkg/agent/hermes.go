@@ -161,6 +161,11 @@ type hermesBackend struct {
 	cfg Config
 }
 
+var (
+	hermesReaderDrainGrace      = 2 * time.Second
+	hermesNotificationQuietTime = 250 * time.Millisecond
+)
+
 func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -264,6 +269,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
+	activity := make(chan struct{}, 1)
 
 	c := &hermesClient{
 		cfg:          b.cfg,
@@ -272,6 +278,12 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		pendingTools: make(map[string]*pendingToolCall),
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
+		},
+		onActivity: func() {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
 		},
 		onMessage: func(msg Message) {
 			if !streamingCurrentTurn.Load() {
@@ -313,11 +325,15 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	// Drive the ACP session lifecycle in a goroutine.
 	go func() {
-		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
 		defer func() {
 			stdin.Close()
+			// Cancellation must be reachable before Wait. A pathological child
+			// can close stdout/stderr (so the pipe drain succeeds) but keep the
+			// process alive; waiting first would then block until the overall
+			// task timeout and make a later deferred cancel ineffective.
+			cancel()
 			_ = cmd.Wait()
 		}()
 
@@ -326,6 +342,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var finalError string
 		var sessionID string
 		effectiveModel := strings.TrimSpace(opts.Model)
+		// The model id the runtime reports as current right after
+		// session/new or session/resume. Used to skip a redundant
+		// session/set_model when we would otherwise re-select the model the
+		// session is already on (see the set_model gate below).
+		var sessionCurrentModel string
 
 		// 1. Initialize handshake.
 		initResult, err := c.request(runCtx, "initialize", map[string]any{
@@ -381,8 +402,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					"actual", sessionID,
 				)
 			}
+			sessionCurrentModel = extractACPCurrentModelID(result)
 			if effectiveModel == "" {
-				effectiveModel = extractACPCurrentModelID(result)
+				effectiveModel = sessionCurrentModel
 			}
 		} else {
 			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model, mcpServers))
@@ -399,8 +421,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
+			sessionCurrentModel = extractACPCurrentModelID(result)
 			if effectiveModel == "" {
-				effectiveModel = extractACPCurrentModelID(result)
+				effectiveModel = sessionCurrentModel
 			}
 		}
 
@@ -415,7 +438,22 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// if we silently fell back to hermes' default model the
 		// user would think their pick was honoured while the
 		// task actually ran on something else.
-		if opts.Model != "" {
+		//
+		// Skip the call when the session already reports this exact model as
+		// current. Hermes' set_model re-runs provider auto-detection on the
+		// model id, and for a `provider:model` id whose parsed provider equals
+		// the session's current provider it can mis-route to a different
+		// provider (e.g. custom:deepseek-v4-pro → OpenRouter) and fail with an
+		// auth error. Re-selecting the model the session is already on is pure
+		// downside. An empty sessionCurrentModel (older runtime or unparsable
+		// state) falls through and still sends set_model, preserving prior
+		// behaviour. See MUL-5029 / NousResearch/hermes-agent#59089.
+		if opts.Model != "" && effectiveModel == sessionCurrentModel {
+			b.cfg.Logger.Info("hermes session already on requested model; skipping redundant set_model",
+				"model", opts.Model,
+				"session_id", sessionID,
+			)
+		} else if opts.Model != "" {
 			if _, err := c.request(runCtx, "session/set_model", map[string]any{
 				"sessionId": sessionID,
 				"modelId":   opts.Model,
@@ -509,24 +547,37 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				c.usageMu.Unlock()
 			default:
 			}
+			waitForHermesNotificationQuiescence(runCtx, activity, readerDone)
 		}
 
 		duration := time.Since(startTime)
 		b.cfg.Logger.Info("hermes finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		// Close stdin and cancel context to signal hermes acp to exit.
+		// Close stdin first so Hermes can observe EOF and exit cleanly. Keep the
+		// process alive while stdout/stderr drain; cancelling at the prompt
+		// response boundary can truncate final notifications that arrive just
+		// after the response.
 		stdin.Close()
-		cancel()
 
-		// Wait for the reader goroutine to finish so all output is accumulated.
-		<-readerDone
-		// Wait for the stderr copier as well so the provider-error sniffer
+		// Wait for the stdout reader and stderr copier so all output is
+		// accumulated and the provider-error sniffer
 		// has every byte the child wrote before we consult it for failure
 		// promotion. Skipping this leaves a small race where stopReason=
 		// end_turn arrives over stdout while the stderr 429 / usage-limit
 		// lines are still in transit, causing the promoted error message
-		// to fall through to the synthetic agent-text fallback.
-		<-stderrDone
+		// to fall through to the synthetic agent-text fallback. If Hermes does
+		// not honor stdin EOF within the bound, cancel it and join both readers
+		// before accessing their buffers.
+		if !waitForHermesPipeDrain(readerDone, stderrDone, hermesReaderDrainGrace) {
+			b.cfg.Logger.Warn("hermes did not close output pipes after stdin EOF; forcing shutdown",
+				"pid", cmd.Process.Pid,
+				"grace", hermesReaderDrainGrace.String(),
+			)
+			cancel()
+			<-readerDone
+			<-stderrDone
+		}
+		streamingCurrentTurn.Store(false)
 
 		outputMu.Lock()
 		finalOutput := output.String()
@@ -569,6 +620,55 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
+// waitForHermesNotificationQuiescence gives the stdout reader a bounded chance
+// to consume session updates emitted just after session/prompt returns. Hermes
+// may deliver the final agent_message_chunk after the response; closing stdin
+// or cancelling immediately at that boundary loses the user-visible answer.
+func waitForHermesNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}) {
+	quiet := time.NewTimer(hermesNotificationQuietTime)
+	defer quiet.Stop()
+	hard := time.NewTimer(hermesReaderDrainGrace)
+	defer hard.Stop()
+
+	for {
+		select {
+		case <-activity:
+			if !quiet.Stop() {
+				select {
+				case <-quiet.C:
+				default:
+				}
+			}
+			quiet.Reset(hermesNotificationQuietTime)
+		case <-quiet.C:
+			return
+		case <-readerDone:
+			return
+		case <-hard.C:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func waitForHermesPipeDrain(readerDone, stderrDone <-chan struct{}, timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for readerDone != nil || stderrDone != nil {
+		select {
+		case <-readerDone:
+			readerDone = nil
+		case <-stderrDone:
+			stderrDone = nil
+		case <-timer.C:
+			return false
+		}
+	}
+	return true
+}
+
 // ── hermesClient: ACP JSON-RPC 2.0 transport ──
 
 type hermesPromptResult struct {
@@ -586,8 +686,8 @@ type hermesClient struct {
 	sessionID    string
 	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
-	// onActivity observes accepted ACP session updates. Grok uses it to
-	// retain a short post-response drain window; other ACP backends leave it
+	// onActivity observes accepted ACP session updates. Hermes and Grok use it
+	// to retain a short post-response drain window; other ACP backends leave it
 	// nil and keep their existing lifecycle behavior.
 	onActivity func()
 	// acceptNotification can drop ACP session updates before dispatching to

@@ -321,10 +321,10 @@
     "every_prefix": "每",
     "unit_hours": "小时",
     "unit_minutes": "分钟",
-    "days_label": "日子",
+    "days_label": "重复",
     "days_every": "每天",
-    "days_weekly": "按星期",
-    "days_monthly": "按日期",
+    "days_weekly": "每周特定几天",
+    "days_monthly": "每月",
     "monthly_short_month_hint": "没有 {{day}} 日的月份将跳过。",
     "days_short": {
       "sun": "日",
@@ -386,7 +386,7 @@
       "window_start_minute": "时间窗口起始分钟",
       "window_end_hour": "时间窗口结束小时",
       "window_end_minute": "时间窗口结束分钟",
-      "day_pattern": "日期方式",
+      "day_pattern": "重复方式",
       "day_of_month": "每月几号",
       "timezone": "时区",
       "days_full": {

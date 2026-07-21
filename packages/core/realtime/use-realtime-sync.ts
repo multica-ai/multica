@@ -33,6 +33,7 @@ import {
   onIssuePropertiesChanged,
   onIssueMetadataChanged,
 } from "../issues/ws-updaters";
+import { invalidateUpdatedAtSortedIssueLists } from "../issues/cache-coordinator";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
 import {
@@ -889,7 +890,15 @@ export function useRealtimeSync(
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (!comment?.issue_id) return;
+      invalidateTimeline(comment.issue_id);
+      // A new comment bumps the parent issue's updated_at server-side
+      // (MUL-5009), so any open board/list sorted by "Updated date" has
+      // drifted. Refetch just those keys to re-sort the commented card into
+      // place; every other sort is untouched. Only comment:created bumps
+      // updated_at, so the other comment events below deliberately do not.
+      const wsId = getCurrentWsId();
+      if (wsId) invalidateUpdatedAtSortedIssueLists(qc, wsId);
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {

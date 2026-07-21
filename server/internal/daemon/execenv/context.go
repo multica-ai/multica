@@ -131,6 +131,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // Kimi:        skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
 // Kiro:        skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
 // Qoder:       skills → {workDir}/.qoder/skills/{name}/SKILL.md  (project-level; see docs.qoder.com/cli/Skills.md)
+// Qwen Code:    skills → {workDir}/.qwen/skills/{name}/SKILL.md  (native project-level discovery)
 // Antigravity: skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery — see https://antigravity.google/docs/gcli-migration "Workspace skills")
 // Default:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 //
@@ -388,6 +389,9 @@ func skillsDirPath(workDir, provider string) string {
 		// Qoder CLI discovers project-level skills under .qoder/skills/.
 		// See https://docs.qoder.com/cli/Skills.md
 		return filepath.Join(workDir, ".qoder", "skills")
+	case "qwen":
+		// Qwen Code discovers project-level skills from .qwen/skills/ in the workdir.
+		return filepath.Join(workDir, ".qwen", "skills")
 	case "traecli":
 		// Official TRAE CLI discovers project-level skills from .traecli/skills/
 		// in the workdir (global skills live in ~/.traecli/skills). See

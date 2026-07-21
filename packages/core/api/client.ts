@@ -562,13 +562,31 @@ export class ApiClient {
     if (params?.limit) search.set("limit", String(params.limit));
     if (params?.offset) search.set("offset", String(params.offset));
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
+    if (params?.q?.trim()) search.set("q", params.q.trim());
     if (params?.status) search.set("status", params.status);
+    if (params?.statuses?.length) search.set("statuses", params.statuses.join(","));
     if (params?.priority) search.set("priority", params.priority);
+    if (params?.priorities?.length) search.set("priorities", params.priorities.join(","));
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params?.assignee_types?.length) search.set("assignee_types", params.assignee_types.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.assignee_filters?.length) {
+      search.set("assignee_filters", params.assignee_filters.map((f) => `${f.type}:${f.id}`).join(","));
+    }
+    if (params?.include_no_assignee) search.set("include_no_assignee", "true");
+    if (params?.creator_filters?.length) {
+      search.set("creator_filters", params.creator_filters.map((f) => `${f.type}:${f.id}`).join(","));
+    }
+    if (params?.project_ids?.length) search.set("project_ids", params.project_ids.join(","));
+    if (params?.include_no_project) search.set("include_no_project", "true");
+    if (params?.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
+    if (params?.top_level_only) search.set("top_level_only", "true");
+    // No `.length` guard on purpose: an empty ids array must still send
+    // `ids=` — the server treats a PRESENT-but-empty list as an empty window
+    // (nothing running), while an absent param means no restriction.
+    if (params?.ids) search.set("ids", params.ids.join(","));
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params?.metadata && Object.keys(params.metadata).length > 0) {
       search.set("metadata", JSON.stringify(params.metadata));
@@ -583,6 +601,19 @@ export class ApiClient {
     if (params?.date_end) search.set("date_end", params.date_end);
     if (params?.sort_by) search.set("sort", params.sort_by);
     if (params?.sort_direction) search.set("direction", params.sort_direction);
+    // An ids facet can carry hundreds of UUIDs (agents-working filter) —
+    // enough to blow the ~8 KB request-line cap of common reverse proxies.
+    // Route those windows through the POST twin, which takes the SAME
+    // key/value pairs as a JSON body.
+    if (params?.ids) {
+      const raw = await this.fetch<unknown>("/api/issues/query", {
+        method: "POST",
+        body: JSON.stringify(Object.fromEntries(search)),
+      });
+      return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
+        endpoint: "POST /api/issues/query",
+      });
+    }
     const path = `/api/issues?${search}`;
     const raw = await this.fetch<unknown>(path);
     return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {

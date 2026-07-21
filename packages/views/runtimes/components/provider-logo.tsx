@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { Monitor } from "lucide-react";
+import qwenLogo from "./qwen-logo.svg";
 
 // Claude (Anthropic) — official mark, sourced from Bootstrap Icons (bi-claude)
 function ClaudeLogo({ className }: { className: string }) {
@@ -283,6 +284,14 @@ function GrokLogo({ className }: { className: string }) {
   );
 }
 
+// Qwen Code — official SVG copied verbatim from QwenLM/qwen-code's desktop
+// brand assets (packages/desktop/apps/electron/resources/brands/qwen-code/icon.svg).
+const qwenLogoSrc = typeof qwenLogo === "string" ? qwenLogo : qwenLogo.src;
+
+function QwenLogo({ className }: { className: string }) {
+  return <img src={qwenLogoSrc} alt="" aria-hidden className={className} />;
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -323,6 +332,8 @@ export function ProviderLogo({
       return <TraeLogo className={className} />;
     case "grok":
       return <GrokLogo className={className} />;
+    case "qwen":
+      return <QwenLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }
