@@ -206,7 +206,8 @@ describe("onIssueLabelsChanged", () => {
 
   it("patches the parent's children cache so the sub-issues panel stays fresh", () => {
     const child = { ...baseIssue, parent_issue_id: PARENT_ISSUE_ID };
-    qc.setQueryData<Issue[]>(issueKeys.children(WS_ID, PARENT_ISSUE_ID), [
+    const childrenKey = issueKeys.children(WS_ID, PARENT_ISSUE_ID);
+    qc.setQueryData<Issue[]>(childrenKey, [
       child,
       otherIssue,
     ]);
@@ -227,6 +228,9 @@ describe("onIssueLabelsChanged", () => {
     expect(qc.getQueryData<Issue[]>(issueKeys.children(WS_ID, "parent-9"))).toBe(
       unrelated,
     );
+    // The committed WS/mutation snapshot also marks active children queries
+    // stale, preventing an older in-flight response from overwriting the patch.
+    expectInvalidated(qc, childrenKey);
   });
 
   it("invalidates batched children caches (Map-shaped, not patchable)", () => {
@@ -294,6 +298,50 @@ describe("onIssueMetadataChanged", () => {
 });
 
 describe("issue property snapshots", () => {
+  it("patches per-parent children and invalidates every children projection on commit", () => {
+    const qc = new QueryClient();
+    const childrenKey = issueKeys.children(WS_ID, PARENT_ISSUE_ID);
+    const unrelatedKey = issueKeys.children(WS_ID, "parent-9");
+    const batchedKey = issueKeys.childrenByParents(WS_ID, [PARENT_ISSUE_ID]);
+    const child = {
+      ...parentedIssue,
+      properties: { estimate: 1, environment: "staging" },
+    };
+    const unrelated = [otherIssue];
+    qc.setQueryData<Issue[]>(childrenKey, [child, otherIssue]);
+    qc.setQueryData<Issue[]>(unrelatedKey, unrelated);
+    qc.setQueryData(batchedKey, new Map([[PARENT_ISSUE_ID, [child]]]));
+
+    // The optimistic leg is deterministic: patch immediately without a
+    // premature refetch that could still return the pre-mutation value.
+    patchIssueProperties(qc, WS_ID, ISSUE_ID, {
+      estimate: 2,
+      environment: "staging",
+    });
+
+    expect(
+      qc.getQueryData<Issue[]>(childrenKey)?.find((candidate) => candidate.id === ISSUE_ID)
+        ?.properties,
+    ).toEqual({ estimate: 2, environment: "staging" });
+    expect(qc.getQueryState(childrenKey)?.isInvalidated).toBe(false);
+    expect(qc.getQueryData<Issue[]>(unrelatedKey)).toBe(unrelated);
+
+    // The committed response/event keeps the immediate patch, then marks both
+    // per-parent and batched projections stale for authoritative convergence.
+    onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, {
+      estimate: 3,
+      environment: "staging",
+    });
+
+    expect(
+      qc.getQueryData<Issue[]>(childrenKey)?.find((candidate) => candidate.id === ISSUE_ID)
+        ?.properties,
+    ).toEqual({ estimate: 3, environment: "staging" });
+    expectInvalidated(qc, childrenKey);
+    expectInvalidated(qc, batchedKey);
+    expect(qc.getQueryData<Issue[]>(unrelatedKey)).toBe(unrelated);
+  });
+
   it("keeps optimistic patches local, then invalidates property windows after commit", () => {
     const qc = new QueryClient();
     const flatKey = issueKeys.flat(

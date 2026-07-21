@@ -82,8 +82,11 @@ export const issueKeys = {
   /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
   identifier: (wsId: string, identifier: string) =>
     [...issueKeys.all(wsId), "identifier", identifier] as const,
+  /** Prefix for every per-parent children query in a workspace. */
+  childrenAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "children"] as const,
   children: (wsId: string, id: string) =>
-    [...issueKeys.all(wsId), "children", id] as const,
+    [...issueKeys.childrenAll(wsId), id] as const,
   /** Prefix for invalidating all batched-children queries in a workspace. */
   childrenByParentsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "children-by-parents"] as const,

@@ -40,6 +40,26 @@ function patchIssueInFlatCaches(
   }
 }
 
+/** Patch denormalized issue snapshots in every loaded per-parent cache. */
+function patchIssueInChildrenCaches(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  patch: Partial<Issue>,
+) {
+  for (const [key, data] of qc.getQueriesData<Issue[]>({
+    queryKey: issueKeys.childrenAll(wsId),
+  })) {
+    if (!data || !data.some((child) => child.id === issueId)) continue;
+    qc.setQueryData<Issue[]>(
+      key,
+      data.map((child) =>
+        child.id === issueId ? { ...child, ...patch } : child,
+      ),
+    );
+  }
+}
+
 function findIssueInFlatCaches(
   qc: QueryClient,
   wsId: string,
@@ -216,19 +236,8 @@ export function patchIssueLabels(
   qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
   );
-  // Patch every per-parent children cache holding this issue — the parent
-  // issue's sub-issues panel renders label chips from these arrays, so a
-  // label change made elsewhere (agent, other tab, the child's own detail
-  // page) must not leave the panel stale.
-  for (const [key, data] of qc.getQueriesData<Issue[]>({
-    queryKey: [...issueKeys.all(wsId), "children"],
-  })) {
-    if (!data || !data.some((c) => c.id === issueId)) continue;
-    qc.setQueryData<Issue[]>(
-      key,
-      data.map((c) => (c.id === issueId ? { ...c, labels } : c)),
-    );
-  }
+  // The sub-issues panel renders label chips from these denormalized rows.
+  patchIssueInChildrenCaches(qc, wsId, issueId, { labels });
   // Patch the Project Gantt caches in-place: the Gantt view applies
   // `labelFilters` to the row data, so a stale `labels` array would silently
   // hide or surface bars after another tab/agent attached or detached a
@@ -247,6 +256,9 @@ export function patchIssueLabels(
 
 /** Reconcile server-filtered label windows only after the write commits. */
 export function invalidateIssueLabelDerivatives(qc: QueryClient, wsId: string) {
+  // A committed response/event must cancel or supersede any per-parent fetch
+  // that started before the label write and could otherwise land afterward.
+  qc.invalidateQueries({ queryKey: issueKeys.childrenAll(wsId) });
   // Batched children caches hold Map-shaped data (parentId → Issue[]) that
   // patchIssueLabels can't surgically update — refetch instead so swimlane
   // child lanes pick up the new label set.
@@ -308,6 +320,10 @@ export function onIssuePropertiesChanged(
   properties: IssuePropertyValues,
 ) {
   patchIssueProperties(qc, wsId, issueId, properties);
+  // Per-parent rows are patched for immediate UI feedback, then all children
+  // projections are marked stale so older fetches cannot win after commit.
+  qc.invalidateQueries({ queryKey: issueKeys.childrenAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   // Plain assignee-group caches are never patched in place (their bucket
   // shape differs) and would otherwise hold stale chips forever under
@@ -340,6 +356,7 @@ export function patchIssueProperties(
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, properties } : old,
   );
+  patchIssueInChildrenCaches(qc, wsId, issueId, { properties });
 }
 
 /**
