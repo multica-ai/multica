@@ -496,6 +496,67 @@ func TestCodexRawTurnCompleted(t *testing.T) {
 	}
 }
 
+func TestCodexTurnNotificationGateDropsResumeReplayAndOtherTurns(t *testing.T) {
+	t.Parallel()
+
+	gate := &codexTurnNotificationGate{}
+	previousCompleted := map[string]any{
+		"threadId": "thr-resumed",
+		"turn": map[string]any{
+			"id":     "turn-previous",
+			"status": "completed",
+		},
+	}
+	if gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("resume replay must stay blocked before the current turn is armed")
+	}
+
+	gate.arm()
+	if !gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("armed gate must preserve older streams that omit turn/started")
+	}
+	if !gate.accept("turn/started", map[string]any{
+		"threadId": "thr-resumed",
+		"turn":     map[string]any{"id": "turn-current"},
+	}) {
+		t.Fatal("current turn/started should open the lifecycle gate")
+	}
+	if gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("completion from another turn must not finish the current turn")
+	}
+	if !gate.accept("item/completed", map[string]any{
+		"threadId": "thr-resumed",
+		"turnId":   "turn-current",
+	}) {
+		t.Fatal("current-turn item should pass the gate")
+	}
+	if !gate.accept("turn/completed", map[string]any{
+		"threadId": "thr-resumed",
+		"turn": map[string]any{
+			"id":     "turn-current",
+			"status": "completed",
+		},
+	}) {
+		t.Fatal("current turn completion should pass the gate")
+	}
+
+	legacy := &codexTurnNotificationGate{}
+	legacyComplete := map[string]any{"msg": map[string]any{"type": "task_complete"}}
+	if legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("legacy resume replay must stay blocked before the current turn is armed")
+	}
+	legacy.arm()
+	if !legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("armed gate must preserve legacy streams that omit task_started")
+	}
+	if !legacy.accept("codex/event", map[string]any{"msg": map[string]any{"type": "task_started"}}) {
+		t.Fatal("legacy current task_started should open the lifecycle gate")
+	}
+	if !legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("legacy current task completion should pass the gate")
+	}
+}
+
 func TestCodexRawTurnCompletedSubtractsCachedInput(t *testing.T) {
 	t.Parallel()
 
@@ -741,6 +802,7 @@ func TestCodexSessionRootPrefersExplicitTaskHome(t *testing.T) {
 func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 	t.Parallel()
 	taskHome := t.TempDir()
+	threadID := "task-thread"
 	startTime := time.Now().Add(-time.Minute)
 	dateDir := filepath.Join(taskHome, "sessions",
 		fmt.Sprintf("%04d", startTime.Year()),
@@ -751,15 +813,15 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 		t.Fatalf("mkdir date dir: %v", err)
 	}
 	content := strings.Join([]string{
-		`{"timestamp":"2026-07-13T00:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`,
-		`{"timestamp":"2026-07-13T00:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":20},"model":"gpt-5.6-sol"}}}`,
+		fmt.Sprintf(`{"timestamp":%q,"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`, startTime.Add(time.Second).UTC().Format(time.RFC3339Nano)),
+		fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":20},"model":"gpt-5.6-sol"}}}`, startTime.Add(2*time.Second).UTC().Format(time.RFC3339Nano)),
 		"",
 	}, "\n")
-	if err := os.WriteFile(filepath.Join(dateDir, "rollout.jsonl"), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write session file: %v", err)
 	}
 
-	got := scanCodexSessionUsage(startTime, taskHome)
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, false)
 	if got == nil {
 		t.Fatal("expected usage scanned from the per-task home")
 	}
@@ -768,6 +830,308 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 	}
 	if got.model != "gpt-5.6-sol" {
 		t.Errorf("model = %q, want gpt-5.6-sol", got.model)
+	}
+}
+
+func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	threadID := "resumed-thread"
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-13T00:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`,
+		`{"timestamp":"2026-07-13T00:00:05.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":700,"output_tokens":50,"reasoning_output_tokens":10},"model":"gpt-5.6-sol"}}}`,
+		`{"timestamp":"2026-07-13T00:00:11.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1300,"cached_input_tokens":900,"output_tokens":70,"reasoning_output_tokens":15},"model":"gpt-5.6-sol"}}}`,
+		`{"timestamp":"2026-07-13T00:00:12.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":1400,"output_tokens":100,"reasoning_output_tokens":25},"model":"gpt-5.6-sol"}}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
+	if got == nil {
+		t.Fatal("expected usage")
+	}
+	// total_token_usage is cumulative for the resumed Codex session. This task
+	// should report only the delta after startTime, not the whole session total.
+	want := TokenUsage{InputTokens: 100, OutputTokens: 65, CacheReadTokens: 700}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want resumed-task delta %+v", got.usage, want)
+	}
+}
+
+func TestParseCodexSessionFileSinceResumeEdgeCases(t *testing.T) {
+	t.Parallel()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	tests := []struct {
+		name  string
+		lines []string
+		want  TokenUsage
+	}{
+		{
+			name: "final last usage wins over earlier total",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":20}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":7,"output_tokens":3}}}}`,
+			},
+			want: TokenUsage{InputTokens: 7, OutputTokens: 3},
+		},
+		{
+			name: "final total wins over earlier last usage",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":7,"output_tokens":3}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":20}}}}`,
+			},
+			want: TokenUsage{InputTokens: 60, OutputTokens: 10},
+		},
+		{
+			name: "cache alias changes from cache read to cached input",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cache_read_input_tokens":700}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":1400}}}}`,
+			},
+			want: TokenUsage{InputTokens: 100, CacheReadTokens: 700},
+		},
+		{
+			name: "cache alias changes from cached input to cache read",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":700}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cache_read_input_tokens":1400}}}}`,
+			},
+			want: TokenUsage{InputTokens: 100, CacheReadTokens: 700},
+		},
+		{
+			name: "counter reset accumulates every segment",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":50}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"output_tokens":60}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5}}}}`,
+				`{"timestamp":"2026-07-13T00:00:13Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"output_tokens":70}}}}`,
+			},
+			want: TokenUsage{InputTokens: 170, OutputTokens: 80},
+		},
+		{
+			name: "one counter reset does not reset monotonic fields",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":50}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"output_tokens":5}}}}`,
+			},
+			want: TokenUsage{InputTokens: 20, OutputTokens: 5},
+		},
+		{
+			name: "missing timestamp before boundary is baseline only",
+			lines: []string{
+				`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+			},
+			want: TokenUsage{InputTokens: 60, OutputTokens: 15},
+		},
+		{
+			name: "missing timestamp after boundary remains in delta",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+				`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":180,"output_tokens":30}}}}`,
+			},
+			want: TokenUsage{InputTokens: 80, OutputTokens: 20},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "session.jsonl")
+			content := strings.Join(append(tc.lines, ""), "\n")
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			got := parseCodexSessionFileSince(path, startTime, true)
+			if got == nil {
+				t.Fatal("expected usage")
+			}
+			if got.usage != tc.want {
+				t.Fatalf("usage = %+v, want %+v", got.usage, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseCodexSessionFileSinceAllMissingTimestamps(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+
+	if got := parseCodexSessionFileSince(path, startTime, true); got != nil {
+		t.Fatalf("ambiguous resumed usage = %+v, want nil", got.usage)
+	}
+	got := parseCodexSessionFileSince(path, startTime, false)
+	if got == nil {
+		t.Fatal("fresh rollout should retain timestamp-less usage")
+	}
+	want := TokenUsage{InputTokens: 100, OutputTokens: 10}
+	if got.usage != want {
+		t.Fatalf("fresh usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageFindsCrossDayResumeWithCacheOnlyDelta(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	threadID := "cross-day-thread"
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	previousDateDir := filepath.Join(taskHome, "sessions", "2026", "07", "12")
+	if err := os.MkdirAll(previousDateDir, 0o755); err != nil {
+		t.Fatalf("mkdir previous date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-12T23:59:59Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":100}}}}`,
+		`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":150}}}}`,
+		"",
+	}, "\n")
+	path := filepath.Join(previousDateDir, "rollout-2026-07-12T23-59-59-"+threadID+".jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+	if err := os.Chtimes(path, startTime.Add(time.Second), startTime.Add(time.Second)); err != nil {
+		t.Fatalf("set session mtime: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
+	if got == nil {
+		t.Fatal("expected cross-day cache-only usage")
+	}
+	want := TokenUsage{CacheReadTokens: 50}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageFollowsLinkedSessionsRoot(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("directory symlink setup requires Windows developer mode")
+	}
+
+	root := t.TempDir()
+	taskHome := filepath.Join(root, "task-home")
+	store := filepath.Join(root, "session-store")
+	threadID := "linked-thread"
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(store, "2026", "07", "12")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir store date dir: %v", err)
+	}
+	if err := os.MkdirAll(taskHome, 0o755); err != nil {
+		t.Fatalf("mkdir task home: %v", err)
+	}
+	if err := os.Symlink(store, filepath.Join(taskHome, "sessions")); err != nil {
+		t.Fatalf("link sessions root: %v", err)
+	}
+
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+		`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+		"",
+	}, "\n")
+	path := filepath.Join(dateDir, "rollout-2026-07-12T23-59-59-"+threadID+".jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write linked rollout: %v", err)
+	}
+	if err := os.Chtimes(path, startTime.Add(time.Second), startTime.Add(time.Second)); err != nil {
+		t.Fatalf("set rollout mtime: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
+	if got == nil {
+		t.Fatal("expected usage through linked sessions root")
+	}
+	want := TokenUsage{InputTokens: 60, OutputTokens: 15}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageSelectsCurrentThread(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+
+	writeRollout := func(threadID string, input int, modTime time.Time) {
+		t.Helper()
+		content := fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d}}}}`+"\n", input)
+		path := filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s rollout: %v", threadID, err)
+		}
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatalf("set %s rollout mtime: %v", threadID, err)
+		}
+	}
+
+	writeRollout("current-thread", 60, startTime.Add(time.Second))
+	writeRollout("newer-subagent-thread", 900, startTime.Add(2*time.Second))
+
+	got := scanCodexSessionUsage(startTime, taskHome, "current-thread", false)
+	if got == nil {
+		t.Fatal("expected current thread usage")
+	}
+	want := TokenUsage{InputTokens: 60}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want current thread %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageUsesSessionMetadataWhenFilenameDrifts(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+
+	writeRollout := func(filenameID, metadataID string, input int, modTime time.Time) {
+		t.Helper()
+		content := strings.Join([]string{
+			fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:11Z","type":"session_meta","payload":{"id":%q}}`, metadataID),
+			fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d}}}}`, input),
+			"",
+		}, "\n")
+		path := filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+filenameID+".jsonl")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s rollout: %v", filenameID, err)
+		}
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatalf("set %s rollout mtime: %v", filenameID, err)
+		}
+	}
+
+	// The apparent filename match belongs to another thread and must be rejected.
+	writeRollout("current-thread", "other-thread", 900, startTime.Add(2*time.Second))
+	// A future filename format can still be attributed by canonical session_meta.
+	writeRollout("future-filename", "current-thread", 60, startTime.Add(time.Second))
+
+	got := scanCodexSessionUsage(startTime, taskHome, "current-thread", false)
+	if got == nil {
+		t.Fatal("expected current thread usage from session metadata")
+	}
+	want := TokenUsage{InputTokens: 60}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want metadata-owned thread %+v", got.usage, want)
 	}
 }
 
@@ -871,6 +1235,55 @@ func TestCodexRawTurnCompletedFromSubagentIgnored(t *testing.T) {
 	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr_main","turn":{"id":"turn-main","status":"completed"}}}`)
 	if doneCount != 1 {
 		t.Fatalf("matching threadId should trigger onTurnDone exactly once, got %d", doneCount)
+	}
+}
+
+func TestCodexTurnNotificationGateIgnoresSubagentTurnStarted(t *testing.T) {
+	t.Parallel()
+
+	gate := &codexTurnNotificationGate{}
+	gate.arm()
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thr_main"
+	c.acceptNotification = gate.accept
+
+	var (
+		gotText        string
+		doneCount      int
+		discardedCount int
+	)
+	c.onMessage = func(msg Message) {
+		if msg.Type == MessageText {
+			gotText = msg.Content
+		}
+	}
+	c.onTurnDone = func(aborted bool) {
+		doneCount++
+	}
+	c.onDiscardedNotification = func(string, map[string]any) {
+		discardedCount++
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr_main","turn":{"id":"turn-main"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr_subagent","turn":{"id":"turn-sub"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_main","turnId":"turn-main","item":{"type":"agentMessage","id":"msg-main","text":"Main answer"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr_main","turn":{"id":"turn-main","status":"completed"}}}`)
+
+	if gate.turnID != "turn-main" {
+		t.Fatalf("subagent turn/started replaced gate turnID: got %q", gate.turnID)
+	}
+	if c.turnID != "turn-main" {
+		t.Fatalf("subagent turn/started replaced client turnID: got %q", c.turnID)
+	}
+	if gotText != "Main answer" {
+		t.Fatalf("main turn text was lost after subagent start: got %q", gotText)
+	}
+	if doneCount != 1 {
+		t.Fatalf("main turn completion count = %d, want 1", doneCount)
+	}
+	if discardedCount != 0 {
+		t.Fatalf("subagent notification should be filtered before the gate, discarded callback count = %d", discardedCount)
 	}
 }
 
@@ -2428,6 +2841,38 @@ func TestCodexExecuteTurnCompletionCanPrecedeTurnStartResponse(t *testing.T) {
 	}
 	if result.Output != "Done" {
 		t.Fatalf("expected output Done, got %q", result.Output)
+	}
+}
+
+func TestCodexExecuteResumeIgnoresPreviousTurnCompletion(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-resumed","turn":{"id":"turn-previous","status":"completed"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-resumed"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-resumed","turn":{"id":"turn-current"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-resumed","turnId":"turn-current","item":{"type":"agentMessage","id":"msg-current","text":"Current answer"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-resumed","turn":{"id":"turn-current","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		ResumeSessionID:           "thr-resumed",
+		ResumeExpected:            true,
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Current answer" {
+		t.Fatalf("expected current-turn output, got %q", result.Output)
 	}
 }
 

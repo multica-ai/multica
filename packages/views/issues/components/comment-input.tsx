@@ -34,7 +34,9 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   // initial content and the submit-button enable state — without this the
   // button would be disabled even though the editor visibly contains text.
   const draftKey = `new:${issueId}` as const;
-  const initialDraft = useCommentDraftStore.getState().getDraft(draftKey);
+  const [initialDraft] = useState(() =>
+    useCommentDraftStore.getState().getDraft(draftKey),
+  );
   const [content, setContent] = useState(initialDraft ?? "");
   const [isEmpty, setIsEmpty] = useState(() => !initialDraft?.trim());
   const [submitting, setSubmitting] = useState(false);
@@ -46,6 +48,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   //    resolve text/code/markdown previews that require the attachment id.
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   const { uploadWithToast } = useEditorUpload();
+
   // Readonly-first: the composer renders as a same-looking static shell until
   // the user shows intent (click / keyboard / file drop). An unsent draft is
   // standing intent — mount the real editor immediately so the draft is

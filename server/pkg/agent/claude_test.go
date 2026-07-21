@@ -794,6 +794,15 @@ func TestWriteMcpConfigToTemp(t *testing.T) {
 	if !bytes.Equal(data, []byte(raw)) {
 		t.Fatalf("expected %s, got %s", raw, data)
 	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat temp file %s: %v", path, err)
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			t.Fatalf("temp MCP file permissions = %o, want no group/other access", info.Mode().Perm())
+		}
+	}
 
 	// Cleanup should remove the temp directory and every related sidecar file.
 	cleanupMcpConfigTemp(path)

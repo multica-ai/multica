@@ -745,7 +745,7 @@ func TestReuseReclaimsManagedSkillDirWithStrayAgentFile(t *testing.T) {
 func TestReuseSkillRefreshIsCanonicalAcrossProviders(t *testing.T) {
 	t.Parallel()
 
-	for _, provider := range []string{"claude", "codebuddy", "openclaw", "copilot", ""} {
+	for _, provider := range []string{"claude", "codebuddy", "openclaw", "copilot", "qwen", ""} {
 		provider := provider
 		name := provider
 		if name == "" {
@@ -1351,6 +1351,33 @@ func TestWriteContextFilesQoderNativeSkills(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
 		t.Error("expected .agent_context/skills/ to NOT exist for Qoder provider")
+	}
+}
+
+func TestWriteContextFilesQwenNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "qwen-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "qwen", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".qwen", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .qwen/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for Qwen provider")
 	}
 }
 

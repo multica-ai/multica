@@ -66,6 +66,7 @@
   },
   "display": {
     "tooltip": "表示設定",
+    "button": "表示",
     "grouping_section": "グループ化",
     "ordering_section": "並び替え",
     "card_properties_section": "カードのプロパティ",

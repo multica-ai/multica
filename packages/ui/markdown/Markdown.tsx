@@ -1,8 +1,8 @@
 import * as React from 'react'
-import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
+import rehypeSanitize from 'rehype-sanitize'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -14,6 +14,7 @@ import { isAllowedFileCardHref, preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
 import { preprocessIssueIdentifiers } from './issue-identifiers'
 import { preprocessMentionShortcodes } from './mentions'
+import { markdownSanitizeSchema, markdownUrlTransform } from './sanitize'
 import 'katex/dist/katex.min.css'
 import './markdown.css'
 
@@ -86,64 +87,6 @@ export interface MarkdownProps {
    */
   autolinkIssueIdentifiers?: boolean
 }
-
-// Sanitization schema — extends GitHub defaults to allow code highlighting classes
-// and Multica's internal mention/slash protocols.
-const sanitizeSchema = {
-  ...defaultSchema,
-  protocols: {
-    ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), 'mention', 'slash'],
-    // Permit inline data-URI images (QR codes, charts, base64 screenshots).
-    // The scheme gate only allows `data:` through here; attributes.img below
-    // narrows it to image/* so non-image data URIs are still rejected.
-    src: [...(defaultSchema.protocols?.src ?? []), 'data'],
-  },
-  attributes: {
-    ...defaultSchema.attributes,
-    div: [
-      ...(defaultSchema.attributes?.div ?? []),
-      'dataType',
-      'dataHref',
-      'dataFilename',
-    ],
-    code: [
-      ...(defaultSchema.attributes?.code ?? []),
-      ['className', /^language-/],
-      ['className', /^math-/],
-      ['className', /^hljs/],
-    ],
-    img: [
-      // Drop the default plain `src` entry so the value allow-list below is the
-      // one findDefinition resolves — it returns the first match by name, so a
-      // bare `src` string would otherwise shadow (and disable) the allow-list.
-      ...(defaultSchema.attributes?.img ?? []).filter(
-        (attr) => (typeof attr === 'string' ? attr : attr[0]) !== 'src',
-      ),
-      'alt',
-      // Allow inline data:image/* URIs while leaving every other src form
-      // (http/https/site-relative) exactly as before: the negative lookahead
-      // keeps all non-data values, and data: is narrowed to images only.
-      ['src', /^data:image\//i, /^(?!data:)/i],
-    ],
-  },
-}
-
-/**
- * Custom URL transform that allows Multica internal protocols while keeping
- * the default security for all other URLs.
- */
-function urlTransform(url: string): string {
-  if (url.startsWith('mention://')) return url
-  if (url.startsWith('slash://skill/')) return url
-  // Allow inline data:image/* URIs — defaultUrlTransform strips every data: URL
-  // to '', which would blank the src even after rehype-sanitize keeps it. Kept
-  // in sync with the image/* narrowing in sanitizeSchema (protocols.src +
-  // attributes.img) so both gates agree on what a valid inline image is.
-  if (/^data:image\//i.test(url)) return url
-  return defaultUrlTransform(url)
-}
-
 
 // File path detection regex - matches paths starting with /, ~/, or ./
 const FILE_PATH_REGEX =
@@ -483,8 +426,8 @@ export function Markdown({
           remarkBreaks,
           [remarkGfm, { singleTilde: false }],
         ]}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
-        urlTransform={urlTransform}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSanitizeSchema], rehypeKatex]}
+        urlTransform={markdownUrlTransform}
         components={components}
       >
         {processedContent}

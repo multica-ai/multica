@@ -882,8 +882,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const didHighlightRef = useRef<string | null>(null);
 
   // Issue data from TQ — uses detail query, seeded from list cache if available.
-  // Only seed when description is present; list API omits it, and ContentEditor
-  // reads defaultValue on mount only — seeding null description shows an empty editor.
+  // Only seed when description is present; the list API omits it, so a partial
+  // list row must not masquerade as a hydrated issue detail.
   const { data: issue = null, isLoading: issueLoading } = useQuery({
     ...issueDetailOptions(wsId, id),
     initialData: () => {
@@ -2160,7 +2160,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <ContentEditor
               ref={descEditorRef}
               key={id}
-              defaultValue={issue.description || ""}
+              value={issue.description || ""}
               placeholder={t(($) => $.detail.desc_placeholder)}
               onUpdate={(md) => {
                 // Bind any pending uploads still referenced in the markdown

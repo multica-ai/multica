@@ -148,7 +148,7 @@ export function ChatInput({
   //   - Placeholder: ContentEditor's placeholder-sync effect refreshes it live,
   //     so it never needed a remount.
   //   - Draft restore (a cancelled run, a failed send): writes into
-  //     `inputDraft`, and the editor's defaultValue-sync effect pushes it into
+  //     `inputDraft`, and the editor's synchronized-value effect pushes it into
   //     the live instance. There is no second copy to drift or resurface.
   //   - Session switch / lazy create: when the user uploads a file in a
   //     brand-new chat, `handleUploadFile` awaits `ensureSession`, which flips
@@ -175,7 +175,7 @@ export function ChatInput({
   // debounce, so the send affordance cannot be derived from `inputDraft` alone.
   // But `isEmpty` is never re-derived when the composer switches draft slots
   // either: ChatInput does not remount on a session switch, and ContentEditor's
-  // defaultValue-sync pushes the incoming draft in with `emitUpdate: false`, so
+  // synchronized-value effect pushes the incoming draft in with `emitUpdate: false`, so
   // no onUpdate fires. Read BOTH signals — a draft `isEmpty` has not seen yet (a
   // restored or parked one, or any persisted draft the user typed in another
   // session) still enables the button. A false enable costs nothing: handleSend
@@ -230,7 +230,7 @@ export function ChatInput({
 
   // Move the editor from the draft it holds to the draft that is selected.
   //
-  // Two hazards make this more than "let the defaultValue sync handle it":
+  // Two hazards make this more than "let the value sync handle it":
   //
   // 1. Unflushed keystrokes. `onUpdate` is debounced, and by the time a
   //    debounce armed under draft A fires, `onUpdate` resolves to the latest
@@ -243,7 +243,7 @@ export function ChatInput({
   //    a worse trade — the user waits on a network round-trip to change tabs.
   //
   // Case 2 also has to force the adopt afterwards: ContentEditor's sync effect
-  // CONSUMED the defaultValue change while Guard 0 was up (lastDefaultValueRef
+  // CONSUMED the value change while Guard 0 was up (lastSyncedValueRef
   // advances before the guard), so it will never re-run for that value and the
   // target draft would never load on its own.
   //
@@ -520,7 +520,7 @@ export function ChatInput({
             // intentionally tracks neither the session nor the agent.
             key={editorKey}
             ref={editorRef}
-            defaultValue={inputDraft}
+            value={inputDraft}
             placeholder={placeholder}
             onUpdate={(md) => {
               setIsEmpty(!md.trim());

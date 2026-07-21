@@ -172,6 +172,32 @@ jobs:
       - name: Test
         run: cd server && go test -race ./...
 
+  windows-execenv:
+    # The environment-preparation deadline owns a process tree, not just a Go
+    # process. This Windows runtime test verifies Job Object cancellation kills
+    # a delayed descendant before an immediate retry can reuse the same root.
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+          cache-dependency-path: server/go.sum
+
+      - name: Test Windows execution-environment isolation
+        working-directory: server
+        # Keep this job scoped to the runtime regression it exists to prove.
+        # The package's legacy OpenClaw HOME tests are not Windows-safe and are
+        # outside this PR; the normal backend job still runs the full package.
+        run: go test ./internal/daemon/execenv -run '^TestPrepareIsolated_WindowsKillsDescendantBeforeRetry$' -count=1 -timeout=5m
+
+      - name: Build Windows CLI helper entrypoint
+        working-directory: server
+        run: go build ./cmd/multica
+
   installer:
     # Stub-driven shell tests for scripts/install.sh. Kept off the heavy
     # backend job so installer regressions surface independently, and

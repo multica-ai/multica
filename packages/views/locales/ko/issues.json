@@ -66,6 +66,7 @@
   },
   "display": {
     "tooltip": "보기 설정",
+    "button": "보기",
     "grouping_section": "그룹화",
     "ordering_section": "정렬",
     "card_properties_section": "카드 속성",

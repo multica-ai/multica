@@ -68,6 +68,7 @@
   },
   "display": {
     "tooltip": "Display settings",
+    "button": "Display",
     "grouping_section": "Grouping",
     "ordering_section": "Ordering",
     "card_properties_section": "Card properties",

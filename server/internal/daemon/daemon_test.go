@@ -514,6 +514,8 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		{provider: "kiro", want: false},
 		{provider: "kimi", want: true},
 		{provider: "traecli", want: true},
+		// Qwen Code loads the per-task QWEN.md file natively.
+		{provider: "qwen", want: false},
 		{provider: "codex", want: false},
 		{provider: "claude", want: false},
 	}
@@ -2549,6 +2551,17 @@ type reportTaskResultRecorder struct {
 	payload map[string]any
 }
 
+func TestTerminalTaskReportTimeoutCoversRetrySchedule(t *testing.T) {
+	client := NewClient("http://example.invalid")
+	worstCase := time.Duration(len(defaultTerminalRetrySchedule)+1) * client.client.Timeout
+	for _, delay := range defaultTerminalRetrySchedule {
+		worstCase += delay
+	}
+	if terminalTaskReportTimeout < worstCase {
+		t.Fatalf("terminal report timeout = %s, want at least retry worst case %s", terminalTaskReportTimeout, worstCase)
+	}
+}
+
 func (r *reportTaskResultRecorder) handler(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -2604,6 +2617,63 @@ func TestReportTaskResult_CompletedHitsCompleteEndpoint(t *testing.T) {
 	}
 	if rec.payload["session_id"] != "ses-1" {
 		t.Errorf("session_id: got %v", rec.payload["session_id"])
+	}
+}
+
+func TestReportTaskResult_CancelledParentStillReportsTerminalState(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		result     TaskResult
+		wantSuffix string
+	}{
+		{
+			name: "complete",
+			result: TaskResult{
+				Status:     "completed",
+				Comment:    "all good",
+				BranchName: "agent/foo",
+				SessionID:  "ses-complete",
+				WorkDir:    "/tmp/complete",
+			},
+			wantSuffix: "/complete",
+		},
+		{
+			name: "fail",
+			result: TaskResult{
+				Status:        "blocked",
+				Comment:       "provider unavailable",
+				SessionID:     "ses-fail",
+				WorkDir:       "/tmp/fail",
+				FailureReason: "agent_error.provider_unavailable",
+			},
+			wantSuffix: "/fail",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if !strings.HasSuffix(req.URL.Path, tc.wantSuffix) {
+					t.Errorf("terminal callback path = %q, want suffix %q", req.URL.Path, tc.wantSuffix)
+				}
+				calls.Add(1)
+				w.WriteHeader(http.StatusOK)
+			}))
+			t.Cleanup(srv.Close)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+			d.reportTaskResult(ctx, "task-cancelled-parent", tc.result, slog.Default())
+
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("terminal callback calls = %d, want 1", got)
+			}
+		})
 	}
 }
 
@@ -2811,6 +2881,76 @@ func TestReportTaskResult_PermanentCompleteFallsBackToFail(t *testing.T) {
 	}
 	if got := failCalls.Load(); got != 1 {
 		t.Fatalf("permanent /complete should fall back to /fail exactly once, got %d", got)
+	}
+}
+
+func TestReportTaskResult_CancelledParentStillRunsPermanentFailureFallback(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var completeCalls, failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/complete"):
+			completeCalls.Add(1)
+			w.WriteHeader(http.StatusBadRequest)
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(ctx, "task-cancelled-fallback", TaskResult{
+		Status:  "completed",
+		Comment: "ok",
+	}, slog.Default())
+
+	if got := completeCalls.Load(); got != 1 {
+		t.Fatalf("complete calls = %d, want 1", got)
+	}
+	if got := failCalls.Load(); got != 1 {
+		t.Fatalf("fallback fail calls = %d, want 1", got)
+	}
+}
+
+func TestHandleTask_BareErrorReportsFailureWithCancelledParent(t *testing.T) {
+	t.Parallel()
+
+	var failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasSuffix(req.URL.Path, "/fail") {
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+		}
+		failCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "codex"}},
+		cancelPollInterval: time.Hour,
+	}
+	d.runner = taskRunnerFunc(func(runCtx context.Context, _ Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
+		if !errors.Is(runCtx.Err(), context.Canceled) {
+			t.Errorf("runner context error = %v, want context.Canceled", runCtx.Err())
+		}
+		return TaskResult{}, errors.New("runner exited during shutdown")
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	d.handleTask(ctx, Task{ID: "task-bare-error", RuntimeID: "rt-1"}, 0)
+
+	if got := failCalls.Load(); got != 1 {
+		t.Fatalf("fail callback calls = %d, want 1", got)
 	}
 }
 
