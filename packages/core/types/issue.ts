@@ -64,12 +64,6 @@ export interface Issue {
   properties: IssuePropertyValues;
   reactions?: IssueReaction[];
   labels?: Label[];
-  // How many agent runs the write that returned this issue actually started
-  // (0 or 1). Present only on the PUT /api/issues/:id reply — never on reads or
-  // the issue:updated broadcast, because it describes that write, not the
-  // issue. Lets the assign-confirm modal report the real outcome after submit
-  // instead of predicting it beforehand (MUL-5010).
-  runs_started?: number;
   created_at: string;
   updated_at: string;
 }

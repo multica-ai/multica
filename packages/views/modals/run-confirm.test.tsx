@@ -44,8 +44,8 @@ vi.mock("@multica/core/runtimes", () => ({
   },
 }));
 
-const mockUpdate = vi.fn().mockResolvedValue({ id: "issue-1", runs_started: 1 });
-const mockBatch = vi.fn().mockResolvedValue({ updated: 2, runs_started: 2 });
+const mockUpdate = vi.fn().mockResolvedValue({ id: "issue-1" });
+const mockBatch = vi.fn().mockResolvedValue({ updated: 2 });
 vi.mock("@multica/core/issues/mutations", () => ({
   useUpdateIssue: () => ({ mutateAsync: mockUpdate }),
   useBatchUpdateIssues: () => ({ mutateAsync: mockBatch }),
@@ -62,8 +62,8 @@ vi.mock("../i18n", () => ({
       vars?: Record<string, unknown>,
     ) => {
       // Resolve the accessor against a flat label map so assertions can target
-      // text, then interpolate {{name}} / {{count}} the way i18next would —
-      // the toast assertions depend on the substituted values.
+      // text, then interpolate {{name}} / {{count}} the way i18next would — the
+      // headline substitutes the assignee name and the batch count.
       const labels = {
         run_confirm: {
           title_assign: "Confirm assignment?",
@@ -74,8 +74,6 @@ vi.mock("../i18n", () => ({
           note_unsupported: "runtime too old",
           confirm_assign: "Confirm assignment",
           dont_start: "Don't start yet",
-          toast_assigned: "assigned to {{name}}",
-          toast_assigned_started: "assigned to {{name}}, {{count}} run started",
           toast_failed: "failed",
         },
       };
@@ -105,12 +103,13 @@ vi.mock("@multica/ui/components/ui/spinner", () => ({
   Spinner: () => <span data-testid="spinner" />,
 }));
 // vi.hoisted: vi.mock factories run before module-level consts initialize.
+// Only error is used now — completion is silent (no result toast).
 const mockToast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 vi.mock("sonner", () => ({ toast: mockToast }));
 
 beforeEach(() => {
-  mockUpdate.mockClear().mockResolvedValue({ id: "issue-1", runs_started: 1 });
-  mockBatch.mockClear().mockResolvedValue({ updated: 2, runs_started: 2 });
+  mockUpdate.mockClear().mockResolvedValue({ id: "issue-1" });
+  mockBatch.mockClear().mockResolvedValue({ updated: 2 });
   mockToast.error.mockClear();
   mockToast.success.mockClear();
   cache.agents = [{ id: "agent-1", runtime_id: "runtime-1" }];
@@ -150,30 +149,18 @@ describe("RunConfirmModal", () => {
     expect(mockBatch).not.toHaveBeenCalled();
   });
 
-  it("reports the server's run count in the result toast", async () => {
+  it("completes silently on success — closes with no result toast", async () => {
+    // Final scope: the dialog only confirms the assignment. The assignee and any
+    // run surface through the issue's normal updates, so submit adds no toast.
     const onClose = vi.fn();
     render(<RunConfirmModal onClose={onClose} data={single} />);
     fireEvent.click(screen.getByText("Confirm assignment"));
-    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("assigned to Walt, 1 run started"));
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it("omits the run count when the write started none", async () => {
-    mockUpdate.mockResolvedValue({ id: "issue-1", runs_started: 0 });
-    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
-    fireEvent.click(screen.getByText("Confirm assignment"));
-    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("assigned to Walt"));
-  });
-
-  it("degrades to the plain message when an older backend omits runs_started", async () => {
-    mockUpdate.mockResolvedValue({ id: "issue-1" });
-    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
-    fireEvent.click(screen.getByText("Confirm assignment"));
-    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("assigned to Walt"));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(mockToast.success).not.toHaveBeenCalled();
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 
   it("'暂不开始' sends suppress_run and no handoff note", async () => {
-    mockUpdate.mockResolvedValue({ id: "issue-1", runs_started: 0 });
     render(<RunConfirmModal onClose={vi.fn()} data={single} />);
     fireEvent.change(screen.getByPlaceholderText("scope..."), { target: { value: "ignored" } });
     fireEvent.click(screen.getByText("Don't start yet"));
@@ -181,7 +168,7 @@ describe("RunConfirmModal", () => {
     const payload = mockUpdate.mock.calls[0]![0];
     expect(payload.suppress_run).toBe(true);
     expect(payload.handoff_note).toBeUndefined();
-    expect(mockToast.success).toHaveBeenCalledWith("assigned to Walt");
+    expect(mockToast.success).not.toHaveBeenCalled();
   });
 
   it("disables the note box when the agent's runtime is too old", () => {
@@ -214,7 +201,7 @@ describe("RunConfirmModal", () => {
     expect(screen.queryByText("runtime too old")).not.toBeInTheDocument();
   });
 
-  it("batch assign (N ids) applies via batchUpdate and reports the batch run count", async () => {
+  it("batch assign (N ids) applies via batchUpdate", async () => {
     const { container } = render(
       <RunConfirmModal onClose={vi.fn()} data={{ ...single, issueIds: ["i1", "i2"] }} />,
     );
@@ -226,7 +213,7 @@ describe("RunConfirmModal", () => {
       updates: { assignee_type: "agent", assignee_id: "agent-1" },
     });
     expect(mockUpdate).not.toHaveBeenCalled();
-    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("assigned to Walt, 2 run started"));
+    expect(mockToast.success).not.toHaveBeenCalled();
   });
 
   it("keeps the dialog open and surfaces the error when the write fails", async () => {

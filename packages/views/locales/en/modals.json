@@ -59,8 +59,6 @@
     "note_unsupported": "Their runtime is too old to receive this handoff note; it may not be read.",
     "confirm_assign": "Confirm assignment",
     "dont_start": "Don't start yet",
-    "toast_assigned": "Assigned to {{name}}",
-    "toast_assigned_started": "Assigned to {{name}} — {{count}} run started",
     "toast_failed": "Action failed",
     "create_will_start": "{{name}} will start working right after creation.",
     "create_will_start_squad": "{{name}}'s leader will review it and start assigning work right after creation.",

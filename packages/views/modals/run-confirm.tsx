@@ -64,10 +64,11 @@ interface RunConfirmData {
  * keyed per issue id with staleTime 0, every new issue was a guaranteed cache
  * miss and the wait was unavoidable.
  *
- * The real enqueue outcome is authoritative and comes back on the write itself
- * (`runs_started`), reported afterwards as one short toast. Dismissing the
- * dialog (X / Esc / click-outside) cancels without any write. Shared by single
- * assign (1 id) and batch assign (N ids).
+ * Completion is silent: the assignee change and any run it starts surface
+ * through the issue's normal assignee / run-status updates, so the confirm adds
+ * no result toast. Whether a run starts stays the server's existing decision at
+ * write time. Dismissing the dialog (X / Esc / click-outside) cancels without
+ * any write. Shared by single assign (1 id) and batch assign (N ids).
  */
 export function RunConfirmModal({
   onClose,
@@ -147,26 +148,15 @@ export function RunConfirmModal({
       ...(!suppressRun && !noteDisabled && note.trim() ? { handoff_note: note.trim() } : {}),
     });
     try {
-      // How many runs the write actually enqueued — the server's own count, so
-      // the toast states what happened rather than what was predicted. An older
-      // backend omits the field; `?? 0` then degrades to the plain "assigned"
-      // message instead of inventing a number.
-      let runsStarted = 0;
+      // Completion is silent, exactly as before: the assignee and any run show
+      // up through the issue's normal assignee / run-status updates, so there is
+      // no result toast to add here. Whether a run started is the server's
+      // existing decision at write time, not something this dialog reports.
       if (issueIds.length === 1) {
-        const updated = await updateIssue.mutateAsync({ id: issueIds[0]!, ...payload });
-        runsStarted = updated.runs_started ?? 0;
+        await updateIssue.mutateAsync({ id: issueIds[0]!, ...payload });
       } else {
-        const result = await batchUpdate.mutateAsync({ ids: issueIds, updates: payload });
-        runsStarted = result.runs_started ?? 0;
+        await batchUpdate.mutateAsync({ ids: issueIds, updates: payload });
       }
-      toast.success(
-        runsStarted > 0
-          ? t(($) => $.run_confirm.toast_assigned_started, {
-              name: assigneeName,
-              count: runsStarted,
-            })
-          : t(($) => $.run_confirm.toast_assigned, { name: assigneeName }),
-      );
       onClose();
     } catch (err) {
       toast.error(err instanceof Error && err.message ? err.message : t(($) => $.run_confirm.toast_failed));

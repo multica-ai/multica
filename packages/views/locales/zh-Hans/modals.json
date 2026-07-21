@@ -59,8 +59,6 @@
     "note_unsupported": "对方的运行环境版本较旧，这条交接说明可能读不到。",
     "confirm_assign": "确认指派",
     "dont_start": "暂不开始",
-    "toast_assigned": "已指派给 {{name}}",
-    "toast_assigned_started": "已指派给 {{name}}，已启动 {{count}} 个 run",
     "toast_failed": "操作失败",
     "create_will_start": "创建后 {{name}} 会立即开始工作。",
     "create_will_start_squad": "创建后 {{name}} 的队长会评估并开始安排任务。",

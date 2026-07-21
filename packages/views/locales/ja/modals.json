@@ -59,8 +59,6 @@
     "note_unsupported": "相手の実行環境が古いため、この引き継ぎメモは読み取れない可能性があります。",
     "confirm_assign": "割り当てを確認",
     "dont_start": "まだ開始しない",
-    "toast_assigned": "{{name}} に割り当てました",
-    "toast_assigned_started": "{{name}} に割り当て、{{count}} 件の run を開始しました",
     "toast_failed": "操作に失敗しました",
     "create_will_start": "作成後、{{name}} がすぐに作業を開始します。",
     "create_will_start_squad": "作成後、{{name}} のリーダーが内容を評価し、タスクの割り振りを開始します。",

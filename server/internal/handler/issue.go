@@ -69,14 +69,6 @@ type IssueResponse struct {
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
 	Labels *[]LabelResponse `json:"labels,omitempty"`
-	// RunsStarted reports how many agent runs this particular write enqueued —
-	// 0 or 1 for a single issue. Only UpdateIssue sets it, so the assign-confirm
-	// UI can state the real outcome after submit instead of predicting it with a
-	// pre-flight preview round-trip (MUL-5010). Pointer + omitempty like Labels:
-	// every read path (list / detail / issue:updated broadcast) emits no field at
-	// all, because "how many runs did the last write start" is a property of that
-	// write, not of the issue.
-	RunsStarted *int `json:"runs_started,omitempty"`
 }
 
 // validIssueStatuses / validIssuePriorities mirror the CHECK constraints on
@@ -2947,12 +2939,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// it stops in-flight agent runs, so that implicit coupling is gone
 	// (MUL-4465). Deleting an issue still cancels its tasks (see DeleteIssue),
 	// because the tasks' owning issue ceases to exist.
-	//
-	// The enqueue outcome is echoed back on this response (runs_started) so the
-	// caller can report what actually happened. It is set after the broadcast
-	// above on purpose: the WS payload carries the shared issue state, while
-	// runs_started is this request's own result and belongs only to its reply.
-	runsStarted := 0
 	if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
 		service.IssueTriggerInput{
 			Issue:           issue,
@@ -2962,11 +2948,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		},
 		h.issueTriggerWriteProbe(r, actorType, issue),
 	); ok && !req.SuppressRun {
-		if h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote) {
-			runsStarted = 1
-		}
+		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote)
 	}
-	resp.RunsStarted = &runsStarted
 
 	// Platform-driven parent notification: when this issue transitions into
 	// `done` and has a parent, post a top-level system comment on the parent
@@ -3269,11 +3252,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated := 0
-	// How many agent runs this batch actually enqueued, echoed back so the
-	// assign-confirm UI can report the real outcome after submit (MUL-5010).
-	// Counts successful enqueues, not predicate hits: a per-issue insert can
-	// still no-op on the pending unique index.
-	runsStarted := 0
 	// Children that transitioned into a terminal status this batch, collected so
 	// the parent/stage notification is evaluated once against the final state
 	// after the loop (MUL-4155) rather than per-child mid-batch.
@@ -3468,9 +3446,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			},
 			h.issueTriggerWriteProbe(r, actorType, issue),
 		); ok && !req.Updates.SuppressRun {
-			if h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.Updates.HandoffNote) {
-				runsStarted++
-			}
+			h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.Updates.HandoffNote)
 		}
 
 		// No status change — not even → cancelled — cancels active tasks here,
@@ -3498,8 +3474,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// batch. Single-issue UpdateIssue is unchanged and still notifies inline.
 	h.notifyParentsOfBatchChildDone(r.Context(), childDoneCompleted)
 
-	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated, "runs_started", runsStarted)...)
-	writeJSON(w, http.StatusOK, map[string]any{"updated": updated, "runs_started": runsStarted})
+	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
+	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
 }
 
 type BatchDeleteIssuesRequest struct {
