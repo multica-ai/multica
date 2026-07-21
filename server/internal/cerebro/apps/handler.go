@@ -117,7 +117,7 @@ func (h *Handler) BundleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	signed := h.authenticateRuntimeRequest(r, nil)
-	granted := h != nil && h.runtimeServiceKey != "" && verifyBundleToken(h.runtimeServiceKey, bearer, appID.String(), version, time.Now().UTC()) == nil
+	granted := h != nil && h.runtimeServiceKey != "" && verifyBundleToken(h.runtimeServiceKey, bearer, appID.String(), version) == nil
 	if !signed && !granted {
 		writeError(w, http.StatusUnauthorized, "runtime authentication failed")
 		return

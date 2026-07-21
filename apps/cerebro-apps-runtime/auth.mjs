@@ -19,8 +19,15 @@ function signatureForTimestamp(secret, method, path, body, timestamp) {
   return `sha256=${signature}`;
 }
 
-export function mintBundleToken(secret, appId, version, now = new Date(), ttlMs = 30 * 60_000) {
-  const payload = Buffer.from(JSON.stringify({ app_id: appId, version, exp: Math.floor((now.getTime() + ttlMs) / 1000) })).toString("base64url");
+// The bundle token is a durable capability: it authorizes exactly one worker to
+// download its own (immutable, hash-verified) app bundle. A worker re-downloads
+// the bundle on every container start, and its Sliplane env is immutable, so the
+// token must stay valid for the worker's entire lifetime. It therefore carries no
+// expiry — an expiring token baked into a long-lived, restart-on-demand service
+// crashes every restart past the TTL. Short-lived, per-request user capabilities
+// use mintInvocationGrant (which keeps its expiry) instead.
+export function mintBundleToken(secret, appId, version) {
+  const payload = Buffer.from(JSON.stringify({ app_id: appId, version })).toString("base64url");
   const signature = createHmac("sha256", secret).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
