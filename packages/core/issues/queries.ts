@@ -419,33 +419,43 @@ export function issueTableGroupsOptions(
         query,
         group,
         page: { limit: 100, cursor: pageParam },
-      }),
+    }),
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     placeholderData: keepPreviousData,
+    retry: false,
   });
 }
 
-export function issueTableRowsOptions(
+/** One independently-addressable Table branch page.
+ *
+ * Table keeps every cursor page under its own query key so a refreshed head
+ * can detach stale tail cursors before their responses land. Keep the request,
+ * key shape, transition placeholder, and retry policy together here — the
+ * dynamic branch graph in views should not duplicate this API contract. */
+export function issueTableRowPageOptions(
   wsId: string,
-  request: Omit<IssueTableRowsRequest, "page">,
+  request: IssueTableRowsRequest,
 ) {
-  return infiniteQueryOptions({
-    queryKey: issueKeys.tableRows(
-      wsId,
-      request.query,
-      request.group,
-      request.group_key,
-      request.hierarchy.enabled,
-      request.parent_id,
-    ),
-    initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) =>
-      api.listIssueTableRows({
-        ...request,
-        page: { limit: 50, cursor: pageParam },
-      }),
-    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+  const cursor = request.page?.cursor ?? null;
+  return queryOptions({
+    queryKey: [
+      ...issueKeys.tableRows(
+        wsId,
+        request.query,
+        request.group,
+        request.group_key,
+        request.hierarchy.enabled,
+        request.parent_id,
+      ),
+      "page",
+      cursor,
+    ] as const,
+    queryFn: () => api.listIssueTableRows(request),
     placeholderData: keepPreviousData,
+    retry: false,
+    // Dynamic useQueries observers can detach/reinstall as sibling branches
+    // enter the viewport. An errored page stays errored until explicit Retry.
+    refetchOnMount: false,
   });
 }
 

@@ -15,7 +15,14 @@ import {
   patchIssueInBuckets,
 } from "./cache-helpers";
 import { cleanupDeletedIssueCaches } from "./delete-cache";
-import type { Issue, IssueLabelsResponse, IssueMetadata, IssuePropertyValues, Label } from "../types";
+import type {
+  Issue,
+  IssueLabelsResponse,
+  IssueMetadata,
+  IssuePropertyValues,
+  IssueTableRowsResponse,
+  Label,
+} from "../types";
 import type { ListIssuesCache } from "../types";
 
 function patchIssueInFlatCaches(
@@ -36,6 +43,35 @@ function patchIssueInFlatCaches(
           issue.id === issueId ? { ...issue, ...patch } : issue,
         ),
       })),
+    });
+  }
+}
+
+function patchIssueInTableCaches(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  patch: Partial<Issue>,
+) {
+  for (const [key, data] of qc.getQueriesData<unknown>({
+    queryKey: issueKeys.tableAll(wsId),
+  })) {
+    if (
+      !data ||
+      typeof data !== "object" ||
+      !Array.isArray((data as IssueTableRowsResponse).rows)
+    ) {
+      continue;
+    }
+    const page = data as IssueTableRowsResponse;
+    if (!page.rows.some((row) => row.issue.id === issueId)) continue;
+    qc.setQueryData<IssueTableRowsResponse>(key, {
+      ...page,
+      rows: page.rows.map((row) =>
+        row.issue.id === issueId
+          ? { ...row, issue: { ...row.issue, ...patch } }
+          : row,
+      ),
     });
   }
 }
@@ -214,6 +250,7 @@ export function patchIssueLabels(
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { labels }));
   }
   patchIssueInFlatCaches(qc, wsId, issueId, { labels });
+  patchIssueInTableCaches(qc, wsId, issueId, { labels });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
   );
@@ -272,6 +309,7 @@ export function onIssueMetadataChanged(
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { metadata }));
   }
   patchIssueInFlatCaches(qc, wsId, issueId, { metadata });
+  patchIssueInTableCaches(qc, wsId, issueId, { metadata });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, metadata } : old,
   );
@@ -329,6 +367,7 @@ export function patchIssueProperties(
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { properties }));
   }
   patchIssueInFlatCaches(qc, wsId, issueId, { properties });
+  patchIssueInTableCaches(qc, wsId, issueId, { properties });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, properties } : old,
   );

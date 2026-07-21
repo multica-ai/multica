@@ -275,9 +275,16 @@ export type IssueTableGroupSpec =
   | { kind: "assignee" }
   | { kind: "property"; property_id: string };
 
+/** Response-side actor reference. Kept open for forward compatibility: an
+ * installed desktop client may receive a new actor kind from a newer server. */
+export interface IssueTableActorRef {
+  type: string;
+  id: string;
+}
+
 export type IssueTableGroupValue =
-  | { kind: "status"; status: IssueStatus }
-  | { kind: "assignee"; actor: IssueActorRef | null }
+  | { kind: "status"; status: string }
+  | { kind: "assignee"; actor: IssueTableActorRef | null }
   | {
       kind: "property";
       property_id: string;

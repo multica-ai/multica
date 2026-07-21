@@ -164,6 +164,69 @@ describe("ApiClient server Table query", () => {
       facets: [],
     });
   });
+
+  it("preserves future Table status and actor enum values", async () => {
+    const responses = [
+      {
+        query_fingerprint: "sha256:future-status",
+        total: 1,
+        groups: [
+          {
+            key: "status:paused",
+            value: { kind: "status", status: "paused" },
+            count: 1,
+          },
+        ],
+        next_cursor: null,
+      },
+      {
+        query_fingerprint: "sha256:future-actor",
+        total: 1,
+        groups: [
+          {
+            key: "service:bot-1",
+            value: {
+              kind: "assignee",
+              actor: { type: "service", id: "bot-1" },
+            },
+            count: 1,
+          },
+        ],
+        next_cursor: null,
+      },
+    ];
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(responses.shift()), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const query = {
+      scope: { kind: "workspace" as const },
+      filters: {},
+      sort: { field: "position" as const, direction: "asc" as const },
+    };
+
+    await expect(
+      client.listIssueTableGroups({ query, group: { kind: "status" } }),
+    ).resolves.toMatchObject({
+      total: 1,
+      groups: [{ value: { kind: "status", status: "paused" } }],
+    });
+    await expect(
+      client.listIssueTableGroups({ query, group: { kind: "assignee" } }),
+    ).resolves.toMatchObject({
+      total: 1,
+      groups: [
+        { value: { kind: "assignee", actor: { type: "service", id: "bot-1" } } },
+      ],
+    });
+  });
 });
 
 describe("ApiClient label response schemas", () => {

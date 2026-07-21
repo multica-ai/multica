@@ -22,6 +22,7 @@ import type {
   ListIssuesResponse,
 } from "@multica/core/types";
 import { useIssueSurfaceController } from "./use-issue-surface-controller";
+import { IssueTableExportIntegrityError } from "../components/table-view-model";
 
 function makeIssue(
   overrides: Partial<Issue> & Pick<Issue, "id" | "status">,
@@ -514,6 +515,100 @@ describe("useIssueSurfaceController", () => {
     );
     expect(listIssues).not.toHaveBeenCalled();
     expect(result.current.isEmpty).toBe(false);
+  });
+
+  it("fails Table export closed when schema fallback would truncate the CSV", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("table");
+    const listIssueTableRows = vi.fn(() =>
+      Promise.resolve({
+        query_fingerprint: "",
+        group_key: null,
+        parent_id: null,
+        total: 0,
+        rows: [],
+        branch_total: 0,
+        next_cursor: null,
+      }),
+    );
+    setApiInstance({
+      listIssues,
+      listIssueTableRows,
+      listIssueTableFacets: vi.fn(() => never()),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
+      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+    } as unknown as ApiClient);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["table"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await expect(result.current.exportTableIssues()).rejects.toBeInstanceOf(
+      IssueTableExportIntegrityError,
+    );
+  });
+
+  it("exports every stable cursor page exactly once", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("table");
+    const first = makeIssue({ id: "issue-1", status: "todo" });
+    const second = makeIssue({ id: "issue-2", status: "done" });
+    const listIssueTableRows = vi
+      .fn()
+      .mockResolvedValueOnce({
+        query_fingerprint: "sha256:export",
+        group_key: null,
+        parent_id: null,
+        total: 2,
+        rows: [{ issue: first, direct_child_count: 0 }],
+        branch_total: 2,
+        next_cursor: "cursor-2",
+      })
+      .mockResolvedValueOnce({
+        query_fingerprint: "sha256:export",
+        group_key: null,
+        parent_id: null,
+        total: 2,
+        rows: [{ issue: second, direct_child_count: 0 }],
+        branch_total: 2,
+        next_cursor: null,
+      });
+    setApiInstance({
+      listIssues,
+      listIssueTableRows,
+      listIssueTableFacets: vi.fn(() => never()),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
+      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+    } as unknown as ApiClient);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["table"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await expect(result.current.exportTableIssues()).resolves.toEqual([
+      first,
+      second,
+    ]);
+    expect(listIssueTableRows).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ page: { limit: 100, cursor: "cursor-2" } }),
+    );
   });
 
   it("sends the agents-working filter as a backend predicate without sending running ids", async () => {

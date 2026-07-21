@@ -198,6 +198,7 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "database is unavailable")
 		return
 	}
+	baseHandler := h
 	var request issueTableRowsRequest
 	if !decodeIssueTableJSON(w, r, &request) {
 		return
@@ -402,12 +403,24 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		})
 	}
 
-	prefix := h.getIssuePrefix(r.Context(), compiled.workspaceID)
+	// The row window, counts and cursor are the authoritative snapshot. Commit
+	// it before the best-effort display enrichment below: PostgreSQL aborts a
+	// transaction after any statement error, so running getIssuePrefix or
+	// labelsByIssue inside the snapshot would turn their intentionally tolerated
+	// failures into a fatal Commit error for the entire page.
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Warn("ListIssueTableRows snapshot commit failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeIssueTableQueryFailure(w, r, "failed to finish table query")
+		return
+	}
+	committed = true
+
+	prefix := baseHandler.getIssuePrefix(r.Context(), compiled.workspaceID)
 	issueIDs := make([]pgtype.UUID, len(scanned))
 	for index, row := range scanned {
 		issueIDs[index] = row.issue.ID
 	}
-	labelsByIssue := h.labelsByIssue(r.Context(), compiled.workspaceID, issueIDs)
+	labelsByIssue := baseHandler.labelsByIssue(r.Context(), compiled.workspaceID, issueIDs)
 	responseRows := make([]issueTableRowResponse, len(scanned))
 	for index, row := range scanned {
 		issue := issueListRowToResponse(row.issue, prefix)
@@ -431,11 +444,5 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		BranchTotal:      branchTotal,
 		NextCursor:       nextCursor,
 	}
-	if err := tx.Commit(r.Context()); err != nil {
-		slog.Warn("ListIssueTableRows snapshot commit failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeIssueTableQueryFailure(w, r, "failed to finish table query")
-		return
-	}
-	committed = true
 	writeJSON(w, http.StatusOK, response)
 }

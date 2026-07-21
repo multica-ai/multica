@@ -569,14 +569,16 @@ export const EMPTY_GROUPED_ISSUES_RESPONSE: GroupedIssuesResponse = {
 };
 
 const IssueTableActorRefSchema = z.object({
-  type: z.enum(["member", "agent", "squad"]),
+  // Server-driven enums stay open so installed desktop clients survive a
+  // backend that introduces another actor kind.
+  type: z.string(),
   id: z.string(),
 }).loose();
 
 const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("status"),
-    status: z.enum(["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"]),
+    status: z.string(),
   }).loose(),
   z.object({
     kind: z.literal("assignee"),

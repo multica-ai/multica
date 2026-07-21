@@ -3,6 +3,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -16,6 +17,7 @@ import { pruneIssueSurfaceViewStates } from "@multica/core/issues/stores/surface
 import type {
   AgentTask,
   Issue,
+  IssueTableRowsRequest,
   ListIssuesParams,
   ListIssuesResponse,
 } from "@multica/core/types";
@@ -412,5 +414,159 @@ describe("IssueSurface — table pagination ownership", () => {
     await waitFor(() => {
       expect(container.querySelector(".fixed.bottom-6")).not.toBeNull();
     });
+  });
+
+  it("keeps the previous Table rows painted while a new sort is loading", async () => {
+    const { getIssueSurfaceViewStore } = await import(
+      "@multica/core/issues/stores/surface-view-store"
+    );
+    const store = getIssueSurfaceViewStore("project:pt-sort-transition");
+    store.getState().setViewMode("table");
+    const issue = makeIssue(
+      "table-sort-placeholder",
+      "Table row kept during sort",
+      "pt-sort-transition",
+    );
+    const listIssueTableRows = vi.fn((request: IssueTableRowsRequest) =>
+      request.query.sort.field === "position"
+        ? Promise.resolve({
+            query_fingerprint: "sha256:initial-sort",
+            group_key: null,
+            parent_id: null,
+            total: 1,
+            rows: [{ issue, direct_child_count: 0 }],
+            branch_total: 1,
+            next_cursor: null,
+          })
+        : never(),
+    );
+    setApiInstance({
+      listIssues,
+      listIssueTableRows,
+      listIssueTableFacets: vi.fn(() => never()),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => Promise.resolve([])),
+      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
+      listMembers: vi.fn(() => Promise.resolve([])),
+      listAgents: vi.fn(() => Promise.resolve([])),
+      listSquads: vi.fn(() => Promise.resolve([])),
+    } as unknown as ApiClient);
+
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "pt-sort-transition" }}
+          modes={["table"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Table row kept during sort");
+    act(() => store.getState().setSortBy("title"));
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Table row kept during sort")).toBeInTheDocument();
+  });
+
+  it("keeps selected Table rows in the batch universe after their group collapses", async () => {
+    const { getIssueSurfaceViewStore } = await import(
+      "@multica/core/issues/stores/surface-view-store"
+    );
+    const store = getIssueSurfaceViewStore("project:pt-collapsed-batch");
+    store.getState().setViewMode("table");
+    store.getState().setTableGrouping("status");
+    const issue = makeIssue(
+      "table-collapsed-selected",
+      "Selected issue in collapsed group",
+      "pt-collapsed-batch",
+    );
+
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        private readonly callback: IntersectionObserverCallback;
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback;
+        }
+        observe(target: Element) {
+          this.callback(
+            [{ isIntersecting: true, target } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver,
+          );
+        }
+        unobserve() {}
+        disconnect() {}
+        takeRecords() {
+          return [];
+        }
+        root = null;
+        rootMargin = "0px";
+        thresholds = [0];
+      },
+    );
+
+    setApiInstance({
+      listIssues,
+      listIssueTableGroups: vi.fn(() =>
+        Promise.resolve({
+          query_fingerprint: "sha256:collapsed-groups",
+          total: 1,
+          groups: [
+            {
+              key: "status:todo",
+              value: { kind: "status", status: "todo" },
+              count: 1,
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+      listIssueTableRows: vi.fn(() =>
+        Promise.resolve({
+          query_fingerprint: "sha256:collapsed-rows",
+          group_key: "status:todo",
+          parent_id: null,
+          total: 1,
+          rows: [{ issue, direct_child_count: 0 }],
+          branch_total: 1,
+          next_cursor: null,
+        }),
+      ),
+      listIssueTableFacets: vi.fn(() => never()),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => Promise.resolve([])),
+      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
+      listMembers: vi.fn(() => Promise.resolve([])),
+      listAgents: vi.fn(() => Promise.resolve([])),
+      listSquads: vi.fn(() => Promise.resolve([])),
+    } as unknown as ApiClient);
+
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "pt-collapsed-batch" }}
+          modes={["table"]}
+          renderHeader={() => null}
+          batchToolbar="always"
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Selected issue in collapsed group");
+    fireEvent.click(screen.getAllByRole("checkbox")[1]!);
+    await waitFor(() => {
+      expect(container.querySelector(".fixed.bottom-6")).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "translated1" }));
+    await waitFor(() => {
+      expect(screen.queryByText("Selected issue in collapsed group")).toBeNull();
+    });
+    expect(container.querySelector(".fixed.bottom-6")).not.toBeNull();
   });
 });

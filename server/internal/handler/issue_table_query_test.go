@@ -6,9 +6,42 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
+
+type issueTableEnrichmentFailTxStarter struct {
+	inner      txStarter
+	labelCalls *int
+}
+
+func (s issueTableEnrichmentFailTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.inner.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &issueTableEnrichmentFailTx{Tx: tx, labelCalls: s.labelCalls}, nil
+}
+
+type issueTableEnrichmentFailTx struct {
+	pgx.Tx
+	labelCalls *int
+}
+
+func (tx *issueTableEnrichmentFailTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "ListLabelsForIssues") {
+		*tx.labelCalls = *tx.labelCalls + 1
+		// A real PostgreSQL statement error poisons the transaction until
+		// rollback. Before enrichment moved after Commit, this turned the
+		// otherwise successful row window into a 500.
+		_, err := tx.Tx.Exec(ctx, "SELECT * FROM issue_table_missing_enrichment_relation")
+		return nil, err
+	}
+	return tx.Tx.Query(ctx, sql, args...)
+}
 
 func TestCanonicalIssueTableFingerprintNormalizesSetLikeArrays(t *testing.T) {
 	left := issueTableQuerySpec{
@@ -71,6 +104,76 @@ func TestIssueTableCursorRejectsAnotherQuery(t *testing.T) {
 	}
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusConflict)
+	}
+}
+
+func TestIssueTableRowsCommitsBeforeBestEffortEnrichment(t *testing.T) {
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("Table enrichment %d", suffix)).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE project_id = $1`, projectID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+	})
+
+	var issueNumber int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = GREATEST(
+			issue_counter,
+			(SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)
+		) + 1
+		WHERE id = $1
+		RETURNING issue_counter
+	`, testWorkspaceID).Scan(&issueNumber); err != nil {
+		t.Fatalf("reserve issue number: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			position, number, project_id
+		)
+		VALUES ($1, 'table-enrichment', 'todo', 'none', 'member', $2, 1, $3, $4)
+	`, testWorkspaceID, testUserID, issueNumber, projectID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+
+	labelCalls := 0
+	handler := *testHandler
+	handler.TxStarter = issueTableEnrichmentFailTxStarter{
+		inner:      testHandler.TxStarter,
+		labelCalls: &labelCalls,
+	}
+	recorder := httptest.NewRecorder()
+	handler.ListIssueTableRows(recorder, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
+		Query: issueTableQuerySpec{
+			Scope: issueTableScope{Kind: "project", ProjectID: projectID},
+			Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+		},
+		Group:     issueTableGroupSpec{Kind: "none"},
+		Hierarchy: issueTableHierarchyRequest{Enabled: false},
+		Page:      issueTablePageRequest{Limit: 10},
+	}))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("rows status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if labelCalls != 0 {
+		t.Fatalf("best-effort labels ran inside snapshot transaction %d times", labelCalls)
+	}
+	var response issueTableRowsResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode rows: %v", err)
+	}
+	if len(response.Rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(response.Rows))
 	}
 }
 

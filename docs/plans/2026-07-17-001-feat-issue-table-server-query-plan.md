@@ -13,7 +13,7 @@ execution: code
 
 > 本文定义 Table View 的目标产品语义、前后端边界和分阶段实施方案。核心目标不是提高当前的 `1000` 上限，而是移除“前端必须拥有完整结果集才能 Group/Hierarchy”的架构前提。
 
-> **Implementation status (2026-07-17):** 新 Table 路径的 canonical compiler、U2–U3、U5–U7，以及 U8 的 exact facets / cache invalidation 已落地；标准字段所需 concurrent indexes 已加入。Legacy GET handlers 尚未迁入同一 compiler。当前显式导出会复用同一 Query Spec 和 keyset cursor，但 server-stream / async export job、release flag、observability、100k/1m staging SLO 与 browser network smoke 仍属于上线前收口项。
+> **Implementation status (2026-07-21):** 新 Table 路径的 canonical compiler、U2–U3、U5–U7，以及 U8 的 exact facets / cache invalidation 已落地；标准字段所需 concurrent indexes 已加入。Legacy GET handlers 尚未迁入同一 compiler。Table 采用 hard cutover，新旧客户端仍可分别使用 additive table endpoints 与 legacy endpoints，不维护两套前端 Table truth。当前显式导出由浏览器遍历同一 rows Query Spec，并在 fingerprint、total、cursor 或 schema 不一致时 fail closed；server-stream / async export job、observability、100k/1m staging SLO 与 browser network smoke 属于后续收口项。
 
 ## Goal Capsule
 
@@ -21,7 +21,7 @@ execution: code
 - **Product authority:** 本文的 Product Contract。实现不得以“已加载窗口”“浏览器内存上限”重新定义 Group、Hierarchy 或 Count 的语义。
 - **Primary user outcome:** 用户选择 Group 后，无论查询命中 10、1,001 还是 100,000 个 issue，都能立即看到准确的 Group Header 和 Count，并按需加载组内行。
 - **Execution profile:** Go backend + `packages/core` 查询层 + `packages/views` Table 渲染层的跨层改造；保留现有 flat/list/board API 作为兼容路径。
-- **Rollout:** 新路径由 `issues_table_server_query` release flag 控制；flag 打开后不得静默 fallback 到前端分组。
+- **Rollout:** 当前 Web/Desktop Table hard cutover 到 additive server Table endpoints；API 错误不得静默 fallback 到前端分组。旧客户端继续使用未删除的 legacy endpoints。
 - **Stop conditions:** U1–U8 完成；后端、core、views 测试通过；1001+ issue 场景浏览器验证通过；无自动全量物化；性能与一致性验收项达标。
 - **Open blockers:** 无产品决策 blocker。自定义属性 Group 的 100k 数据性能必须在 rollout 前用 `EXPLAIN (ANALYZE, BUFFERS)` 验证，但不阻塞标准字段实现。
 
@@ -31,7 +31,7 @@ execution: code
 
 采用一套后端权威的 `IssueTableQuerySpec`，所有需要对完整结果集求真的能力都从该 Query Spec 派生：
 
-- 后端负责 membership、search、sort、group membership、group count、hierarchy membership、facet count、aggregate 和 export。
+- 后端负责 membership、search、sort、group membership、group count、hierarchy membership、facet count 和 aggregate；当前导出由前端遍历同一 server-authoritative rows query，后续可迁到 server-stream/job。
 - 前端负责 view mode、columns、column width、collapsed groups、collapsed parents、selection、density 和虚拟滚动。
 - Group Header 与 Rows 分开查询：Header 返回准确 Count；Rows 按展开且进入视口的 group/parent branch 使用 cursor 加载。
 - Group membership 默认取 issue 自己的字段，不再根据“是否完整加载”改用根父项字段。
@@ -47,7 +47,7 @@ View state
   │    └─ POST /api/issues/table/groups   → exact group headers/counts
   │    └─ POST /api/issues/table/rows     → cursor-paged root/child rows
   │    └─ POST /api/issues/table/facets   → exact filter facets
-  │    └─ POST /api/issues/table/export   → same membership, server export
+  │    └─ export replays table/rows pages → same server membership, fail closed
   └─ Presentation state: columns/collapse/selection/density
        └─ frontend render + virtualization
 ```
@@ -61,7 +61,7 @@ View state
 | Group membership / order / count | Backend | 必须对完整结果集求真 |
 | Hierarchy membership / child count | Backend | 父项可能不在当前客户端 window |
 | Facet count / aggregate | Backend | loaded rows 不能代表全集 |
-| Export | Backend | 不应在浏览器逐页物化全集 |
+| Export | Backend membership + frontend orchestration（当前） | 显式导出逐页读取同一 rows query；fingerprint/total/cursor/schema 漂移时拒绝生成部分 CSV。server stream/job 为后续优化 |
 | View mode / columns / width / density | Frontend | 只改变呈现，不改变 membership |
 | Group / parent collapse | Frontend | 个人交互状态，决定哪些 branch 需要请求 |
 | Selection | Frontend | 当前交互 session 状态；membership 变化时清理 |
@@ -174,7 +174,7 @@ Filter 菜单中的数量采用 disjunctive faceting：
 - 计算某个维度的候选值时，保留 scope、search 和其他 filter dimensions。
 - 暂时排除当前 dimension 自身，再分别计算各 candidate count。
 - 已选值即使 count=0 仍返回，以便用户看到并移除。
-- Response 标记 `exact: true`；超时或不可用时整个维度显示 loading/unknown，不显示 loaded-row 近似值。
+- Response 中的 counts 按 contract 即为精确值，不另设 `exact` 标记；超时或不可用时整个维度显示 loading/unknown，不显示 loaded-row 近似值。
 
 ### 2.5 Toolbar Information Architecture
 
@@ -213,10 +213,10 @@ Filter · Sort: Title ↑ · Group: Status · Columns · Table
 - Status、Assignee、Select、Checkbox Group。
 - Hierarchy lazy branches。
 - Exact filter facets。
-- Query-consistent server export。
+- Query-consistent export（当前复用 rows cursor；server stream/job 后续实现）。
 - Toolbar 信息架构调整。
 - Realtime cache correctness。
-- Release flag、observability 和 rollout。
+- Hard-cutover compatibility、observability 和 rollout 验证。
 
 **后续能力，接口预留但不在首发：**
 
@@ -490,46 +490,49 @@ Response：
 
 `POST /api/issues/table/facets`
 
-Request 复用 Query Spec，并声明需要的 dimensions：
+Request 复用 Query Spec，并声明需要的 facets：
 
 ```json
 {
   "query": { "...": "IssueTableQuerySpec" },
-  "dimensions": ["status", "priority", "assignee", "project", "label"]
+  "facets": [
+    { "kind": "status" },
+    { "kind": "priority" },
+    { "kind": "assignee" },
+    { "kind": "project" },
+    { "kind": "label" }
+  ]
 }
 ```
 
-Response 每个维度返回 `exact`、values 和 count。Custom property facets 可按当前打开的 property submenu 单独请求，避免一次计算 workspace 全部 properties。
+Response 返回 query fingerprint、query total，以及每个 facet 的 kind、可选 property ID 和 `{key,count}` values。Custom property facets 可按当前打开的 property submenu 单独请求，避免一次计算 workspace 全部 properties。
 
 前端不再用 `scopedIssues` 计算 Table facet counts；Board/List 在统一 Query API 前可保留现有行为。
 
 ### 4.6 Endpoint: Export
 
-`POST /api/issues/table/export`
+V1 不新增独立 export endpoint。显式导出在浏览器中使用与 Table 相同的 Query Spec，逐页调用 `POST /api/issues/table/rows`：
 
-- Request：同一个 Query Spec + columns + locale/timezone。
-- 小结果可 stream CSV；超过同步阈值时返回 `202` 和 export job ID，完成后通过 inbox/notification 提供结果。
-- CSV formula injection protection沿用 `escapeCsvCell` 语义，但在后端实现同等 escaping。
-- Export 不受当前 viewport、collapsed state、loaded branches 影响。
-- V1 导出平铺 rows；Group Header 不作为 CSV 行。是否增加 group column 由请求显式 `include_group_column` 控制。
+- 导出固定使用 `group=none`、`hierarchy=false`，因此只输出 query membership 中的真实 issue 行，不受 viewport、collapsed state 或 loaded branches 影响。
+- 每一页必须保持相同的非空 `query_fingerprint` 和 `total`，cursor 必须前进，issue ID 不得重复；结束时唯一 issue 数必须等于首屏 `total`。
+- Response schema fallback、fingerprint/total 漂移、cursor loop、重复 issue 或最终数量不一致时 fail closed，不生成可能截断或混合 snapshot 的 CSV。
+- CSV formula injection protection沿用 `escapeCsvCell`。
+- Server-stream / async export job 是大规模导出的后续优化；迁移时仍须复用同一 Query Spec 和上述一致性语义。
 
 ### 4.7 Error Contract
 
 ```json
 {
-  "error": {
-    "code": "unsupported_group_field",
-    "message": "...",
-    "details": { "property_id": "..." }
-  }
+  "error": "unsupported_group",
+  "code": "property_type_unsupported",
+  "message": "This property type cannot be used for grouping."
 }
 ```
 
-- `400 invalid_query_spec`：shape、UUID、limit、date range 等非法。
-- `409 cursor_query_mismatch`：cursor 与 query/group/parent 不匹配。
-- `422 unsupported_group_field`：unknown/archived/unsupported property type。
-- `504 query_timeout`：受控 query deadline 超时。
-- `404`：release flag 未打开时隐藏新 endpoint。
+- `400`：shape、UUID、limit、date range、cursor envelope 等非法；body 使用现有 `{ "error": "..." }` contract。
+- `409`：cursor 与 query/group/parent 不匹配。
+- `422 unsupported_group`：unknown/archived/unsupported property 或 group kind；机器可读原因在顶层 `code`。
+- `500/504`：受控 query failure/timeout，body 沿用 handler 的顶层 error contract。
 
 前端对 branch 错误局部展示 Retry；group header 冷启动错误展示 Table-level Retry。
 
@@ -715,14 +718,14 @@ Custom property Group 使用 `i.properties -> '<definition-id>'`。现有 `jsonb
 
 - `packages/core/types/api.ts`
   - `IssueTableQuerySpec`
-  - groups/rows/facets/export request/response tagged unions
+  - groups/rows/facets request/response tagged unions
 - `packages/core/api/schemas.ts`
   - 对所有新 response 使用 Zod schema；不要 raw cast。
 - `packages/core/api/client.ts`
   - `listIssueTableGroups`
   - `listIssueTableRows`
   - `getIssueTableFacets`
-  - `exportIssueTable`
+  - export 复用 `listIssueTableRows`
 - `packages/core/issues/queries.ts`
   - 新 query key prefix：`issueKeys.tableQueryAll(wsId)`。
   - group headers key 包含 canonical query + group。
@@ -759,7 +762,7 @@ buildIssueTableQuerySpec(
 - `useIssueTableGroups(spec, group)`：group headers infinite query。
 - `useIssueTableBranch(spec, group, groupKey, hierarchy, parentId)`：单 branch infinite query。
 - `useIssueTableFacets(spec)`：按打开的 filter submenu 懒加载。
-- `useIssueTableExport(spec, columns)`：发起 stream/job。
+- export controller：使用 `group=none` / `hierarchy=false` 遍历 rows cursor，并执行完整性校验。
 
 加载规则：
 
@@ -832,29 +835,14 @@ issueKeys.tableQueryAll(wsId)
 
 后续可优化为只 invalid source/destination group，但首发不以复杂 delta logic 换取少一次 refetch。
 
-### 6.7 Feature Flag
+### 6.7 Deployment Strategy
 
-新增 frontend-public release flag：
+本次不引入 frontend-public release flag，也不在同一客户端保留双 Table 数据路径：
 
-```text
-issues_table_server_query
-```
-
-修改：
-
-- `server/internal/featureflags/keys.go`
-- `packages/core/feature-flags/keys.ts`
-- 对应 tests
-
-Flag off：保持旧 Table 路径，供 rollout/rollback。
-
-Flag on：
-
-- 所有 Table membership/structure 使用新 API。
-- 新 API error 显示 Retry。
-- 不 fallback 到旧 client Group。
-
-稳定后先永久启用兼容 key，再删除旧分支和 flag，遵循已有 feature flag retirement pattern。
+- 新 Table endpoints 是 additive API；老 Web/Desktop 客户端继续使用 legacy endpoints。
+- 新客户端的 Table membership/structure 始终使用新 API；API error 显示 Retry，不 fallback 到 loaded-row Group。
+- 回滚以回滚 Web/Desktop build 为单位，后端 additive endpoints 和 indexes 可保留，不涉及数据回迁。
+- Board/List 仍使用原有 API；它们不在本次 hard cutover 范围内。
 
 ---
 
@@ -927,9 +915,8 @@ Flag on：
   - `packages/core/issues/surface/query-plan.ts`
   - `packages/core/issues/surface/repository.ts`
   - new compiler/tests under `packages/core/issues/surface/`
-  - `packages/core/feature-flags/keys.ts`
 - **Approach:** typed union + Zod parse；canonical key builder；group/branch infinite query options；my any scope 不再走三次 full fetch。
-- **Critical test scenarios:** schema defaults不得把 malformed group value 伪装成 empty success；query keys 隔离 group/parent/hierarchy；canonical array order；POST body exactness；feature flag key publication。
+- **Critical test scenarios:** schema defaults不得把 malformed group value 伪装成 empty success；query keys 隔离 group/parent/hierarchy；canonical array order；POST body exactness；response enum 向前兼容。
 - **Verification:** core unit tests、API schema tests、typecheck。
 
 ### U6. Table Data Hook and Server-backed Renderer
@@ -964,19 +951,19 @@ Flag on：
 - **Critical test scenarios:** group trigger label；keyboard navigation；mobile merged display；archived property fallback；all four locales；sort icon accessible label。
 - **Verification:** component tests + browser keyboard/accessibility smoke。
 
-### U8. Facets, Export, Realtime and Rollout
+### U8. Facets, Export, Realtime and Compatibility
 
 - **Goal:** 所有 Table 衍生能力复用相同 Query Spec，并安全发布。
 - **Requirements:** R2、R7–R10。
 - **Dependencies:** U5、U6。
 - **Files:**
-  - backend facets/export handlers and tests
+  - backend facets handler and tests
   - `packages/core/issues/cache-coordinator.ts`
   - `packages/core/issues/ws-updaters.ts`
   - `packages/views/issues/surface/use-issue-table-data.ts`
   - analytics/observability touchpoints
-- **Approach:** exact disjunctive facets；server export；table query prefix invalidation；row optimistic patch；flag cohort rollout。
-- **Critical test scenarios:** group/facet/export membership parity；create/delete/update invalidation；property edit regroup；offline/5xx retry；flag off/on；old desktop client继续使用旧 endpoints。
+- **Approach:** exact disjunctive facets；rows-based fail-closed export；table query prefix invalidation；row optimistic patch；additive endpoint compatibility。
+- **Critical test scenarios:** group/facet/export membership parity；export cursor/fingerprint/total/schema drift；create/delete/update invalidation；property edit regroup；offline/5xx retry；old desktop client继续使用旧 endpoints。
 - **Verification:** core WS/cache tests、integration tests、staging rollout dashboards。
 
 ### Sequencing
@@ -1002,28 +989,28 @@ U2/U3/U4 可由 backend owner 连续完成；U5 可在 API schema freeze 后与 
 
 - 保留 `GET /api/issues`、`POST /api/issues/query`、`GET /api/issues/grouped`。
 - 老 Web/Desktop 客户端继续使用旧 API，不受新 response 影响。
-- 新前端只在 public flag=true 时使用新 endpoints。
+- 新前端的 Table 直接使用新 endpoints；Board/List 以及老客户端保持原有 API。
 - 新 endpoint 不改变数据库 schema，除性能 indexes 外无数据 migration。
 
-### 8.2 Cohorts
+### 8.2 Validation Cohorts
 
-1. Local/dev flag on：功能与测试完成。
+1. Local/dev：功能与测试完成。
 2. Internal workspace：收集 group/rows query duration、error、timeout、branch request fan-out。
 3. 10% cloud workspaces：重点观察大 workspace、自定义 property group。
-4. 100% cloud：flag 默认 true。
-5. 至少一个 desktop release 周期后，移除旧 client grouping 和 1000 上限；随后退休 flag。
+4. 100% cloud：发布新 Web/Desktop build。
+5. 至少一个 desktop release 周期后，再评估 legacy endpoint 和旧 client grouping 的退休窗口。
 
 ### 8.3 Rollback
 
-- Flag off 即回到旧 Table 数据路径；旧 endpoints 全程保留。
+- 回滚 Web/Desktop build 即回到旧 Table 数据路径；旧 endpoints 全程保留。
 - Rollback 不删除 index；concurrent indexes 可在后续独立 migration 决定是否移除。
-- Flag on 的单次请求失败只显示 Retry，不按请求级别自动 fallback，避免同一 session 同时存在两套 Group truth。
+- 新 Table API 的单次请求失败只显示 Retry，不按请求级别自动 fallback，避免同一 session 同时存在两套 Group truth。
 
 ### 8.4 Observability
 
 Backend structured fields：
 
-- endpoint: groups/rows/facets/export
+- endpoint: groups/rows/facets
 - group_kind
 - hierarchy
 - scope_kind

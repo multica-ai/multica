@@ -8,6 +8,16 @@ import type {
   IssuePropertyValue,
 } from "@multica/core/types";
 
+/** Export must fail closed when paged Table responses cannot prove that the
+ * complete query window was collected. The UI translates this marker instead
+ * of exposing a protocol detail to users. */
+export class IssueTableExportIntegrityError extends Error {
+  constructor() {
+    super("Table export response was incomplete");
+    this.name = "IssueTableExportIntegrityError";
+  }
+}
+
 export type IssueTableDisplayRow =
   | {
       kind: "group";

@@ -61,9 +61,14 @@ import {
   TableRow,
 } from "@multica/ui/components/ui/table";
 import { cn } from "@multica/ui/lib/utils";
-import { api, ApiError } from "@multica/core/api";
+import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueKeys } from "@multica/core/issues/queries";
+import { ALL_STATUSES } from "@multica/core/issues/config";
+import {
+  issueKeys,
+  issueTableGroupsOptions,
+  issueTableRowPageOptions,
+} from "@multica/core/issues/queries";
 import {
   TABLE_SYSTEM_COLUMNS,
   propertyIdFromViewKey,
@@ -85,6 +90,7 @@ import type {
   Issue,
   IssueProperty,
   IssuePropertyValue,
+  IssueStatus,
   IssueTableGroupDescriptor,
   IssueTableGroupSpec,
   IssueTableQuerySpec,
@@ -119,6 +125,7 @@ import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
 import {
   buildIssueTableCsv,
   getIssueTableSelectionRange,
+  IssueTableExportIntegrityError,
   type IssueTableDisplayRow,
 } from "./table-view-model";
 import type { ChildProgress } from "./list-row";
@@ -153,6 +160,7 @@ type ServerBranch = {
 
 type ServerBranchState = {
   identity: string;
+  structureIdentity: string;
   branches: Map<string, ServerBranch>;
 };
 
@@ -169,10 +177,63 @@ type ServerBranchData = {
   headFetching: boolean;
   loading: boolean;
   error: boolean;
+  placeholder: boolean;
+};
+
+type LoadedIssueState = {
+  membershipIdentity: string;
+  issues: Map<string, Issue>;
 };
 
 function serverBranchKey(groupKey: string | null, parentId: string | null) {
   return `${groupKey ?? "ungrouped"}::${parentId ?? "root"}`;
+}
+
+function sameStringArray(left: string[], right: string[]) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+/** Rebase the branch graph synchronously when a query changes.
+ *
+ * Filters/search/sort keep the same group/hierarchy structure, so preserving
+ * branch identities while resetting every cursor to the head lets React Query
+ * show the previous rows during the new request. A real structure change
+ * (group kind or hierarchy) discards incompatible group/parent identities. */
+function rebaseServerBranchState(
+  previous: ServerBranchState,
+  identity: string,
+  structureIdentity: string,
+  usesServerGrouping: boolean,
+): ServerBranchState {
+  if (previous.identity === identity) return previous;
+
+  const branches =
+    previous.structureIdentity === structureIdentity
+      ? new Map(
+          [...previous.branches].map(([key, branch]) => [
+            key,
+            { ...branch, cursors: [null] },
+          ]),
+        )
+      : new Map<string, ServerBranch>();
+
+  if (!usesServerGrouping) {
+    const key = serverBranchKey(null, null);
+    if (!branches.has(key)) {
+      branches.set(key, {
+        key,
+        groupKey: null,
+        parentId: null,
+        ancestorIds: [],
+        cursors: [null],
+      });
+    }
+  }
+
+  return { identity, structureIdentity, branches };
 }
 
 function tableGroupSpec(grouping: string): IssueTableGroupSpec {
@@ -776,26 +837,17 @@ export function TableView({
     [effectiveTableGrouping],
   );
   const usesServerGrouping = serverGroupSpec.kind !== "none";
+  const serverGroupsRequestGroup =
+    serverGroupSpec.kind === "none"
+      ? ({ kind: "status" } as const)
+      : serverGroupSpec;
   const serverGroupsQuery = useInfiniteQuery({
-    queryKey: [
-      ...issueKeys.tableAll(wsId),
-      "groups",
+    ...issueTableGroupsOptions(
+      wsId,
       serverQuery,
-      serverGroupSpec,
-    ],
-    initialPageParam: null as string | null,
+      serverGroupsRequestGroup,
+    ),
     enabled: usesServerGrouping,
-    queryFn: ({ pageParam }) => {
-      if (serverGroupSpec.kind === "none") {
-        throw new Error("server grouping is not active");
-      }
-      return api.listIssueTableGroups({
-        query: serverQuery,
-        group: serverGroupSpec,
-        page: { limit: 100, cursor: pageParam },
-      });
-    },
-    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
   });
   const {
     data: serverGroupsData,
@@ -833,6 +885,10 @@ export function TableView({
     () => JSON.stringify([serverQuery, serverGroupSpec, tableHierarchy]),
     [serverGroupSpec, serverQuery, tableHierarchy],
   );
+  const serverStructureIdentity = useMemo(
+    () => JSON.stringify([serverGroupSpec, tableHierarchy]),
+    [serverGroupSpec, tableHierarchy],
+  );
   const collapsedGroupSet = useMemo(
     () => new Set(tableCollapsedGroups),
     [tableCollapsedGroups],
@@ -844,44 +900,38 @@ export function TableView({
   const [serverBranchState, setServerBranchState] =
     useState<ServerBranchState>({
       identity: "",
+      structureIdentity: "",
       branches: new Map(),
     });
 
-  // Changing membership, sort, group, or hierarchy starts a fresh branch
-  // graph, so cursors can never leak across queries. Group/child branches are
-  // activated by their viewport sentinel below; only the single ungrouped
-  // root is registered eagerly.
-  useEffect(() => {
-    setServerBranchState((previous) => {
-      const branches =
-        previous.identity === serverIdentity
-          ? new Map(previous.branches)
-          : new Map<string, ServerBranch>();
-      let changed = previous.identity !== serverIdentity;
-      if (!usesServerGrouping) {
-        const key = serverBranchKey(null, null);
-        if (!branches.has(key)) {
-          branches.set(key, {
-            key,
-            groupKey: null,
-            parentId: null,
-            ancestorIds: [],
-            cursors: [null],
-          });
-          changed = true;
-        }
-      }
-      if (!changed) return previous;
-      return { identity: serverIdentity, branches };
-    });
-  }, [serverIdentity, usesServerGrouping]);
-
-  const activeServerBranches = useMemo(
+  const rebasedServerBranchState = useMemo(
     () =>
-      serverBranchState.identity === serverIdentity
-        ? serverBranchState.branches
-        : new Map<string, ServerBranch>(),
-    [serverBranchState, serverIdentity],
+      rebaseServerBranchState(
+        serverBranchState,
+        serverIdentity,
+        serverStructureIdentity,
+        usesServerGrouping,
+      ),
+    [
+      serverBranchState,
+      serverIdentity,
+      serverStructureIdentity,
+      usesServerGrouping,
+    ],
+  );
+
+  // Commit the synchronous rebase after render. Consumers use the derived
+  // state above immediately, so a filter/search/sort transition never has an
+  // empty frame while this effect catches state up.
+  useEffect(() => {
+    if (rebasedServerBranchState !== serverBranchState) {
+      setServerBranchState(rebasedServerBranchState);
+    }
+  }, [rebasedServerBranchState, serverBranchState]);
+
+  const activeServerBranches = rebasedServerBranchState.branches;
+  const serverBranchPlaceholderRef = useRef(
+    new Map<string, IssueTableRowsResponse>(),
   );
   const serverBranchPageTargets = useMemo<ServerBranchPageTarget[]>(
     () =>
@@ -896,21 +946,15 @@ export function TableView({
   // virtualized table starts measuring rows).
   const serverBranchQueries = useMemo(
     () =>
-      serverBranchPageTargets.map(({ branch, cursor }) => ({
-        queryKey: [
-          ...issueKeys.tableRows(
-            wsId,
-            serverQuery,
-            serverGroupSpec,
-            branch.groupKey,
-            tableHierarchy,
-            branch.parentId,
-          ),
-          "page",
-          cursor,
-        ] as const,
-        queryFn: () =>
-          api.listIssueTableRows({
+      serverBranchPageTargets.map(({ branch, cursor }) => {
+        const placeholder =
+          cursor === null
+            ? serverBranchPlaceholderRef.current.get(
+                `${serverStructureIdentity}:${branch.key}`,
+              )
+            : undefined;
+        return {
+          ...issueTableRowPageOptions(wsId, {
             query: serverQuery,
             group: serverGroupSpec,
             group_key: branch.groupKey,
@@ -918,23 +962,24 @@ export function TableView({
             parent_id: branch.parentId,
             page: { limit: 50, cursor },
           }),
-        retry: false,
-        // Dynamic useQueries observers can be detached/reinstalled as sibling
-        // branches enter the viewport. An errored page must stay errored until
-        // the user explicitly retries it; otherwise remounts create a request
-        // loop and make the Retry control unstable.
-        refetchOnMount: false,
-        enabled:
-          (branch.groupKey === null ||
-            !collapsedGroupSet.has(branch.groupKey)) &&
-          !branch.ancestorIds.some((id) => collapsedParentSet.has(id)),
-      })),
+          // QueriesObserver replaces observers by query hash, so
+          // keepPreviousData alone cannot bridge a changed table query inside
+          // useQueries. Retain the last settled head per structural branch to
+          // keep the previous table painted while the new query is pending.
+          ...(placeholder ? { placeholderData: () => placeholder } : {}),
+          enabled:
+            (branch.groupKey === null ||
+              !collapsedGroupSet.has(branch.groupKey)) &&
+            !branch.ancestorIds.some((id) => collapsedParentSet.has(id)),
+        };
+      }),
     [
       collapsedGroupSet,
       collapsedParentSet,
       serverBranchPageTargets,
       serverGroupSpec,
       serverQuery,
+      serverStructureIdentity,
       tableHierarchy,
       wsId,
     ],
@@ -954,6 +999,7 @@ export function TableView({
           headFetching: false,
           loading: false,
           error: false,
+          placeholder: false,
         };
         const page = result.data;
         if (page) {
@@ -967,6 +1013,7 @@ export function TableView({
         }
         current.loading ||= result.isPending || result.isFetching;
         current.error ||= result.isError;
+        current.placeholder ||= result.isPlaceholderData;
         byBranch[target.branch.key] = current;
       }
       return byBranch;
@@ -981,6 +1028,77 @@ export function TableView({
     combine: combineServerBranchQueries,
   });
 
+  useEffect(() => {
+    const next = new Map<string, IssueTableRowsResponse>();
+    for (const branch of activeServerBranches.values()) {
+      const key = `${serverStructureIdentity}:${branch.key}`;
+      const data = serverBranchData[branch.key];
+      if (!data || data.placeholder || data.loading || data.error) {
+        const previous = serverBranchPlaceholderRef.current.get(key);
+        if (previous) next.set(key, previous);
+        continue;
+      }
+      next.set(key, {
+        query_fingerprint: "__table_placeholder__",
+        group_key: branch.groupKey,
+        parent_id: branch.parentId,
+        total: data.total,
+        rows: data.rows,
+        branch_total: data.rows.length,
+        next_cursor: null,
+      });
+    }
+    // Bound placeholders to the active structural graph. Sort/filter/search
+    // transitions reuse these entries; old group/property configurations do
+    // not accumulate for the lifetime of the Table component.
+    serverBranchPlaceholderRef.current = next;
+  }, [
+    activeServerBranches,
+    serverBranchData,
+    serverStructureIdentity,
+  ]);
+
+  // Re-derive ancestry from the current row graph after realtime re-parenting.
+  // Branch keys are parent ids, so an existing branch can move under a new
+  // collapsed ancestor without being re-activated by the viewport sentinel.
+  useEffect(() => {
+    const desiredAncestors = new Map<string, string[]>();
+    const visited = new Set<string>();
+    const visit = (
+      groupKey: string | null,
+      parentId: string | null,
+      ancestors: string[],
+    ) => {
+      const key = serverBranchKey(groupKey, parentId);
+      if (visited.has(key)) return;
+      visited.add(key);
+      desiredAncestors.set(key, ancestors);
+      for (const row of serverBranchData[key]?.rows ?? []) {
+        if (row.direct_child_count > 0) {
+          visit(groupKey, row.issue.id, [...ancestors, row.issue.id]);
+        }
+      }
+    };
+
+    if (usesServerGrouping) {
+      for (const group of serverGroups) visit(group.key, null, []);
+    } else {
+      visit(null, null, []);
+    }
+
+    setServerBranchState((previous) => {
+      if (previous.identity !== serverIdentity) return previous;
+      let branches: Map<string, ServerBranch> | null = null;
+      for (const [key, ancestors] of desiredAncestors) {
+        const branch = previous.branches.get(key);
+        if (!branch || sameStringArray(branch.ancestorIds, ancestors)) continue;
+        branches ??= new Map(previous.branches);
+        branches.set(key, { ...branch, ancestorIds: ancestors });
+      }
+      return branches ? { ...previous, branches } : previous;
+    });
+  }, [serverBranchData, serverGroups, serverIdentity, usesServerGrouping]);
+
   const activateServerBranch = useCallback(
     (
       groupKey: string | null,
@@ -990,16 +1108,24 @@ export function TableView({
       setServerBranchState((previous) => {
         if (previous.identity !== serverIdentity) return previous;
         const key = serverBranchKey(groupKey, parentId);
-        if (previous.branches.has(key)) return previous;
+        const existing = previous.branches.get(key);
+        if (existing && sameStringArray(existing.ancestorIds, ancestorIds)) {
+          return previous;
+        }
         const branches = new Map(previous.branches);
-        branches.set(key, {
+        branches.set(
           key,
-          groupKey,
-          parentId,
-          ancestorIds,
-          cursors: [null],
-        });
-        return { identity: previous.identity, branches };
+          existing
+            ? { ...existing, ancestorIds }
+            : {
+                key,
+                groupKey,
+                parentId,
+                ancestorIds,
+                cursors: [null],
+              },
+        );
+        return { ...previous, branches };
       });
     },
     [serverIdentity],
@@ -1012,29 +1138,39 @@ export function TableView({
   // refreshed head directly into the cache without exposing a fetching frame.
   const branchHeadRevisionRef = useRef<Record<string, number>>({});
   useEffect(() => {
+    const previousRevisions = branchHeadRevisionRef.current;
+    const nextRevisions: Record<string, number> = {};
+    const branchesToTrim = new Set<string>();
+    for (const [key, branch] of activeServerBranches) {
+      const revision = serverBranchData[key]?.headUpdatedAt ?? 0;
+      if (revision === 0) continue;
+      nextRevisions[key] = revision;
+      const seen = previousRevisions[key];
+      if (
+        branch.cursors.length > 1 &&
+        (serverBranchData[key]?.headFetching ||
+          (seen !== undefined && seen !== revision))
+      ) {
+        branchesToTrim.add(key);
+      }
+    }
+    // Keep only the current query's active branches. This bounds the revision
+    // bookkeeping across long sessions with many filter/search identities.
+    branchHeadRevisionRef.current = nextRevisions;
+    if (branchesToTrim.size === 0) return;
+
     setServerBranchState((previous) => {
       if (previous.identity !== serverIdentity) return previous;
       let branches: Map<string, ServerBranch> | null = null;
       for (const [key, branch] of previous.branches) {
-        const revision = serverBranchData[key]?.headUpdatedAt ?? 0;
-        if (revision === 0) continue;
-        const revisionKey = `${serverIdentity}:${key}`;
-        const seen = branchHeadRevisionRef.current[revisionKey];
-        branchHeadRevisionRef.current[revisionKey] = revision;
-        if (
-          branch.cursors.length > 1 &&
-          (serverBranchData[key]?.headFetching ||
-            (seen !== undefined && seen !== revision))
-        ) {
+        if (branchesToTrim.has(key)) {
           branches ??= new Map(previous.branches);
           branches.set(key, { ...branch, cursors: [null] });
         }
       }
-      return branches
-        ? { identity: previous.identity, branches }
-        : previous;
+      return branches ? { ...previous, branches } : previous;
     });
-  }, [serverBranchData, serverIdentity]);
+  }, [activeServerBranches, serverBranchData, serverIdentity]);
 
   const loadNextServerBranchPage = useCallback(
     (branchKey: string, cursor: string) => {
@@ -1047,7 +1183,7 @@ export function TableView({
           ...branch,
           cursors: [...branch.cursors, cursor],
         });
-        return { identity: previous.identity, branches };
+        return { ...previous, branches };
       });
     },
     [serverIdentity],
@@ -1083,7 +1219,15 @@ export function TableView({
   const serverGroupLabel = useCallback(
     (descriptor: IssueTableGroupDescriptor) => {
       const value = descriptor.value;
-      if (value.kind === "status") return t(($) => $.status[value.status]);
+      if (value.kind === "status") {
+        if (ALL_STATUSES.includes(value.status as IssueStatus)) {
+          return t(($) => $.status[value.status as IssueStatus]);
+        }
+        // Installed clients can receive a status introduced by a newer
+        // backend. Keep the group usable instead of collapsing the response
+        // to the schema fallback or rendering an empty label.
+        return value.status;
+      }
       if (value.kind === "assignee") {
         return value.actor
           ? getActorName(value.actor.type, value.actor.id)
@@ -1109,6 +1253,7 @@ export function TableView({
 
   const serverDisplayRows = useMemo<IssueTableDisplayRow[]>(() => {
     const result: IssueTableDisplayRow[] = [];
+    const seenIssueIds = new Set<string>();
     const appendBranch = (
       groupKey: string | null,
       parentId: string | null,
@@ -1140,6 +1285,11 @@ export function TableView({
         });
       }
       for (const row of data.rows) {
+        // A realtime move can briefly leave the same entity in old and new
+        // branch caches. Render the first authoritative position only; duplicate
+        // ids otherwise create duplicate React keys and duplicate selection.
+        if (seenIssueIds.has(row.issue.id)) continue;
+        seenIssueIds.add(row.issue.id);
         const collapsed = collapsedParentSet.has(row.issue.id);
         result.push({
           kind: "issue",
@@ -1248,6 +1398,59 @@ export function TableView({
     ? groupedServerTotal
     : (ungroupedRootData?.total ?? 0);
 
+  const tableMembershipIdentity = useMemo(
+    () =>
+      JSON.stringify([
+        serverQuery.scope,
+        serverQuery.filters,
+        serverQuery.search ?? "",
+      ]),
+    [serverQuery.filters, serverQuery.scope, serverQuery.search],
+  );
+  const authoritativeLoadedIssues = useMemo(() => {
+    const byId = new Map<string, Issue>();
+    for (const branch of Object.values(serverBranchData)) {
+      // Previous-data placeholders keep the old table painted during a query
+      // transition, but they are not members of the new filter/search window.
+      if (branch.placeholder) continue;
+      for (const row of branch.rows) byId.set(row.issue.id, row.issue);
+    }
+    return [...byId.values()];
+  }, [serverBranchData]);
+  const [loadedIssueState, setLoadedIssueState] = useState<LoadedIssueState>({
+    membershipIdentity: tableMembershipIdentity,
+    issues: new Map(),
+  });
+  useEffect(() => {
+    setLoadedIssueState((previous) => {
+      const reset = previous.membershipIdentity !== tableMembershipIdentity;
+      const issues = reset
+        ? new Map<string, Issue>()
+        : new Map(previous.issues);
+      let changed = reset;
+      for (const issue of authoritativeLoadedIssues) {
+        if (issues.get(issue.id) !== issue) {
+          issues.set(issue.id, issue);
+          changed = true;
+        }
+      }
+      return changed
+        ? { membershipIdentity: tableMembershipIdentity, issues }
+        : previous;
+    });
+  }, [authoritativeLoadedIssues, tableMembershipIdentity]);
+  const loadedIssues = useMemo(
+    () =>
+      loadedIssueState.membershipIdentity === tableMembershipIdentity
+        ? [...loadedIssueState.issues.values()]
+        : [],
+    [
+      loadedIssueState.issues,
+      loadedIssueState.membershipIdentity,
+      tableMembershipIdentity,
+    ],
+  );
+
   const visibleColumnConfigs = useMemo(
     () =>
       tableColumns.filter((column) => {
@@ -1265,19 +1468,12 @@ export function TableView({
         .map((row) => row.issue.id),
     [displayRows],
   );
-  const renderedIssues = useMemo(() => {
-    const byId = new Map<string, Issue>();
-    for (const row of displayRows) {
-      if (row.kind === "issue") byId.set(row.issue.id, row.issue);
-    }
-    return [...byId.values()];
-  }, [displayRows]);
   useEffect(() => {
-    onLoadedIssuesChange(renderedIssues);
-  }, [onLoadedIssuesChange, renderedIssues]);
+    onLoadedIssuesChange(loadedIssues);
+  }, [loadedIssues, onLoadedIssuesChange]);
   const selectedIssues = useMemo(
-    () => renderedIssues.filter((issue) => selection.selectedIds.has(issue.id)),
-    [renderedIssues, selection.selectedIds],
+    () => loadedIssues.filter((issue) => selection.selectedIds.has(issue.id)),
+    [loadedIssues, selection.selectedIds],
   );
   const handleIssueSelection = useCallback(
     (issueId: string, shiftKey: boolean) => {
@@ -1707,7 +1903,11 @@ export function TableView({
       toast.success(t(($) => $.table.export_success, { count: rows.length }));
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : t(($) => $.table.export_failed),
+        error instanceof Error &&
+          !(error instanceof IssueTableExportIntegrityError) &&
+          error.message
+          ? error.message
+          : t(($) => $.table.export_failed),
       );
     } finally {
       setExporting(null);
@@ -1715,7 +1915,7 @@ export function TableView({
   };
 
   const displayedTotal = serverTotal;
-  const displayedLoaded = renderedIssues.length;
+  const displayedLoaded = loadedIssues.length;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
