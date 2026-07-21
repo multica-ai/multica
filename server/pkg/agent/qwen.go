@@ -18,9 +18,20 @@ type qwenBackend struct {
 	cfg Config
 }
 
+// qwenHeadlessAllowedTools is the smallest native tool set a Multica coding
+// task must be able to invoke without an interactive permission prompt. Qwen's
+// default auto mode delegates shell and subagent decisions to an LLM
+// classifier; that classifier can be unavailable, while -p mode has no user
+// attached to answer the fallback prompt. Default mode plus explicit
+// session-only allow rules keeps the policy deterministic without enabling
+// Qwen's blanket YOLO mode. Read/search tools remain available through their
+// normal safe defaults, while network and other unrelated tools are not added.
+const qwenHeadlessAllowedTools = "run_shell_command,edit,write_file,notebook_edit,agent"
+
 // qwenBlockedArgs are owned by Multica. Qwen accepts the task prompt and stream
 // protocol as flags, so custom args must not replace either. Model/session are
-// also selected by Multica, and safe mode disables the QWEN.md context file.
+// also selected by Multica, safe mode disables the QWEN.md context file, and
+// the approval flags define the deterministic headless permission contract.
 var qwenBlockedArgs = map[string]blockedArgMode{
 	"-p":                   blockedWithValue,
 	"--prompt":             blockedWithValue,
@@ -37,10 +48,15 @@ var qwenBlockedArgs = map[string]blockedArgMode{
 	"--chat-recording":     blockedWithValue,
 	"--mcp-config":         blockedWithValue,
 	"--safe-mode":          blockedStandalone,
+	"--approval-mode":      blockedWithValue,
+	"--allowed-tools":      blockedWithValue,
+	"--yolo":               blockedStandalone,
+	"-y":                   blockedStandalone,
 }
 
 func buildQwenArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{"-p", prompt, "--output-format", "stream-json"}
+	args := []string{"-p", prompt, "--output-format", "stream-json",
+		"--approval-mode", "default", "--allowed-tools", qwenHeadlessAllowedTools}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
