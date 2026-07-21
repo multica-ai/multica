@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import type { Attachment } from "@multica/core/types";
 
 const openExternalMock = vi.hoisted(() => vi.fn());
@@ -149,6 +149,17 @@ function makeAttachment(overrides: Partial<Attachment> = {}): Attachment {
     created_at: "2026-05-13T00:00:00Z",
     ...overrides,
   };
+}
+
+function ClosablePreview({ attachment }: { attachment: Attachment }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <AttachmentPreviewModal
+      source={{ kind: "full", attachment }}
+      open={open}
+      onClose={() => setOpen(false)}
+    />
+  );
 }
 
 beforeEach(() => {
@@ -456,6 +467,21 @@ describe("AttachmentPreviewModal — controls", () => {
     const dialog = screen.getByRole("dialog");
     fireEvent.click(dialog);
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("keeps the dialog mounted for its exit and then removes it", async () => {
+    const att = makeAttachment({
+      filename: "manual.pdf",
+      content_type: "application/pdf",
+    });
+    render(<ClosablePreview attachment={att} />);
+
+    fireEvent.click(screen.getByTitle("Close"));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
   });
 });
 
