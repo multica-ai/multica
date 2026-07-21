@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 )
 
 // ── Setup helpers ───────────────────────────────────────────────────────────
@@ -1099,7 +1101,7 @@ func TestReconcileFailsDispatchlessRunWhenDeliveryPermanentlyFailed(t *testing.T
 		t.Fatalf("fail delivery: %v", err)
 	}
 
-	if _, err := testHandler.AutopilotService.ReconcileTaskDrivenRuns(context.Background()); err != nil {
+	if _, err := testHandler.AutopilotService.ReconcileAutopilotRuns(context.Background()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	got, err := testHandler.Queries.GetAutopilotRun(context.Background(), first.AutopilotRunID)
@@ -1108,6 +1110,114 @@ func TestReconcileFailsDispatchlessRunWhenDeliveryPermanentlyFailed(t *testing.T
 	}
 	if got.Status != "failed" {
 		t.Fatalf("reconcile did not converge the dispatchless run off the failed delivery: %q", got.Status)
+	}
+}
+
+// withTaskDrivenGateOff forces the FIRST rollout phase (FF_AUTOPILOT_TASK_DRIVEN_RUNS
+// default off) for the duration of a test.
+func withTaskDrivenGateOff(t *testing.T) {
+	t.Helper()
+	prev := testHandler.AutopilotService.FeatureFlags
+	provider := featureflag.NewStaticProvider()
+	provider.Set(featureflags.AutopilotTaskDrivenRuns, featureflag.Rule{Default: false})
+	testHandler.AutopilotService.FeatureFlags = featureflag.NewService(provider)
+	t.Cleanup(func() { testHandler.AutopilotService.FeatureFlags = prev })
+}
+
+// TestWebhookDeliveryExhaustionConvergesRunWhileGateOff is the P0-1 two-phase-rollout
+// counter-example (MUL-4809 §4.1 P0-1). Deployed as the PR requires — task-driven gate
+// OFF — a collision whose fail-transition fault persists all the way to delivery
+// exhaustion leaves `delivery=failed + run=active/unbound`. The durable backstop must NOT
+// be gated behind the task-driven flag: once the fault clears, the reconcile has to
+// converge the run WITHOUT flipping the gate.
+func TestWebhookDeliveryExhaustionConvergesRunWhileGateOff(t *testing.T) {
+	withTaskDrivenGateOff(t)
+	ctx := context.Background()
+
+	agentID := createWebhookTestAgent(t, "GateOffExhaustion Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "create_issue")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	post := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "gate-off-exhaustion"}, map[string]string{
+		"Idempotency-Key": "gate-off-exhaustion",
+	})
+	deliveryID := requireAcceptedWebhookResponse(t, post)
+	first := processQueuedWebhookDelivery(t, deliveryID)
+	run, err := testHandler.Queries.GetAutopilotRun(ctx, first.AutopilotRunID)
+	if err != nil || !run.IssueID.Valid {
+		t.Fatalf("load create_issue run: run=%#v err=%v", run, err)
+	}
+	issueID := uuidToString(run.IssueID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// Pre-bind crash + stray pending task so the repair collides, and a fault that keeps
+	// the collision's fail-transition erroring for every attempt.
+	if _, err := testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID); err != nil {
+		t.Fatalf("remove dispatched task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx,
+		`UPDATE autopilot_run SET status = 'issue_created', task_id = NULL WHERE id = $1`, first.AutopilotRunID); err != nil {
+		t.Fatalf("reset run: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+		SELECT a.id, a.runtime_id, $2::uuid, 'queued', 0, now() FROM agent a WHERE a.id = $1`,
+		agentID, issueID); err != nil {
+		t.Fatalf("insert stray pending task: %v", err)
+	}
+	installAutopilotRunFailTransitionFault(t)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE webhook_delivery SET status = 'queued', autopilot_run_id = NULL, available_at = now(),
+		    dispatch_attempts = 0, lease_token = NULL, lease_expires_at = NULL WHERE id = $1`, deliveryID); err != nil {
+		t.Fatalf("requeue delivery: %v", err)
+	}
+
+	// Drive the worker until the delivery exhausts its retries.
+	var delivery db.WebhookDelivery
+	for i := 0; i < webhookWorkerMaxAttempts+1; i++ {
+		if _, err := testPool.Exec(ctx, `UPDATE webhook_delivery SET available_at = now() WHERE id = $1`, deliveryID); err != nil {
+			t.Fatalf("clear backoff: %v", err)
+		}
+		worked, err := testHandler.WebhookDeliveryWorker.ProcessNext(ctx)
+		if err != nil || !worked {
+			t.Fatalf("attempt %d: worked=%v err=%v", i, worked, err)
+		}
+		delivery, err = testHandler.Queries.GetWebhookDelivery(ctx, parseUUID(deliveryID))
+		if err != nil {
+			t.Fatalf("load delivery: %v", err)
+		}
+		if delivery.Status == deliveryStatusFailed {
+			break
+		}
+	}
+	if delivery.Status != deliveryStatusFailed {
+		t.Fatalf("delivery should have exhausted its retries, got %q", delivery.Status)
+	}
+	// The fault also blocked the worker's immediate convergence, so the run is stranded.
+	stranded, err := testHandler.Queries.GetAutopilotRun(ctx, first.AutopilotRunID)
+	if err != nil {
+		t.Fatalf("load stranded run: %v", err)
+	}
+	if stranded.Status != "issue_created" {
+		t.Fatalf("precondition: expected the run to still be active, got %q", stranded.Status)
+	}
+
+	// Fault clears. The gate stays OFF — the reconcile must still converge the run.
+	if _, err := testPool.Exec(ctx, `DROP TRIGGER IF EXISTS mul4809_run_fail_fault_trg ON autopilot_run`); err != nil {
+		t.Fatalf("clear fault: %v", err)
+	}
+	if _, err := testHandler.AutopilotService.ReconcileAutopilotRuns(ctx); err != nil {
+		t.Fatalf("gate-off reconcile: %v", err)
+	}
+	got, err := testHandler.Queries.GetAutopilotRun(ctx, first.AutopilotRunID)
+	if err != nil {
+		t.Fatalf("load run: %v", err)
+	}
+	if got.Status != "failed" {
+		t.Fatalf("gate-off reconcile did not converge the stranded run: %q", got.Status)
 	}
 }
 

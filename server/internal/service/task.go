@@ -3335,10 +3335,19 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Another path (FailTask's in-tx retry, a concurrent sweeper, or the autopilot
 		// reconcile back-fill) already created this task's retry successor; the
-		// retry_of_task_id unique constraint made our INSERT a no-op. Idempotent success
-		// — the retry exists, so return without error and without a duplicate broadcast
-		// (MUL-4809 §4.1 P0-2).
-		return nil, nil
+		// retry_of_task_id unique constraint made our INSERT a no-op (MUL-4809 §4.1 P0-2).
+		// Return the WINNER's successor rather than nil: callers key their retry-pending
+		// bookkeeping off a non-nil child, and a backoff-armed DEFERRED successor is
+		// invisible to HasActiveTaskForIssue — returning nil here would let
+		// HandleFailedTasks reset the issue to todo while a retry is still pending
+		// (MUL-4809 §4.1 P1). No broadcast: the creator already announced it.
+		existing, lookupErr := s.Queries.GetRetrySuccessorTask(ctx, parent.ID)
+		if lookupErr != nil {
+			// Could not confirm the winner's successor. Surface it as an error so callers
+			// treat this failure as retry-pending rather than terminal.
+			return nil, fmt.Errorf("load existing retry successor: %w", lookupErr)
+		}
+		return &existing, nil
 	}
 	if err != nil {
 		slog.Warn("task auto-retry failed",

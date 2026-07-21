@@ -334,24 +334,35 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 // beside a failed delivery. The worker calls this on exhaustion to guarantee the two
 // converge together (MUL-4809 §4.1 P0-1). Idempotent: a no-op when no run is linked to
 // the delivery or it was already finalized by another path.
-func (s *AutopilotService) FailActiveRunForWebhookDelivery(ctx context.Context, deliveryID pgtype.UUID, reason string) {
+// It reports whether the convergence was authoritative: a nil error means no run needs
+// converging or this call (or a racing path) left it terminal. A non-nil error means the
+// run may STILL be active — the caller must not treat the outcome as settled; the ungated
+// dispatchless reconcile is the durable backstop that converges it later.
+func (s *AutopilotService) FailActiveRunForWebhookDelivery(ctx context.Context, deliveryID pgtype.UUID, reason string) error {
 	run, err := s.Queries.GetAutopilotRunByWebhookDelivery(ctx, deliveryID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // no run linked to this delivery — nothing to converge
+	}
 	if err != nil {
-		return // no run linked (or a transient lookup error) — nothing to converge
+		return fmt.Errorf("load run for webhook delivery: %w", err)
 	}
 	if isAutopilotRunTerminalStatus(run.Status) {
-		return // already finalized (the common case: dispatch succeeded / failRun won)
+		return nil // already finalized (the common case: dispatch succeeded / failRun won)
 	}
 	failed, won, ferr := s.failRun(ctx, run.ID, reason)
-	if ferr != nil || !won {
-		return // transient error or a racing path already finalized it
+	if ferr != nil {
+		return fmt.Errorf("fail active run for webhook delivery: %w", ferr)
+	}
+	if !won {
+		return nil // a racing path already finalized it
 	}
 	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
 	if err != nil {
-		return
+		return nil // the run IS terminal; only the analytics/publish side effect is lost
 	}
 	s.captureAutopilotRunFailed(autopilot, failed, failed.Source, reason)
 	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), failed, "failed")
+	return nil
 }
 
 // ensureWebhookCreateIssueTask repairs the create_issue crash window on a reclaimed
@@ -1409,7 +1420,7 @@ type reconcileResult struct {
 	retryable int
 }
 
-// RunTaskDrivenReconcileLoop periodically converges create_issue runs stranded by the
+// RunAutopilotReconcileLoop periodically converges create_issue runs stranded by the
 // "no event replay" gap while the gate is ON (MUL-4809 §4.1 P0-3). Each tick is
 // advisory-locked (one replica walks) and CAS-safe, so it is safe to run on every
 // replica. A one-shot boot scan would permanently lose any run whose query
@@ -1417,10 +1428,10 @@ type reconcileResult struct {
 // settled; this bounded periodic re-scan converges them on a later tick. It backs off
 // to a short interval after a tick that reported transient errors. Returns when ctx
 // is cancelled.
-func (s *AutopilotService) RunTaskDrivenReconcileLoop(ctx context.Context, pool *pgxpool.Pool) {
+func (s *AutopilotService) RunAutopilotReconcileLoop(ctx context.Context, pool *pgxpool.Pool) {
 	for {
 		next := autopilotReconcileInterval
-		res, err := s.ReconcileTaskDrivenRunsAtBoot(ctx, pool)
+		res, err := s.ReconcileAutopilotRunsAtBoot(ctx, pool)
 		switch {
 		case err != nil:
 			slog.Error("autopilot task-driven reconcile tick failed", "error", err)
@@ -1440,14 +1451,13 @@ func (s *AutopilotService) RunTaskDrivenReconcileLoop(ctx context.Context, pool 
 	}
 }
 
-// ReconcileTaskDrivenRunsAtBoot runs ReconcileTaskDrivenRuns under a Postgres session
-// advisory lock so a single replica does the walk per tick (MUL-4809 §4.1 P0-3).
-// No-op when the gate is off; a replica that loses the lock returns a zero result so
-// the next tick — or another replica — takes over.
-func (s *AutopilotService) ReconcileTaskDrivenRunsAtBoot(ctx context.Context, pool *pgxpool.Pool) (reconcileResult, error) {
-	if !s.taskDrivenRunsEnabled(ctx) {
-		return reconcileResult{}, nil
-	}
+// ReconcileAutopilotRunsAtBoot runs ReconcileAutopilotRuns under a Postgres session
+// advisory lock so a single replica does the walk per tick (MUL-4809 §4.1 P0-3). A
+// replica that loses the lock returns a zero result so the next tick — or another
+// replica — takes over. Deliberately NOT gated: the pass itself gates only the
+// task-driven half (see ReconcileAutopilotRuns), because the dispatchless-run
+// convergence must also run during the gate-off first rollout phase.
+func (s *AutopilotService) ReconcileAutopilotRunsAtBoot(ctx context.Context, pool *pgxpool.Pool) (reconcileResult, error) {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return reconcileResult{}, fmt.Errorf("acquire conn: %w", err)
@@ -1463,22 +1473,30 @@ func (s *AutopilotService) ReconcileTaskDrivenRunsAtBoot(ctx context.Context, po
 	defer func() {
 		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", autopilotReconcileAdvisoryLockKey)
 	}()
-	return s.ReconcileTaskDrivenRuns(ctx)
+	return s.ReconcileAutopilotRuns(ctx)
 }
 
-// ReconcileTaskDrivenRuns converges create_issue runs whose dispatched task already
-// reached a terminal result while task-driven finalization was gated off (MUL-4809
-// §4.1 P0-3). It manually replays the settled terminal leaf of each active run's
-// dispatched lineage through the normal CAS finalizer — the event bus does not
-// re-deliver past task events. Keyset-paginated so it never materializes every active
-// run at once. Idempotent and safe under concurrent replicas. No-op when the gate is
-// off. A transient error on any single run is counted (retryable) and left for a
-// later tick rather than stranding the run; only a page-load error aborts the pass.
-func (s *AutopilotService) ReconcileTaskDrivenRuns(ctx context.Context) (reconcileResult, error) {
+// ReconcileAutopilotRuns converges stranded active create_issue runs. It has two halves
+// with DIFFERENT gating (MUL-4809 §4.1 P0-1 / P0-3):
+//
+//   - Dispatchless convergence (UNGATED): a run that never got a task and whose webhook
+//     delivery permanently failed is finalized off that durable signal. A permanently
+//     failed dispatch is not task-driven finalization, so this must also run during the
+//     first rollout phase where FF_AUTOPILOT_TASK_DRIVEN_RUNS is off — otherwise a
+//     delivery that exhausted its retries would strand an active run with no worker left
+//     to converge it.
+//   - Task-outcome finalization + retry back-fill (GATED): replays the settled terminal
+//     leaf of the dispatched lineage through the normal CAS finalizer, since the event
+//     bus does not re-deliver past task events. Skipped while the gate is off, where
+//     create_issue runs are still finalized from issue status.
+//
+// Keyset-paginated so it never materializes every active run at once. Idempotent and
+// safe under concurrent replicas. A transient error on any single run is counted
+// (retryable) and left for a later tick rather than stranding the run; only a page-load
+// error aborts the pass.
+func (s *AutopilotService) ReconcileAutopilotRuns(ctx context.Context) (reconcileResult, error) {
 	var res reconcileResult
-	if !s.taskDrivenRunsEnabled(ctx) {
-		return res, nil
-	}
+	taskDriven := s.taskDrivenRunsEnabled(ctx)
 	// Keyset cursor over (created_at, id); '-infinity' + zero-uuid selects the first
 	// page. Finalized runs drop out of the active-status filter, so paging forward
 	// never revisits or skips a run within a pass.
@@ -1497,7 +1515,7 @@ func (s *AutopilotService) ReconcileTaskDrivenRuns(ctx context.Context) (reconci
 			break
 		}
 		for _, run := range batch {
-			switch s.reconcileCreateIssueRun(ctx, run) {
+			switch s.reconcileCreateIssueRun(ctx, run, taskDriven) {
 			case reconcileFinalized:
 				res.finalized++
 			case reconcileRetryLater:
@@ -1517,7 +1535,7 @@ func (s *AutopilotService) ReconcileTaskDrivenRuns(ctx context.Context) (reconci
 // of its dispatched lineage has settled at a terminal status. It distinguishes "not
 // ready" (still pending / retry pending) from "transient error" (revisit later) so a
 // single DB blip never strands the run (MUL-4809 §4.1 P0-2 / P0-3).
-func (s *AutopilotService) reconcileCreateIssueRun(ctx context.Context, run db.AutopilotRun) reconcileOutcome {
+func (s *AutopilotService) reconcileCreateIssueRun(ctx context.Context, run db.AutopilotRun, taskDriven bool) reconcileOutcome {
 	// The dispatched task: the bound task_id, else the provenance-stamped root.
 	var root db.AgentTaskQueue
 	var err error
@@ -1531,11 +1549,19 @@ func (s *AutopilotService) reconcileCreateIssueRun(ctx context.Context, run db.A
 		// it can also be a stranded webhook collision run whose fail-transition never
 		// succeeded before its delivery exhausted its retries. Converge that off the
 		// delivery's durable terminal state so a permanently-failed delivery never sits
-		// beside a live run (MUL-4809 §4.1 P0-1) — no time heuristic.
+		// beside a live run (MUL-4809 §4.1 P0-1) — no time heuristic. UNGATED on purpose:
+		// this is dispatch failure, not task-driven finalization, so it must also heal
+		// during the gate-off first rollout phase.
 		return s.reconcileDispatchlessRun(ctx, run)
 	}
 	if err != nil {
 		return reconcileRetryLater // transient error — revisit, do not strand the run
+	}
+	if !taskDriven {
+		// Two-phase rollout: while the gate is off, create_issue runs are finalized from
+		// issue status, so neither the retry back-fill nor task-outcome finalization below
+		// may touch this run (MUL-4809 §4.1 P0-3).
+		return reconcileNotReady
 	}
 	// Walk the linear system-retry chain forward to the final attempt.
 	leaf := root

@@ -444,7 +444,7 @@ func main() {
 	// a run left behind by a transient error or an unsettled retry lineage converges
 	// on a later tick. No-op while the gate is off; each tick is advisory-locked so a
 	// single replica walks during a rolling deploy.
-	go autopilotSvc.RunTaskDrivenReconcileLoop(sweepCtx, pool)
+	go autopilotSvc.RunAutopilotReconcileLoop(sweepCtx, pool)
 
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)

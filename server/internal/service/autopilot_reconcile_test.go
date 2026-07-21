@@ -35,7 +35,7 @@ func TestReconcileFinalizesRunWhoseTaskTerminatedWhileGateOff(t *testing.T) {
 
 	// Phase 2 — flip ON, publish NO new event, run only the boot reconcile.
 	svc.FeatureFlags = autopilotTaskDrivenFlags(true)
-	res, err := svc.ReconcileTaskDrivenRuns(ctx)
+	res, err := svc.ReconcileAutopilotRuns(ctx)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestReconcileFinalizesOffRetryLeaf(t *testing.T) {
 	}
 
 	svc.FeatureFlags = autopilotTaskDrivenFlags(true)
-	if _, err := svc.ReconcileTaskDrivenRuns(ctx); err != nil {
+	if _, err := svc.ReconcileAutopilotRuns(ctx); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	got, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
@@ -95,7 +95,7 @@ func TestReconcileAtBootNoopWhenGateOff(t *testing.T) {
 
 	insertTask(agentID, 0, "completed", run.ID)
 
-	res, err := svc.ReconcileTaskDrivenRunsAtBoot(ctx, pool)
+	res, err := svc.ReconcileAutopilotRunsAtBoot(ctx, pool)
 	if err != nil {
 		t.Fatalf("boot reconcile: %v", err)
 	}
@@ -111,14 +111,6 @@ func TestReconcileAtBootNoopWhenGateOff(t *testing.T) {
 	}
 }
 
-// TestReconcileSkipsRetryEligibleFailedLeafThenConverges is the P0-2 concurrency-
-// boundary counter-example (MUL-4809 §4.1 P0-2). The dispatched task is terminal-
-// FAILED with an infrastructure-shaped reason (runtime_offline, attempt 1/2) but its
-// system retry has not been created yet — the sweeper marks the task failed, then
-// creates the retry in a separate step. Finalizing the run now would fail it before
-// the retry runs, and a later successful retry cannot un-fail a terminal run. The
-// reconcile must SKIP the run while the leaf is still retry-eligible, then converge it
-// on a later tick once the (now-completed) retry successor settles the lineage.
 // TestReconcileConvergesOnLaterTickAfterTransientError is the P0-3 "first round query
 // fails, next round succeeds" counter-example (MUL-4809 §4.1 P0-3). A one-shot boot
 // scan would permanently strand a run whose reconcile query hit a transient DB error.
@@ -137,7 +129,7 @@ func TestReconcileConvergesOnLaterTickAfterTransientError(t *testing.T) {
 	// an error and must not touch the run.
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	if _, err := svc.ReconcileTaskDrivenRuns(cancelled); err == nil {
+	if _, err := svc.ReconcileAutopilotRuns(cancelled); err == nil {
 		t.Fatal("expected the first reconcile pass to error on the cancelled context")
 	}
 	mid, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
@@ -149,7 +141,7 @@ func TestReconcileConvergesOnLaterTickAfterTransientError(t *testing.T) {
 	}
 
 	// Tick 2: a live context converges the run off the already-persisted task result.
-	res, err := svc.ReconcileTaskDrivenRuns(ctx)
+	res, err := svc.ReconcileAutopilotRuns(ctx)
 	if err != nil {
 		t.Fatalf("reconcile (recovery): %v", err)
 	}
@@ -192,7 +184,7 @@ func TestReconcileAtBootLockLoserSkipsThenTakesOver(t *testing.T) {
 	}
 
 	// This replica loses the lock → skips this tick, leaving the run untouched.
-	res, err := svc.ReconcileTaskDrivenRunsAtBoot(ctx, pool)
+	res, err := svc.ReconcileAutopilotRunsAtBoot(ctx, pool)
 	if err != nil {
 		holder.Release()
 		t.Fatalf("boot reconcile (lock loser): %v", err)
@@ -219,7 +211,7 @@ func TestReconcileAtBootLockLoserSkipsThenTakesOver(t *testing.T) {
 	}
 	holder.Release()
 
-	res, err = svc.ReconcileTaskDrivenRunsAtBoot(ctx, pool)
+	res, err = svc.ReconcileAutopilotRunsAtBoot(ctx, pool)
 	if err != nil {
 		t.Fatalf("boot reconcile (takeover): %v", err)
 	}
@@ -262,7 +254,7 @@ func TestReconcileBackfillsMissingRetryForOrphanedFailedLeaf(t *testing.T) {
 	}
 
 	// Tick 1: back-fill the missing retry; do not finalize while it is pending.
-	res, err := svc.ReconcileTaskDrivenRuns(ctx)
+	res, err := svc.ReconcileAutopilotRuns(ctx)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -281,7 +273,7 @@ func TestReconcileBackfillsMissingRetryForOrphanedFailedLeaf(t *testing.T) {
 	}
 
 	// Tick 2 (retry still queued) must not create a duplicate — idempotent back-fill.
-	if _, err := svc.ReconcileTaskDrivenRuns(ctx); err != nil {
+	if _, err := svc.ReconcileAutopilotRuns(ctx); err != nil {
 		t.Fatalf("reconcile (idempotency tick): %v", err)
 	}
 	if n := countSuccessors(); n != 1 {
@@ -292,7 +284,7 @@ func TestReconcileBackfillsMissingRetryForOrphanedFailedLeaf(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE retry_of_task_id = $1`, dispatched.ID); err != nil {
 		t.Fatalf("complete retry: %v", err)
 	}
-	res, err = svc.ReconcileTaskDrivenRuns(ctx)
+	res, err = svc.ReconcileAutopilotRuns(ctx)
 	if err != nil {
 		t.Fatalf("reconcile (converge tick): %v", err)
 	}
@@ -391,13 +383,13 @@ func TestHandleFailedTasksRetryErrorDefersRunNotPrematureFail(t *testing.T) {
 	if _, err := pool.Exec(ctx, `DROP TRIGGER IF EXISTS mul4809_retry_insert_fault_trg ON agent_task_queue`); err != nil {
 		t.Fatalf("clear fault: %v", err)
 	}
-	if _, err := svc.ReconcileTaskDrivenRuns(ctx); err != nil {
+	if _, err := svc.ReconcileAutopilotRuns(ctx); err != nil {
 		t.Fatalf("reconcile (back-fill): %v", err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE retry_of_task_id = $1`, dispatched.ID); err != nil {
 		t.Fatalf("complete back-filled retry: %v", err)
 	}
-	if _, err := svc.ReconcileTaskDrivenRuns(ctx); err != nil {
+	if _, err := svc.ReconcileAutopilotRuns(ctx); err != nil {
 		t.Fatalf("reconcile (converge): %v", err)
 	}
 	got, err := svc.Queries.GetAutopilotRun(ctx, run.ID)
@@ -433,15 +425,81 @@ func TestMaybeRetryFailedTaskIdempotentUnderUniqueConstraint(t *testing.T) {
 	if first == nil {
 		t.Fatal("first retry should create a successor")
 	}
-	// Second call on the same still-failed parent must no-op (unique constraint), not
-	// create a duplicate or error.
+	// Second call on the same still-failed parent must not create a duplicate. It reports
+	// the SAME successor rather than nil so callers still treat the failure as
+	// retry-pending — a nil here would let HandleFailedTasks reset the issue while a
+	// deferred retry is armed (MUL-4809 §4.1 P1).
 	second, err := svc.TaskSvc.MaybeRetryFailedTask(ctx, reloaded)
 	if err != nil {
 		t.Fatalf("second retry must be idempotent, got error: %v", err)
 	}
-	if second != nil {
-		t.Fatalf("second retry created a duplicate successor: %s", util.UUIDToString(second.ID))
+	if second == nil {
+		t.Fatal("second retry must report the existing successor, not nil")
 	}
+	if util.UUIDToString(second.ID) != util.UUIDToString(first.ID) {
+		t.Fatalf("second retry created a duplicate successor: %s (first %s)",
+			util.UUIDToString(second.ID), util.UUIDToString(first.ID))
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE retry_of_task_id = $1`, parent.ID).Scan(&n); err != nil {
+		t.Fatalf("count successors: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected exactly one retry successor, got %d", n)
+	}
+}
+
+// TestHandleFailedTasksKeepsIssuePendingWhenConflictHasDeferredSuccessor is the P1
+// counter-example (MUL-4809 §4.1 P1). When two creators race, the loser's
+// MaybeRetryFailedTask hits the retry_of_task_id unique constraint. If it reported "no
+// child" the caller would treat the failure as terminal — and because a backoff-armed
+// DEFERRED successor is invisible to HasActiveTaskForIssue, HandleFailedTasks would reset
+// the issue to todo while a retry is still pending. The loser must instead see the
+// winner's successor and keep the issue retry-pending.
+func TestHandleFailedTasksKeepsIssuePendingWhenConflictHasDeferredSuccessor(t *testing.T) {
+	ctx := context.Background()
+	svc, agentID, run, pool, insertTask := newCreateIssueRunFixture(t)
+
+	// A retry-eligible failed parent whose successor already exists — and is DEFERRED,
+	// so HasActiveTaskForIssue does not see it.
+	parent := insertTask(agentID, 0, "failed", run.ID)
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET failure_reason = 'runtime_offline' WHERE id = $1`, parent.ID); err != nil {
+		t.Fatalf("set failure reason: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, attempt, retry_of_task_id, fire_at, created_at)
+		VALUES ($1, $2, $3, 'deferred', 0, 2, $4, now() + interval '5 seconds', now())`,
+		parent.AgentID, parent.RuntimeID, parent.IssueID, parent.ID); err != nil {
+		t.Fatalf("insert deferred successor: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE issue SET status = 'in_progress' WHERE id = $1`, parent.IssueID); err != nil {
+		t.Fatalf("set issue in_progress: %v", err)
+	}
+
+	// The losing creator: its INSERT conflicts, so it must surface the winner's successor.
+	reloaded, err := svc.Queries.GetAgentTask(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("reload parent: %v", err)
+	}
+	child, err := svc.TaskSvc.MaybeRetryFailedTask(ctx, reloaded)
+	if err != nil {
+		t.Fatalf("losing retry must not error: %v", err)
+	}
+	if child == nil {
+		t.Fatal("losing retry must report the winner's existing successor, not nil")
+	}
+
+	// End to end: the losing HandleFailedTasks must leave the issue in_progress.
+	svc.TaskSvc.HandleFailedTasks(ctx, []db.AgentTaskQueue{reloaded})
+	issueAfter, err := svc.Queries.GetIssue(ctx, parent.IssueID)
+	if err != nil {
+		t.Fatalf("get issue: %v", err)
+	}
+	if issueAfter.Status != "in_progress" {
+		t.Fatalf("issue was reset while a deferred retry was still pending: status=%q", issueAfter.Status)
+	}
+
+	// And no duplicate successor was created by the losing path.
 	var n int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE retry_of_task_id = $1`, parent.ID).Scan(&n); err != nil {
 		t.Fatalf("count successors: %v", err)
