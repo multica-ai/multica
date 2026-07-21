@@ -42,6 +42,26 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 vi.mock("@multica/core/agents", () => ({
+  agentRuntimeBindingKeys: {
+    detail: (wsId: string, agentId: string) => [
+      "agent-runtime-binding",
+      wsId,
+      agentId,
+    ],
+  },
+  agentRuntimeBindingOptions: (wsId: string, agentId: string) => ({
+    queryKey: ["agent-runtime-binding", wsId, agentId],
+    queryFn: () =>
+      Promise.resolve({
+        agent_id: agentId,
+        user_id: currentUserRef.current?.id ?? "",
+        runtime_id: null,
+        effective_runtime_id: "runtime-1",
+        bound: false,
+        created_at: null,
+        updated_at: null,
+      }),
+  }),
   useWorkspacePresenceMap: () => ({ byAgent: new Map() }),
 }));
 vi.mock("@multica/core/workspace/queries", () => ({

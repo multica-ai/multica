@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import type {
   Agent,
   AgentRuntime,
+  AgentRuntimeBinding,
   MemberWithUser,
 } from "@multica/core/types";
 import { providerSupportsMcpConfig } from "@multica/core/agents";
@@ -119,12 +120,15 @@ function sectionForView(view: DetailTab): DetailSection {
 interface AgentOverviewPaneProps {
   agent: Agent;
   runtime: AgentRuntime | null;
+  runtimeBinding: AgentRuntimeBinding | null;
   owner: MemberWithUser | null;
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
   currentUserId?: string | null;
   canEdit: boolean;
+  onRuntimeBindingChange: (id: string, runtimeId: string) => Promise<void>;
+  onRuntimeBindingClear: (id: string) => Promise<void>;
   navIntent?: DetailTab | null;
   onNavIntentHandled?: () => void;
 }
@@ -139,12 +143,15 @@ interface AgentOverviewPaneProps {
 export function AgentOverviewPane({
   agent,
   runtime,
+  runtimeBinding,
   owner,
   runtimes,
   members,
   onUpdate,
   currentUserId,
   canEdit,
+  onRuntimeBindingChange,
+  onRuntimeBindingClear,
   navIntent,
   onNavIntentHandled,
 }: AgentOverviewPaneProps) {
@@ -432,11 +439,14 @@ export function AgentOverviewPane({
                     <AgentDetailInspector
                       agent={agent}
                       runtime={runtime}
+                      runtimeBinding={runtimeBinding}
                       runtimes={runtimes}
                       members={members}
                       currentUserId={currentUserId ?? null}
                       canEdit={canEdit}
                       onUpdate={onUpdate}
+                      onRuntimeBindingChange={onRuntimeBindingChange}
+                      onRuntimeBindingClear={onRuntimeBindingClear}
                     />
                   )}
                   {effectiveView === "access" && (

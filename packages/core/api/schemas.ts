@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type {
   Agent,
+  AgentRuntimeBinding,
   AgentTemplate,
   AgentTemplateSummary,
   AgentBuilderSession,
@@ -613,6 +614,26 @@ export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
   metadata: {},
   created_at: "",
   updated_at: "",
+};
+
+export const AgentRuntimeBindingSchema = z.object({
+  agent_id: z.string(),
+  user_id: z.string(),
+  runtime_id: z.string().nullable().default(null),
+  effective_runtime_id: z.string(),
+  bound: z.boolean().default(false),
+  created_at: z.string().nullable().default(null),
+  updated_at: z.string().nullable().default(null),
+}).loose();
+
+export const EMPTY_AGENT_RUNTIME_BINDING: AgentRuntimeBinding = {
+  agent_id: "",
+  user_id: "",
+  runtime_id: null,
+  effective_runtime_id: "",
+  bound: false,
+  created_at: null,
+  updated_at: null,
 };
 
 // ---------------------------------------------------------------------------

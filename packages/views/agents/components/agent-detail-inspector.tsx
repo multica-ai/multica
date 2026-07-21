@@ -1,13 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { RotateCcw } from "lucide-react";
 import type {
   Agent,
   AgentRuntime,
+  AgentRuntimeBinding,
   MemberWithUser,
 } from "@multica/core/types";
 import { AGENT_DESCRIPTION_MAX_LENGTH } from "@multica/core/agents";
 import { isImeComposing } from "@multica/core/utils";
+import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
@@ -28,11 +31,14 @@ import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 interface InspectorProps {
   agent: Agent;
   runtime: AgentRuntime | null;
+  runtimeBinding: AgentRuntimeBinding | null;
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
   currentUserId: string | null;
   canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+  onRuntimeBindingChange: (id: string, runtimeId: string) => Promise<void>;
+  onRuntimeBindingClear: (id: string) => Promise<void>;
 }
 
 interface ProfileDraft {
@@ -52,11 +58,14 @@ function profileDraftsEqual(left: ProfileDraft, right: ProfileDraft) {
 export function AgentDetailInspector({
   agent,
   runtime,
+  runtimeBinding,
   runtimes,
   members,
   currentUserId,
   canEdit,
   onUpdate,
+  onRuntimeBindingChange,
+  onRuntimeBindingClear,
 }: InspectorProps) {
   const { t } = useT("agents");
   const { t: ts } = useT("settings");
@@ -106,6 +115,9 @@ export function AgentDetailInspector({
 
   const isOnline = runtime?.status === "online";
   const nameInvalid = name.trim().length === 0;
+  const effectiveRuntimeID =
+    runtimeBinding?.effective_runtime_id || agent.runtime_id;
+  const canBindRuntime = !!currentUserId && !agent.archived_at;
 
   return (
     <div className="space-y-8">
@@ -228,6 +240,36 @@ export function AgentDetailInspector({
                 update({ runtime_id: id, model: "", thinking_level: "" })
               }
             />
+          </SettingsRow>
+          <SettingsRow
+            label={t(($) => $.inspector.prop_my_runtime)}
+            size="select-wide"
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <RuntimePicker
+                variant="field"
+                showLabel={false}
+                value={effectiveRuntimeID}
+                runtimes={runtimes}
+                members={members}
+                currentUserId={currentUserId}
+                canEdit={canBindRuntime}
+                onChange={(id) => onRuntimeBindingChange(agent.id, id)}
+              />
+              {runtimeBinding?.bound && canBindRuntime ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  aria-label={t(($) => $.inspector.reset_my_runtime_aria)}
+                  title={t(($) => $.inspector.reset_my_runtime_aria)}
+                  onClick={() => onRuntimeBindingClear(agent.id)}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </Button>
+              ) : null}
+            </div>
           </SettingsRow>
           <SettingsRow
             label={t(($) => $.inspector.prop_model)}
