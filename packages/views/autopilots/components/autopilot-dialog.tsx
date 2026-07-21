@@ -642,14 +642,22 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           {/* Left: Runbook */}
           <div className="flex-none lg:flex-1 min-h-0 flex flex-col border-b lg:border-b-0 lg:border-r">
             <div className="px-6 pt-5 pb-3 shrink-0">
-              <TitleEditor
-                autoFocus={isCreate}
-                defaultValue={initial.title ?? ""}
-                placeholder={t(($) => $.dialog.title_placeholder)}
-                className="text-2xl font-semibold tracking-tight"
-                onChange={setTitle}
-                onSubmit={handleSubmit}
-              />
+              <div className="mb-1.5 flex items-center gap-1 text-xs font-medium text-foreground">
+                <span>{t(($) => $.dialog.title_label)}</span>
+                <span aria-hidden="true" className="text-destructive">*</span>
+                <span className="sr-only">{t(($) => $.dialog.required)}</span>
+              </div>
+              <div className="rounded-md border border-input bg-background px-3 py-2 transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+                <TitleEditor
+                  autoFocus={isCreate}
+                  required
+                  defaultValue={initial.title ?? ""}
+                  placeholder={t(($) => $.dialog.title_placeholder)}
+                  className="text-base font-medium"
+                  onChange={setTitle}
+                  onSubmit={handleSubmit}
+                />
+              </div>
             </div>
 
             <div className="px-6 pb-2 shrink-0 flex items-baseline gap-2">

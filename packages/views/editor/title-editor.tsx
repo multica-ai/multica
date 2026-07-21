@@ -20,6 +20,7 @@ interface TitleEditorProps {
   placeholder?: string;
   className?: string;
   autoFocus?: boolean;
+  required?: boolean;
   onSubmit?: () => void;
   onBlur?: (value: string) => void;
   onChange?: (value: string) => void;
@@ -75,6 +76,7 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
       placeholder: placeholderText = "",
       className,
       autoFocus = false,
+      required = false,
       onSubmit,
       onBlur,
       onChange,
@@ -111,6 +113,7 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
           role: "textbox",
           "aria-multiline": "false",
           "aria-label": placeholderText || t(($) => $.title_editor.title_aria_label),
+          "aria-required": String(required),
         },
       },
       onUpdate: ({ editor: ed }) => {
