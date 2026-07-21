@@ -12,6 +12,17 @@ func TestResourceLabelsReleaseFlagDefaultsToOff(t *testing.T) {
 	}
 }
 
+func TestBulkMemberProvisioningReleaseFlagDefaultsToOff(t *testing.T) {
+	ctx := context.Background()
+	if BulkMemberProvisioningEnabled(ctx, nil) {
+		t.Fatal("bulk member provisioning release flag must default to off")
+	}
+	flags := EvaluateFrontendPublicFlags(ctx, nil)
+	if flags[BulkMemberProvisioning] {
+		t.Fatal("bulk member provisioning frontend flag must default to off")
+	}
+}
+
 func TestAgentBuilderCompatDecisionStaysEnabled(t *testing.T) {
 	flags := EvaluateFrontendPublicFlags(context.Background(), nil)
 	if !flags[agentBuilderCompat] {

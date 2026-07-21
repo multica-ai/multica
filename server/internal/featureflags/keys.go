@@ -16,6 +16,10 @@ const (
 	// ResourceLabels controls the agent- and skill-scoped label namespaces.
 	// Issue labels remain available while this release flag is off.
 	ResourceLabels = "settings_resource_labels"
+	// BulkMemberProvisioning lets workspace owners pre-provision a bounded set
+	// of trusted seed users without sending invitation emails. It is disabled
+	// by default because it deliberately bypasses the invite acceptance step.
+	BulkMemberProvisioning = "settings_bulk_member_provisioning"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -29,6 +33,7 @@ const (
 var frontendPublicFlags = []string{
 	ComposioMCPApps,
 	ResourceLabels,
+	BulkMemberProvisioning,
 }
 
 func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -37,6 +42,10 @@ func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) boo
 
 func ResourceLabelsEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, ResourceLabels, false)
+}
+
+func BulkMemberProvisioningEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, BulkMemberProvisioning, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

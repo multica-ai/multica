@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Clock, X, Mail } from "lucide-react";
+import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Clock, X, Mail, Users } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
 import type { MemberWithUser, MemberRole, Invitation } from "@multica/core/types";
 import { Input } from "@multica/ui/components/ui/input";
@@ -42,7 +42,10 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, invitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
+import { useFeatureEnabled } from "@multica/core/config";
+import { BULK_MEMBER_PROVISIONING_FLAG } from "@multica/core/feature-flags";
 import { useT } from "../../i18n";
+import { BulkMemberProvisionDialog } from "./bulk-member-provision-dialog";
 import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
 
 const ROLE_ICONS: Record<MemberRole, typeof Crown> = {
@@ -236,10 +239,12 @@ export function MembersTab() {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: invitations = [] } = useQuery(invitationListOptions(wsId));
+  const bulkProvisioningEnabled = useFeatureEnabled(BULK_MEMBER_PROVISIONING_FLAG, false);
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [provisionOpen, setProvisionOpen] = useState(false);
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
   const [invitationActionId, setInvitationActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -341,6 +346,17 @@ export function MembersTab() {
               <div className="flex items-center gap-2">
                 <Plus className="h-4 w-4 text-muted-foreground" />
                 <h3 className="text-sm font-medium">{t(($) => $.members.invite_title)}</h3>
+                {bulkProvisioningEnabled && isOwner && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="ml-auto"
+                    onClick={() => setProvisionOpen(true)}
+                  >
+                    <Users className="h-4 w-4" />
+                    {t(($) => $.members.provision.open_button)}
+                  </Button>
+                )}
               </div>
               <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
                 <Input
@@ -442,6 +458,18 @@ export function MembersTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {bulkProvisioningEnabled && isOwner && (
+        <BulkMemberProvisionDialog
+          workspaceId={workspace.id}
+          open={provisionOpen}
+          onOpenChange={setProvisionOpen}
+          onCompleted={() => {
+            qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+            qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
+          }}
+        />
+      )}
     </SettingsTab>
   );
 }

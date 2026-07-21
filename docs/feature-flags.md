@@ -212,6 +212,28 @@ longer gates the write endpoint. `/api/config` still reports
 switch; this is a client-compatibility decision, not an operator-controlled
 flag.
 
+### Enterprise seed-member provisioning
+
+`settings_bulk_member_provisioning` is a default-off release flag for
+self-hosted enterprise adoption. When enabled, workspace owners can provision a
+known seed cohort directly from **Settings > Members** without relying on
+invitation email delivery:
+
+```bash
+FF_SETTINGS_BULK_MEMBER_PROVISIONING=true
+```
+
+Each batch accepts at most 100 unique email addresses and assigns either the
+member or admin role. The backend independently verifies the flag and owner
+role, applies any configured email/domain allowlists before creating new global
+accounts, marks those accounts ready for first sign-in, and removes a matching pending invitation after the member
+relationship is created. The endpoint returns one result per email so callers
+can retry only failed entries safely.
+
+This flag does not bypass sign-in verification or grant owner access. Turning
+it off removes the UI entry and makes the API return 404; existing memberships
+remain intact.
+
 ### Security note: never rely on the frontend alone
 
 A frontend feature flag controls what the user *sees*. It does NOT enforce access. Any API route exposing the same capability MUST evaluate the matching backend flag independently. The two flags can share a key but they live in two `Service` instances and the backend value is the source of truth.

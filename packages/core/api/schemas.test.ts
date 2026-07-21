@@ -22,6 +22,7 @@ import {
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
+  ProvisionMembersResponseSchema,
   SearchProjectsResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -690,6 +691,42 @@ describe("AppConfigSchema cdn_signed drift", () => {
   it("parses server_version and leaves it undefined when the server omits it", () => {
     expect(AppConfigSchema.parse({ server_version: "1.2.3" }).server_version).toBe("1.2.3");
     expect(AppConfigSchema.parse({}).server_version).toBeUndefined();
+  });
+});
+
+describe("ProvisionMembersResponseSchema", () => {
+  it("parses per-email outcomes and preserves future fields", () => {
+    const parsed = ProvisionMembersResponseSchema.parse({
+      summary: {
+        total: 2,
+        created: 1,
+        already_member: 1,
+        duplicate: 0,
+        invalid: 0,
+        failed: 0,
+      },
+      results: [
+        { email: "new@company.com", role: "member", status: "created", future: true },
+        { email: "old@company.com", role: "admin", status: "already_member" },
+      ],
+    });
+    expect(parsed.results.map((result) => result.status)).toEqual(["created", "already_member"]);
+    expect((parsed.results[0] as Record<string, unknown>).future).toBe(true);
+  });
+
+  it("rejects malformed success payloads instead of inventing provisioned members", () => {
+    expect(ProvisionMembersResponseSchema.safeParse({ summary: {}, results: "all good" }).success).toBe(false);
+    expect(ProvisionMembersResponseSchema.safeParse({
+      summary: {
+        total: 1,
+        created: 1,
+        already_member: 0,
+        duplicate: 0,
+        invalid: 0,
+        failed: 0,
+      },
+      results: [{ email: "seed@company.com", role: "owner", status: "created" }],
+    }).success).toBe(false);
   });
 });
 

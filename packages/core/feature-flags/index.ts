@@ -20,6 +20,7 @@ export { ChainProvider } from "./chain-provider";
 export {
   COMPOSIO_MCP_APPS_FLAG,
   RESOURCE_LABELS_FLAG,
+  BULK_MEMBER_PROVISIONING_FLAG,
 } from "./keys";
 export {
   FeatureFlagsProvider,

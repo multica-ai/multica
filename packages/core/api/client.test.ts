@@ -5,6 +5,85 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient member provisioning", () => {
+  it("posts the bounded seed cohort to the workspace endpoint", async () => {
+    const response = {
+      summary: {
+        total: 1,
+        created: 1,
+        already_member: 0,
+        duplicate: 0,
+        invalid: 0,
+        failed: 0,
+      },
+      results: [
+        {
+          email: "seed@company.com",
+          role: "member",
+          status: "created",
+          user_id: "user-1",
+          member_id: "member-1",
+        },
+      ],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.provisionMembers("workspace-1", {
+        entries: [{ email: "seed@company.com", role: "member" }],
+      }),
+    ).resolves.toEqual(response);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/workspaces/workspace-1/members/provision",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          entries: [{ email: "seed@company.com", role: "member" }],
+        }),
+      }),
+    );
+  });
+
+  it("falls back to an empty result when a success response is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ summary: {}, results: "ok" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.provisionMembers("workspace-1", {
+        entries: [{ email: "seed@company.com", role: "member" }],
+      }),
+    ).resolves.toEqual({
+      summary: {
+        total: 0,
+        created: 0,
+        already_member: 0,
+        duplicate: 0,
+        invalid: 0,
+        failed: 0,
+      },
+      results: [],
+    });
+  });
+});
+
 describe("ApiClient label response schemas", () => {
   it("falls back safely for malformed label catalog, label, and resource responses", async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
