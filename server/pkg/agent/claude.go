@@ -682,15 +682,24 @@ func buildClaudeInput(prompt string) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-// claudeResumeRejectedPhrases are the provider messages that positively
-// identify a refused --resume, as opposed to a failure that merely happened
-// to occur during a resumed run. Matching must stay tight: a false positive
-// makes the daemon throw away a recoverable session pointer and re-run the
-// task, so anything ambiguous belongs out of this list.
-var claudeResumeRejectedPhrases = []string{
+// resumeRejectedPhrases are the provider messages that positively identify a
+// refused resume, as opposed to a failure that merely happened to occur during
+// a resumed run. Shared by the stream-json backends (claude, codebuddy, qwen);
+// the ACP backends match structured error codes via isACPSessionNotFound
+// instead.
+//
+// Matching must stay tight: a false positive makes the daemon throw away a
+// recoverable session pointer and re-run the task, so anything ambiguous
+// belongs out of this list.
+var resumeRejectedPhrases = []string{
 	// Verified: claude prints this when the transcript named by --resume is
 	// absent. Covered by TestResolveSessionID's existing stderr fixture.
 	"no conversation found",
+	// Verified: qwen-code 0.20.0, captured in
+	// testdata/qwen-code-0.20.0-resume-not-found.stderr.txt — "No saved
+	// session found with ID <id>. Run `qwen --resume` without an ID to
+	// choose from existing sessions."
+	"no saved session found",
 	// Reported verbatim in multica-ai/multica#5704 against Claude Code
 	// 2.1.207 (zh-CN): "400 此 session 已绑定另外的ai账号，请执行 /new 开启新
 	// session". This is the account-switch guardrail this signal exists for.
@@ -718,7 +727,7 @@ func resumeWasRejected(requestedResume, emitted string, failed bool, texts ...st
 	}
 	for _, text := range texts {
 		lower := strings.ToLower(text)
-		for _, phrase := range claudeResumeRejectedPhrases {
+		for _, phrase := range resumeRejectedPhrases {
 			if strings.Contains(lower, phrase) {
 				return true
 			}

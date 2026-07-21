@@ -1764,9 +1764,56 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			want:           true,
 		},
 		{
+			// qwen-code 0.20.0's real wording, from
+			// pkg/agent/testdata/qwen-code-0.20.0-resume-not-found.stderr.txt.
+			// The backend reports no session at all here, so before the
+			// phrase was recognised this path silently lost its recovery.
+			name: "qwen stale session rejection retries",
+			result: agent.Result{
+				Status:         "failed",
+				Error:          "No saved session found with ID session-redacted. Run `qwen --resume` without an ID to choose from existing sessions.",
+				ResumeRejected: true,
+			},
+			priorSessionID: "session-redacted",
+			want:           true,
+		},
+		{
 			name:           "no resume requested never retries",
 			result:         agent.Result{Status: "failed", Error: "boom", ResumeRejected: true},
 			priorSessionID: "",
+			want:           false,
+		},
+
+		// Backends with no rejection signal (antigravity, copilot, cursor,
+		// deveco, opencode) scrape SessionID from stream output. An empty id
+		// is all they can offer, and it only proves no session was
+		// established — so it still gates a retry, but only for failures a
+		// fresh session could plausibly cure.
+		{
+			name:           "no signal and no session established retries",
+			result:         agent.Result{Status: "failed", Error: "agent exited before dispatching"},
+			priorSessionID: "stale-id",
+			want:           true,
+		},
+		{
+			name:           "no signal but a session was established does not retry",
+			result:         agent.Result{Status: "failed", Error: "agent exited before dispatching", SessionID: "live-sess"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			// The regression that motivated the positive signal: without the
+			// classification guard, every unsignalled network blip would
+			// reset the session these backends were about to resume.
+			name:           "no signal network drop does not retry",
+			result:         agent.Result{Status: "failed", Error: "API Error: Connection closed mid-response"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "no signal rate limit does not retry",
+			result:         agent.Result{Status: "failed", Error: "API Error: 429 rate limit exceeded"},
+			priorSessionID: "stale-id",
 			want:           false,
 		},
 		{
@@ -1825,8 +1872,10 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			want:           false,
 		},
 		{
-			name:           "unrecognised startup failure keeps the session",
-			result:         agent.Result{Status: "failed", Error: "exit status 1"},
+			// Unclassified AND a session was established: nothing suggests
+			// the resume was the problem, so leave the pointer alone.
+			name:           "unrecognised failure with a live session keeps it",
+			result:         agent.Result{Status: "failed", Error: "exit status 1", SessionID: "live-sess"},
 			priorSessionID: "stale-id",
 			want:           false,
 		},

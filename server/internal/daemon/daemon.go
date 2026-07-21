@@ -4841,15 +4841,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 //  1. Would a fresh session even fix this? Only if the resume itself was
 //     refused — the transcript is gone, or it belongs to another provider
 //     account. result.ResumeRejected is the backend's positive evidence of
-//     that. Answering by exclusion instead ("it wasn't an auth error") is
-//     wrong: the failures a new session cures are a small enumerable set,
-//     while the ones it cannot are open-ended. A network drop, a 429, a
-//     quota trip or a provider 5xx has nothing to do with the session, so
-//     resetting it discards the one recoverable thing — the conversation
-//     pointer — and re-runs the task for nothing. provider_network in
-//     particular is documented resume-safe in internal/service/task.go
-//     (retryableReasons, MUL-4910): the platform's own retry is supposed to
-//     inherit the session and continue the truncated conversation.
+//     that, and where a backend can produce it, it is the whole answer.
+//     Answering by exclusion alone would invert the burden of proof: the
+//     failures a new session cures are a small enumerable set, while the
+//     ones it cannot are open-ended. A network drop, a 429, a quota trip or
+//     a provider 5xx has nothing to do with the session, so resetting it
+//     discards the one recoverable thing — the conversation pointer — and
+//     re-runs the task for nothing. provider_network in particular is
+//     documented resume-safe in internal/service/task.go (retryableReasons,
+//     MUL-4910): the platform's own retry is supposed to inherit the session
+//     and continue the truncated conversation.
+//
+//     Not every backend can answer, though. See the empty-SessionID branch
+//     below for the ones that have no rejection signal to offer.
 //
 //  2. Is re-running safe? Only if the agent executed no tool. tools == 0 does
 //     not prove the run mutated nothing — it proves we observed no tool use,
@@ -4860,10 +4864,43 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 //     attempts, so a retry after real work re-plans on top of its own
 //     half-finished commits.
 func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, tools int32) bool {
-	return result.Status == "failed" &&
-		priorSessionID != "" &&
-		result.ResumeRejected &&
-		tools == 0
+	if result.Status != "failed" || priorSessionID == "" || tools > 0 {
+		return false
+	}
+	// Positive evidence: the backend proved the resume was refused.
+	if result.ResumeRejected {
+		return true
+	}
+	// No evidence either way. Backends that scrape SessionID out of stream
+	// output (antigravity, copilot, cursor, deveco, opencode) cannot tell a
+	// refused resume from any other startup failure — none of them has a
+	// captured rejection string to match on. An empty SessionID at least
+	// proves no session was established this run, which is what the gate
+	// used to rely on for every backend.
+	//
+	// Keep that path for them, minus the classes a new session provably
+	// cannot cure. Guessing rejection phrases for these five instead would
+	// grow the inferred-match surface, and a false positive there is the
+	// expensive direction: it discards a recoverable session pointer.
+	return result.SessionID == "" && freshSessionMayHelp(result.Error)
+}
+
+// freshSessionMayHelp reports whether restarting the conversation could
+// plausibly fix errText. It answers "is this failure about the session at
+// all?", so every reason with a defined non-session remedy — wait, back off,
+// top up, re-auth — is excluded. Those keep the session pointer so the
+// platform's own retry can resume the truncated conversation.
+func freshSessionMayHelp(errText string) bool {
+	switch taskfailure.Classify(errText) {
+	case taskfailure.ReasonAgentProviderNetwork,
+		taskfailure.ReasonAgentProviderCapacityOrRateLimit,
+		taskfailure.ReasonAgentProviderQuotaLimit,
+		taskfailure.ReasonAgentProviderServerError,
+		taskfailure.ReasonAgentProviderAuthOrAccess:
+		return false
+	default:
+		return true
+	}
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
