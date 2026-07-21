@@ -4961,12 +4961,21 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				if !ok {
 					goto drainDone
 				}
-				// Stamp activity as soon as a message lands. The idle
-				// watchdog reads this to decide whether the backend has
-				// gone silent — stamping before processing makes sure a
-				// slow downstream call (mu.Lock contention, batch resize)
-				// can't be misattributed to backend silence.
-				lastActivityAt.Store(time.Now().UnixNano())
+				// Stamp activity as soon as a progress-bearing message
+				// lands. Stamping before processing makes sure a slow
+				// downstream call (mu.Lock contention, batch resize) can't
+				// be misattributed to backend silence.
+				//
+				// Only forward progress counts. Liveness-only messages are
+				// deliberately excluded: a backend blocked on a dead
+				// provider stream keeps emitting them on a fixed cadence
+				// (the claude CLI sustained ~35 content-free events/min
+				// through two multi-minute hangs), so counting them as
+				// activity refreshes the idle timer forever and leaves the
+				// watchdog structurally unable to ever fire (MUL-5042).
+				if isProgressMessage(msg.Type) {
+					lastActivityAt.Store(time.Now().UnixNano())
+				}
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
@@ -5151,6 +5160,36 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 // drain-timeout branch in executeAndDrain emit identical wording.
 func idleWatchdogReason(window time.Duration) string {
 	return fmt.Sprintf("agent produced no new messages for %s and message queue was empty; force-stopped by idle watchdog", window)
+}
+
+// isProgressMessage reports whether a backend message represents forward
+// progress for idle-watchdog purposes.
+//
+// Only messages that carry work count: assistant content (text, thinking),
+// tool traffic, and errors. Liveness-only messages are excluded because a
+// backend that is alive but stuck still produces them:
+//
+//   - MessageStatus is a periodic ping. The claude backend emits one per
+//     `system` stream event, and two observed hangs sustained roughly 35
+//     content-free events/min for their entire duration — indistinguishable
+//     from a healthy run if it counts as activity.
+//   - MessageLog is diagnostic output, which says the process is running, not
+//     that the run is advancing.
+//
+// Counting either one refreshed lastActivityAt indefinitely, which is why the
+// watchdog never fired once across four days of production logs despite real
+// multi-minute hangs (MUL-5042).
+//
+// Narrowing this does not endanger legitimately slow work: a long silent tool
+// call is covered by the separate in-flight-tool budget (see runIdleWatchdog),
+// and session pinning reads MessageStatus independently of this predicate.
+func isProgressMessage(t agent.MessageType) bool {
+	switch t {
+	case agent.MessageText, agent.MessageThinking, agent.MessageToolUse, agent.MessageToolResult, agent.MessageError:
+		return true
+	default:
+		return false
+	}
 }
 
 // runIdleWatchdog ticks until either agentCtx is cancelled or the backend has
