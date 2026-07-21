@@ -7,6 +7,7 @@ import { ChevronDown, ChevronUp, Plus, Settings2, Trash2 } from "lucide-react";
 import { meetingOptions, settingsOptions, useUpdateMeeting } from "../core/queries";
 import type { MeetingAgendaSection, MeetingCadenceUnit, MeetingConfig } from "../core/types";
 import { SearchSelect } from "./search-select";
+import { CycleTimeline } from "./cycle-timeline";
 
 const bindingOptions = [
   { value: "none", label: "Free text" },
@@ -87,6 +88,7 @@ export function MeetingsPage({ renderCurrentNote }: { renderCurrentNote?: (noteI
   return (
     <div className="mx-auto grid h-full max-w-5xl gap-6 overflow-y-auto p-4 sm:p-6">
       <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Operating cadence</p><h1 className="mt-1 text-2xl font-semibold">{cyclesLabel}</h1><p className="mt-1 text-sm text-muted-foreground">Run the current recurring review Note with its issues, comments, mentions, and agent work in context.</p></div><button type="button" aria-expanded={showSetup} onClick={() => setShowSetup((value) => !value)} className="flex min-h-11 items-center gap-2 rounded-md border bg-background px-4 text-sm font-medium"><Settings2 aria-hidden className="size-4" />{showSetup ? "Close setup" : "Cycle setup"}</button></div>
+      {!showSetup && cadenceUnit !== "manual" && <CycleTimeline cadenceUnit={cadenceUnit} cadenceCount={cadenceCount} label={cyclesLabel} />}
       {!showSetup && currentNoteId && renderCurrentNote?.(currentNoteId, () => setShowSetup(true))}
       {!showSetup && currentNoteId && !renderCurrentNote && <div role="alert" className="rounded-xl border border-destructive/30 p-8 text-center text-sm text-destructive">The current review Note is unavailable. Cycle setup is still available.</div>}
       {!showSetup && !currentNoteId && <div className="rounded-xl border border-dashed bg-card p-8 text-center"><h2 className="font-semibold">No current review Note</h2><p className="mt-1 text-sm text-muted-foreground">Choose a recurring Note type in Cycle setup. The Note remains the single source of truth and is never created implicitly here.</p><button type="button" onClick={() => setShowSetup(true)} className="mt-4 min-h-11 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Open Cycle setup</button></div>}
