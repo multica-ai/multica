@@ -27,10 +27,10 @@ type RepoContextForEnv struct {
 // fields the meta-skill template needs to render a human-readable summary
 // (URL for github_repo, generic label otherwise).
 type ProjectResourceForEnv struct {
-	ID           string          // server-assigned UUID
-	ResourceType string          // e.g. "github_repo"
-	ResourceRef  json.RawMessage // raw JSONB payload from the API
-	Label        string          // optional user-supplied label
+	ID           string          `json:"id"`              // server-assigned UUID
+	ResourceType string          `json:"resource_type"`   // e.g. "github_repo"
+	ResourceRef  json.RawMessage `json:"resource_ref"`    // raw JSONB payload from the API
+	Label        string          `json:"label,omitempty"` // optional user-supplied label
 }
 
 // PrepareParams holds all inputs needed to set up an execution environment.
@@ -81,7 +81,12 @@ type PrepareParams struct {
 	// blocklisted keys) used to expand ${VAR} in Hermes external_dirs so it
 	// matches what the Hermes child process actually sees. Only used for hermes.
 	HermesEnv map[string]string
-	Task      TaskContextForEnv // context data for writing files
+	// CodexCustomArgs are the effective Codex CLI args this task launches with
+	// (daemon defaults + profile-fixed + per-agent custom_args). Only the
+	// Windows sandbox decision reads them, to honor a `-c windows.sandbox=...`
+	// override that never lands in config.toml (MUL-4957).
+	CodexCustomArgs []string
+	Task            TaskContextForEnv // context data for writing files
 }
 
 // TaskContextForEnv is the subset of task context used for writing context files.
@@ -334,7 +339,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
-		codexHome := filepath.Join(envRoot, "codex-home")
+		codexHome := filepath.Join(envRoot, codexHomeDirName)
 		// Under the Linux workspace-write sandbox the real HOME is read-only;
 		// give the task a writable HOME and grant write access to it in the
 		// Codex config so npm/Prisma can write their caches (MUL-4856).
@@ -343,7 +348,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: prepare task home: %w", err)
 		}
 		env.TaskHome = taskHome
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), WritableRoots: writableRoots}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), WritableRoots: writableRoots, CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
@@ -452,7 +457,11 @@ type ReuseParams struct {
 	HermesSourceHome      string
 	HermesSourceMustExist bool
 	HermesEnv             map[string]string
-	Task                  TaskContextForEnv // refreshed context files / skills
+	// CodexCustomArgs mirrors PrepareParams.CodexCustomArgs on reuse so the
+	// Windows sandbox decision honors a `-c windows.sandbox=...` override here
+	// too (MUL-4957).
+	CodexCustomArgs []string
+	Task            TaskContextForEnv // refreshed context files / skills
 }
 
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
@@ -546,7 +555,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// lives alongside the workdir. Re-run prepareCodexHomeWithOpts to ensure
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
-		codexHome := filepath.Join(env.RootDir, "codex-home")
+		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
 		// Refresh the per-task writable HOME (re-seed credential symlinks in
 		// case the user's real home changed) and recompute the sandbox
 		// writable_roots on reuse, mirroring the fresh Prepare path (MUL-4856).
@@ -555,7 +564,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			logger.Warn("execenv: refresh task home failed", "error", err)
 		}
 		env.TaskHome = taskHome
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), WritableRoots: writableRoots}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), WritableRoots: writableRoots, CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome

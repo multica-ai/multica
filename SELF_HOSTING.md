@@ -103,6 +103,7 @@ You also need at least one AI agent CLI installed:
 - Qoder CLI (`qodercli` on PATH)
 - Trae CLI (`traecli` on PATH)
 - [Grok Build CLI](https://docs.x.ai/) (`grok` on PATH)
+- Qwen Code (`qwen` on PATH)
 
 ### b) One-command setup
 

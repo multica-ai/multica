@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { createRef } from "react";
+import { createRef, useState } from "react";
 import type { Attachment } from "@multica/core/types";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 
@@ -33,6 +33,7 @@ const providerProps = vi.hoisted<{ attachments: Attachment[] | undefined }>(
 );
 
 const uploadAndInsertFileMock = vi.hoisted(() => vi.fn());
+const preprocessMarkdownMock = vi.hoisted(() => vi.fn((value: string) => value));
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({}),
@@ -52,7 +53,7 @@ vi.mock("./extensions/file-upload", () => ({
 }));
 
 vi.mock("./utils/preprocess", () => ({
-  preprocessMarkdown: (value: string) => value,
+  preprocessMarkdown: preprocessMarkdownMock,
 }));
 
 // Empty-list repair needs a live ProseMirror doc (covered by
@@ -167,6 +168,7 @@ describe("ContentEditor", () => {
     latestEditorOptions.current = undefined;
     providerProps.attachments = undefined;
     capturedExtOptions.current = undefined;
+    preprocessMarkdownMock.mockImplementation((value: string) => value);
   });
 
   afterEach(() => {
@@ -192,21 +194,30 @@ describe("ContentEditor", () => {
     expect(mockFocus).not.toHaveBeenCalled();
   });
 
-  it("syncs editor content when defaultValue changes externally and editor is unfocused", () => {
+  it("syncs editor content when value changes externally and editor is unfocused", () => {
     editorState.markdown = "old content";
-    const { rerender } = render(<ContentEditor defaultValue="old content" />);
+    const { rerender } = render(<ContentEditor value="old content" />);
 
     expect(mockSetContent).not.toHaveBeenCalled();
 
     // Editor still holds the old, in-sync content; external value changes.
     editorState.markdown = "old content";
-    rerender(<ContentEditor defaultValue="new content from server" />);
+    rerender(<ContentEditor value="new content from server" />);
 
     expect(mockSetContent).toHaveBeenCalledTimes(1);
     expect(mockSetContent).toHaveBeenCalledWith(
       "new content from server",
       expect.objectContaining({ emitUpdate: false, contentType: "markdown" }),
     );
+  });
+
+  it("treats defaultValue as mount-only", () => {
+    editorState.markdown = "initial draft";
+    const { rerender } = render(<ContentEditor defaultValue="initial draft" />);
+
+    rerender(<ContentEditor defaultValue="draft store echo" />);
+
+    expect(mockSetContent).not.toHaveBeenCalled();
   });
 
   it("does not parse the initial defaultValue twice when markdown round-trip canonicalizes it", () => {
@@ -222,35 +233,87 @@ describe("ContentEditor", () => {
     expect(mockSetContent).not.toHaveBeenCalled();
   });
 
-  it("does not sync while a file upload is in flight (in-flight upload node must survive external defaultValue changes)", () => {
+  it("does not feed a locally emitted draft back through preprocessing", () => {
+    vi.useFakeTimers();
+    preprocessMarkdownMock.mockImplementation((value: string) =>
+      value === "dev.de" ? "[dev.de](http://dev.de)" : value,
+    );
+
+    function EchoingDraftHost() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ContentEditor
+          defaultValue={draft}
+          onUpdate={setDraft}
+          debounceMs={100}
+        />
+      );
+    }
+
+    render(<EchoingDraftHost />);
+    editorState.markdown = "dev.de";
+
+    act(() => {
+      latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
+  it("recognizes a synchronized value echo before preprocessing it", () => {
+    vi.useFakeTimers();
+    preprocessMarkdownMock.mockImplementation((value: string) =>
+      value === "dev.de" ? "[dev.de](http://dev.de)" : value,
+    );
+
+    function SynchronizedDraftHost() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ContentEditor value={draft} onUpdate={setDraft} debounceMs={100} />
+      );
+    }
+
+    render(<SynchronizedDraftHost />);
+    editorState.markdown = "dev.de";
+
+    act(() => {
+      latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
+  it("does not sync while a file upload is in flight (in-flight upload node must survive external value changes)", () => {
     editorState.markdown = "old content";
-    const { rerender } = render(<ContentEditor defaultValue="old content" />);
+    const { rerender } = render(<ContentEditor value="old content" />);
 
     // A file is uploading: the doc holds a node with attrs.uploading. An
-    // external defaultValue change (e.g. chat lazy-creating a session mid-upload
-    // flips the draft key → defaultValue) must NOT setContent over it, or the
+    // external value change (e.g. chat lazy-creating a session mid-upload
+    // flips the draft key → value) must NOT setContent over it, or the
     // uploading node is wiped and the upload's finalize can't find it.
     editorState.uploadingNodes = [{ attrs: { uploading: true } }];
-    rerender(<ContentEditor defaultValue="" />);
+    rerender(<ContentEditor value="" />);
 
     expect(mockSetContent).not.toHaveBeenCalled();
 
     // Once the upload settles (no uploading node), a later external change syncs.
     editorState.uploadingNodes = [];
-    rerender(<ContentEditor defaultValue="new content from server" />);
+    rerender(<ContentEditor value="new content from server" />);
     expect(mockSetContent).toHaveBeenCalledTimes(1);
   });
 
   it("does not sync when editor is focused and has unsaved local edits", () => {
     editorState.markdown = "old content";
-    const { rerender } = render(<ContentEditor defaultValue="old content" />);
+    const { rerender } = render(<ContentEditor value="old content" />);
 
     // User is typing — focused AND dirty (markdown diverges from
     // lastEmittedRef, which was seeded with "old content" by onCreate).
     editorState.isFocused = true;
     editorState.markdown = "user-typed-content";
 
-    rerender(<ContentEditor defaultValue="incoming external change" />);
+    rerender(<ContentEditor value="incoming external change" />);
 
     expect(mockSetContent).not.toHaveBeenCalled();
   });
@@ -262,12 +325,12 @@ describe("ContentEditor", () => {
     // With an unconditional `if (isFocused) return`, this sync would be lost
     // forever because onBlur has no replay path.
     editorState.markdown = "old content";
-    const { rerender } = render(<ContentEditor defaultValue="old content" />);
+    const { rerender } = render(<ContentEditor value="old content" />);
 
     editorState.isFocused = true;
     editorState.markdown = "old content"; // clean — no typing happened
 
-    rerender(<ContentEditor defaultValue="new content from server" />);
+    rerender(<ContentEditor value="new content from server" />);
 
     expect(mockSetContent).toHaveBeenCalledTimes(1);
     expect(mockSetContent).toHaveBeenCalledWith(
@@ -279,7 +342,7 @@ describe("ContentEditor", () => {
   it("does not sync when editor is unfocused but has unsaved local edits (blur-before-debounce window)", () => {
     editorState.markdown = "old content";
     const { rerender } = render(
-      <ContentEditor defaultValue="old content" onUpdate={() => {}} />,
+      <ContentEditor value="old content" onUpdate={() => {}} />,
     );
 
     // User typed locally, then blurred. Debounce hasn't flushed yet so
@@ -289,7 +352,7 @@ describe("ContentEditor", () => {
 
     rerender(
       <ContentEditor
-        defaultValue="external update from another agent"
+        value="external update from another agent"
         onUpdate={() => {}}
       />,
     );
@@ -337,12 +400,12 @@ describe("ContentEditor", () => {
       expect(ref.current?.flushPendingUpdate()).toBeNull();
     });
 
-    it("leaves the editor clean so the next defaultValue sync is no longer blocked by the dirty guard", () => {
+    it("leaves the editor clean so the next value sync is no longer blocked by the dirty guard", () => {
       vi.useFakeTimers();
       const ref = createRef<ContentEditorRef>();
       editorState.markdown = "draft A text";
       const { rerender } = render(
-        <ContentEditor ref={ref} defaultValue="draft A text" onUpdate={vi.fn()} debounceMs={100} />,
+        <ContentEditor ref={ref} value="draft A text" onUpdate={vi.fn()} debounceMs={100} />,
       );
 
       // Unflushed local edits — this is what makes the editor dirty.
@@ -357,7 +420,7 @@ describe("ContentEditor", () => {
       // Host has taken the bytes, so switching destination must now load the
       // incoming draft rather than leaving the old document on screen.
       rerender(
-        <ContentEditor ref={ref} defaultValue="draft B text" onUpdate={vi.fn()} debounceMs={100} />,
+        <ContentEditor ref={ref} value="draft B text" onUpdate={vi.fn()} debounceMs={100} />,
       );
       expect(mockSetContent).toHaveBeenCalled();
     });
@@ -366,7 +429,7 @@ describe("ContentEditor", () => {
       vi.useFakeTimers();
       editorState.markdown = "draft A text";
       const { rerender } = render(
-        <ContentEditor defaultValue="draft A text" onUpdate={vi.fn()} debounceMs={100} />,
+        <ContentEditor value="draft A text" onUpdate={vi.fn()} debounceMs={100} />,
       );
 
       editorState.markdown = "draft A text, still typing";
@@ -375,19 +438,19 @@ describe("ContentEditor", () => {
       });
 
       // No flush → dirty → the guard must still protect the unsaved bytes.
-      rerender(<ContentEditor defaultValue="draft B text" onUpdate={vi.fn()} debounceMs={100} />);
+      rerender(<ContentEditor value="draft B text" onUpdate={vi.fn()} debounceMs={100} />);
       expect(mockSetContent).not.toHaveBeenCalled();
     });
   });
 
-  it("does not sync when defaultValue normalizes to the current editor markdown", () => {
+  it("does not sync when value normalizes to the current editor markdown", () => {
     editorState.markdown = "same content";
-    const { rerender } = render(<ContentEditor defaultValue="same content" />);
+    const { rerender } = render(<ContentEditor value="same content" />);
 
-    // Different `defaultValue` string forces the effect to re-run (the dep
+    // Different `value` string forces the effect to re-run (the dep
     // array sees a new value), but the trailing whitespace normalises away
     // via `trimEnd()`, so `setContent` must still short-circuit.
-    rerender(<ContentEditor defaultValue={"same content\n"} />);
+    rerender(<ContentEditor value={"same content\n"} />);
 
     expect(mockSetContent).not.toHaveBeenCalled();
   });

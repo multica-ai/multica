@@ -43,14 +43,22 @@ type tomlByteRange struct {
 // managed shell policy.
 //
 // Inherited process variables keep Codex's documented default filtering for
-// names containing KEY, SECRET, or TOKEN. Inherited MULTICA_* variables are
-// always dropped because they belong to the daemon process, not necessarily to
-// this task. Explicit MULTICA_* values are safe to include because daemon.go
-// blocklists that namespace from agent custom_env and constructs those values
-// from the current task. Non-secret explicit custom_env values keep their
-// existing shell visibility; secret-looking custom_env remains filtered just
-// as it was under Codex's default policy.
-func CodexShellEnvAllowlist(inherited []string, explicit map[string]string) []string {
+// names containing KEY, SECRET, or TOKEN. Credential-looking explicit values
+// are included only when their names also appear in authorizedExplicit, which
+// daemon.go derives solely from the current agent's blocklist-checked
+// custom_env. Inherited MULTICA_* variables are always dropped because they
+// belong to the daemon process, not necessarily to this task. Explicit
+// MULTICA_* values are safe to include because daemon.go blocklists that
+// namespace from agent custom_env and constructs those values from the current
+// task.
+func CodexShellEnvAllowlist(inherited []string, explicit map[string]string, authorizedExplicit []string) []string {
+	authorized := make(map[string]struct{}, len(authorizedExplicit))
+	for _, key := range authorizedExplicit {
+		if key != "" {
+			authorized[strings.ToUpper(key)] = struct{}{}
+		}
+	}
+
 	// Codex's glob matching is case-insensitive. De-duplicate on the same basis
 	// so Windows Path/PATH aliases cannot create ambiguous policy entries.
 	allowed := make(map[string]string, len(inherited)+len(explicit))
@@ -64,7 +72,12 @@ func CodexShellEnvAllowlist(inherited []string, explicit map[string]string) []st
 				return
 			}
 		} else if codexDefaultExcludesEnvKey(upper) {
-			return
+			if !isExplicit {
+				return
+			}
+			if _, ok := authorized[upper]; !ok {
+				return
+			}
 		}
 		allowed[upper] = key
 	}

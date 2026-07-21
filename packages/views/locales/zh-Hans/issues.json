@@ -66,6 +66,7 @@
   },
   "display": {
     "tooltip": "显示设置",
+    "button": "显示",
     "grouping_section": "分组",
     "ordering_section": "排序",
     "card_properties_section": "卡片属性",

@@ -243,7 +243,7 @@ vi.mock("../editor", async () => {
   const uploadGate = await vi.importActual<typeof import("../editor/use-upload-gate")>(
     "../editor/use-upload-gate",
   );
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onUploadFile, onUploadingChange, placeholder, attachments }: any, ref: any) => {
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, onUploadingChange, placeholder, attachments }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     // Mirrors the real editor's `uploading` node attrs: the placeholder is in
@@ -279,11 +279,48 @@ vi.mock("../editor", async () => {
             setValue(e.target.value);
             onUpdate?.(e.target.value);
           }}
+          // Stands in for createSubmitShortcutExtension with the default
+          // `send` binding (Mod+Enter). Plain Enter stays a newline.
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onSubmit?.();
+          }}
         />
       </>
     );
   });
   ContentEditor.displayName = "ContentEditor";
+
+  // Mirrors the real split: plain Enter is the keymap's `onSubmit` path, the
+  // configured `send` chord (default Mod+Enter) is `onSubmitShortcut`. The
+  // real component never routes plain Enter to onSubmitShortcut.
+  const TitleEditor = forwardRef(
+    ({ defaultValue, placeholder, onChange, onSubmit, onSubmitShortcut }: any, ref: any) => {
+      const [value, setValue] = useState(defaultValue || "");
+      const inputRef = useRef<HTMLInputElement>(null);
+      useImperativeHandle(ref, () => ({
+        getText: () => value,
+        focus: () => inputRef.current?.focus(),
+        focusAtCoords: () => inputRef.current?.focus(),
+      }));
+      return (
+        <input
+          ref={inputRef}
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => {
+            setValue(e.target.value);
+            onChange?.(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return;
+            if (e.metaKey || e.ctrlKey) onSubmitShortcut?.();
+            else onSubmit?.();
+          }}
+        />
+      );
+    },
+  );
+  TitleEditor.displayName = "TitleEditor";
 
   return {
     ...uploadGate,
@@ -295,22 +332,7 @@ vi.mock("../editor", async () => {
     useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
     FileDropOverlay: () => null,
     ContentEditor,
-    TitleEditor: ({ defaultValue, placeholder, onChange, onSubmit }: any) => {
-      const [value, setValue] = useState(defaultValue || "");
-      return (
-        <input
-          value={value}
-          placeholder={placeholder}
-          onChange={(e) => {
-            setValue(e.target.value);
-            onChange?.(e.target.value);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onSubmit?.();
-          }}
-        />
-      );
-    },
+    TitleEditor,
   };
 });
 
@@ -1204,13 +1226,31 @@ describe("CreateIssueModal", () => {
       );
     });
 
-    it("never submits manual create from Enter in the title", async () => {
+    // Plain Enter in the title was removed as a create trigger in #5532 — it
+    // fired from a half-typed title. MUL-4931 adds the explicit `send` chord
+    // alongside it; plain Enter must stay inert.
+    it("never submits manual create from plain Enter in the title", async () => {
       const user = userEvent.setup();
       renderManual();
       const title = screen.getByPlaceholderText("Issue title");
       await user.type(title, "Has a screenshot");
 
       fireEvent.keyDown(title, { key: "Enter" });
+      await Promise.resolve();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
+    });
+
+    it("blocks the title send chord while an upload is in flight", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      const title = screen.getByPlaceholderText("Issue title");
+      await user.type(title, "Has a screenshot");
+
+      startPendingUpload();
+
+      // The chord bypasses the button, so the handler's own gate is what stops
+      // this from serializing a description whose image hasn't landed yet.
+      fireEvent.keyDown(title, { key: "Enter", metaKey: true });
       await Promise.resolve();
       expect(mockCreateIssue).not.toHaveBeenCalled();
     });
@@ -1229,6 +1269,147 @@ describe("CreateIssueModal", () => {
       await waitFor(() => expect(switchButton).toBeDisabled());
       fireEvent.click(switchButton);
       expect(onSwitchMode).not.toHaveBeenCalled();
+    });
+  });
+
+  // MUL-4931 — manual create had no submit shortcut at all, while agent create
+  // has had one all along.
+  describe("send shortcut", () => {
+    function renderManual() {
+      return renderModal(
+        <ManualCreatePanel
+          onClose={vi.fn()}
+          onSwitchMode={vi.fn()}
+          isExpanded={false}
+          setIsExpanded={vi.fn()}
+        />,
+      );
+    }
+
+    it("creates from the send chord in the title", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      const title = screen.getByPlaceholderText("Issue title");
+      await user.type(title, "Shortcut from title");
+
+      fireEvent.keyDown(title, { key: "Enter", metaKey: true });
+
+      await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(1));
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Shortcut from title" }),
+      );
+    });
+
+    it("creates from the send chord in the description", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      await user.type(screen.getByPlaceholderText("Issue title"), "Shortcut from body");
+      const description = screen.getByPlaceholderText("Add description...");
+      await user.type(description, "Body text");
+
+      fireEvent.keyDown(description, { key: "Enter", ctrlKey: true });
+
+      await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(1));
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Shortcut from body",
+          description: "Body text",
+        }),
+      );
+    });
+
+    it("leaves plain Enter in the description as a newline, not a create", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      await user.type(screen.getByPlaceholderText("Issue title"), "Still typing");
+
+      fireEvent.keyDown(screen.getByPlaceholderText("Add description..."), { key: "Enter" });
+      await Promise.resolve();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
+    });
+
+    it("focuses the title instead of silently doing nothing when it is empty", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      const description = screen.getByPlaceholderText("Add description...");
+      await user.type(description, "Body but no title");
+
+      fireEvent.keyDown(description, { key: "Enter", metaKey: true });
+
+      await Promise.resolve();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
+      // The shortcut path can't rely on the button's tooltip, so it has to say
+      // where the problem is some other way.
+      expect(screen.getByPlaceholderText("Issue title")).toHaveFocus();
+    });
+
+    it("creates once when the chord is pressed twice in the same tick", async () => {
+      const user = userEvent.setup();
+      // Hold the create open so both presses land inside the in-flight window.
+      let release!: (v: unknown) => void;
+      mockCreateIssue.mockImplementationOnce(
+        () => new Promise((resolve) => { release = resolve; }),
+      );
+      renderManual();
+      const title = screen.getByPlaceholderText("Issue title");
+      await user.type(title, "Double tap");
+
+      // Both presses are dispatched inside ONE act, so React cannot re-render
+      // between them and the second handler still closes over `submitting ===
+      // false`. `fireEvent` would flush in between and hide the race — only a
+      // ref that flips synchronously stops the second create here.
+      await act(async () => {
+        const press = () =>
+          title.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true }),
+          );
+        press();
+        press();
+      });
+
+      await act(async () => {
+        release({ id: "issue-1", identifier: "MUL-1", title: "Double tap", status: "todo" });
+      });
+      expect(mockCreateIssue).toHaveBeenCalledTimes(1);
+    });
+
+    it("renders the send keycaps on Create without renaming the button", async () => {
+      const user = userEvent.setup();
+      renderManual();
+
+      // Accessible name must stay the label alone — the keycaps are decorative.
+      expect(screen.getByRole("button", { name: "Create Issue" })).toBeInTheDocument();
+      expect(document.querySelector("[data-slot='shortcut-keycaps']")).toBeInTheDocument();
+
+      // And the affordance survives the empty → filled transition.
+      await user.type(screen.getByPlaceholderText("Issue title"), "Now valid");
+      expect(screen.getByRole("button", { name: "Create Issue" })).toBeInTheDocument();
+      expect(document.querySelector("[data-slot='shortcut-keycaps']")).toBeInTheDocument();
+    });
+
+    it("keeps Create focusable via aria-disabled while the title is empty", () => {
+      renderManual();
+      const createButton = screen.getByRole("button", { name: "Create Issue" });
+
+      // Native `disabled` would drop it out of the tab order, hiding the
+      // "Enter a title to create" tooltip from keyboard and SR users.
+      expect(createButton).toHaveAttribute("aria-disabled", "true");
+      expect(createButton).not.toBeDisabled();
+      createButton.focus();
+      expect(createButton).toHaveFocus();
+    });
+
+    it("carries its own disabled visuals, since the Button base only styles native disabled", () => {
+      renderManual();
+      const createButton = screen.getByRole("button", { name: "Create Issue" });
+
+      // Without these the control reads as a live primary button while
+      // aria-disabled. `pointer-events-none` is deliberately absent: it would
+      // kill the tooltip hover and the click that focuses the title.
+      expect(createButton.className).toContain("aria-disabled:opacity-50");
+      expect(createButton.className).toContain("aria-disabled:cursor-not-allowed");
+      expect(createButton.className).toContain("aria-disabled:active:translate-y-0");
+      expect(createButton.className).not.toContain("aria-disabled:pointer-events-none");
     });
   });
 });

@@ -1332,14 +1332,8 @@ export function IssueDisplayControls({
                 <TooltipTrigger
                   render={
                     <Button variant="outline" size="sm" className={controlButtonClass}>
-                      {sortBy === "position" ? (
-                        <SlidersHorizontal className="size-3.5" />
-                      ) : sortDirection === "asc" ? (
-                        <ArrowUp className="size-3.5" />
-                      ) : (
-                        <ArrowDown className="size-3.5" />
-                      )}
-                      <span className="hidden md:inline">{sortLabel}</span>
+                      <SlidersHorizontal className="size-3.5" />
+                      <span className="hidden md:inline">{t(($) => $.display.button)}</span>
                     </Button>
                   }
                 />

@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import {
+  ModeChooser,
   buildInvocationTargets,
   decodeBuilderInput,
   deriveDuplicateAccess,
@@ -11,6 +14,45 @@ import {
   stripBuilderDraft,
   type AgentDraft,
 } from "./agent-creation-studio";
+
+vi.mock("../../i18n", () => ({
+  useT: () => ({
+    t: (
+      selector: (translations: {
+        creation_studio: {
+          eyebrow: string;
+          choose_title: string;
+          choose_description: string;
+          recommended: string;
+          continue: string;
+          modes: {
+            blank: { title: string; description: string };
+            ai: { title: string; description: string };
+          };
+        };
+      }) => string,
+    ) =>
+      selector({
+        creation_studio: {
+          eyebrow: "Agent creation",
+          choose_title: "How would you like to start?",
+          choose_description: "Choose a creation mode.",
+          recommended: "Recommended",
+          continue: "Continue",
+          modes: {
+            blank: {
+              title: "Start blank",
+              description: "Configure every field yourself.",
+            },
+            ai: {
+              title: "Build with AI",
+              description: "Describe the outcome you want.",
+            },
+          },
+        },
+      }),
+  }),
+}));
 
 describe("Agent creation studio screen keys", () => {
   it("groups configuration modes and separates the AI setup and builder", () => {
@@ -32,6 +74,20 @@ const draft = (): AgentDraft => ({
   permissionScope: "private",
   memberIds: new Set(),
   teamIds: new Set(),
+});
+
+describe("Agent creation studio mode chooser", () => {
+  it("always offers AI-assisted creation", () => {
+    render(
+      createElement(ModeChooser, {
+        onBlank: vi.fn(),
+        onAI: vi.fn(),
+      }),
+    );
+
+    expect(screen.getByText("Start blank")).toBeInTheDocument();
+    expect(screen.getByText("Build with AI")).toBeInTheDocument();
+  });
 });
 
 describe("Agent creation studio builder protocol", () => {
