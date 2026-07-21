@@ -5,6 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, Label, TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
+import {
+  DEFAULT_SUB_ISSUE_ROW_PROPERTIES,
+  useSubIssueDisplayStore,
+} from "@multica/core/issues/stores/sub-issue-display-store";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
@@ -256,6 +260,7 @@ const mockApiObj = vi.hoisted(() => ({
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
   getChildIssueProgress: vi.fn().mockResolvedValue({ progress: [] }),
   getAgentTaskSnapshot: vi.fn().mockResolvedValue([]),
+  listProperties: vi.fn().mockResolvedValue({ properties: [], total: 0 }),
   listIssues: vi.fn().mockResolvedValue({ issues: [], total: 0 }),
   uploadFile: vi.fn(),
   listIssueReactions: vi.fn().mockResolvedValue([]),
@@ -308,6 +313,11 @@ vi.mock("@multica/core/issues/stores", async () => ({
   ...(await vi.importActual<
     typeof import("@multica/core/issues/stores/resolved-expand-store")
   >("@multica/core/issues/stores/resolved-expand-store")),
+  // Real store: sub-issue display tests drive it with setState, and the
+  // component reads it through the barrel — both must hit the same instance.
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/sub-issue-display-store")
+  >("@multica/core/issues/stores/sub-issue-display-store")),
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
       const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };
@@ -588,6 +598,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
     mockApiObj.getChildIssueProgress.mockResolvedValue({ progress: [] });
     mockApiObj.getAgentTaskSnapshot.mockResolvedValue([]);
+    mockApiObj.listProperties.mockResolvedValue({ properties: [], total: 0 });
     mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
     mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
     mockApiObj.listTasksByIssue.mockResolvedValue([]);
@@ -1405,6 +1416,13 @@ describe("IssueDetail (shared)", () => {
   });
 
   describe("sub-issues list", () => {
+    beforeEach(() => {
+      useSubIssueDisplayStore.setState({
+        rowProperties: { ...DEFAULT_SUB_ISSUE_ROW_PROPERTIES },
+        rowPropertyIds: [],
+      });
+    });
+
     const label = (id: string, name: string): Label => ({
       id,
       workspace_id: "ws-1",
@@ -1464,6 +1482,77 @@ describe("IssueDetail (shared)", () => {
       // Bare row shows no due date / no progress chip of its own.
       const bareRow = screen.getByText("Ship dashboards").closest("a");
       expect(bareRow?.textContent).not.toContain("/");
+    });
+
+    it("hides fields the user toggled off in the display preference", async () => {
+      useSubIssueDisplayStore.setState({
+        rowProperties: {
+          ...DEFAULT_SUB_ISSUE_ROW_PROPERTIES,
+          labels: false,
+          dueDate: false,
+        },
+      });
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 11,
+            identifier: "TES-11",
+            title: "Fix login flow",
+            labels: [label("l1", "backend")],
+            due_date: "2020-01-01",
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Fix login flow");
+      expect(screen.queryByText("backend")).not.toBeInTheDocument();
+      expect(screen.queryByText("Jan 1")).not.toBeInTheDocument();
+    });
+
+    it("renders opted-in custom property chips on rows that carry a value", async () => {
+      const estimate = {
+        id: "prop-1",
+        workspace_id: "ws-1",
+        name: "Estimate",
+        type: "text",
+        config: {},
+        position: 0,
+        archived: false,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      };
+      mockApiObj.listProperties.mockResolvedValue({
+        properties: [estimate],
+        total: 1,
+      });
+      useSubIssueDisplayStore.setState({ rowPropertyIds: ["prop-1"] });
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 11,
+            identifier: "TES-11",
+            title: "Fix login flow",
+            properties: { "prop-1": "Sprint 3" },
+          }),
+          subIssue({
+            id: "child-2",
+            number: 12,
+            identifier: "TES-12",
+            title: "Ship dashboards",
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Fix login flow");
+      // Chip renders only on the row that has a value for the property.
+      expect(await screen.findByText("Sprint 3")).toBeInTheDocument();
+      expect(screen.getAllByText("Sprint 3")).toHaveLength(1);
     });
 
     it("mutes the due date on done sub-issues even when past", async () => {
