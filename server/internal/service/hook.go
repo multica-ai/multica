@@ -393,12 +393,20 @@ func principalMatches(a, b pgtype.UUID) bool {
 }
 
 func (s *HookService) inTx(ctx context.Context, fn func(qtx *db.Queries) error) error {
+	return s.inTxWith(ctx, func(_ pgx.Tx, qtx *db.Queries) error { return fn(qtx) })
+}
+
+// inTxWith is inTx with the raw transaction exposed, for callers that need to open
+// SAVEPOINTs inside it (pgx models a nested Begin as a savepoint). The matcher uses
+// it to isolate one candidate hook's failure without abandoning the event's single
+// authoritative transaction.
+func (s *HookService) inTxWith(ctx context.Context, fn func(tx pgx.Tx, qtx *db.Queries) error) error {
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	if err := fn(s.Queries.WithTx(tx)); err != nil {
+	if err := fn(tx, s.Queries.WithTx(tx)); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

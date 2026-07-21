@@ -128,3 +128,17 @@ INSERT INTO hook_execution (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (hook_id, event_id) DO NOTHING
 RETURNING *;
+
+-- name: CreateHookExecutionFailure :one
+-- Terminal isolation record for a candidate whose STORED CONFIG cannot be
+-- evaluated (a malformed revision fails identically on every retry). Writing it
+-- lets the matcher finish the remaining candidates and finalize the event, so one
+-- bad rule can never starve the healthy rules on the same event (MUL-4332 PR3
+-- review round: matcher point 4). It carries no snapshots — evaluation never
+-- produced one. Same (hook_id, event_id) idempotency as the decision path.
+INSERT INTO hook_execution (
+    id, workspace_id, hook_id, hook_revision_id, event_id, correlation_id,
+    status, error_code, error, completed_at
+) VALUES ($1, $2, $3, $4, $5, $6, 'failed', $7, $8, now())
+ON CONFLICT (hook_id, event_id) DO NOTHING
+RETURNING *;

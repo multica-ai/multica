@@ -73,9 +73,38 @@ WHERE id IN (
 )
 RETURNING *;
 
+-- name: GetDomainEventForDispatch :one
+-- Row-lock one claimed event so the matcher can re-assert lease ownership BEFORE
+-- it writes any decision (MUL-4332 PR3 review round: matcher point 2). The lock is
+-- held for the rest of the authoritative transaction, so a concurrent
+-- ClaimPendingDomainEvents cannot steal the lease mid-decision — it blocks here and
+-- then re-checks dispatch_status. A stale holder whose lease WAS already reclaimed
+-- sees a different lease_token and must abort without writing anything.
+SELECT * FROM domain_event
+WHERE id = $1
+FOR UPDATE;
+
 -- name: MarkDomainEventDispatched :execrows
 -- Finalize a matched event. CAS on lease_token so only the current lease holder
--- can advance it (a stale/expired matcher whose lease was reclaimed cannot).
+-- can advance it (a stale/expired matcher whose lease was reclaimed cannot). The
+-- caller MUST assert this returns exactly 1 — a 0 means the lease was lost and the
+-- decision must not be counted as dispatched. dispatched_at is set here (and only
+-- here) so the retention/audit boundary can rely on "dispatched ⇒ dispatched_at".
 UPDATE domain_event
-SET dispatch_status = 'dispatched', lease_token = NULL, lease_expires_at = NULL
+SET dispatch_status = 'dispatched',
+    dispatched_at = now(),
+    lease_token = NULL,
+    lease_expires_at = NULL
+WHERE id = $1 AND lease_token = $2;
+
+-- name: MarkDomainEventFailed :execrows
+-- Terminal failure for an event the matcher can never decode (a malformed payload
+-- fails identically on every retry). Recording it 'failed' instead of leaving it
+-- pending stops one poison event from being re-leased forever. Same lease CAS as
+-- the dispatched path.
+UPDATE domain_event
+SET dispatch_status = 'failed',
+    dispatched_at = now(),
+    lease_token = NULL,
+    lease_expires_at = NULL
 WHERE id = $1 AND lease_token = $2;

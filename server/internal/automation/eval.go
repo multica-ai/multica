@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 )
@@ -28,6 +29,14 @@ const (
 // EvaluatedAgainstCurrentState labels the state basis of a condition evaluation
 // (2A): conditions read current workspace state, not the event's point in time.
 const EvaluatedAgainstCurrentState = "current_state"
+
+// ErrInvalidConfig marks a DETERMINISTIC failure to interpret a stored revision:
+// the configuration itself is unusable, so every retry fails identically. It is
+// deliberately distinguishable from a transient StateReader/database error, which
+// Evaluate propagates unwrapped. The matcher branches on this: a config error is
+// isolated as one terminal `failed` execution so the remaining candidates for the
+// same event still run, whereas a transient error retries the whole event.
+var ErrInvalidConfig = errors.New("invalid hook configuration")
 
 // StateReader reads the current value of an issue field for condition evaluation.
 // Implemented by the service against workspace-scoped queries; kept as an
@@ -139,7 +148,7 @@ func Evaluate(ctx context.Context, event EventView, rev EvalRevision, state Stat
 
 	match, err := ParseMatch(rev.Match)
 	if err != nil {
-		return Evaluation{}, fmt.Errorf("parse stored match: %w", err)
+		return Evaluation{}, fmt.Errorf("%w: parse stored match: %v", ErrInvalidConfig, err)
 	}
 	ev.Matched, ev.MatchClauses = evalMatch(event, match)
 	if !ev.Matched {

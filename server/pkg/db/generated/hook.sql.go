@@ -190,6 +190,69 @@ func (q *Queries) CreateHookExecution(ctx context.Context, arg CreateHookExecuti
 	return i, err
 }
 
+const createHookExecutionFailure = `-- name: CreateHookExecutionFailure :one
+INSERT INTO hook_execution (
+    id, workspace_id, hook_id, hook_revision_id, event_id, correlation_id,
+    status, error_code, error, completed_at
+) VALUES ($1, $2, $3, $4, $5, $6, 'failed', $7, $8, now())
+ON CONFLICT (hook_id, event_id) DO NOTHING
+RETURNING id, workspace_id, hook_id, hook_revision_id, event_id, correlation_id, status, skip_reason, match_snapshot, condition_snapshot, current_action_index, attempts, next_attempt_at, lease_token, lease_expires_at, error_code, error, created_at, started_at, completed_at
+`
+
+type CreateHookExecutionFailureParams struct {
+	ID             pgtype.UUID `json:"id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	HookID         pgtype.UUID `json:"hook_id"`
+	HookRevisionID pgtype.UUID `json:"hook_revision_id"`
+	EventID        pgtype.UUID `json:"event_id"`
+	CorrelationID  pgtype.UUID `json:"correlation_id"`
+	ErrorCode      pgtype.Text `json:"error_code"`
+	Error          pgtype.Text `json:"error"`
+}
+
+// Terminal isolation record for a candidate whose STORED CONFIG cannot be
+// evaluated (a malformed revision fails identically on every retry). Writing it
+// lets the matcher finish the remaining candidates and finalize the event, so one
+// bad rule can never starve the healthy rules on the same event (MUL-4332 PR3
+// review round: matcher point 4). It carries no snapshots — evaluation never
+// produced one. Same (hook_id, event_id) idempotency as the decision path.
+func (q *Queries) CreateHookExecutionFailure(ctx context.Context, arg CreateHookExecutionFailureParams) (HookExecution, error) {
+	row := q.db.QueryRow(ctx, createHookExecutionFailure,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.HookID,
+		arg.HookRevisionID,
+		arg.EventID,
+		arg.CorrelationID,
+		arg.ErrorCode,
+		arg.Error,
+	)
+	var i HookExecution
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.HookID,
+		&i.HookRevisionID,
+		&i.EventID,
+		&i.CorrelationID,
+		&i.Status,
+		&i.SkipReason,
+		&i.MatchSnapshot,
+		&i.ConditionSnapshot,
+		&i.CurrentActionIndex,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.LeaseToken,
+		&i.LeaseExpiresAt,
+		&i.ErrorCode,
+		&i.Error,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const createHookRevision = `-- name: CreateHookRevision :one
 INSERT INTO hook_revision (
     id, hook_id, revision, event_type, match, conditions, fire_mode, actions,
