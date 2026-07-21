@@ -19,6 +19,33 @@ func TestLoad_RealTemplates(t *testing.T) {
 	}
 }
 
+func TestReleaseNotesTemplate_ReviewAndPublishGuardrails(t *testing.T) {
+	reg, err := Load()
+	if err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+
+	tmpl, ok := reg.Get("release-notes")
+	if !ok {
+		t.Fatal("expected release-notes template")
+	}
+
+	required := []string{
+		"actual previous announcement",
+		"same audience and channel",
+		"exact recipient or target group",
+		"message format",
+		"sending identity and profile",
+		"Do not switch identity after a failure",
+		"idempotency key",
+	}
+	for _, phrase := range required {
+		if !strings.Contains(tmpl.Instructions, phrase) {
+			t.Errorf("release-notes instructions missing guardrail %q", phrase)
+		}
+	}
+}
+
 func TestLoadFromFS_Valid(t *testing.T) {
 	fsys := fstest.MapFS{
 		"templates/alpha.json": &fstest.MapFile{Data: []byte(`{
