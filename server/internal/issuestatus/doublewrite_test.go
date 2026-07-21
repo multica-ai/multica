@@ -84,26 +84,34 @@ func TestUpdateIssueStatusDoubleWritesStatusID(t *testing.T) {
 	}
 }
 
-func TestUpdateIssueReDerivesStatusIDOnlyOnStatusChange(t *testing.T) {
+// UpdateIssue stores the status_id its caller supplies and never derives one
+// itself (MUL-4809 §6.1). Deriving it here — as this query once did, via
+// system_key — could only ever reach the 7 built-ins, which is what made custom
+// statuses unusable. The handler resolves through issuestatus.Resolve and passes
+// the pair down, so the compat token and status_id always come from one row.
+func TestUpdateIssueWritesCallerSuppliedStatusID(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	wsID, _ := seededWorkspace(ctx, t)
 	iss := createTestIssue(ctx, t, q, wsID, "todo")
+	wantDone := builtinStatusID(ctx, t, q, wsID, "done")
 
-	// Changing status re-derives status_id.
 	changed, err := q.UpdateIssue(ctx, db.UpdateIssueParams{
-		ID:     iss.ID,
-		Status: pgtype.Text{String: "done", Valid: true},
+		ID:       iss.ID,
+		Status:   pgtype.Text{String: "done", Valid: true},
+		StatusID: wantDone,
 	})
 	if err != nil {
-		t.Fatalf("update (status change): %v", err)
+		t.Fatalf("update (status + status_id): %v", err)
 	}
-	wantDone := builtinStatusID(ctx, t, q, wsID, "done")
 	if changed.StatusID != wantDone {
 		t.Fatalf("status change: got status_id %v, want %v", changed.StatusID, wantDone)
 	}
+	if changed.Status != "done" {
+		t.Fatalf("compat status: got %q, want done", changed.Status)
+	}
 
-	// A title-only update (status narg NULL) must leave status_id untouched.
+	// A title-only update leaves both untouched.
 	titleOnly, err := q.UpdateIssue(ctx, db.UpdateIssueParams{
 		ID:    iss.ID,
 		Title: pgtype.Text{String: "renamed", Valid: true},
@@ -113,6 +121,20 @@ func TestUpdateIssueReDerivesStatusIDOnlyOnStatusChange(t *testing.T) {
 	}
 	if titleOnly.StatusID != wantDone {
 		t.Fatalf("title-only update changed status_id: got %v, want unchanged %v", titleOnly.StatusID, wantDone)
+	}
+
+	// The query must NOT guess: a legacy token with no status_id leaves the
+	// authoritative column alone rather than silently re-deriving it. This is the
+	// regression guard against re-introducing the system_key subquery.
+	noID, err := q.UpdateIssue(ctx, db.UpdateIssueParams{
+		ID:     iss.ID,
+		Status: pgtype.Text{String: "todo", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("update (status only): %v", err)
+	}
+	if noID.StatusID != wantDone {
+		t.Fatalf("status-only update must not re-derive status_id: got %v, want unchanged %v", noID.StatusID, wantDone)
 	}
 }
 

@@ -26,6 +26,13 @@ export interface UpdateIssueRequest {
   title?: string;
   description?: string;
   status?: IssueStatus;
+  /**
+   * Targets a catalog row directly — the only way to reach a CUSTOM status, and
+   * unambiguous across renames (MUL-4809 §3.1). The API also accepts an alias or
+   * exact display name via `status`; sending both is accepted only when they
+   * resolve to the same status.
+   */
+  status_id?: string;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;

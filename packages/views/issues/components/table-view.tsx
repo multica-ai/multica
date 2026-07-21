@@ -901,7 +901,12 @@ export function TableView({
             case "status":
               return (
                 <div onClick={stopRowNavigation}>
-                  <StatusPicker status={issue.status} onUpdate={onUpdate} align="start" />
+                  <StatusPicker
+                    status={issue.status}
+                    statusDetail={issue.status_detail}
+                    onUpdate={onUpdate}
+                    align="start"
+                  />
                 </div>
               );
             case "priority":

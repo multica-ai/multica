@@ -635,11 +635,13 @@ function SubIssueRow({ child }: { child: Issue }) {
       </div>
       <StatusPicker
         status={child.status}
+        statusDetail={child.status_detail}
         onUpdate={handleUpdate}
         align="start"
         trigger={
           <StatusIcon
             status={child.status}
+            detail={child.status_detail}
             className="h-[15px] w-[15px] shrink-0"
           />
         }
@@ -1557,7 +1559,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           {/* Core props — always rendered. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
-            <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
+            <StatusPicker
+              status={issue.status}
+              statusDetail={issue.status_detail}
+              onUpdate={handleUpdateField}
+              align="start"
+            />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />

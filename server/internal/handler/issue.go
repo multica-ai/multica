@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -99,6 +100,92 @@ type IssueStatusDetail struct {
 // up as a 500.
 var validIssueStatuses = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
 var validIssuePriorities = []string{"urgent", "high", "medium", "low", "none"}
+
+// resolveIssueStatusInput turns the status inputs of a write request into the
+// authoritative issue_status row (MUL-4809 §3.1 / §6.1). Callers pass whichever
+// of the two the client sent:
+//
+//   - statusID targets a catalog row directly (what the UI picker sends). It must
+//     name a status in THIS workspace and must not be archived — archived statuses
+//     stay readable for old issues but must not accept new ones.
+//   - status is the alias form: Category alias, legacy alias, or exact display
+//     name, resolved by issuestatus.Resolve.
+//
+// Sending both is accepted only when they resolve to the same row; a mismatch is
+// a 400 rather than a silent winner, because either field could have been the
+// user's intent. Writes fail closed on an unknown status with the legal values.
+// It returns the resolved row plus the legacy token to write. On a workspace whose
+// catalog is not seeded yet — the Phase-2 rolling-deploy / pre-backfill window —
+// there is nothing to resolve against, so it falls back to validating the legacy
+// token and returns a zero row: `status` stays authoritative and status_id stays
+// NULL, exactly as the create path already behaves there (§6.1).
+func (h *Handler) resolveIssueStatusInput(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspaceID pgtype.UUID,
+	status *string,
+	statusID *string,
+) (db.IssueStatus, string, bool) {
+	seeded, err := h.Queries.CountWorkspaceIssueStatuses(r.Context(), workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load status catalog: "+err.Error())
+		return db.IssueStatus{}, "", false
+	}
+	if seeded == 0 {
+		if statusID != nil {
+			writeError(w, http.StatusBadRequest, "status_id does not name a status in this workspace")
+			return db.IssueStatus{}, "", false
+		}
+		if !validateIssueEnum(w, "status", *status, validIssueStatuses) {
+			return db.IssueStatus{}, "", false
+		}
+		return db.IssueStatus{}, *status, true
+	}
+
+	var byID db.IssueStatus
+	if statusID != nil {
+		parsed, err := util.ParseUUID(strings.TrimSpace(*statusID))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "status_id must be a status id")
+			return db.IssueStatus{}, "", false
+		}
+		byID, err = h.Queries.GetWorkspaceIssueStatus(r.Context(), db.GetWorkspaceIssueStatusParams{
+			ID: parsed, WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusBadRequest, "status_id does not name a status in this workspace")
+				return db.IssueStatus{}, "", false
+			}
+			writeError(w, http.StatusInternalServerError, "failed to load status: "+err.Error())
+			return db.IssueStatus{}, "", false
+		}
+		if byID.ArchivedAt.Valid {
+			writeError(w, http.StatusBadRequest, "status_id names an archived status")
+			return db.IssueStatus{}, "", false
+		}
+	}
+
+	if status == nil {
+		return byID, issuestatus.LegacyStatusToken(byID), true
+	}
+
+	byName, err := issuestatus.Resolve(r.Context(), h.Queries, workspaceID, *status)
+	if err != nil {
+		var invalid *issuestatus.InvalidStatusError
+		if errors.As(err, &invalid) {
+			writeError(w, http.StatusBadRequest, invalid.Error())
+			return db.IssueStatus{}, "", false
+		}
+		writeError(w, http.StatusInternalServerError, "failed to resolve status: "+err.Error())
+		return db.IssueStatus{}, "", false
+	}
+	if statusID != nil && uuidToString(byName.ID) != uuidToString(byID.ID) {
+		writeError(w, http.StatusBadRequest, "status and status_id refer to different statuses")
+		return db.IssueStatus{}, "", false
+	}
+	return byName, issuestatus.LegacyStatusToken(byName), true
+}
 
 func validateIssueEnum(w http.ResponseWriter, field, value string, allowed []string) bool {
 	for _, a := range allowed {
@@ -2818,9 +2905,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title         *string  `json:"title"`
-	Description   *string  `json:"description"`
-	Status        *string  `json:"status"`
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	// Status is the human/alias form: a Category alias, a legacy alias, or a
+	// status's exact display name (MUL-4809 §3.1). StatusID targets a catalog
+	// row directly and is what the UI status picker sends. Either may be used;
+	// sending both is only accepted when they resolve to the SAME status.
+	Status   *string `json:"status"`
+	StatusID *string `json:"status_id"`
 	Priority      *string  `json:"priority"`
 	AssigneeType  *string  `json:"assignee_type"`
 	AssigneeID    *string  `json:"assignee_id"`
@@ -2893,11 +2985,16 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if req.Description != nil {
 		params.Description = pgtype.Text{String: *req.Description, Valid: true}
 	}
-	if req.Status != nil {
-		if !validateIssueEnum(w, "status", *req.Status, validIssueStatuses) {
+	if req.Status != nil || req.StatusID != nil {
+		resolved, legacyToken, ok := h.resolveIssueStatusInput(w, r, prevIssue.WorkspaceID, req.Status, req.StatusID)
+		if !ok {
 			return
 		}
-		params.Status = pgtype.Text{String: *req.Status, Valid: true}
+		// Double-write: the authoritative status_id plus the compat legacy token
+		// derived from that SAME row, so the two can never disagree (§6.1). On an
+		// unseeded workspace resolved is zero and only the legacy token is written.
+		params.StatusID = resolved.ID
+		params.Status = pgtype.Text{String: legacyToken, Valid: true}
 	}
 	if req.Priority != nil {
 		if !validateIssueEnum(w, "priority", *req.Priority, validIssuePriorities) {
@@ -3043,11 +3140,22 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
+	// Return the resolved catalog view with the mutation, so a client that just
+	// moved the issue to a custom status renders its name/icon/color immediately
+	// instead of falling back to the legacy token (MUL-4809). hydrateStatusDetails
+	// writes through the slice, so read the element back.
+	hydrated := []IssueResponse{resp}
+	h.hydrateStatusDetails(r.Context(), issue.WorkspaceID, hydrated)
+	resp = hydrated[0]
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
 		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
-	statusChanged := req.Status != nil && prevIssue.Status != issue.Status
+	// status_id is the authoritative status, so compare it too: moving between two
+	// custom statuses in the SAME Category leaves the legacy token untouched, and
+	// keying only off that token would silently skip the status-change side effects.
+	statusChanged := (req.Status != nil || req.StatusID != nil) &&
+		(prevIssue.Status != issue.Status || uuidToString(prevIssue.StatusID) != uuidToString(issue.StatusID))
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
 	// project_changed gates the client's per-project issue-list refetch the way
 	// status/assignee flags gate theirs. Without it the client must diff

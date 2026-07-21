@@ -105,13 +105,12 @@ UPDATE issue SET
     title = COALESCE(sqlc.narg('title'), title),
     description = COALESCE(sqlc.narg('description'), description),
     status = COALESCE(sqlc.narg('status'), status),
-    -- Phase 2 double-write (MUL-4809): re-derive status_id only when status is
-    -- being changed, keyed on the built-in system_key; otherwise leave it.
-    status_id = CASE
-        WHEN sqlc.narg('status')::text IS NOT NULL
-        THEN (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = issue.workspace_id AND system_key = sqlc.narg('status'))
-        ELSE status_id
-    END,
+    -- Phase 2 double-write (MUL-4809 §6.1). status_id is supplied explicitly by
+    -- the caller, which resolved it through issuestatus.Resolve and derived the
+    -- compat `status` above from the SAME row — so the pair can never disagree.
+    -- Deriving it here from system_key (as this once did) could only ever reach
+    -- the 7 built-ins and made custom statuses unreachable.
+    status_id = COALESCE(sqlc.narg('status_id'), status_id),
     priority = COALESCE(sqlc.narg('priority'), priority),
     assignee_type = sqlc.narg('assignee_type'),
     assignee_id = sqlc.narg('assignee_id'),

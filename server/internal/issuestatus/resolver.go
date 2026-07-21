@@ -31,6 +31,21 @@ func CategoryForStatusToken(status string) string {
 	}
 }
 
+// LegacyStatusToken projects a catalog status onto the legacy `issue.status`
+// token that the compat column, older clients, and every not-yet-migrated read
+// path still use (MUL-4809 §6.1). Built-ins keep their exact system_key, so
+// `in_review` / `blocked` survive; a custom status projects to its Category,
+// which is always one of the five Category keys and therefore always a legal
+// legacy token. This is the inverse of Resolve and the two must stay in step:
+// Resolve(LegacyStatusToken(s)) returns s for every built-in, and returns the
+// Category default for a custom status.
+func LegacyStatusToken(s db.IssueStatus) string {
+	if s.SystemKey.Valid && s.SystemKey.String != "" {
+		return s.SystemKey.String
+	}
+	return s.Category
+}
+
 // IsTerminalCategory reports whether a machine Category is terminal — the work is
 // finished (done) or abandoned (cancelled). in_review and blocked are NOT terminal
 // (they are in_progress), which is why machine logic keys off Category and not the

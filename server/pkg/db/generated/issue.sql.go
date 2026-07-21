@@ -1402,22 +1402,21 @@ UPDATE issue SET
     title = COALESCE($2, title),
     description = COALESCE($3, description),
     status = COALESCE($4, status),
-    -- Phase 2 double-write (MUL-4809): re-derive status_id only when status is
-    -- being changed, keyed on the built-in system_key; otherwise leave it.
-    status_id = CASE
-        WHEN $4::text IS NOT NULL
-        THEN (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = issue.workspace_id AND system_key = $4)
-        ELSE status_id
-    END,
-    priority = COALESCE($5, priority),
-    assignee_type = $6,
-    assignee_id = $7,
-    position = COALESCE($8, position),
-    start_date = $9,
-    due_date = $10,
-    parent_issue_id = $11,
-    project_id = $12,
-    stage = $13,
+    -- Phase 2 double-write (MUL-4809 §6.1). status_id is supplied explicitly by
+    -- the caller, which resolved it through issuestatus.Resolve and derived the
+    -- compat ` + "`" + `status` + "`" + ` above from the SAME row — so the pair can never disagree.
+    -- Deriving it here from system_key (as this once did) could only ever reach
+    -- the 7 built-ins and made custom statuses unreachable.
+    status_id = COALESCE($5, status_id),
+    priority = COALESCE($6, priority),
+    assignee_type = $7,
+    assignee_id = $8,
+    position = COALESCE($9, position),
+    start_date = $10,
+    due_date = $11,
+    parent_issue_id = $12,
+    project_id = $13,
+    stage = $14,
     updated_at = now()
 WHERE issue.id = $1
 RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, status_id
@@ -1428,6 +1427,7 @@ type UpdateIssueParams struct {
 	Title         pgtype.Text   `json:"title"`
 	Description   pgtype.Text   `json:"description"`
 	Status        pgtype.Text   `json:"status"`
+	StatusID      pgtype.UUID   `json:"status_id"`
 	Priority      pgtype.Text   `json:"priority"`
 	AssigneeType  pgtype.Text   `json:"assignee_type"`
 	AssigneeID    pgtype.UUID   `json:"assignee_id"`
@@ -1445,6 +1445,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		arg.Title,
 		arg.Description,
 		arg.Status,
+		arg.StatusID,
 		arg.Priority,
 		arg.AssigneeType,
 		arg.AssigneeID,
