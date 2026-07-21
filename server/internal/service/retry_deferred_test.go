@@ -167,3 +167,104 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 		})
 	}
 }
+
+// TestFailTaskWatchdogRetryDisposition is the end-to-end guard for the two
+// watchdog dispositions (MUL-5063). They deliberately diverge:
+//
+//   - idle_watchdog — the model turn stalled with no tool in flight. Nothing
+//     ran outside the process, so a retry child is created and MUST inherit
+//     session_id/work_dir, because resuming the pinned session on a fresh
+//     connection is the entire recovery. A child that restarts from scratch
+//     would silently redo work the parent already completed.
+//   - tool_watchdog — a tool call never returned. It may already have taken
+//     effect outside the process, so no child is created at all and the task
+//     waits for a human.
+func TestFailTaskWatchdogRetryDisposition(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("read agent runtime: %v", err)
+	}
+
+	cases := []struct {
+		name        string
+		reason      string
+		attempt     int32
+		maxAttempts int32
+		wantChild   bool
+		wantAttempt int32
+	}{
+		{"idle_watchdog retries and resumes", "idle_watchdog", 1, 2, true, 2},
+		// Generic ceiling, not provider_network's widened one.
+		{"idle_watchdog exhausts at the generic ceiling", "idle_watchdog", 2, 2, false, 0},
+		{"idle_watchdog honours retry-disabled", "idle_watchdog", 1, 1, false, 0},
+		// Side-effect risk: never auto-retried, even with budget remaining.
+		{"tool_watchdog never auto-retries", "tool_watchdog", 1, 2, false, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var parentID pgtype.UUID
+			if err := pool.QueryRow(ctx, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts, session_id, work_dir)
+				VALUES ($1, $2, $3, 'running', 0, $4, $5, 'watchdog-session', '/tmp/watchdog-workdir')
+				RETURNING id
+			`, agentID, runtimeID, issueID, tc.attempt, tc.maxAttempts).Scan(&parentID); err != nil {
+				t.Fatalf("insert parent task: %v", err)
+			}
+			t.Cleanup(func() {
+				pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id = $1 OR id = $1`, parentID)
+			})
+
+			if _, err := svc.FailTask(ctx, parentID, "force-stopped by watchdog", "watchdog-session", "/tmp/watchdog-workdir", tc.reason); err != nil {
+				t.Fatalf("FailTask: %v", err)
+			}
+
+			var (
+				n                   int
+				childAttempt        int32
+				childSession        string
+				childWorkDir        string
+				childForceFreshSess bool
+			)
+			row := pool.QueryRow(ctx, `
+				SELECT count(*),
+				       coalesce(max(attempt), 0),
+				       coalesce(max(session_id), ''),
+				       coalesce(max(work_dir), ''),
+				       coalesce(bool_or(force_fresh_session), false)
+				FROM agent_task_queue WHERE parent_task_id = $1`, parentID)
+			if err := row.Scan(&n, &childAttempt, &childSession, &childWorkDir, &childForceFreshSess); err != nil {
+				t.Fatalf("read child: %v", err)
+			}
+
+			if !tc.wantChild {
+				if n != 0 {
+					t.Fatalf("expected no retry child for %s, got %d", tc.reason, n)
+				}
+				return
+			}
+			if n != 1 {
+				t.Fatalf("expected exactly one retry child, got %d", n)
+			}
+			if childAttempt != tc.wantAttempt {
+				t.Errorf("child attempt = %d, want %d", childAttempt, tc.wantAttempt)
+			}
+			// The resume pointer is the whole point: without it the retry redoes
+			// the work the parent already finished.
+			if childSession != "watchdog-session" {
+				t.Errorf("child session_id = %q, want the parent's session inherited", childSession)
+			}
+			if childWorkDir != "/tmp/watchdog-workdir" {
+				t.Errorf("child work_dir = %q, want the parent's workdir inherited", childWorkDir)
+			}
+			if childForceFreshSess {
+				t.Error("force_fresh_session = true, want false (idle_watchdog is resume-safe)")
+			}
+		})
+	}
+}

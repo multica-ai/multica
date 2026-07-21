@@ -2287,8 +2287,14 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnStuckInFlightTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Status != "idle_watchdog" {
-		t.Fatalf("expected status=idle_watchdog for a hung in-flight tool, got %q (err=%q)", result.Status, result.Error)
+	// A hung in-flight tool reports tool_watchdog, NOT idle_watchdog: the tool
+	// may already have taken effect outside the process, so this disposition is
+	// deliberately kept out of the server's auto-retry allowlist (MUL-5063).
+	if result.Status != "tool_watchdog" {
+		t.Fatalf("expected status=tool_watchdog for a hung in-flight tool, got %q (err=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "tool watchdog") {
+		t.Fatalf("expected error to mention tool watchdog, got %q", result.Error)
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("tool watchdog took too long to fire: %s (window=%s)", elapsed, d.cfg.AgentToolWatchdog)
@@ -3992,5 +3998,129 @@ func TestHandleTask_AcksCancelOnPostRunStatusCheck(t *testing.T) {
 
 	if got := ackCalls.Load(); got != 1 {
 		t.Fatalf("cancel-ack calls = %d, want 1", got)
+	}
+}
+
+// sessionPinBackend emits status messages carrying a SessionID on a cadence,
+// then completes. It drives the resume-pointer pin path without involving the
+// watchdog.
+type sessionPinBackend struct {
+	interval time.Duration
+	pings    int
+}
+
+func (b sessionPinBackend) Execute(ctx context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message)
+	resCh := make(chan agent.Result, 1)
+
+	go func() {
+		defer close(msgCh)
+		for i := 0; i < b.pings; i++ {
+			select {
+			case <-time.After(b.interval):
+			case <-ctx.Done():
+				resCh <- agent.Result{Status: "aborted", Error: ctx.Err().Error()}
+				close(resCh)
+				return
+			}
+			select {
+			case msgCh <- agent.Message{Type: agent.MessageStatus, Status: "running", SessionID: "sess-pin"}:
+			case <-ctx.Done():
+			}
+		}
+		resCh <- agent.Result{Status: "completed", Output: "done"}
+		close(resCh)
+	}()
+
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// newPinCountingDaemon returns a daemon whose server fails the first failCount
+// session-pin calls, plus the live attempt counter.
+func newPinCountingDaemon(t *testing.T, failCount int32) (*Daemon, *atomic.Int32) {
+	t.Helper()
+	var pinAttempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/session") {
+			if pinAttempts.Add(1) <= failCount {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return &Daemon{client: NewClient(srv.URL), logger: slog.Default()}, &pinAttempts
+}
+
+// waitForAtLeast polls a counter, since pins are fired asynchronously and may
+// still be in flight when executeAndDrain returns.
+func waitForAtLeast(counter *atomic.Int32, want int32, timeout time.Duration) int32 {
+	deadline := time.Now().Add(timeout)
+	for {
+		if got := counter.Load(); got >= want || time.Now().After(deadline) {
+			return got
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestExecuteAndDrain_SessionPinRetriesUntilConfirmed guards the resume pointer
+// against a transient pin failure (MUL-5063). The pin used to be marked done
+// before the HTTP call returned, so a single blip permanently lost the pointer
+// — and since the watchdog's synthetic result carries no SessionID of its own,
+// the retry child would restart from scratch instead of resuming.
+func TestExecuteAndDrain_SessionPinRetriesUntilConfirmed(t *testing.T) {
+	t.Parallel()
+
+	d, pinAttempts := newPinCountingDaemon(t, 2) // first two pins fail
+
+	result, _, err := d.executeAndDrain(
+		context.Background(),
+		sessionPinBackend{interval: 10 * time.Millisecond, pings: 12},
+		"p",
+		agent.ExecOptions{Cwd: "/tmp/pin-workdir"},
+		slog.Default(),
+		"t-session-pin",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed, got %q (err=%q)", result.Status, result.Error)
+	}
+
+	// Three attempts means the two failures were retried and the third
+	// succeeded. Exactly one attempt is the pre-fix behavior.
+	if got := waitForAtLeast(pinAttempts, 3, 2*time.Second); got < 3 {
+		t.Fatalf("expected the pin to be retried past its failures, got %d attempts", got)
+	}
+}
+
+// TestExecuteAndDrain_SessionPinRetriesAreBounded is the other half: a pin
+// endpoint that never recovers must not fire one request per status message for
+// the life of the run.
+func TestExecuteAndDrain_SessionPinRetriesAreBounded(t *testing.T) {
+	t.Parallel()
+
+	d, pinAttempts := newPinCountingDaemon(t, 1000) // always fails
+
+	if _, _, err := d.executeAndDrain(
+		context.Background(),
+		sessionPinBackend{interval: 5 * time.Millisecond, pings: 40},
+		"p",
+		agent.ExecOptions{Cwd: "/tmp/pin-workdir"},
+		slog.Default(),
+		"t-session-pin-bounded",
+		new(atomic.Int32),
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Let any in-flight pin land before sampling.
+	time.Sleep(100 * time.Millisecond)
+	if got := pinAttempts.Load(); got > maxSessionPinAttempts {
+		t.Fatalf("pin attempts = %d, want at most %d — a failing endpoint must not be hammered", got, maxSessionPinAttempts)
 	}
 }

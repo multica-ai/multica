@@ -4740,15 +4740,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			FailureReason: failureReason,
 			Usage:         usageEntries,
 		}, nil
-	case "idle_watchdog":
-		// The idle watchdog force-stopped the run because the backend
-		// went silent (e.g. claude blocked on a tool call against a
-		// frozen child process). Route through the blocked path with a
-		// dedicated failure_reason so the run leaves "running" state and
-		// operators can tell idle-stop apart from a real timeout.
+	case "idle_watchdog", "tool_watchdog":
+		// A watchdog force-stopped the run. Route through the blocked path
+		// with a dedicated failure_reason so the run leaves "running" state
+		// and operators can tell a watchdog stop apart from a real timeout.
+		//
+		// The two reasons are kept distinct because only idle_watchdog is in
+		// the server's auto-retry allowlist: a stalled model turn is safe to
+		// resume, while a tool that never returned may have already taken
+		// effect outside the process (MUL-5063).
+		toolInFlight := result.Status == "tool_watchdog"
 		comment := result.Error
 		if comment == "" {
-			comment = idleWatchdogReason(d.cfg.AgentIdleWatchdog)
+			window := d.cfg.AgentIdleWatchdog
+			if toolInFlight {
+				window = d.cfg.AgentToolWatchdog
+			}
+			comment = idleWatchdogReason(window, toolInFlight)
 		}
 		return TaskResult{
 			Status:        "blocked",
@@ -4756,7 +4764,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			SessionID:     result.SessionID,
 			WorkDir:       env.WorkDir,
 			EnvRoot:       env.RootDir,
-			FailureReason: "idle_watchdog",
+			FailureReason: result.Status,
 			Usage:         usageEntries,
 		}, nil
 	case "cancelled":
@@ -4873,10 +4881,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	// message — so while a tool is in flight the watchdog applies the larger
 	// AgentToolWatchdog budget instead of treating that silence as a hang.
 	var inFlightTools atomic.Int32
-	var idleWatchdogFired atomic.Bool
-	// idleWatchdogThreshold records (as nanos) which silence budget actually
-	// tripped the watchdog — the idle window or the larger in-flight-tool
-	// window — so the failure message reports the real duration.
+	// watchdog records whether the watchdog fired, which silence budget tripped
+	// it, and — critically — whether a tool was in flight at the time. The two
+	// modes get different dispositions downstream: a stalled model turn is safe
+	// to resume, a stuck tool call may have already taken effect outside the
+	// process (MUL-5063).
+	var watchdog watchdogOutcome
 	idleWindow := d.cfg.AgentIdleWatchdog
 	// A provider may opt into a shorter per-run no-message budget. The global
 	// zero remains authoritative so MULTICA_AGENT_IDLE_WATCHDOG=0 still disables
@@ -4884,10 +4894,9 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	if idleWindow > 0 && opts.IdleWatchdogTimeout > 0 && opts.IdleWatchdogTimeout < idleWindow {
 		idleWindow = opts.IdleWatchdogTimeout
 	}
-	var idleWatchdogThreshold atomic.Int64
-	idleWatchdogThreshold.Store(int64(idleWindow))
+	watchdog.threshold.Store(int64(idleWindow))
 	if idleWindow > 0 {
-		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
+		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &watchdog, agentCancel, session.Messages, taskLog, taskID)
 	}
 
 	// drainFinished closes after the drain goroutine has flushed the last
@@ -4954,7 +4963,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			}
 		}()
 
+		// sessionPinned flips only once the server has acknowledged the resume
+		// pointer; sessionPinInFlight keeps concurrent status messages from
+		// stacking duplicate pin requests.
 		var sessionPinned atomic.Bool
+		var sessionPinInFlight atomic.Bool
+		var sessionPinAttempts atomic.Int32
 		for {
 			select {
 			case msg, ok := <-session.Messages:
@@ -4982,15 +4996,36 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					// reveals them. Without this, a daemon crash mid-run
 					// loses the resume pointer and the auto-retry fires
 					// without context.
-					if msg.SessionID != "" && !sessionPinned.Swap(true) {
+					//
+					// Only a CONFIRMED pin counts as pinned. Marking it done
+					// before the HTTP call returned meant one transient
+					// failure permanently lost the resume pointer — and the
+					// watchdog's synthetic result carries no SessionID of its
+					// own, so the retry child would silently restart from
+					// scratch instead of resuming. Status messages keep
+					// arriving, so retrying on the next one costs nothing;
+					// the attempt cap stops a hard failure from firing a
+					// request per status event for the life of the run
+					// (MUL-5063).
+					if msg.SessionID != "" && !sessionPinned.Load() &&
+						sessionPinAttempts.Load() < maxSessionPinAttempts &&
+						sessionPinInFlight.CompareAndSwap(false, true) {
 						sid := msg.SessionID
 						wd := opts.Cwd
+						attempt := sessionPinAttempts.Add(1)
 						go func() {
+							defer sessionPinInFlight.Store(false)
 							pinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 							defer cancel()
 							if err := d.client.PinTaskSession(pinCtx, taskID, sid, wd); err != nil {
-								taskLog.Debug("pin session failed", "error", err)
+								taskLog.Debug("pin session failed, retrying on next status message",
+									"attempt", attempt,
+									"max_attempts", maxSessionPinAttempts,
+									"error", err,
+								)
+								return
 							}
+							sessionPinned.Store(true)
 						}()
 					}
 				case agent.MessageToolUse:
@@ -5109,15 +5144,16 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	select {
 	case result := <-session.Result:
 		waitForDrain()
-		if idleWatchdogFired.Load() {
+		if watchdog.fired.Load() {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".
-			// Re-tag it as "idle_watchdog" so runTask routes the
-			// disposition through a dedicated failure_reason, not the
-			// generic "agent_error" bucket the aborted path falls into.
-			result.Status = "idle_watchdog"
+			// Re-tag it so runTask routes the disposition through a dedicated
+			// failure_reason, not the generic "agent_error" bucket the aborted
+			// path falls into.
+			toolInFlight := watchdog.toolInFlight.Load()
+			result.Status = watchdogStatus(toolInFlight)
 			if result.Error == "" {
-				result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
+				result.Error = idleWatchdogReason(time.Duration(watchdog.threshold.Load()), toolInFlight)
 			}
 		}
 		return result, toolCount.Load(), nil
@@ -5131,10 +5167,11 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		// context.Canceled. Check this BEFORE the generic cancelled/timeout
 		// classifiers so a watchdog-induced stop isn't misreported as
 		// "task cancelled by server".
-		if idleWatchdogFired.Load() {
+		if watchdog.fired.Load() {
+			toolInFlight := watchdog.toolInFlight.Load()
 			return agent.Result{
-				Status: "idle_watchdog",
-				Error:  idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load())),
+				Status: watchdogStatus(toolInFlight),
+				Error:  idleWatchdogReason(time.Duration(watchdog.threshold.Load()), toolInFlight),
 			}, toolCount.Load(), nil
 		}
 		// Distinguish external cancellation (e.g. server-initiated cancel
@@ -5155,10 +5192,51 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	}
 }
 
+// maxSessionPinAttempts bounds how many times one run will try to persist its
+// resume pointer. Status messages arrive continuously, so a failed pin retries
+// on the next one; the cap stops a permanently-failing endpoint from firing a
+// request per status event for the life of the run (MUL-5063).
+const maxSessionPinAttempts = 5
+
+// watchdogOutcome records how a run ended when the watchdog stopped it.
+// toolInFlight separates the two failure modes the watchdog detects, which
+// carry very different resume risk — see watchdogStatus.
+type watchdogOutcome struct {
+	fired        atomic.Bool
+	toolInFlight atomic.Bool
+	// threshold records (as nanos) which silence budget actually tripped the
+	// watchdog — the idle window or the larger in-flight-tool window — so the
+	// failure message reports the real duration.
+	threshold atomic.Int64
+}
+
+// watchdogStatus maps a watchdog stop onto the disposition runTask routes on.
+//
+// The distinction matters because only one of the two modes is safe to retry
+// automatically:
+//
+//   - idle_watchdog — no tool was in flight, so the model turn itself stalled.
+//     Nothing ran outside the process, and resuming the session on a fresh
+//     connection is exactly the recovery.
+//   - tool_watchdog — a tool call was in flight and never returned. It may have
+//     already taken effect outside the process (a deploy that shipped, an
+//     upload that landed, a payment that posted) with only the result lost.
+//     Resuming would re-run it, so this one stays out of the auto-retry
+//     allowlist and waits for a human (MUL-5063).
+func watchdogStatus(toolInFlight bool) string {
+	if toolInFlight {
+		return "tool_watchdog"
+	}
+	return "idle_watchdog"
+}
+
 // idleWatchdogReason formats the human-facing explanation surfaced on
-// idle_watchdog dispositions. Centralised so the result-arrival branch and the
+// watchdog dispositions. Centralised so the result-arrival branch and the
 // drain-timeout branch in executeAndDrain emit identical wording.
-func idleWatchdogReason(window time.Duration) string {
+func idleWatchdogReason(window time.Duration, toolInFlight bool) string {
+	if toolInFlight {
+		return fmt.Sprintf("a tool call produced no output for %s and message queue was empty; force-stopped by tool watchdog (not auto-retried: the tool may have already taken effect)", window)
+	}
 	return fmt.Sprintf("agent produced no new messages for %s and message queue was empty; force-stopped by idle watchdog", window)
 }
 
@@ -5214,7 +5292,7 @@ func isProgressMessage(t agent.MessageType) bool {
 // Tick interval is window/2 (floored at 30 s in production, but the floor only
 // kicks in for windows >= 1 min so tests can pass tiny windows like 50 ms and
 // see the watchdog fire within a few ticks).
-func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger, taskID string) {
+func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, outcome *watchdogOutcome, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger, taskID string) {
 	interval := window / 2
 	if window >= time.Minute && interval < 30*time.Second {
 		interval = 30 * time.Second
@@ -5258,8 +5336,9 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 				"threshold", threshold.String(),
 				"tool_in_flight", toolInFlight,
 			)
-			firedThreshold.Store(int64(threshold))
-			fired.Store(true)
+			outcome.threshold.Store(int64(threshold))
+			outcome.toolInFlight.Store(toolInFlight)
+			outcome.fired.Store(true)
 			cancel()
 			return
 		}

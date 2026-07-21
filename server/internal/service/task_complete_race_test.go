@@ -242,6 +242,8 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 		{"idle_watchdog retries once", "idle_watchdog", 1, 2, true},
 		{"idle_watchdog exhausts at attempt 2", "idle_watchdog", 2, 2, false},
 		{"idle_watchdog with retry disabled never retries", "idle_watchdog", 1, 1, false},
+		// Side-effect risk outranks budget: never retried even on attempt 1.
+		{"tool_watchdog never retries even with budget left", "tool_watchdog", 1, 2, false},
 	}
 	for _, tc := range eligCases {
 		if got := retryEligible(tc.reason, mkTask(tc.attempt, tc.max)); got != tc.want {
@@ -266,6 +268,11 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		// the retry resumes the pinned session on a fresh process — and
 		// therefore a fresh connection — rather than redoing the work.
 		{reason: "idle_watchdog", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
+		// Tool watchdog force-stop: a tool call never returned and may already
+		// have taken effect outside the process (a deploy that shipped, an
+		// upload that landed). Resuming would re-run it, so this one stays out
+		// of the auto-retry allowlist and waits for a human (MUL-5063).
+		{reason: "tool_watchdog", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
 		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
