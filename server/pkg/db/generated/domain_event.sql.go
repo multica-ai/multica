@@ -11,29 +11,77 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const claimPendingDomainEvents = `-- name: ClaimPendingDomainEvents :many
+const claimOneEventWithCandidates = `-- name: ClaimOneEventWithCandidates :many
 
-UPDATE domain_event
-SET dispatch_status = 'dispatching',
-    lease_token = $1,
-    lease_expires_at = $2,
-    attempts = attempts + 1
-WHERE id IN (
-    SELECT id FROM domain_event
-    WHERE available_at <= now()
-      AND (dispatch_status = 'pending'
-           OR (dispatch_status = 'dispatching' AND lease_expires_at < now()))
-    ORDER BY seq ASC
-    LIMIT $3::int
-    FOR UPDATE SKIP LOCKED
+WITH claimed AS (
+    UPDATE domain_event
+    SET dispatch_status = 'dispatching',
+        lease_token = $1,
+        lease_expires_at = $2,
+        attempts = attempts + 1
+    WHERE id = (
+        SELECT id FROM domain_event
+        WHERE available_at <= now()
+          AND (dispatch_status = 'pending'
+               OR (dispatch_status = 'dispatching' AND lease_expires_at < now()))
+        ORDER BY seq ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+    )
+    RETURNING id, workspace_id, type, subject_id, actor_type, actor_id,
+              payload, correlation_id, hop_count
 )
-RETURNING id, seq, workspace_id, type, schema_version, subject_type, subject_id, actor_type, actor_id, payload, correlation_id, causation_execution_id, causation_action_index, hop_count, dispatch_status, attempts, available_at, lease_token, lease_expires_at, dispatched_at, created_at
+SELECT
+    c.id             AS event_id,
+    c.workspace_id   AS event_workspace_id,
+    c.type           AS event_type,
+    c.subject_id     AS event_subject_id,
+    c.actor_type     AS event_actor_type,
+    c.actor_id       AS event_actor_id,
+    c.payload        AS event_payload,
+    c.correlation_id AS event_correlation_id,
+    c.hop_count      AS event_hop_count,
+    cand.hook_id     AS hook_id,
+    cand.revision_id AS revision_id,
+    cand.match       AS match,
+    cand.conditions  AS conditions,
+    -- COALESCE so the no-candidate row (every cand.* NULL) still scans into a
+    -- non-nullable string; callers gate on hook_id being present.
+    COALESCE(cand.fire_mode, '')::text AS fire_mode
+FROM claimed c
+LEFT JOIN LATERAL (
+    SELECT h.id AS hook_id, h.created_at AS hook_created_at,
+           r.id AS revision_id, r.match, r.conditions, r.fire_mode
+    FROM hook h
+    JOIN hook_revision r ON r.id = h.active_revision_id
+    WHERE h.workspace_id = c.workspace_id
+      AND h.enabled = true
+      AND h.archived_at IS NULL
+      AND r.event_type = c.type
+) cand ON true
+ORDER BY cand.hook_created_at ASC NULLS LAST, cand.hook_id ASC
 `
 
-type ClaimPendingDomainEventsParams struct {
+type ClaimOneEventWithCandidatesParams struct {
 	LeaseToken     pgtype.UUID        `json:"lease_token"`
 	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
-	MaxEvents      int32              `json:"max_events"`
+}
+
+type ClaimOneEventWithCandidatesRow struct {
+	EventID            pgtype.UUID `json:"event_id"`
+	EventWorkspaceID   pgtype.UUID `json:"event_workspace_id"`
+	EventType          string      `json:"event_type"`
+	EventSubjectID     pgtype.UUID `json:"event_subject_id"`
+	EventActorType     string      `json:"event_actor_type"`
+	EventActorID       pgtype.UUID `json:"event_actor_id"`
+	EventPayload       []byte      `json:"event_payload"`
+	EventCorrelationID pgtype.UUID `json:"event_correlation_id"`
+	EventHopCount      int32       `json:"event_hop_count"`
+	HookID             pgtype.UUID `json:"hook_id"`
+	RevisionID         pgtype.UUID `json:"revision_id"`
+	Match              []byte      `json:"match"`
+	Conditions         []byte      `json:"conditions"`
+	FireMode           string      `json:"fire_mode"`
 }
 
 // NOTE: the retention/TTL delete is intentionally NOT defined in PR1. The
@@ -42,42 +90,52 @@ type ClaimPendingDomainEventsParams struct {
 // exist until PR3. Shipping a weaker "dispatched + TTL" delete now would risk
 // reclaiming still-executing audit sources the moment PR3 enables dispatching
 // (review point 5). The query lands in PR3 with the full terminal predicate.
-// The durable matcher's claim scan (MUL-4332 PR3): lease a bounded batch of
-// undispatched, now-available events in seq order. Reclaims events left
-// 'dispatching' by a crashed matcher once their lease expires, so processing is
-// at-least-once. FOR UPDATE SKIP LOCKED lets multiple matchers share the queue;
-// the LIMIT bounds the lock hold. Rides idx_domain_event_dispatch.
-func (q *Queries) ClaimPendingDomainEvents(ctx context.Context, arg ClaimPendingDomainEventsParams) ([]DomainEvent, error) {
-	rows, err := q.db.Query(ctx, claimPendingDomainEvents, arg.LeaseToken, arg.LeaseExpiresAt, arg.MaxEvents)
+// The durable matcher's claim AND revision pin, in a SINGLE statement (MUL-4332 PR3
+// review round: matcher point 1). It leases exactly one undispatched, now-available
+// event in seq order and, in the same statement, materializes that event's complete
+// (hook_id, revision_id) candidate set with each revision's configuration.
+//
+// One statement is what makes the pin real. PostgreSQL's default READ COMMITTED
+// gives every statement its own snapshot, so claiming in one statement and then
+// selecting candidates in another — even inside one transaction — lets a revision
+// edit committed in between change this event's decision, and lets two candidates be
+// decided against revisions from different instants. Here the claim and the whole
+// candidate set share one snapshot, so the pinned revisions are exactly those active
+// at claim time (§5.1 "使用 matcher claim 时的当前 enabled revision").
+//
+// The LEFT JOIN LATERAL means an event with no candidates still returns exactly one
+// row (hook_id NULL), so the caller can distinguish "claimed, nothing matched" from
+// "nothing to claim" (zero rows). Reclaims events left 'dispatching' by a crashed
+// matcher once their lease expires, so processing is at-least-once. FOR UPDATE SKIP
+// LOCKED lets multiple matchers share the queue and keeps the claimed row locked for
+// the rest of the transaction. Rides idx_domain_event_dispatch.
+//
+// Issue scope is lifecycle ownership only and does NOT restrict the event subject —
+// that is the job of `when` — so scope is not a filter here.
+func (q *Queries) ClaimOneEventWithCandidates(ctx context.Context, arg ClaimOneEventWithCandidatesParams) ([]ClaimOneEventWithCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, claimOneEventWithCandidates, arg.LeaseToken, arg.LeaseExpiresAt)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []DomainEvent{}
+	items := []ClaimOneEventWithCandidatesRow{}
 	for rows.Next() {
-		var i DomainEvent
+		var i ClaimOneEventWithCandidatesRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.Seq,
-			&i.WorkspaceID,
-			&i.Type,
-			&i.SchemaVersion,
-			&i.SubjectType,
-			&i.SubjectID,
-			&i.ActorType,
-			&i.ActorID,
-			&i.Payload,
-			&i.CorrelationID,
-			&i.CausationExecutionID,
-			&i.CausationActionIndex,
-			&i.HopCount,
-			&i.DispatchStatus,
-			&i.Attempts,
-			&i.AvailableAt,
-			&i.LeaseToken,
-			&i.LeaseExpiresAt,
-			&i.DispatchedAt,
-			&i.CreatedAt,
+			&i.EventID,
+			&i.EventWorkspaceID,
+			&i.EventType,
+			&i.EventSubjectID,
+			&i.EventActorType,
+			&i.EventActorID,
+			&i.EventPayload,
+			&i.EventCorrelationID,
+			&i.EventHopCount,
+			&i.HookID,
+			&i.RevisionID,
+			&i.Match,
+			&i.Conditions,
+			&i.FireMode,
 		); err != nil {
 			return nil, err
 		}
@@ -194,6 +252,30 @@ func (q *Queries) CreateDomainEvent(ctx context.Context, arg CreateDomainEventPa
 	return i, err
 }
 
+const deferDomainEventDispatch = `-- name: DeferDomainEventDispatch :execrows
+UPDATE domain_event
+SET available_at = now() + make_interval(secs => $2::int),
+    attempts = attempts + 1
+WHERE id = $1
+`
+
+type DeferDomainEventDispatchParams struct {
+	ID             pgtype.UUID `json:"id"`
+	BackoffSeconds int32       `json:"backoff_seconds"`
+}
+
+// Back off one event after a transient dispatch failure. The failed decision rolled
+// back (including its claim), so without this the event would sit at the head of the
+// queue and be re-claimed immediately, spinning on the same failure and starving
+// everything behind it.
+func (q *Queries) DeferDomainEventDispatch(ctx context.Context, arg DeferDomainEventDispatchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deferDomainEventDispatch, arg.ID, arg.BackoffSeconds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getDomainEvent = `-- name: GetDomainEvent :one
 SELECT id, seq, workspace_id, type, schema_version, subject_type, subject_id, actor_type, actor_id, payload, correlation_id, causation_execution_id, causation_action_index, hop_count, dispatch_status, attempts, available_at, lease_token, lease_expires_at, dispatched_at, created_at FROM domain_event
 WHERE id = $1
@@ -228,20 +310,29 @@ func (q *Queries) GetDomainEvent(ctx context.Context, id pgtype.UUID) (DomainEve
 	return i, err
 }
 
-const getDomainEventForDispatch = `-- name: GetDomainEventForDispatch :one
+const getOwnedDomainEventForDispatch = `-- name: GetOwnedDomainEventForDispatch :one
 SELECT id, seq, workspace_id, type, schema_version, subject_type, subject_id, actor_type, actor_id, payload, correlation_id, causation_execution_id, causation_action_index, hop_count, dispatch_status, attempts, available_at, lease_token, lease_expires_at, dispatched_at, created_at FROM domain_event
 WHERE id = $1
+  AND dispatch_status = 'dispatching'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp()
 FOR UPDATE
 `
 
-// Row-lock one claimed event so the matcher can re-assert lease ownership BEFORE
-// it writes any decision (MUL-4332 PR3 review round: matcher point 2). The lock is
-// held for the rest of the authoritative transaction, so a concurrent
-// ClaimPendingDomainEvents cannot steal the lease mid-decision — it blocks here and
-// then re-checks dispatch_status. A stale holder whose lease WAS already reclaimed
-// sees a different lease_token and must abort without writing anything.
-func (q *Queries) GetDomainEventForDispatch(ctx context.Context, id pgtype.UUID) (DomainEvent, error) {
-	row := q.db.QueryRow(ctx, getDomainEventForDispatch, id)
+type GetOwnedDomainEventForDispatchParams struct {
+	ID         pgtype.UUID `json:"id"`
+	LeaseToken pgtype.UUID `json:"lease_token"`
+}
+
+// Row-lock one claimed event and assert lease OWNERSHIP before the matcher writes
+// any decision (MUL-4332 PR3 review round: matcher point 2). The predicate is
+// deliberately identical to the one MarkDomainEventDispatched/Failed use, and both
+// evaluate the expiry against DATABASE clock time (clock_timestamp(), not now(),
+// which is frozen at transaction start): a worker holding the right token whose
+// lease has nonetheless expired is NOT the owner and must write nothing. Returning
+// no rows is the fail-closed signal.
+func (q *Queries) GetOwnedDomainEventForDispatch(ctx context.Context, arg GetOwnedDomainEventForDispatchParams) (DomainEvent, error) {
+	row := q.db.QueryRow(ctx, getOwnedDomainEventForDispatch, arg.ID, arg.LeaseToken)
 	var i DomainEvent
 	err := row.Scan(
 		&i.ID,
@@ -334,7 +425,10 @@ SET dispatch_status = 'dispatched',
     dispatched_at = now(),
     lease_token = NULL,
     lease_expires_at = NULL
-WHERE id = $1 AND lease_token = $2
+WHERE id = $1
+  AND dispatch_status = 'dispatching'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp()
 `
 
 type MarkDomainEventDispatchedParams struct {
@@ -342,11 +436,12 @@ type MarkDomainEventDispatchedParams struct {
 	LeaseToken pgtype.UUID `json:"lease_token"`
 }
 
-// Finalize a matched event. CAS on lease_token so only the current lease holder
-// can advance it (a stale/expired matcher whose lease was reclaimed cannot). The
-// caller MUST assert this returns exactly 1 — a 0 means the lease was lost and the
-// decision must not be counted as dispatched. dispatched_at is set here (and only
-// here) so the retention/audit boundary can rely on "dispatched ⇒ dispatched_at".
+// Finalize a matched event under the SAME ownership predicate as the entry
+// assertion, so a lease that expired mid-decision cannot commit the decision. The
+// caller MUST assert this returns exactly 1 — a 0 means ownership was lost and the
+// whole transaction (every execution and latch it wrote) must roll back.
+// dispatched_at is set here (and only here) so the retention/audit boundary can
+// rely on "dispatched ⇒ dispatched_at".
 func (q *Queries) MarkDomainEventDispatched(ctx context.Context, arg MarkDomainEventDispatchedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markDomainEventDispatched, arg.ID, arg.LeaseToken)
 	if err != nil {
@@ -361,7 +456,10 @@ SET dispatch_status = 'failed',
     dispatched_at = now(),
     lease_token = NULL,
     lease_expires_at = NULL
-WHERE id = $1 AND lease_token = $2
+WHERE id = $1
+  AND dispatch_status = 'dispatching'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp()
 `
 
 type MarkDomainEventFailedParams struct {
@@ -371,8 +469,8 @@ type MarkDomainEventFailedParams struct {
 
 // Terminal failure for an event the matcher can never decode (a malformed payload
 // fails identically on every retry). Recording it 'failed' instead of leaving it
-// pending stops one poison event from being re-leased forever. Same lease CAS as
-// the dispatched path.
+// pending stops one poison event from being re-leased forever. Same ownership
+// predicate as the dispatched path.
 func (q *Queries) MarkDomainEventFailed(ctx context.Context, arg MarkDomainEventFailedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markDomainEventFailed, arg.ID, arg.LeaseToken)
 	if err != nil {

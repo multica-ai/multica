@@ -453,8 +453,13 @@ func (q *Queries) GetMaxHookRevision(ctx context.Context, hookID pgtype.UUID) (i
 	return max_revision, err
 }
 
-const listActiveHookIDsForEvent = `-- name: ListActiveHookIDsForEvent :many
-SELECT h.id
+const listActiveHookRevisionsForEvent = `-- name: ListActiveHookRevisionsForEvent :many
+SELECT
+    h.id           AS hook_id,
+    r.id           AS revision_id,
+    r.match        AS match,
+    r.conditions   AS conditions,
+    r.fire_mode    AS fire_mode
 FROM hook h
 JOIN hook_revision r ON r.id = h.active_revision_id
 WHERE h.workspace_id = $1
@@ -464,29 +469,53 @@ WHERE h.workspace_id = $1
 ORDER BY h.created_at ASC, h.id ASC
 `
 
-type ListActiveHookIDsForEventParams struct {
+type ListActiveHookRevisionsForEventParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	EventType   string      `json:"event_type"`
 }
 
-// Candidate hooks for a domain event: enabled, non-archived hooks in the
-// workspace whose ACTIVE revision listens to this event type. Issue scope is
-// lifecycle ownership only and does NOT restrict the event subject — that is the
-// job of `when` — so scope is not a filter here. The matcher re-reads each hook
-// under a row lock to pin the revision authoritatively.
-func (q *Queries) ListActiveHookIDsForEvent(ctx context.Context, arg ListActiveHookIDsForEventParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listActiveHookIDsForEvent, arg.WorkspaceID, arg.EventType)
+type ListActiveHookRevisionsForEventRow struct {
+	HookID     pgtype.UUID `json:"hook_id"`
+	RevisionID pgtype.UUID `json:"revision_id"`
+	Match      []byte      `json:"match"`
+	Conditions []byte      `json:"conditions"`
+	FireMode   string      `json:"fire_mode"`
+}
+
+// Materialize the complete candidate set for a domain event in ONE statement:
+// every enabled, non-archived hook in the workspace whose ACTIVE revision listens
+// to this event type, together with that revision's full configuration.
+//
+// Being a SINGLE statement is the point (MUL-4332 PR3 review round: matcher point
+// 1). Under READ COMMITTED every statement gets its own snapshot, so reading the
+// candidate ids and then re-reading each hook's active_revision_id one by one could
+// mix revisions from different instants within the same transaction. Returning
+// (hook, revision) pairs from one statement pins the whole set at one instant, and
+// the matcher calls this inside the transaction that claims the event, so the pin
+// is taken at claim time. The matcher must NOT re-read active_revision_id
+// afterwards — the pinned revision_id here is authoritative for this event.
+//
+// Issue scope is lifecycle ownership only and does NOT restrict the event subject —
+// that is the job of `when` — so scope is not a filter here.
+func (q *Queries) ListActiveHookRevisionsForEvent(ctx context.Context, arg ListActiveHookRevisionsForEventParams) ([]ListActiveHookRevisionsForEventRow, error) {
+	rows, err := q.db.Query(ctx, listActiveHookRevisionsForEvent, arg.WorkspaceID, arg.EventType)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []pgtype.UUID{}
+	items := []ListActiveHookRevisionsForEventRow{}
 	for rows.Next() {
-		var id pgtype.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i ListActiveHookRevisionsForEventRow
+		if err := rows.Scan(
+			&i.HookID,
+			&i.RevisionID,
+			&i.Match,
+			&i.Conditions,
+			&i.FireMode,
+		); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -642,6 +671,29 @@ func (q *Queries) ListHooksByWorkspace(ctx context.Context, workspaceID pgtype.U
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockHookForDecision = `-- name: LockHookForDecision :one
+SELECT id FROM hook
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockHookForDecisionParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Serialize one hook's rising-edge latch read-modify-write against other matchers.
+// This is a LOCK ONLY: the hook's active_revision_id is deliberately not returned,
+// because the revision for this event was already pinned at claim time by
+// ListActiveHookRevisionsForEvent and re-reading it here would reintroduce the
+// drift that pin exists to prevent.
+func (q *Queries) LockHookForDecision(ctx context.Context, arg LockHookForDecisionParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockHookForDecision, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const setHookActiveRevision = `-- name: SetHookActiveRevision :one

@@ -102,13 +102,28 @@ WHERE hook_id = $1
 ORDER BY created_at DESC
 LIMIT $2;
 
--- name: ListActiveHookIDsForEvent :many
--- Candidate hooks for a domain event: enabled, non-archived hooks in the
--- workspace whose ACTIVE revision listens to this event type. Issue scope is
--- lifecycle ownership only and does NOT restrict the event subject — that is the
--- job of `when` — so scope is not a filter here. The matcher re-reads each hook
--- under a row lock to pin the revision authoritatively.
-SELECT h.id
+-- name: ListActiveHookRevisionsForEvent :many
+-- Materialize the complete candidate set for a domain event in ONE statement:
+-- every enabled, non-archived hook in the workspace whose ACTIVE revision listens
+-- to this event type, together with that revision's full configuration.
+--
+-- Being a SINGLE statement is the point (MUL-4332 PR3 review round: matcher point
+-- 1). Under READ COMMITTED every statement gets its own snapshot, so reading the
+-- candidate ids and then re-reading each hook's active_revision_id one by one could
+-- mix revisions from different instants within the same transaction. Returning
+-- (hook, revision) pairs from one statement pins the whole set at one instant, and
+-- the matcher calls this inside the transaction that claims the event, so the pin
+-- is taken at claim time. The matcher must NOT re-read active_revision_id
+-- afterwards — the pinned revision_id here is authoritative for this event.
+--
+-- Issue scope is lifecycle ownership only and does NOT restrict the event subject —
+-- that is the job of `when` — so scope is not a filter here.
+SELECT
+    h.id           AS hook_id,
+    r.id           AS revision_id,
+    r.match        AS match,
+    r.conditions   AS conditions,
+    r.fire_mode    AS fire_mode
 FROM hook h
 JOIN hook_revision r ON r.id = h.active_revision_id
 WHERE h.workspace_id = $1
@@ -116,6 +131,16 @@ WHERE h.workspace_id = $1
   AND h.archived_at IS NULL
   AND r.event_type = $2
 ORDER BY h.created_at ASC, h.id ASC;
+
+-- name: LockHookForDecision :one
+-- Serialize one hook's rising-edge latch read-modify-write against other matchers.
+-- This is a LOCK ONLY: the hook's active_revision_id is deliberately not returned,
+-- because the revision for this event was already pinned at claim time by
+-- ListActiveHookRevisionsForEvent and re-reading it here would reintroduce the
+-- drift that pin exists to prevent.
+SELECT id FROM hook
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
 
 -- name: CreateHookExecution :one
 -- Persist one matcher decision (queued to fire, or skipped with a reason) with

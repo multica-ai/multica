@@ -3,11 +3,14 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -93,7 +96,7 @@ func (f matcherFixture) setIssueStatus(t *testing.T, status string) {
 }
 
 // seedHookAged is seedHook with an explicit age, so candidate order
-// (ListActiveHookIDsForEvent sorts by created_at ASC) is deterministic. An older
+// (the candidate query sorts by created_at ASC) is deterministic. An older
 // hook is evaluated first.
 func (f matcherFixture) seedHookAged(t *testing.T, eventType, matchJSON, condJSON, fireMode, age string) string {
 	t.Helper()
@@ -105,9 +108,9 @@ func (f matcherFixture) seedHookAged(t *testing.T, eventType, matchJSON, condJSO
 	return hookID
 }
 
-// claimWithLease puts an event into the state ClaimPendingDomainEvents leaves it in
-// and returns the lease that owns it, so a test can drive processEvent as either the
-// real owner or a stale holder.
+// claimWithLease puts an event into the state the matcher's claim leaves it in and
+// returns the lease that owns it, so a test can drive the decision as either the real
+// owner or a stale holder.
 func (f matcherFixture) claimWithLease(t *testing.T, eventID pgtype.UUID) pgtype.UUID {
 	t.Helper()
 	lease := util.NewUUID()
@@ -119,6 +122,37 @@ func (f matcherFixture) claimWithLease(t *testing.T, eventID pgtype.UUID) pgtype
 		t.Fatalf("claim event: %v", err)
 	}
 	return lease
+}
+
+// decideClaimed drives ownership + decision + finalize for one already-claimed
+// event. Production claims, pins and decides in a single transaction
+// (claimAndDecideOne); this resolves candidates separately so a test can target a
+// specific event, but runs the very same decideAndFinalize.
+func (f matcherFixture) decideClaimed(ctx context.Context, event db.DomainEvent, lease pgtype.UUID) (bool, error) {
+	var dispatched bool
+	var err error
+	err = f.svc.inTxWith(ctx, func(tx pgx.Tx, qtx *db.Queries) error {
+		rows, err := qtx.ListActiveHookRevisionsForEvent(ctx, db.ListActiveHookRevisionsForEventParams{
+			WorkspaceID: event.WorkspaceID, EventType: event.Type,
+		})
+		if err != nil {
+			return err
+		}
+		candidates := make([]pinnedCandidate, 0, len(rows))
+		for _, r := range rows {
+			candidates = append(candidates, pinnedCandidate{
+				HookID: r.HookID, RevisionID: r.RevisionID,
+				Match: r.Match, Conditions: r.Conditions, FireMode: r.FireMode,
+			})
+		}
+		ok, err := f.svc.decideAndFinalize(ctx, tx, qtx, event, candidates, lease)
+		dispatched = ok
+		return err
+	})
+	if errors.Is(err, errLeaseLost) {
+		return false, nil
+	}
+	return dispatched, err
 }
 
 type eventState struct {
@@ -463,7 +497,7 @@ func TestMatcherDecisionIsAtomicAcrossCandidates(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		ok, err := f.svc.processEvent(ctx, event, lease)
+		ok, err := f.decideClaimed(ctx, event, lease)
 		done <- result{dispatched: ok, err: err}
 	}()
 
@@ -471,7 +505,7 @@ func TestMatcherDecisionIsAtomicAcrossCandidates(t *testing.T) {
 	// not the finalize. This is the single-transaction guarantee.
 	select {
 	case res := <-done:
-		t.Fatalf("processEvent completed (dispatched=%v err=%v) while hook B was locked", res.dispatched, res.err)
+		t.Fatalf("decision completed (dispatched=%v err=%v) while hook B was locked", res.dispatched, res.err)
 	case <-time.After(750 * time.Millisecond):
 	}
 	if r := f.execFor(t, hookA); r.count != 0 {
@@ -490,13 +524,13 @@ func TestMatcherDecisionIsAtomicAcrossCandidates(t *testing.T) {
 	select {
 	case res := <-done:
 		if res.err != nil {
-			t.Fatalf("processEvent: %v", res.err)
+			t.Fatalf("decide: %v", res.err)
 		}
 		if !res.dispatched {
-			t.Fatal("processEvent did not dispatch the event after the lock released")
+			t.Fatal("decision did not dispatch the event after the lock released")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("processEvent never unblocked after the hook lock released")
+		t.Fatal("decision never unblocked after the hook lock released")
 	}
 
 	// Both candidates landed together, each pinned to the revision the snapshot saw.
@@ -562,7 +596,7 @@ func TestMatcherStaleLeaseHolderWritesNothing(t *testing.T) {
 	}
 	staleDone := make(chan staleResult, 1)
 	go func() {
-		ok, err := f.svc.processEvent(ctx, event, stale)
+		ok, err := f.decideClaimed(ctx, event, stale)
 		staleDone <- staleResult{dispatched: ok, err: err}
 	}()
 
@@ -596,7 +630,7 @@ func TestMatcherStaleLeaseHolderWritesNothing(t *testing.T) {
 	}
 
 	// The real owner still decides it normally.
-	ok, err := f.svc.processEvent(ctx, event, owner)
+	ok, err := f.decideClaimed(ctx, event, owner)
 	if err != nil {
 		t.Fatalf("owner: %v", err)
 	}
@@ -684,9 +718,9 @@ func TestMatcherPoisonHookDoesNotStarveHealthy(t *testing.T) {
 	event := f.seedEvent(t, "done", 0)
 	lease := f.claimWithLease(t, event.ID)
 
-	ok, err := f.svc.processEvent(ctx, event, lease)
+	ok, err := f.decideClaimed(ctx, event, lease)
 	if err != nil {
-		t.Fatalf("processEvent: %v", err)
+		t.Fatalf("decide: %v", err)
 	}
 	if !ok {
 		t.Fatal("event was not dispatched — one poison candidate blocked the whole event")
@@ -715,5 +749,228 @@ func TestMatcherPoisonHookDoesNotStarveHealthy(t *testing.T) {
 	}
 	if r := f.execFor(t, poison); r.count != 1 {
 		t.Errorf("poison hook has %d executions after re-decide, want 1", r.count)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Regressions for the second matcher review round: claim-time revision pin under
+// a single snapshot, and zero writes from an expired lease.
+// ---------------------------------------------------------------------------
+
+// drainMatcherQueue empties the shared outbox so a following controlled claim lands
+// on this test's own event.
+func (f matcherFixture) drainMatcherQueue(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	for i := 0; i < 60; i++ {
+		n, err := f.svc.ClaimAndMatch(ctx, 500)
+		if err != nil {
+			t.Fatalf("drain: %v", err)
+		}
+		if n == 0 {
+			return
+		}
+	}
+	t.Fatal("outbox never drained")
+}
+
+// sleepDuringClaim makes the matcher's claim UPDATE on one specific event pause, so
+// a test can commit a concurrent edit inside the claim window.
+func (f matcherFixture) sleepDuringClaim(t *testing.T, eventID pgtype.UUID, seconds float64) {
+	t.Helper()
+	ctx := context.Background()
+	name := fmt.Sprintf("hook_claim_sleep_%d", time.Now().UnixNano())
+	fn := name + "_fn"
+	if _, err := f.pool.Exec(ctx, fmt.Sprintf(`
+		CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN PERFORM pg_sleep(%f); RETURN NEW; END; $$;`, quoteIdent(fn), seconds)); err != nil {
+		t.Fatalf("create claim sleep function: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx, fmt.Sprintf(`
+		CREATE TRIGGER %s BEFORE UPDATE ON domain_event
+		FOR EACH ROW WHEN (NEW.id = %s::uuid AND NEW.dispatch_status = 'dispatching')
+		EXECUTE FUNCTION %s();`, quoteIdent(name), quoteLiteral(util.UUIDToString(eventID)), quoteIdent(fn))); err != nil {
+		t.Fatalf("create claim sleep trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		f.pool.Exec(bg, fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON domain_event", quoteIdent(name)))
+		f.pool.Exec(bg, fmt.Sprintf("DROP FUNCTION IF EXISTS %s()", quoteIdent(fn)))
+	})
+}
+
+// Must-fix 1 (round 2) — the revision set is pinned by the CLAIM statement itself.
+//
+// Wrapping the decision in a transaction is not enough: PostgreSQL's default READ
+// COMMITTED gives every statement a fresh snapshot, so claiming in one statement and
+// resolving candidates in another lets an edit committed in between change the
+// decision — and lets two candidates in one transaction be decided against revisions
+// from different instants. This drives the real ClaimAndMatch, pauses inside the
+// claim, and commits a revision swap to a DIFFERENT event type in that window. The
+// claim and the candidate set share one snapshot, so the decision must still bind
+// revision 1. Anything that resolved candidates after the claim would see revision 2,
+// find no candidate, and write nothing.
+func TestMatcherPinsRevisionAtClaimTime(t *testing.T) {
+	f := newMatcherFixture(t)
+	ctx := context.Background()
+	f.drainMatcherQueue(t)
+
+	hookID := f.seedHook(t, "issue.status_changed", `{"to":"done"}`, `[]`, automation.FirePerEvent)
+	var rev1 string
+	if err := f.pool.QueryRow(ctx, `SELECT active_revision_id::text FROM hook WHERE id = $1`, hookID).Scan(&rev1); err != nil {
+		t.Fatal(err)
+	}
+	event := f.seedEvent(t, "done", 0)
+	f.sleepDuringClaim(t, event.ID, 0.8)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.svc.ClaimAndMatch(ctx, 5)
+		done <- err
+	}()
+
+	// Land the edit inside the claim window: a new revision listening to a different
+	// event type, made active while the claim is still executing.
+	time.Sleep(250 * time.Millisecond)
+	rev2 := uuid.NewString()
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO hook_revision (id, hook_id, revision, event_type, match, conditions, fire_mode, actions, created_by_type, created_by_id)
+		VALUES ($1, $2, 2, 'issue.created', '{}'::jsonb, '[]'::jsonb, $3, '[]'::jsonb, 'member', $4)`,
+		rev2, hookID, automation.FirePerEvent, f.userID); err != nil {
+		t.Fatalf("seed revision 2: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE hook SET active_revision_id = $2 WHERE id = $1`, hookID, rev2); err != nil {
+		t.Fatalf("repoint active revision: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("claim and match: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("claim and match never returned")
+	}
+
+	r := f.execFor(t, hookID)
+	if r.count != 1 || r.status != hookExecQueued {
+		t.Fatalf("want exactly 1 queued execution from the claim-time revision, got count=%d status=%q "+
+			"(a revision edit landing after the claim changed the decision)", r.count, r.status)
+	}
+	if r.revisionID != rev1 {
+		t.Errorf("execution pinned revision %s, want the claim-time revision %s", r.revisionID, rev1)
+	}
+	if s := f.eventState(t, event.ID); s.status != "dispatched" || !s.hasDispatchedAt {
+		t.Errorf("event state = %+v, want dispatched with dispatched_at set", s)
+	}
+}
+
+// Must-fix 2 (round 2) — a worker whose lease has EXPIRED writes nothing.
+//
+// The ownership predicate previously checked only status + token, so a worker still
+// holding the right token past its expiry could decide and finalize. Ownership now
+// requires the lease to be unexpired under database clock time, at entry and at the
+// finalize CAS alike. Driving the real ClaimAndMatch with an already-elapsed TTL
+// makes the claimed lease expired on arrival, so the whole transaction must roll back.
+func TestMatcherExpiredLeaseWritesNothing(t *testing.T) {
+	f := newMatcherFixture(t)
+	ctx := context.Background()
+	f.drainMatcherQueue(t)
+
+	// rising_edge with a satisfied condition, so a leaked write would leave BOTH an
+	// execution row and an advanced latch behind.
+	cond := `[{"issues_status":{"ids":["` + f.issueID + `"],"all":"done"}}]`
+	hookID := f.seedHook(t, "issue.status_changed", `{}`, cond, automation.FireRisingEdge)
+	f.setIssueStatus(t, "done")
+	event := f.seedEvent(t, "done", 0)
+
+	original := MatcherLeaseTTL
+	t.Cleanup(func() { MatcherLeaseTTL = original })
+
+	// Every lease this tick acquires is already expired when it is granted. Hold the
+	// hook row as a concurrent edit would: an expired worker must fail closed BEFORE
+	// any decision work, so it never reaches (and never blocks on) this lock.
+	MatcherLeaseTTL = -1 * time.Minute
+	lockConn, err := f.pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire lock conn: %v", err)
+	}
+	lockTx, err := lockConn.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin lock tx: %v", err)
+	}
+	if _, err := lockTx.Exec(ctx, `SELECT id FROM hook WHERE id = $1 FOR UPDATE`, hookID); err != nil {
+		t.Fatalf("lock hook: %v", err)
+	}
+
+	expired := make(chan error, 1)
+	go func() {
+		_, err := f.svc.ClaimAndMatch(ctx, 10)
+		expired <- err
+	}()
+	select {
+	case err := <-expired:
+		if err != nil {
+			t.Fatalf("claim and match with an expired lease: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		lockTx.Rollback(ctx)
+		lockConn.Release()
+		t.Fatal("expired-lease worker blocked on the hook row — it began deciding before asserting ownership")
+	}
+	if err := lockTx.Rollback(ctx); err != nil {
+		t.Fatalf("release hook lock: %v", err)
+	}
+	lockConn.Release()
+
+	if r := f.execFor(t, hookID); r.count != 0 {
+		t.Errorf("expired-lease worker wrote %d execution(s), want 0", r.count)
+	}
+	if _, found := f.latchFor(t, hookID); found {
+		t.Error("expired-lease worker advanced the rising-edge latch")
+	}
+	if s := f.eventState(t, event.ID); s.status == "dispatched" || s.hasDispatchedAt {
+		t.Errorf("expired-lease worker finalized the event: %+v", s)
+	}
+
+	// With a live lease the same event decides normally.
+	MatcherLeaseTTL = original
+	if _, err := f.svc.ClaimAndMatch(ctx, 10); err != nil {
+		t.Fatalf("claim and match: %v", err)
+	}
+	if r := f.execFor(t, hookID); r.count != 1 || r.status != hookExecQueued {
+		t.Errorf("live-lease decision: count=%d status=%q, want 1 queued", r.count, r.status)
+	}
+	if s := f.eventState(t, event.ID); s.status != "dispatched" || !s.hasDispatchedAt {
+		t.Errorf("event state = %+v, want dispatched with dispatched_at set", s)
+	}
+}
+
+// The finalize CAS carries the same not-expired condition as the entry assertion, so
+// a lease that elapses mid-decision cannot commit the decision it already wrote.
+func TestMatcherFinalizeRejectsExpiredLease(t *testing.T) {
+	f := newMatcherFixture(t)
+	ctx := context.Background()
+	event := f.seedEvent(t, "done", 0)
+	lease := f.claimWithLease(t, event.ID)
+
+	// The lease elapses while the decision is in flight.
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE domain_event SET lease_expires_at = now() - interval '1 second' WHERE id = $1`,
+		util.UUIDToString(event.ID)); err != nil {
+		t.Fatalf("expire lease: %v", err)
+	}
+
+	rows, err := f.svc.Queries.MarkDomainEventDispatched(ctx, db.MarkDomainEventDispatchedParams{
+		ID: event.ID, LeaseToken: lease,
+	})
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if rows != 0 {
+		t.Errorf("finalize affected %d row(s) for an expired lease, want 0", rows)
+	}
+	if s := f.eventState(t, event.ID); s.status == "dispatched" || s.hasDispatchedAt {
+		t.Errorf("expired lease finalized the event: %+v", s)
 	}
 }
