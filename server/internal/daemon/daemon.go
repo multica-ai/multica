@@ -4637,7 +4637,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, err
 	}
 
-	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools) {
+	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
 		firstUsage := result.Usage
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 		execOpts.ResumeSessionID = ""
@@ -4852,8 +4852,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 //     MUL-4910): the platform's own retry is supposed to inherit the session
 //     and continue the truncated conversation.
 //
-//     Not every backend can answer, though. See the empty-SessionID branch
-//     below for the ones that have no rejection signal to offer.
+//     Not every backend can answer, though, and a false ResumeRejected means
+//     different things depending on who produced it: "checked, not a
+//     rejection" from a capable backend, "could not tell" from one of the
+//     five in agent.ResumeRejectionUndetectable. That is why provider is a
+//     parameter — without it the compatibility branch below would silently
+//     apply to every backend, second-guessing capable ones by exclusion.
 //
 //  2. Is re-running safe? Only if the agent executed no tool. tools == 0 does
 //     not prove the run mutated nothing — it proves we observed no tool use,
@@ -4863,7 +4867,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 //     retry also reuses the same workdir, which is never reset between
 //     attempts, so a retry after real work re-plans on top of its own
 //     half-finished commits.
-func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, tools int32) bool {
+func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, tools int32, provider string) bool {
 	if result.Status != "failed" || priorSessionID == "" || tools > 0 {
 		return false
 	}
@@ -4871,32 +4875,54 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 	if result.ResumeRejected {
 		return true
 	}
-	// No evidence either way. Backends that scrape SessionID out of stream
-	// output (antigravity, copilot, cursor, deveco, opencode) cannot tell a
-	// refused resume from any other startup failure — none of them has a
-	// captured rejection string to match on. An empty SessionID at least
-	// proves no session was established this run, which is what the gate
-	// used to rely on for every backend.
+	// Everything below is a bounded compatibility path for the backends that
+	// cannot answer question 1 at all. For every other backend a false
+	// ResumeRejected is a real answer — it checked and this was not a
+	// rejection — so the gate stops here rather than second-guessing it by
+	// exclusion.
+	if !agent.ResumeRejectionUndetectable(provider) {
+		return false
+	}
+	// antigravity, copilot, cursor, deveco and opencode scrape SessionID out
+	// of stream output and have no rejection string captured anywhere, so an
+	// empty SessionID is the only thing they can offer. It proves no session
+	// was established this run, which is exactly what the gate relied on for
+	// every backend before ResumeRejected existed; keeping it preserves their
+	// recovery instead of silently removing it.
 	//
-	// Keep that path for them, minus the classes a new session provably
-	// cannot cure. Guessing rejection phrases for these five instead would
-	// grow the inferred-match surface, and a false positive there is the
-	// expensive direction: it discards a recoverable session pointer.
+	// Inventing rejection phrases for these five would be the alternative,
+	// and it is worse: no real output has been captured for any of them, and
+	// a false positive discards a recoverable session pointer.
 	return result.SessionID == "" && freshSessionMayHelp(result.Error)
 }
 
 // freshSessionMayHelp reports whether restarting the conversation could
 // plausibly fix errText. It answers "is this failure about the session at
 // all?", so every reason with a defined non-session remedy — wait, back off,
-// top up, re-auth — is excluded. Those keep the session pointer so the
-// platform's own retry can resume the truncated conversation.
+// top up, re-auth, fix the config, install the binary — is excluded. Those
+// keep the session pointer so the platform's own retry can resume the
+// truncated conversation.
+//
+// What is left through is deliberately narrow: unknown, process failure and
+// unparseable output. A real resume rejection from one of these backends most
+// likely surfaces as exactly that — a non-zero exit or output we cannot
+// parse — since none of them reports one explicitly. Context overflow is also
+// allowed through, as starting over genuinely can clear it.
 func freshSessionMayHelp(errText string) bool {
 	switch taskfailure.Classify(errText) {
 	case taskfailure.ReasonAgentProviderNetwork,
 		taskfailure.ReasonAgentProviderCapacityOrRateLimit,
 		taskfailure.ReasonAgentProviderQuotaLimit,
 		taskfailure.ReasonAgentProviderServerError,
-		taskfailure.ReasonAgentProviderAuthOrAccess:
+		taskfailure.ReasonAgentProviderAuthOrAccess,
+		taskfailure.ReasonAgentMissingConfig,
+		taskfailure.ReasonAgentModelNotFoundOrUnavailable,
+		taskfailure.ReasonAgentRuntimeMissingExecutable,
+		taskfailure.ReasonAgentRuntimeVersionUnsupported,
+		// Defensive: a timeout normally carries its own terminal status and
+		// never reaches this gate, but if one is ever classified out of a
+		// "failed" result, re-running the whole task is not the answer.
+		taskfailure.ReasonAgentTimeout:
 		return false
 	default:
 		return true

@@ -1464,7 +1464,7 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	}
 
 	// Mirrors the retry in runTask, gated on the same production predicate.
-	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools) {
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools, "claude") {
 		firstUsage := result.Usage
 		opts.ResumeSessionID = ""
 		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
@@ -1684,7 +1684,7 @@ func TestExecuteAndDrain_NoRetryAfterToolsExecuted(t *testing.T) {
 	// opened a PR, written commits into the reused workdir). Re-running it
 	// from scratch would duplicate those side effects, so the fallback must
 	// stay out regardless of what the backend reported as SessionID.
-	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools+1) {
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools+1, "claude") {
 		t.Fatal("should not retry once tools have executed")
 	}
 	if int(fb.idx.Load()) != 1 {
@@ -1720,7 +1720,7 @@ func TestExecuteAndDrain_NetworkFailureKeepsResumeSession(t *testing.T) {
 	if result.ResumeRejected {
 		t.Fatal("a network drop must not be reported as a rejected resume")
 	}
-	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools) {
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools, "claude") {
 		t.Fatal("network failure must not trigger a fresh-session retry")
 	}
 	if int(fb.idx.Load()) != 1 {
@@ -1740,7 +1740,10 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 		result         agent.Result
 		priorSessionID string
 		tools          int32
-		want           bool
+		// provider defaults to claude — a backend that CAN detect rejections,
+		// so cases that leave it unset assert the capable-backend contract.
+		provider string
+		want     bool
 	}{
 		{
 			name:           "rejected resume before any tool retries",
@@ -1784,36 +1787,72 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			want:           false,
 		},
 
-		// Backends with no rejection signal (antigravity, copilot, cursor,
-		// deveco, opencode) scrape SessionID from stream output. An empty id
-		// is all they can offer, and it only proves no session was
+		// The compatibility path for backends that cannot detect a rejection
+		// (antigravity, copilot, cursor, deveco, opencode). An empty
+		// SessionID is all they can offer, and it only proves no session was
 		// established — so it still gates a retry, but only for failures a
 		// fresh session could plausibly cure.
 		{
-			name:           "no signal and no session established retries",
+			name:           "undetectable backend with no session established retries",
 			result:         agent.Result{Status: "failed", Error: "agent exited before dispatching"},
 			priorSessionID: "stale-id",
+			provider:       "copilot",
 			want:           true,
 		},
 		{
-			name:           "no signal but a session was established does not retry",
+			name:           "undetectable backend that established a session does not retry",
 			result:         agent.Result{Status: "failed", Error: "agent exited before dispatching", SessionID: "live-sess"},
 			priorSessionID: "stale-id",
+			provider:       "copilot",
 			want:           false,
 		},
 		{
 			// The regression that motivated the positive signal: without the
 			// classification guard, every unsignalled network blip would
 			// reset the session these backends were about to resume.
-			name:           "no signal network drop does not retry",
+			name:           "undetectable backend network drop does not retry",
 			result:         agent.Result{Status: "failed", Error: "API Error: Connection closed mid-response"},
 			priorSessionID: "stale-id",
+			provider:       "cursor",
 			want:           false,
 		},
 		{
-			name:           "no signal rate limit does not retry",
+			name:           "undetectable backend rate limit does not retry",
 			result:         agent.Result{Status: "failed", Error: "API Error: 429 rate limit exceeded"},
 			priorSessionID: "stale-id",
+			provider:       "deveco",
+			want:           false,
+		},
+
+		// Failures with a defined non-session remedy. Restarting the
+		// conversation cannot fix a missing binary or an unavailable model,
+		// so these must not burn a second run even on the compat path.
+		{
+			name:           "missing config does not retry",
+			result:         agent.Result{Status: "failed", Error: "missing environment variable: ANTHROPIC_API_KEY"},
+			priorSessionID: "stale-id",
+			provider:       "copilot",
+			want:           false,
+		},
+		{
+			name:           "unavailable model does not retry",
+			result:         agent.Result{Status: "failed", Error: "model not found: gpt-99"},
+			priorSessionID: "stale-id",
+			provider:       "opencode",
+			want:           false,
+		},
+		{
+			name:           "missing executable does not retry",
+			result:         agent.Result{Status: "failed", Error: "cursor-agent: executable not found"},
+			priorSessionID: "stale-id",
+			provider:       "cursor",
+			want:           false,
+		},
+		{
+			name:           "unsupported runtime version does not retry",
+			result:         agent.Result{Status: "failed", Error: "installed CLI is below the minimum supported version"},
+			priorSessionID: "stale-id",
+			provider:       "antigravity",
 			want:           false,
 		},
 		{
@@ -1913,11 +1952,55 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := shouldRetryWithFreshSession(tt.result, tt.priorSessionID, tt.tools); got != tt.want {
-				t.Fatalf("shouldRetryWithFreshSession() = %v, want %v", got, tt.want)
+			provider := tt.provider
+			if provider == "" {
+				provider = "claude"
+			}
+			if got := shouldRetryWithFreshSession(tt.result, tt.priorSessionID, tt.tools, provider); got != tt.want {
+				t.Fatalf("shouldRetryWithFreshSession(provider=%q) = %v, want %v", provider, got, tt.want)
 			}
 		})
 	}
+}
+
+// The compatibility path must be reachable ONLY by backends that cannot
+// report a rejection. One identical result, opposite answers: a backend that
+// can detect has already said "not a rejection" by leaving ResumeRejected
+// false, and must be taken at its word rather than second-guessed by
+// exclusion.
+func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
+	t.Parallel()
+
+	// Unclassified startup failure, no session established — the exact shape
+	// the compat path exists to catch.
+	result := agent.Result{Status: "failed", Error: "exit status 1"}
+
+	undetectable := []string{"antigravity", "copilot", "cursor", "deveco", "opencode"}
+	for _, provider := range undetectable {
+		t.Run(provider+" retries", func(t *testing.T) {
+			t.Parallel()
+			if !shouldRetryWithFreshSession(result, "stale-id", 0, provider) {
+				t.Fatalf("%s cannot detect rejections; it must keep its empty-session recovery", provider)
+			}
+		})
+	}
+
+	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "kiro", "qoder", "traecli", "pi", "openclaw"}
+	for _, provider := range detectable {
+		t.Run(provider+" does not retry", func(t *testing.T) {
+			t.Parallel()
+			if shouldRetryWithFreshSession(result, "stale-id", 0, provider) {
+				t.Fatalf("%s reports rejections; a false ResumeRejected is an answer, not an absence", provider)
+			}
+		})
+	}
+
+	t.Run("unknown provider fails closed", func(t *testing.T) {
+		t.Parallel()
+		if shouldRetryWithFreshSession(result, "stale-id", 0, "some-future-backend") {
+			t.Fatal("a backend not listed as undetectable must not inherit the compat path")
+		}
+	})
 }
 
 func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T) {
