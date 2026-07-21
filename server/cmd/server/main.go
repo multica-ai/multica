@@ -393,6 +393,7 @@ func main() {
 	// records queued/skipped hook_execution decisions. Gated on the
 	// automation_event_hooks flag (default off), so it is dormant until enabled.
 	go runHookMatcher(sweepCtx, h.HookService, flags)
+	go runHookExecutor(sweepCtx, h.HookService, flags)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)

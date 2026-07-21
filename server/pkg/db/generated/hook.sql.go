@@ -11,6 +11,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const advanceHookExecutionAction = `-- name: AdvanceHookExecutionAction :execrows
+UPDATE hook_execution
+SET current_action_index = $3
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp()
+`
+
+type AdvanceHookExecutionActionParams struct {
+	ID              pgtype.UUID `json:"id"`
+	LeaseToken      pgtype.UUID `json:"lease_token"`
+	NextActionIndex int32       `json:"next_action_index"`
+}
+
+// Move the action cursor past a completed action, under the ownership predicate. It
+// runs in the SAME transaction as that action's target write and effect, so an action
+// can never commit without its cursor advancing.
+func (q *Queries) AdvanceHookExecutionAction(ctx context.Context, arg AdvanceHookExecutionActionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, advanceHookExecutionAction, arg.ID, arg.LeaseToken, arg.NextActionIndex)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const archiveHook = `-- name: ArchiveHook :one
 UPDATE hook SET
     archived_at = now(),
@@ -49,6 +75,63 @@ func (q *Queries) ArchiveHook(ctx context.Context, arg ArchiveHookParams) (Hook,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ArchivedAt,
+	)
+	return i, err
+}
+
+const claimOneHookExecution = `-- name: ClaimOneHookExecution :one
+UPDATE hook_execution
+SET status = 'running',
+    lease_token = $1,
+    lease_expires_at = clock_timestamp() + make_interval(secs => $2::float8),
+    attempts = attempts + 1,
+    started_at = COALESCE(started_at, now())
+WHERE id = (
+    SELECT id FROM hook_execution
+    WHERE (status = 'queued' AND (next_attempt_at IS NULL OR next_attempt_at <= now()))
+       OR (status = 'running' AND lease_expires_at < now())
+    ORDER BY created_at ASC
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, workspace_id, hook_id, hook_revision_id, event_id, correlation_id, status, skip_reason, match_snapshot, condition_snapshot, current_action_index, attempts, next_attempt_at, lease_token, lease_expires_at, error_code, error, created_at, started_at, completed_at
+`
+
+type ClaimOneHookExecutionParams struct {
+	LeaseToken      pgtype.UUID `json:"lease_token"`
+	LeaseTtlSeconds float64     `json:"lease_ttl_seconds"`
+}
+
+// The executor's claim (MUL-4332 PR3 §7.2): lease one queued execution whose retry
+// backoff has elapsed, or reclaim one abandoned by a crashed worker once its lease
+// expires. Oldest first. The lease deadline comes from the DATABASE clock, the same
+// clock every ownership predicate compares it against, so app/DB skew cannot grant an
+// already-expired or over-long lease. FOR UPDATE SKIP LOCKED lets several executors
+// share the queue. Rides idx_hook_execution_lease.
+func (q *Queries) ClaimOneHookExecution(ctx context.Context, arg ClaimOneHookExecutionParams) (HookExecution, error) {
+	row := q.db.QueryRow(ctx, claimOneHookExecution, arg.LeaseToken, arg.LeaseTtlSeconds)
+	var i HookExecution
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.HookID,
+		&i.HookRevisionID,
+		&i.EventID,
+		&i.CorrelationID,
+		&i.Status,
+		&i.SkipReason,
+		&i.MatchSnapshot,
+		&i.ConditionSnapshot,
+		&i.CurrentActionIndex,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.LeaseToken,
+		&i.LeaseExpiresAt,
+		&i.ErrorCode,
+		&i.Error,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
 	)
 	return i, err
 }
@@ -121,6 +204,55 @@ func (q *Queries) CreateHook(ctx context.Context, arg CreateHookParams) (Hook, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ArchivedAt,
+	)
+	return i, err
+}
+
+const createHookActionEffect = `-- name: CreateHookActionEffect :one
+INSERT INTO hook_action_effect (
+    id, effect_key, execution_id, action_index, action_type, status, resolved_input, attempts
+) VALUES ($1, $2, $3, $4, $5, 'running', $6, 1)
+ON CONFLICT (effect_key) DO NOTHING
+RETURNING id, effect_key, execution_id, action_index, action_type, status, resolved_input, output_type, output_id, attempts, error_code, error, created_at, completed_at
+`
+
+type CreateHookActionEffectParams struct {
+	ID            pgtype.UUID `json:"id"`
+	EffectKey     string      `json:"effect_key"`
+	ExecutionID   pgtype.UUID `json:"execution_id"`
+	ActionIndex   int32       `json:"action_index"`
+	ActionType    string      `json:"action_type"`
+	ResolvedInput []byte      `json:"resolved_input"`
+}
+
+// Claim one action's idempotency anchor. ON CONFLICT DO NOTHING means a concurrent or
+// replayed attempt gets no row back and must read the existing effect instead of
+// re-running the action.
+func (q *Queries) CreateHookActionEffect(ctx context.Context, arg CreateHookActionEffectParams) (HookActionEffect, error) {
+	row := q.db.QueryRow(ctx, createHookActionEffect,
+		arg.ID,
+		arg.EffectKey,
+		arg.ExecutionID,
+		arg.ActionIndex,
+		arg.ActionType,
+		arg.ResolvedInput,
+	)
+	var i HookActionEffect
+	err := row.Scan(
+		&i.ID,
+		&i.EffectKey,
+		&i.ExecutionID,
+		&i.ActionIndex,
+		&i.ActionType,
+		&i.Status,
+		&i.ResolvedInput,
+		&i.OutputType,
+		&i.OutputID,
+		&i.Attempts,
+		&i.ErrorCode,
+		&i.Error,
+		&i.CreatedAt,
+		&i.CompletedAt,
 	)
 	return i, err
 }
@@ -307,6 +439,32 @@ func (q *Queries) CreateHookRevision(ctx context.Context, arg CreateHookRevision
 	return i, err
 }
 
+const getHookActionEffect = `-- name: GetHookActionEffect :one
+SELECT id, effect_key, execution_id, action_index, action_type, status, resolved_input, output_type, output_id, attempts, error_code, error, created_at, completed_at FROM hook_action_effect WHERE effect_key = $1
+`
+
+func (q *Queries) GetHookActionEffect(ctx context.Context, effectKey string) (HookActionEffect, error) {
+	row := q.db.QueryRow(ctx, getHookActionEffect, effectKey)
+	var i HookActionEffect
+	err := row.Scan(
+		&i.ID,
+		&i.EffectKey,
+		&i.ExecutionID,
+		&i.ActionIndex,
+		&i.ActionType,
+		&i.Status,
+		&i.ResolvedInput,
+		&i.OutputType,
+		&i.OutputID,
+		&i.Attempts,
+		&i.ErrorCode,
+		&i.Error,
+		&i.CreatedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const getHookForUpdate = `-- name: GetHookForUpdate :one
 SELECT id, workspace_id, name, enabled, active_revision_id, scope_type, scope_id, retire_after_event_seq, origin, system_key, system_version, creator_actor_type, creator_actor_id, authorization_principal_user_id, disabled_reason, created_at, updated_at, archived_at FROM hook
 WHERE id = $1 AND workspace_id = $2
@@ -451,6 +609,52 @@ func (q *Queries) GetMaxHookRevision(ctx context.Context, hookID pgtype.UUID) (i
 	var max_revision int32
 	err := row.Scan(&max_revision)
 	return max_revision, err
+}
+
+const getOwnedHookExecution = `-- name: GetOwnedHookExecution :one
+SELECT id, workspace_id, hook_id, hook_revision_id, event_id, correlation_id, status, skip_reason, match_snapshot, condition_snapshot, current_action_index, attempts, next_attempt_at, lease_token, lease_expires_at, error_code, error, created_at, started_at, completed_at FROM hook_execution
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp()
+FOR UPDATE
+`
+
+type GetOwnedHookExecutionParams struct {
+	ID         pgtype.UUID `json:"id"`
+	LeaseToken pgtype.UUID `json:"lease_token"`
+}
+
+// Row-lock a claimed execution and assert lease OWNERSHIP before any action write.
+// Identical predicate to every terminal write below, evaluated against database clock
+// time, so a worker whose lease was reclaimed — or whose own lease elapsed — is not
+// the owner and must write nothing (§7.3: a lost lease may never write terminal state).
+func (q *Queries) GetOwnedHookExecution(ctx context.Context, arg GetOwnedHookExecutionParams) (HookExecution, error) {
+	row := q.db.QueryRow(ctx, getOwnedHookExecution, arg.ID, arg.LeaseToken)
+	var i HookExecution
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.HookID,
+		&i.HookRevisionID,
+		&i.EventID,
+		&i.CorrelationID,
+		&i.Status,
+		&i.SkipReason,
+		&i.MatchSnapshot,
+		&i.ConditionSnapshot,
+		&i.CurrentActionIndex,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.LeaseToken,
+		&i.LeaseExpiresAt,
+		&i.ErrorCode,
+		&i.Error,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+	)
+	return i, err
 }
 
 const listActiveHookRevisionsForEvent = `-- name: ListActiveHookRevisionsForEvent :many
@@ -694,6 +898,132 @@ func (q *Queries) LockHookForDecision(ctx context.Context, arg LockHookForDecisi
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const markHookActionEffectSucceeded = `-- name: MarkHookActionEffectSucceeded :execrows
+UPDATE hook_action_effect
+SET status = 'succeeded', output_type = $2, output_id = $3, completed_at = now()
+WHERE effect_key = $1
+`
+
+type MarkHookActionEffectSucceededParams struct {
+	EffectKey  string      `json:"effect_key"`
+	OutputType pgtype.Text `json:"output_type"`
+	OutputID   pgtype.UUID `json:"output_id"`
+}
+
+func (q *Queries) MarkHookActionEffectSucceeded(ctx context.Context, arg MarkHookActionEffectSucceededParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markHookActionEffectSucceeded, arg.EffectKey, arg.OutputType, arg.OutputID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markHookExecutionFailed = `-- name: MarkHookExecutionFailed :execrows
+UPDATE hook_execution
+SET status = 'failed', error_code = $3, error = $4, completed_at = now(),
+    lease_token = NULL, lease_expires_at = NULL
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp()
+`
+
+type MarkHookExecutionFailedParams struct {
+	ID         pgtype.UUID `json:"id"`
+	LeaseToken pgtype.UUID `json:"lease_token"`
+	ErrorCode  pgtype.Text `json:"error_code"`
+	Error      pgtype.Text `json:"error"`
+}
+
+func (q *Queries) MarkHookExecutionFailed(ctx context.Context, arg MarkHookExecutionFailedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markHookExecutionFailed,
+		arg.ID,
+		arg.LeaseToken,
+		arg.ErrorCode,
+		arg.Error,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markHookExecutionSkipped = `-- name: MarkHookExecutionSkipped :execrows
+UPDATE hook_execution
+SET status = 'skipped', skip_reason = $3, completed_at = now(),
+    lease_token = NULL, lease_expires_at = NULL
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp()
+`
+
+type MarkHookExecutionSkippedParams struct {
+	ID         pgtype.UUID `json:"id"`
+	LeaseToken pgtype.UUID `json:"lease_token"`
+	SkipReason pgtype.Text `json:"skip_reason"`
+}
+
+// A terminal, non-retryable outcome (§7.3): permission, unavailable target, departed
+// principal. Distinct from `failed`, which is an exhausted infrastructure retry.
+func (q *Queries) MarkHookExecutionSkipped(ctx context.Context, arg MarkHookExecutionSkippedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markHookExecutionSkipped, arg.ID, arg.LeaseToken, arg.SkipReason)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markHookExecutionSucceeded = `-- name: MarkHookExecutionSucceeded :execrows
+UPDATE hook_execution
+SET status = 'succeeded', completed_at = now(), lease_token = NULL, lease_expires_at = NULL
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp()
+`
+
+type MarkHookExecutionSucceededParams struct {
+	ID         pgtype.UUID `json:"id"`
+	LeaseToken pgtype.UUID `json:"lease_token"`
+}
+
+func (q *Queries) MarkHookExecutionSucceeded(ctx context.Context, arg MarkHookExecutionSucceededParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markHookExecutionSucceeded, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const rescheduleHookExecution = `-- name: RescheduleHookExecution :execrows
+UPDATE hook_execution
+SET status = 'queued',
+    next_attempt_at = now() + make_interval(secs => $3::int),
+    lease_token = NULL, lease_expires_at = NULL
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp()
+`
+
+type RescheduleHookExecutionParams struct {
+	ID             pgtype.UUID `json:"id"`
+	LeaseToken     pgtype.UUID `json:"lease_token"`
+	BackoffSeconds int32       `json:"backoff_seconds"`
+}
+
+// Release the lease and re-queue for a later attempt after an infrastructure failure.
+// current_action_index is untouched, so the retry resumes at the action that failed
+// and every action already committed stays committed (§7.2 partial execution).
+func (q *Queries) RescheduleHookExecution(ctx context.Context, arg RescheduleHookExecutionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rescheduleHookExecution, arg.ID, arg.LeaseToken, arg.BackoffSeconds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setHookActiveRevision = `-- name: SetHookActiveRevision :one

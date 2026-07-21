@@ -167,3 +167,108 @@ INSERT INTO hook_execution (
 ) VALUES ($1, $2, $3, $4, $5, $6, 'failed', $7, $8, now())
 ON CONFLICT (hook_id, event_id) DO NOTHING
 RETURNING *;
+
+-- name: ClaimOneHookExecution :one
+-- The executor's claim (MUL-4332 PR3 §7.2): lease one queued execution whose retry
+-- backoff has elapsed, or reclaim one abandoned by a crashed worker once its lease
+-- expires. Oldest first. The lease deadline comes from the DATABASE clock, the same
+-- clock every ownership predicate compares it against, so app/DB skew cannot grant an
+-- already-expired or over-long lease. FOR UPDATE SKIP LOCKED lets several executors
+-- share the queue. Rides idx_hook_execution_lease.
+UPDATE hook_execution
+SET status = 'running',
+    lease_token = @lease_token,
+    lease_expires_at = clock_timestamp() + make_interval(secs => @lease_ttl_seconds::float8),
+    attempts = attempts + 1,
+    started_at = COALESCE(started_at, now())
+WHERE id = (
+    SELECT id FROM hook_execution
+    WHERE (status = 'queued' AND (next_attempt_at IS NULL OR next_attempt_at <= now()))
+       OR (status = 'running' AND lease_expires_at < now())
+    ORDER BY created_at ASC
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
+-- name: GetOwnedHookExecution :one
+-- Row-lock a claimed execution and assert lease OWNERSHIP before any action write.
+-- Identical predicate to every terminal write below, evaluated against database clock
+-- time, so a worker whose lease was reclaimed — or whose own lease elapsed — is not
+-- the owner and must write nothing (§7.3: a lost lease may never write terminal state).
+SELECT * FROM hook_execution
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp()
+FOR UPDATE;
+
+-- name: AdvanceHookExecutionAction :execrows
+-- Move the action cursor past a completed action, under the ownership predicate. It
+-- runs in the SAME transaction as that action's target write and effect, so an action
+-- can never commit without its cursor advancing.
+UPDATE hook_execution
+SET current_action_index = @next_action_index
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp();
+
+-- name: MarkHookExecutionSucceeded :execrows
+UPDATE hook_execution
+SET status = 'succeeded', completed_at = now(), lease_token = NULL, lease_expires_at = NULL
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp();
+
+-- name: MarkHookExecutionSkipped :execrows
+-- A terminal, non-retryable outcome (§7.3): permission, unavailable target, departed
+-- principal. Distinct from `failed`, which is an exhausted infrastructure retry.
+UPDATE hook_execution
+SET status = 'skipped', skip_reason = @skip_reason, completed_at = now(),
+    lease_token = NULL, lease_expires_at = NULL
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp();
+
+-- name: MarkHookExecutionFailed :execrows
+UPDATE hook_execution
+SET status = 'failed', error_code = @error_code, error = @error, completed_at = now(),
+    lease_token = NULL, lease_expires_at = NULL
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp();
+
+-- name: RescheduleHookExecution :execrows
+-- Release the lease and re-queue for a later attempt after an infrastructure failure.
+-- current_action_index is untouched, so the retry resumes at the action that failed
+-- and every action already committed stays committed (§7.2 partial execution).
+UPDATE hook_execution
+SET status = 'queued',
+    next_attempt_at = now() + make_interval(secs => @backoff_seconds::int),
+    lease_token = NULL, lease_expires_at = NULL
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp();
+
+-- name: GetHookActionEffect :one
+SELECT * FROM hook_action_effect WHERE effect_key = $1;
+
+-- name: CreateHookActionEffect :one
+-- Claim one action's idempotency anchor. ON CONFLICT DO NOTHING means a concurrent or
+-- replayed attempt gets no row back and must read the existing effect instead of
+-- re-running the action.
+INSERT INTO hook_action_effect (
+    id, effect_key, execution_id, action_index, action_type, status, resolved_input, attempts
+) VALUES ($1, $2, $3, $4, $5, 'running', $6, 1)
+ON CONFLICT (effect_key) DO NOTHING
+RETURNING *;
+
+-- name: MarkHookActionEffectSucceeded :execrows
+UPDATE hook_action_effect
+SET status = 'succeeded', output_type = @output_type, output_id = @output_id, completed_at = now()
+WHERE effect_key = $1;
