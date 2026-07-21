@@ -34,10 +34,13 @@ export type TabSubject =
   | { kind: "machine"; machineId: string }
   /** A runtime nested under a machine. */
   | { kind: "runtime"; machineId: string; runtimeId: string }
-  /** An attachment preview. */
-  | { kind: "attachment"; id: string }
-  /** The Inbox container; `selectedKey` is the `?issue=` selection or null. */
-  | { kind: "inbox"; selectedKey: string | null }
+  /** An attachment preview. `filename` is the `?name=` hint, or null. */
+  | { kind: "attachment"; id: string; filename: string | null }
+  /**
+   * The Inbox container; `selectedKey` is the `?issue=` selection or null,
+   * `archived` is the `?view=archived` sub-list (its own list/cache).
+   */
+  | { kind: "inbox"; selectedKey: string | null; archived: boolean }
   /** The Chat container; `sessionId` is the `?session=` selection or null. */
   | { kind: "chat"; sessionId: string | null }
   /** A creation flow that has not produced a resource yet. */
@@ -96,7 +99,11 @@ export function parseTabSubject(url: string): TabSubject {
     case "usage":
       return { kind: "page", page: "usage" };
     case "inbox":
-      return { kind: "inbox", selectedKey: query.get("issue") || null };
+      return {
+        kind: "inbox",
+        selectedKey: query.get("issue") || null,
+        archived: query.get("view") === "archived",
+      };
     case "chat":
       return { kind: "chat", sessionId: query.get("session") || null };
     case "runtimes":
@@ -111,8 +118,10 @@ export function parseTabSubject(url: string): TabSubject {
     case "settings":
       return { kind: "page", page: "settings" };
     case "attachments":
-      // `/attachments/:id/preview`.
-      return id ? { kind: "attachment", id } : { kind: "unknown" };
+      // `/attachments/:id/preview?name=<filename>`.
+      return id
+        ? { kind: "attachment", id, filename: query.get("name") || null }
+        : { kind: "unknown" };
     default: {
       // A bare `/{slug}` (no route segment) is normalized to the default
       // surface elsewhere; treat any other unknown segment as unknown so it
@@ -147,9 +156,9 @@ export function tabSubjectKey(subject: TabSubject): string {
     case "runtime":
       return `runtime:${subject.machineId}:${subject.runtimeId}`;
     case "attachment":
-      return `attachment:${subject.id}`;
+      return `attachment:${subject.id}:${subject.filename ?? ""}`;
     case "inbox":
-      return `inbox:${subject.selectedKey ?? ""}`;
+      return `inbox:${subject.archived ? "archived" : "inbox"}:${subject.selectedKey ?? ""}`;
     case "chat":
       return `chat:${subject.sessionId ?? ""}`;
     case "flow":

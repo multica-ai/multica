@@ -5,7 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
-import { inboxListOptions } from "@multica/core/inbox/queries";
+import {
+  inboxListOptions,
+  archivedInboxListOptions,
+} from "@multica/core/inbox/queries";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 
@@ -68,6 +71,11 @@ function seed(qc: QueryClient) {
   qc.setQueryData(inboxListOptions("ws1").queryKey, [
     { id: "n1", issue_id: "i9", title: "Assigned to you", type: "issue_assigned" },
     { id: "n2", issue_id: null, title: "Quick create failed", type: "quick_create_failed" },
+  ] as never);
+  // Archived list is a distinct cache; these items are NOT in the main list.
+  qc.setQueryData(archivedInboxListOptions("ws1").queryKey, [
+    { id: "a1", issue_id: "i1", title: "Old assignment", type: "issue_assigned" },
+    { id: "a2", issue_id: null, title: "Archived note", type: "quick_create_failed" },
   ] as never);
   qc.setQueryData(agentListOptions("ws1").queryKey, [
     { id: "ag1", name: "Robby", avatar_url: null },
@@ -157,6 +165,35 @@ describe("useTabPresentation — live from cache", () => {
     expect(presentationOf("/acme/inbox?issue=n2")).toEqual({
       visual: { kind: "icon", icon: "Inbox" },
       title: "Quick create failed",
+    });
+  });
+
+  it("archived inbox: selected issue resolves against the archived list", () => {
+    // a1 lives only in the archived list; without ?view=archived it must NOT
+    // resolve (title stays Inbox), and with it, it resolves to i1's title.
+    expect(presentationOf("/acme/inbox?issue=i1").title).toBe("Inbox");
+    expect(presentationOf("/acme/inbox?view=archived&issue=i1")).toEqual({
+      visual: { kind: "icon", icon: "Inbox" },
+      title: "MUL-1: Fix login",
+    });
+  });
+
+  it("archived inbox: selected non-issue resolves against the archived list", () => {
+    expect(presentationOf("/acme/inbox?view=archived&issue=a2")).toEqual({
+      visual: { kind: "icon", icon: "Inbox" },
+      title: "Archived note",
+    });
+  });
+
+  it("attachment: filename from ?name= drives the title and file icon", () => {
+    expect(presentationOf("/acme/attachments/att1/preview?name=diagram.png")).toEqual({
+      visual: { kind: "icon", icon: "FileImage" },
+      title: "diagram.png",
+    });
+    // Missing filename → generic File + localized "Attachment".
+    expect(presentationOf("/acme/attachments/att1/preview")).toEqual({
+      visual: { kind: "icon", icon: "File" },
+      title: "Attachment",
     });
   });
 });

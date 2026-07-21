@@ -13,6 +13,12 @@ import {
   BookOpenText,
   Settings,
   File,
+  FileText,
+  FileImage,
+  FileCode,
+  FileArchive,
+  FileAudio,
+  FileVideo,
   FileQuestion,
   type LucideIcon,
 } from "lucide-react";
@@ -40,6 +46,12 @@ export const ROUTE_ICON_COMPONENTS: Record<RouteIconName, LucideIcon> = {
   BookOpenText,
   Settings,
   File,
+  FileText,
+  FileImage,
+  FileCode,
+  FileArchive,
+  FileAudio,
+  FileVideo,
   FileQuestion,
 };
 

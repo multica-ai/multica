@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { parseTabSubject } from "./tab-subject";
 import {
   resolveTabPresentation,
+  iconForAttachment,
   type TabEntityData,
 } from "./tab-presentation";
 
@@ -90,10 +91,29 @@ describe("resolveTabPresentation — direct resources", () => {
     });
   });
 
-  it("attachment uses a file icon and a type label (no standalone filename)", () => {
+  it("attachment shows the filename and a matching file icon, falling back only when missing", () => {
+    // Filename present (from ?name=) → title is the filename, icon matches type.
+    expect(present("/acme/attachments/att1/preview?name=report.pdf")).toEqual({
+      visual: { kind: "icon", icon: "FileText" },
+      title: { kind: "text", text: "report.pdf" },
+    });
+    expect(present("/acme/attachments/att1/preview?name=diagram.png").visual).toEqual({
+      kind: "icon",
+      icon: "FileImage",
+    });
+    expect(present("/acme/attachments/att1/preview?name=app.tsx").visual).toEqual({
+      kind: "icon",
+      icon: "FileCode",
+    });
+    // Missing filename → generic File icon + "Attachment" label.
     expect(present("/acme/attachments/att1/preview")).toEqual({
       visual: { kind: "icon", icon: "File" },
       title: { kind: "tab", tabKey: "attachment" },
+    });
+    // Unknown / extensionless → generic File, but still shows the filename.
+    expect(present("/acme/attachments/att1/preview?name=LICENSE")).toEqual({
+      visual: { kind: "icon", icon: "File" },
+      title: { kind: "text", text: "LICENSE" },
     });
   });
 
@@ -180,5 +200,27 @@ describe("resolveTabPresentation — flow and unknown", () => {
       visual: { kind: "icon", icon: "FileQuestion" },
       title: { kind: "tab", tabKey: "unknown" },
     });
+  });
+});
+
+describe("iconForAttachment", () => {
+  it("maps extensions to file-type icons", () => {
+    expect(iconForAttachment("a.png")).toBe("FileImage");
+    expect(iconForAttachment("clip.MP4")).toBe("FileVideo");
+    expect(iconForAttachment("song.mp3")).toBe("FileAudio");
+    expect(iconForAttachment("bundle.zip")).toBe("FileArchive");
+    expect(iconForAttachment("main.ts")).toBe("FileCode");
+    expect(iconForAttachment("notes.md")).toBe("FileText");
+  });
+
+  it("is case-insensitive on the extension", () => {
+    expect(iconForAttachment("PHOTO.JPEG")).toBe("FileImage");
+  });
+
+  it("falls back to the generic File icon", () => {
+    expect(iconForAttachment(null)).toBe("File");
+    expect(iconForAttachment("LICENSE")).toBe("File"); // no extension
+    expect(iconForAttachment("archive.")).toBe("File"); // trailing dot
+    expect(iconForAttachment("data.unknownext")).toBe("File");
   });
 });

@@ -23,7 +23,15 @@ describe("parseTabSubject", () => {
     ["/acme/projects/p1", { kind: "project", id: "p1" }],
     ["/acme/autopilots/a1", { kind: "autopilot", id: "a1" }],
     ["/acme/skills/s1", { kind: "skill", id: "s1" }],
-    ["/acme/attachments/att1/preview", { kind: "attachment", id: "att1" }],
+    ["/acme/attachments/att1/preview", { kind: "attachment", id: "att1", filename: null }],
+    [
+      "/acme/attachments/att1/preview?name=report.pdf",
+      { kind: "attachment", id: "att1", filename: "report.pdf" },
+    ],
+    [
+      "/acme/attachments/att1/preview?name=my%20photo.png",
+      { kind: "attachment", id: "att1", filename: "my photo.png" },
+    ],
     // Actors
     ["/acme/agents/ag1", { kind: "actor", actorType: "agent", id: "ag1" }],
     ["/acme/members/m1", { kind: "actor", actorType: "member", id: "m1" }],
@@ -36,13 +44,13 @@ describe("parseTabSubject", () => {
       "/acme/runtimes/machine-1/runtime/rt-2",
       { kind: "runtime", machineId: "machine-1", runtimeId: "rt-2" },
     ],
-    // Containers — selection lives in the query string
-    ["/acme/inbox", { kind: "inbox", selectedKey: null }],
-    ["/acme/inbox?issue=MUL-9", { kind: "inbox", selectedKey: "MUL-9" }],
-    ["/acme/inbox?view=archived", { kind: "inbox", selectedKey: null }],
+    // Containers — selection (and archived sub-list) live in the query string
+    ["/acme/inbox", { kind: "inbox", selectedKey: null, archived: false }],
+    ["/acme/inbox?issue=MUL-9", { kind: "inbox", selectedKey: "MUL-9", archived: false }],
+    ["/acme/inbox?view=archived", { kind: "inbox", selectedKey: null, archived: true }],
     [
       "/acme/inbox?view=archived&issue=MUL-9",
-      { kind: "inbox", selectedKey: "MUL-9" },
+      { kind: "inbox", selectedKey: "MUL-9", archived: true },
     ],
     ["/acme/chat", { kind: "chat", sessionId: null }],
     ["/acme/chat?session=sess-1", { kind: "chat", sessionId: "sess-1" }],
@@ -87,5 +95,17 @@ describe("tabSubjectKey", () => {
     expect(
       tabSubjectKey({ kind: "actor", actorType: "member", id: "m1" }),
     ).toBe("actor:member:m1");
+  });
+
+  it("distinguishes archived inbox and the attachment filename", () => {
+    expect(tabSubjectKey({ kind: "inbox", selectedKey: "k", archived: false })).toBe(
+      "inbox:inbox:k",
+    );
+    expect(tabSubjectKey({ kind: "inbox", selectedKey: "k", archived: true })).toBe(
+      "inbox:archived:k",
+    );
+    expect(
+      tabSubjectKey({ kind: "attachment", id: "a1", filename: "x.pdf" }),
+    ).toBe("attachment:a1:x.pdf");
   });
 });

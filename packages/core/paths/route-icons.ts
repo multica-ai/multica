@@ -34,6 +34,12 @@ export type RouteIconName =
   | "BookOpenText"
   | "Settings"
   | "File"
+  | "FileText"
+  | "FileImage"
+  | "FileCode"
+  | "FileArchive"
+  | "FileAudio"
+  | "FileVideo"
   | "FileQuestion";
 
 /** i18n label key (under the `layout.nav` namespace) for a page. */

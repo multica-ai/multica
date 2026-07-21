@@ -104,6 +104,37 @@ const ACTOR_LABEL: Record<TabActorType, TabLabelKey> = {
   squad: "squad",
 };
 
+// Extension → file-type icon. The preview URL only carries the filename, so the
+// extension is the available signal; anything unrecognized uses the generic
+// File glyph.
+const EXTENSION_ICON: Record<string, RouteIconName> = {};
+const registerExtensions = (icon: RouteIconName, exts: string[]) => {
+  for (const ext of exts) EXTENSION_ICON[ext] = icon;
+};
+registerExtensions("FileImage", [
+  "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif", "heic",
+]);
+registerExtensions("FileVideo", ["mp4", "mov", "webm", "mkv", "avi", "m4v"]);
+registerExtensions("FileAudio", ["mp3", "wav", "ogg", "flac", "m4a", "aac"]);
+registerExtensions("FileArchive", ["zip", "tar", "gz", "tgz", "rar", "7z", "bz2"]);
+registerExtensions("FileCode", [
+  "js", "jsx", "ts", "tsx", "json", "yaml", "yml", "py", "go", "rs",
+  "java", "c", "h", "cpp", "cc", "rb", "php", "swift", "kt", "sh", "css", "scss",
+]);
+registerExtensions("FileText", [
+  "txt", "md", "markdown", "pdf", "doc", "docx", "csv", "log",
+  "html", "htm", "xml", "rtf", "odt",
+]);
+
+/** Choose the file icon for an attachment from its filename, else generic File. */
+export function iconForAttachment(filename: string | null): RouteIconName {
+  if (!filename) return "File";
+  const dot = filename.lastIndexOf(".");
+  if (dot < 0 || dot === filename.length - 1) return "File";
+  const ext = filename.slice(dot + 1).toLowerCase();
+  return EXTENSION_ICON[ext] ?? "File";
+}
+
 /**
  * Resolve a subject + available data into the tab's leading visual and title.
  * Exhaustive over every {@link TabSubject} kind so a new route/resource type
@@ -159,12 +190,14 @@ export function resolveTabPresentation(
         title: textOr(data.runtime?.name, "runtime"),
       };
     case "attachment":
-      // The attachment filename is not resolvable from the preview URL alone
-      // (it needs the owning issue's attachment list), so the tab shows a
-      // stable type label until/unless a richer source is wired up.
+      // The preview URL carries the filename (`?name=`), so use it for the
+      // title and pick a matching file icon from its extension. Only fall back
+      // to the generic File glyph + "Attachment" label when it's missing.
       return {
-        visual: { kind: "icon", icon: "File" },
-        title: { kind: "tab", tabKey: "attachment" },
+        visual: { kind: "icon", icon: iconForAttachment(subject.filename) },
+        title: subject.filename
+          ? { kind: "text", text: subject.filename }
+          : { kind: "tab", tabKey: "attachment" },
       };
     case "inbox": {
       // The container icon never changes; only the title tracks the selection.

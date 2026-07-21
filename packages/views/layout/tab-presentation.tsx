@@ -24,7 +24,10 @@ import {
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { runtimeDisplayName } from "@multica/core/runtimes";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
-import { inboxListOptions } from "@multica/core/inbox/queries";
+import {
+  inboxListOptions,
+  archivedInboxListOptions,
+} from "@multica/core/inbox/queries";
 import { cn } from "@multica/ui/lib/utils";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
@@ -73,10 +76,19 @@ const PENDING_RESOURCE_KEYS: ReadonlySet<TabLabelKey> = new Set<TabLabelKey>([
 function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
   const { t: chatT } = useT("chat");
 
+  // Read both inbox lists cache-only; the archived view keeps its own list, so
+  // an archived selection has to resolve against the archived cache — the same
+  // list the InboxPage populates when `?view=archived` is active.
   const inboxList = useQuery({ ...inboxListOptions(wsId), enabled: false }).data;
+  const archivedInboxList = useQuery({
+    ...archivedInboxListOptions(wsId),
+    enabled: false,
+  }).data;
+  const activeInboxList =
+    subject.kind === "inbox" && subject.archived ? archivedInboxList : inboxList;
   const inboxItem =
     subject.kind === "inbox" && subject.selectedKey
-      ? (inboxList?.find(
+      ? (activeInboxList?.find(
           (i) => (i.issue_id ?? i.id) === subject.selectedKey,
         ) ?? null)
       : null;
