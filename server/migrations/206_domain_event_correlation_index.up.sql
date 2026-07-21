@@ -1,4 +1,4 @@
--- Single-statement CONCURRENTLY migration (see 203). Backs correlation-chain
+-- Single-statement CONCURRENTLY migration (see 204). Backs correlation-chain
 -- reads (GET /api/events?correlation_id=) and loop/depth guardrail lookups:
 --   WHERE workspace_id = $1 AND correlation_id = $2 ORDER BY seq
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_domain_event_correlation
