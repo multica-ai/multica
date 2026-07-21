@@ -1857,13 +1857,17 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 		if restorable {
 			// Channel-ingested user messages are the durable record of what
 			// the platform sender wrote — the sender has no Multica composer
-			// to restore a draft into. A bound session settles as "Stopped."
-			// below instead of deleting its sealed input batch.
-			channelBound, err := qtx.ChatSessionHasChannelBinding(ctx, task.ChatSessionID)
+			// to restore a draft into. The gate is the immutable per-message
+			// channel_ingested stamp, NOT the channel_chat_session_binding
+			// row: archiving a session or rebinding an installation deletes
+			// the binding while the messages (and a still-cancellable task)
+			// remain. A channel task settles as "Stopped." below instead of
+			// deleting its sealed input batch.
+			channelIngested, err := qtx.TaskHasChannelIngestedMessages(ctx, task.ID)
 			if err != nil {
-				return fmt.Errorf("check cancelled chat channel binding: %w", err)
+				return fmt.Errorf("check cancelled chat channel provenance: %w", err)
 			}
-			restorable = !channelBound
+			restorable = !channelIngested
 		}
 		if restorable && task.StartedAt.Valid && opts.ClientSupportsDraftRestore {
 			// A started task's daemon learns of the cancellation by polling
@@ -1994,15 +1998,15 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 		}
 		restorable := len(messages) == 0
 		if restorable {
-			// Same guard as finalizeCancelledChatMessage: channel-bound
-			// sessions never restore-delete their sealed input. The sync path
-			// no longer defers such tasks; this covers markers created by an
-			// older replica during a rolling deploy.
-			channelBound, err := qtx.ChatSessionHasChannelBinding(ctx, claimed.ChatSessionID)
+			// Same immutable-provenance guard as finalizeCancelledChatMessage:
+			// channel tasks never restore-delete their sealed input. The sync
+			// path no longer defers such tasks; this covers markers created by
+			// an older replica during a rolling deploy.
+			channelIngested, err := qtx.TaskHasChannelIngestedMessages(ctx, claimed.ID)
 			if err != nil {
-				return fmt.Errorf("check cancelled chat channel binding: %w", err)
+				return fmt.Errorf("check cancelled chat channel provenance: %w", err)
 			}
-			restorable = !channelBound
+			restorable = !channelIngested
 		}
 		if restorable {
 			// The transcript stayed empty through the daemon flush: same

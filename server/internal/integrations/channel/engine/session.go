@@ -306,11 +306,15 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 		}
 	}
 
+	// channel_ingested is the immutable provenance the cancel path gates on:
+	// it must be stamped in the same transaction as the message so no later
+	// binding deletion (archive, installation rebind) can strip it.
 	msg, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
 		ChatSessionID:            in.SessionID,
 		Role:                     "user",
 		Content:                  in.Body,
 		ChannelMediaPendingUntil: in.MediaPendingUntil,
+		ChannelIngested:          pgtype.Bool{Bool: true, Valid: true},
 	})
 	if err != nil {
 		return AppendResult{}, fmt.Errorf("create chat message: %w", err)

@@ -131,12 +131,13 @@ func TestBindMediaRefs_PersistsAndLinksAttachmentToDurableMessage(t *testing.T) 
 	var content, filename, url, contentType string
 	var mediaPendingUntil pgtype.Timestamptz
 	var sizeBytes int64
+	var channelIngested bool
 	if err := pool.QueryRow(context.Background(), `
-		SELECT m.content, a.filename, a.url, a.content_type, a.size_bytes, m.channel_media_pending_until
+		SELECT m.content, a.filename, a.url, a.content_type, a.size_bytes, m.channel_media_pending_until, m.channel_ingested
 		FROM chat_message m
 		JOIN attachment a ON a.chat_message_id = m.id
 		WHERE m.chat_session_id = $1 AND a.chat_session_id = $1`, fixture.sessionID).
-		Scan(&content, &filename, &url, &contentType, &sizeBytes, &mediaPendingUntil); err != nil {
+		Scan(&content, &filename, &url, &contentType, &sizeBytes, &mediaPendingUntil, &channelIngested); err != nil {
 		t.Fatalf("load linked attachment: %v", err)
 	}
 	if content != "[Image]" || filename != "image.png" || url != "https://cdn.example.test/image" || contentType != "image/png" || sizeBytes != 3 {
@@ -144,6 +145,9 @@ func TestBindMediaRefs_PersistsAndLinksAttachmentToDurableMessage(t *testing.T) 
 	}
 	if mediaPendingUntil.Valid {
 		t.Fatalf("media pending deadline was not cleared: %v", mediaPendingUntil.Time)
+	}
+	if !channelIngested {
+		t.Fatal("channel append must stamp channel_ingested for the cancel-path provenance gate")
 	}
 }
 

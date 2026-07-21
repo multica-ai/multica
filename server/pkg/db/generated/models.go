@@ -360,6 +360,7 @@ type ChatMessage struct {
 	ElapsedMs                pgtype.Int8        `json:"elapsed_ms"`
 	MessageKind              string             `json:"message_kind"`
 	ChannelMediaPendingUntil pgtype.Timestamptz `json:"channel_media_pending_until"`
+	ChannelIngested          bool               `json:"channel_ingested"`
 }
 
 type ChatPinnedAgent struct {

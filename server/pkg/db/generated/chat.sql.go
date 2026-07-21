@@ -88,14 +88,15 @@ func (q *Queries) CreateChatDraftRestore(ctx context.Context, arg CreateChatDraf
 const createChatMessage = `-- name: CreateChatMessage :one
 INSERT INTO chat_message (
     chat_session_id, role, content, task_id, failure_reason, elapsed_ms,
-    message_kind, channel_media_pending_until
+    message_kind, channel_media_pending_until, channel_ingested
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     COALESCE($7::text, 'message'),
-    $8
+    $8,
+    COALESCE($9::boolean, FALSE)
 )
-RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested
 `
 
 type CreateChatMessageParams struct {
@@ -107,6 +108,7 @@ type CreateChatMessageParams struct {
 	ElapsedMs                pgtype.Int8        `json:"elapsed_ms"`
 	MessageKind              pgtype.Text        `json:"message_kind"`
 	ChannelMediaPendingUntil pgtype.Timestamptz `json:"channel_media_pending_until"`
+	ChannelIngested          pgtype.Bool        `json:"channel_ingested"`
 }
 
 // message_kind defaults to 'message' via COALESCE so every existing caller
@@ -122,6 +124,7 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 		arg.ElapsedMs,
 		arg.MessageKind,
 		arg.ChannelMediaPendingUntil,
+		arg.ChannelIngested,
 	)
 	var i ChatMessage
 	err := row.Scan(
@@ -135,6 +138,7 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 		&i.ElapsedMs,
 		&i.MessageKind,
 		&i.ChannelMediaPendingUntil,
+		&i.ChannelIngested,
 	)
 	return i, err
 }
@@ -466,7 +470,7 @@ func (q *Queries) DeleteChatSession(ctx context.Context, arg DeleteChatSessionPa
 const deleteUserChatMessageByTask = `-- name: DeleteUserChatMessageByTask :one
 DELETE FROM chat_message
 WHERE task_id = $1 AND role = 'user'
-RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested
 `
 
 func (q *Queries) DeleteUserChatMessageByTask(ctx context.Context, taskID pgtype.UUID) (ChatMessage, error) {
@@ -483,6 +487,7 @@ func (q *Queries) DeleteUserChatMessageByTask(ctx context.Context, taskID pgtype
 		&i.ElapsedMs,
 		&i.MessageKind,
 		&i.ChannelMediaPendingUntil,
+		&i.ChannelIngested,
 	)
 	return i, err
 }
@@ -507,7 +512,7 @@ func (q *Queries) GetChannelMediaPendingUntil(ctx context.Context, chatSessionID
 }
 
 const getChatMessage = `-- name: GetChatMessage :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested FROM chat_message
 WHERE id = $1
 `
 
@@ -525,6 +530,7 @@ func (q *Queries) GetChatMessage(ctx context.Context, id pgtype.UUID) (ChatMessa
 		&i.ElapsedMs,
 		&i.MessageKind,
 		&i.ChannelMediaPendingUntil,
+		&i.ChannelIngested,
 	)
 	return i, err
 }
@@ -628,7 +634,7 @@ func (q *Queries) GetLastChatTaskSession(ctx context.Context, chatSessionID pgty
 }
 
 const getMostRecentUserChatMessage = `-- name: GetMostRecentUserChatMessage :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested FROM chat_message
 WHERE chat_session_id = $1 AND role = 'user'
 ORDER BY created_at DESC
 LIMIT 1
@@ -653,6 +659,7 @@ func (q *Queries) GetMostRecentUserChatMessage(ctx context.Context, chatSessionI
 		&i.ElapsedMs,
 		&i.MessageKind,
 		&i.ChannelMediaPendingUntil,
+		&i.ChannelIngested,
 	)
 	return i, err
 }
@@ -898,7 +905,7 @@ func (q *Queries) ListChatDraftRestoresBySession(ctx context.Context, chatSessio
 }
 
 const listChatInputMessages = `-- name: ListChatInputMessages :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested FROM chat_message
 WHERE task_id = $1 AND role = 'user'
 ORDER BY created_at ASC, id ASC
 `
@@ -930,6 +937,7 @@ func (q *Queries) ListChatInputMessages(ctx context.Context, taskID pgtype.UUID)
 			&i.ElapsedMs,
 			&i.MessageKind,
 			&i.ChannelMediaPendingUntil,
+			&i.ChannelIngested,
 		); err != nil {
 			return nil, err
 		}
@@ -942,7 +950,7 @@ func (q *Queries) ListChatInputMessages(ctx context.Context, taskID pgtype.UUID)
 }
 
 const listChatMessages = `-- name: ListChatMessages :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested FROM chat_message
 WHERE chat_session_id = $1
 ORDER BY created_at ASC, id ASC
 `
@@ -967,6 +975,7 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 			&i.ElapsedMs,
 			&i.MessageKind,
 			&i.ChannelMediaPendingUntil,
+			&i.ChannelIngested,
 		); err != nil {
 			return nil, err
 		}
@@ -979,7 +988,7 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 }
 
 const listChatMessagesPage = `-- name: ListChatMessagesPage :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested FROM chat_message
 WHERE chat_session_id = $1
   AND (
     $3::timestamptz IS NULL
@@ -1021,6 +1030,7 @@ func (q *Queries) ListChatMessagesPage(ctx context.Context, arg ListChatMessages
 			&i.ElapsedMs,
 			&i.MessageKind,
 			&i.ChannelMediaPendingUntil,
+			&i.ChannelIngested,
 		); err != nil {
 			return nil, err
 		}
@@ -1582,6 +1592,28 @@ func (q *Queries) SetChatTaskInputOwnerSelf(ctx context.Context, id pgtype.UUID)
 		&i.AccountableUserID,
 	)
 	return i, err
+}
+
+const taskHasChannelIngestedMessages = `-- name: TaskHasChannelIngestedMessages :one
+SELECT EXISTS (
+    SELECT 1 FROM chat_message
+    WHERE task_id = $1
+      AND role = 'user'
+      AND channel_ingested
+) AS channel_ingested
+`
+
+// Immutable cancel-path provenance: channel_ingested is stamped inside the
+// channel append transaction and never mutated afterwards, so it survives
+// session archiving and installation rebinds that delete the
+// channel_chat_session_binding row. The cancel restore-delete gates on this —
+// a channel sender has no Multica composer, so their messages must never be
+// deleted into a draft restore.
+func (q *Queries) TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, taskHasChannelIngestedMessages, taskID)
+	var channel_ingested bool
+	err := row.Scan(&channel_ingested)
+	return channel_ingested, err
 }
 
 const touchChatSession = `-- name: TouchChatSession :exec

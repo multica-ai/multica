@@ -443,15 +443,6 @@ SELECT * FROM channel_chat_session_binding
 WHERE chat_session_id = sqlc.arg('chat_session_id')
   AND channel_type = sqlc.arg('channel_type');
 
--- name: ChatSessionHasChannelBinding :one
--- Cancel finalization keys off this: a bound session's user messages are the
--- durable record of what the platform sender wrote (the sender has no Multica
--- composer), so cancelling a task must never delete them into a draft restore.
-SELECT EXISTS (
-    SELECT 1 FROM channel_chat_session_binding
-    WHERE chat_session_id = $1
-) AS bound;
-
 -- name: UpdateChannelChatSessionBindingReplyTarget :exec
 -- Records the most recent inbound trigger message + thread so the decoupled
 -- outbound patcher can thread its reply back into the originating topic.

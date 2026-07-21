@@ -40,6 +40,7 @@ type fakeSessionQueries struct {
 	createdSessions int
 	messages        []string
 	messageID       pgtype.UUID
+	lastCreate      db.CreateChatMessageParams
 	touched         int
 	replyTargets    int
 	lockedWorkspace int    // count of LockWorkspaceForChatSessionCreate calls
@@ -93,6 +94,7 @@ func (f *fakeSessionQueries) CreateChannelChatSessionBinding(_ context.Context, 
 
 func (f *fakeSessionQueries) CreateChatMessage(_ context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	f.messages = append(f.messages, arg.Content)
+	f.lastCreate = arg
 	return db.ChatMessage{ID: f.messageID}, nil
 }
 
@@ -322,6 +324,9 @@ func TestBindMediaRefs_CreatesAndLinksChatAttachments(t *testing.T) {
 	}
 	if res.MessageID != f.messageID {
 		t.Fatalf("message id = %v, want %v", res.MessageID, f.messageID)
+	}
+	if !f.lastCreate.ChannelIngested.Valid || !f.lastCreate.ChannelIngested.Bool {
+		t.Fatalf("channel append must stamp channel_ingested, got %+v", f.lastCreate.ChannelIngested)
 	}
 	err = s.BindMediaRefs(context.Background(), BindMediaInput{
 		MessageID:   res.MessageID,

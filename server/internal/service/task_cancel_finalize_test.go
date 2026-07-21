@@ -582,10 +582,15 @@ func TestListChatFinalizeDeferredExpired_HonorsGrace(t *testing.T) {
 	}
 }
 
-// bindChannelSession attaches a channel_chat_session_binding to the fixture's
-// chat session, making it a channel-ingested (Feishu/Slack) session.
-func (f cancelFinalizeFixture) bindChannelSession(t *testing.T, ctx context.Context) {
+// seedChannelIngest mirrors the channel append path: the user message carries
+// the immutable channel_ingested stamp and the session has a routing binding.
+func (f cancelFinalizeFixture) seedChannelIngest(t *testing.T, ctx context.Context) {
 	t.Helper()
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE chat_message SET channel_ingested = TRUE WHERE id = $1
+	`, f.userMessageID); err != nil {
+		t.Fatalf("stamp channel_ingested: %v", err)
+	}
 	if _, err := f.pool.Exec(ctx, `
 		INSERT INTO channel_chat_session_binding (
 			chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, config
@@ -599,15 +604,28 @@ func (f cancelFinalizeFixture) bindChannelSession(t *testing.T, ctx context.Cont
 	})
 }
 
-// A channel-bound session's user messages are the durable record of what the
-// platform sender wrote — the sender has no Multica composer to restore a
-// draft into. Cancelling a channel task with its sealed input batch must keep
-// the messages and settle as "Stopped." instead of restore-deleting them.
-func TestCancelTask_ChannelBoundSession_KeepsSealedMessages(t *testing.T) {
+// unbindChannelSession deletes the routing binding the way archiving a session
+// or rebinding an installation does — the provenance gate must survive it.
+func (f cancelFinalizeFixture) unbindChannelSession(t *testing.T, ctx context.Context) {
+	t.Helper()
+	if _, err := f.pool.Exec(ctx, `
+		DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1
+	`, f.chatSessionID); err != nil {
+		t.Fatalf("delete channel binding: %v", err)
+	}
+}
+
+// Channel-ingested user messages are the durable record of what the platform
+// sender wrote — the sender has no Multica composer to restore a draft into.
+// The gate is the immutable per-message channel_ingested stamp, so it must
+// hold even after archiving/rebinding deleted the session binding: cancelling
+// the sealed queued task keeps the messages and settles as "Stopped.".
+func TestCancelTask_ChannelIngested_ArchivedSessionKeepsSealedMessages(t *testing.T) {
 	ctx := context.Background()
 	pool := newCancelFinalizePool(t)
 	f := createCancelFinalizeFixture(t, ctx, pool, "queued", false)
-	f.bindChannelSession(t, ctx)
+	f.seedChannelIngest(t, ctx)
+	f.unbindChannelSession(t, ctx)
 	svc := NewTaskService(db.New(pool), pool, nil, events.New())
 
 	result, err := svc.CancelTaskWithResult(ctx, util.MustParseUUID(f.taskID), CancelTaskOptions{ClientSupportsDraftRestore: true})
@@ -615,7 +633,7 @@ func TestCancelTask_ChannelBoundSession_KeepsSealedMessages(t *testing.T) {
 		t.Fatalf("cancel task: %v", err)
 	}
 	if result.CancelledChatMessage != nil {
-		t.Fatalf("channel session must not produce a restore result, got %+v", result.CancelledChatMessage)
+		t.Fatalf("channel task must not produce a restore result, got %+v", result.CancelledChatMessage)
 	}
 	if !f.userMessageExists(t, ctx) {
 		t.Error("channel user chat message must be preserved")
@@ -624,28 +642,30 @@ func TestCancelTask_ChannelBoundSession_KeepsSealedMessages(t *testing.T) {
 		t.Errorf("assistant messages = %v, want [Stopped.]", got)
 	}
 	if restores := f.draftRestores(t, ctx); len(restores) != 0 {
-		t.Errorf("channel session must not create draft restores, got %d", len(restores))
+		t.Errorf("channel task must not create draft restores, got %d", len(restores))
 	}
 	if got := f.chatFinalizeDeferredAt(t, ctx); got != nil {
-		t.Errorf("channel session must not defer finalize, got %v", got)
+		t.Errorf("channel task must not defer finalize, got %v", got)
 	}
 }
 
-// Started-empty channel task: the sync path settles it as "Stopped." without
-// marking it deferred, and a marker left behind by an older replica during a
-// rolling deploy must still not delete the sealed input on the deferred path.
-func TestFinalizeDeferredCancelledChat_ChannelBoundSession_KeepsSealedMessages(t *testing.T) {
+// Started-empty channel task after archive/unbind: the sync path settles it as
+// "Stopped." without marking it deferred, and a marker left behind by an older
+// replica during a rolling deploy must still not delete the sealed input when
+// the deferred path claims it.
+func TestFinalizeDeferredCancelledChat_ChannelIngested_ArchivedSessionKeepsSealedMessages(t *testing.T) {
 	ctx := context.Background()
 	pool := newCancelFinalizePool(t)
 	f := createCancelFinalizeFixture(t, ctx, pool, "running", true)
-	f.bindChannelSession(t, ctx)
+	f.seedChannelIngest(t, ctx)
+	f.unbindChannelSession(t, ctx)
 	svc := NewTaskService(db.New(pool), pool, nil, events.New())
 
 	if _, err := svc.CancelTaskWithResult(ctx, util.MustParseUUID(f.taskID), CancelTaskOptions{ClientSupportsDraftRestore: true}); err != nil {
 		t.Fatalf("cancel task: %v", err)
 	}
 	if got := f.chatFinalizeDeferredAt(t, ctx); got != nil {
-		t.Errorf("channel session must settle synchronously, deferred at %v", got)
+		t.Errorf("channel task must settle synchronously, deferred at %v", got)
 	}
 
 	if _, err := pool.Exec(ctx, `
@@ -659,6 +679,6 @@ func TestFinalizeDeferredCancelledChat_ChannelBoundSession_KeepsSealedMessages(t
 		t.Error("channel user chat message must be preserved by the deferred path")
 	}
 	if restores := f.draftRestores(t, ctx); len(restores) != 0 {
-		t.Errorf("channel session must not create draft restores, got %d", len(restores))
+		t.Errorf("channel task must not create draft restores, got %d", len(restores))
 	}
 }

@@ -153,14 +153,29 @@ WHERE id = $1;
 -- 'no_response' to mark a visible turn with no text output (MUL-4351).
 INSERT INTO chat_message (
     chat_session_id, role, content, task_id, failure_reason, elapsed_ms,
-    message_kind, channel_media_pending_until
+    message_kind, channel_media_pending_until, channel_ingested
 )
 VALUES (
     $1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms),
     COALESCE(sqlc.narg(message_kind)::text, 'message'),
-    sqlc.narg(channel_media_pending_until)
+    sqlc.narg(channel_media_pending_until),
+    COALESCE(sqlc.narg(channel_ingested)::boolean, FALSE)
 )
 RETURNING *;
+
+-- name: TaskHasChannelIngestedMessages :one
+-- Immutable cancel-path provenance: channel_ingested is stamped inside the
+-- channel append transaction and never mutated afterwards, so it survives
+-- session archiving and installation rebinds that delete the
+-- channel_chat_session_binding row. The cancel restore-delete gates on this —
+-- a channel sender has no Multica composer, so their messages must never be
+-- deleted into a draft restore.
+SELECT EXISTS (
+    SELECT 1 FROM chat_message
+    WHERE task_id = $1
+      AND role = 'user'
+      AND channel_ingested
+) AS channel_ingested;
 
 -- name: GetChannelMediaPendingUntil :one
 -- The latest unexpired media deadline gates a channel task. Using a durable

@@ -73,23 +73,6 @@ func (q *Queries) BackfillChannelInstallationRegionToFeishuLark(ctx context.Cont
 	return result.RowsAffected(), nil
 }
 
-const chatSessionHasChannelBinding = `-- name: ChatSessionHasChannelBinding :one
-SELECT EXISTS (
-    SELECT 1 FROM channel_chat_session_binding
-    WHERE chat_session_id = $1
-) AS bound
-`
-
-// Cancel finalization keys off this: a bound session's user messages are the
-// durable record of what the platform sender wrote (the sender has no Multica
-// composer), so cancelling a task must never delete them into a draft restore.
-func (q *Queries) ChatSessionHasChannelBinding(ctx context.Context, chatSessionID pgtype.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, chatSessionHasChannelBinding, chatSessionID)
-	var bound bool
-	err := row.Scan(&bound)
-	return bound, err
-}
-
 const claimChannelInboundDedup = `-- name: ClaimChannelInboundDedup :one
 
 INSERT INTO channel_inbound_message_dedup (installation_id, message_id, claim_token)
