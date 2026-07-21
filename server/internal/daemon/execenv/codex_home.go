@@ -286,7 +286,15 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	policy := codexSandboxPolicyForConfig(opts.GOOS, opts.CodexVersion, winState)
 	policy.WritableRoots = opts.WritableRoots
 	if err := ensureCodexSandboxConfig(configFile, policy, opts.CodexVersion, logger); err != nil {
-		logger.Warn("execenv: codex-home ensure sandbox config failed", "error", err)
+		// The managed block is the authoritative on-disk sandbox policy. If it
+		// can't be written, config.toml keeps whatever it already had — on a
+		// reused home that may be a stale danger-full-access from a prior run —
+		// so the fail-closed policy just computed above would only exist in
+		// memory while the effective config silently stays loose. Abort rather
+		// than launch Codex with an unenforced sandbox: on fresh Prepare this
+		// fails the task; on Reuse the caller leaves env.CodexHome unset, which
+		// configureCodexTaskShellEnvironment then refuses to start (MUL-4957).
+		return fmt.Errorf("ensure codex sandbox config: %w", err)
 	}
 
 	// Disable Codex native multi-agent inside daemon-managed task sessions

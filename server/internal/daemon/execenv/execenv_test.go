@@ -3065,6 +3065,69 @@ func TestResolveWindowsSandboxStateFailsClosed(t *testing.T) {
 	})
 }
 
+// TestPrepareCodexHomeFailsClosedWhenSandboxWriteFails pins the MUL-4957
+// round-4 must-fix: the computed fail-closed policy must not stay only in
+// memory. It reproduces the reuse scenario where (1) the per-task config.toml
+// still holds last run's managed danger-full-access, (2) the shared config has
+// since opted into a native windows.sandbox but the sync cannot refresh the
+// copy, and (3) the managed block cannot be rewritten. Previously prepare
+// warned and returned success, so the task launched with the stale
+// danger-full-access — the decision failed closed while the effective config
+// failed open. prepareCodexHomeWithOpts must now return an error, which blocks
+// startup on both paths (fresh Prepare fails the task; Reuse leaves
+// env.CodexHome unset, which configureCodexTaskShellEnvironment refuses).
+func TestPrepareCodexHomeFailsClosedWhenSandboxWriteFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses the read-only permissions this test relies on")
+	}
+	// Cannot use t.Parallel() with t.Setenv.
+
+	// Shared home the user has since pointed at a native Windows sandbox.
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte("windows.sandbox = \"unelevated\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	// Reused per-task home still holding the prior run's danger-full-access.
+	codexHome := t.TempDir()
+	configPath := filepath.Join(codexHome, "config.toml")
+	stale := multicaManagedBeginMarker + "\nsandbox_mode = \"danger-full-access\"\n" + multicaManagedEndMarker + "\n"
+	if err := os.WriteFile(configPath, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Read-only file + directory: the sync cannot replace the stale copy and
+	// the managed block cannot be rewritten.
+	if err := os.Chmod(configPath, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(codexHome, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	// Restore before t.TempDir's own cleanup so removal succeeds (LIFO).
+	t.Cleanup(func() {
+		_ = os.Chmod(codexHome, 0o755)
+		_ = os.Chmod(configPath, 0o644)
+	})
+
+	err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{GOOS: "windows", CodexVersion: "0.144.5"}, testLogger())
+	if err == nil {
+		t.Fatal("expected prepareCodexHomeWithOpts to fail closed when the sandbox block cannot be written, got nil")
+	}
+	if !strings.Contains(err.Error(), "sandbox config") {
+		t.Errorf("expected a sandbox-config error, got: %v", err)
+	}
+	// The stale danger-full-access is still on disk — proving the task would
+	// have launched unsandboxed had prepare reported success.
+	data, readErr := os.ReadFile(configPath)
+	if readErr != nil {
+		t.Fatalf("read config: %v", readErr)
+	}
+	if !strings.Contains(string(data), `sandbox_mode = "danger-full-access"`) {
+		t.Fatalf("expected the stale danger-full-access to remain (write failed), got:\n%s", data)
+	}
+}
+
 func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
