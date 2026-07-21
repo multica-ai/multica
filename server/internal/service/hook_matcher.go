@@ -155,8 +155,8 @@ func (s *HookService) claimAndDecideOne(ctx context.Context) (claimed bool, disp
 	var eventID pgtype.UUID
 	err = s.inTxWith(ctx, func(tx pgx.Tx, qtx *db.Queries) error {
 		rows, err := qtx.ClaimOneEventWithCandidates(ctx, db.ClaimOneEventWithCandidatesParams{
-			LeaseToken:     lease,
-			LeaseExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(MatcherLeaseTTL), Valid: true},
+			LeaseToken:      lease,
+			LeaseTtlSeconds: MatcherLeaseTTL.Seconds(),
 		})
 		if err != nil {
 			return err
@@ -174,13 +174,29 @@ func (s *HookService) claimAndDecideOne(ctx context.Context) (claimed bool, disp
 	case errors.Is(err, errNoClaimableEvent):
 		return false, false, nil
 	case errors.Is(err, errLeaseLost):
-		// Not our event (or our lease expired mid-decision). The transaction rolled
-		// back, so we wrote nothing; the owner — or a later tick — will decide it.
-		// Report it as not claimed so the tick ends instead of immediately re-claiming
-		// the same row and failing ownership again.
-		return false, false, nil
+		if !claimed {
+			// We never took the event, so it is not ours to back off.
+			return false, false, nil
+		}
+		// We DID claim it in this transaction and then lost ownership, which — with
+		// the claim and the decision in one transaction and the event row locked
+		// throughout — means our own fresh lease expired mid-decision. The rollback
+		// also undid the claim, restoring the original available_at, so without a
+		// backoff the next tick selects this same oldest event again and everything
+		// behind it starves. Back it off exactly like any other failed decision.
+		if derr := s.deferFailedEvent(ctx, eventID); derr != nil {
+			slog.Warn("hook matcher: could not back off an expired-lease event",
+				"event_id", util.UUIDToString(eventID), "error", derr)
+			return false, false, nil // end the tick rather than spin on the same row
+		}
+		slog.Warn("hook matcher: lease expired mid-decision, event backed off",
+			"event_id", util.UUIDToString(eventID))
+		return true, false, nil // deferred — keep draining the rest of the queue
 	case err != nil:
-		s.deferFailedEvent(ctx, eventID)
+		if derr := s.deferFailedEvent(ctx, eventID); derr != nil {
+			slog.Warn("hook matcher: could not back off a failed event",
+				"event_id", util.UUIDToString(eventID), "error", derr)
+		}
 		return claimed, false, err
 	}
 	return claimed, dispatched, nil
@@ -439,19 +455,18 @@ func pinnedRevisionToEval(candidate pinnedCandidate, eventType string) (automati
 	}, nil
 }
 
-// deferFailedEvent backs an event off after a transient failure. Best effort: the
-// decision transaction already rolled back, so the worst case is the event retrying
-// sooner than intended.
-func (s *HookService) deferFailedEvent(ctx context.Context, eventID pgtype.UUID) {
+// deferFailedEvent backs an event off after a failed decision so it cannot hold the
+// head of the queue. It runs on its own connection, outside the rolled-back decision
+// transaction, and detached from ctx so a cancelled tick still records the backoff.
+func (s *HookService) deferFailedEvent(ctx context.Context, eventID pgtype.UUID) error {
 	if !eventID.Valid {
-		return
+		return nil
 	}
-	if _, err := s.Queries.DeferDomainEventDispatch(context.WithoutCancel(ctx), db.DeferDomainEventDispatchParams{
+	_, err := s.Queries.DeferDomainEventDispatch(context.WithoutCancel(ctx), db.DeferDomainEventDispatchParams{
 		ID:             eventID,
 		BackoffSeconds: int32(matcherFailureBackoff.Seconds()),
-	}); err != nil {
-		slog.Warn("hook matcher: could not defer failed event", "event_id", util.UUIDToString(eventID), "error", err)
-	}
+	})
+	return err
 }
 
 // writeHookExecution inserts one decision row idempotently, pinned to the revision

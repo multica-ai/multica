@@ -78,7 +78,11 @@ WITH claimed AS (
     UPDATE domain_event
     SET dispatch_status = 'dispatching',
         lease_token = @lease_token,
-        lease_expires_at = @lease_expires_at,
+        -- Derive the deadline from the DATABASE clock, the same clock the ownership
+        -- predicate compares it against. Computing it application-side would let
+        -- app/DB clock skew grant a lease that is already expired, or one that
+        -- outlives its intended TTL.
+        lease_expires_at = clock_timestamp() + make_interval(secs => @lease_ttl_seconds::float8),
         attempts = attempts + 1
     WHERE id = (
         SELECT id FROM domain_event

@@ -933,6 +933,15 @@ func TestMatcherExpiredLeaseWritesNothing(t *testing.T) {
 		t.Errorf("expired-lease worker finalized the event: %+v", s)
 	}
 
+	// Losing ownership now also backs the event off (see
+	// TestMatcherExpiredLeaseEventDoesNotStarveQueue), so it is not immediately
+	// claimable. Advance past that backoff to reach the retry.
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE domain_event SET available_at = now() WHERE id = $1`,
+		util.UUIDToString(event.ID)); err != nil {
+		t.Fatalf("clear backoff: %v", err)
+	}
+
 	// With a live lease the same event decides normally.
 	MatcherLeaseTTL = original
 	if _, err := f.svc.ClaimAndMatch(ctx, 10); err != nil {
@@ -972,5 +981,100 @@ func TestMatcherFinalizeRejectsExpiredLease(t *testing.T) {
 	}
 	if s := f.eventState(t, event.ID); s.status == "dispatched" || s.hasDispatchedAt {
 		t.Errorf("expired lease finalized the event: %+v", s)
+	}
+}
+
+// sleepBeforeExecutionInsert makes every hook_execution INSERT for one hook pause,
+// so a test can make a decision reliably outlive its lease TTL.
+func (f matcherFixture) sleepBeforeExecutionInsert(t *testing.T, hookID string, seconds float64) {
+	t.Helper()
+	ctx := context.Background()
+	name := fmt.Sprintf("hook_exec_sleep_%d", time.Now().UnixNano())
+	fn := name + "_fn"
+	if _, err := f.pool.Exec(ctx, fmt.Sprintf(`
+		CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN PERFORM pg_sleep(%f); RETURN NEW; END; $$;`, quoteIdent(fn), seconds)); err != nil {
+		t.Fatalf("create execution sleep function: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx, fmt.Sprintf(`
+		CREATE TRIGGER %s BEFORE INSERT ON hook_execution
+		FOR EACH ROW WHEN (NEW.hook_id = %s::uuid)
+		EXECUTE FUNCTION %s();`, quoteIdent(name), quoteLiteral(hookID), quoteIdent(fn))); err != nil {
+		t.Fatalf("create execution sleep trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		f.pool.Exec(bg, fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON hook_execution", quoteIdent(name)))
+		f.pool.Exec(bg, fmt.Sprintf("DROP FUNCTION IF EXISTS %s()", quoteIdent(fn)))
+	})
+}
+
+// availableInFuture reports whether an event has been backed off past now.
+func (f matcherFixture) availableInFuture(t *testing.T, eventID pgtype.UUID) bool {
+	t.Helper()
+	var future bool
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT available_at > now() FROM domain_event WHERE id = $1`,
+		util.UUIDToString(eventID)).Scan(&future); err != nil {
+		t.Fatalf("read available_at: %v", err)
+	}
+	return future
+}
+
+// An event whose OWN fresh lease expires mid-decision must be backed off like any
+// other failed decision, so the queue moves past it.
+//
+// Zero writes alone is not enough. Claim and decision share one transaction and the
+// event row stays locked throughout, so in production this branch is essentially
+// always "the lease we just took expired while we were deciding". Rolling back also
+// undoes the claim and restores the original available_at, so a decision that
+// reliably outlives its TTL would be re-selected as the oldest event on every tick
+// and starve everything behind it forever. This puts such an event at the head of
+// the queue with a healthy event behind it and asserts the healthy one still runs.
+func TestMatcherExpiredLeaseEventDoesNotStarveQueue(t *testing.T) {
+	f := newMatcherFixture(t)
+	ctx := context.Background()
+	f.drainMatcherQueue(t)
+
+	// The head event matches this hook, and writing its execution always takes
+	// longer than the lease TTL below — so ownership is lost every single attempt.
+	stuckHook := f.seedHook(t, "issue.status_changed", `{"to":"done"}`, `[]`, automation.FirePerEvent)
+	f.sleepBeforeExecutionInsert(t, stuckHook, 0.7)
+
+	head := f.seedEvent(t, "done", 0)   // matches stuckHook → slow execution insert
+	behind := f.seedEvent(t, "todo", 0) // no candidate matches → decides instantly
+	if head.Seq >= behind.Seq {
+		t.Fatalf("head event must be older: head seq %d, behind seq %d", head.Seq, behind.Seq)
+	}
+
+	original := MatcherLeaseTTL
+	t.Cleanup(func() { MatcherLeaseTTL = original })
+	MatcherLeaseTTL = 300 * time.Millisecond
+
+	// Two ticks, mirroring a running matcher.
+	for round := 1; round <= 2; round++ {
+		if _, err := f.svc.ClaimAndMatch(ctx, 10); err != nil {
+			t.Fatalf("round %d: %v", round, err)
+		}
+	}
+
+	// The stuck event stayed safe: no partial decision survived.
+	if r := f.execFor(t, stuckHook); r.count != 0 {
+		t.Errorf("expired-lease event wrote %d execution(s), want 0", r.count)
+	}
+	if s := f.eventState(t, head.ID); s.status == "dispatched" || s.hasDispatchedAt {
+		t.Errorf("expired-lease event was finalized: %+v", s)
+	}
+
+	// ...and it was backed off rather than left holding the head of the queue.
+	if !f.availableInFuture(t, head.ID) {
+		t.Error("expired-lease event was not backed off — it stays the oldest claimable " +
+			"event and will be re-selected on every tick")
+	}
+
+	// The decisive assertion: the queue moved past it.
+	if s := f.eventState(t, behind.ID); s.status != "dispatched" || !s.hasDispatchedAt {
+		t.Errorf("event behind the stuck one = %+v, want dispatched — one event whose lease "+
+			"keeps expiring is starving the whole queue", s)
 	}
 }

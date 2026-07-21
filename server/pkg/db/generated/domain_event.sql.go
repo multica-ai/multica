@@ -17,7 +17,11 @@ WITH claimed AS (
     UPDATE domain_event
     SET dispatch_status = 'dispatching',
         lease_token = $1,
-        lease_expires_at = $2,
+        -- Derive the deadline from the DATABASE clock, the same clock the ownership
+        -- predicate compares it against. Computing it application-side would let
+        -- app/DB clock skew grant a lease that is already expired, or one that
+        -- outlives its intended TTL.
+        lease_expires_at = clock_timestamp() + make_interval(secs => $2::float8),
         attempts = attempts + 1
     WHERE id = (
         SELECT id FROM domain_event
@@ -63,8 +67,8 @@ ORDER BY cand.hook_created_at ASC NULLS LAST, cand.hook_id ASC
 `
 
 type ClaimOneEventWithCandidatesParams struct {
-	LeaseToken     pgtype.UUID        `json:"lease_token"`
-	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	LeaseToken      pgtype.UUID `json:"lease_token"`
+	LeaseTtlSeconds float64     `json:"lease_ttl_seconds"`
 }
 
 type ClaimOneEventWithCandidatesRow struct {
@@ -113,7 +117,7 @@ type ClaimOneEventWithCandidatesRow struct {
 // Issue scope is lifecycle ownership only and does NOT restrict the event subject —
 // that is the job of `when` — so scope is not a filter here.
 func (q *Queries) ClaimOneEventWithCandidates(ctx context.Context, arg ClaimOneEventWithCandidatesParams) ([]ClaimOneEventWithCandidatesRow, error) {
-	rows, err := q.db.Query(ctx, claimOneEventWithCandidates, arg.LeaseToken, arg.LeaseExpiresAt)
+	rows, err := q.db.Query(ctx, claimOneEventWithCandidates, arg.LeaseToken, arg.LeaseTtlSeconds)
 	if err != nil {
 		return nil, err
 	}
