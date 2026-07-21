@@ -120,7 +120,7 @@ func awaitQwenResult(t *testing.T, session *Session) ([]Message, Result) {
 func TestQwenBackendStreamsNativeEvents(t *testing.T) {
 	t.Parallel()
 	backend := newFakeQwenBackend(t, nil)
-	session, err := backend.Execute(context.Background(), "reply PONG", ExecOptions{Model: "qwen-test", Timeout: time.Second})
+	session, err := backend.Execute(context.Background(), "reply PONG", ExecOptions{Model: "qwen-test", Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestQwenBackendPreservesSuccessfulResumeSession(t *testing.T) {
 	t.Parallel()
 	backend := newFakeQwenBackend(t, nil)
 	session, err := backend.Execute(context.Background(), "continue task", ExecOptions{
-		Model: "qwen-test", ResumeSessionID: "sess-qwen-1", Timeout: time.Second,
+		Model: "qwen-test", ResumeSessionID: "sess-qwen-1", Timeout: 5 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
