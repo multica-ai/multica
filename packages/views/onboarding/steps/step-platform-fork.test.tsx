@@ -163,7 +163,7 @@ describe("StepPlatformFork", () => {
     await user.click(screen.getByRole("button", { name: /show steps/i }));
 
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/1 computer connected/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/1 agent runtime connected/i)).toBeInTheDocument();
     expect(
       within(dialog).getByText(/selected: claude code/i),
     ).toBeInTheDocument();
