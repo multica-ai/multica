@@ -1603,12 +1603,15 @@ SELECT EXISTS (
 ) AS channel_ingested
 `
 
-// Immutable cancel-path provenance: channel_ingested is stamped inside the
-// channel append transaction and never mutated afterwards, so it survives
-// session archiving and installation rebinds that delete the
-// channel_chat_session_binding row. The cancel restore-delete gates on this —
-// a channel sender has no Multica composer, so their messages must never be
-// deleted into a draft restore.
+// Immutable channel provenance for a task's user-message input batch:
+// channel_ingested is stamped inside the channel append transaction and never
+// mutated afterwards, so it survives session archiving and installation
+// rebinds that delete the channel_chat_session_binding row. Callers pass the
+// batch OWNER id (chat_input_task_id, which auto-retry clones inherit), not
+// necessarily the task's own id. The cancel restore-delete and the
+// empty-completion silent-drop both gate on this — a channel sender has no
+// Multica composer for a restored draft, and the no_response fallback body
+// must never be pushed to an external channel.
 func (q *Queries) TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error) {
 	row := q.db.QueryRow(ctx, taskHasChannelIngestedMessages, taskID)
 	var channel_ingested bool

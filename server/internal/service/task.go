@@ -1843,6 +1843,17 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 	}, nil
 }
 
+// chatInputOwnerID resolves the id the task's user-message input batch is
+// keyed on: chat_input_task_id when set (auto-retry clones inherit their
+// parent's, so provenance checks reach the parent's sealed messages), falling
+// back to the task's own id for legacy rows.
+func chatInputOwnerID(task db.AgentTaskQueue) pgtype.UUID {
+	if task.ChatInputTaskID.Valid {
+		return task.ChatInputTaskID
+	}
+	return task.ID
+}
+
 func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.AgentTaskQueue, opts CancelTaskOptions) *CancelledChatMessageResult {
 	if !task.ChatSessionID.Valid {
 		return nil
@@ -1861,9 +1872,11 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 			// channel_ingested stamp, NOT the channel_chat_session_binding
 			// row: archiving a session or rebinding an installation deletes
 			// the binding while the messages (and a still-cancellable task)
-			// remain. A channel task settles as "Stopped." below instead of
-			// deleting its sealed input batch.
-			channelIngested, err := qtx.TaskHasChannelIngestedMessages(ctx, task.ID)
+			// remain. Keyed by the input-batch owner id so an auto-retry
+			// clone (which inherits chat_input_task_id) reaches the same
+			// verdict as its parent. A channel task settles as "Stopped."
+			// below instead of deleting its sealed input batch.
+			channelIngested, err := qtx.TaskHasChannelIngestedMessages(ctx, chatInputOwnerID(task))
 			if err != nil {
 				return fmt.Errorf("check cancelled chat channel provenance: %w", err)
 			}
@@ -2002,7 +2015,7 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 			// channel tasks never restore-delete their sealed input. The sync
 			// path no longer defers such tasks; this covers markers created by
 			// an older replica during a rolling deploy.
-			channelIngested, err := qtx.TaskHasChannelIngestedMessages(ctx, claimed.ID)
+			channelIngested, err := qtx.TaskHasChannelIngestedMessages(ctx, chatInputOwnerID(claimed))
 			if err != nil {
 				return fmt.Errorf("check cancelled chat channel provenance: %w", err)
 			}
@@ -2868,19 +2881,22 @@ const chatNoResponseFallback = "The agent finished this turn without a text repl
 // completed chat task inside the caller's completion transaction, returning the
 // row (nil when none is written).
 //
-// Task-owned direct (web/mobile) tasks — chat_input_task_id set — get the
-// explicit single-outcome contract: a non-empty final output becomes an ordinary
-// assistant message, and an empty/whitespace output becomes a visible
-// no_response outcome carrying a non-empty English fallback body. It never
-// auto-retries: an empty output is a legitimate terminal result (a tool-only
-// turn) and re-running it would repeat side effects already performed.
+// Direct (web/mobile) tasks get the explicit single-outcome contract: a
+// non-empty final output becomes an ordinary assistant message, and an
+// empty/whitespace output becomes a visible no_response outcome carrying a
+// non-empty English fallback body. It never auto-retries: an empty output is a
+// legitimate terminal result (a tool-only turn) and re-running it would repeat
+// side effects already performed.
 //
-// Legacy and channel (Slack/Lark) tasks — chat_input_task_id NULL — keep the
-// prior behavior: a non-empty output writes an ordinary assistant message, but
-// an EMPTY output writes NO row, so chat:done carries empty content and the
-// channel outbound silently drops it. This preserves Slack/Lark empty-completion
-// semantics unchanged (MUL-4351 review): the no_response fallback body must never
-// be pushed to an external channel.
+// Channel (Slack/Lark) and legacy tasks keep the prior behavior: a non-empty
+// output writes an ordinary assistant message, but an EMPTY output writes NO
+// row, so chat:done carries empty content and the channel outbound silently
+// drops it (MUL-4351 review): the no_response fallback body must never be
+// pushed to an external channel. Channel tasks now own a sealed input batch
+// (chat_input_task_id set) just like direct tasks, so the discriminator is the
+// immutable channel_ingested stamp on the owned batch — keyed by the batch
+// owner id so an auto-retry clone (which inherits chat_input_task_id) reaches
+// the same verdict as its parent — while a NULL owner marks a legacy task.
 func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, result []byte) (*db.ChatMessage, error) {
 	// result is the daemon request re-marshalled by the handler, so it is always
 	// valid JSON; an empty Output is the only case this branch cares about.
@@ -2916,10 +2932,21 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 
 	// Channel/legacy empty completion with nothing to show: emit no assistant
 	// row, only an empty chat:done for typing/lifecycle. Keeps the Slack/Lark
-	// silent-drop path. Attachments still force a row — the agent produced a
-	// deliverable the user must see.
-	if isEmpty && pendingAttachments == 0 && !task.ChatInputTaskID.Valid {
-		return nil, nil
+	// silent-drop path — the outbound patcher forwards any non-empty content
+	// verbatim, so the fallback body must never be written for a channel task.
+	// Attachments still force a row — the agent produced a deliverable the
+	// user must see.
+	if isEmpty && pendingAttachments == 0 {
+		if !task.ChatInputTaskID.Valid {
+			return nil, nil // legacy task
+		}
+		channelIngested, err := qtx.TaskHasChannelIngestedMessages(ctx, task.ChatInputTaskID)
+		if err != nil {
+			return nil, fmt.Errorf("check chat completion channel provenance: %w", err)
+		}
+		if channelIngested {
+			return nil, nil // channel task
+		}
 	}
 
 	params := db.CreateChatMessageParams{
