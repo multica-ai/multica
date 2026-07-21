@@ -9,6 +9,7 @@ export interface StreamingMarkdownProps {
   onUrlClick?: (url: string) => void
   onFileClick?: (path: string) => void
   renderMention?: (props: { type: string; id: string }) => React.ReactNode
+  renderArtifact?: (props: { identifier: string; type: string; title: string; content: string }) => React.ReactNode
   cdnDomain?: string
 }
 
@@ -138,6 +139,7 @@ const MemoizedBlock = React.memo(
     onUrlClick,
     onFileClick,
     renderMention,
+    renderArtifact,
     cdnDomain
   }: {
     content: string
@@ -146,17 +148,18 @@ const MemoizedBlock = React.memo(
     onUrlClick?: (url: string) => void
     onFileClick?: (path: string) => void
     renderMention?: (props: { type: string; id: string }) => React.ReactNode
+    renderArtifact?: (props: { identifier: string; type: string; title: string; content: string }) => React.ReactNode
     cdnDomain?: string
   }) {
     return (
-      <Markdown mode={mode} className={className} onUrlClick={onUrlClick} onFileClick={onFileClick} renderMention={renderMention} cdnDomain={cdnDomain}>
+      <Markdown mode={mode} className={className} onUrlClick={onUrlClick} onFileClick={onFileClick} renderMention={renderMention} renderArtifact={renderArtifact} cdnDomain={cdnDomain}>
         {content}
       </Markdown>
     )
   },
   (prev, next) => {
     // Only re-render if content actually changed
-    return prev.content === next.content && prev.mode === next.mode && prev.className === next.className
+    return prev.content === next.content && prev.mode === next.mode && prev.className === next.className && prev.renderArtifact === next.renderArtifact
   }
 )
 MemoizedBlock.displayName = 'MemoizedBlock'
@@ -185,6 +188,7 @@ export function StreamingMarkdown({
   onUrlClick,
   onFileClick,
   renderMention,
+  renderArtifact,
   cdnDomain
 }: StreamingMarkdownProps): React.JSX.Element {
   // Split into blocks - memoized to avoid recomputation
@@ -197,7 +201,7 @@ export function StreamingMarkdown({
   // Not streaming - use simple Markdown (no block splitting needed)
   if (!isStreaming) {
     return (
-      <Markdown mode={mode} className={className} onUrlClick={onUrlClick} onFileClick={onFileClick} renderMention={renderMention} cdnDomain={cdnDomain}>
+      <Markdown mode={mode} className={className} onUrlClick={onUrlClick} onFileClick={onFileClick} renderMention={renderMention} renderArtifact={renderArtifact} cdnDomain={cdnDomain}>
         {content}
       </Markdown>
     )
@@ -226,6 +230,7 @@ export function StreamingMarkdown({
             onUrlClick={onUrlClick}
             onFileClick={onFileClick}
             renderMention={renderMention}
+            renderArtifact={renderArtifact}
             cdnDomain={cdnDomain}
           />
         )
