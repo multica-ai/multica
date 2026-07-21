@@ -2988,6 +2988,27 @@ func TestBuildCodexArgsDoesNotLeakMcpToArgv(t *testing.T) {
 	}
 }
 
+// TestNormalizeCodexLaunchArgsStripsShellQuotes locks the normalization the
+// daemon reuses for the Windows sandbox decision (MUL-4957): a shell-quoted
+// `-c windows.sandbox=...` opt-in must come out as clean tokens, and
+// buildCodexArgs must be exactly the transport prefix followed by this result,
+// so the sandbox decision and the launch argv can never diverge.
+func TestNormalizeCodexLaunchArgsStripsShellQuotes(t *testing.T) {
+	t.Parallel()
+
+	got := NormalizeCodexLaunchArgs(nil, []string{"'-c'", "'windows.sandbox=unelevated'"}, nil, slog.Default())
+	want := []string{"-c", "windows.sandbox=unelevated"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("NormalizeCodexLaunchArgs = %v, want %v", got, want)
+	}
+
+	launch := buildCodexArgs(ExecOptions{CustomArgs: []string{"'-c'", "'windows.sandbox=unelevated'"}}, slog.Default())
+	wantLaunch := append([]string{"app-server", "--listen", "stdio://"}, want...)
+	if !reflect.DeepEqual(launch, wantLaunch) {
+		t.Fatalf("buildCodexArgs = %v, want %v", launch, wantLaunch)
+	}
+}
+
 func TestCodexExecuteFailsClosedWhenMcpConfigInvalid(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {

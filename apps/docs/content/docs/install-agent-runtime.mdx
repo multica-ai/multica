@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 16 supported tools so the daemon can detect them.
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 17 supported tools so the daemon can detect them.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 16 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 17 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -31,9 +31,9 @@ multica daemon restart
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
 
-## The 16 supported tools
+## The 17 supported tools
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 16.
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 17.
 
 ### Claude Code (Anthropic)
 
@@ -169,6 +169,17 @@ Agentic coding CLI using the ACP protocol over stdio (shares the transport with 
 | Daemon looks for | `qodercli` |
 | Install | See the official CLI docs at [qoder.com/cli](https://qoder.com/cli). |
 | Authentication | Per the vendor's docs. |
+
+### Qwen Code (Alibaba)
+
+Qwen Code uses its native JSONL protocol in daemon mode: `qwen -p <prompt> --output-format stream-json`. Session resumption works through `--resume`; the task runtime brief is written to `QWEN.md`; assigned skills are copied to `.qwen/skills/`; and personal skills use `$QWEN_HOME/skills/` (default `~/.qwen/skills/`).
+
+| | |
+|---|---|
+| Daemon looks for | `qwen` |
+| Install | Install Qwen Code using Alibaba's current Qwen Code instructions, then ensure `qwen` is on `PATH`. |
+| Authentication | Run `qwen` once interactively and complete its configured authentication flow before starting the daemon. |
+| Notes | Minimum CLI version: `0.20.0`. Override the binary with `MULTICA_QWEN_PATH` and set a daemon-wide default model with `MULTICA_QWEN_MODEL`. Add daemon-wide non-managed flags with `MULTICA_QWEN_ARGS` (POSIX shellword parsing). Managed agent `mcp_config` is written to a 0600 temporary JSON file and passed through `--mcp-config`; the file is removed after the run. Leave the field null to inherit native Qwen Code MCP settings. |
 
 ### Trae CLI (ByteDance)
 

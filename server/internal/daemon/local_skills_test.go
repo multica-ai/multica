@@ -279,6 +279,12 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			wantName: "Qoder Review",
 		},
 		{
+			provider: "qwen",
+			root:     filepath.Join(".qwen", "skills"),
+			wantPath: "~/.qwen/skills/review-helper",
+			wantName: "Qwen Review",
+		},
+		{
 			provider: "grok",
 			root:     filepath.Join(".grok", "skills"),
 			wantPath: "~/.grok/skills/review-helper",
@@ -292,6 +298,9 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			t.Setenv("HOME", home)
 			if tc.provider == "grok" {
 				t.Setenv("GROK_HOME", "")
+			}
+			if tc.provider == "qwen" {
+				t.Setenv("QWEN_HOME", "")
 			}
 
 			writeTestLocalSkill(t, filepath.Join(home, tc.root), "review-helper", map[string]string{
@@ -373,6 +382,41 @@ func TestListRuntimeLocalSkills_GrokUsesGROKHOME(t *testing.T) {
 		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
 	}
 	if !supported || bundle == nil || bundle.Name != "Grok Home Review" {
+		t.Fatalf("unexpected bundle: supported=%v bundle=%+v", supported, bundle)
+	}
+}
+
+func TestListRuntimeLocalSkills_QwenUsesQWENHOME(t *testing.T) {
+	home := t.TempDir()
+	qwenHome := filepath.Join(t.TempDir(), "custom-qwen-home")
+	t.Setenv("HOME", home)
+	t.Setenv("QWEN_HOME", qwenHome)
+	writeTestLocalSkill(t, filepath.Join(qwenHome, "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Qwen Home Review\ndescription: Review code\n---\n# Review\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".qwen", "skills"), "wrong-home", map[string]string{
+		"SKILL.md": "---\nname: Wrong Home\n---\n# Wrong\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("qwen")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("qwen should be supported")
+	}
+	if len(skills) != 1 || skills[0].Key != "review-helper" {
+		t.Fatalf("expected only QWEN_HOME skill, got %+v", skills)
+	}
+	if skills[0].SourcePath != filepath.ToSlash(filepath.Join(qwenHome, "skills", "review-helper")) {
+		t.Fatalf("source_path = %q, want custom QWEN_HOME path", skills[0].SourcePath)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("qwen", "review-helper")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported || bundle == nil || bundle.Name != "Qwen Home Review" {
 		t.Fatalf("unexpected bundle: supported=%v bundle=%+v", supported, bundle)
 	}
 }
@@ -1004,4 +1048,5 @@ func TestLoadRuntimeLocalSkillBundle_ProviderNonDirFallsThrough(t *testing.T) {
 	if bundle.Name != "Filish" || bundle.SourcePath != "~/.agents/skills/filish" {
 		t.Fatalf("bundle = %+v, want universal Filish", bundle)
 	}
+
 }

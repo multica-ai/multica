@@ -270,6 +270,25 @@ export function createJaDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
+          version: "0.4.7",
+          date: "2026-07-21",
+          title: "Qwen Code ランタイム、チャットの図表、Windows の修正",
+          changes: [],
+          features: [
+            "Qwen Code ランタイムでエージェントを構築できるようになりました。",
+            "エージェントがチャットで描いた図が、そのまま図として表示されます。",
+          ],
+          improvements: [
+            "割り当て確認ダイアログが、読み込み待ちなしですぐに開きます。",
+          ],
+          fixes: [
+            "Windows で、プロンプトにコマンドライン引数が含まれていても Cursor タスクが失敗しなくなりました。",
+            "Windows で、Codex タスクが開始前に拒否されなくなりました。",
+            "セルフホストのカスタムモデルが、最初のターンで認証に失敗しなくなりました。",
+            "Issue の作成時にプロジェクトを選ぶと、プロジェクトのドロップダウンが閉じます。",
+          ],
+        },
+        {
           version: "0.4.5",
           date: "2026-07-20",
           title: "カスタマイズできる Issue テーブル、リアルタイムに並ぶボード、より安定したエージェント実行",

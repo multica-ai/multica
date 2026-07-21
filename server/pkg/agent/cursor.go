@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -33,7 +35,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	args := buildCursorArgs(prompt, opts, b.cfg.Logger)
+	args := buildCursorArgs(opts, b.cfg.Logger)
 	argv0, cmdArgs := chooseCursorInvocation(execName, lookedUp, args, b.cfg.Logger)
 
 	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
@@ -50,10 +52,18 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("cursor stdout pipe: %w", err)
 	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("cursor stdin pipe: %w", err)
+	}
+	var closeStdinOnce sync.Once
+	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[cursor:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
+		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start cursor-agent: %w", err)
 	}
@@ -63,14 +73,30 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
+	// The prompt is delivered on stdin (see buildCursorArgs). Write it from its
+	// own goroutine so it cannot deadlock against the stdout reader below: a
+	// prompt larger than the OS pipe buffer (~64 KiB) blocks mid-write until the
+	// child drains it, and the child cannot drain while we are not reading its
+	// stdout. Closing stdin is what signals end-of-prompt — cursor-agent reads
+	// to EOF — so we always close, on both the success and error paths.
+	writeErrCh := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(stdin, prompt)
+		closeStdin()
+		writeErrCh <- err
+	}()
+
 	go func() {
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
+		// Closing stdin too releases a prompt write still blocked on a full pipe
+		// (e.g. the child died before draining it), so that goroutine cannot leak.
 		go func() {
 			<-runCtx.Done()
+			closeStdin()
 			_ = stdout.Close()
 		}()
 
@@ -224,6 +250,10 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)
 
+		// Wait has already closed the stdin pipe, so a prompt write still blocked
+		// on a full pipe has returned by now; the writer sends exactly once.
+		writeErr := <-writeErrCh
+
 		if resultSeen {
 			// A parsed result is the protocol boundary. Ignore the cancellation and
 			// exit error caused by stopping a Cursor worker that lingers afterward.
@@ -244,6 +274,14 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case protocolError != "":
 				finalStatus = "failed"
 				finalError = protocolError
+			case writeErr != nil:
+				// Ranked below explicit agent errors because a child that exits
+				// early for its own reason (bad auth, bad flag) makes our write
+				// fail with EPIPE as a side effect. The stderr tail is appended
+				// to every !resultSeen failure below, so the real cause still
+				// surfaces either way.
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("cursor-agent prompt write failed: %v", writeErr)
 			case exitErr != nil:
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("cursor-agent exited with error: %v", exitErr)
@@ -587,12 +625,27 @@ var cursorBlockedArgs = map[string]blockedArgMode{
 
 // buildCursorArgs assembles the argv for a one-shot cursor-agent invocation.
 //
-// Usage: cursor-agent -p <prompt> --output-format stream-json
+// Usage: cursor-agent -p --output-format stream-json
 //
 //	--workspace <cwd> --yolo [--model <m>] [--resume <id>]
-func buildCursorArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
+//
+// The prompt is deliberately NOT part of argv. cursor-agent's -p is a boolean
+// print-mode switch and the prompt is a positional argument; when no positional
+// prompt is present and stdin is not a TTY, the CLI reads stdin to EOF and uses
+// that as the prompt. We rely on that path because putting user-controlled text
+// on the command line is not safe on Windows: the official cursor-agent.cmd/.ps1
+// launcher ends in `& node.exe index.js $args`, and PowerShell re-serialises
+// $args onto node's command line. Under Windows PowerShell 5.1 (and pwsh
+// <= 7.2, which default to Legacy native argument passing) an argument holding
+// embedded double quotes is not re-escaped, so a prompt containing e.g.
+// `go build -ldflags "-X main.version=foo"` gets re-tokenised and `-X` reaches
+// commander.js as a standalone flag: "error: unknown option '-X'" (#5649).
+// Routing the prompt through stdin keeps it off every command line, so no shell
+// or launcher on any platform can re-tokenise it. Only fixed, content-free
+// flags remain in argv.
+func buildCursorArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
-		"-p", prompt,
+		"-p",
 		"--output-format", "stream-json",
 		"--yolo",
 	}

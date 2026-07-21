@@ -269,6 +269,25 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
+          version: "0.4.7",
+          date: "2026-07-21",
+          title: "Qwen Code 런타임, 채팅 다이어그램, Windows 수정",
+          changes: [],
+          features: [
+            "이제 Qwen Code 런타임으로 에이전트를 만들 수 있습니다.",
+            "에이전트가 채팅에서 그린 다이어그램이 이제 실제 도표로 표시됩니다.",
+          ],
+          improvements: [
+            "할당 확인 창이 로딩 대기 없이 바로 열립니다.",
+          ],
+          fixes: [
+            "Windows에서 프롬프트에 명령줄 옵션이 들어 있어도 Cursor 작업이 실패하지 않습니다.",
+            "Windows에서 Codex 작업이 시작되기도 전에 거부되지 않습니다.",
+            "셀프 호스팅 맞춤 모델이 첫 턴에서 인증에 실패하지 않습니다.",
+            "Issue를 만들 때 프로젝트를 고르면 프로젝트 드롭다운이 닫힙니다.",
+          ],
+        },
+        {
           version: "0.4.5",
           date: "2026-07-20",
           title: "맞춤 설정할 수 있는 Issue 테이블, 실시간으로 정렬되는 보드, 더 안정적인 에이전트 실행",

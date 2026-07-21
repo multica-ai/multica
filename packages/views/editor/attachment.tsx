@@ -14,9 +14,9 @@
  * Call sites:
  *   - extensions/file-card.tsx FileCardView (Tiptap NodeView)
  *   - extensions/image-view.tsx ImageView (Tiptap NodeView)
- *   - readonly-content.tsx (markdown img + fileCard div renderers)
+ *   - rich-content/rich-content.tsx (markdown img + fileCard div renderers,
+ *     serving Chat, Issue descriptions and Comments through one renderer)
  *   - issues/components/comment-card.tsx AttachmentList (standalone fallback)
- *   - common/markdown.tsx (chat / skill viewer Markdown wrapper)
  *
  * The component owns its own preview modal and download dispatcher — callers
  * just pass `attachment` and (for editor surfaces) optional editor chrome
