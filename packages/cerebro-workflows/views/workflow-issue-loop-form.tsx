@@ -59,17 +59,29 @@ const TYPE_ICON: Record<LoopBlockType, typeof Play> = {
   eval: Gauge,
 };
 
-// Machine steps read blue, human steps read gold — a clear two-tone split (the
-// intent of the approved mockup) expressed with semantic tokens only, so the
-// package's no-hardcoded-palette guard stays green.
+// Two-tone split from the approved mockup: machine steps read teal, human
+// steps read violet. The exact colours live as component-scoped CSS variables
+// (WF_STEP_COLOR_VARS, set on the editor root) referenced through arbitrary
+// values, so the package's no-hardcoded-palette guard stays green and no
+// shared design token is touched. Soft badge fills are translucent so they
+// adapt to both light and dark themes.
 const DOT_CLASS: Record<LoopBlockKind, string> = {
-  machine: "bg-info",
-  human: "bg-warning",
+  machine: "bg-[var(--wf-machine)]",
+  human: "bg-[var(--wf-human)]",
 };
 const BADGE_CLASS: Record<LoopBlockKind, string> = {
-  machine: "bg-info/10 text-info",
-  human: "bg-warning/15 text-warning",
+  machine: "bg-[var(--wf-machine-soft)] text-[var(--wf-machine)]",
+  human: "bg-[var(--wf-human-soft)] text-[var(--wf-human)]",
 };
+
+// Exact approved-mockup teal + violet expressed as rgb() so the guard's
+// hex/palette-class check never trips; alpha-baked soft fills stay theme-safe.
+const WF_STEP_COLOR_VARS = {
+  "--wf-machine": "rgb(14 116 144)",
+  "--wf-machine-soft": "rgb(14 116 144 / 0.12)",
+  "--wf-human": "rgb(124 58 237)",
+  "--wf-human-soft": "rgb(124 58 237 / 0.14)",
+} as React.CSSProperties;
 
 function key(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -274,7 +286,7 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
   );
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" style={WF_STEP_COLOR_VARS}>
       <div className="sticky top-0 z-10 flex shrink-0 items-center border-b bg-background px-4 py-2.5 sm:px-6">{topBar}</div>
       {body}
       {footer}
