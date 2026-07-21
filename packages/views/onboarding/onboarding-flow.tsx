@@ -104,11 +104,11 @@ function mergeQuestionnaire(
  */
 export function OnboardingFlow({
   onComplete,
-  runtimeInstructions,
+  platform = "desktop",
   onRuntimeRefresh,
 }: {
   onComplete: (workspace?: Workspace, issueId?: string) => void;
-  runtimeInstructions?: React.ReactNode;
+  platform?: "desktop" | "web";
   /** Desktop wires this to restart the bundled daemon so a freshly
    *  installed agent CLI gets picked up on the runtime step. Web omits
    *  it — its CLI install flow already runs on the user's machine and
@@ -145,11 +145,7 @@ export function OnboardingFlow({
   const existingWorkspace = workspace ?? workspaces[0] ?? null;
   const canSkipWelcome = workspacesFetched && workspaces.length > 0;
 
-  // The `runtimeInstructions` slot is only plumbed by the web shell
-  // (desktop bundles a daemon, so a CLI install card would be noise
-  // there). We reuse its presence as the web signal rather than
-  // introducing a redundant prop.
-  const isWeb = !!runtimeInstructions;
+  const isWeb = platform === "web";
 
   // Derive "what comes after `from`" from ONBOARDING_STEP_ORDER so
   // inserting/reordering a persisted step only requires editing the
@@ -323,13 +319,13 @@ export function OnboardingFlow({
   }
 
   // Step 3. Both paths own full-bleed two-column layouts.
-  //   - Desktop (no cliInstructions slot) → StepRuntimeConnect drives
+  //   - Desktop → StepRuntimeConnect drives
   //     the local daemon's runtime list directly.
   //   - Web → StepPlatformFork offers Download / CLI / Cloud paths.
   //     Under the CLI path it embeds StepRuntimeConnect for the live
   //     probe; the Cloud path is a soft exit via the waitlist.
   if (step === "runtime" && workspace) {
-    if (!runtimeInstructions) {
+    if (!isWeb) {
       return (
         <StepRuntimeConnect
           wsId={workspace.id}
@@ -344,7 +340,6 @@ export function OnboardingFlow({
         wsId={workspace.id}
         onNext={handleRuntimeNext}
         onBack={() => handleBack("runtime")}
-        cliInstructions={runtimeInstructions}
       />
     );
   }

@@ -40,6 +40,16 @@ import type {
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
 
+export const RuntimeSetupSessionSchema = z.object({
+  id: z.string().min(1),
+  token: z.string().optional(),
+  expires_at: z.string().min(1),
+  redeemed_at: z.string().nullable(),
+  daemon_connected_at: z.string().nullable(),
+  daemon_id: z.string().nullable(),
+  runtime_count: z.number().int().nonnegative(),
+}).loose();
+
 // Label responses are consumed by settings tables and resource pickers. Keep
 // the resource type lenient so newer server scopes do not break older clients,
 // while defaulting fields that predate scoped label catalogs.

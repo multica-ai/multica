@@ -44,6 +44,7 @@ export type WSEventType =
   | "member:removed"
   | "daemon:heartbeat"
   | "daemon:register"
+  | "setup:progress"
   | "skill:created"
   | "skill:updated"
   | "skill:deleted"

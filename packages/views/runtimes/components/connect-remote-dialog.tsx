@@ -1,13 +1,32 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronRight, Copy, Terminal } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { runtimeKeys } from "@multica/core/runtimes/queries";
-import { useWSEvent } from "@multica/core/realtime";
-import { paths, useWorkspaceSlug } from "@multica/core/paths";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  AlertTriangle,
+  Check,
+  Circle,
+  CircleCheck,
+  Copy,
+  LoaderCircle,
+  RefreshCw,
+  Terminal,
+} from "lucide-react";
 import { useConfigStore } from "@multica/core/config";
+import {
+  paths,
+  useCurrentWorkspace,
+  useWorkspaceSlug,
+} from "@multica/core/paths";
+import { useWSEvent } from "@multica/core/realtime";
+import {
+  runtimeKeys,
+  runtimeListOptions,
+  runtimeSetupCreateOptions,
+  runtimeSetupStatusOptions,
+} from "@multica/core/runtimes";
+import type { AgentRuntime } from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -16,358 +35,342 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
-import { Button } from "@multica/ui/components/ui/button";
-import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { cn } from "@multica/ui/lib/utils";
-import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { useNavigation } from "../../navigation";
+import { buildRuntimeMachines } from "./runtime-machines";
 
-type Step = "instructions" | "success";
+const INSTALL_SCRIPT =
+  "https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh";
 
-const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
-const CLOUD_SERVER_URL = "https://api.multica.ai";
-const CLOUD_APP_URL = "https://multica.ai";
-
-function normalizeCommandURL(url: string | undefined) {
-  return url?.trim().replace(/\/+$/, "") ?? "";
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-function daemonCommands(serverUrl: string | undefined, appUrl: string | undefined) {
-  const normalizedServerUrl = normalizeCommandURL(serverUrl);
-  const normalizedAppUrl = normalizeCommandURL(appUrl);
-  if (normalizedServerUrl && normalizedAppUrl) {
-    return {
-      setupCmd: `multica setup self-host --server-url ${normalizedServerUrl} --app-url ${normalizedAppUrl}`,
-      tokenCmd: `multica config set server_url ${normalizedServerUrl}
-multica config set app_url ${normalizedAppUrl}
-multica login --token <YOUR_TOKEN>
-multica daemon start`,
-    };
+export function runtimeSetupCommand(
+  token: string,
+  serverUrl?: string,
+  appUrl?: string,
+): string {
+  const args = [`--token ${shellQuote(token)}`];
+  const normalizedServer = serverUrl?.trim().replace(/\/+$/, "");
+  const normalizedApp = appUrl?.trim().replace(/\/+$/, "");
+  if (normalizedServer && normalizedApp) {
+    args.push(`--server-url ${shellQuote(normalizedServer)}`);
+    args.push(`--app-url ${shellQuote(normalizedApp)}`);
   }
-
-  return {
-    setupCmd: "multica setup",
-    tokenCmd: `multica config set server_url ${CLOUD_SERVER_URL}
-multica config set app_url ${CLOUD_APP_URL}
-multica login --token <YOUR_TOKEN>
-multica daemon start`,
-  };
+  return `curl -fsSL ${INSTALL_SCRIPT} | bash -s -- ${args.join(" ")}`;
 }
 
-export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
-  const [step, setStep] = useState<Step>("instructions");
-  const wsId = useWorkspaceId();
+interface ConnectRemoteDialogProps {
+  onClose: () => void;
+  /** Explicit during web onboarding; runtime settings use URL workspace state. */
+  workspaceId?: string;
+  /** Onboarding advances with the newly detected runtime. */
+  onConnected?: (runtime: AgentRuntime) => void;
+}
+
+function useConnectWorkspaceId(explicitWorkspaceId?: string): string {
+  const currentWorkspace = useCurrentWorkspace();
+  const workspaceId = explicitWorkspaceId ?? currentWorkspace?.id;
+  if (!workspaceId) {
+    throw new Error(
+      "ConnectRemoteDialog requires a workspaceId outside a workspace route",
+    );
+  }
+  return workspaceId;
+}
+
+export function ConnectRemoteDialog({
+  onClose,
+  workspaceId,
+  onConnected,
+}: ConnectRemoteDialogProps) {
+  const wsId = useConnectWorkspaceId(workspaceId);
   const slug = useWorkspaceSlug();
-  const qc = useQueryClient();
   const navigation = useNavigation();
-  const newRuntimeIdRef = useRef<string | null>(null);
+  const qc = useQueryClient();
+  const { t } = useT("runtimes");
+  const daemonServerUrl = useConfigStore((state) => state.daemonServerUrl);
+  const daemonAppUrl = useConfigStore((state) => state.daemonAppUrl);
+  const [copied, setCopied] = useState(false);
 
-  // `multica setup` is one blocking command that handles config + login
-  // + daemon start; the dialog passively listens for the resulting
-  // `daemon:register` WS event and auto-advances to success.
-  const handleDaemonRegister = useCallback(
+  const created = useQuery(runtimeSetupCreateOptions(wsId));
+  const sessionId = created.data?.id ?? "";
+  const status = useQuery(runtimeSetupStatusOptions(wsId, sessionId));
+  const session = status.data ?? created.data;
+  const runtimes = useQuery(runtimeListOptions(wsId));
+
+  const refreshProgress = useCallback(
     (payload: unknown) => {
-      if (step !== "instructions") return;
-      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-      const p = payload as Record<string, unknown> | null;
-      if (p?.runtime_id && typeof p.runtime_id === "string") {
-        newRuntimeIdRef.current = p.runtime_id;
+      const body = payload as { setup_session_id?: unknown } | null;
+      if (
+        sessionId &&
+        body?.setup_session_id &&
+        body.setup_session_id !== sessionId
+      ) {
+        return;
       }
-      setStep("success");
+      if (sessionId) {
+        void qc.invalidateQueries({
+          queryKey: runtimeKeys.setupStatus(wsId, sessionId),
+        });
+      }
+      void qc.invalidateQueries({ queryKey: runtimeKeys.list(wsId) });
     },
-    [step, qc, wsId],
+    [qc, sessionId, wsId],
   );
-  useWSEvent("daemon:register", handleDaemonRegister);
+  useWSEvent("setup:progress", refreshProgress);
+  useWSEvent("daemon:register", refreshProgress);
 
-  const handleGoToAgents = () => {
-    onClose();
-    if (slug) {
-      navigation.push(paths.workspace(slug).agents());
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 2_000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  // The raw token is intentionally returned only once, by the create call.
+  // Status polling must never replace the source used to render the command.
+  const command = created.data?.token
+    ? runtimeSetupCommand(created.data.token, daemonServerUrl, daemonAppUrl)
+    : "";
+  const setupRuntimes = useMemo(() => {
+    if (!session?.daemon_id) return [];
+    return (runtimes.data ?? []).filter(
+      (runtime) => runtime.daemon_id === session.daemon_id,
+    );
+  }, [runtimes.data, session?.daemon_id]);
+  const machines = useMemo(
+    () => buildRuntimeMachines(setupRuntimes, { now: Date.now() }),
+    [setupRuntimes],
+  );
+  const firstRuntime = setupRuntimes[0] ?? null;
+
+  // A progress poll can succeed even if the corresponding websocket event
+  // was missed. Refresh the runtime list when that fallback discovers one.
+  useEffect(() => {
+    if ((session?.runtime_count ?? 0) > 0) {
+      void qc.invalidateQueries({ queryKey: runtimeKeys.list(wsId) });
     }
+  }, [qc, session?.runtime_count, wsId]);
+
+  const handleCopy = () => {
+    if (!command) return;
+    void copyText(command).then((ok) => setCopied(ok));
   };
 
-  const handleGoToRuntime = () => {
-    onClose();
-    if (slug && newRuntimeIdRef.current) {
-      navigation.push(
-        paths.workspace(slug).runtimeDetail(newRuntimeIdRef.current),
-      );
+  const handlePrimary = () => {
+    if (!firstRuntime) return;
+    if (onConnected) {
+      onConnected(firstRuntime);
+      return;
     }
+    onClose();
+    if (slug) navigation.push(paths.workspace(slug).runtimeDetail(firstRuntime.id));
+  };
+
+  const handleCreateAgent = () => {
+    onClose();
+    if (slug) navigation.push(paths.workspace(slug).agents());
   };
 
   return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-lg">
-        {step === "instructions" && <InstructionsStep onClose={onClose} />}
-        {step === "success" && (
-          <SuccessStep
-            onGoToAgents={handleGoToAgents}
-            onGoToRuntime={
-              newRuntimeIdRef.current ? handleGoToRuntime : undefined
-            }
-          />
-        )}
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="flex max-h-[88vh] flex-col gap-0 p-0 sm:max-w-xl">
+        <DialogHeader className="px-6 pt-6 pb-2">
+          <DialogTitle className="text-base text-balance">
+            {t(($) => $.connect.title)}
+          </DialogTitle>
+          <DialogDescription className="text-xs text-balance">
+            {t(($) => $.connect.one_command_description)}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
+          {created.isPending ? (
+            <div className="flex min-h-28 items-center justify-center rounded-lg border bg-muted/30">
+              <LoaderCircle className="size-5 animate-spin text-muted-foreground" aria-hidden />
+              <span className="sr-only">{t(($) => $.connect.preparing)}</span>
+            </div>
+          ) : created.isError ? (
+            <div className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+              <p className="text-sm font-medium text-foreground">
+                {t(($) => $.connect.prepare_failed)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.connect.prepare_failed_hint)}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => void created.refetch()}>
+                <RefreshCw className="size-3.5" aria-hidden />
+                {t(($) => $.connect.try_again)}
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div>
+                <div className="mb-1.5 flex items-center justify-between gap-3">
+                  <p className="text-xs font-medium text-foreground">
+                    {t(($) => $.connect.run_command)}
+                  </p>
+                  <span className="text-[11px] text-muted-foreground">
+                    {t(($) => $.connect.token_expiry)}
+                  </span>
+                </div>
+                <div className="flex items-start gap-2 rounded-lg bg-muted px-3 py-3 font-mono text-sm">
+                  <Terminal className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  <code
+                    className={cn(
+                      "min-w-0 flex-1 break-all whitespace-pre-wrap tabular-nums",
+                      CODE_LIGATURE_CLASS,
+                    )}
+                  >
+                    {command}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    aria-label={t(($) => $.connect.copy_aria)}
+                    className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {copied ? (
+                      <Check className="size-3.5 text-success" aria-hidden />
+                    ) : (
+                      <Copy className="size-3.5" aria-hidden />
+                    )}
+                  </button>
+                </div>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                  {t(($) => $.connect.security_hint)}
+                </p>
+              </div>
+
+              <SetupChecklist
+                redeemed={Boolean(session?.redeemed_at)}
+                daemonConnected={Boolean(session?.daemon_connected_at)}
+                runtimeCount={session?.runtime_count ?? 0}
+              />
+
+              {session?.daemon_connected_at && session.runtime_count === 0 ? (
+                <div className="flex gap-2.5 rounded-lg border border-warning/30 bg-warning/5 p-3">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
+                  <div>
+                    <p className="text-xs font-medium text-foreground">
+                      {t(($) => $.connect.no_runtime_title)}
+                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                      {t(($) => $.connect.no_runtime_hint)}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+
+              {session?.runtime_count ? (
+                <ConnectedMachines machines={machines} runtimeCount={session.runtime_count} />
+              ) : null}
+            </>
+          )}
+        </div>
+
+        <DialogFooter className="m-0 rounded-b-xl border-t bg-muted/30 px-6 py-3 sm:justify-between">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            {t(($) => $.connect.cancel)}
+          </Button>
+          <div className="flex items-center gap-2">
+            {!onConnected && firstRuntime ? (
+              <Button variant="outline" size="sm" onClick={handleCreateAgent}>
+                {t(($) => $.connect.create_agent)}
+              </Button>
+            ) : null}
+            <Button size="sm" disabled={!firstRuntime} onClick={handlePrimary}>
+              {onConnected
+                ? t(($) => $.connect.continue)
+                : t(($) => $.connect.view_runtime)}
+            </Button>
+          </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Copy button + code row — mirrors onboarding/CliInstallInstructions
-// ---------------------------------------------------------------------------
-
-function CopyButton({ text, ariaLabel }: { text: string; ariaLabel: string }) {
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 2000);
-    return () => clearTimeout(t);
-  }, [copied]);
-
-  const handleCopy = () => {
-    void copyText(text).then((ok) => {
-      if (ok) setCopied(true);
-    });
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      aria-label={ariaLabel}
-      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      {copied ? (
-        <Check className="h-3.5 w-3.5 text-success" aria-hidden />
-      ) : (
-        <Copy className="h-3.5 w-3.5" aria-hidden />
-      )}
-    </button>
-  );
-}
-
-function CommandStep({
-  n,
-  label,
-  cmd,
-  copyAria,
+function SetupChecklist({
+  redeemed,
+  daemonConnected,
+  runtimeCount,
 }: {
-  n: number;
-  label: string;
-  cmd: string;
-  copyAria: string;
+  redeemed: boolean;
+  daemonConnected: boolean;
+  runtimeCount: number;
 }) {
+  const { t } = useT("runtimes");
+  const items = [
+    { done: redeemed, label: t(($) => $.connect.check_command) },
+    { done: daemonConnected, label: t(($) => $.connect.check_daemon) },
+    {
+      done: runtimeCount > 0,
+      label: t(($) => $.connect.check_runtimes, { count: runtimeCount }),
+    },
+  ];
   return (
-    <div>
-      <p className="mb-1.5 text-xs font-medium text-foreground">
-        {n}. {label}
+    <div className="rounded-lg border p-3" aria-live="polite">
+      <p className="mb-2.5 text-xs font-medium text-foreground">
+        {t(($) => $.connect.progress_title)}
       </p>
-      <div className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2.5 font-mono text-sm">
-        <Terminal
-          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground"
-          aria-hidden
-        />
-        <code
-          className={cn(
-            "min-w-0 flex-1 break-all whitespace-pre-wrap tabular-nums",
-            CODE_LIGATURE_CLASS,
-          )}
-        >
-          {cmd}
-        </code>
-        <CopyButton text={cmd} ariaLabel={copyAria} />
-      </div>
+      <ol className="space-y-2">
+        {items.map((item, index) => (
+          <li key={item.label} className="flex items-center gap-2 text-xs">
+            {item.done ? (
+              <CircleCheck className="size-4 shrink-0 text-success" aria-hidden />
+            ) : index === 0 || items[index - 1]?.done ? (
+              <LoaderCircle className="size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+            ) : (
+              <Circle className="size-4 shrink-0 text-muted-foreground/50" aria-hidden />
+            )}
+            <span className={item.done ? "text-foreground" : "text-muted-foreground"}>
+              {item.label}
+            </span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Step 1: Instructions
-// ---------------------------------------------------------------------------
-
-function InstructionsStep({ onClose }: { onClose: () => void }) {
+function ConnectedMachines({
+  machines,
+  runtimeCount,
+}: {
+  machines: ReturnType<typeof buildRuntimeMachines>;
+  runtimeCount: number;
+}) {
   const { t } = useT("runtimes");
-  const daemonServerUrl = useConfigStore((s) => s.daemonServerUrl);
-  const daemonAppUrl = useConfigStore((s) => s.daemonAppUrl);
-  const { setupCmd, tokenCmd } = daemonCommands(daemonServerUrl, daemonAppUrl);
   return (
-    <>
-      <DialogHeader className="px-6 pt-6 pb-2">
-        <DialogTitle className="text-base text-balance">
-          {t(($) => $.connect.title)}
-        </DialogTitle>
-        <DialogDescription className="text-xs text-balance">
-          {t(($) => $.connect.description)}
-        </DialogDescription>
-      </DialogHeader>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-        <div className="space-y-4">
-          <CommandStep
-            n={1}
-            label={t(($) => $.connect.step1_label)}
-            cmd={INSTALL_CMD}
-            copyAria={t(($) => $.connect.copy_aria)}
-          />
-
-          <div>
-            <CommandStep
-              n={2}
-              label={t(($) => $.connect.step2_label)}
-              cmd={setupCmd}
-              copyAria={t(($) => $.connect.copy_aria)}
-            />
-            <p className="mt-1.5 text-[11px] leading-[1.55] text-muted-foreground">
-              {t(($) => $.connect.step2_hint)}
+    <div className="rounded-lg border p-3">
+      <p className="text-xs font-medium text-foreground">
+        {t(($) => $.connect.connected_summary, {
+          runtimeCount,
+          computerCount: machines.length,
+        })}
+      </p>
+      <div className="mt-2 space-y-2">
+        {machines.map((machine) => (
+          <div key={machine.id} className="rounded-md bg-muted/50 px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="truncate text-xs font-medium text-foreground">
+                {machine.title}
+              </span>
+              <span className="shrink-0 text-[11px] text-muted-foreground">
+                {t(($) => $.connect.runtime_count, { count: machine.runtimes.length })}
+              </span>
+            </div>
+            <p className="mt-1 truncate text-[11px] text-muted-foreground">
+              {machine.providerNames.join(" · ")}
             </p>
           </div>
-
-          <LiveListening />
-
-          <TroubleshootingDetails tokenCmd={tokenCmd} />
-        </div>
+        ))}
       </div>
-
-      <DialogFooter className="m-0 rounded-b-xl border-t bg-muted/30 px-6 py-3">
-        <Button variant="outline" size="sm" onClick={onClose}>
-          {t(($) => $.connect.cancel)}
-        </Button>
-      </DialogFooter>
-    </>
-  );
-}
-
-function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
-  const { t } = useT("runtimes");
-  return (
-    <details className="group rounded-lg border border-dashed">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <ChevronRight
-          className="h-3 w-3 transition-transform group-open:rotate-90"
-          aria-hidden
-        />
-        {t(($) => $.connect.troubleshooting)}
-      </summary>
-      <div className="space-y-2 border-t px-3 pt-2.5 pb-3 text-[11px] leading-[1.55] text-muted-foreground">
-        <p>{t(($) => $.connect.trouble_intro)}</p>
-        <CommandStep
-          n={2}
-          label={t(($) => $.connect.step2_label)}
-          cmd={tokenCmd}
-          copyAria={t(($) => $.connect.copy_aria)}
-        />
-        <p>
-          {t(($) => $.connect.trouble_token_hint_prefix)}
-          <span className="font-medium text-foreground">
-            {t(($) => $.connect.trouble_token_hint_destination)}
-          </span>
-          {t(($) => $.connect.trouble_token_hint_suffix)}
-        </p>
-        <ul className="space-y-1">
-          <li className="flex items-center gap-1.5">
-            <span>{t(($) => $.connect.trouble_check_status)}</span>
-            {/* CLI command — literal shell string, not i18n content. */}
-            {/* eslint-disable-next-line i18next/no-literal-string */}
-            <code
-              className={cn(
-                "rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground",
-                CODE_LIGATURE_CLASS,
-              )}
-            >
-              {"multica daemon status"}
-            </code>
-          </li>
-          <li className="flex items-center gap-1.5">
-            <span>{t(($) => $.connect.trouble_view_logs)}</span>
-            {/* CLI command — literal shell string, not i18n content. */}
-            {/* eslint-disable-next-line i18next/no-literal-string */}
-            <code
-              className={cn(
-                "rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground",
-                CODE_LIGATURE_CLASS,
-              )}
-            >
-              {"multica daemon logs -f"}
-            </code>
-          </li>
-        </ul>
-      </div>
-    </details>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Live-listening indicator
-// ---------------------------------------------------------------------------
-
-function LiveListening() {
-  const { t } = useT("runtimes");
-  return (
-    <div
-      className="flex items-center gap-2.5 rounded-lg border bg-muted/40 px-3 py-2.5 text-xs"
-      role="status"
-      aria-live="polite"
-    >
-      <span className="relative inline-flex shrink-0" aria-hidden>
-        <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-success opacity-60 motion-reduce:hidden" />
-        <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
-      </span>
-      <span className="font-medium text-foreground">
-        {t(($) => $.connect.live_listening)}
-      </span>
-      <span className="text-muted-foreground">
-        {t(($) => $.connect.live_listening_hint)}
-      </span>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Step 2: Success
-// ---------------------------------------------------------------------------
-
-function SuccessStep({
-  onGoToAgents,
-  onGoToRuntime,
-}: {
-  onGoToAgents: () => void;
-  onGoToRuntime?: () => void;
-}) {
-  const { t } = useT("runtimes");
-  return (
-    <>
-      <DialogHeader className="px-6 pt-6 pb-2">
-        <DialogTitle className="text-base text-balance">
-          {t(($) => $.connect.success_title)}
-        </DialogTitle>
-        <DialogDescription className="text-xs text-balance">
-          {t(($) => $.connect.success_description)}
-        </DialogDescription>
-      </DialogHeader>
-
-      <div className="flex flex-col items-center gap-3 px-6 py-8">
-        <div
-          className="flex h-12 w-12 items-center justify-center rounded-full bg-success/10"
-          aria-hidden
-        >
-          <Check className="h-6 w-6 text-success" />
-        </div>
-      </div>
-
-      <DialogFooter className="m-0 rounded-b-xl border-t bg-muted/30 px-6 py-3">
-        {onGoToRuntime && (
-          <Button variant="ghost" size="sm" onClick={onGoToRuntime}>
-            {t(($) => $.connect.view_runtime)}
-          </Button>
-        )}
-        <Button size="sm" onClick={onGoToAgents}>
-          {t(($) => $.connect.create_agent)}
-          <ChevronRight className="h-3.5 w-3.5" aria-hidden />
-        </Button>
-      </DialogFooter>
-    </>
   );
 }

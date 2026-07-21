@@ -1,25 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Download } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
 import type { AgentRuntime } from "@multica/core/types";
 import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "../components/step-header";
 import { RuntimeAsidePanel } from "../components/runtime-aside-panel";
-import { CompactRuntimeRow } from "../components/compact-runtime-row";
-import { useRuntimePicker } from "../components/use-runtime-picker";
 import { useT } from "../../i18n";
+import { ConnectRemoteDialog } from "../../runtimes/components/connect-remote-dialog";
 
 /**
  * Step 3 on **web**. The user is in a browser and hasn't downloaded
@@ -54,13 +45,10 @@ export function StepPlatformFork({
   wsId,
   onNext,
   onBack,
-  cliInstructions,
 }: {
   wsId: string;
   onNext: (runtime: AgentRuntime | null) => void | Promise<void>;
   onBack?: () => void;
-  /** Platform-specific CLI install card, rendered inside the CLI dialog. */
-  cliInstructions?: ReactNode;
 }) {
   const { t } = useT("onboarding");
   const mainRef = useRef<HTMLElement>(null);
@@ -68,8 +56,6 @@ export function StepPlatformFork({
 
   const [dialog, setDialog] = useState<DialogState>(null);
   const [downloaded, setDownloaded] = useState(false);
-
-  const picker = useRuntimePicker(wsId);
 
   const pickDesktop = () => {
     window.open(DOWNLOAD_PAGE_URL, "_blank", "noopener,noreferrer");
@@ -80,10 +66,9 @@ export function StepPlatformFork({
     setDialog("cli");
   };
 
-  const handleCliConnect = () => {
-    if (!picker.selected) return;
+  const handleCliConnect = (runtime: AgentRuntime) => {
     setDialog(null);
-    onNext(picker.selected);
+    onNext(runtime);
   };
 
   const footerHint = (() => {
@@ -178,18 +163,13 @@ export function StepPlatformFork({
         </div>
       </aside>
 
-      <CliInstallDialog
-        open={dialog === "cli"}
-        onClose={() => setDialog(null)}
-        onConnect={handleCliConnect}
-        runtimes={picker.runtimes}
-        selectedId={picker.selectedId}
-        onSelect={picker.setSelectedId}
-        hasRuntimes={picker.hasRuntimes}
-        canConnect={picker.selected !== null}
-        selectedName={picker.selected?.name ?? null}
-        cliInstructions={cliInstructions}
-      />
+      {dialog === "cli" ? (
+        <ConnectRemoteDialog
+          workspaceId={wsId}
+          onClose={() => setDialog(null)}
+          onConnected={handleCliConnect}
+        />
+      ) : null}
     </div>
   );
 }
@@ -285,226 +265,6 @@ function ForkAlt({
           {actionLabel}
         </Button>
       )}
-    </div>
-  );
-}
-
-// ------------------------------------------------------------
-// CLI install dialog
-// ------------------------------------------------------------
-
-/**
- * Modal dialog for the CLI install path. Contains the real install
- * instructions card (via the `cliInstructions` slot) plus the live
- * runtime probe. Owns its own "Connect & continue" advancement — when
- * a runtime has registered and the user picks it, clicking that button
- * closes the dialog and fires the parent's `onConnect`.
- */
-function CliInstallDialog({
-  open,
-  onClose,
-  onConnect,
-  runtimes,
-  selectedId,
-  onSelect,
-  hasRuntimes,
-  canConnect,
-  selectedName,
-  cliInstructions,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onConnect: () => void;
-  runtimes: AgentRuntime[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  hasRuntimes: boolean;
-  canConnect: boolean;
-  selectedName: string | null;
-  cliInstructions?: ReactNode;
-}) {
-  const { t } = useT("onboarding");
-  return (
-    <Dialog open={open} onOpenChange={(o) => (o ? null : onClose())}>
-      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[560px]">
-        <DialogHeader>
-          <DialogTitle>{t(($) => $.step_platform.cli_dialog_title)}</DialogTitle>
-          <DialogDescription>
-            {t(($) => $.step_platform.cli_dialog_description)}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-2">
-          {cliInstructions}
-
-          {hasRuntimes ? (
-            <>
-              <div className="flex items-center gap-2 pt-1 text-sm">
-                <div className="h-2 w-2 rounded-full bg-success" />
-                <span className="font-medium">
-                  {t(($) => $.step_platform.runtimes_connected, { count: runtimes.length })}
-                </span>
-              </div>
-              {/* Cap the runtime list at ~4 rows visible, scroll the rest.
-                  Keeps the commands above always reachable even when
-                  a user has many machines registered. */}
-              <div className="flex max-h-[240px] flex-col gap-2 overflow-y-auto">
-                {runtimes.map((rt) => (
-                  <CompactRuntimeRow
-                    key={rt.id}
-                    runtime={rt}
-                    selected={rt.id === selectedId}
-                    onSelect={() => onSelect(rt.id)}
-                  />
-                ))}
-              </div>
-            </>
-          ) : (
-            <CliWaitingStatus dialogOpen={open} />
-          )}
-        </div>
-
-        <DialogFooter className="flex items-center justify-between gap-3 sm:justify-between">
-          {/* Hint is only useful AFTER a runtime has registered — "pick
-              one" / "selected X". While still waiting, the body's
-              CliWaitingStatus already conveys the live-listening state,
-              so an additional "Waiting..." footer line is duplication. */}
-          <span className="text-xs text-muted-foreground">
-            {hasRuntimes
-              ? canConnect && selectedName
-                ? t(($) => $.step_runtime.hint_selected, { name: selectedName })
-                : t(($) => $.step_platform.cli_dialog_pick_hint)
-              : null}
-          </span>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={onClose}>
-              {t(($) => $.common.cancel)}
-            </Button>
-            <Button disabled={!canConnect} onClick={onConnect}>
-              {t(($) => $.step_runtime.start_exploring)}
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/**
- * Format a seconds count as `m:ss` (e.g. 75 → "1:15"). Inline helper —
- * no existing utility matches this format (agent-live-card's
- * formatElapsed uses "1m 15s" style, not suitable for a ticking clock).
- */
-function formatElapsed(seconds: number) {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-/**
- * Waiting state for the CLI dialog — shown until the first daemon
- * registers. We can't actually observe the install / login / daemon-
- * start phases from the frontend (they happen in the user's terminal
- * and browser), so the best we can do is:
- *
- *   1. Confirm "we're listening" — a pulsing green dot + m:ss timer
- *      signals an active WS subscription (useRuntimePicker is already
- *      subscribed to `daemon:register`). This is what tells the user
- *      "the system isn't frozen, it's waiting for your daemon".
- *   2. Progressively reveal troubleshooting hints as elapsed time
- *      crosses thresholds — so a user who stalls mid-setup gets
- *      useful guidance without being dogpiled at t=0.
- *   3. At the 90s+ "stalled" tier, point the user at alternate paths
- *      (Skip / Cloud waitlist) — parallels desktop's EmptyView, which
- *      already exposes the same two exits when no runtime registers.
- *
- * Elapsed-time counter only ticks while the dialog is open so reopen
- * after closing resets the staging.
- */
-function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
-  const { t } = useT("onboarding");
-  const [elapsed, setElapsed] = useState(0);
-
-  useEffect(() => {
-    if (!dialogOpen) {
-      setElapsed(0);
-      return;
-    }
-    const id = window.setInterval(() => {
-      setElapsed((e) => e + 1);
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [dialogOpen]);
-
-  // Stage thresholds are rough — `multica setup` typical flow is
-  //   ~1s save config → browser-tab auth (user-driven, 5–30s) →
-  //   ~2s daemon boot → immediate WS register. So under 15s means
-  //   "still normal", 15–45s means "probably stuck on browser auth",
-  //   45–90s means "probably an error in the terminal", 90s+ means
-  //   "nothing's coming through, suggest alt paths" (the stalled tier
-  //   parallels desktop StepRuntimeConnect's EmptyView — by that point
-  //   it's worth pointing the user at Skip or Cloud waitlist).
-  const stage: "normal" | "midway" | "slow" | "stalled" =
-    elapsed < 15
-      ? "normal"
-      : elapsed < 45
-        ? "midway"
-        : elapsed < 90
-          ? "slow"
-          : "stalled";
-
-  return (
-    <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-4">
-      <div className="flex items-center gap-2 text-sm">
-        {/* Pulsing green dot signals active WS subscription — the
-            useRuntimePicker hook is already subscribed to `daemon:register`,
-            this is the visual confirmation that "we're listening". */}
-        <span
-          aria-hidden
-          className="inline-block size-2 shrink-0 rounded-full bg-success animate-pulse"
-        />
-        <span className="font-medium text-foreground">
-          {t(($) => $.step_platform.live_listening)}
-        </span>
-        <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
-          {formatElapsed(elapsed)}
-        </span>
-      </div>
-
-      <p
-        aria-live="polite"
-        className="text-[12.5px] leading-[1.55] text-muted-foreground"
-      >
-        {stage === "normal" && (
-          <>
-            {t(($) => $.step_platform.stage_normal_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
-            {t(($) => $.step_platform.stage_normal_suffix)}
-          </>
-        )}
-        {stage === "midway" && (
-          <>
-            {t(($) => $.step_platform.stage_midway_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
-            {t(($) => $.step_platform.stage_midway_suffix)}
-          </>
-        )}
-        {stage === "slow" && (
-          <>
-            {t(($) => $.step_platform.stage_slow_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
-            {t(($) => $.step_platform.stage_slow_suffix)}
-          </>
-        )}
-        {stage === "stalled" && (
-          <>
-            {t(($) => $.step_platform.stage_stalled_prefix)}
-            <span className="font-medium text-foreground">{t(($) => $.step_platform.stage_stalled_term)}</span>
-            {t(($) => $.step_platform.stage_stalled_suffix)}
-          </>
-        )}
-      </p>
     </div>
   );
 }

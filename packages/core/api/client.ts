@@ -154,6 +154,7 @@ import type {
   CreateCloudRuntimeNodeRequest,
   ListCloudRuntimeNodesParams,
 } from "../runtimes/cloud-runtime";
+import type { RuntimeSetupSession } from "../runtimes/types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -259,6 +260,7 @@ import {
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_RESOURCE_LABELS_RESPONSE,
+  RuntimeSetupSessionSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1899,6 +1901,40 @@ export class ApiClient {
 
   async revokePersonalAccessToken(id: string): Promise<void> {
     await this.fetch(`/api/tokens/${id}`, { method: "DELETE" });
+  }
+
+  // Headless runtime setup. Creation returns the mst_ secret once; subsequent
+  // status reads expose only progress fields.
+  async createRuntimeSetupSession(workspaceId: string): Promise<RuntimeSetupSession> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/setup-tokens`,
+      { method: "POST", body: "{}" },
+    );
+    // Do not use parseWithFallback here: its contract-drift warning includes
+    // the received payload, while this is the sole response containing the
+    // raw one-time secret. Fail closed without copying that secret into logs.
+    const parsed = RuntimeSetupSessionSchema.safeParse(raw);
+    if (!parsed.success || !parsed.data.token) {
+      throw new Error("setup session response is missing its token");
+    }
+    return parsed.data;
+  }
+
+  async getRuntimeSetupSession(
+    workspaceId: string,
+    sessionId: string,
+  ): Promise<RuntimeSetupSession> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/setup-tokens/${sessionId}`,
+    );
+    const parsed = parseWithFallback<RuntimeSetupSession | null>(
+      raw,
+      RuntimeSetupSessionSchema,
+      null,
+      { endpoint: "GET /api/workspaces/:id/setup-tokens/:setupTokenId" },
+    );
+    if (!parsed) throw new Error("setup session response is malformed");
+    return parsed;
   }
 
   // File Upload & Attachments

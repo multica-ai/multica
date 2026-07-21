@@ -8,3 +8,15 @@ export type RuntimeHealth =
   | "recently_lost" // amber — offline < 5 minutes (likely transient)
   | "offline" // grey — offline 5 minutes ~ 7 days
   | "about_to_gc"; // dim — within 1 day of the 7-day GC threshold
+
+/** Short-lived browser-created session used by the headless runtime guide. */
+export interface RuntimeSetupSession {
+  id: string;
+  /** Present only on the create response; status reads never return it. */
+  token?: string;
+  expires_at: string;
+  redeemed_at: string | null;
+  daemon_connected_at: string | null;
+  daemon_id: string | null;
+  runtime_count: number;
+}

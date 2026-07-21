@@ -24,6 +24,35 @@ vi.mock("../components/use-runtime-picker", () => ({
   useRuntimePicker: () => mocks.pickerState,
 }));
 
+vi.mock("../../runtimes/components/connect-remote-dialog", () => ({
+  ConnectRemoteDialog: ({
+    onConnected,
+  }: {
+    onConnected: (runtime: AgentRuntime) => void;
+  }) => (
+    <div role="dialog">
+      <div data-testid="cli-instructions">install me</div>
+      {mocks.pickerState.hasRuntimes ? (
+        <>
+          <span>{mocks.pickerState.runtimes.length} agent runtime connected</span>
+          <span>Selected: {mocks.pickerState.selected?.name}</span>
+        </>
+      ) : (
+        <span>Waiting for your computer</span>
+      )}
+      <button
+        type="button"
+        disabled={!mocks.pickerState.selected}
+        onClick={() =>
+          mocks.pickerState.selected && onConnected(mocks.pickerState.selected)
+        }
+      >
+        Start exploring
+      </button>
+    </div>
+  ),
+}));
+
 import { StepPlatformFork } from "./step-platform-fork";
 
 function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
@@ -54,7 +83,6 @@ function renderFork(
       <StepPlatformFork
         wsId="ws_test"
         onNext={onNext}
-        cliInstructions={<div data-testid="cli-instructions">install me</div>}
         {...overrides}
       />
     </I18nProvider>,
