@@ -13,12 +13,13 @@ import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
-import { PageviewTracker } from "./components/pageview-tracker";
 import { UpdateNotification } from "./components/update-notification";
+import { IssueWindow } from "./components/issue-window";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
+import { captureEvent } from "@multica/core/analytics";
 import { RESOURCES } from "@multica/views/locales";
 
 // BCP-47 region tags for the <html lang> attribute, mirroring
@@ -35,10 +36,82 @@ const HTML_LANG: Record<SupportedLocale, string> = {
 };
 
 
+/**
+ * Cmd/Ctrl+W: close the active tab. When the last real tab is closed
+ * (or no tabs/workspace exist — e.g. login page), close the window.
+ *
+ * Mounted at the App root so every renderer state — including login,
+ * loading, onboarding, and runtime-config errors — has a working Cmd+W
+ * handler. Without this, states outside the tab shell would swallow the
+ * shortcut and do nothing.
+ */
+function useCmdWCloseTab() {
+  useEffect(() => {
+    return window.desktopAPI.onCloseActiveTab(() => {
+      if (window.desktopAPI.windowContext?.kind === "issue") {
+        window.desktopAPI.closeWindow();
+        return;
+      }
+      const store = useTabStore.getState();
+      const { activeWorkspaceSlug, byWorkspace } = store;
+      if (!activeWorkspaceSlug) {
+        // No workspace — nothing to close, dismiss the window.
+        window.desktopAPI.closeWindow();
+        return;
+      }
+      const group = byWorkspace[activeWorkspaceSlug];
+      if (!group || group.tabs.length <= 1) {
+        // Last tab (or no tabs) — close the window.
+        window.desktopAPI.closeWindow();
+        return;
+      }
+      // Multiple tabs — close the active one.
+      store.closeActiveTab();
+    });
+  }, []);
+}
+
+function IssueWindowContent() {
+  const user = useAuthStore((state) => state.user);
+  const isLoading = useAuthStore((state) => state.isLoading);
+  const context = window.desktopAPI.windowContext ?? { kind: "main" as const };
+
+  if (context.kind !== "issue") return null;
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <MulticaIcon className="size-6 animate-pulse" />
+      </div>
+    );
+  }
+
+  return user ? <IssueWindow context={context} /> : <DesktopLoginPage />;
+}
+
+/**
+ * Keep the main process informed of the resolved account identity without
+ * sharing credentials between renderer processes. Main uses this signal to
+ * close dedicated windows on logout/account switch.
+ */
+function DesktopAuthSessionBridge() {
+  const userId = useAuthStore((state) => state.user?.id ?? null);
+  const isLoading = useAuthStore((state) => state.isLoading);
+
+  useEffect(() => {
+    if (isLoading) return;
+    // Optional chaining keeps renderer HMR safe during the brief interval in
+    // which an old preload is still attached to the refreshed React tree.
+    window.desktopAPI.reportAuthSession?.(userId);
+  }, [isLoading, userId]);
+
+  return null;
+}
+
 function AppContent() {
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const qc = useQueryClient();
+
   // Deep-link login runs loginWithToken → syncToken → listWorkspaces →
   // setQueryData sequentially. loginWithToken sets user+isLoading=false
   // as soon as getMe resolves, which would cause DesktopShell to mount
@@ -192,6 +265,7 @@ function AppContent() {
     return undefined;
   }, [user, workspaceListFetched, wsCount, workspaces, hasOnboarded, qc]);
 
+
   // Validate persisted tab state against the current user's workspace list,
   // and pick an active workspace if none is set. Runs in useLayoutEffect
   // (synchronously after render, before paint) rather than the render
@@ -244,15 +318,7 @@ function AppContent() {
     );
   }
 
-  // Pageview tracker sits at the app root so it covers every visible
-  // surface (login, overlays, tab paths) — mounting it inside DesktopShell
-  // would miss the logged-out and overlay states.
-  return (
-    <>
-      <PageviewTracker />
-      {user ? <DesktopShell /> : <DesktopLoginPage />}
-    </>
-  );
+  return user ? <DesktopShell /> : <DesktopLoginPage />;
 }
 
 function BlockingRuntimeConfigError({ message }: { message: string }) {
@@ -277,6 +343,9 @@ function BlockingRuntimeConfigError({ message }: { message: string }) {
 // useLogout clears the storage key, but the live stores stay populated until
 // we explicitly reset them here.
 async function handleDaemonLogout() {
+  // Report synchronously before async daemon cleanup so a rapidly closed main
+  // window cannot leave authenticated issue renderers behind.
+  window.desktopAPI.reportAuthSession?.(null);
   useTabStore.getState().reset();
   useWindowOverlayStore.getState().close();
   // Drop any post-onboarding welcome signal so user B logging in next
@@ -298,6 +367,32 @@ export default function App() {
   const { version, os } = window.desktopAPI.appInfo;
   const systemLocale = window.desktopAPI.systemLocale;
   const runtimeConfigResult = window.desktopAPI.runtimeConfig;
+  // The fallback keeps renderer HMR safe while a main/preload rebuild is
+  // restarting Electron; packaged builds always expose windowContext.
+  const windowContext =
+    window.desktopAPI.windowContext ?? { kind: "main" as const };
+  useCmdWCloseTab();
+
+  // Flush a freeze/crash breadcrumb the main process parked from a previous
+  // session. A true hang or process death can't report itself when it happens
+  // (the renderer is blocked or gone), so the main process persists it and we
+  // emit it here on the next boot. The in-thread, recoverable freeze tier is
+  // handled separately by the shared watchdog in CoreProvider.
+  useEffect(() => {
+    const last = window.desktopAPI.getLastFreeze();
+    if (!last) return;
+    const crashed = last.kind === "render-process-gone";
+    captureEvent(crashed ? "client_crash" : "client_unresponsive", {
+      // Spread context FIRST so our explicit fields below always win — a
+      // future context key (e.g. its own `source`) must not silently override.
+      ...last.context,
+      source: crashed ? "render-process-gone" : "main-unresponsive",
+      recovered: false,
+      breadcrumb_ts: last.ts,
+      crashed_version: last.version,
+    });
+  }, []);
+
   // Stable identity reference so downstream effects (WS reconnect) don't
   // tear down on every parent render.
   const identity = useMemo(
@@ -349,19 +444,26 @@ export default function App() {
         <CoreProvider
           apiBaseUrl={runtimeConfigResult.config.apiUrl}
           wsUrl={runtimeConfigResult.config.wsUrl}
-          onLogout={handleDaemonLogout}
+          onLogout={
+            windowContext.kind === "main" ? handleDaemonLogout : undefined
+          }
           identity={identity}
           locale={locale}
           resources={resources}
           localeAdapter={localeAdapter}
         >
-          <AppContent />
+          <DesktopAuthSessionBridge />
+          {windowContext.kind === "issue" ? (
+            <IssueWindowContent />
+          ) : (
+            <AppContent />
+          )}
         </CoreProvider>
       ) : (
         <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
       )}
       <Toaster />
-      <UpdateNotification />
+      {windowContext.kind === "main" && <UpdateNotification />}
     </ThemeProvider>
   );
 }

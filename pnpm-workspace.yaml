@@ -25,6 +25,7 @@ catalog:
   # UI & Styling
   tailwindcss: "^4"
   "@tailwindcss/postcss": "^4"
+  postcss: "^8"
   "@tailwindcss/vite": "^4"
   tailwind-merge: "^3.4.0"
   class-variance-authority: "^0.7.1"
@@ -46,8 +47,14 @@ catalog:
   # Loading animations (chat StatusPill)
   unicode-animations: "^1.0.3"
 
+  # QR rendering — Lark device-flow scan-to-install dialog renders the
+  # verification_uri_complete as a QR so users can scan it from their
+  # phone instead of typing the URL.
+  "react-qr-code": "^2.0.18"
+
   # Virtualized timeline (issue detail comments)
   react-virtuoso: "^4.14.0"
+  "@tanstack/react-virtual": "^3.13.0"
 
   # Product analytics
   posthog-js: "^1.176.1"

@@ -37,7 +37,7 @@ SMTP 경로는 대부분의 온프레미스 메일 서버(특히 Microsoft Excha
 |---|---|---|---|
 | 익명 내부 relay | `25` | 없음 — IP / 서브넷으로 제출을 신뢰 | 전송 경로상 없음(내부 세그먼트 전용) |
 | 인증된 제출(submission) | `587` | `SMTP_USERNAME` + `SMTP_PASSWORD` | STARTTLS, 자동 업그레이드 |
-| 암묵적 TLS (SMTPS) | `465` | — | **아직 지원하지 않음** — 포트 25 또는 587을 사용하세요 |
+| 암묵적 TLS (SMTPS) | `465` | 선택 사항(`SMTP_USERNAME` + `SMTP_PASSWORD`) | 연결 시 TLS 핸드셰이크 — 포트 `465`에서 자동 활성화, 비표준 포트에서는 `SMTP_TLS=implicit`로 강제 |
 
 **포트 25의 익명 Exchange relay** — 자격 증명 없이 신뢰된 서브넷에서 오는 메일을 받아들이는 일반적인 "internal SMTP relay" / Exchange 익명 receive connector:
 
@@ -61,7 +61,27 @@ SMTP_TLS_INSECURE=false        # set true only for self-signed / private CA
 RESEND_FROM_EMAIL=noreply@yourdomain.com
 ```
 
-시작 시 서버는 선택한 제공자를 출력합니다. 예를 들어 `EmailService: SMTP relay exchange.internal.example.com:25 from=noreply@example.com`(또는 `Resend API` / `DEV mode`)와 같이 표시됩니다. 비밀번호는 절대 로그에 기록되지 않습니다. 재시작 후 SMTP 줄이 보이지 않는다면 `SMTP_HOST`가 프로세스에 도달하지 못한 것이므로, 컨테이너 환경(`docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP`)을 확인하세요.
+**포트 465의 암묵적 TLS(SMTPS)** — SMTPS만 제공하고 STARTTLS를 알리지 않는 제공자(예: Aliyun / Tencent 엔터프라이즈 메일)용. 포트 `465`는 암묵적 TLS를 자동으로 활성화하며, `SMTP_TLS=implicit`(별칭: `smtps`, `ssl`)는 비표준 SMTPS 포트에서 이를 강제합니다:
+
+```bash
+SMTP_HOST=smtp.qiye.aliyun.com
+SMTP_PORT=465                  # implicit TLS auto-enabled on 465
+SMTP_USERNAME=multica@yourdomain.com
+SMTP_PASSWORD=...
+SMTP_TLS=implicit              # optional on 465; required on a non-standard SMTPS port
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+**엄격한 공개 relay(예: Google Workspace `smtp-relay.gmail.com`)** 는 추가로 유효한 EHLO 이름을 요구합니다. 이들은 공개 IP에서 보내는 기본 `localhost` greeting을 거부하며, relay가 연결을 끊습니다 — 이는 greeting 단계가 아니라 이후 명령에서 불투명한 `EOF`(`smtp auth: EOF`)로 나타납니다. relay가 기대하는 FQDN으로 `SMTP_EHLO_NAME`을 설정하세요. 기본값은 머신 호스트명이며, 컨테이너 안에서는 보통 유효한 FQDN이 아닙니다:
+
+```bash
+SMTP_HOST=smtp-relay.gmail.com
+SMTP_PORT=587
+SMTP_EHLO_NAME=mail.yourdomain.com   # FQDN the relay accepts; defaults to the (non-FQDN) container hostname
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+시작 시 서버는 협상된 TLS 모드를 포함하여 선택한 제공자를 출력합니다. 예를 들어 `EmailService: SMTP relay exchange.internal.example.com:25 (starttls) from=noreply@example.com` 또는 `… smtp.qiye.aliyun.com:465 (implicit-tls) from=…`(또는 `Resend API` / `DEV mode`)와 같이 표시됩니다. 비밀번호는 절대 로그에 기록되지 않습니다. 재시작 후 SMTP 줄이 보이지 않는다면 `SMTP_HOST`가 프로세스에 도달하지 못한 것이므로, 컨테이너 환경(`docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP`)을 확인하세요.
 
 **둘 다 설정하지 않으면**: 서버는 오류를 내지 않지만, **전송되어야 했던 모든 이메일이 서버의 stdout에만 기록됩니다**. 로컬 개발에는 편리하지만(로그에서 코드를 복사하면 됩니다), 프로덕션에서는 블랙홀이 됩니다.
 

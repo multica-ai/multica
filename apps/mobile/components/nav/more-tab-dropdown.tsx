@@ -50,6 +50,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Text } from "@/components/ui/text";
+import { WorkspaceAvatar } from "@/components/workspace/workspace-avatar";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -138,10 +139,10 @@ export function MoreTabDropdownAnchor({
 
           <WorkspaceCard
             currentWorkspaceName={currentWorkspace?.name}
+            currentWorkspaceAvatarUrl={currentWorkspace?.avatar_url}
             onPress={() =>
               slug && router.push(`/${slug}/switch-workspace`)
             }
-            iconTint={t.foreground}
             chevronTint={t.mutedForeground}
           />
 
@@ -247,13 +248,13 @@ function UserCard({
  */
 function WorkspaceCard({
   currentWorkspaceName,
+  currentWorkspaceAvatarUrl,
   onPress,
-  iconTint,
   chevronTint,
 }: {
   currentWorkspaceName: string | undefined;
+  currentWorkspaceAvatarUrl: string | null | undefined;
   onPress: () => void;
-  iconTint: string;
   chevronTint: string;
 }) {
   const { data } = useQuery(workspaceListOptions());
@@ -265,16 +266,14 @@ function WorkspaceCard({
       disabled={!canSwitch}
       className="h-12 gap-3"
       accessibilityLabel={
-        canSwitch ? "切换工作区" : currentWorkspaceName ?? "Workspace"
+        canSwitch ? "Switch workspace" : currentWorkspaceName ?? "Workspace"
       }
     >
-      <View className="size-8 rounded-md bg-muted items-center justify-center">
-        <ExpoImage
-          source="sf:building.2"
-          tintColor={iconTint}
-          style={{ width: 16, height: 16 }}
-        />
-      </View>
+      <WorkspaceAvatar
+        name={currentWorkspaceName ?? "Workspace"}
+        avatarUrl={currentWorkspaceAvatarUrl}
+        size={32}
+      />
       <View className="flex-1 min-w-0">
         <Text
           className="text-sm font-medium text-foreground"

@@ -193,6 +193,7 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 		`"workspace_id"`,
 		`"task_short"`,
 		`"artifact_ratio"`,
+		`"managed_artifact_subpaths"`,
 		`"total_task_count"`,
 		`"total_workspace_count"`,
 		`"total_artifact_ratio"`,
@@ -200,6 +201,66 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("JSON missing required field %s: %s", want, raw)
 		}
+	}
+}
+
+func TestScanDiskUsage_ManagedCodexSandboxIsExactAndDeduplicated(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	wsID := "mmmmmmmm-mmmm-mmmm-mmmm-mmmmmmmmmmmm"
+	taskDir := filepath.Join(root, wsID, "tttttttt")
+	writeFile(t, filepath.Join(taskDir, "codex-home/.sandbox-bin/codex.exe"), 300)
+	writeFile(t, filepath.Join(taskDir, "workdir/repo/.sandbox-bin/cache"), 400)
+
+	report, err := ScanDiskUsage(root, nil)
+	if err != nil {
+		t.Fatalf("ScanDiskUsage managed-only: %v", err)
+	}
+	if got := report.Tasks[0].SizeBytes; got != 700 {
+		t.Fatalf("size_bytes=%d, want 700", got)
+	}
+	if got := report.Tasks[0].ArtifactSizeBytes; got != 300 {
+		t.Fatalf("artifact_size_bytes=%d, want exact managed 300", got)
+	}
+	if got := strings.Join(report.ManagedArtifactSubpaths, ","); got != "codex-home/.sandbox-bin" {
+		t.Fatalf("managed artifact paths=%q, want codex-home/.sandbox-bin", got)
+	}
+
+	report, err = ScanDiskUsage(root, []string{".sandbox-bin"})
+	if err != nil {
+		t.Fatalf("ScanDiskUsage broad basename: %v", err)
+	}
+	if got := report.Tasks[0].ArtifactSizeBytes; got != 700 {
+		t.Fatalf("artifact_size_bytes=%d, want 700 without double counting", got)
+	}
+}
+
+func TestScanDiskUsage_LegacyMetaAgeUsesMetaFileMTime(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	wsID := "llllllll-llll-llll-llll-llllllllllll"
+	taskDir := filepath.Join(root, wsID, "tttttttt")
+	writeFile(t, filepath.Join(taskDir, "workdir/main.go"), 10)
+	mustWriteMeta(t, taskDir, execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: "issue-legacy", WorkspaceID: wsID,
+	})
+	oldRoot := time.Now().Add(-30 * 24 * time.Hour)
+	if err := os.Chtimes(taskDir, oldRoot, oldRoot); err != nil {
+		t.Fatal(err)
+	}
+	recentMeta := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(filepath.Join(taskDir, ".gc_meta.json"), recentMeta, recentMeta); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := ScanDiskUsage(root, nil)
+	if err != nil {
+		t.Fatalf("ScanDiskUsage: %v", err)
+	}
+	if got := report.Tasks[0].AgeSeconds; got < int64(time.Hour.Seconds()) || got > int64((3*time.Hour).Seconds()) {
+		t.Fatalf("age_seconds=%d, want metadata age near 2h instead of stale task root age", got)
 	}
 }
 
@@ -340,6 +401,54 @@ func TestScanDiskUsage_RejectsPatternsWithSeparators(t *testing.T) {
 	}
 	if got := report.ArtifactPatterns; len(got) != 0 {
 		t.Errorf("ArtifactPatterns = %v, want empty (all dropped)", got)
+	}
+}
+
+// TestScanDiskUsageRoots_SumsAcrossRoots verifies the cross-root aggregate:
+// each root keeps its own labeled report and the grand totals are the sum of
+// every root's full scan. A missing root contributes an empty report, not an
+// error, so a never-used profile root doesn't break the aggregate.
+func TestScanDiskUsageRoots_SumsAcrossRoots(t *testing.T) {
+	t.Parallel()
+
+	rootA := t.TempDir()
+	writeFile(t, filepath.Join(rootA, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "t1", "workdir/main.go"), 100)
+
+	rootB := t.TempDir()
+	writeFile(t, filepath.Join(rootB, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "t1", "workdir/big"), 300)
+	writeFile(t, filepath.Join(rootB, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "t2", "workdir/main.go"), 50)
+
+	missing := filepath.Join(t.TempDir(), "never-ran")
+
+	agg, err := ScanDiskUsageRoots([]DiskUsageRoot{
+		{Profile: "", Root: rootA},
+		{Profile: "desktop-host", Root: rootB},
+		{Profile: "never-ran", Root: missing},
+	}, []string{"node_modules"})
+	if err != nil {
+		t.Fatalf("ScanDiskUsageRoots: %v", err)
+	}
+
+	if len(agg.Roots) != 3 {
+		t.Fatalf("Roots len = %d, want 3 (missing root still listed, empty)", len(agg.Roots))
+	}
+	if agg.Roots[0].Profile != "" || agg.Roots[1].Profile != "desktop-host" {
+		t.Fatalf("root profiles not preserved in order: %+v", agg.Roots)
+	}
+	if agg.Roots[2].Report.TotalTaskCount != 0 {
+		t.Fatalf("missing root TotalTaskCount = %d, want 0", agg.Roots[2].Report.TotalTaskCount)
+	}
+	if agg.TotalTaskCount != 3 {
+		t.Fatalf("TotalTaskCount = %d, want 3 across roots", agg.TotalTaskCount)
+	}
+	if agg.TotalSizeBytes != 450 {
+		t.Fatalf("TotalSizeBytes = %d, want 450 (100 + 300 + 50)", agg.TotalSizeBytes)
+	}
+	if agg.TotalWorkspaceCount != 2 {
+		t.Fatalf("TotalWorkspaceCount = %d, want 2", agg.TotalWorkspaceCount)
+	}
+	if got := strings.Join(agg.ManagedArtifactSubpaths, ","); got != "codex-home/.sandbox-bin" {
+		t.Fatalf("managed artifact paths=%q, want codex-home/.sandbox-bin", got)
 	}
 }
 

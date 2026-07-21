@@ -13,3 +13,9 @@ export {
   useLocalDaemonStatus,
   type LocalDaemonStatus,
 } from "./use-local-daemon-status";
+export {
+  ScrollRestorationProvider,
+  useRestoredScrollOffset,
+  useRestoredScrollRef,
+  type ScrollRestorationAdapter,
+} from "./scroll-restoration";

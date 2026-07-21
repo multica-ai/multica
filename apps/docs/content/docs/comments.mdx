@@ -39,9 +39,9 @@ Mentioning the same person multiple times in one comment still produces **only o
 
 ## Referencing issues
 
-To link another issue, type its issue key, such as `MUL-123`. Multica resolves real issue keys in comments and stores them as an internal `mention://issue/<uuid>` link. Issue links are cross-references only: they do not notify people and they do not trigger agents.
+To link another issue, choose it from the comment mention picker. Multica stores issue links as an explicit `[MUL-123](mention://issue/<uuid>)` mention link. Issue links are cross-references only: they do not notify people and they do not trigger agents.
 
-You normally do not need to write `[MUL-123](mention://issue/<uuid>)` by hand. That format is the canonical internal representation after Multica has resolved the key.
+Typing a bare issue key, such as `MUL-123`, keeps it as plain text. This also keeps branch names and paths, such as `feature/MUL-123`, from being rewritten inside comments.
 
 <Callout type="info">
 Markdown emphasis follows CommonMark rules. When bold text ends with punctuation or a closing quote and is immediately followed by a Korean particle, the closing `**` may not be recognized.

@@ -34,9 +34,14 @@ import {
   type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
 import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
+import {
+  unhandledCommentTriggerOutcomes,
+  mentionLabelsByTarget,
+} from "@multica/core/issues/comment-trigger-outcomes";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+import { blockedShortReasonLabel } from "../blocked-trigger-copy";
 
 type TLCache = TimelineEntry[];
 
@@ -56,6 +61,7 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
     resolved_at: c.resolved_at,
     resolved_by_type: c.resolved_by_type,
     resolved_by_id: c.resolved_by_id,
+    source_task_id: c.source_task_id,
   };
 }
 
@@ -258,47 +264,92 @@ export function useIssueTimeline(issueId: string, userId?: string) {
 
   // --- Mutation functions ---
 
+  // The comment saved, but a mention did not clearly trigger (blocked, or an
+  // unknown/future status we must not assume succeeded). Warn instead of a
+  // silent no-op (MUL-4525 §2): the comment IS posted, but N explicitly-named
+  // targets were not triggered.
+  const warnUnhandledTriggers = useCallback(
+    (triggerOutcomes: unknown, content?: string) => {
+      const unhandled = unhandledCommentTriggerOutcomes(triggerOutcomes);
+      if (unhandled.length === 0) return;
+      // Name the target when a single mention was refused — the posted comment's
+      // markup carries the label the user typed (the wire outcome omits it for
+      // enumeration-safety). Several refusals fall back to a count.
+      if (unhandled.length === 1) {
+        const outcome = unhandled[0]!;
+        const name = mentionLabelsByTarget(content ?? "").get(
+          `${outcome.target_type}:${outcome.target_id}`,
+        );
+        if (name) {
+          toast.warning(
+            t(($) => $.comment.posted_partial_trigger_named, {
+              name,
+              reason: blockedShortReasonLabel(outcome.reason_code, t),
+            }),
+          );
+          return;
+        }
+      }
+      toast.warning(
+        t(($) => $.comment.posted_partial_trigger, { count: unhandled.length }),
+      );
+    },
+    [t],
+  );
+
+  // Returns true on success, false on failure. The composer keeps the user's
+  // text (editor locked + button spinning) until this settles and clears only
+  // on success — so a slow send no longer leaves the box full next to an
+  // already-posted comment, and a failed send keeps the draft.
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[]) => {
-      if (!content.trim() || !userId) return;
+    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<boolean> => {
+      if (!content.trim() || !userId) return false;
       try {
-        await createComment({ content, attachmentIds });
+        const comment = await createComment({ content, attachmentIds, suppressAgentIds });
+        warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
+        return true;
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
             ? err.message
             : t(($) => $.comment.send_failed),
         );
+        return false;
       }
     },
-    [userId, createComment, t],
+    [userId, createComment, warnUnhandledTriggers, t],
   );
 
   const submitReply = useCallback(
-    async (parentId: string, content: string, attachmentIds?: string[]) => {
-      if (!content.trim() || !userId) return;
+    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<boolean> => {
+      if (!content.trim() || !userId) return false;
       try {
-        await createComment({
+        const comment = await createComment({
           content,
           type: "comment",
           parentId,
           attachmentIds,
+          suppressAgentIds,
         });
+        warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
+        return true;
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
             ? err.message
             : t(($) => $.comment.send_reply_failed),
         );
+        return false;
       }
     },
-    [userId, createComment, t],
+    [userId, createComment, warnUnhandledTriggers, t],
   );
 
   const editComment = useCallback(
-    async (commentId: string, content: string, attachmentIds: string[]) => {
+    async (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => {
       try {
-        await updateComment({ commentId, content, attachmentIds });
+        const comment = await updateComment({ commentId, content, attachmentIds, suppressAgentIds });
+        warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
@@ -307,7 +358,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         );
       }
     },
-    [updateComment, t],
+    [updateComment, warnUnhandledTriggers, t],
   );
 
   const deleteComment = useCallback(

@@ -144,6 +144,7 @@ func runPrepareLikeCycle(t *testing.T, workDir, envRoot, provider string, ctx Ta
 // one — review the test diff before merging.
 var allFileBasedProviders = []string{
 	"claude",
+	"codebuddy",
 	"codex",
 	"copilot",
 	"opencode",
@@ -154,7 +155,7 @@ var allFileBasedProviders = []string{
 	"kimi",
 	"kiro",
 	"antigravity",
-	"gemini",
+	"qwen",
 }
 
 // TestPrepareThenCleanupSidecarsRoundTripEmptyWorkdir is the headline
@@ -212,7 +213,7 @@ func TestPrepareThenCleanupSidecarsRoundTripEmptyWorkdir(t *testing.T) {
 func TestPrepareThenCleanupSidecarsPreservesUserSkillSibling(t *testing.T) {
 	t.Parallel()
 	// One representative case per provider that writes into a
-	// provider-native skill directory. Gemini and Hermes don't have a
+	// provider-native skill directory. Hermes doesn't have a
 	// native discovery path; they fall back to .agent_context/skills/,
 	// which is also covered (a user-created sibling under there should
 	// also survive). Codex is intentionally excluded — its workspace
@@ -224,6 +225,7 @@ func TestPrepareThenCleanupSidecarsPreservesUserSkillSibling(t *testing.T) {
 		userSkillFile string // path under userSkillRel
 	}{
 		{"claude", filepath.Join(".claude", "skills", "my-own"), "SKILL.md"},
+		{"codebuddy", filepath.Join(".codebuddy", "skills", "my-own"), "SKILL.md"},
 		{"copilot", filepath.Join(".github", "skills", "my-own"), "SKILL.md"},
 		{"opencode", filepath.Join(".opencode", "skills", "my-own"), "SKILL.md"},
 		{"openclaw", filepath.Join("skills", "my-own"), "SKILL.md"},
@@ -232,8 +234,8 @@ func TestPrepareThenCleanupSidecarsPreservesUserSkillSibling(t *testing.T) {
 		{"kimi", filepath.Join(".kimi", "skills", "my-own"), "SKILL.md"},
 		{"kiro", filepath.Join(".kiro", "skills", "my-own"), "SKILL.md"},
 		{"antigravity", filepath.Join(".agents", "skills", "my-own"), "SKILL.md"},
+		{"qwen", filepath.Join(".qwen", "skills", "my-own"), "SKILL.md"},
 		{"hermes", filepath.Join(".agent_context", "skills", "my-own"), "SKILL.md"},
-		{"gemini", filepath.Join(".agent_context", "skills", "my-own"), "SKILL.md"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -289,6 +291,7 @@ func TestPrepareThenCleanupSidecarsPreservesUnrelatedUserFiles(t *testing.T) {
 		userFile string // path under workDir
 	}{
 		{"claude", filepath.Join(".claude", "settings.json")},
+		{"codebuddy", filepath.Join(".codebuddy", "settings.json")},
 		{"copilot", filepath.Join(".github", "CODEOWNERS")},
 		{"opencode", filepath.Join(".opencode", "config.json")},
 		{"pi", filepath.Join(".pi", "config.toml")},
@@ -296,6 +299,7 @@ func TestPrepareThenCleanupSidecarsPreservesUnrelatedUserFiles(t *testing.T) {
 		{"kimi", filepath.Join(".kimi", "config.json")},
 		{"kiro", filepath.Join(".kiro", "config.json")},
 		{"antigravity", filepath.Join(".agents", "config.json")},
+		{"qwen", filepath.Join(".qwen", "settings.json")},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -608,13 +612,14 @@ func TestSidecarManifestRoundTripJSON(t *testing.T) {
 // is fully cleaned up.
 //
 // Codex skills live under codex-home (not workdir), so the per-skill
-// collision branch doesn't apply to it. Gemini falls back to
+// collision branch doesn't apply to it. Hermes falls back to
 // .agent_context/skills/ same as the default; Hermes goes there too.
 var sameSlugSkillProviderCases = []struct {
 	provider string
 	skillDir string // relative path under workDir for the colliding slug
 }{
 	{"claude", filepath.Join(".claude", "skills", "issue-review")},
+	{"codebuddy", filepath.Join(".codebuddy", "skills", "issue-review")},
 	{"copilot", filepath.Join(".github", "skills", "issue-review")},
 	{"opencode", filepath.Join(".opencode", "skills", "issue-review")},
 	{"openclaw", filepath.Join("skills", "issue-review")},
@@ -623,8 +628,8 @@ var sameSlugSkillProviderCases = []struct {
 	{"kimi", filepath.Join(".kimi", "skills", "issue-review")},
 	{"kiro", filepath.Join(".kiro", "skills", "issue-review")},
 	{"antigravity", filepath.Join(".agents", "skills", "issue-review")},
+	{"qwen", filepath.Join(".qwen", "skills", "issue-review")},
 	{"hermes", filepath.Join(".agent_context", "skills", "issue-review")},
-	{"gemini", filepath.Join(".agent_context", "skills", "issue-review")},
 }
 
 // TestPrepareThenCleanupSidecarsSameSlugCollisionPerProvider is the

@@ -6,9 +6,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
@@ -22,6 +25,12 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	got[0] = "mutated"
 	if defaults[0] == "mutated" {
 		t.Fatal("patternsFromEnv must not return a slice aliased with defaults")
+	}
+}
+
+func TestDefaultGCIntervalIsTwoHours(t *testing.T) {
+	if DefaultGCInterval != 2*time.Hour {
+		t.Fatalf("DefaultGCInterval = %s, want 2h", DefaultGCInterval)
 	}
 }
 
@@ -240,6 +249,162 @@ func stageFakeAgent(t *testing.T) string {
 	return binDir
 }
 
+func TestLoadConfig_DiscoversQwenCode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell fixture is unavailable on Windows")
+	}
+	binDir := stageFakeAgent(t)
+	qwen := filepath.Join(binDir, "qwen")
+	if err := os.WriteFile(qwen, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake qwen: %v", err)
+	}
+	// Avoid consulting an inherited interactive shell for all deliberately
+	// absent providers; this test is about ordinary PATH discovery.
+	t.Setenv("SHELL", "/usr/bin/fish")
+	t.Setenv("MULTICA_QWEN_MODEL", "qwen3.8-max-preview")
+	t.Setenv("MULTICA_QWEN_ARGS", "--verbose --foo=bar")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	entry, ok := cfg.Agents["qwen"]
+	if !ok {
+		t.Fatalf("qwen was not discovered: %v", cfg.Agents)
+	}
+	wantPath, err := filepath.EvalSymlinks(qwen)
+	if err != nil {
+		t.Fatalf("eval symlinks for qwen: %v", err)
+	}
+	if entry.Path != wantPath || entry.Command != "qwen" || entry.Model != "qwen3.8-max-preview" {
+		t.Fatalf("qwen entry = %+v, want path=%q command=qwen model=qwen3.8-max-preview", entry, wantPath)
+	}
+	if got, want := strings.Join(cfg.QwenArgs, " "), "--verbose --foo=bar"; got != want {
+		t.Fatalf("QwenArgs = %q, want %q", got, want)
+	}
+}
+
+func TestLoadConfig_SkipsMulticaHooksShadowingAgentBinaries(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	hooksDir := filepath.Join(home, ".multica", "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("create hooks dir: %v", err)
+	}
+	realBinDir := t.TempDir()
+
+	for _, name := range []string{"claude", "codex", "hermes"} {
+		hookPath := filepath.Join(hooksDir, name)
+		hookBody := "#!/bin/sh\nexec " + name + " \"$@\"\n"
+		if err := os.WriteFile(hookPath, []byte(hookBody), 0o755); err != nil {
+			t.Fatalf("write hook wrapper %s: %v", name, err)
+		}
+		realPath := filepath.Join(realBinDir, name)
+		if err := os.WriteFile(realPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write real binary %s: %v", name, err)
+		}
+	}
+
+	t.Setenv("PATH", hooksDir+string(os.PathListSeparator)+realBinDir)
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	for provider, binary := range map[string]string{
+		"claude": "claude",
+		"codex":  "codex",
+		"hermes": "hermes",
+	} {
+		got, ok := cfg.Agents[provider]
+		if !ok {
+			t.Fatalf("expected %s agent in config, got %#v", provider, cfg.Agents)
+		}
+		want := canonicalExecutablePath(filepath.Join(realBinDir, binary))
+		if got.Path != want {
+			t.Errorf("%s path = %q, want unshadowed real binary %q", provider, got.Path, want)
+		}
+		if strings.HasPrefix(got.Path, hooksDir) {
+			t.Errorf("%s path still points into hooks dir: %q", provider, got.Path)
+		}
+	}
+}
+
+func TestLoadConfig_SkipsMulticaHooksFromLoginShellFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	sh := "/bin/sh"
+	if _, err := os.Stat(sh); err != nil {
+		t.Skipf("no /bin/sh available: %v", err)
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	hooksDir := filepath.Join(home, ".multica", "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("create hooks dir: %v", err)
+	}
+	realBinDir := t.TempDir()
+	hookPath := filepath.Join(hooksDir, "codex")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexec codex \"$@\"\n"), 0o755); err != nil {
+		t.Fatalf("write hook wrapper: %v", err)
+	}
+	realPath := filepath.Join(realBinDir, "codex")
+	if err := os.WriteFile(realPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write real codex: %v", err)
+	}
+
+	t.Setenv("PATH", "/usr/bin:/bin")
+	if _, err := exec.LookPath("codex"); err == nil {
+		t.Skip("PATH leak - codex already visible to daemon without shell fallback")
+	}
+	rc := filepath.Join(t.TempDir(), "sh.rc")
+	rcBody := "export PATH=\"" + hooksDir + string(os.PathListSeparator) + realBinDir + ":$PATH\"\n"
+	if err := os.WriteFile(rc, []byte(rcBody), 0o644); err != nil {
+		t.Fatalf("write shell rc: %v", err)
+	}
+	t.Setenv("SHELL", sh)
+	t.Setenv("ENV", rc)
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	pinNonCodexAgentsToMissingPaths(t)
+	oldBundlePaths := codexDesktopAppBundlePaths
+	codexDesktopAppBundlePaths = func() []string { return nil }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := cfg.Agents["codex"]
+	if !ok {
+		t.Fatalf("expected codex from login-shell fallback, got %#v", cfg.Agents)
+	}
+	want := canonicalExecutablePath(realPath)
+	if got.Path != want {
+		t.Fatalf("codex path = %q, want unshadowed real binary %q", got.Path, want)
+	}
+	if strings.HasPrefix(got.Path, hooksDir) {
+		t.Fatalf("codex path still points into hooks dir: %q", got.Path)
+	}
+}
+
 // TestLoadConfig_AutoUpdateDefault_SelfHostOff is the regression guard for
 // MUL-2381: a daemon pointed at any non-cloud server URL must default
 // AutoUpdateEnabled to false, because self-host operators frequently run a
@@ -255,6 +420,101 @@ func TestLoadConfig_AutoUpdateDefault_SelfHostOff(t *testing.T) {
 	}
 	if cfg.AutoUpdateEnabled {
 		t.Fatalf("AutoUpdateEnabled = true for self-host (localhost) server, want false")
+	}
+}
+
+func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with default: %v", err)
+	}
+	if cfg.CodexHandshakeTimeout != DefaultCodexHandshakeTimeout {
+		t.Fatalf("CodexHandshakeTimeout = %s, want default %s", cfg.CodexHandshakeTimeout, DefaultCodexHandshakeTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "47s")
+
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with env: %v", err)
+	}
+	if cfg.CodexHandshakeTimeout != 47*time.Second {
+		t.Fatalf("CodexHandshakeTimeout = %s, want 47s from env", cfg.CodexHandshakeTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "0")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with zero env: %v", err)
+	}
+	if cfg.CodexHandshakeTimeout != DefaultCodexHandshakeTimeout {
+		t.Fatalf("CodexHandshakeTimeout = %s, want default %s for zero env", cfg.CodexHandshakeTimeout, DefaultCodexHandshakeTimeout)
+	}
+
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:             "http://localhost:8080",
+		WorkspacesRoot:        t.TempDir(),
+		CodexHandshakeTimeout: 12 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with override: %v", err)
+	}
+	if cfg.CodexHandshakeTimeout != 12*time.Second {
+		t.Fatalf("CodexHandshakeTimeout = %s, want 12s from override", cfg.CodexHandshakeTimeout)
+	}
+}
+
+func TestLoadConfig_OpenCodeIdleWatchdog(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_OPENCODE_IDLE_WATCHDOG", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with default: %v", err)
+	}
+	if cfg.OpenCodeIdleWatchdog != DefaultOpenCodeIdleWatchdog {
+		t.Fatalf("OpenCodeIdleWatchdog = %s, want default %s", cfg.OpenCodeIdleWatchdog, DefaultOpenCodeIdleWatchdog)
+	}
+
+	t.Setenv("MULTICA_OPENCODE_IDLE_WATCHDOG", "7m")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with env: %v", err)
+	}
+	if cfg.OpenCodeIdleWatchdog != 7*time.Minute {
+		t.Fatalf("OpenCodeIdleWatchdog = %s, want 7m from env", cfg.OpenCodeIdleWatchdog)
+	}
+
+	// Zero disables the OpenCode-specific override while leaving the generic
+	// AgentIdleWatchdog as the fallback for OpenCode runs.
+	t.Setenv("MULTICA_OPENCODE_IDLE_WATCHDOG", "0")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with zero env: %v", err)
+	}
+	if cfg.OpenCodeIdleWatchdog != 0 {
+		t.Fatalf("OpenCodeIdleWatchdog = %s, want zero from env", cfg.OpenCodeIdleWatchdog)
 	}
 }
 
@@ -539,6 +799,80 @@ func TestLoadConfig_UsesCodexDesktopAppBundleFallback(t *testing.T) {
 	}
 }
 
+// Regression for #5205: after OpenAI moved the Desktop app to ChatGPT.app,
+// Multica must resolve the bundled CLI under ChatGPT.app (and prefer it over
+// the legacy Codex.app path when both exist).
+func TestLoadConfig_UsesChatGPTAppBundleCodexPath(t *testing.T) {
+	pathDir := t.TempDir()
+	fakeChatGPT := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex")
+	fakeLegacy := filepath.Join(pathDir, "Codex.app", "Contents", "Resources", "codex")
+	for _, p := range []string{fakeChatGPT, fakeLegacy} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write fake CLI: %v", err)
+		}
+	}
+
+	oldBundlePaths := codexDesktopAppBundlePaths
+	// Prefer ChatGPT first, matching production ordering.
+	codexDesktopAppBundlePaths = func() []string { return []string{fakeChatGPT, fakeLegacy} }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	pinNonCodexAgentsToMissingPaths(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := cfg.Agents["codex"]
+	if !ok {
+		t.Fatalf("expected codex agent from ChatGPT.app bundle, got %#v", cfg.Agents)
+	}
+	if got.Path != fakeChatGPT {
+		t.Fatalf("codex path = %q, want ChatGPT.app path %q", got.Path, fakeChatGPT)
+	}
+}
+
+func TestCodexDesktopAppBundlePaths_IncludesChatGPTAndLegacy(t *testing.T) {
+	paths := codexDesktopAppBundlePaths()
+	var hasChatGPT, hasLegacy bool
+	for _, p := range paths {
+		if strings.Contains(p, "ChatGPT.app") && strings.HasSuffix(filepath.ToSlash(p), "Contents/Resources/codex") {
+			hasChatGPT = true
+		}
+		if strings.Contains(p, "Codex.app") && strings.HasSuffix(filepath.ToSlash(p), "Contents/Resources/codex") {
+			hasLegacy = true
+		}
+	}
+	if !hasChatGPT {
+		t.Fatalf("codexDesktopAppBundlePaths missing ChatGPT.app entry: %#v", paths)
+	}
+	if !hasLegacy {
+		t.Fatalf("codexDesktopAppBundlePaths missing legacy Codex.app entry: %#v", paths)
+	}
+	// New path must be preferred (listed before legacy).
+	chatgptIdx, legacyIdx := -1, -1
+	for i, p := range paths {
+		if chatgptIdx < 0 && strings.Contains(p, "ChatGPT.app") {
+			chatgptIdx = i
+		}
+		if legacyIdx < 0 && strings.Contains(p, "Codex.app") {
+			legacyIdx = i
+		}
+	}
+	if chatgptIdx < 0 || legacyIdx < 0 || chatgptIdx > legacyIdx {
+		t.Fatalf("expected ChatGPT.app before Codex.app, got indices chat=%d legacy=%d paths=%#v", chatgptIdx, legacyIdx, paths)
+	}
+}
+
 func TestLoadConfig_CodexDesktopFallbackDoesNotOverrideExplicitPath(t *testing.T) {
 	pathDir := t.TempDir()
 	fakeCodex := filepath.Join(pathDir, "Codex.app", "Contents", "Resources", "codex")
@@ -584,13 +918,273 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 		"MULTICA_OPENCODE_PATH",
 		"MULTICA_OPENCLAW_PATH",
 		"MULTICA_HERMES_PATH",
-		"MULTICA_GEMINI_PATH",
 		"MULTICA_PI_PATH",
 		"MULTICA_CURSOR_PATH",
 		"MULTICA_COPILOT_PATH",
 		"MULTICA_KIMI_PATH",
 		"MULTICA_KIRO_PATH",
+		"MULTICA_GROK_PATH",
 	} {
 		t.Setenv(name, filepath.Join(missingDir, strings.ToLower(name)))
 	}
+}
+
+// =============================================================================
+// CLI config Backends.OpenClaw overrides (issue #3875)
+// =============================================================================
+
+// writeCLIConfigForProfile is a minimal helper for the override tests:
+// stages a HOME, writes a config.json under the given profile (empty profile
+// = default), and returns the resolved path so tests can assert against it.
+func writeCLIConfigForProfile(t *testing.T, profile string, cfg cli.CLIConfig) {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+		t.Fatalf("write cli config: %v", err)
+	}
+}
+
+// TestApplyOpenclawOverride_DoesNothingWhenNil verifies the early-return
+// path. A daemon started with no override should not Setenv anything; the
+// existing probe / spawn flow remains undisturbed.
+func TestApplyOpenclawOverride_DoesNothingWhenNil(t *testing.T) {
+	// Pre-set both env vars to known values; verify they survive untouched.
+	t.Setenv("MULTICA_OPENCLAW_PATH", "/before/openclaw")
+	t.Setenv("OPENCLAW_STATE_DIR", "/before/state")
+
+	applyOpenclawOverride(nil)
+
+	if got := os.Getenv("MULTICA_OPENCLAW_PATH"); got != "/before/openclaw" {
+		t.Errorf("MULTICA_OPENCLAW_PATH mutated: got %q, want /before/openclaw", got)
+	}
+	if got := os.Getenv("OPENCLAW_STATE_DIR"); got != "/before/state" {
+		t.Errorf("OPENCLAW_STATE_DIR mutated: got %q, want /before/state", got)
+	}
+}
+
+// TestApplyOpenclawOverride_SetsBothWhenEnvUnset verifies the happy path:
+// neither env var is set, the override has both fields, both env vars get
+// set to the override values.
+func TestApplyOpenclawOverride_SetsBothWhenEnvUnset(t *testing.T) {
+	t.Setenv("MULTICA_OPENCLAW_PATH", "")
+	t.Setenv("OPENCLAW_STATE_DIR", "")
+	os.Unsetenv("MULTICA_OPENCLAW_PATH")
+	os.Unsetenv("OPENCLAW_STATE_DIR")
+	t.Cleanup(func() {
+		os.Unsetenv("MULTICA_OPENCLAW_PATH")
+		os.Unsetenv("OPENCLAW_STATE_DIR")
+	})
+
+	applyOpenclawOverride(&cli.OpenClawOverride{
+		BinaryPath: "/from/config/openclaw",
+		StateDir:   "/from/config/state",
+	})
+
+	if got := os.Getenv("MULTICA_OPENCLAW_PATH"); got != "/from/config/openclaw" {
+		t.Errorf("MULTICA_OPENCLAW_PATH: got %q, want /from/config/openclaw", got)
+	}
+	if got := os.Getenv("OPENCLAW_STATE_DIR"); got != "/from/config/state" {
+		t.Errorf("OPENCLAW_STATE_DIR: got %q, want /from/config/state", got)
+	}
+}
+
+// TestApplyOpenclawOverride_EnvWinsOverConfig is the precedence test
+// agreed with @YOMXXX in #3875 review: an env var set upstream by the user
+// (shell export, launchctl, systemd unit) MUST take precedence over the
+// config-file value. This is the back-compat contract — anyone with
+// MULTICA_OPENCLAW_PATH already in their environment must not see the
+// daemon silently change its meaning when they later add a config file.
+func TestApplyOpenclawOverride_EnvWinsOverConfig(t *testing.T) {
+	// User has already exported these in their shell.
+	t.Setenv("MULTICA_OPENCLAW_PATH", "/from/env/openclaw")
+	t.Setenv("OPENCLAW_STATE_DIR", "/from/env/state")
+
+	applyOpenclawOverride(&cli.OpenClawOverride{
+		BinaryPath: "/from/config/openclaw",
+		StateDir:   "/from/config/state",
+	})
+
+	if got := os.Getenv("MULTICA_OPENCLAW_PATH"); got != "/from/env/openclaw" {
+		t.Errorf("MULTICA_OPENCLAW_PATH: env should win, got %q want /from/env/openclaw", got)
+	}
+	if got := os.Getenv("OPENCLAW_STATE_DIR"); got != "/from/env/state" {
+		t.Errorf("OPENCLAW_STATE_DIR: env should win, got %q want /from/env/state", got)
+	}
+}
+
+// TestApplyOpenclawOverride_PartialFields_OnlySetsConfigured verifies that
+// an override with only one field set leaves the other env var alone (does
+// not Setenv to ""). This matters: a user who only configures state_dir
+// must not have their MULTICA_OPENCLAW_PATH discovery path forcibly
+// short-circuited to an empty string.
+func TestApplyOpenclawOverride_PartialFields_OnlySetsConfigured(t *testing.T) {
+	os.Unsetenv("MULTICA_OPENCLAW_PATH")
+	os.Unsetenv("OPENCLAW_STATE_DIR")
+	t.Cleanup(func() {
+		os.Unsetenv("MULTICA_OPENCLAW_PATH")
+		os.Unsetenv("OPENCLAW_STATE_DIR")
+	})
+
+	applyOpenclawOverride(&cli.OpenClawOverride{
+		StateDir: "/from/config/state",
+		// BinaryPath intentionally empty — must NOT call Setenv("MULTICA_OPENCLAW_PATH", "")
+	})
+
+	if _, set := os.LookupEnv("MULTICA_OPENCLAW_PATH"); set {
+		t.Errorf("MULTICA_OPENCLAW_PATH should remain unset when BinaryPath is empty; got %q", os.Getenv("MULTICA_OPENCLAW_PATH"))
+	}
+	if got := os.Getenv("OPENCLAW_STATE_DIR"); got != "/from/config/state" {
+		t.Errorf("OPENCLAW_STATE_DIR: got %q, want /from/config/state", got)
+	}
+}
+
+// TestOpenclawOverrideFrom_NavigationCases verifies the nullable-pointer
+// chain into Backends.OpenClaw. Three cases that all must safely return
+// nil without panicking: nil Backends, nil OpenClaw inside Backends, and
+// the happy path (returns the inner override unchanged).
+func TestOpenclawOverrideFrom_NavigationCases(t *testing.T) {
+	if got := openclawOverrideFrom(cli.CLIConfig{}); got != nil {
+		t.Errorf("nil Backends should produce nil override, got %+v", got)
+	}
+	if got := openclawOverrideFrom(cli.CLIConfig{Backends: &cli.BackendOverrides{}}); got != nil {
+		t.Errorf("nil OpenClaw inside Backends should produce nil override, got %+v", got)
+	}
+	want := &cli.OpenClawOverride{StateDir: "/x"}
+	got := openclawOverrideFrom(cli.CLIConfig{Backends: &cli.BackendOverrides{OpenClaw: want}})
+	if got != want {
+		t.Errorf("happy path should return inner pointer; got %p want %p", got, want)
+	}
+}
+
+// TestLoadConfig_AppliesBackendOverridesFromConfigFile is the integration
+// test that ties commit 1's schema to commit 2's wire-up: write a config
+// file with backends.openclaw.{binary_path,state_dir}, call LoadConfig
+// (with no env vars set), and verify the openclaw probe picked up the
+// configured BinaryPath and the OPENCLAW_STATE_DIR env var was injected.
+func TestLoadConfig_AppliesBackendOverridesFromConfigFile(t *testing.T) {
+	stageFakeAgent(t)
+	// stageFakeAgent left "claude" on PATH; we also need a fake "openclaw"
+	// at a custom path that the config file points at (mimicking a non-default
+	// installation: another bundled / isolated / CI deployment, etc).
+	customDir := t.TempDir()
+	customOpenclaw := filepath.Join(customDir, "non-default-openclaw")
+	if err := os.WriteFile(customOpenclaw, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake openclaw: %v", err)
+	}
+
+	// Make sure no env-var override is leaking in from the test runner.
+	os.Unsetenv("MULTICA_OPENCLAW_PATH")
+	os.Unsetenv("OPENCLAW_STATE_DIR")
+	t.Cleanup(func() {
+		os.Unsetenv("MULTICA_OPENCLAW_PATH")
+		os.Unsetenv("OPENCLAW_STATE_DIR")
+	})
+
+	// Drop a CLI config under the user's HOME (already pointed at TempDir
+	// by stageFakeAgent's t.Setenv chain — but reassert here for clarity).
+	homeForCLIConfig := t.TempDir()
+	t.Setenv("HOME", homeForCLIConfig)
+	cfg := cli.CLIConfig{
+		ServerURL: "http://localhost:8080",
+		Backends: &cli.BackendOverrides{
+			OpenClaw: &cli.OpenClawOverride{
+				BinaryPath: customOpenclaw,
+				StateDir:   "/var/lib/openclaw-isolated",
+			},
+		},
+	}
+	if err := cli.SaveCLIConfig(cfg); err != nil {
+		t.Fatalf("save cli config: %v", err)
+	}
+
+	loaded, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	openclaw, ok := loaded.Agents["openclaw"]
+	if !ok {
+		t.Fatalf("agents map missing 'openclaw' key; got keys=%v", agentKeys(loaded.Agents))
+	}
+	if openclaw.Path != customOpenclaw {
+		t.Errorf("openclaw.Path: got %q, want %q (the binary configured in CLI config)", openclaw.Path, customOpenclaw)
+	}
+	if got := os.Getenv("OPENCLAW_STATE_DIR"); got != "/var/lib/openclaw-isolated" {
+		t.Errorf("OPENCLAW_STATE_DIR: got %q, want injected from config", got)
+	}
+}
+
+// TestLoadConfig_BackendOverrides_BackwardCompat_NoConfigFile verifies that
+// the override mechanism is purely additive: a daemon started without any
+// CLI config file (or with an empty one) behaves identically to before
+// commit 1 — agents discovered from PATH, no env injection.
+func TestLoadConfig_BackendOverrides_BackwardCompat_NoConfigFile(t *testing.T) {
+	stageFakeAgent(t)
+
+	// Point HOME at an empty dir — no config.json present.
+	t.Setenv("HOME", t.TempDir())
+	os.Unsetenv("MULTICA_OPENCLAW_PATH")
+	os.Unsetenv("OPENCLAW_STATE_DIR")
+	t.Cleanup(func() {
+		os.Unsetenv("MULTICA_OPENCLAW_PATH")
+		os.Unsetenv("OPENCLAW_STATE_DIR")
+	})
+
+	_, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with no config file should not fail: %v", err)
+	}
+
+	if _, set := os.LookupEnv("OPENCLAW_STATE_DIR"); set {
+		t.Errorf("OPENCLAW_STATE_DIR should remain unset when no config file is present; got %q", os.Getenv("OPENCLAW_STATE_DIR"))
+	}
+}
+
+// TestLoadConfig_BackendOverrides_MalformedConfigFileNonFatal verifies the
+// fail-soft contract documented inline in LoadConfig: a corrupt config.json
+// must not prevent daemon startup. This matters for diskcorruption /
+// partial-write recovery — the daemon should log and proceed using
+// env-var-only configuration.
+func TestLoadConfig_BackendOverrides_MalformedConfigFileNonFatal(t *testing.T) {
+	stageFakeAgent(t)
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	// Write malformed JSON.
+	cfgDir := filepath.Join(homeDir, ".multica")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte("{not valid json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig should not fail on malformed config.json: %v", err)
+	}
+	// Should also have logged a slog Warn — we don't assert on the log
+	// output here (avoids brittle string matching), but the build does
+	// make sure log/slog stays imported.
+}
+
+// agentKeys is a tiny helper to make agent-map missing-key error messages
+// readable. Returns sorted keys.
+func agentKeys(m map[string]AgentEntry) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

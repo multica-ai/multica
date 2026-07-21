@@ -10,11 +10,13 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
+import { DeferredPopup } from "../../../common/deferred-popup";
 import {
   PropertyPicker,
   PickerItem,
   PickerSection,
   PickerEmpty,
+  PICKER_TRIGGER_CLASS,
 } from "./property-picker";
 import { useT } from "../../../i18n";
 import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
@@ -37,25 +39,66 @@ export function canAssignAgent(
   }).allowed;
 }
 
-export function AssigneePicker({
+interface AssigneePickerProps {
+  assigneeType: IssueAssigneeType | null;
+  assigneeId: string | null;
+  /**
+   * `true` when a batch selection spans different assignees ("mixed"): no row
+   * is checked, including the unassigned row. Distinct from `assigneeType` /
+   * `assigneeId` both being `null`, which means every selected issue is
+   * genuinely unassigned and the unassigned row should be checked.
+   */
+  mixed?: boolean;
+  onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
+  trigger?: React.ReactNode;
+  triggerRender?: React.ReactElement<Record<string, unknown>>;
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
+  align?: "start" | "center" | "end";
+}
+
+/**
+ * Mounting the real picker subscribes to members/agents/squads/frequency
+ * queries — multiplied per board card / list row that cost froze tab
+ * switches. Uncontrolled callers that bring their own trigger content get a
+ * deferred lookalike trigger instead; the picker mounts on first interaction.
+ * The default trigger needs `getActorName` (a members/agents subscription
+ * itself), so trigger-less callers stay eager.
+ */
+export function AssigneePicker(props: AssigneePickerProps) {
+  const hasDeferredTriggerContent =
+    props.trigger !== undefined || props.triggerRender?.props.children != null;
+  const canDefer =
+    props.open === undefined &&
+    props.onOpenChange === undefined &&
+    hasDeferredTriggerContent;
+  if (!canDefer) {
+    return <AssigneePickerImpl {...props} />;
+  }
+  return (
+    <DeferredPopup
+      trigger={props.trigger}
+      triggerRender={props.triggerRender}
+      triggerClassName={PICKER_TRIGGER_CLASS}
+    >
+      {(open, onOpenChange) => (
+        <AssigneePickerImpl {...props} open={open} onOpenChange={onOpenChange} />
+      )}
+    </DeferredPopup>
+  );
+}
+
+function AssigneePickerImpl({
   assigneeType,
   assigneeId,
+  mixed = false,
   onUpdate,
   trigger: customTrigger,
   triggerRender,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
-}: {
-  assigneeType: IssueAssigneeType | null;
-  assigneeId: string | null;
-  onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
-  trigger?: React.ReactNode;
-  triggerRender?: React.ReactElement;
-  open?: boolean;
-  onOpenChange?: (v: boolean) => void;
-  align?: "start" | "center" | "end";
-}) {
+}: AssigneePickerProps) {
   const { t } = useT("issues");
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
@@ -118,7 +161,7 @@ export function AssigneePicker({
       trigger={
         customTrigger ? customTrigger : assigneeType && assigneeId ? (
           <>
-            <ActorAvatar actorType={assigneeType} actorId={assigneeId} size={18} enableHoverCard showStatusDot />
+            <ActorAvatar actorType={assigneeType} actorId={assigneeId} size="sm" enableHoverCard showStatusDot />
             <span className="truncate">{triggerLabel}</span>
           </>
         ) : (
@@ -129,7 +172,7 @@ export function AssigneePicker({
       {/* Unassigned option — hidden when search is active */}
       {!query && (
         <PickerItem
-          selected={!assigneeType && !assigneeId}
+          selected={!mixed && !assigneeType && !assigneeId}
           onClick={() => {
             onUpdate({ assignee_type: null, assignee_id: null });
             setOpen(false);
@@ -155,7 +198,7 @@ export function AssigneePicker({
                 setOpen(false);
               }}
             >
-              <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
+              <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
               <span className="truncate">{m.name}</span>
             </PickerItem>
           ))}
@@ -191,7 +234,7 @@ export function AssigneePicker({
                   setOpen(false);
                 }}
               >
-                <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                 <span className={`truncate ${allowed ? "" : "text-muted-foreground"}`}>{a.name}</span>
                 {a.visibility === "private" && (
                   <Lock className="ml-auto h-3 w-3 text-muted-foreground" />
@@ -218,7 +261,7 @@ export function AssigneePicker({
                 setOpen(false);
               }}
             >
-              <ActorAvatar actorType="squad" actorId={s.id} size={18} />
+              <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
               <span className="truncate">{s.name}</span>
             </PickerItem>
           ))}

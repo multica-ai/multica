@@ -1,6 +1,7 @@
 {
   "nav": {
     "inbox": "インボックス",
+    "chat": "チャット",
     "my_issues": "マイイシュー",
     "issues": "イシュー",
     "projects": "プロジェクト",
@@ -16,7 +17,9 @@
     "trigger": "ヘルプ",
     "docs": "ドキュメント",
     "changelog": "変更ログ",
-    "feedback": "フィードバック"
+    "discord": "Discord",
+    "feedback": "フィードバック",
+    "server_version": "サーバーバージョン {{version}}"
   },
   "workspace_loader": {
     "loading_workspace": "ワークスペースを読み込み中…",
@@ -36,6 +39,11 @@
     "pinned_label": "ピン留め済み",
     "workspace_group": "ワークスペース",
     "configure_group": "設定",
-    "unread_overflow": "99+"
+    "unread_overflow": "99+",
+    "discord_card": {
+      "title": "Discord に参加",
+      "description": "チームや他のユーザーと交流しましょう。",
+      "dismiss": "閉じる"
+    }
   }
 }

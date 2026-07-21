@@ -52,7 +52,7 @@ jobs:
           cache-dependency-path: server/go.sum
 
       - name: Run tests
-        run: cd server && go test ./...
+        run: cd server && go test -race ./...
 
   release:
     needs: verify

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -15,49 +15,85 @@ import {
   type ContentEditorRef,
   useFileDropZone,
   FileDropOverlay,
+  useUploadGate,
+  useEditorUpload,
 } from "../editor";
-import { useCreateFeedback, useFeedbackDraftStore } from "@multica/core/feedback";
+import {
+  useCreateFeedback,
+  useFeedbackDraftStore,
+  FEEDBACK_KINDS,
+  type FeedbackKind,
+} from "@multica/core/feedback";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { api } from "@multica/core/api";
-import { captureFeedbackOpened } from "@multica/core/analytics";
 import { useT } from "../i18n";
-import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 
 const MAX_MESSAGE_LEN = 10000;
 
-export function FeedbackModal({ onClose }: { onClose: () => void }) {
+const FEEDBACK_KIND_SET = new Set<FeedbackKind>(FEEDBACK_KINDS);
+
+function composeFeedbackInitialMessage(draftMessage: string, incomingInitialMessage: string) {
+  const draft = draftMessage.trim();
+  const incoming = incomingInitialMessage.trim();
+  if (!incoming) return draftMessage;
+  if (!draft) return incomingInitialMessage;
+  if (draft.includes(incoming)) return draftMessage;
+  return `${draftMessage}
+
+---
+
+${incomingInitialMessage}`;
+}
+
+export function FeedbackModal({
+  onClose,
+  data,
+  initialMessage,
+}: {
+  onClose: () => void;
+  data?: Record<string, unknown> | null;
+  initialMessage?: string;
+}) {
+  const sendShortcut = useShortcut("send");
   const { t } = useT("modals");
+  const { t: tEditor } = useT("editor");
   const workspace = useCurrentWorkspace();
   const draft = useFeedbackDraftStore((s) => s.draft);
   const setDraft = useFeedbackDraftStore((s) => s.setDraft);
   const clearDraft = useFeedbackDraftStore((s) => s.clearDraft);
 
   const editorRef = useRef<ContentEditorRef>(null);
-  const [message, setMessage] = useState(draft.message);
+  const incomingInitialMessage =
+    initialMessage ?? (typeof data?.initialMessage === "string" ? data.initialMessage : "");
+  const kind = typeof data?.kind === "string" && FEEDBACK_KIND_SET.has(data.kind as FeedbackKind)
+    ? (data.kind as FeedbackKind)
+    : undefined;
+  const seededMessage = composeFeedbackInitialMessage(draft.message, incomingInitialMessage);
+  const [message, setMessage] = useState(seededMessage);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
-  const { uploadWithToast } = useFileUpload(api);
+  const { uploadWithToast } = useEditorUpload();
+  // The handler already refused to submit mid-upload, but the button stayed
+  // clickable — so the only feedback was a toast fired after the click.
+  const uploadGate = useUploadGate(editorRef);
   const mutation = useCreateFeedback();
-
-  // Fire the "modal opened" analytics event once per mount. Pairs with
-  // the backend's `feedback_submitted` to give a funnel completion rate.
-  // Workspace id is captured from the closure at mount time — the modal
-  // is short-lived, so there's no meaningful workspace switch to track.
-  useEffect(() => {
-    captureFeedbackOpened("help_menu", workspace?.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const canSubmit =
     message.trim().length > 0 &&
     message.length <= MAX_MESSAGE_LEN &&
-    !mutation.isPending;
+    !mutation.isPending &&
+    !uploadGate.uploading;
 
   const handleSubmit = async () => {
-    if (!canSubmit) return;
-    if (editorRef.current?.hasActiveUploads()) {
+    // The button can use debounced `message` state, but the keyboard shortcut
+    // must not: Command+Enter can arrive before ContentEditor's 150ms onUpdate
+    // fires. The editor ref below is the submit-time source of truth.
+    if (mutation.isPending) return;
+    // Keep the toast on this path: the shortcut can fire while the button is
+    // disabled and off-screen, so a silent no-op would read as a dead ⌘+Enter.
+    if (uploadGate.isBlocked()) {
       toast.info(t(($) => $.feedback.toast_uploading));
       return;
     }
@@ -75,6 +111,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
         message: latest,
         url: typeof window !== "undefined" ? window.location.href : undefined,
         workspace_id: workspace?.id,
+        kind,
       });
       clearDraft();
       toast.success(t(($) => $.feedback.toast_sent));
@@ -113,10 +150,11 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
           >
             <ContentEditor
               ref={editorRef}
-              defaultValue={draft.message}
+              defaultValue={seededMessage}
               placeholder={t(($) => $.feedback.placeholder)}
               onUpdate={(md) => { setMessage(md); setDraft({ message: md }); }}
               onUploadFile={uploadWithToast}
+              onUploadingChange={uploadGate.onUploadingChange}
               onSubmit={handleSubmit}
               debounceMs={150}
               showBubbleMenu={false}
@@ -129,13 +167,29 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
           <FileUploadButton
             size="sm"
+            multiple
             onSelect={(file) => editorRef.current?.uploadFile(file)}
           />
-          <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
-            {mutation.isPending ? t(($) => $.feedback.sending) : t(($) => $.feedback.send)}
-            <kbd className="ml-1 inline-flex h-4 items-center gap-0.5 rounded border border-border/50 bg-background/30 px-1 font-mono text-[10px] leading-none">
-              {formatShortcut(modKey, enterKey)}
-            </kbd>
+          <Button
+            size="sm"
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            aria-disabled={uploadGate.uploading || undefined}
+            aria-busy={uploadGate.uploading || undefined}
+          >
+            {mutation.isPending
+              ? t(($) => $.feedback.sending)
+              : uploadGate.uploading
+                ? tEditor(($) => $.upload.in_progress)
+                : t(($) => $.feedback.send)}
+            {sendShortcut ? (
+              <ShortcutKeycaps
+                shortcut={sendShortcut}
+                decorative
+                className="ml-1"
+                keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
+              />
+            ) : null}
           </Button>
         </div>
       </DialogContent>

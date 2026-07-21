@@ -28,6 +28,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Image as RNImage, Pressable, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import type { Attachment } from "@multica/core/types";
+import { resolveAttachmentUrl } from "@/lib/attachment-url";
 import { useLightbox } from "./lightbox-provider";
 
 interface Props {
@@ -41,9 +42,21 @@ export function MarkdownImage({ uri, attachments }: Props) {
   const [aspect, setAspect] = useState<number | null>(null);
 
   const resolvedUri = useMemo(() => {
-    if (!attachments || attachments.length === 0) return uri;
-    const match = attachments.find((a) => a.url === uri);
-    return match?.download_url || uri;
+    // mc://file/<id> → look up the matching attachment's download_url.
+    // No match (external link, html https URL, or unresolved mc://) falls
+    // through to the original uri.
+    let candidate: string | null | undefined = uri;
+    if (attachments && attachments.length > 0) {
+      const match = attachments.find((a) => a.url === uri);
+      if (match?.download_url) candidate = match.download_url;
+    }
+    // The backend may return a server-relative `download_url` (e.g.
+    // `/api/attachments/{id}/download`) when no CloudFront signer is
+    // configured — see MUL-2976. RN's image loader has no document
+    // origin to resolve against, so prepend `EXPO_PUBLIC_API_URL` for
+    // server-relative paths and let absolute URLs / external links pass
+    // through unchanged.
+    return resolveAttachmentUrl(candidate) ?? uri;
   }, [uri, attachments]);
 
   useEffect(() => {

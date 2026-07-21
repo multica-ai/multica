@@ -49,7 +49,13 @@ export function AuthInitializer({
     api
       .getConfig()
       .then((cfg) => {
-        if (cfg.cdn_domain) configStore.getState().setCdnDomain(cfg.cdn_domain);
+        if (cfg.cdn_domain) {
+          configStore.getState().setCdnConfig({
+            cdnDomain: cfg.cdn_domain,
+            // Old servers omit this — false keeps the previous behavior.
+            cdnSigned: cfg.cdn_signed === true,
+          });
+        }
         configStore.getState().setAuthConfig({
           allowSignup: cfg.allow_signup,
           googleClientId: cfg.google_client_id,
@@ -61,6 +67,8 @@ export function AuthInitializer({
           daemonServerUrl: cfg.daemon_server_url,
           daemonAppUrl: cfg.daemon_app_url,
         });
+        configStore.getState().setFeatureFlags(cfg.feature_flags);
+        configStore.getState().setServerVersion(cfg.server_version);
         if (cfg.posthog_key) {
           initAnalytics({
             key: cfg.posthog_key,

@@ -27,14 +27,14 @@ describe("ImageExtension.renderMarkdown", () => {
     expect(md).toContain("\\\\");
     expect(md).toContain("\\[");
     expect(md).toContain("\\(");
-    expect(md).toMatch(/^!\[.*\]\(https:\/\/cdn\.example\.com\/img\.png\)\n\n$/);
+    expect(md).toMatch(/^!\[.*\]\(https:\/\/cdn\.example\.com\/img\.png\)$/);
   });
 
   it("leaves normal alt text unchanged", () => {
     const md = imageRenderMarkdown({
       attrs: { src: "https://cdn.example.com/img.png", alt: "screenshot" },
     });
-    expect(md).toBe("![screenshot](https://cdn.example.com/img.png)\n\n");
+    expect(md).toBe("![screenshot](https://cdn.example.com/img.png)");
   });
 });
 
@@ -61,6 +61,20 @@ describe("file-card tokenizer", () => {
     expect(token).toBeDefined();
     expect(token!.attributes.filename).toBe("readme.md");
   });
+
+  it("rejects an unterminated file card with escape-pair runs in linear time", () => {
+    // Each "\a" pair is ambiguous under (?:\\.|[^\]]) — the pre-fix regex
+    // enumerates 2^28 backtrack paths (~10s) before failing. The disjoint
+    // char class must fail fast instead.
+    const src = `!file[${"\\a".repeat(28)}](/uploads/x`;
+
+    const t0 = performance.now();
+    const token = tokenize(src);
+    const elapsed = performance.now() - t0;
+
+    expect(token).toBeUndefined();
+    expect(elapsed).toBeLessThan(100);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -80,5 +94,18 @@ describe("preprocessFileCards", () => {
     const result = preprocessFileCards(input, "cdn.example.com");
     expect(result).toContain('data-type="fileCard"');
     expect(result).toContain('data-filename="readme.md"');
+  });
+
+  it("rejects an unterminated file card with escape-pair runs in linear time", () => {
+    // This path runs on every read-only comment/description render, so a
+    // backtracking label regex here is reachable without opening the editor.
+    const input = `!file[${"\\a".repeat(28)}](/uploads/x`;
+
+    const t0 = performance.now();
+    const result = preprocessFileCards(input, "cdn.example.com");
+    const elapsed = performance.now() - t0;
+
+    expect(result).toBe(input);
+    expect(elapsed).toBeLessThan(100);
   });
 });

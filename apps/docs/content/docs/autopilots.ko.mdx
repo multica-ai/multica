@@ -58,7 +58,7 @@ multica autopilot trigger <autopilot-id>
 https://<your-multica-host>/api/webhooks/autopilots/awt_…
 ```
 
-그 URL로 아무 JSON이나 POST하세요 — Multica는 `source = webhook`로 실행을 기록하고, 본문을 실행의 `trigger_payload`로 저장한 다음, schedule 트리거와 정확히 동일한 방식으로 에이전트를 디스패치합니다.
+그 URL로 아무 JSON이나 POST하세요. Multica는 먼저 전달을 영구 저장하고 멱등 실행을 동기적으로 승인한 뒤, `status = accepted | skipped`와 `run_id`가 포함된 `200 OK`를 반환합니다. 이후 데이터베이스-backed worker가 accepted 실행을 재개하고 에이전트를 디스패치합니다. 수신과 디스패치 사이에 서버가 재시작되어도 큐에 저장된 전달은 유실되지 않습니다.
 
 ```bash
 curl -X POST "$MULTICA_WEBHOOK_URL" \
@@ -89,6 +89,11 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
 `event` 필드를 제공하지 않으면, Multica는 일반적인 헤더와 본문 필드로부터 이를 추론합니다(`X-GitHub-Event` + 본문 `action`, `X-Gitlab-Event`, `X-Event-Type`, 본문의 `event`/`type`/`action`). 어느 것도 일치하지 않으면 이벤트는 `webhook.received`가 됩니다.
 
 GitHub 같은 소스를 구성할 때는 content type을 `application/json`으로 설정하세요 — 폼 인코딩된 webhook payload는 허용되지 않습니다.
+
+GitHub 전달은 `X-GitHub-Delivery`로 중복 제거됩니다. 일반 발신자는
+`Idempotency-Key`를 제공할 수 있습니다. 같은 키로 재시도하면 기존에 큐에 저장된
+전달과 run을 재사용합니다. 두 헤더가 모두 없으면 안정적인 이벤트 ID가 없으므로
+중복 제거는 최선 노력 방식으로만 제공됩니다.
 
 ### 이벤트 필터
 
@@ -168,7 +173,7 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
   -H 'X-GitHub-Event: workflow_run' \
   -H 'Content-Type: application/json' \
   -d '{"action":"completed"}'
-# → 200 {"status":"accepted", ...}
+# → 200 {"status":"accepted", "delivery_id":"…", "run_id":"…", ...}
 
 # Filtered — same event, action not in allowlist
 curl -X POST "$MULTICA_WEBHOOK_URL" \
@@ -189,10 +194,14 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
 
 ### 상태 코드 의미
 
-Multica는 정상적인 no-op 결과에 대해 `status` 필드와 함께 `200 OK`를 반환하므로, 제공자의 webhook 재시도 메커니즘이 URL을 계속 두드리지 않습니다.
+유효하고 활성 상태인 전달은 전달과 멱등 실행이 모두 영구 저장된 뒤 `200 OK`로 확인됩니다.
 
-- `{"status":"accepted","run_id":"…","autopilot_id":"…","trigger_id":"…"}` — 실행이 디스패치되었습니다.
-- `{"status":"skipped","run_id":"…","reason":"agent runtime is offline at dispatch time"}` — 수신 대상의 런타임이 오프라인이며, `skipped` 실행으로 기록됩니다.
+- `{"status":"accepted","delivery_id":"…","run_id":"…","autopilot_id":"…","trigger_id":"…"}` — 승인이 완료되었고 worker가 복구 가능한 디스패치를 맡습니다.
+- `{"status":"skipped","delivery_id":"…","run_id":"…","reason":"…"}` — 예를 들어 담당 에이전트의 런타임이 오프라인인 경우 영구 저장된 skipped 실행이 생성되었습니다.
+
+no-op과 중복도 `200 OK`를 반환합니다.
+
+- `{"status":"duplicate","delivery_id":"…","run_id":"…"}` — 같은 멱등 키의 전달이 이미 수신되었습니다. 원본 요청이 실행 승인 전에 종료된 경우에만 `run_id`가 생략되며 worker가 이를 복구합니다.
 - `{"status":"ignored","reason":"trigger_disabled"}` — 트리거가 비활성화되어 있습니다.
 - `{"status":"ignored","reason":"autopilot_paused"}` — 오토파일럿이 일시 정지되어 있습니다.
 - `{"status":"ignored","reason":"autopilot_archived"}` — 오토파일럿이 보관되어 있습니다.
@@ -200,9 +209,10 @@ Multica는 정상적인 no-op 결과에 대해 `status` 필드와 함께 `200 OK
 2xx가 아닌 응답은 실제 실패를 다룹니다.
 
 - `400` — 유효하지 않은 JSON, 스칼라 본문, 빈 본문.
+- `401` — 설정된 webhook 서명이 없거나 유효하지 않습니다.
 - `404` — 알 수 없는 토큰(`{"error":"webhook not found"}`).
 - `413` — payload가 256 KiB를 초과했습니다.
-- `429` — 토큰별 속도 제한 초과(기본값 60 req/min).
+- `429` — IP 절대 상한 또는 알 수 없는 토큰 / 잘못된 서명 시도 한도를 초과했습니다. 응답에는 `Retry-After`가 포함됩니다. 유효한 전달은 worker의 트리거별 예산 때문에 거부되지 않고, 예산이 복구될 때까지 큐에 남습니다.
 
 ### 자체 호스팅: 공개 URL 구성하기
 

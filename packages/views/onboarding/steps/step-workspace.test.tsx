@@ -15,11 +15,15 @@ const TEST_RESOURCES = {
   },
 };
 
+type MockConfigState = {
+  workspaceCreationDisabled: boolean;
+  daemonAppUrl: string;
+};
+
 const mockLogout = vi.hoisted(() => vi.fn());
 const mockUseConfigStore = vi.hoisted(() =>
-  vi.fn(
-    (selector: (state: { workspaceCreationDisabled: boolean }) => unknown) =>
-      selector({ workspaceCreationDisabled: false }),
+  vi.fn((selector: (state: MockConfigState) => unknown) =>
+    selector({ workspaceCreationDisabled: false, daemonAppUrl: "" }),
   ),
 );
 
@@ -28,7 +32,7 @@ vi.mock("../../auth", () => ({
 }));
 
 vi.mock("@multica/core/config", () => ({
-  useConfigStore: (selector: (state: { workspaceCreationDisabled: boolean }) => unknown) =>
+  useConfigStore: (selector: (state: MockConfigState) => unknown) =>
     mockUseConfigStore(selector),
 }));
 
@@ -53,13 +57,15 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 function renderStep({
   existing,
   disabled,
+  daemonAppUrl = "",
 }: {
   existing: Workspace | null;
   disabled: boolean;
+  daemonAppUrl?: string;
 }) {
   mockUseConfigStore.mockImplementation(
-    (selector: (state: { workspaceCreationDisabled: boolean }) => unknown) =>
-      selector({ workspaceCreationDisabled: disabled }),
+    (selector: (state: MockConfigState) => unknown) =>
+      selector({ workspaceCreationDisabled: disabled, daemonAppUrl }),
   );
   return render(
     <StepWorkspace existing={existing} onCreated={vi.fn()} onBack={vi.fn()} />,
@@ -135,5 +141,24 @@ describe("StepWorkspace — DISABLE_WORKSPACE_CREATION gate", () => {
     // enabled, so the user can press it without further interaction.
     const cta = screen.getByRole("button", { name: "Open Acme" });
     expect(cta).toBeEnabled();
+  });
+});
+
+// #4263: the workspace URL prefix must reflect the deployment's own host on
+// self-hosted instances instead of the hardcoded `multica.ai`.
+describe("StepWorkspace — workspace URL prefix", () => {
+  it("shows the brand host when no app URL is configured", () => {
+    renderStep({ existing: null, disabled: false });
+    expect(screen.getByText("multica.ai/")).toBeInTheDocument();
+  });
+
+  it("shows the deployment host for self-hosted instances", () => {
+    renderStep({
+      existing: null,
+      disabled: false,
+      daemonAppUrl: "https://multica.example.com",
+    });
+    expect(screen.getByText("multica.example.com/")).toBeInTheDocument();
+    expect(screen.queryByText("multica.ai/")).not.toBeInTheDocument();
   });
 });

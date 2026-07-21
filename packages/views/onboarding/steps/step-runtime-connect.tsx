@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Loader2, RefreshCw } from "lucide-react";
-import { captureEvent, setPersonProperties } from "@multica/core/analytics";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
@@ -117,52 +116,6 @@ function FancyView({
 
   const onlineCount = runtimes.filter((r) => r.status === "online").length;
 
-  // One-shot analytics event when the scan window resolves. Answers the
-  // question "did the user actually have any AI CLI installed on this
-  // machine when they hit Step 3" — currently unanswerable from the
-  // existing funnel because a zero-CLI daemon fails to register at all,
-  // so `runtime_registered` is silent on that cohort. Emitting from here
-  // (rather than the daemon) keeps the signal in sync with what the UI
-  // actually showed the user: "scanning → found" vs "scanning → empty"
-  // after the 5s grace period.
-  const detectStartRef = useRef<number | null>(null);
-  if (detectStartRef.current === null) {
-    detectStartRef.current =
-      typeof performance !== "undefined" ? performance.now() : Date.now();
-  }
-  const detectedEmittedRef = useRef(false);
-  useEffect(() => {
-    if (detectedEmittedRef.current) return;
-    if (phase === "scanning") return;
-    detectedEmittedRef.current = true;
-
-    const providers = Array.from(
-      new Set(runtimes.map((r) => r.provider).filter(Boolean)),
-    ).sort();
-    const now =
-      typeof performance !== "undefined" ? performance.now() : Date.now();
-    const detectMs = Math.round(now - (detectStartRef.current ?? now));
-
-    captureEvent("onboarding_runtime_detected", {
-      source: "onboarding",
-      surface: "step3_desktop",
-      workspace_id: wsId,
-      outcome: phase,
-      runtime_count: runtimes.length,
-      online_count: onlineCount,
-      providers,
-      has_claude: providers.includes("claude"),
-      has_codex: providers.includes("codex"),
-      has_cursor: providers.includes("cursor"),
-      detect_ms: detectMs,
-    });
-
-    setPersonProperties({
-      has_any_cli: runtimes.length > 0,
-      detected_cli_count: runtimes.length,
-    });
-  }, [phase, runtimes, onlineCount]);
-
   const [submitting, setSubmitting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -177,9 +130,6 @@ function FancyView({
     try {
       if (onRefresh) await onRefresh();
       await qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-      detectedEmittedRef.current = false;
-      detectStartRef.current =
-        typeof performance !== "undefined" ? performance.now() : Date.now();
       setScanEpoch((n) => n + 1);
     } finally {
       setRefreshing(false);

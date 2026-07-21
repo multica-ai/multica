@@ -66,10 +66,7 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	sessionID := opts.ResumeSessionID
 	if sessionID == "" {
@@ -178,8 +175,21 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 // registration time via `openclaw agents add/update --model`, and instructions
 // must be injected inline into --message because openclaw loads AGENTS.md from
 // its own workspace directory, not from cwd.
+//
+// Routing (issue #3260): `openclaw agent` defaults to Gateway routing; --local
+// is the embedded-mode opt-in. The daemon historically forced --local so every
+// run executed in-process on the daemon host. When opts.OpenclawMode ==
+// "gateway" the daemon drops --local so openclaw dials its configured Gateway
+// instead — useful when the daemon host is a lightweight coordinator and the
+// real agent work should land on a remote machine running the Gateway.
+// --local stays in openclawBlockedArgs so users cannot smuggle it back in via
+// custom_args under gateway mode (mode is the single source of truth).
 func buildOpenclawArgs(prompt, sessionID string, opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{"agent", "--local", "--json", "--session-id", sessionID}
+	args := []string{"agent"}
+	if opts.OpenclawMode != "gateway" {
+		args = append(args, "--local")
+	}
+	args = append(args, "--json", "--session-id", sessionID)
 	if opts.Timeout > 0 {
 		args = append(args, "--timeout", fmt.Sprintf("%d", int(opts.Timeout.Seconds())))
 	}

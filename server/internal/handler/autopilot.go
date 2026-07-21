@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,7 +13,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -42,6 +47,57 @@ type AutopilotResponse struct {
 	LastRunAt          *string `json:"last_run_at"`
 	CreatedAt          string  `json:"created_at"`
 	UpdatedAt          string  `json:"updated_at"`
+
+	// List-endpoint-only derived fields (absent on the detail/create/update
+	// responses and on older servers — clients must treat them as optional).
+	// Enabled triggers only; last_run_status is the most recent run's status.
+	TriggerKinds  []string `json:"trigger_kinds,omitempty"`
+	NextRunAt     *string  `json:"next_run_at,omitempty"`
+	LastRunStatus *string  `json:"last_run_status,omitempty"`
+
+	// Always non-nil (empty slice when no subscribers configured) so
+	// frontend optional-chain rules can treat the field as authoritative.
+	Subscribers []AutopilotSubscriberEntry `json:"subscribers"`
+
+	// CanWrite reports whether the requesting caller may perform write/execute
+	// operations on this autopilot — editing, deleting, triggering, and
+	// managing triggers/webhook secrets (creator, workspace owner/admin, or an
+	// explicit collaborator). Nil on responses built without a caller in
+	// context (older servers omit it; clients must treat absence as "unknown"
+	// and fall back to attempting the action). See MUL-3807.
+	CanWrite *bool `json:"can_write,omitempty"`
+
+	// CanManageAccess reports whether the caller may manage the collaborator
+	// (access) list — a narrower right held only by the creator and workspace
+	// owners/admins, NOT by granted collaborators (who can write but cannot
+	// re-grant). Nil when built without a caller in context. See MUL-3807.
+	CanManageAccess *bool `json:"can_manage_access,omitempty"`
+}
+
+// AutopilotCollaboratorEntry is a member explicitly granted write access to an
+// autopilot, surfaced on the detail response and the collaborator endpoints.
+type AutopilotCollaboratorEntry struct {
+	UserType  string `json:"user_type"`
+	UserID    string `json:"user_id"`
+	GrantedBy string `json:"granted_by"`
+	CreatedAt string `json:"created_at"`
+}
+
+func collaboratorToEntry(c db.AutopilotCollaborator) AutopilotCollaboratorEntry {
+	return AutopilotCollaboratorEntry{
+		UserType:  c.UserType,
+		UserID:    uuidToString(c.UserID),
+		GrantedBy: uuidToString(c.GrantedBy),
+		CreatedAt: timestampToString(c.CreatedAt),
+	}
+}
+
+// user_type is restricted to "member" at the DB layer; the field is kept on
+// the wire so a future expansion to agents/squads is additive, not breaking.
+type AutopilotSubscriberEntry struct {
+	UserType  string `json:"user_type"`
+	UserID    string `json:"user_id"`
+	CreatedAt string `json:"created_at"`
 }
 
 type AutopilotTriggerResponse struct {
@@ -86,16 +142,22 @@ type AutopilotTriggerResponse struct {
 }
 
 type AutopilotRunResponse struct {
-	ID             string  `json:"id"`
-	AutopilotID    string  `json:"autopilot_id"`
-	TriggerID      *string `json:"trigger_id"`
-	Source         string  `json:"source"`
-	Status         string  `json:"status"`
-	IssueID        *string `json:"issue_id"`
-	TaskID         *string `json:"task_id"`
-	TriggeredAt    string  `json:"triggered_at"`
-	CompletedAt    *string `json:"completed_at"`
-	FailureReason  *string `json:"failure_reason"`
+	ID            string  `json:"id"`
+	AutopilotID   string  `json:"autopilot_id"`
+	TriggerID     *string `json:"trigger_id"`
+	Source        string  `json:"source"`
+	Status        string  `json:"status"`
+	IssueID       *string `json:"issue_id"`
+	TaskID        *string `json:"task_id"`
+	TriggeredAt   string  `json:"triggered_at"`
+	CompletedAt   *string `json:"completed_at"`
+	FailureReason *string `json:"failure_reason"`
+	// ReasonCode is a stable, localizable, enumeration-safe classification of a
+	// non-success run (skipped/failed), derived from FailureReason. The "run now"
+	// UI localizes it instead of echoing the raw English reason (which may name a
+	// private assignee agent). Additive: nil for success-path runs and ignored by
+	// old clients (MUL-4525).
+	ReasonCode     *string `json:"reason_code,omitempty"`
 	TriggerPayload any     `json:"trigger_payload"`
 	Result         any     `json:"result"`
 	CreatedAt      string  `json:"created_at"`
@@ -103,13 +165,21 @@ type AutopilotRunResponse struct {
 
 // ── Converters ──────────────────────────────────────────────────────────────
 
-func autopilotToResponse(a db.Autopilot) AutopilotResponse {
+func autopilotToResponse(a db.Autopilot, subscribers []db.AutopilotSubscriber) AutopilotResponse {
 	assigneeType := a.AssigneeType
 	if assigneeType == "" {
 		// Older rows pre-MUL-2429 may surface as "" against an out-of-date
 		// schema view; default to "agent" so the API contract stays
 		// non-null.
 		assigneeType = "agent"
+	}
+	subResp := make([]AutopilotSubscriberEntry, len(subscribers))
+	for i, s := range subscribers {
+		subResp[i] = AutopilotSubscriberEntry{
+			UserType:  s.UserType,
+			UserID:    uuidToString(s.UserID),
+			CreatedAt: timestampToString(s.CreatedAt),
+		}
 	}
 	return AutopilotResponse{
 		ID:                 uuidToString(a.ID),
@@ -127,6 +197,7 @@ func autopilotToResponse(a db.Autopilot) AutopilotResponse {
 		LastRunAt:          timestampToPtr(a.LastRunAt),
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
+		Subscribers:        subResp,
 	}
 }
 
@@ -204,16 +275,20 @@ func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
 		json.Unmarshal(r.Result, &result)
 	}
 	return AutopilotRunResponse{
-		ID:             uuidToString(r.ID),
-		AutopilotID:    uuidToString(r.AutopilotID),
-		TriggerID:      uuidToPtr(r.TriggerID),
-		Source:         r.Source,
-		Status:         r.Status,
-		IssueID:        uuidToPtr(r.IssueID),
-		TaskID:         uuidToPtr(r.TaskID),
-		TriggeredAt:    timestampToString(r.TriggeredAt),
-		CompletedAt:    timestampToPtr(r.CompletedAt),
-		FailureReason:  textToPtr(r.FailureReason),
+		ID:            uuidToString(r.ID),
+		AutopilotID:   uuidToString(r.AutopilotID),
+		TriggerID:     uuidToPtr(r.TriggerID),
+		Source:        r.Source,
+		Status:        r.Status,
+		IssueID:       uuidToPtr(r.IssueID),
+		TaskID:        uuidToPtr(r.TaskID),
+		TriggeredAt:   timestampToString(r.TriggeredAt),
+		CompletedAt:   timestampToPtr(r.CompletedAt),
+		FailureReason: textToPtr(r.FailureReason),
+		// ReasonCode is left unset here: it is a decision-time value the manual
+		// "run now" handler injects from the typed dispatch outcome (MUL-4525).
+		// Persisted rows (list/history) surface the human failure_reason instead
+		// of a code reverse-engineered from that text.
 		TriggerPayload: payload,
 		Result:         result,
 		CreatedAt:      timestampToString(r.CreatedAt),
@@ -239,10 +314,11 @@ type CreateAutopilotRequest struct {
 	ProjectID   *string `json:"project_id"`
 	// AssigneeType is optional and defaults to "agent" — preserves backward
 	// compatibility with desktop clients shipped before MUL-2429.
-	AssigneeType       *string `json:"assignee_type"`
-	AssigneeID         string  `json:"assignee_id"`
-	ExecutionMode      string  `json:"execution_mode"`
-	IssueTitleTemplate *string `json:"issue_title_template"`
+	AssigneeType       *string           `json:"assignee_type"`
+	AssigneeID         string            `json:"assignee_id"`
+	ExecutionMode      string            `json:"execution_mode"`
+	IssueTitleTemplate *string           `json:"issue_title_template"`
+	Subscribers        []SubscriberInput `json:"subscribers"`
 }
 
 type UpdateAutopilotRequest struct {
@@ -254,6 +330,13 @@ type UpdateAutopilotRequest struct {
 	Status             *string `json:"status"`
 	ExecutionMode      *string `json:"execution_mode"`
 	IssueTitleTemplate *string `json:"issue_title_template"`
+	// Wholesale replacement when present; omit to leave subscribers untouched.
+	Subscribers []SubscriberInput `json:"subscribers"`
+}
+
+type SubscriberInput struct {
+	UserType string `json:"user_type"`
+	UserID   string `json:"user_id"`
 }
 
 type CreateAutopilotTriggerRequest struct {
@@ -322,9 +405,39 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the caller's write access for per-row can_write. The collaborator
+	// grants are fetched once as a set (keyed by autopilot id) so the flag
+	// costs no per-row query. A missing member (shouldn't happen behind the
+	// workspace-member middleware) just yields can_write=false everywhere.
+	caller, callerErr := h.getWorkspaceMember(r.Context(), requestUserID(r), workspaceID)
+	collabSet := map[string]struct{}{}
+	if callerErr == nil {
+		if ids, err := h.Queries.ListAutopilotIDsForCollaborator(r.Context(), caller.UserID); err == nil {
+			for _, id := range ids {
+				collabSet[uuidToString(id)] = struct{}{}
+			}
+		}
+	}
+
 	resp := make([]AutopilotResponse, len(autopilots))
-	for i, a := range autopilots {
-		resp[i] = autopilotToResponse(a)
+	for i, row := range autopilots {
+		// Omit subscribers to avoid an N+1; GET /api/autopilots/{id} is
+		// the source of truth for the populated template.
+		r := autopilotToResponse(row.Autopilot, nil)
+		r.TriggerKinds = row.TriggerKinds
+		if row.NextRunAt.Valid {
+			r.NextRunAt = timestampToPtr(row.NextRunAt)
+		}
+		if row.LastRunStatus != "" {
+			s := row.LastRunStatus
+			r.LastRunStatus = &s
+		}
+		if callerErr == nil {
+			_, isCollaborator := collabSet[uuidToString(row.Autopilot.ID)]
+			cw := autopilotWriteByOwnership(row.Autopilot, caller) || isCollaborator
+			r.CanWrite = &cw
+		}
+		resp[i] = r
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"autopilots": resp, "total": len(resp)})
 }
@@ -338,7 +451,30 @@ func (h *Handler) GetAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := autopilotToResponse(autopilot)
+	subs, err := h.Queries.ListAutopilotSubscribers(r.Context(), autopilot.ID)
+	if err != nil {
+		// Don't 500 the detail fetch over template metadata.
+		subs = nil
+	}
+	resp := autopilotToResponse(autopilot, subs)
+
+	// Resolve the caller's write access once: it both stamps can_write and
+	// gates webhook-secret exposure. Webhook tokens are trigger-granting
+	// secrets (anyone who reads the token can fire the autopilot from outside
+	// the permission system), so only writers — the creator, a workspace
+	// owner/admin, or a granted collaborator — get the live token/URL; every
+	// other member sees the trigger metadata with the secret fields stripped
+	// (MUL-3807).
+	canWrite := false
+	canManageAccess := false
+	if member, err := h.getWorkspaceMember(r.Context(), requestUserID(r), workspaceID); err == nil {
+		canWrite = h.memberCanWriteAutopilot(r.Context(), autopilot, member)
+		// Managing the access list is narrower than write: collaborators can
+		// write but cannot re-grant (MUL-3807).
+		canManageAccess = autopilotWriteByOwnership(autopilot, member)
+	}
+	resp.CanWrite = &canWrite
+	resp.CanManageAccess = &canManageAccess
 
 	// Include triggers.
 	triggers, err := h.Queries.ListAutopilotTriggers(r.Context(), autopilot.ID)
@@ -347,12 +483,30 @@ func (h *Handler) GetAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	triggerResp := make([]AutopilotTriggerResponse, len(triggers))
 	for i, t := range triggers {
-		triggerResp[i] = h.triggerToResponse(t)
+		tr := h.triggerToResponse(t)
+		if !canWrite {
+			tr.WebhookToken = nil
+			tr.WebhookPath = nil
+			tr.WebhookURL = nil
+		}
+		triggerResp[i] = tr
+	}
+
+	// Include the explicit collaborator grants so the "manage access" UI can
+	// render the current list without a second round-trip.
+	collaborators, err := h.Queries.ListAutopilotCollaborators(r.Context(), autopilot.ID)
+	if err != nil {
+		collaborators = nil
+	}
+	collabResp := make([]AutopilotCollaboratorEntry, len(collaborators))
+	for i, c := range collaborators {
+		collabResp[i] = collaboratorToEntry(c)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"autopilot": resp,
-		"triggers":  triggerResp,
+		"autopilot":     resp,
+		"triggers":      triggerResp,
+		"collaborators": collabResp,
 	})
 }
 
@@ -375,6 +529,70 @@ func (h *Handler) loadAutopilotInWorkspace(w http.ResponseWriter, r *http.Reques
 		return db.Autopilot{}, false
 	}
 	return autopilot, true
+}
+
+// autopilotWriteByOwnership is the implicit, query-free part of the write
+// predicate: the autopilot's creator and workspace owners/admins always have
+// write access. Explicit collaborator grants (memberCanWriteAutopilot) layer
+// on top of this (MUL-3807).
+func autopilotWriteByOwnership(ap db.Autopilot, member db.Member) bool {
+	if roleAllowed(member.Role, "owner", "admin") {
+		return true
+	}
+	return ap.CreatedByType == "member" && uuidToString(ap.CreatedByID) == uuidToString(member.UserID)
+}
+
+// memberCanWriteAutopilot reports whether the given member may perform write or
+// execute operations on the autopilot — editing it, deleting it, triggering
+// runs, replaying deliveries, and managing its triggers, webhook secrets, and
+// access list. Write access is held by the autopilot's creator, by workspace
+// owners/admins, and by members explicitly granted as collaborators. The same
+// predicate also gates whether webhook secrets are exposed on the read path,
+// since seeing a webhook token is equivalent to being able to trigger.
+func (h *Handler) memberCanWriteAutopilot(ctx context.Context, ap db.Autopilot, member db.Member) bool {
+	if autopilotWriteByOwnership(ap, member) {
+		return true
+	}
+	granted, err := h.Queries.IsAutopilotCollaborator(ctx, db.IsAutopilotCollaboratorParams{
+		AutopilotID: ap.ID,
+		UserID:      member.UserID,
+	})
+	return err == nil && granted
+}
+
+// requireAutopilotWrite enforces memberCanWriteAutopilot for a mutating/
+// executing request. On failure it writes the response (404 when the caller is
+// not a member of the workspace, 403 otherwise) and returns false; the caller
+// must return early. On success it returns true.
+func (h *Handler) requireAutopilotWrite(w http.ResponseWriter, r *http.Request, ap db.Autopilot, workspaceID string) bool {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if !h.memberCanWriteAutopilot(r.Context(), ap, member) {
+		writeError(w, http.StatusForbidden, "only the autopilot creator, a workspace admin, or a granted collaborator can manage this autopilot")
+		return false
+	}
+	return true
+}
+
+// requireAutopilotAccessManagement enforces the narrower predicate used by the
+// collaborator (access list) endpoints: only the autopilot's creator or a
+// workspace owner/admin may grant or revoke access. A granted collaborator
+// keeps its own write/execute rights (edit, trigger, manage triggers/secrets)
+// but cannot manage the access list — this stops a collaborator from
+// re-granting access to others or revoking peers (privilege escalation).
+// See MUL-3807.
+func (h *Handler) requireAutopilotAccessManagement(w http.ResponseWriter, r *http.Request, ap db.Autopilot, workspaceID string) bool {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if !autopilotWriteByOwnership(ap, member) {
+		writeError(w, http.StatusForbidden, "only the autopilot creator or a workspace admin can manage access")
+		return false
+	}
+	return true
 }
 
 func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
@@ -437,7 +655,21 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	autopilot, err := h.Queries.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
+	// Validate before insert so a bad payload doesn't half-create the row.
+	subscriberUUIDs, ok := h.validateAutopilotSubscribers(w, r, req.Subscribers, workspaceID)
+	if !ok {
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	autopilot, err := qtx.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
 		WorkspaceID:        wsUUID,
 		Title:              req.Title,
 		AssigneeType:       assigneeType,
@@ -455,9 +687,83 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := autopilotToResponse(autopilot)
+	// Creating an autopilot IS a substantive publish: append rule-version v1 with
+	// the creating member as publisher, so every autopilot has an accountable
+	// human at dispatch time (MUL-4302 §3.4).
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, autopilot, "member", parseUUID(userID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
+		return
+	}
+
+	for _, uid := range subscriberUUIDs {
+		if err := qtx.AddAutopilotSubscriber(r.Context(), db.AddAutopilotSubscriberParams{
+			AutopilotID: autopilot.ID,
+			UserType:    "member",
+			UserID:      uid,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to add autopilot subscriber")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
+		return
+	}
+	subs, err := h.Queries.ListAutopilotSubscribers(r.Context(), autopilot.ID)
+	if err != nil {
+		subs = nil
+	}
+
+	resp := autopilotToResponse(autopilot, subs)
 	h.publish(protocol.EventAutopilotCreated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AutopilotCreated(
+		userID,
+		workspaceID,
+		uuidToString(autopilot.ID),
+		"manual",
+		"manual",
+	))
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// Writes an HTTP error and returns ok=false on the first invalid entry.
+// Returns (nil, true) when raw is empty — caller distinguishes "leave alone"
+// from "replace with empty" via the raw-fields map, not this return.
+func (h *Handler) validateAutopilotSubscribers(
+	w http.ResponseWriter,
+	r *http.Request,
+	raw []SubscriberInput,
+	workspaceID string,
+) ([]pgtype.UUID, bool) {
+	if len(raw) == 0 {
+		return nil, true
+	}
+	out := make([]pgtype.UUID, 0, len(raw))
+	seen := make(map[string]bool, len(raw))
+	for i, entry := range raw {
+		if entry.UserType != "member" {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("subscribers[%d].user_type must be 'member'", i))
+			return nil, false
+		}
+		if entry.UserID == "" {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("subscribers[%d].user_id is required", i))
+			return nil, false
+		}
+		uid, ok := parseUUIDOrBadRequest(w, entry.UserID, fmt.Sprintf("subscribers[%d].user_id", i))
+		if !ok {
+			return nil, false
+		}
+		if seen[entry.UserID] {
+			continue
+		}
+		seen[entry.UserID] = true
+		if !h.isWorkspaceEntity(r.Context(), entry.UserType, entry.UserID, workspaceID) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("subscribers[%d] is not a member of this workspace", i))
+			return nil, false
+		}
+		out = append(out, uid)
+	}
+	return out, true
 }
 
 func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
@@ -466,6 +772,9 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	prev, ok := h.loadAutopilotInWorkspace(w, r, id, workspaceID)
 	if !ok {
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, prev, workspaceID) {
 		return
 	}
 
@@ -568,15 +877,126 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	autopilot, err := h.Queries.UpdateAutopilot(r.Context(), params)
+	// Subscribers are validated up-front (before any write) so a bad payload
+	// doesn't leave the autopilot row updated but the template stale.
+	var (
+		subscriberUUIDs    []pgtype.UUID
+		replaceSubscribers bool
+	)
+	if _, sent := rawFields["subscribers"]; sent {
+		replaceSubscribers = true
+		validated, vok := h.validateAutopilotSubscribers(w, r, req.Subscribers, workspaceID)
+		if !vok {
+			return
+		}
+		subscriberUUIDs = validated
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	autopilot, err := qtx.UpdateAutopilot(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update autopilot")
 		return
 	}
 
-	resp := autopilotToResponse(autopilot)
+	// A substantive change (target / enabled-state / execution mode) republishes the
+	// rule: append a new version with THIS member as publisher, so a later run
+	// attributes to whoever last changed what the rule does — not the original
+	// creator. Cosmetic edits (title / description / template) write no version and
+	// leave accountability with the previous publisher (MUL-4302 §3.4).
+	if autopilotRuleSubstantiveChange(prev, autopilot) {
+		if err := h.recordAutopilotRuleVersion(r.Context(), qtx, autopilot, "member", parseUUID(userID)); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+			return
+		}
+		// An autopilot-level substantive edit governs every trigger, so responsibility
+		// for each firing trigger transfers to this editor (source=trigger_owner). A
+		// trigger-scoped edit re-stamps only its own row (see UpdateAutopilotTrigger).
+		if err := qtx.SetAutopilotTriggerPublishersByAutopilot(r.Context(), db.SetAutopilotTriggerPublishersByAutopilotParams{
+			AutopilotID:     autopilot.ID,
+			PublishedByType: pgtype.Text{String: "member", Valid: true},
+			PublishedByID:   parseUUID(userID),
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+			return
+		}
+	}
+
+	if replaceSubscribers {
+		if err := qtx.DeleteAutopilotSubscribersForAutopilot(r.Context(), autopilot.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update subscribers")
+			return
+		}
+		for _, uid := range subscriberUUIDs {
+			if err := qtx.AddAutopilotSubscriber(r.Context(), db.AddAutopilotSubscriberParams{
+				AutopilotID: autopilot.ID,
+				UserType:    "member",
+				UserID:      uid,
+			}); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to add autopilot subscriber")
+				return
+			}
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+		return
+	}
+
+	subs, err := h.Queries.ListAutopilotSubscribers(r.Context(), autopilot.ID)
+	if err != nil {
+		subs = nil
+	}
+	resp := autopilotToResponse(autopilot, subs)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// autopilotRuleSubstantiveChange reports whether a substantive (publish-worthy)
+// field of the autopilot ROW changed between prev and next — a change that alters
+// WHAT the automation instructs the agent to do, or WHO / WHETHER it runs, and so
+// transfers accountability to the editor (MUL-4302 §3.4; boundary pinned with Elon):
+//
+//   - assignee_type / assignee_id — who (agent / squad leader) executes;
+//   - status — enabled state (active / paused / archived);
+//   - execution_mode — run_only vs create_issue;
+//   - description — the product surfaces this as the run PROMPT, i.e. the task
+//     instruction itself, so editing it must transfer responsibility (the gap Elon
+//     flagged: a fresh publisher of the instructions is the accountable human);
+//   - issue_title_template — templates the created issue in create_issue mode; part
+//     of the instruction / output spec the run produces.
+//
+// Deliberately NOT substantive (cosmetic / routing — they change neither the
+// instruction nor the executor): title (display label) and project_id (which project
+// created issues are filed under). The comparison is faithful because UpdateAutopilot
+// seeds every param from prev, so an omitted field round-trips unchanged.
+//
+// Trigger-table edits (cron / timezone / enabled / event_filters) are substantive PER
+// TRIGGER and handled in UpdateAutopilotTrigger; archive and system-pause republish in
+// their own paths.
+func autopilotRuleSubstantiveChange(prev, next db.Autopilot) bool {
+	return prev.AssigneeType != next.AssigneeType ||
+		prev.AssigneeID != next.AssigneeID ||
+		prev.Status != next.Status ||
+		prev.ExecutionMode != next.ExecutionMode ||
+		prev.Description != next.Description ||
+		prev.IssueTitleTemplate != next.IssueTitleTemplate
+}
+
+// recordAutopilotRuleVersion appends one rule-version snapshot for a substantive
+// publish (MUL-4302 §3.4). Thin handler wrapper over service.RecordAutopilotRuleVersion
+// (shared with the failure monitor); callers pass their tx-scoped Queries so the
+// version is atomic with the autopilot write.
+func (h *Handler) recordAutopilotRuleVersion(ctx context.Context, q *db.Queries, ap db.Autopilot, publishedByType string, publishedByID pgtype.UUID) error {
+	return service.RecordAutopilotRuleVersion(ctx, q, ap, publishedByType, publishedByID)
 }
 
 func (h *Handler) parseAutopilotProjectID(
@@ -615,11 +1035,15 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
+	ap, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
 		ID:          idUUID,
 		WorkspaceID: wsUUID,
-	}); err != nil {
+	})
+	if err != nil {
 		writeError(w, http.StatusNotFound, "autopilot not found")
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
 		return
 	}
 
@@ -628,13 +1052,152 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.DeleteAutopilot(r.Context(), idUUID); err != nil {
+	// Product "delete" is archival: stop future triggers and hide the
+	// autopilot from default lists while preserving runs, tasks, webhook
+	// deliveries, subscribers, and collaborators as execution history.
+	// Archiving is a substantive status change (MUL-4302 §3.4), so republish the
+	// rule version with this member as publisher, atomically with the archive.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if err := qtx.ArchiveAutopilot(r.Context(), idUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
+	ap.Status = "archived" // reflect the post-archive state in the version snapshot
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", parseUUID(userID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
 		return
 	}
 
 	h.publish(protocol.EventAutopilotDeleted, workspaceID, "member", userID, map[string]any{"autopilot_id": uuidToString(idUUID)})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Collaborator (access grant) management ───────────────────────────────────
+
+type AutopilotCollaboratorRequest struct {
+	UserID string `json:"user_id"`
+}
+
+func (h *Handler) writeAutopilotCollaborators(w http.ResponseWriter, r *http.Request, autopilotID pgtype.UUID, status int) {
+	collaborators, err := h.Queries.ListAutopilotCollaborators(r.Context(), autopilotID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load collaborators")
+		return
+	}
+	resp := make([]AutopilotCollaboratorEntry, len(collaborators))
+	for i, c := range collaborators {
+		resp[i] = collaboratorToEntry(c)
+	}
+	writeJSON(w, status, map[string]any{"collaborators": resp})
+}
+
+// AddAutopilotCollaborator grants a workspace member explicit write access to
+// the autopilot. Only the autopilot's creator or a workspace owner/admin can
+// manage the access list; a granted collaborator cannot re-grant to others
+// (privilege escalation). See MUL-3807.
+func (h *Handler) AddAutopilotCollaborator(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+
+	ap, ok := h.loadAutopilotInWorkspace(w, r, id, workspaceID)
+	if !ok {
+		return
+	}
+	if !h.requireAutopilotAccessManagement(w, r, ap, workspaceID) {
+		return
+	}
+
+	var req AutopilotCollaboratorRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.UserID == "" {
+		writeError(w, http.StatusBadRequest, "user_id is required")
+		return
+	}
+	targetUUID, ok := parseUUIDOrBadRequest(w, req.UserID, "user_id")
+	if !ok {
+		return
+	}
+	// Only workspace members can be granted access — agents already reach
+	// autopilots through their own dispatch path, not this grant list.
+	if !h.isWorkspaceEntity(r.Context(), "member", req.UserID, workspaceID) {
+		writeError(w, http.StatusBadRequest, "user_id must be a member of this workspace")
+		return
+	}
+
+	grantedBy, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	grantedByUUID, ok := parseUUIDOrBadRequest(w, grantedBy, "granted_by")
+	if !ok {
+		return
+	}
+
+	if _, err := h.Queries.AddAutopilotCollaborator(r.Context(), db.AddAutopilotCollaboratorParams{
+		AutopilotID: ap.ID,
+		UserType:    "member",
+		UserID:      targetUUID,
+		GrantedBy:   grantedByUUID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to grant access")
+		return
+	}
+
+	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", grantedBy, map[string]any{
+		"autopilot_id": uuidToString(ap.ID),
+	})
+	h.writeAutopilotCollaborators(w, r, ap.ID, http.StatusCreated)
+}
+
+// RemoveAutopilotCollaborator revokes a member's explicit write grant. Only the
+// autopilot's creator or a workspace owner/admin can manage the access list; a
+// collaborator cannot revoke peers. Implicit writers (creator / owner / admin)
+// are unaffected — there is no row to remove.
+func (h *Handler) RemoveAutopilotCollaborator(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	userID := chi.URLParam(r, "userId")
+	workspaceID := h.resolveWorkspaceID(r)
+
+	ap, ok := h.loadAutopilotInWorkspace(w, r, id, workspaceID)
+	if !ok {
+		return
+	}
+	if !h.requireAutopilotAccessManagement(w, r, ap, workspaceID) {
+		return
+	}
+	targetUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+
+	if err := h.Queries.DeleteAutopilotCollaborator(r.Context(), db.DeleteAutopilotCollaboratorParams{
+		AutopilotID: ap.ID,
+		UserType:    "member",
+		UserID:      targetUUID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke access")
+		return
+	}
+
+	actor := requestUserID(r)
+	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", actor, map[string]any{
+		"autopilot_id": uuidToString(ap.ID),
+	})
+	h.writeAutopilotCollaborators(w, r, ap.ID, http.StatusOK)
 }
 
 // ── Trigger management ──────────────────────────────────────────────────────
@@ -647,6 +1210,20 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
+		return
+	}
+	// A new trigger changes what / when the rule fires — a substantive publish, so
+	// the acting member republishes the rule version ATOMICALLY with the trigger
+	// create (MUL-4302 §3.4). Resolved here so both the webhook and schedule create
+	// paths can write the version inside the same tx as the INSERT — a failed
+	// version write must roll the trigger back, never leave future dispatches
+	// attributed to the previous publisher.
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	publisherID := parseUUID(userID)
 
 	var req CreateAutopilotTriggerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -745,13 +1322,12 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, "failed to encode event_filters")
 			return
 		}
-		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap.ID, ptrToText(req.Label), provider, eventFiltersBytes)
+		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap, ptrToText(req.Label), provider, eventFiltersBytes, publisherID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to create trigger")
 			return
 		}
 		resp := h.triggerToResponse(trigger)
-		userID, _ := requireUserID(w, r)
 		h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 			"autopilot_id": uuidToString(ap.ID),
 			"trigger":      resp,
@@ -760,7 +1336,16 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	trigger, err := h.Queries.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
+	// Schedule create: write the trigger and republish the rule version atomically.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create trigger")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	trigger, err := qtx.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
 		AutopilotID:    ap.ID,
 		Kind:           req.Kind,
 		Enabled:        true,
@@ -769,14 +1354,26 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		NextRunAt:      nextRunAt,
 		Label:          ptrToText(req.Label),
 		WebhookToken:   webhookToken,
+		// Seed the responsible publisher = creator; a later substantive edit re-stamps
+		// it to the editor so runs attribute to whoever last shaped this trigger
+		// (source=trigger_owner, MUL-4302).
+		PublishedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
+		PublishedByID:   publisherID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create trigger")
 		return
 	}
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", publisherID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create trigger")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create trigger")
+		return
+	}
 
 	resp := h.triggerToResponse(trigger)
-	userID, _ := requireUserID(w, r)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
 		"trigger":      resp,
@@ -790,35 +1387,60 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 // kind=webhook row with NULL webhook_token visible in the UI if the second
 // statement failed.
 //
-// Retries on the unique-index collision case so a vanishingly-rare RNG
+// Each attempt runs in its OWN transaction so the trigger INSERT and the
+// rule-version republish (a webhook trigger is a substantive change to what fires,
+// MUL-4302 §3.4, published by publisherID) commit together — a version-write failure
+// rolls the trigger back rather than leaving future dispatches attributed to the
+// previous publisher. Retries on the unique-index collision case with a fresh token
+// (the collided attempt's tx is already rolled back), so a vanishingly-rare RNG
 // collision turns into a clean retry rather than a 500.
 func (h *Handler) createWebhookTriggerWithMintedToken(
 	r *http.Request,
-	autopilotID pgtype.UUID,
+	ap db.Autopilot,
 	label pgtype.Text,
 	provider string,
 	eventFilters []byte,
+	publisherID pgtype.UUID,
 ) (db.AutopilotTrigger, error) {
+	ctx := r.Context()
 	for attempt := 0; attempt < 3; attempt++ {
 		token, err := generateWebhookToken()
 		if err != nil {
 			return db.AutopilotTrigger{}, err
 		}
-		trigger, err := h.Queries.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
-			AutopilotID:  autopilotID,
+		tx, err := h.TxStarter.Begin(ctx)
+		if err != nil {
+			return db.AutopilotTrigger{}, err
+		}
+		qtx := h.Queries.WithTx(tx)
+		trigger, err := qtx.CreateAutopilotTrigger(ctx, db.CreateAutopilotTriggerParams{
+			AutopilotID:  ap.ID,
 			Kind:         "webhook",
 			Enabled:      true,
 			Label:        label,
 			WebhookToken: pgtype.Text{String: token, Valid: true},
 			Provider:     pgtype.Text{String: provider, Valid: provider != ""},
 			EventFilters: eventFilters,
+			// Seed the responsible publisher = creator; re-stamped to the editor on a
+			// later substantive edit (source=trigger_owner, MUL-4302).
+			PublishedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
+			PublishedByID:   publisherID,
 		})
-		if err == nil {
-			return trigger, nil
-		}
-		if !isUniqueViolation(err) {
+		if err != nil {
+			tx.Rollback(ctx)
+			if isUniqueViolation(err) {
+				continue // token collision: retry with a fresh token
+			}
 			return db.AutopilotTrigger{}, err
 		}
+		if err := h.recordAutopilotRuleVersion(ctx, qtx, ap, "member", publisherID); err != nil {
+			tx.Rollback(ctx)
+			return db.AutopilotTrigger{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return db.AutopilotTrigger{}, err
+		}
+		return trigger, nil
 	}
 	return db.AutopilotTrigger{}, fmt.Errorf("could not mint unique webhook token")
 }
@@ -890,6 +1512,13 @@ func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusUnprocessableEntity, "squad leader is archived; pick a different squad or rotate the leader before assigning autopilot")
 			return false
 		}
+		// Private-leader gate: the member configuring the autopilot must have
+		// access to the private leader, same as validateAssigneePair.
+		actorType, actorID := h.resolveActor(r, requestUserID(r), util.UUIDToString(workspaceID))
+		if !h.canInvokeAgent(r.Context(), leader, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), util.UUIDToString(workspaceID)) {
+			writeError(w, http.StatusForbidden, "cannot assign autopilot to squad with private leader")
+			return false
+		}
 		return true
 	default:
 		writeError(w, http.StatusBadRequest, "assignee_type must be agent or squad")
@@ -904,6 +1533,9 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 
 	ap, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
 	if !ok {
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
 		return
 	}
 
@@ -1008,14 +1640,59 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		params.NextRunAt = pgtype.Timestamptz{Time: t, Valid: true}
 	}
 
-	trigger, err := h.Queries.UpdateAutopilotTrigger(r.Context(), params)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update trigger")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	trigger, err := qtx.UpdateAutopilotTrigger(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update trigger")
 		return
 	}
 
+	// Only a substantive edit republishes the rule version and transfers this
+	// trigger's accountability to the editor. cron / timezone / enabled / event_filters
+	// change WHAT or WHEN the trigger fires; label is a cosmetic display field, and a
+	// no-op PATCH changes nothing — neither should move responsibility (MUL-4302; the
+	// over-transfer Elon flagged). Comparing the persisted before/after rows captures a
+	// real change and ignores label-only / no-op PATCHes (next_run_at is derived from
+	// cron/timezone, so it is not an independent signal).
+	triggerSubstantiveChange := prev.Enabled != trigger.Enabled ||
+		prev.CronExpression != trigger.CronExpression ||
+		prev.Timezone != trigger.Timezone ||
+		!bytes.Equal(prev.EventFilters, trigger.EventFilters)
+	if triggerSubstantiveChange {
+		if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", parseUUID(userID)); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update trigger")
+			return
+		}
+		// Responsibility for THIS trigger's runs transfers to the editor. Scoped to the
+		// single row so editing one trigger never reassigns another's accountability —
+		// the per-firing-trigger granularity the autopilot-scoped rule_version can't give.
+		if err := qtx.SetAutopilotTriggerPublisher(r.Context(), db.SetAutopilotTriggerPublisherParams{
+			ID:              trigger.ID,
+			PublishedByType: pgtype.Text{String: "member", Valid: true},
+			PublishedByID:   parseUUID(userID),
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update trigger")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update trigger")
+		return
+	}
+
 	resp := h.triggerToResponse(trigger)
-	userID, _ := requireUserID(w, r)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
 		"trigger":      resp,
@@ -1041,11 +1718,15 @@ func (h *Handler) DeleteAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if _, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
+	ap, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
 		ID:          autopilotUUID,
 		WorkspaceID: wsUUID,
-	}); err != nil {
+	})
+	if err != nil {
 		writeError(w, http.StatusNotFound, "autopilot not found")
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
 		return
 	}
 
@@ -1060,7 +1741,26 @@ func (h *Handler) DeleteAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.Queries.DeleteAutopilotTrigger(r.Context(), triggerUUID); err != nil {
+	// Removing a trigger changes what fires — a substantive publish (MUL-4302 §3.4).
+	// Republish the rule version with this member as publisher, atomically with the
+	// delete.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete trigger")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if err := qtx.DeleteAutopilotTrigger(r.Context(), triggerUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete trigger")
+		return
+	}
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", parseUUID(userID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete trigger")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete trigger")
 		return
 	}
@@ -1083,6 +1783,9 @@ func (h *Handler) RotateAutopilotTriggerWebhookToken(w http.ResponseWriter, r *h
 
 	ap, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
 	if !ok {
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
 		return
 	}
 
@@ -1149,6 +1852,9 @@ func (h *Handler) SetAutopilotTriggerSigningSecret(w http.ResponseWriter, r *htt
 
 	ap, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
 	if !ok {
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
 		return
 	}
 	triggerUUID, ok := parseUUIDOrBadRequest(w, triggerID, "trigger id")
@@ -1294,16 +2000,37 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireAutopilotWrite(w, r, autopilot, workspaceID) {
+		return
+	}
 	if autopilot.Status != "active" {
 		writeError(w, http.StatusBadRequest, "autopilot is not active")
 		return
 	}
 
-	run, err := h.AutopilotService.DispatchAutopilot(r.Context(), autopilot, pgtype.UUID{}, "manual", nil)
+	// A manual "run now" is a direct human action, so the run is attributed
+	// direct_human to the triggering member (MUL-4302 §4). Resolve the actor the
+	// same way assign/promote does; only a member actor is a human — an agent
+	// triggering via A2A yields an invalid actor and falls back to rule_owner.
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+	run, reasonCode, err := h.AutopilotService.DispatchAutopilotManual(r.Context(), autopilot, pgtype.UUID{}, nil, memberActorUserID(actorType, actorID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, runToResponse(*run))
+	// Carry the typed admission reason (decided at its source, MUL-4525) straight
+	// into the response — no reverse-engineering from failure_reason text. The
+	// UI branches on run status + this code for the "run now" toast.
+	resp := runToResponse(*run)
+	if reasonCode != "" {
+		c := string(reasonCode)
+		resp.ReasonCode = &c
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

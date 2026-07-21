@@ -7,7 +7,16 @@
     "view_compact": "간결하게",
     "view_comfortable": "넓게",
     "search_placeholder": "프로젝트 검색...",
-    "no_search_results": "검색 결과가 없습니다"
+    "no_search_results": "검색 결과가 없습니다",
+    "view_table": "테이블",
+    "view_cards": "카드",
+    "row_menu": "프로젝트 작업",
+    "pin": "사이드바에 고정",
+    "unpin": "고정 해제",
+    "delete": "삭제",
+    "no_matches": "일치하는 프로젝트가 없습니다",
+    "selected_other": "{{count}}개 선택됨",
+    "clear_selection": "선택 해제"
   },
   "table": {
     "name": "이름",
@@ -15,7 +24,8 @@
     "status": "상태",
     "progress": "진행률",
     "lead": "리드",
-    "created": "생성일"
+    "created": "생성일",
+    "issues": "이슈 수"
   },
   "status": {
     "planned": "계획됨",
@@ -57,7 +67,11 @@
     "section_properties": "속성",
     "section_progress": "진행률",
     "section_description": "설명",
+    "prop_start_date": "시작일",
+    "prop_due_date": "마감일",
+    "clear_date": "날짜 지우기",
     "description_placeholder": "설명 추가...",
+    "description_hint": "이 프로젝트의 모든 작업에서 컨텍스트로 에이전트에게 공유됩니다.",
     "empty_issues_title": "연결된 이슈가 없습니다",
     "empty_issues_hint": "새 이슈를 만들거나 기존 이슈를 이 프로젝트에 할당하세요.",
     "empty_issues_new_button": "새 이슈",
@@ -116,5 +130,20 @@
   },
   "chip": {
     "fallback_label": "프로젝트"
+  },
+  "toolbar": {
+    "result_count_title": "일치하는 프로젝트 / 전체 프로젝트",
+    "filter_label": "필터",
+    "filter_active_count_other": "필터 {{count}}개",
+    "clear_filters": "필터 지우기",
+    "section_status": "상태",
+    "section_priority": "우선순위",
+    "section_lead": "리드",
+    "display": "표시",
+    "sort_by": "정렬",
+    "direction_asc": "오름차순",
+    "direction_desc": "내림차순",
+    "section_columns": "열",
+    "view": "보기"
   }
 }

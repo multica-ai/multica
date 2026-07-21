@@ -1,7 +1,8 @@
 // Package agent provides a unified interface for executing prompts via
-// coding agents (Claude Code, Codex, Copilot, OpenCode, OpenClaw, Hermes,
-// Gemini, Pi, Cursor, Kimi, Kiro, Antigravity). It mirrors the happy-cli
-// AgentBackend pattern, translated to idiomatic Go.
+// coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, DevEco Code,
+// OpenClaw, Hermes, Pi, Cursor, Kimi, Kiro, Antigravity, Qoder, Trae, Grok,
+// Qwen Code). It
+// mirrors the happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
 
 import (
@@ -28,23 +29,66 @@ type ExecOptions struct {
 	// developer/system instructions. Hermes ACP intentionally ignores it and
 	// relies on cwd-scoped context files such as AGENTS.md instead.
 	SystemPrompt              string
+	ThreadName                string
 	MaxTurns                  int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
-	ResumeSessionID           string          // if non-empty, resume a previous agent session
-	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
-	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
-	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	// IdleWatchdogTimeout optionally narrows the daemon's generic no-message
+	// watchdog for this execution. Zero keeps the daemon-wide window, and a
+	// value above that window cannot extend the global safety bound. The
+	// daemon-wide zero still disables the watchdog entirely, and an in-flight
+	// tool continues to use the separate tool watchdog budget.
+	IdleWatchdogTimeout time.Duration
+	// HandshakeTimeout bounds startup RPCs for providers with a long-lived
+	// protocol transport. It is currently consumed by Codex app-server;
+	// zero uses the provider default rather than disabling the bound.
+	HandshakeTimeout time.Duration
+	ResumeSessionID  string // if non-empty, resume a previous agent session
+	// ResumeExpected records that this task intended to continue a prior
+	// conversation, independent of ResumeSessionID (which a fallback retry may
+	// clear). When it is true but the backend ends up on a fresh thread — the
+	// live resume RPC was rejected, or a transport failure forced a fresh retry —
+	// the backend surfaces a continuity notice to the user instead of silently
+	// restarting. Currently honoured by the codex backend (MUL-4424).
+	ResumeExpected bool
+	ExtraArgs      []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
+	CustomArgs     []string        // per-agent CLI arguments appended after ExtraArgs
+	McpConfig      json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
 	// medium|high|xhigh", OpenCode's model variant names). Empty means
 	// "use the runtime/model default" —
 	// every backend that consumes this skips its --effort / reasoning_effort
 	// injection so the upstream CLI's own default applies. Currently honoured
-	// by the claude, codex, and opencode backends; other backends ignore the
-	// field rather than fail (so MUL-2339 can grow runtime support
+	// by the claude, codex, opencode, codebuddy, and grok (ACP
+	// `--effort` on `grok agent`) backends; other backends ignore
+	// the field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
+	// OpenclawMode chooses between local (embedded) and gateway routing for
+	// the openclaw backend. "" or "local" keeps the historical behaviour —
+	// the daemon spawns `openclaw agent --local …` and the agent loop runs
+	// in-process on the daemon host. "gateway" instructs the daemon to drop
+	// the --local flag and let openclaw route the turn through a Gateway (the
+	// user's globally-configured one, or an endpoint pinned in the per-task
+	// config wrapper that the daemon writes from execenv.OpenclawGatewayPin —
+	// see server/internal/daemon/execenv/openclaw_config.go). Other backends
+	// ignore this field, mirroring ThinkingLevel's renderer-side fall-through
+	// pattern. See issue #3260.
+	OpenclawMode string
+}
+
+// runContext derives the execution context for an agent subprocess from the
+// configured per-run timeout. A positive timeout imposes a hard wall-clock
+// deadline; a zero (or negative) timeout imposes NO deadline, leaving liveness
+// entirely to the daemon's inactivity watchdog so a session that keeps emitting
+// events is never killed merely for running long (MUL-3064). The caller owns
+// the returned CancelFunc and must call it to release resources.
+func runContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout > 0 {
+		return context.WithTimeout(ctx, timeout)
+	}
+	return context.WithCancel(ctx)
 }
 
 // Session represents a running agent execution.
@@ -93,22 +137,122 @@ type TokenUsage struct {
 // Result is the final outcome after an agent session completes.
 type Result struct {
 	Status     string // "completed", "failed", "aborted", "timeout", "cancelled"
-	Output     string // accumulated text output
+	Output     string // final user-facing output selected by the backend
 	Error      string // error message if failed
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	// ResumeRejected is positive evidence that this run's requested resume
+	// was itself refused — the transcript is gone, or the session belongs to
+	// another provider account. Only a refused resume can be cured by starting
+	// over, so it is what the daemon's fresh-session fallback looks for first.
+	//
+	// false is NOT evidence of the opposite. For a backend listed in
+	// ResumeRejectionUndetectable it means "could not tell"; for every other
+	// backend it means "checked, and this was not a rejection". The daemon
+	// needs the provider name to tell those apart — see
+	// shouldRetryWithFreshSession in internal/daemon.
+	//
+	// Backends must NOT set it for failures a new session cannot cure:
+	// network drops, rate limits, quota, provider 5xx, or auth errors. Those
+	// keep the session pointer so the platform's own retry can resume the
+	// truncated conversation (see retryableReasons in internal/service/task.go).
+	ResumeRejected bool
+	// codexInitializeRetrySafe is provider-internal evidence that an
+	// initialize timeout happened before semantic activity and after the
+	// process tree was reaped. It is intentionally not part of the public
+	// result contract.
+	codexInitializeRetrySafe bool
 }
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, agy)
+	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli, traecli, grok, qwen)
+	CLIVersion     string            // detected version paired with ExecutablePath; observation only, never used to choose behavior
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
+	TaskID         string
+	RuntimeID      string
+	DaemonVersion  string
+	CodexVersion   string
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "antigravity".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli", "grok", "qwen".
+//
+// SupportedTypes is the canonical whitelist of agent types eligible to back a
+// custom runtime profile. It MUST stay in lockstep with the
+// runtime_profile.protocol_family CHECK constraint (migration 120, widened by
+// migration 134 to add qoder, migration 136 to add traecli, migration 175 to
+// add deveco, migration 179 to add grok, and migration 202 to add qwen): a
+// custom runtime profile may only
+// be based on a backend Multica officially supports.
+// qoder is exposed here so Qoder CN (`qoderclicn`) users can point the Qoder
+// backend at a non-default binary instead of misrouting through Kiro/ACP with
+// incompatible arguments (#4883). traecli (Trae) has a New backend, launch
+// header and provider branding but was previously missing from this whitelist,
+// so the family picker rejected it (#4945). grok is the xAI Grok Build CLI
+// ACP backend (`grok agent --always-approve stdio`). qwen is Qwen Code's
+// native `qwen -p <prompt> --output-format stream-json` backend.
+var SupportedTypes = []string{
+	"claude",
+	"codebuddy",
+	"codex",
+	"copilot",
+	"opencode",
+	"deveco",
+	"openclaw",
+	"hermes",
+	"pi",
+	"cursor",
+	"kimi",
+	"kiro",
+	"antigravity",
+	"qoder",
+	"traecli",
+	"grok",
+	"qwen",
+}
+
+// IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
+// Used to validate a custom runtime profile's protocol_family before it is
+// persisted or registered.
+func IsSupportedType(agentType string) bool {
+	for _, t := range SupportedTypes {
+		if t == agentType {
+			return true
+		}
+	}
+	return false
+}
+
+// resumeRejectionUndetectable lists the backends that cannot produce
+// Result.ResumeRejected at all. They scrape SessionID out of stream output and
+// have no rejection detection: no phrase match, no structured error code, no
+// internal restart. copilot's own comment documents the hole (a session.error
+// arriving before session.start leaves SessionID empty), and antigravity's
+// conversation-id reader returns "" whenever the CLI exits before dispatching.
+//
+// Membership is deliberately opt-in. A backend absent from this map is treated
+// as capable, so a new backend fails closed — it reports no rejection and gets
+// no fallback — rather than silently inheriting a guess-based retry. Remove an
+// entry as soon as its backend learns to report rejections.
+var resumeRejectionUndetectable = map[string]bool{
+	"antigravity": true,
+	"copilot":     true,
+	"cursor":      true,
+	"deveco":      true,
+	"opencode":    true,
+}
+
+// ResumeRejectionUndetectable reports whether agentType is a backend that
+// cannot tell a refused resume from any other startup failure. Callers use it
+// to read a false Result.ResumeRejected correctly: "could not tell" for these,
+// "checked, not a rejection" for everything else.
+func ResumeRejectionUndetectable(agentType string) bool {
+	return resumeRejectionUndetectable[agentType]
+}
+
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -117,18 +261,20 @@ func New(agentType string, cfg Config) (Backend, error) {
 	switch agentType {
 	case "claude":
 		return &claudeBackend{cfg: cfg}, nil
+	case "codebuddy":
+		return &codebuddyBackend{cfg: cfg}, nil
 	case "codex":
 		return &codexBackend{cfg: cfg}, nil
 	case "copilot":
 		return &copilotBackend{cfg: cfg}, nil
 	case "opencode":
 		return &opencodeBackend{cfg: cfg}, nil
+	case "deveco":
+		return &devecoBackend{cfg: cfg}, nil
 	case "openclaw":
 		return &openclawBackend{cfg: cfg}, nil
 	case "hermes":
 		return &hermesBackend{cfg: cfg}, nil
-	case "gemini":
-		return &geminiBackend{cfg: cfg}, nil
 	case "pi":
 		return &piBackend{cfg: cfg}, nil
 	case "cursor":
@@ -139,8 +285,16 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &kiroBackend{cfg: cfg}, nil
 	case "antigravity":
 		return &antigravityBackend{cfg: cfg}, nil
+	case "qoder":
+		return &qoderBackend{cfg: cfg}, nil
+	case "traecli":
+		return &traecliBackend{cfg: cfg}, nil
+	case "grok":
+		return &grokBackend{cfg: cfg}, nil
+	case "qwen":
+		return &qwenBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli, grok, qwen)", agentType)
 	}
 }
 
@@ -156,18 +310,23 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
-	"antigravity": "agy -p (print mode)",
+	"antigravity": "agy -p (non-interactive)",
 	"claude":      "claude (stream-json)",
+	"codebuddy":   "codebuddy (stream-json)",
 	"codex":       "codex app-server",
 	"copilot":     "copilot (json)",
 	"cursor":      "cursor-agent (stream-json)",
-	"gemini":      "gemini (stream-json)",
+	"deveco":      "deveco run (json)",
 	"hermes":      "hermes acp",
 	"kimi":        "kimi acp",
 	"kiro":        "kiro-cli acp",
 	"openclaw":    "openclaw agent (json)",
 	"opencode":    "opencode run (json)",
 	"pi":          "pi (json mode)",
+	"qoder":       "qodercli --acp",
+	"traecli":     "traecli acp serve",
+	"grok":        "grok agent stdio",
+	"qwen":        "qwen -p (stream-json)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

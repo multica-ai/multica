@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,9 +19,33 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+func TestLogClaimEndpointSlowIncludesPayloadFields(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	logClaimEndpointSlow("runtime-1", "claimed", time.Now().Add(-600*time.Millisecond), 10, 20, 30, 4096, 2, 8, 3072)
+
+	got := logs.String()
+	for _, want := range []string{
+		"msg=\"claim_endpoint slow\"",
+		"runtime_id=runtime-1",
+		"payload_bytes=4096",
+		"agent_skill_count=2",
+		"builtin_skill_count=8",
+		"skill_payload_bytes=3072",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("slow claim log missing %q in %s", want, got)
+		}
+	}
+}
 
 // slowProbeLocalSkillListStore wraps a LocalSkillListStore but blocks inside
 // HasPending until the provided context is cancelled. PopPending delegates
@@ -95,6 +120,58 @@ func newDaemonTokenRequest(method, path string, body any, workspaceID, daemonID 
 	return req.WithContext(ctx)
 }
 
+func TestListDaemonWorkspaces_UserScopedAndConditional(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodGet, "/api/daemon/workspaces", nil)
+	testHandler.ListDaemonWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListDaemonWorkspaces: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var workspaces []DaemonWorkspaceResponse
+	if err := json.NewDecoder(w.Body).Decode(&workspaces); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(workspaces) == 0 {
+		t.Fatal("expected at least one daemon workspace")
+	}
+	if workspaces[0].ID == "" || workspaces[0].Name == "" {
+		t.Fatalf("expected minimal id/name projection, got %+v", workspaces[0])
+	}
+	etag := w.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("expected ETag")
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest(http.MethodGet, "/api/daemon/workspaces", nil)
+	req.Header.Set("If-None-Match", etag)
+	testHandler.ListDaemonWorkspaces(w, req)
+	if w.Code != http.StatusNotModified {
+		t.Fatalf("conditional ListDaemonWorkspaces: expected 304, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("expected empty 304 body, got %q", w.Body.String())
+	}
+}
+
+func TestListDaemonWorkspaces_DaemonTokenIsWorkspaceScoped(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest(http.MethodGet, "/api/daemon/workspaces", nil, testWorkspaceID, "daemon-test")
+	testHandler.ListDaemonWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListDaemonWorkspaces: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var workspaces []DaemonWorkspaceResponse
+	if err := json.NewDecoder(w.Body).Decode(&workspaces); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(workspaces) != 1 || workspaces[0].ID != testWorkspaceID {
+		t.Fatalf("daemon-token workspaces = %+v, want only %s", workspaces, testWorkspaceID)
+	}
+}
+
 func createClaimReclaimRuntime(t *testing.T, ctx context.Context, name string) string {
 	t.Helper()
 
@@ -102,11 +179,11 @@ func createClaimReclaimRuntime(t *testing.T, ctx context.Context, name string) s
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider,
-			status, device_info, metadata, last_seen_at, visibility
+			status, device_info, metadata, last_seen_at, visibility, owner_id
 		)
-		VALUES ($1, NULL, $2, 'cloud', 'handler_test_runtime', 'online', 'claim reclaim fixture', '{}'::jsonb, now(), 'private')
+		VALUES ($1, NULL, $2, 'cloud', 'handler_test_runtime', 'online', 'claim reclaim fixture', '{}'::jsonb, now(), 'private', $3)
 		RETURNING id
-	`, testWorkspaceID, name).Scan(&runtimeID); err != nil {
+	`, testWorkspaceID, name, testUserID).Scan(&runtimeID); err != nil {
 		t.Fatalf("setup: create runtime: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
@@ -165,6 +242,17 @@ func createDispatchedClaimFixtureTask(t *testing.T, ctx context.Context, agentID
 	return taskID
 }
 
+func setTaskPrepareLeaseForTest(t *testing.T, ctx context.Context, taskID, expiresIn string) {
+	t.Helper()
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET prepare_lease_expires_at = now() + ($2::interval)
+		WHERE id = $1
+	`, taskID, expiresIn); err != nil {
+		t.Fatalf("setup: set prepare lease: %v", err)
+	}
+}
+
 func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
 	ID string `json:"id"`
 }, string) {
@@ -189,6 +277,114 @@ func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
 		t.Fatalf("decode claim response: %v", err)
 	}
 	return resp.Task, w.Body.String()
+}
+
+// claimChatIntroForTest claims the next task for a runtime and returns the
+// claimed task id plus its chat_intro flag (false when the field is absent, as
+// it is omitempty).
+func claimChatIntroForTest(t *testing.T, runtimeID string) (string, bool, string) {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "chat-intro-review")
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID        string `json:"id"`
+			ChatIntro bool   `json:"chat_intro"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatalf("expected a claimable task, got none: %s", w.Body.String())
+	}
+	return resp.Task.ID, resp.Task.ChatIntro, w.Body.String()
+}
+
+// TestClaimTaskByRuntime_ChatIntroGateClearsAfterUserReplies pins the MUL-4259
+// fix: an is_agent_intro session drives the self-introduction prompt only on
+// its first, message-less turn. Once the creator has replied, later turns on
+// the same (still is_agent_intro) session must claim with chat_intro=false so
+// the agent answers instead of repeating its introduction.
+func TestClaimTaskByRuntime_ChatIntroGateClearsAfterUserReplies(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Chat intro gate runtime")
+	agentID, _ := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Chat intro gate agent")
+	// Allow more than one in-flight task so the second claim isn't blocked by
+	// the first (which stays 'dispatched') on the concurrency limit.
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET max_concurrent_tasks = 5 WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("raise max_concurrent_tasks: %v", err)
+	}
+
+	var sessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status, runtime_id, is_agent_intro)
+		VALUES ($1, $2, $3, '👋 intro', 'active', $4, true)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&sessionID); err != nil {
+		t.Fatalf("insert intro chat session: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID) })
+
+	seedQueuedChatTask := func() string {
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, chat_session_id)
+			VALUES ($1, $2, 'queued', 0, $3)
+			RETURNING id
+		`, agentID, runtimeID, sessionID).Scan(&taskID); err != nil {
+			t.Fatalf("seed queued chat task: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+		return taskID
+	}
+
+	// First turn: no user message yet → the server-driven intro run.
+	introTaskID := seedQueuedChatTask()
+	claimedID, chatIntro, body := claimChatIntroForTest(t, runtimeID)
+	if claimedID != introTaskID {
+		t.Fatalf("claimed task id = %s, want intro task %s: %s", claimedID, introTaskID, body)
+	}
+	if !chatIntro {
+		t.Fatalf("expected chat_intro=true for the message-less intro turn: %s", body)
+	}
+
+	// The intro run finishes. Chat tasks serialize on chat_session_id, so the
+	// next turn only becomes claimable once this one leaves an in-flight state.
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, introTaskID); err != nil {
+		t.Fatalf("complete intro task: %v", err)
+	}
+
+	// The creator replies: persist a user message on the same session.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content)
+		VALUES ($1, 'user', 'thanks! can you help me with X?')
+	`, sessionID); err != nil {
+		t.Fatalf("insert user reply: %v", err)
+	}
+
+	// Second turn on the same is_agent_intro session must NOT re-introduce.
+	followupTaskID := seedQueuedChatTask()
+	claimedID, chatIntro, body = claimChatIntroForTest(t, runtimeID)
+	if claimedID != followupTaskID {
+		t.Fatalf("claimed task id = %s, want follow-up task %s: %s", claimedID, followupTaskID, body)
+	}
+	if chatIntro {
+		t.Fatalf("expected chat_intro=false once the creator has replied: %s", body)
+	}
 }
 
 func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {
@@ -250,6 +446,109 @@ func TestClaimTaskByRuntime_DoesNotReclaimFreshDispatchedTask(t *testing.T) {
 	}
 }
 
+func TestClaimTaskByRuntime_DoesNotReclaimActivePrepareLease(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Active prepare lease runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Active prepare lease agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "240 seconds", false)
+	setTaskPrepareLeaseForTest(t, ctx, taskID, "30 seconds")
+
+	task, body := claimTaskByRuntimeForTest(t, runtimeID)
+	if task != nil {
+		t.Fatalf("expected actively leased dispatched task %s not to be reclaimed, got %s in %s", taskID, task.ID, body)
+	}
+
+	var leaseActive bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT prepare_lease_expires_at > now()
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&leaseActive); err != nil {
+		t.Fatalf("load active prepare lease: %v", err)
+	}
+	if !leaseActive {
+		t.Fatal("expected prepare lease to remain active")
+	}
+}
+
+func TestClaimTaskByRuntime_ReclaimsExpiredPrepareLease(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Expired prepare lease runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Expired prepare lease agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "240 seconds", false)
+	setTaskPrepareLeaseForTest(t, ctx, taskID, "-5 seconds")
+
+	task, body := claimTaskByRuntimeForTest(t, runtimeID)
+	if task == nil {
+		t.Fatalf("expected expired leased task %s to be reclaimed, got nil response: %s", taskID, body)
+	}
+	if task.ID != taskID {
+		t.Fatalf("reclaimed task id = %s, want %s", task.ID, taskID)
+	}
+
+	var leaseRefreshed bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT prepare_lease_expires_at > now()
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&leaseRefreshed); err != nil {
+		t.Fatalf("load refreshed prepare lease: %v", err)
+	}
+	if !leaseRefreshed {
+		t.Fatal("expected reclaimed task to refresh prepare lease")
+	}
+}
+
+func TestExtendTaskPrepareLease(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Extend prepare lease runtime")
+	otherRuntimeID := createClaimReclaimRuntime(t, ctx, "Other prepare lease runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Extend prepare lease agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+otherRuntimeID+"/tasks/"+taskID+"/prepare-lease", nil,
+		testWorkspaceID, "extend-prepare-lease")
+	req = withURLParams(req, "runtimeId", otherRuntimeID, "taskId", taskID)
+	testHandler.ExtendTaskPrepareLease(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("ExtendTaskPrepareLease wrong runtime: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/prepare-lease", nil,
+		testWorkspaceID, "extend-prepare-lease")
+	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
+	testHandler.ExtendTaskPrepareLease(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ExtendTaskPrepareLease: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var leaseActive bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT prepare_lease_expires_at > now()
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&leaseActive); err != nil {
+		t.Fatalf("load extended prepare lease: %v", err)
+	}
+	if !leaseActive {
+		t.Fatal("expected prepare lease to be extended")
+	}
+}
+
 func TestClaimTaskByRuntime_DoesNotReclaimAlreadyStartedTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -304,6 +603,134 @@ func TestClaimTaskByRuntime_DoesNotReclaimDifferentRuntimeTask(t *testing.T) {
 	}
 	if runtimeID != owningRuntimeID {
 		t.Fatalf("task runtime_id = %s, want %s", runtimeID, owningRuntimeID)
+	}
+}
+
+func TestClaimTaskByRuntime_SkillBundleRefsAndResolve(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Skill refs runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Skill refs agent")
+
+	var skillID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+		VALUES ($1, 'deploy-skill-ref-test', 'Deploy safely', 'main skill content', '{}'::jsonb, $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&skillID); err != nil {
+		t.Fatalf("setup: create skill: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_skill WHERE skill_id = $1`, skillID)
+		testPool.Exec(ctx, `DELETE FROM skill_file WHERE skill_id = $1`, skillID)
+		testPool.Exec(ctx, `DELETE FROM skill WHERE id = $1`, skillID)
+	})
+	if _, err := testPool.Exec(ctx, `INSERT INTO skill_file (skill_id, path, content) VALUES ($1, 'rules.md', 'rules content')`, skillID); err != nil {
+		t.Fatalf("setup: create skill file: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`, agentID, skillID); err != nil {
+		t.Fatalf("setup: bind skill: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "skill-refs-daemon")
+	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilitySkillBundlesV1)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var claimResp struct {
+		Task *AgentTaskResponse `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &claimResp); err != nil {
+		t.Fatalf("decode claim: %v", err)
+	}
+	if claimResp.Task == nil || claimResp.Task.Agent == nil {
+		t.Fatalf("missing task agent in response: %s", w.Body.String())
+	}
+	if len(claimResp.Task.Agent.Skills) != 0 {
+		t.Fatalf("slim claim returned full skills: %+v", claimResp.Task.Agent.Skills)
+	}
+	var ref service.AgentSkillRefData
+	for _, candidate := range claimResp.Task.Agent.SkillRefs {
+		if candidate.ID == skillID {
+			ref = candidate
+			break
+		}
+	}
+	if ref.ID == "" || ref.Hash == "" || ref.FileCount != 1 || len(ref.Files) != 1 || ref.Files[0].SHA256 == "" {
+		t.Fatalf("workspace skill ref missing manifest: %+v", ref)
+	}
+
+	staleHashBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source, Hash: "sha256:stale"}}}
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", staleHashBody, testWorkspaceID, "skill-refs-daemon")
+	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
+	testHandler.ResolveTaskSkillBundles(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ResolveTaskSkillBundles with stale hash: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var staleHashResp struct {
+		Bundles []service.AgentSkillData `json:"bundles"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &staleHashResp); err != nil {
+		t.Fatalf("decode stale hash resolve: %v", err)
+	}
+	if len(staleHashResp.Bundles) != 1 || staleHashResp.Bundles[0].Hash != ref.Hash {
+		t.Fatalf("stale hash resolve did not return current bundle: %+v", staleHashResp.Bundles)
+	}
+
+	invalidRefBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source}}}
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", invalidRefBody, testWorkspaceID, "skill-refs-daemon")
+	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
+	testHandler.ResolveTaskSkillBundles(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("ResolveTaskSkillBundles with invalid ref: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	resolveBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source, Hash: ref.Hash}}}
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", resolveBody, testWorkspaceID, "skill-refs-daemon")
+	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
+	testHandler.ResolveTaskSkillBundles(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ResolveTaskSkillBundles: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resolveResp struct {
+		Bundles []service.AgentSkillData `json:"bundles"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resolveResp); err != nil {
+		t.Fatalf("decode resolve: %v", err)
+	}
+	if len(resolveResp.Bundles) != 1 || resolveResp.Bundles[0].Content != "main skill content" || len(resolveResp.Bundles[0].Files) != 1 || resolveResp.Bundles[0].Files[0].Content != "rules content" {
+		t.Fatalf("unexpected resolved bundles: %+v", resolveResp.Bundles)
+	}
+
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, taskID); err != nil {
+		t.Fatalf("setup: mark task running: %v", err)
+	}
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", resolveBody, testWorkspaceID, "skill-refs-daemon")
+	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
+	testHandler.ResolveTaskSkillBundles(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("ResolveTaskSkillBundles for running task: expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -423,6 +850,49 @@ func TestClaimTaskByRuntime_WorkspaceContextEmptyWhenUnset(t *testing.T) {
 	}
 }
 
+func TestClaimTaskByRuntime_MissingRuntimeOwnerCancelsAndRejects(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider,
+			status, device_info, metadata, last_seen_at, visibility
+		)
+		VALUES ($1, NULL, 'Missing owner claim runtime', 'cloud', 'handler_test_runtime', 'online', 'claim missing owner fixture', '{}'::jsonb, now(), 'private')
+		RETURNING id
+	`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: create runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Missing owner claim agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "missing-owner-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("ClaimTaskByRuntime: expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "runtime owner required to mint task token") {
+		t.Fatalf("ClaimTaskByRuntime body = %q, want runtime owner error", w.Body.String())
+	}
+
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
+		t.Fatalf("read task status: %v", err)
+	}
+	if status != "cancelled" {
+		t.Fatalf("task status = %q, want cancelled", status)
+	}
+}
+
 func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -457,6 +927,58 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	rt := runtimes[0].(map[string]any)
 	runtimeID := rt["id"].(string)
 	testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+}
+
+func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	profileID := insertRuntimeProfileFixture(t, ctx, "Missing Custom Codex", "codex", "missing-codex")
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-daemon-profile-failure",
+		"device_name":  "test-device",
+		"failed_profiles": []map[string]any{
+			{
+				"profile_id":   profileID,
+				"command_name": "missing-codex",
+				"reason":       "command not found on PATH: missing-codex",
+			},
+		},
+	}, testWorkspaceID, "test-daemon-profile-failure")
+
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE profile_id = $1`, profileID)
+	})
+
+	var status string
+	var metadata []byte
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, metadata FROM agent_runtime
+		WHERE workspace_id = $1 AND daemon_id = $2 AND profile_id = $3
+	`, testWorkspaceID, "test-daemon-profile-failure", profileID).Scan(&status, &metadata); err != nil {
+		t.Fatalf("read failed profile runtime row: %v", err)
+	}
+	if status != "offline" {
+		t.Fatalf("status = %q, want offline", status)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(metadata, &meta); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if meta["runtime_profile_registration_error"] != true {
+		t.Fatalf("registration error metadata missing: %#v", meta)
+	}
+	if meta["runtime_profile_failure_reason"] != "command not found on PATH: missing-codex" {
+		t.Fatalf("failure reason metadata = %#v", meta["runtime_profile_failure_reason"])
+	}
 }
 
 func TestDaemonRegister_WithDaemonToken_WorkspaceMismatch(t *testing.T) {
@@ -548,6 +1070,51 @@ func TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError(t *testing.T) {
 	}
 	if ack.RuntimeID != missingRuntime {
 		t.Fatalf("ack.RuntimeID = %q, want %q", ack.RuntimeID, missingRuntime)
+	}
+}
+
+func TestHandleDaemonWSHeartbeat_AllowsAnyAuthorizedWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	slug := "handler-ws-heartbeat-" + uuid.New().String()
+	var workspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, "WS Heartbeat Scope", slug, "Temporary workspace for WS heartbeat tests", "HWS").Scan(&workspaceID); err != nil {
+		t.Fatalf("setup: create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, workspaceID)
+	})
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider,
+			status, device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, $5, now())
+		RETURNING id
+	`, workspaceID, "WS Heartbeat Runtime", "handler_test_runtime", "WS heartbeat runtime", testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: create runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	ack, err := testHandler.HandleDaemonWSHeartbeat(ctx,
+		daemonws.ClientIdentity{WorkspaceIDs: []string{testWorkspaceID, workspaceID}},
+		runtimeID, false)
+	if err != nil {
+		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
+	}
+	if ack == nil || ack.RuntimeID != runtimeID {
+		t.Fatalf("ack = %+v, want runtime_id %q", ack, runtimeID)
 	}
 }
 
@@ -813,6 +1380,66 @@ func TestGetIssueGCCheck_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	}
 	if resp.UpdatedAt == "" {
 		t.Fatal("expected updated_at to be set")
+	}
+}
+
+func TestBatchIssueGCCheck_WithDaemonToken(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	var issueID string
+	err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
+		VALUES ($1, 'batch-gc-check-auth-test-issue', 'done', 'medium', $2, 'member')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID)
+	if err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	defer testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+
+	missingID := "00000000-0000-0000-0000-000000000099"
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check", map[string]any{
+		"issue_ids": []string{issueID, missingID},
+	}, testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "workspaceId", testWorkspaceID)
+
+	testHandler.BatchIssueGCCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BatchIssueGCCheck: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Issues []struct {
+			ID        string `json:"id"`
+			Found     bool   `json:"found"`
+			Status    string `json:"status"`
+			UpdatedAt string `json:"updated_at"`
+		} `json:"issues"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Issues) != 2 {
+		t.Fatalf("issues length = %d, want 2", len(resp.Issues))
+	}
+	if got := resp.Issues[0]; got.ID != issueID || !got.Found || got.Status != "done" || got.UpdatedAt == "" {
+		t.Fatalf("found issue result = %+v", got)
+	}
+	if got := resp.Issues[1]; got.ID != missingID || got.Found || got.Status != "" || got.UpdatedAt != "" {
+		t.Fatalf("missing issue result = %+v", got)
+	}
+
+	// A token for another workspace is rejected before any issue lookup.
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check", map[string]any{
+		"issue_ids": []string{issueID},
+	}, "00000000-0000-0000-0000-000000000000", "attacker-daemon")
+	req = withURLParam(req, "workspaceId", testWorkspaceID)
+	testHandler.BatchIssueGCCheck(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace batch: expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -1742,11 +2369,12 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
 
 	const projectRepoURL = "https://github.com/example/project-only-repo"
+	const projectRepoRef = "release/v2"
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO project_resource (
 			project_id, workspace_id, resource_type, resource_ref, position
 		) VALUES ($1, $2, 'github_repo', $3::jsonb, 0)
-	`, projectID, testWorkspaceID, `{"url":"`+projectRepoURL+`"}`); err != nil {
+	`, projectID, testWorkspaceID, `{"url":"`+projectRepoURL+`","ref":"`+projectRepoRef+`"}`); err != nil {
 		t.Fatalf("create project_resource: %v", err)
 	}
 
@@ -1808,6 +2436,9 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	if len(resp.Task.Repos) != 1 || resp.Task.Repos[0].URL != projectRepoURL {
 		t.Fatalf("expected resp.Repos to contain only the project repo URL, got %+v", resp.Task.Repos)
 	}
+	if resp.Task.Repos[0].Ref != projectRepoRef {
+		t.Fatalf("project repo ref = %q, want %q", resp.Task.Repos[0].Ref, projectRepoRef)
+	}
 	for _, r := range resp.Task.Repos {
 		if strings.HasSuffix(r.URL, "workspace-repo-a") || strings.HasSuffix(r.URL, "workspace-repo-b") {
 			t.Errorf("workspace repo %q leaked into resp.Repos despite project override", r.URL)
@@ -1815,6 +2446,128 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	}
 	if len(resp.Task.ProjectResources) != 1 {
 		t.Errorf("expected 1 project_resources entry, got %d", len(resp.Task.ProjectResources))
+	}
+}
+
+// When an issue belongs to a project that has a description, the claim handler
+// must surface that description as project_description so the daemon can inject
+// it into the brief. This is the handler-side boundary the execenv tests can't
+// cover: if this assignment regresses, the description silently stops reaching
+// the agent while the execenv rendering tests still pass.
+func TestClaimTask_ProjectDescriptionInjected(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	const projectDescription = "Always write copy in British English. Ship behind a feature flag."
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, description) VALUES ($1, $2, $3) RETURNING id
+	`, testWorkspaceID, "Claim project description", projectDescription).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, project_id, title, status, priority, creator_id, creator_type, number, position
+		) VALUES ($1, $2, 'project description', 'todo', 'medium', $3, 'member', 88002, 0)
+		RETURNING id
+	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority
+		) VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-project-desc")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ProjectID          string `json:"project_id"`
+			ProjectDescription string `json:"project_description"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected task in response")
+	}
+	if resp.Task.ProjectID != projectID {
+		t.Errorf("project_id = %q, want %q", resp.Task.ProjectID, projectID)
+	}
+	if resp.Task.ProjectDescription != projectDescription {
+		t.Errorf("project_description = %q, want %q", resp.Task.ProjectDescription, projectDescription)
+	}
+}
+
+// The quick-create path resolves its project from the task context JSONB
+// (not an issue row), so its project_description wiring is a separate branch
+// in the claim handler and needs its own boundary assertion.
+func TestClaimTask_QuickCreateInjectsProjectDescription(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	const projectDescription = "Use the design system tokens; never hardcode colors."
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, description) VALUES ($1, $2, $3) RETURNING id
+	`, testWorkspaceID, "Quick-create project description", projectDescription).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+
+	quickContext, _ := json.Marshal(map[string]any{
+		"type":         "quick_create",
+		"prompt":       "create a follow-up issue",
+		"requester_id": testUserID,
+		"workspace_id": testWorkspaceID,
+		"project_id":   projectID,
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
+		VALUES ($1, $2, 'queued', 2, $3)
+	`, agentID, runtimeID, quickContext); err != nil {
+		t.Fatalf("setup: create quick-create task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.ProjectID != projectID {
+		t.Errorf("quick-create project_id = %q, want %q", task.ProjectID, projectID)
+	}
+	if task.ProjectDescription != projectDescription {
+		t.Errorf("quick-create project_description = %q, want %q", task.ProjectDescription, projectDescription)
 	}
 }
 
@@ -1962,6 +2715,7 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 	var resp struct {
 		Task *struct {
 			WorkspaceID string `json:"workspace_id"`
+			ThreadName  string `json:"thread_name"`
 		} `json:"task"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -1975,6 +2729,9 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 	}
 	if resp.Task.WorkspaceID != testWorkspaceID {
 		t.Fatalf("expected workspace_id %q, got %q", testWorkspaceID, resp.Task.WorkspaceID)
+	}
+	if resp.Task.ThreadName != "claim workspace fixture" {
+		t.Fatalf("autopilot task thread_name = %q, want autopilot title", resp.Task.ThreadName)
 	}
 }
 
@@ -2081,10 +2838,12 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
+	setWorkspaceIssuePrefixForTest(t, "MUL")
+
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'mul-1198 fixture', 'in_progress', 'none', $2, 'member', 81198, 0)
+		VALUES ($1, 'mul-3310 agent output fixture', 'in_progress', 'none', $2, 'member', 3310, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -2114,7 +2873,10 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
 
-	const agentFinalOutput = "sure, will look into it shortly"
+	agentFinalOutput := fmt.Sprintf(
+		"sure, see MUL-3310, issue/MUL-3310, feature/MUL-3310, and [MUL-3310](mention://issue/%s)",
+		issueID,
+	)
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
@@ -2384,8 +3146,15 @@ func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *te
 }
 
 type claimRuntimeGuardTask struct {
-	PriorSessionID string `json:"prior_session_id"`
-	PriorWorkDir   string `json:"prior_work_dir"`
+	PriorSessionID           string   `json:"prior_session_id"`
+	PriorWorkDir             string   `json:"prior_work_dir"`
+	ChatMessage              string   `json:"chat_message"`
+	ThreadName               string   `json:"thread_name"`
+	QuickCreateAttachmentIDs []string `json:"quick_create_attachment_ids"`
+	QuickCreatePriority      string   `json:"quick_create_priority"`
+	QuickCreateDueDate       string   `json:"quick_create_due_date"`
+	ProjectID                string   `json:"project_id"`
+	ProjectDescription       string   `json:"project_description"`
 }
 
 func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {
@@ -2443,6 +3212,9 @@ func createRuntimeGuardAgent(t *testing.T, ctx context.Context) (agentID, runtim
 	}
 	runtimeID = runtimes[0].(map[string]any)["id"].(string)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET owner_id = $1 WHERE id = $2`, testUserID, runtimeID); err != nil {
+		t.Fatalf("setup: set runtime owner: %v", err)
+	}
 
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent (
@@ -2633,6 +3405,9 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	if task.PriorWorkDir != "/tmp/old-runtime-workdir" {
 		t.Fatalf("runtime mismatch: expected PriorWorkDir='/tmp/old-runtime-workdir', got %q", task.PriorWorkDir)
 	}
+	if task.ThreadName != "runtime-session-skip fixture" {
+		t.Fatalf("issue task thread_name = %q, want issue title", task.ThreadName)
+	}
 	if _, err := testPool.Exec(ctx, `
 		UPDATE agent_task_queue
 		SET status = 'completed', completed_at = now()
@@ -2772,6 +3547,113 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	}
 }
 
+// TestClaimTask_ManualRetryReusesWorkdir is the MUL-4869 claim-layer contract: a
+// manual retry (rerun_of_task_id set) ALWAYS hands back the source task's
+// workdir, and resumes the session only when the source failure did not poison
+// the conversation AND the source ran on the claiming runtime. The rerun row's
+// force_fresh_session is always true (rollback-safe); the session decision is
+// computed here from the source task, including the legacy 400 error-text guard.
+// Contrast with a plain force_fresh task carrying no rerun lineage, which resumes
+// nothing — covered by TestClaimTask_IssuePriorSessionRuntimeGuard.
+func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	otherRuntimeID := createRuntimeGuardRuntime(t, ctx, "kimi")
+
+	// insertRerun persists a terminal source task plus a queued rerun that points
+	// at it (rerun_of_task_id) with force_fresh_session=true, mimicking what
+	// RerunIssue writes, then claims and returns the resolved task. Each case uses
+	// a fresh issue so the partial unique index (one pending task per issue+agent)
+	// never trips across cases. The source's runtime, failure_reason, and error
+	// text drive the runtime-match and resume-safety gates.
+	issueNum := 81207
+	insertRerun := func(t *testing.T, sourceRuntimeID, failureReason, errorText, session, workdir string) *claimRuntimeGuardTask {
+		t.Helper()
+		issueNum++
+		var issueID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+			VALUES ($1, 'manual-retry-reuse fixture', 'in_progress', 'none', $2, 'member', $3, 0)
+			RETURNING id
+		`, testWorkspaceID, testUserID, issueNum).Scan(&issueID); err != nil {
+			t.Fatalf("setup: create issue: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+		var sourceID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (
+				agent_id, runtime_id, issue_id, status, priority,
+				failure_reason, error, session_id, work_dir
+			)
+			VALUES ($1, $2, $3, 'failed', 0, $4, $5, $6, $7)
+			RETURNING id
+		`, agentID, sourceRuntimeID, issueID, failureReason, errorText, session, workdir).Scan(&sourceID); err != nil {
+			t.Fatalf("setup: insert source task: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, sourceID) })
+		// force_fresh_session is always true on a rerun row (rollback-safe); the
+		// new claim handler resumes from the source task regardless.
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO agent_task_queue (
+				agent_id, runtime_id, issue_id, status, priority,
+				rerun_of_task_id, force_fresh_session
+			)
+			VALUES ($1, $2, $3, 'queued', 0, $4, TRUE)
+		`, agentID, runtimeID, issueID, sourceID); err != nil {
+			t.Fatalf("setup: insert rerun task: %v", err)
+		}
+		return claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	}
+
+	t.Run("resume_safe_same_runtime_reuses_both", func(t *testing.T) {
+		task := insertRerun(t, runtimeID, "timeout", "", "safe-session", "/tmp/retry-safe-workdir")
+		if task.PriorWorkDir != "/tmp/retry-safe-workdir" {
+			t.Fatalf("PriorWorkDir = %q, want /tmp/retry-safe-workdir", task.PriorWorkDir)
+		}
+		if task.PriorSessionID != "safe-session" {
+			t.Fatalf("PriorSessionID = %q, want safe-session (transient failure resumes)", task.PriorSessionID)
+		}
+	})
+
+	t.Run("poisoned_reason_same_runtime_reuses_workdir_fresh_session", func(t *testing.T) {
+		task := insertRerun(t, runtimeID, "agent_error.context_overflow", "", "poison-session", "/tmp/retry-poison-workdir")
+		if task.PriorWorkDir != "/tmp/retry-poison-workdir" {
+			t.Fatalf("PriorWorkDir = %q, want /tmp/retry-poison-workdir (workdir reused even when session poisoned)", task.PriorWorkDir)
+		}
+		if task.PriorSessionID != "" {
+			t.Fatalf("PriorSessionID = %q, want empty (poisoned session starts fresh)", task.PriorSessionID)
+		}
+	})
+
+	t.Run("legacy_400_error_text_reuses_workdir_fresh_session", func(t *testing.T) {
+		// failure_reason is a benign generic 'agent_error', but the raw error
+		// carries the Anthropic 400 invalid_request_error marker — the exact
+		// source path must still refuse to resume that session (defense-in-depth
+		// mirrored from GetLastTaskSession).
+		task := insertRerun(t, runtimeID, "agent_error", "API error 400 invalid_request_error: prompt is too long", "legacy400-session", "/tmp/retry-legacy400-workdir")
+		if task.PriorWorkDir != "/tmp/retry-legacy400-workdir" {
+			t.Fatalf("PriorWorkDir = %q, want /tmp/retry-legacy400-workdir", task.PriorWorkDir)
+		}
+		if task.PriorSessionID != "" {
+			t.Fatalf("PriorSessionID = %q, want empty (legacy 400 invalid_request_error must not resume)", task.PriorSessionID)
+		}
+	})
+
+	t.Run("different_runtime_reuses_workdir_drops_session", func(t *testing.T) {
+		task := insertRerun(t, otherRuntimeID, "timeout", "", "cross-session", "/tmp/retry-cross-workdir")
+		if task.PriorWorkDir != "/tmp/retry-cross-workdir" {
+			t.Fatalf("PriorWorkDir = %q, want /tmp/retry-cross-workdir (workdir offered regardless of runtime, best-effort)", task.PriorWorkDir)
+		}
+		if task.PriorSessionID != "" {
+			t.Fatalf("PriorSessionID = %q, want empty (cross-runtime session cannot resolve)", task.PriorSessionID)
+		}
+	})
+}
+
 func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -2859,6 +3741,201 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	}
 	if task.PriorWorkDir != "/tmp/same-chat-workdir" {
 		t.Fatalf("chat runtime match: expected PriorWorkDir='/tmp/same-chat-workdir', got %q", task.PriorWorkDir)
+	}
+}
+
+// TestClaimTask_ChatDeliversAllUnansweredUserMessages pins the fix for the
+// regression the MUL-2968 debounce exposed: when several user messages are
+// debounced into a single run, the agent must receive ALL of them, not just
+// the most recent. Before the fix the daemon prompt was the single latest
+// user message, so "看上海天气" then "还有青岛" answered only Qingdao.
+func TestClaimTask_ChatDeliversAllUnansweredUserMessages(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	var sessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
+		VALUES ($1, $2, $3, 'debounce delivery chat')
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&sessionID); err != nil {
+		t.Fatalf("setup: create chat session: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID) })
+
+	// Two user messages debounced into one run (explicit created_at so the
+	// ASC ordering is deterministic).
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content, created_at) VALUES
+			($1, 'user', '看上海天气', now()),
+			($1, 'user', '还有青岛',   now() + interval '1 second')
+	`, sessionID); err != nil {
+		t.Fatalf("setup: insert user messages: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 2)
+	`, agentID, runtimeID, sessionID); err != nil {
+		t.Fatalf("setup: create chat task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.ChatMessage != "看上海天气\n\n还有青岛" {
+		t.Fatalf("chat prompt must include every unanswered user message in order; got %q", task.ChatMessage)
+	}
+	if task.ThreadName != "debounce delivery chat" {
+		t.Fatalf("chat task thread_name = %q, want chat session title", task.ThreadName)
+	}
+
+	// Complete the run and record the agent's assistant reply, then send a
+	// fresh user message — only the new one should be delivered next.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue SET status = 'completed', completed_at = now()
+		WHERE chat_session_id = $1 AND status IN ('dispatched', 'running')
+	`, sessionID); err != nil {
+		t.Fatalf("setup: complete first chat task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content, created_at)
+		VALUES ($1, 'assistant', '上海与青岛天气如下…', now() + interval '2 second')
+	`, sessionID); err != nil {
+		t.Fatalf("setup: insert assistant reply: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content, created_at)
+		VALUES ($1, 'user', '深圳呢', now() + interval '3 second')
+	`, sessionID); err != nil {
+		t.Fatalf("setup: insert follow-up user message: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 2)
+	`, agentID, runtimeID, sessionID); err != nil {
+		t.Fatalf("setup: create follow-up chat task: %v", err)
+	}
+
+	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.ChatMessage != "深圳呢" {
+		t.Fatalf("after a reply, only the new user message must be delivered; got %q", task.ChatMessage)
+	}
+}
+
+// TestClaimTask_ChatPopulatesInitiator verifies MUL-2645 for chat tasks: the
+// claim response surfaces the STORED task initiator (initiator_user_id captured
+// at enqueue), NOT chat_session.creator_id. This is the MUL-2645 review fix: for
+// Lark group chats the session creator is the installer, not the sender, so the
+// claim must read the stored sender. The test pins this by making the creator a
+// DIFFERENT user (the "installer") from the stored initiator (the sender) and
+// asserting the claim resolves the sender.
+func TestClaimTask_ChatPopulatesInitiator(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	// A separate user stands in for the Lark group session creator (installer).
+	var installerID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ('Installer User', 'installer-test@multica.ai')
+		RETURNING id
+	`).Scan(&installerID); err != nil {
+		t.Fatalf("setup: create installer user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, installerID) })
+
+	var sessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
+		VALUES ($1, $2, $3, 'initiator chat')
+		RETURNING id
+	`, testWorkspaceID, agentID, installerID).Scan(&sessionID); err != nil {
+		t.Fatalf("setup: create chat session: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content) VALUES ($1, 'user', 'hi there')
+	`, sessionID); err != nil {
+		t.Fatalf("setup: insert user message: %v", err)
+	}
+	// initiator_user_id = the real sender (testUserID), distinct from creator.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, initiator_user_id)
+		VALUES ($1, $2, $3, 'queued', 2, $4)
+	`, agentID, runtimeID, sessionID, testUserID); err != nil {
+		t.Fatalf("setup: create chat task: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, daemonID)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Task *struct {
+			InitiatorType  string `json:"initiator_type"`
+			InitiatorID    string `json:"initiator_id"`
+			InitiatorName  string `json:"initiator_name"`
+			InitiatorEmail string `json:"initiator_email"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatalf("expected a claimed task, got %s", w.Body.String())
+	}
+	if resp.Task.InitiatorType != "member" || resp.Task.InitiatorID != testUserID ||
+		resp.Task.InitiatorName != handlerTestName || resp.Task.InitiatorEmail != handlerTestEmail {
+		t.Errorf("chat initiator = {type:%q id:%q name:%q email:%q}, want {member %q %q %q}",
+			resp.Task.InitiatorType, resp.Task.InitiatorID, resp.Task.InitiatorName, resp.Task.InitiatorEmail,
+			testUserID, handlerTestName, handlerTestEmail)
+	}
+}
+
+func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	quickPrompt := "create a follow-up issue for Codex session titles"
+	attachmentID := "019ec09d-6222-722b-bdfa-427b105d80be"
+	quickContext, _ := json.Marshal(map[string]any{
+		"type":           "quick_create",
+		"prompt":         quickPrompt,
+		"requester_id":   testUserID,
+		"workspace_id":   testWorkspaceID,
+		"priority":       "high",
+		"due_date":       "2026-08-01",
+		"attachment_ids": []string{attachmentID},
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
+		VALUES ($1, $2, 'queued', 2, $3)
+	`, agentID, runtimeID, quickContext); err != nil {
+		t.Fatalf("setup: create quick-create task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.ThreadName != quickPrompt {
+		t.Fatalf("quick-create task thread_name = %q, want prompt", task.ThreadName)
+	}
+	if len(task.QuickCreateAttachmentIDs) != 1 || task.QuickCreateAttachmentIDs[0] != attachmentID {
+		t.Fatalf("quick-create attachment ids = %#v, want [%q]", task.QuickCreateAttachmentIDs, attachmentID)
+	}
+	if task.QuickCreatePriority != "high" || task.QuickCreateDueDate != "2026-08-01" {
+		t.Fatalf("quick-create fields = {%q, %q}, want {high, 2026-08-01}", task.QuickCreatePriority, task.QuickCreateDueDate)
 	}
 }
 
@@ -3570,6 +4647,56 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesNewCommentCount(t *testing.T) {
 	}
 }
 
+// TestClaimTaskByRuntime_CommentTaskPopulatesInitiator verifies MUL-2645: the
+// claim response surfaces the triggering comment's member author as the task
+// initiator (type + id + name + email), so a workspace-visible agent learns who
+// actually asked rather than seeing the runtime owner. createCommentTriggeredClaimTask
+// authors the trigger comment as the fixture member (testUserID).
+func TestClaimTaskByRuntime_CommentTaskPopulatesInitiator(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Comment initiator runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Comment initiator agent")
+	taskID, _ := createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "comment-initiator-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Task *struct {
+			ID             string `json:"id"`
+			InitiatorType  string `json:"initiator_type"`
+			InitiatorID    string `json:"initiator_id"`
+			InitiatorName  string `json:"initiator_name"`
+			InitiatorEmail string `json:"initiator_email"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil || resp.Task.ID != taskID {
+		t.Fatalf("expected claimed task %s, got %s", taskID, w.Body.String())
+	}
+	if resp.Task.InitiatorType != "member" {
+		t.Errorf("initiator_type = %q, want %q", resp.Task.InitiatorType, "member")
+	}
+	if resp.Task.InitiatorID != testUserID {
+		t.Errorf("initiator_id = %q, want %q", resp.Task.InitiatorID, testUserID)
+	}
+	if resp.Task.InitiatorName != handlerTestName {
+		t.Errorf("initiator_name = %q, want %q", resp.Task.InitiatorName, handlerTestName)
+	}
+	if resp.Task.InitiatorEmail != handlerTestEmail {
+		t.Errorf("initiator_email = %q, want %q", resp.Task.InitiatorEmail, handlerTestEmail)
+	}
+}
+
 func TestClaimTaskByRuntime_CommentTaskOmitsDeltaWhenOnlyTriggerIsNew(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -3630,5 +4757,123 @@ func TestClaimTaskByRuntime_CommentResumeDefaultOn(t *testing.T) {
 	resp := claimCommentTask(t, runtimeID, "comment-resume-default")
 	if resp.Task.PriorSessionID != priorSession {
 		t.Errorf("prior_session_id = %q, want %q (comment resume is default-on)", resp.Task.PriorSessionID, priorSession)
+	}
+}
+
+// TestAckTaskCancelled verifies the cancel-ack endpoint settles a deferred
+// chat finalization (marker claimed, Stopped. row written for a transcript
+// that filled in late) and keeps the anti-enumeration shape of
+// requireDaemonTaskAccess for cross-workspace tokens.
+func TestAckTaskCancelled(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var chatSessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
+		VALUES ($1, $2, $3, 'cancel ack test')
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("setup: create chat session: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+
+	// Cancelled chat task with a pending deferred-finalize marker, plus a
+	// transcript row that landed after the cancel (the daemon's late flush).
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, chat_session_id, status, priority,
+			started_at, completed_at, chat_finalize_deferred_at
+		)
+		VALUES ($1, $2, NULL, $3, 'cancelled', 0, now(), now(), now())
+		RETURNING id
+	`, agentID, runtimeID, chatSessionID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM task_message WHERE task_id = $1`, taskID)
+		testPool.Exec(ctx, `DELETE FROM chat_message WHERE task_id = $1`, taskID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_message (task_id, seq, type, content)
+		VALUES ($1, 1, 'text', 'late flush')
+	`, taskID); err != nil {
+		t.Fatalf("setup: insert task message: %v", err)
+	}
+
+	// Cross-workspace daemon token must still 404 and leave the marker armed.
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/cancel-ack", nil,
+		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
+	req = withURLParam(req, "taskId", taskID)
+	testHandler.AckTaskCancelled(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("AckTaskCancelled with cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+	var deferredAt *time.Time
+	if err := testPool.QueryRow(ctx, `
+		SELECT chat_finalize_deferred_at FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&deferredAt); err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	if deferredAt == nil {
+		t.Fatal("cross-workspace ack must not claim the marker")
+	}
+
+	// Same-workspace token settles the deferred finalize.
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/cancel-ack", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "taskId", taskID)
+	testHandler.AckTaskCancelled(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("AckTaskCancelled same-workspace: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT chat_finalize_deferred_at FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&deferredAt); err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	if deferredAt != nil {
+		t.Errorf("marker should be claimed, got %v", deferredAt)
+	}
+	var stopped int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM chat_message WHERE task_id = $1 AND role = 'assistant' AND content = 'Stopped.'
+	`, taskID).Scan(&stopped); err != nil {
+		t.Fatalf("count stopped rows: %v", err)
+	}
+	if stopped != 1 {
+		t.Errorf("Stopped. rows = %d, want 1", stopped)
+	}
+
+	// Idempotent: a second ack is a no-op (no duplicate Stopped.).
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/cancel-ack", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "taskId", taskID)
+	testHandler.AckTaskCancelled(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("second AckTaskCancelled: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM chat_message WHERE task_id = $1 AND role = 'assistant' AND content = 'Stopped.'
+	`, taskID).Scan(&stopped); err != nil {
+		t.Fatalf("count stopped rows: %v", err)
+	}
+	if stopped != 1 {
+		t.Errorf("Stopped. rows after second ack = %d, want 1", stopped)
 	}
 }

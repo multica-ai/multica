@@ -43,6 +43,18 @@ function paste(editor: Editor, text: string, html?: string): boolean {
   );
 }
 
+function pasteThroughEditorDom(editor: Editor, text: string, html: string): void {
+  const event = new Event("paste", { bubbles: false, cancelable: true });
+  Object.defineProperty(event, "clipboardData", {
+    value: {
+      files: [],
+      getData: (type: string) =>
+        type === "text/plain" ? text : type === "text/html" ? html : "",
+    },
+  });
+  editor.view.dom.dispatchEvent(event);
+}
+
 interface JsonNode {
   type: string;
   text?: string;
@@ -63,6 +75,10 @@ function nodeText(node: JsonNode): string {
   return (node.content ?? []).map(nodeText).join("");
 }
 
+function unescapeMarkdownSyntax(md: string): string {
+  return md.replace(/\\([\\`*_[\]~])/g, "$1");
+}
+
 function expectLiteralPaste(editor: Editor, text: string) {
   editor.commands.setTextSelection(1);
   const parseSpy = vi.spyOn(editor.markdown!, "parse");
@@ -72,7 +88,7 @@ function expectLiteralPaste(editor: Editor, text: string) {
   expect(handled).toBe(true);
   expect(parseSpy).not.toHaveBeenCalled();
   expect(editor.getText()).toBe(text);
-  expect(editor.getMarkdown()).toBe(text);
+  expect(unescapeMarkdownSyntax(editor.getMarkdown())).toBe(text);
 }
 
 describe("markdownPaste — code block context", () => {
@@ -181,6 +197,92 @@ describe("markdownPaste — code block context", () => {
 
     expect(handled).toBe(false);
     expect(parseSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordered numbering when rich HTML fragments every item into its own list", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    pasteThroughEditorDom(
+      editor,
+      "1. First\n2. Second\n3. Third",
+      "<ol><li><strong>First</strong></li></ol>" +
+        "<ol><li>Second</li></ol>" +
+        "<ol><li>Third</li></ol>",
+    );
+
+    const json = editor.getJSON() as JsonNode;
+    const orderedLists = (json.content ?? []).filter(
+      (node) => node.type === "orderedList",
+    );
+    expect(orderedLists).toHaveLength(1);
+    expect(orderedLists[0]?.content?.map(nodeText)).toEqual([
+      "First",
+      "Second",
+      "Third",
+    ]);
+    expect(editor.getMarkdown()).toContain(
+      "1. **First**\n2. Second\n3. Third",
+    );
+  });
+
+  it("repairs fragmented ordered lists nested inside another list item", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    pasteThroughEditorDom(
+      editor,
+      "Plan\n1. First\n2. Second",
+      "<ul><li>Plan" +
+        "<ol><li>First</li></ol>" +
+        "<ol><li>Second</li></ol>" +
+        "</li></ul>",
+    );
+
+    const orderedList = findFirst(editor.getJSON() as JsonNode, "orderedList");
+    expect(orderedList?.content?.map(nodeText)).toEqual(["First", "Second"]);
+  });
+
+  it("keeps ordered lists separate when real content divides them", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    pasteThroughEditorDom(
+      editor,
+      "1. First\nSeparate section\n1. Restarted",
+      "<ol><li>First</li></ol>" +
+        "<p>Separate section</p>" +
+        "<ol><li>Restarted</li></ol>",
+    );
+
+    const json = editor.getJSON() as JsonNode;
+    expect(
+      (json.content ?? []).filter((node) => node.type === "orderedList"),
+    ).toHaveLength(2);
+  });
+
+  it("leaves ProseMirror-owned clipboard slices on the native path", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    const handled = paste(
+      editor,
+      "1. First\n1. Restarted",
+      '<div data-pm-slice="0 0 []">' +
+        "<ol><li>First</li></ol>" +
+        "<ol><li>Restarted</li></ol>" +
+        "</div>",
+    );
+
+    expect(handled).toBe(false);
   });
 
   it("does not paste rich HTML natively when its text would drop raw tag-like lines", () => {

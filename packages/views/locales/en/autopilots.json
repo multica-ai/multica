@@ -6,15 +6,23 @@
     "table": {
       "name": "Name",
       "agent": "Agent",
+      "created_by": "Created by",
       "mode": "Mode",
       "status": "Status",
-      "last_run": "Last run"
+      "last_run": "Last run",
+      "assignee": "Assignee",
+      "trigger": "Trigger",
+      "next_run": "Next run",
+      "created": "Created"
     },
     "last_run_empty": "--",
     "empty": {
       "title": "No autopilots yet",
       "hint": "Schedule recurring tasks for your AI agents. Pick a template or start from scratch."
-    }
+    },
+    "scope_all": "All",
+    "no_matches": "No automations match",
+    "retry": "Retry"
   },
   "status": {
     "active": "Active",
@@ -66,16 +74,25 @@
     "running": "Running...",
     "toast_triggered": "Autopilot triggered",
     "toast_trigger_failed": "Failed to trigger autopilot",
+    "run_blocked_invocation_not_allowed": "Not triggered — you don't have permission to use this autopilot's agent",
+    "run_blocked_runtime_offline": "Not triggered — the agent's runtime is offline",
+    "run_blocked_target_unavailable": "Not triggered — the agent is unavailable",
+    "run_blocked_attribution": "Not triggered — the run couldn't be attributed to a responsible member",
+    "run_blocked_already_active": "Not triggered — a recent run already covers this",
+    "run_blocked_generic": "Not triggered — the run was blocked",
     "section_properties": "Properties",
     "section_triggers": "Triggers",
     "section_run_history": "Run History",
     "section_danger": "Danger Zone",
     "field_agent": "Agent",
+    "field_created_by": "Created by",
     "field_output_mode": "Output Mode",
     "field_project": "Project",
     "no_project": "No project",
     "project_unavailable": "Project unavailable",
     "field_prompt": "Prompt",
+    "field_subscribers": "Subscribers",
+    "field_subscribers_none": "None",
     "add_trigger": "Add trigger",
     "no_triggers": "No triggers configured. Add a schedule to run automatically.",
     "no_runs": "No runs yet. Click \"Run now\" to trigger manually.",
@@ -90,13 +107,26 @@
       "deleting": "Deleting..."
     }
   },
+  "access": {
+    "title": "Manage access",
+    "description": "Members you add can edit, run, and manage this autopilot's triggers and webhooks.",
+    "current_label": "With access",
+    "add": "Add member",
+    "search_placeholder": "Search members…",
+    "no_results": "No members found",
+    "remove_tooltip": "Remove access",
+    "empty": "No one has been granted access yet.",
+    "toast_granted": "Access granted",
+    "toast_revoked": "Access removed",
+    "toast_failed": "Couldn't update access",
+    "owner_note": "The creator and workspace admins always have access."
+  },
   "run_status": {
     "issue_created": "Issue Created",
     "running": "Running",
     "skipped": "Skipped",
     "completed": "Completed",
-    "failed": "Failed",
-    "skipped": "Skipped"
+    "failed": "Failed"
   },
   "run_source": {
     "schedule": "Schedule",
@@ -179,6 +209,8 @@
       "received_at": "Received",
       "last_attempt_at": "Last attempt",
       "attempt_count": "Attempts",
+      "dispatch_attempts": "Dispatch attempts",
+      "available_at": "Next dispatch",
       "response_status": "Response",
       "dedupe_key": "Dedupe key",
       "dedupe_source": "Dedupe source",
@@ -247,6 +279,13 @@
     "section_project": "Project",
     "no_project": "No project",
     "section_output_mode": "Output mode",
+    "section_subscribers": "Subscribers",
+    "subscribers_hint": "Auto-subscribed to every issue this autopilot creates",
+    "subscribers_empty": "No subscribers — add a teammate to notify them on every run",
+    "subscribers_add": "Add subscriber",
+    "subscribers_search_placeholder": "Search members by name…",
+    "subscribers_no_results": "No matching members",
+    "subscribers_remove_tooltip": "Remove",
     "section_schedule": "Schedule",
     "section_trigger_kind": "Trigger",
     "trigger_kind_schedule": "Schedule",
@@ -264,7 +303,6 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_hint": "Only process webhooks matching these events. Leave empty to accept all.",
     "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
-    "next_run_label": "Next run:",
     "output_modes": {
       "create_issue": {
         "label": "Create issue",
@@ -274,32 +312,20 @@
         "label": "Run only",
         "description": "Silent run, no issue created"
       }
-    },
-    "frequency_long": {
-      "hourly": "Every hour",
-      "daily": "Every day",
-      "weekdays": "Every weekday",
-      "weekly": "Every week",
-      "custom": "Custom cron"
-    },
-    "days": {
-      "sunday": "Sunday",
-      "monday": "Monday",
-      "tuesday": "Tuesday",
-      "wednesday": "Wednesday",
-      "thursday": "Thursday",
-      "friday": "Friday",
-      "saturday": "Saturday"
     }
   },
-  "trigger_config": {
-    "frequencies": {
-      "hourly": "Hourly",
-      "daily": "Daily",
-      "weekdays": "Weekdays",
-      "weekly": "Days",
-      "custom": "Custom"
-    },
+  "schedule_editor": {
+    "time_label": "Time",
+    "time_at": "At a time",
+    "time_every": "At an interval",
+    "every_prefix": "Every",
+    "unit_hours": "hours",
+    "unit_minutes": "minutes",
+    "days_label": "Days",
+    "days_every": "Every day",
+    "days_weekly": "Days of week",
+    "days_monthly": "Day of month",
+    "monthly_short_month_hint": "Months without day {{day}} are skipped.",
     "days_short": {
       "sun": "Sun",
       "mon": "Mon",
@@ -309,32 +335,69 @@
       "fri": "Fri",
       "sat": "Sat"
     },
-    "cron_label": "Cron Expression",
-    "cron_hint": "Standard 5-field cron (min hour dom month dow)",
-    "minute_label": "Minute",
-    "time_label": "Time",
     "timezone_label": "Timezone",
-    "days_label": "Days",
-    "summary": {
-      "hourly": "Hourly · :{{min}}",
-      "daily": "Daily {{time}}",
-      "weekdays": "Weekdays {{time}}",
-      "weekly": "{{days}} {{time}}",
-      "custom": "Custom cron",
-      "no_days": "—"
-    },
+    "cron_toggle": "Cron",
+    "cron_click_to_edit": "click to edit",
+    "cron_hint": "Standard 5-field cron (min hour dom month dow)",
+    "cron_invalid": "This cron expression isn't valid.",
+    "timezone_invalid": "This timezone isn't recognized by the server.",
+    "advanced_hint": "This expression uses features the visual editor can't represent. Edit the cron text directly, or simplify it to re-enable the controls.",
+    "advanced_unverified": "The server couldn't be reached to check this expression, so the controls stay off. Make sure the cron text is right before saving.",
+    "advanced_checking": "Checking this expression with the server. The controls stay off until it answers.",
+    "next_runs_label": "Next runs",
+    "next_in": "in {{countdown}}",
+    "preview_unavailable": "Next runs unavailable right now.",
+    "no_upcoming_runs": "This expression has no upcoming runs.",
     "describe": {
-      "hourly": "Runs every hour at :{{min}}",
-      "daily": "Runs daily at {{time}} {{offset}}",
-      "weekdays": "Runs weekdays at {{time}} {{offset}}",
-      "weekly": "Runs every {{days}} at {{time}} {{offset}}",
-      "custom": "Custom schedule: {{cron}}"
+      "days_every": "Every day",
+      "days_monthly": "Day {{day}} of the month",
+      "days_long": {
+        "sun": "Sun",
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat"
+      },
+      "days_range": "{{from}}–{{to}}",
+      "days_join": ", ",
+      "time_at": "At {{time}}",
+      "time_every_hour": "Every hour at :{{minute}}",
+      "time_every_hours": "Every {{interval}} hours at :{{minute}}",
+      "time_every_hour_window": "Every hour",
+      "time_every_hours_window": "Every {{interval}} hours",
+      "time_every_minute": "Every minute",
+      "time_every_minutes": "Every {{interval}} minutes",
+      "window": "{{from}}–{{to}}"
     },
     "countdown": {
-      "days_hours": "{{days}}d {{hours}}h",
+      "days_hours": "{{days}}d {{hours}}h {{minutes}}m",
       "hours_minutes": "{{hours}}h {{minutes}}m",
       "minutes": "{{minutes}}m",
       "less_than_minute": "<1m"
+    },
+    "a11y": {
+      "fixed_hour": "Hour",
+      "fixed_minute": "Minute",
+      "interval": "Interval",
+      "interval_unit": "Interval unit",
+      "window_start_hour": "Window start hour",
+      "window_start_minute": "Window start minute",
+      "window_end_hour": "Window end hour",
+      "window_end_minute": "Window end minute",
+      "day_pattern": "Day pattern",
+      "day_of_month": "Day of month",
+      "timezone": "Timezone",
+      "days_full": {
+        "sun": "Sunday",
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday"
+      }
     }
   },
   "agent_picker": {
@@ -346,5 +409,39 @@
   },
   "timezone_picker": {
     "search_placeholder": "Search timezone..."
+  },
+  "toolbar": {
+    "result_count_title": "Matching automations / all automations",
+    "filter_label": "Filter",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Clear filters",
+    "section_assignee": "Assignee",
+    "section_mode": "Mode",
+    "section_trigger": "Trigger",
+    "section_creator": "Created by",
+    "display": "Display",
+    "sort_by": "Sort by",
+    "direction_asc": "Ascending",
+    "direction_desc": "Descending",
+    "section_columns": "Columns"
+  },
+  "actions": {
+    "row_menu": "Automation actions",
+    "pause": "Pause",
+    "resume": "Resume",
+    "delete": "Delete",
+    "selected_one": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "clear_selection": "Clear selection",
+    "delete_dialog": {
+      "title": "Delete automation?",
+      "description_one": "This will permanently delete \"{{name}}\" and its run history.",
+      "description_other": "This will permanently delete {{count}} automations and their run history.",
+      "warning": "This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete permanently",
+      "deleting": "Deleting…"
+    }
   }
 }

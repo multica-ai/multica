@@ -1,8 +1,111 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiClient, ApiError } from "./client";
+import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY } from "./client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("ApiClient label response schemas", () => {
+  it("falls back safely for malformed label catalog, label, and resource responses", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ labels: "not-an-array", total: "not-a-number" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.listLabels("agent")).resolves.toEqual({ labels: [], total: 0 });
+    await expect(client.getLabel("label-1")).resolves.toMatchObject({ id: "" });
+    await expect(
+      client.createLabel({ resource_type: "agent", name: "Ops", color: "#3b82f6" }),
+    ).resolves.toMatchObject({ id: "" });
+    await expect(
+      client.updateLabel("label-1", { name: "Operations" }),
+    ).resolves.toMatchObject({ id: "" });
+
+    await expect(client.listLabelsForIssue("issue-1")).resolves.toEqual({ labels: [] });
+    await expect(client.attachLabel("issue-1", "label-1")).resolves.toEqual({ labels: [] });
+    await expect(client.detachLabel("issue-1", "label-1")).resolves.toEqual({ labels: [] });
+
+    await expect(client.listLabelsForResource("agent", "agent-1")).resolves.toEqual({ labels: [] });
+    await expect(
+      client.attachLabelToResource("agent", "agent-1", "label-1"),
+    ).resolves.toEqual({ labels: [] });
+    await expect(
+      client.detachLabelFromResource("agent", "agent-1", "label-1"),
+    ).resolves.toEqual({ labels: [] });
+
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+  });
+});
+
+describe("ApiClient notification preferences", () => {
+  it("sends atomic preference updates with PATCH", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          workspace_id: "workspace-1",
+          preferences: {
+            status_changes: "muted",
+            comments: "muted",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.updateNotificationPreferences(
+        { comments: "muted" },
+        "workspace-one",
+      ),
+    ).resolves.toEqual({
+      workspace_id: "workspace-1",
+      preferences: {
+        status_changes: "muted",
+        comments: "muted",
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/notification-preferences",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        method: "PATCH",
+        headers: expect.objectContaining({
+          "X-Workspace-Slug": "workspace-one",
+        }),
+        body: JSON.stringify({ preferences: { comments: "muted" } }),
+      }),
+    );
+  });
+
+  it("falls back safely when a preference response is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ workspace_id: "workspace-1", preferences: [] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.getNotificationPreferences()).resolves.toEqual({
+      workspace_id: "",
+      preferences: {},
+    });
+  });
 });
 
 describe("ApiClient", () => {
@@ -31,6 +134,75 @@ describe("ApiClient", () => {
         statusText: "Conflict",
       });
     }
+  });
+
+  it("preserves planned and delivered comment coverage from issue task runs", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              id: "task-1",
+              status: "queued",
+              trigger_comment_id: "comment-3",
+              coalesced_comment_ids: ["comment-1", "comment-2"],
+              delivered_comment_ids: ["comment-1", "comment-2", "comment-3"],
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listTasksByIssue("issue-1");
+
+    expect(tasks[0]?.trigger_comment_id).toBe("comment-3");
+    expect(tasks[0]?.coalesced_comment_ids).toEqual([
+      "comment-1",
+      "comment-2",
+    ]);
+    expect(tasks[0]?.delivered_comment_ids).toEqual([
+      "comment-1",
+      "comment-2",
+      "comment-3",
+    ]);
+  });
+
+  it("keeps task runs when optional comment coverage is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              id: "task-1",
+              status: "queued",
+              coalesced_comment_ids: ["comment-1", 2],
+              delivered_comment_ids: "not-an-array",
+            },
+            {
+              id: "task-2",
+              status: "completed",
+              delivered_comment_ids: ["comment-2", "comment-3"],
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listTasksByIssue("issue-1");
+
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]?.coalesced_comment_ids).toBeUndefined();
+    expect(tasks[0]?.delivered_comment_ids).toBeUndefined();
+    expect(tasks[1]?.delivered_comment_ids).toEqual([
+      "comment-2",
+      "comment-3",
+    ]);
   });
 
   it("uses the expected HTTP contract for autopilot endpoints", async () => {
@@ -150,6 +322,150 @@ describe("ApiClient", () => {
     expect(headers["X-Client-Platform"]).toBeUndefined();
     expect(headers["X-Client-Version"]).toBeUndefined();
     expect(headers["X-Client-OS"]).toBeUndefined();
+  });
+
+  it("posts feedback kind and parses the response through the schema", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "feedback-1", created_at: "2026-06-26T00:00:00Z" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const response = await client.createFeedback({
+      message: "Desktop route crashed",
+      url: "app://desktop/acme/issues",
+      workspace_id: "ws-1",
+      kind: "bug",
+    });
+
+    expect(response).toEqual({
+      id: "feedback-1",
+      created_at: "2026-06-26T00:00:00Z",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/feedback",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          message: "Desktop route crashed",
+          url: "app://desktop/acme/issues",
+          workspace_id: "ws-1",
+          kind: "bug",
+        }),
+      }),
+    );
+  });
+
+  it("falls back to an empty feedback response when the server shape drifts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ id: 42, created_at: "2026-06-26T00:00:00Z" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.createFeedback({ message: "hello" })).resolves.toEqual({
+      id: "",
+      created_at: "",
+    });
+  });
+
+  it("uses the expected HTTP contract for comment trigger preview and suppress", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ agents: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          id: "comment-1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "user-1",
+          content: "hello",
+          type: "comment",
+          parent_id: null,
+          reactions: [],
+          attachments: [],
+          created_at: "2026-06-05T00:00:00Z",
+          updated_at: "2026-06-05T00:00:00Z",
+        }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          id: "comment-1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "user-1",
+          content: "updated",
+          type: "comment",
+          parent_id: null,
+          reactions: [],
+          attachments: [],
+          created_at: "2026-06-05T00:00:00Z",
+          updated_at: "2026-06-05T00:01:00Z",
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.previewCommentTriggers("issue-1", "hello", "parent-1", "comment-1");
+    await client.createComment(
+      "issue-1",
+      "hello",
+      "comment",
+      "parent-1",
+      ["attachment-1"],
+      ["agent-1"],
+    );
+    await client.updateComment("comment-1", "updated", ["attachment-1"], ["agent-1"]);
+
+    expect(fetchMock.mock.calls.map(([url, init]) => ({
+      url,
+      method: init?.method,
+      body: init?.body,
+    }))).toMatchObject([
+      {
+        url: "https://api.example.test/api/issues/issue-1/comments/trigger-preview",
+        method: "POST",
+        body: JSON.stringify({ content: "hello", parent_id: "parent-1", editing_comment_id: "comment-1" }),
+      },
+      {
+        url: "https://api.example.test/api/issues/issue-1/comments",
+        method: "POST",
+        body: JSON.stringify({
+          content: "hello",
+          type: "comment",
+          parent_id: "parent-1",
+          attachment_ids: ["attachment-1"],
+          suppress_agent_ids: ["agent-1"],
+        }),
+      },
+      {
+        url: "https://api.example.test/api/comments/comment-1",
+        method: "PUT",
+        body: JSON.stringify({
+          content: "updated",
+          attachment_ids: ["attachment-1"],
+          suppress_agent_ids: ["agent-1"],
+        }),
+      },
+    ]);
   });
 
   it("uses the Cloud Runtime node API contract", async () => {
@@ -359,6 +675,239 @@ describe("ApiClient", () => {
       await expect(client.getAttachmentTextContent("att-1")).rejects.toBeInstanceOf(
         PreviewUnsupportedError,
       );
+    });
+  });
+
+  describe("listChatMessagesPage deployment-order fallback", () => {
+    const jsonResponse = (body: unknown, status: number, statusText = "") =>
+      new Response(JSON.stringify(body), {
+        status,
+        statusText,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    it("falls back to the legacy full-list endpoint when the paged route 404s", async () => {
+      const legacy = [
+        { id: "m1", role: "user", content: "hi", created_at: "2026-06-01T00:00:00Z" },
+        { id: "m2", role: "assistant", content: "yo", created_at: "2026-06-01T00:00:01Z" },
+      ];
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ error: "not found" }, 404, "Not Found"))
+        .mockResolvedValueOnce(jsonResponse(legacy, 200));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const page = await client.listChatMessagesPage("session-1", { limit: 50 });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[0]![0]).toBe(
+        "https://api.example.test/api/chat/sessions/session-1/messages/page?limit=50",
+      );
+      expect(fetchMock.mock.calls[1]![0]).toBe(
+        "https://api.example.test/api/chat/sessions/session-1/messages",
+      );
+      expect(page).toEqual({ messages: legacy, limit: 50, has_more: false, next_cursor: null });
+    });
+
+    it("does NOT fall back on a cursor request — a 404 there propagates", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ error: "not found" }, 404, "Not Found"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(
+        client.listChatMessagesPage("session-1", {
+          before: { created_at: "2026-06-01T00:00:00Z", id: "m1" },
+        }),
+      ).rejects.toBeInstanceOf(ApiError);
+      // Only the paged request fires; no legacy full-list call that would duplicate messages.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("propagates non-404 errors instead of masking them with the legacy list", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ error: "boom" }, 500, "Internal Server Error"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listChatMessagesPage("session-1")).rejects.toMatchObject({
+        status: 500,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("cancelTaskById response parsing", () => {
+    const taskResponse = {
+      id: "task-1",
+      agent_id: "agent-1",
+      runtime_id: "runtime-1",
+      issue_id: "",
+      status: "cancelled",
+      priority: 0,
+      dispatched_at: null,
+      started_at: null,
+      completed_at: "2026-06-12T06:40:00Z",
+      result: null,
+      error: null,
+      created_at: "2026-06-12T06:39:00Z",
+    };
+
+    it("parses the cancelled chat message payload", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          ...taskResponse,
+          cancelled_chat_message: {
+            chat_session_id: "session-1",
+            message_id: "message-1",
+            content: "restore me",
+            restore_to_input: true,
+          },
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.cancelTaskById("task-1");
+
+      expect(fetchMock.mock.calls[0]).toMatchObject([
+        "https://api.example.test/api/tasks/task-1/cancel",
+        { method: "POST" },
+      ]);
+      expect(result.cancelled_chat_message).toEqual({
+        chat_session_id: "session-1",
+        message_id: "message-1",
+        content: "restore me",
+        restore_to_input: true,
+      });
+    });
+
+    it("parses task attribution when the backend enriches it", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({
+            ...taskResponse,
+            attribution: {
+              source: "direct_human",
+              precise: true,
+              initiator: { id: "user-1", name: "Ada", avatar_url: "https://x/a.png" },
+              originator: { id: "user-1", name: "Ada" },
+              evidence: { kind: "comment", ref_id: "comment-1" },
+            },
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.cancelTaskById("task-1");
+
+      expect(result.attribution).toEqual({
+        source: "direct_human",
+        precise: true,
+        initiator: { id: "user-1", name: "Ada", avatar_url: "https://x/a.png" },
+        originator: { id: "user-1", name: "Ada" },
+        evidence: { kind: "comment", ref_id: "comment-1" },
+      });
+    });
+
+    it("leaves attribution absent on servers that predate it", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify(taskResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.cancelTaskById("task-1");
+
+      expect(result.attribution).toBeUndefined();
+    });
+
+    // The server only defers the empty-transcript judgment — and so only
+    // withholds the synchronous restore — for clients that advertise this
+    // capability (#5219). Drop the header and this client is treated as a
+    // pre-#5219 build, quietly losing the deferred path it actually implements.
+    it("advertises the durable draft-restore capability", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(taskResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await new ApiClient("https://api.example.test").cancelTaskById("task-1");
+
+      const init = fetchMock.mock.calls[0]?.[1] as { headers: Record<string, string> };
+      expect(init.headers["X-Client-Capabilities"]).toBe(CHAT_DRAFT_RESTORE_CAPABILITY);
+    });
+
+    it("treats a null cancelled chat message as absent", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({
+            ...taskResponse,
+            cancelled_chat_message: null,
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.cancelTaskById("task-1");
+
+      expect(result.id).toBe("task-1");
+      expect(result.cancelled_chat_message).toBeUndefined();
+    });
+
+    it.each([
+      ["a missing task id", { ...taskResponse, id: undefined }],
+      [
+        "a malformed cancelled chat message",
+        {
+          ...taskResponse,
+          cancelled_chat_message: {
+            chat_session_id: "session-1",
+            message_id: "message-1",
+            content: "restore me",
+            restore_to_input: "true",
+          },
+        },
+      ],
+      ["a null body", null],
+    ])("falls back for %s", async (_label, body) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.cancelTaskById("task-1");
+
+      expect(result.id).toBe("");
+      expect(result.cancelled_chat_message).toBeUndefined();
     });
   });
 

@@ -5,6 +5,15 @@
     --font-sans: var(--font-sans);
     --font-serif: var(--font-serif);
     --font-mono: var(--font-mono);
+    --color-app-shell: var(--app-shell);
+    --color-page-canvas: var(--page-canvas);
+    --color-surface: var(--surface);
+    --color-surface-foreground: var(--surface-foreground);
+    --color-surface-raised: var(--surface-raised);
+    --color-surface-hover: var(--surface-hover);
+    --color-surface-selected: var(--surface-selected);
+    --color-surface-selected-foreground: var(--surface-selected-foreground);
+    --color-surface-border: var(--surface-border);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -51,11 +60,30 @@
 }
 
 :root {
-    --background: oklch(1 0 0);
+    color-scheme: light;
+    /* Surface system: the app shell is the quiet outer frame; the page canvas
+       is where lists, boards, and conversations live; surfaces are reserved
+       for bounded content groups; raised surfaces are ephemeral overlays. */
+    --app-shell: oklch(0.964435 0.001327 286.375);
+    --page-canvas: oklch(0.988087 0 0);
+    --surface: oklch(1 0 0);
+    --surface-foreground: oklch(0.141 0.005 285.823);
+    --surface-raised: oklch(1 0 0);
+    --surface-hover: oklch(0.967 0.001 286.375);
+    --surface-selected: oklch(0.95 0.002 286.375);
+    --surface-selected-foreground: oklch(0.141 0.005 285.823);
+    --surface-border: oklch(0.92 0.004 286.32);
+    --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
+    --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
+    /* Menus (dropdown/context/select/popover) hover just above their trigger,
+       so they carry a lighter shadow than window-level overlays (dialogs,
+       sheets), which keep --floating-shadow. */
+    --menu-shadow: 0 8px 24px rgb(15 23 42 / 0.08), 0 2px 6px rgb(15 23 42 / 0.05);
+    --background: var(--page-canvas);
     --foreground: oklch(0.141 0.005 285.823);
-    --card: oklch(1 0 0);
+    --card: var(--surface);
     --card-foreground: oklch(0.141 0.005 285.823);
-    --popover: oklch(1 0 0);
+    --popover: var(--surface-raised);
     --popover-foreground: oklch(0.141 0.005 285.823);
     --primary: oklch(0.21 0.006 285.885);
     --primary-foreground: oklch(0.985 0 0);
@@ -66,7 +94,7 @@
     --accent: oklch(0.967 0.001 286.375);
     --accent-foreground: oklch(0.21 0.006 285.885);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.92 0.004 286.32);
+    --border: oklch(0.945 0.003 286.32);
     --input: oklch(0.92 0.004 286.32);
     --ring: oklch(0.705 0.015 286.067);
     /* Brand-derived blue gradient (h=255 = brand hue). chart-1 equals brand
@@ -80,11 +108,11 @@
     --chart-4: oklch(0.85 0.06 255);
     --chart-5: oklch(0.92 0.03 255);
     --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
+    --sidebar: oklch(0.964435 0.001327 286.375);
     --sidebar-foreground: oklch(0.141 0.005 285.823);
     --sidebar-primary: oklch(0.21 0.006 285.885);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.95 0.002 286.375);
+    --sidebar-accent: oklch(0.935 0.003 286.375);
     --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
     --sidebar-border: oklch(0.92 0.004 286.32);
     --sidebar-ring: oklch(0.705 0.015 286.067);
@@ -96,14 +124,33 @@
     --scrollbar-thumb: oklch(0 0 0 / 10%);
     --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
     --scrollbar-track: transparent;
+    /* In-page find (Cmd/Ctrl+F) match tints, painted via the CSS Custom
+       Highlight API. Bright fill + dark text so matches stay legible in
+       both themes; the active match steps to orange. */
+    --find-match: oklch(0.92 0.15 100);
+    --find-match-active: oklch(0.82 0.17 62);
+    --find-match-foreground: oklch(0.22 0.03 92);
 }
 
 .dark {
-    --background: oklch(0.18 0.005 285.823);
+    color-scheme: dark;
+    --app-shell: oklch(0.155 0.005 285.823);
+    --page-canvas: oklch(0.18 0.005 285.823);
+    --surface: oklch(0.21 0.006 285.885);
+    --surface-foreground: oklch(0.985 0 0);
+    --surface-raised: oklch(0.235 0.007 285.885);
+    --surface-hover: oklch(0.274 0.006 286.033);
+    --surface-selected: oklch(0.3 0.006 286.033);
+    --surface-selected-foreground: oklch(0.985 0 0);
+    --surface-border: oklch(1 0 0 / 10%);
+    --surface-shadow: 0 1px 2px rgb(0 0 0 / 0.2), 0 1px 1px rgb(0 0 0 / 0.16);
+    --floating-shadow: 0 20px 48px rgb(0 0 0 / 0.46), 0 4px 12px rgb(0 0 0 / 0.28);
+    --menu-shadow: 0 10px 28px rgb(0 0 0 / 0.3), 0 2px 8px rgb(0 0 0 / 0.18);
+    --background: var(--page-canvas);
     --foreground: oklch(0.985 0 0);
-    --card: oklch(0.21 0.006 285.885);
+    --card: var(--surface);
     --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.21 0.006 285.885);
+    --popover: var(--surface-raised);
     --popover-foreground: oklch(0.985 0 0);
     --primary: oklch(0.92 0.004 286.32);
     --primary-foreground: oklch(0.21 0.006 285.885);
@@ -114,7 +161,7 @@
     --accent: oklch(0.274 0.006 286.033);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
+    --border: oklch(1 0 0 / 6%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.552 0.016 285.938);
     /* Dark mode mirrors light mode's "primary → secondary" gradient on the
@@ -142,4 +189,7 @@
     --scrollbar-thumb: oklch(1 0 0 / 8%);
     --scrollbar-thumb-hover: oklch(1 0 0 / 18%);
     --scrollbar-track: transparent;
+    --find-match: oklch(0.82 0.16 100);
+    --find-match-active: oklch(0.76 0.18 60);
+    --find-match-foreground: oklch(0.18 0.02 92);
 }

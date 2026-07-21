@@ -1,9 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, FolderKanban } from "lucide-react";
+import { BarChart3, FolderKanban, Trash2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import {
+  CompactNumberFlow,
+  CurrencyNumberFlow,
+  NumberFlow,
+  NumberFlowGroup,
+} from "@multica/ui/components/ui/number-flow";
 import {
   Select,
   SelectContent,
@@ -12,6 +18,7 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { useWorkspaceId } from "@multica/core/hooks";
+import type { Agent } from "@multica/core/types";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
@@ -51,7 +58,9 @@ import {
   aggregateDailyTokens,
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
+  bucketUnknownAgentRows,
   computeDailyTotals,
+  DELETED_AGENTS_ROW_ID,
   formatDuration,
   mergeAgentDashboardRows,
   type AgentDashboardRow,
@@ -98,11 +107,7 @@ const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
-
-function fmtMoney(n: number): string {
-  if (n >= 100) return `$${n.toFixed(0)}`;
-  return `$${n.toFixed(2)}`;
-}
+const EMPTY_AGENTS: Agent[] = [];
 
 // Local segmented control — same visual language the runtime usage section
 // uses for its period / tab toggles. shadcn's Tabs is wired for full tab
@@ -136,6 +141,43 @@ function Segmented<T extends string | number>({
   );
 }
 
+function DurationNumberFlow({
+  seconds,
+  lessThanMinuteLabel,
+  locales,
+}: {
+  seconds: number;
+  lessThanMinuteLabel: string;
+  locales?: Intl.LocalesArgument;
+}) {
+  const label = formatDuration(seconds, lessThanMinuteLabel);
+  const parts = Array.from(label.matchAll(/(\d+)([a-z]+)/gi), (match) => ({
+    value: Number(match[1]),
+    unit: match[2] ?? "",
+  }));
+
+  if (parts.length === 0) return label;
+
+  return (
+    <>
+      <span className="sr-only">{label}</span>
+      <NumberFlowGroup>
+        <span aria-hidden className="inline-flex items-baseline gap-1">
+          {parts.map((part) => (
+            <NumberFlow
+              key={part.unit}
+              value={part.value}
+              locales={locales}
+              suffix={part.unit}
+              format={{ maximumFractionDigits: 0, useGrouping: false }}
+            />
+          ))}
+        </span>
+      </NumberFlowGroup>
+    </>
+  );
+}
+
 /**
  * Workspace + project token / run-time dashboard.
  *
@@ -148,9 +190,10 @@ function Segmented<T extends string | number>({
  * and the runtime page using one pricing table.
  */
 export function DashboardPage() {
-  const { t } = useT("usage");
+  const { t, i18n } = useT("usage");
   const wsId = useWorkspaceId();
   const viewTZ = useViewingTimezone();
+  const locales = i18n.resolvedLanguage ?? i18n.language;
   const [dim, setDim] = useState<Dim>("daily");
   const [days, setDays] = useState<TimeRange>(30);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
@@ -169,7 +212,8 @@ export function DashboardPage() {
   useCustomPricingStore((s) => s.pricings);
 
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const agentsQuery = useQuery(agentListOptions(wsId));
+  const agents = agentsQuery.data ?? EMPTY_AGENTS;
 
   // Validate the picked project against the current workspace's list. A
   // stale UUID — left over from a project that's been deleted, or from the
@@ -310,6 +354,32 @@ export function DashboardPage() {
     [agentTokenRows, runTimeRows],
   );
 
+  // Fold rollup rows for hard-deleted agents into one aggregated "Deleted
+  // agents" row instead of showing them as a bare UUID (MUL-3771) or dropping
+  // them outright — dropping made the per-agent breakdown stop reconciling
+  // with the top-line Cost/Tokens KPIs, which still count that spend (MUL-3776,
+  // #4640). Archived agents stay as themselves (the agent list is fetched with
+  // archived included); only truly-removed agents collapse into the bucket.
+  // Skip bucketing until the agent list has loaded so a slow agents fetch
+  // doesn't transiently merge every row.
+  const knownAgentIds = useMemo(
+    () => (agentsQuery.isSuccess ? new Set(agents.map((a) => a.id)) : null),
+    [agentsQuery.isSuccess, agents],
+  );
+  const visibleAgentRows = useMemo(
+    () => bucketUnknownAgentRows(agentRows, knownAgentIds),
+    [agentRows, knownAgentIds],
+  );
+  // Distinct hard-deleted agents folded into the bucket — drives the caption's
+  // "· N deleted" suffix (the bucket itself is a single row).
+  const deletedAgentCount = useMemo(
+    () =>
+      knownAgentIds
+        ? agentRows.filter((r) => !knownAgentIds.has(r.agentId)).length
+        : 0,
+    [agentRows, knownAgentIds],
+  );
+
   return (
     <div className="flex h-full flex-col">
       {/* h-auto + min-h-12 + flex-wrap: the toolbar (project filter,
@@ -358,13 +428,23 @@ export function DashboardPage() {
               <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
                 <KpiCard
                   label={t(($) => $.kpi.cost_label, { days })}
-                  value={fmtMoney(totals.cost)}
+                  value={
+                    <CurrencyNumberFlow value={totals.cost} locales={locales} />
+                  }
                 />
                 <KpiCard
                   label={t(($) => $.kpi.tokens_label, { days })}
-                  value={formatTokens(
-                    totals.input + totals.output + totals.cacheRead + totals.cacheWrite,
-                  )}
+                  value={
+                    <CompactNumberFlow
+                      value={
+                        totals.input +
+                        totals.output +
+                        totals.cacheRead +
+                        totals.cacheWrite
+                      }
+                      locales={locales}
+                    />
+                  }
                   hint={t(($) => $.kpi.tokens_hint, {
                     input: formatTokens(totals.input),
                     output: formatTokens(totals.output),
@@ -372,17 +452,27 @@ export function DashboardPage() {
                 />
                 <KpiCard
                   label={t(($) => $.kpi.run_time_label, { days })}
-                  value={formatDuration(
-                    runTimeTotals.totalSeconds,
-                    t(($) => $.duration.less_than_minute),
-                  )}
+                  value={
+                    <DurationNumberFlow
+                      seconds={runTimeTotals.totalSeconds}
+                      lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
+                      locales={locales}
+                    />
+                  }
                   hint={t(($) => $.kpi.run_time_hint, {
                     tasks: runTimeTotals.taskCount,
                   })}
                 />
                 <KpiCard
                   label={t(($) => $.kpi.tasks_label, { days })}
-                  value={String(runTimeTotals.taskCount)}
+                  value={
+                    <NumberFlow
+                      value={runTimeTotals.taskCount}
+                      locales={locales}
+                      format={{ maximumFractionDigits: 0 }}
+                      aria-label={String(runTimeTotals.taskCount)}
+                    />
+                  }
                   hint={t(($) => $.kpi.tasks_hint, {
                     failed: runTimeTotals.failedCount,
                   })}
@@ -411,8 +501,9 @@ export function DashboardPage() {
               {/* Per-agent leaderboard — user picks the ranking metric;
                   the progress bar and column emphasis follow the metric. */}
               <Leaderboard
-                rows={agentRows}
+                rows={visibleAgentRows}
                 agents={agents}
+                deletedAgentCount={deletedAgentCount}
                 lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
               />
             </>
@@ -437,9 +528,14 @@ function ProjectFilter({
   const selected = projects.find((p) => p.id === value);
   const selectedTitle =
     value === ALL_PROJECTS ? allLabel : selected?.title ?? allLabel;
+  const projectItems = [
+    { value: ALL_PROJECTS, label: allLabel },
+    ...projects.map((project) => ({ value: project.id, label: project.title })),
+  ];
 
   return (
     <Select
+      items={projectItems}
       value={value}
       onValueChange={(v) => onChange(v ?? ALL_PROJECTS)}
     >
@@ -622,10 +718,12 @@ const SORT_METRIC: Record<LeaderboardSort, (r: AgentDashboardRow) => number> = {
 function Leaderboard({
   rows,
   agents,
+  deletedAgentCount,
   lessThanMinuteLabel,
 }: {
   rows: AgentDashboardRow[];
   agents: { id: string; name: string }[];
+  deletedAgentCount: number;
   lessThanMinuteLabel: string;
 }) {
   const { t } = useT("usage");
@@ -666,7 +764,12 @@ function Leaderboard({
         <div className="flex items-center gap-3">
           <Segmented value={sortBy} onChange={setSortBy} options={sortOptions} />
           <span className="text-xs text-muted-foreground">
-            {t(($) => $.leaderboard.caption, { count: rows.length })}
+            {deletedAgentCount > 0
+              ? t(($) => $.leaderboard.caption_with_deleted, {
+                  count: rows.length - 1,
+                  deleted: deletedAgentCount,
+                })
+              : t(($) => $.leaderboard.caption, { count: rows.length })}
           </span>
         </div>
       </div>
@@ -686,6 +789,11 @@ function Leaderboard({
           </div>
           <div className="divide-y">
             {sortedRows.map((row) => {
+              // The deleted-agents bucket is a synthetic row, not a real agent:
+              // render a neutral placeholder (no avatar fetch / hover card / UUID)
+              // and dash out Time/Tasks, which it never carries (see
+              // bucketUnknownAgentRows).
+              const isDeletedBucket = row.agentId === DELETED_AGENTS_ROW_ID;
               const agent = agents.find((a) => a.id === row.agentId);
               const value = SORT_METRIC[sortBy](row);
               const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
@@ -695,15 +803,28 @@ function Leaderboard({
                   className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2"
                 >
                   <div className="flex min-w-0 items-center gap-2">
-                    <ActorAvatar
-                      actorType="agent"
-                      actorId={row.agentId}
-                      size={22}
-                      enableHoverCard
-                    />
-                    <span className="cursor-pointer truncate text-sm font-medium">
-                      {agent?.name ?? row.agentId}
-                    </span>
+                    {isDeletedBucket ? (
+                      <>
+                        <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                          <Trash2 className="h-3 w-3" />
+                        </span>
+                        <span className="truncate text-sm font-medium italic text-muted-foreground">
+                          {t(($) => $.leaderboard.deleted_agents)}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <ActorAvatar
+                          actorType="agent"
+                          actorId={row.agentId}
+                          size="md"
+                          enableHoverCard
+                        />
+                        <span className="cursor-pointer truncate text-sm font-medium">
+                          {agent?.name ?? row.agentId}
+                        </span>
+                      </>
+                    )}
                   </div>
                   <div className="relative h-2 overflow-hidden rounded-full bg-muted">
                     <div
@@ -724,12 +845,14 @@ function Leaderboard({
                   <div
                     className={`text-right text-xs tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}
                   >
-                    {formatDuration(row.seconds, lessThanMinuteLabel)}
+                    {isDeletedBucket
+                      ? "—"
+                      : formatDuration(row.seconds, lessThanMinuteLabel)}
                   </div>
                   <div
                     className={`text-right text-xs tabular-nums ${sortBy === "tasks" ? "font-medium text-foreground" : "text-muted-foreground"}`}
                   >
-                    {row.taskCount}
+                    {isDeletedBucket ? "—" : row.taskCount}
                   </div>
                 </div>
               );

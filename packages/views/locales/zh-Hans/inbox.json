@@ -18,17 +18,22 @@
       "minutes": "{{count}} 分钟",
       "hours": "{{count}} 小时",
       "days": "{{count}} 天"
-    }
+    },
+    "archived_title": "已归档",
+    "archived_empty": "暂无已归档通知",
+    "unarchive_tooltip": "取消归档"
   },
   "detail": {
     "select_prompt": "选择一条通知查看详情",
     "empty": "收件箱为空",
     "original_input": "原始输入",
     "edit_advanced": "在完整表单中编辑",
-    "archive": "归档"
+    "archive": "归档",
+    "unarchive": "取消归档"
   },
   "types": {
     "issue_assigned": "已分配",
+    "issue_subscribed": "已订阅",
     "unassigned": "已取消分配",
     "assignee_changed": "分配人已更改",
     "status_changed": "状态已更改",
@@ -66,6 +71,8 @@
     "mark_all_read_failed": "全部标为已读失败",
     "archive_all_failed": "归档全部失败",
     "archive_all_read_failed": "归档已读失败",
-    "archive_completed_failed": "归档已完成失败"
+    "archive_completed_failed": "归档已完成失败",
+    "unarchive_failed": "取消归档失败",
+    "archived_load_failed": "无法加载已归档通知"
   }
 }

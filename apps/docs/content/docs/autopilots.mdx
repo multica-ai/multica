@@ -59,9 +59,12 @@ on the autopilot detail page; Multica generates a unique URL of the shape:
 https://<your-multica-host>/api/webhooks/autopilots/awt_…
 ```
 
-POST any JSON to that URL — Multica records a run with `source = webhook`,
-stores the body as the run's `trigger_payload`, and dispatches the agent
-exactly the way a schedule trigger would.
+POST any JSON to that URL. Multica first stores a durable delivery and
+synchronously admits an idempotent run, returning `200 OK` with
+`status = accepted | skipped` and its `run_id`. A database-backed worker then
+resumes accepted runs, stores the body as the run's `trigger_payload`, and
+dispatches the agent exactly the way a schedule trigger would. A server restart
+between admission and dispatch does not lose the queued delivery.
 
 ```bash
 curl -X POST "$MULTICA_WEBHOOK_URL" \
@@ -98,6 +101,11 @@ nothing matches, the event is `webhook.received`.
 
 When configuring GitHub or similar sources, set the content type to
 `application/json` — form-encoded webhook payloads are not accepted.
+
+GitHub deliveries are deduplicated by `X-GitHub-Delivery`; generic senders can
+provide `Idempotency-Key`. Retries with the same key reuse the original queued
+delivery and run. Without either header, delivery remains best-effort because
+there is no stable event identity to deduplicate.
 
 ### Event filters
 
@@ -209,7 +217,7 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
   -H 'X-GitHub-Event: workflow_run' \
   -H 'Content-Type: application/json' \
   -d '{"action":"completed"}'
-# → 200 {"status":"accepted", ...}
+# → 200 {"status":"accepted", "delivery_id":"…", "run_id":"…", ...}
 
 # Filtered — same event, action not in allowlist
 curl -X POST "$MULTICA_WEBHOOK_URL" \
@@ -235,13 +243,21 @@ autopilot. Treat it like a token:
 
 ### Status-code semantics
 
-Multica returns `200 OK` with a `status` field for normal no-op outcomes so
-your provider's webhook-retry machinery doesn't keep hammering the URL:
+Multica acknowledges an active, valid delivery only after both its delivery and
+idempotent run are durable:
 
-- `{"status":"accepted","run_id":"…","autopilot_id":"…","trigger_id":"…"}`
-  — a run was dispatched.
-- `{"status":"skipped","run_id":"…","reason":"agent runtime is offline at dispatch time"}`
-  — the assignee's runtime is offline; recorded as a `skipped` run.
+- `200 {"status":"accepted","delivery_id":"…","run_id":"…","autopilot_id":"…","trigger_id":"…"}`
+  — admission succeeded and the worker owns recoverable dispatch.
+- `200 {"status":"skipped","delivery_id":"…","run_id":"…","reason":"…"}`
+  — admission produced a durable skipped run, for example when the assignee's
+  runtime is offline.
+
+Normal no-op and deduplication outcomes return `200 OK` so providers do not
+retry them indefinitely:
+
+- `{"status":"duplicate","delivery_id":"…","run_id":"…"}` — the provider's
+  idempotency key was already admitted. `run_id` is omitted only if the original
+  request ended before its run could be admitted; the worker will recover it.
 - `{"status":"ignored","reason":"trigger_disabled"}` — the trigger is disabled.
 - `{"status":"ignored","reason":"autopilot_paused"}` — the autopilot is paused.
 - `{"status":"ignored","reason":"autopilot_archived"}` — the autopilot is archived.
@@ -249,9 +265,13 @@ your provider's webhook-retry machinery doesn't keep hammering the URL:
 Non-2xx responses cover real failures:
 
 - `400` — invalid JSON, scalar body, or empty body.
+- `401` — a configured webhook signature is missing or invalid.
 - `404` — unknown token (`{"error":"webhook not found"}`).
 - `413` — payload exceeded 256 KiB.
-- `429` — per-token rate limit exceeded (defaults to 60 req/min).
+- `429` — the high absolute IP ceiling was exceeded, or the IP accumulated too
+  many unknown-token/invalid-signature attempts. Responses include
+  `Retry-After`. Valid admitted deliveries are not rejected by the worker's
+  per-trigger budget; they remain queued until that budget is available.
 
 ### Self-hosted: configure your public URL
 

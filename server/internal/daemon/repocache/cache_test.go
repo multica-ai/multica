@@ -1,6 +1,8 @@
 package repocache
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -102,6 +104,16 @@ func TestGitEnvPreservesExistingConfig(t *testing.T) {
 	}
 	if !envHas("GIT_CONFIG_KEY_1=http.extraHeader") {
 		t.Error("existing GIT_CONFIG_KEY_1 was lost")
+	}
+}
+
+func TestRunGitOutputTimesOut(t *testing.T) {
+	_, err := runGitOutputWithTimeout(0, "--version")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("runGitOutputWithTimeout error = %v, want deadline exceeded", err)
+	}
+	if !strings.Contains(err.Error(), "timed out after 0s") {
+		t.Fatalf("runGitOutputWithTimeout error = %v, want timeout context", err)
 	}
 }
 
@@ -502,6 +514,192 @@ func TestCreateWorktree(t *testing.T) {
 	}
 }
 
+func TestCreateWorktreeWithIsolatedGitMetadata(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	baseRef := getRemoteDefaultBranch(barePath)
+	baseCommit := gitRefCommit(t, barePath, baseRef)
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Linux Codex",
+		TaskID:              "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		IsolatedGitMetadata: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	gitInfo, err := os.Stat(filepath.Join(result.Path, ".git"))
+	if err != nil || !gitInfo.IsDir() {
+		t.Fatalf("isolated checkout .git must be a directory, info=%v err=%v", gitInfo, err)
+	}
+	if !isIsolatedCheckout(result.Path) {
+		t.Fatal("isolated checkout marker missing")
+	}
+	if _, err := os.Stat(filepath.Join(result.Path, ".git", "objects", "info", "alternates")); !os.IsNotExist(err) {
+		t.Fatalf("isolated checkout must not depend on cache alternates, err=%v", err)
+	}
+
+	origin, err := runGitOutput("-C", result.Path, "remote", "get-url", "origin")
+	if err != nil {
+		t.Fatalf("get origin URL: %v", err)
+	}
+	if got := strings.TrimSpace(string(origin)); got != sourceRepo {
+		t.Fatalf("origin URL = %q, want %q", got, sourceRepo)
+	}
+	if got := gitHead(t, result.Path); got != baseCommit {
+		t.Fatalf("checkout HEAD = %s, want %s", got, baseCommit)
+	}
+	if err := runGit("-C", result.Path, "rev-parse", "--verify", baseRef); err != nil {
+		t.Fatalf("isolated checkout missing cache ref %s: %v", baseRef, err)
+	}
+	if err := runGit("-C", barePath, "show-ref", "--verify", "refs/heads/"+result.BranchName); err == nil {
+		t.Fatalf("isolated branch %s leaked into shared bare cache", result.BranchName)
+	}
+
+	if err := os.WriteFile(filepath.Join(result.Path, "isolated.txt"), []byte("writable\n"), 0o644); err != nil {
+		t.Fatalf("write isolated file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", "isolated.txt")
+	runGitAuthored(t, result.Path, "commit", "-m", "isolated commit")
+	if got := gitHead(t, result.Path); got == baseCommit {
+		t.Fatal("git commit did not advance isolated checkout")
+	}
+	if got := gitRefCommit(t, barePath, baseRef); got != baseCommit {
+		t.Fatalf("isolated commit mutated shared cache base: got %s, want %s", got, baseCommit)
+	}
+}
+
+func TestCreateWorktreeReusesIsolatedGitMetadata(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("initial sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	first, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Linux Codex",
+		TaskID:              "11111111-1111-1111-1111-111111111111",
+		IsolatedGitMetadata: true,
+	})
+	if err != nil {
+		t.Fatalf("first CreateWorktree failed: %v", err)
+	}
+	const userBranch = "feature/keep-me"
+	runGitAuthored(t, first.Path, "checkout", "-b", userBranch)
+	addEmptyCommit(t, first.Path, "unpublished feature work")
+	userCommit := gitHead(t, first.Path)
+
+	addEmptyCommit(t, sourceRepo, "upstream advance")
+	wantHead := gitHead(t, sourceRepo)
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("refresh sync failed: %v", err)
+	}
+
+	second, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Linux Codex",
+		TaskID:              "22222222-2222-2222-2222-222222222222",
+		IsolatedGitMetadata: true,
+	})
+	if err != nil {
+		t.Fatalf("second CreateWorktree failed: %v", err)
+	}
+	if second.Path != first.Path {
+		t.Fatalf("reused checkout path = %q, want %q", second.Path, first.Path)
+	}
+	if second.BranchName == first.BranchName {
+		t.Fatalf("reused checkout kept old branch %q", first.BranchName)
+	}
+	if got := gitHead(t, second.Path); got != wantHead {
+		t.Fatalf("reused checkout HEAD = %s, want refreshed upstream %s", got, wantHead)
+	}
+
+	// Reuse must not accumulate earlier tasks' agent/* branches, but it must
+	// preserve user-created branches and commits that may not exist remotely.
+	if err := runGit("-C", second.Path, "show-ref", "--verify", "refs/heads/"+first.BranchName); err == nil {
+		t.Fatalf("stale branch %s survived reuse", first.BranchName)
+	}
+	if got := gitRefCommit(t, second.Path, "refs/heads/"+userBranch); got != userCommit {
+		t.Fatalf("preserved user branch commit = %s, want %s", got, userCommit)
+	}
+	heads, err := runGitOutput("-C", second.Path, "for-each-ref", "--format=%(refname)", "refs/heads/")
+	if err != nil {
+		t.Fatalf("list local heads: %v", err)
+	}
+	wantHeads := "refs/heads/" + second.BranchName + "\nrefs/heads/" + userBranch
+	if got := strings.TrimSpace(string(heads)); got != wantHeads {
+		t.Fatalf("reused checkout local heads = %q, want %q", got, wantHeads)
+	}
+}
+
+func TestCreateWorktreeMigratesLinkedWorktreeToIsolatedMetadata(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	linked, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "Linux Codex",
+		TaskID:      "11111111-1111-1111-1111-111111111111",
+	})
+	if err != nil {
+		t.Fatalf("linked CreateWorktree failed: %v", err)
+	}
+	if !isGitWorktree(linked.Path) {
+		t.Fatal("test setup did not create a linked worktree")
+	}
+
+	isolated, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Linux Codex",
+		TaskID:              "22222222-2222-2222-2222-222222222222",
+		IsolatedGitMetadata: true,
+	})
+	if err != nil {
+		t.Fatalf("isolated CreateWorktree failed: %v", err)
+	}
+	if isolated.Path != linked.Path {
+		t.Fatalf("migrated checkout path = %q, want %q", isolated.Path, linked.Path)
+	}
+	if !isIsolatedCheckout(isolated.Path) {
+		t.Fatal("linked worktree was not migrated to isolated metadata")
+	}
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	out, err := runGitOutput("-C", barePath, "worktree", "list", "--porcelain")
+	if err != nil {
+		t.Fatalf("list cache worktrees: %v", err)
+	}
+	if strings.Contains(string(out), "worktree "+linked.Path+"\n") {
+		t.Fatalf("shared cache retained migrated worktree admin entry:\n%s", out)
+	}
+}
+
 func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
@@ -530,6 +728,44 @@ func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {
 	}
 	if strings.Contains(exclude, ".config/opencode") {
 		t.Fatalf("expected .git/info/exclude to not contain stale .config/opencode, got:\n%s", exclude)
+	}
+}
+
+// TestCreateWorktreeExcludesCodebuddySidecars is the regression guard for
+// PR #5224's review feedback: once the daemon started writing
+// .codebuddy/skills/ and CODEBUDDY.md into the task workdir (instead of
+// reusing Claude's .claude/CLAUDE.md, which were already excluded), the
+// repo-cache worktree needed the new CodeBuddy sidecar paths added to
+// .git/info/exclude too — otherwise these daemon-injected files show up in
+// `git status` and risk being committed by the agent.
+func TestCreateWorktreeExcludesCodebuddySidecars(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "CodeBuddy",
+		TaskID:      "codebuddy-exclude-test",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	exclude := gitInfoExclude(t, result.Path)
+	if !strings.Contains(exclude, ".codebuddy\n") {
+		t.Fatalf("expected .git/info/exclude to contain .codebuddy, got:\n%s", exclude)
+	}
+	if !strings.Contains(exclude, "CODEBUDDY.md\n") {
+		t.Fatalf("expected .git/info/exclude to contain CODEBUDDY.md, got:\n%s", exclude)
 	}
 }
 

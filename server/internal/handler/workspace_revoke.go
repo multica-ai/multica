@@ -112,6 +112,33 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		}
 	}
 
+	// channel_user_binding used to carry a member FK with ON DELETE CASCADE, so
+	// a removed member's IM bindings vanished automatically. MUL-3515 §4 dropped
+	// every channel_* foreign key, moving that integrity rule to the application
+	// layer: prune the bindings here, in the same tx as the member-row delete.
+	// The inbound path also re-checks membership (see ChannelStore.IsWorkspaceMember),
+	// but pruning stops a stale binding from lingering across a remove/re-add.
+	if err := qtx.DeleteChannelUserBindingsByWorkspaceMember(ctx, db.DeleteChannelUserBindingsByWorkspaceMemberParams{
+		WorkspaceID:   workspaceID,
+		MulticaUserID: userID,
+	}); err != nil {
+		return empty, err
+	}
+
+	// agent_invocation_target carries member-target grants with NO database FK
+	// (MUL-3963 keeps the new table FK-free, matching the MUL-3515 channel
+	// generalization). Prune this leaving member's grants in the same tx as the
+	// member-row delete so a re-invited user does not silently reclaim old
+	// invocation permission on agents that had allow-listed them. SCOPED to
+	// this workspace: the same user may belong to other workspaces, and
+	// removing them here must not touch their grants on agents elsewhere.
+	if err := qtx.DeleteAgentInvocationTargetsByMember(ctx, db.DeleteAgentInvocationTargetsByMemberParams{
+		WorkspaceID: workspaceID,
+		TargetID:    userID,
+	}); err != nil {
+		return empty, err
+	}
+
 	// Member row deletion lives inside the same tx so a successful revoke is
 	// never followed by a failed member-delete (which would leave the user
 	// still a member with a dead runtime), and a failed revoke never leaves

@@ -76,4 +76,29 @@ describe("task transcript timeline", () => {
     expect(items[0]?.content).not.toContain("abc123xyz");
     expect(items[0]?.content).not.toContain("def456");
   });
+
+  it("keeps the latest created_at when coalescing streaming fragments", () => {
+    const items = coalesceTimelineItems([
+      { seq: 1, type: "text", content: "hello ", created_at: "2026-06-09T09:00:00.000Z" },
+      { seq: 2, type: "text", content: "world", created_at: "2026-06-09T09:00:05.000Z" },
+    ]);
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        seq: 1,
+        type: "text",
+        content: "hello world",
+        created_at: "2026-06-09T09:00:05.000Z",
+      }),
+    ]);
+  });
+
+  it("falls back to the previous created_at when the merged fragment has none", () => {
+    const items = coalesceTimelineItems([
+      { seq: 1, type: "text", content: "hello ", created_at: "2026-06-09T09:00:00.000Z" },
+      { seq: 2, type: "text", content: "world" },
+    ]);
+
+    expect(items[0]?.created_at).toBe("2026-06-09T09:00:00.000Z");
+  });
 });

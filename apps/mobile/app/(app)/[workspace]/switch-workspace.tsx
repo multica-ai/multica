@@ -30,6 +30,7 @@ import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import type { Workspace } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
+import { WorkspaceAvatar } from "@/components/workspace/workspace-avatar";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
@@ -45,12 +46,12 @@ export default function SwitchWorkspaceRoute() {
   const onSelect = (ws: Workspace) => {
     if (ws.slug === activeSlug) return;
     Alert.alert(
-      "切换工作区",
-      `确定切换到 "${ws.name}"?`,
+      "Switch workspace",
+      `Switch to "${ws.name}"?`,
       [
-        { text: "取消", style: "cancel" },
+        { text: "Cancel", style: "cancel" },
         {
-          text: "切换",
+          text: "Switch",
           onPress: () => {
             router.dismiss();
             router.replace(`/${ws.slug}/inbox`);
@@ -64,7 +65,7 @@ export default function SwitchWorkspaceRoute() {
     <View className="flex-1">
       <View className="px-4 pt-4 pb-3">
         <Text className="text-base font-semibold text-foreground">
-          切换工作区
+          Switch workspace
         </Text>
       </View>
       {isLoading ? (
@@ -80,7 +81,6 @@ export default function SwitchWorkspaceRoute() {
               active={ws.slug === activeSlug}
               onPress={() => onSelect(ws)}
               iconTint={t.foreground}
-              mutedIconTint={t.mutedForeground}
             />
           ))}
         </ScrollView>
@@ -94,13 +94,11 @@ function WorkspaceRow({
   active,
   onPress,
   iconTint,
-  mutedIconTint,
 }: {
   workspace: Workspace;
   active: boolean;
   onPress: () => void;
   iconTint: string;
-  mutedIconTint: string;
 }) {
   return (
     <Pressable
@@ -108,18 +106,18 @@ function WorkspaceRow({
       disabled={active}
       accessibilityLabel={
         active
-          ? `${workspace.name}, 当前工作区`
-          : `切换到 ${workspace.name}`
+          ? `${workspace.name}, current workspace`
+          : `Switch to ${workspace.name}`
       }
       className={cn(
         "flex-row items-center gap-3 px-4 py-3 active:bg-secondary",
         active && "opacity-100",
       )}
     >
-      <ExpoImage
-        source="sf:building.2"
-        tintColor={active ? iconTint : mutedIconTint}
-        style={{ width: 18, height: 18 }}
+      <WorkspaceAvatar
+        name={workspace.name}
+        avatarUrl={workspace.avatar_url}
+        size={24}
       />
       <Text
         className={cn(

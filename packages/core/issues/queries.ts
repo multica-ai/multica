@@ -1,4 +1,9 @@
-import { keepPreviousData, queryOptions, type QueryClient } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  keepPreviousData,
+  queryOptions,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   GroupedIssuesResponse,
@@ -8,11 +13,18 @@ import type {
   ListIssuesParams,
   ListIssuesCache,
 } from "../types";
-import { BOARD_STATUSES } from "./config";
+import { ALL_STATUSES } from "./config";
 
 export interface IssueSortParam {
   sort_by?: ListIssuesParams["sort_by"];
   sort_direction?: ListIssuesParams["sort_direction"];
+  date_field?: ListIssuesParams["date_field"];
+  date_start?: ListIssuesParams["date_start"];
+  date_end?: ListIssuesParams["date_end"];
+  /** Server-side custom-property filter (definition id → accepted values).
+   *  Lives in the sort/window bag so every list surface, query key, and
+   *  load-more page carries it automatically. */
+  properties?: ListIssuesParams["properties"];
 }
 
 export const issueKeys = {
@@ -22,6 +34,19 @@ export const issueKeys = {
   /** FULL KEY for queryOptions — includes sort. */
   listSorted: (wsId: string, sort?: IssueSortParam) =>
     [...issueKeys.list(wsId), sort ?? {}] as const,
+  flatAll: (wsId: string) => [...issueKeys.all(wsId), "flat"] as const,
+  flat: (
+    wsId: string,
+    scope: string,
+    filter: IssueFlatFilter,
+    sort?: IssueSortParam,
+  ) => [...issueKeys.flatAll(wsId), scope, filter, sort ?? {}] as const,
+  flatExport: (
+    wsId: string,
+    scope: string,
+    filter: IssueFlatFilter,
+    sort?: IssueSortParam,
+  ) => [...issueKeys.flatAll(wsId), "export", scope, filter, sort ?? {}] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
@@ -54,6 +79,9 @@ export const issueKeys = {
     [...issueKeys.projectGanttAll(wsId), projectId] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
+  /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
+  identifier: (wsId: string, identifier: string) =>
+    [...issueKeys.all(wsId), "identifier", identifier] as const,
   children: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "children", id] as const,
   /** Prefix for invalidating all batched-children queries in a workspace. */
@@ -64,29 +92,80 @@ export const issueKeys = {
     [...issueKeys.childrenByParentsAll(wsId), parentIds] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
+  /** Prefix-match keys for invalidating the per-issue caches below across
+   *  all issues. These keys carry no wsId, so `issueKeys.all(wsId)` does NOT
+   *  cover them — WS reconnect recovery must invalidate these `*All`
+   *  prefixes explicitly, or missed events leave them stale forever under
+   *  the staleTime: Infinity default (#3953). */
+  timelineAll: () => ["issues", "timeline"] as const,
   /** Full-issue timeline (single TanStack Query, no cursor). */
   timeline: (issueId: string) =>
-    ["issues", "timeline", issueId] as const,
-  reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
+    [...issueKeys.timelineAll(), issueId] as const,
+  /** Prefix across all issues — WS task lifecycle events invalidate here so
+   *  an open composer's trigger preview refreshes when an agent's queue
+   *  state changes (the dedup guard makes the answer queue-dependent). */
+  commentTriggerPreviewAll: () => ["issues", "comment-trigger-preview"] as const,
+  /** PREFIX for invalidation — the composer hook appends parent + content signature. */
+  commentTriggerPreview: (issueId: string) =>
+    [...issueKeys.commentTriggerPreviewAll(), issueId] as const,
+  /** Prefix across all issue-trigger previews (assign/status/create/batch).
+   *  WS task lifecycle events invalidate here so the answer revalidates when an
+   *  agent's queue state changes (the status source's pending dedup makes it
+   *  queue-dependent, mirroring commentTriggerPreviewAll). */
+  issueTriggerPreviewAll: () => ["issues", "issue-trigger-preview"] as const,
+  /** PREFIX — the picker hook appends a signature of the prospective write. */
+  issueTriggerPreview: (signature: string) =>
+    [...issueKeys.issueTriggerPreviewAll(), signature] as const,
+  reactionsAll: () => ["issues", "reactions"] as const,
+  reactions: (issueId: string) =>
+    [...issueKeys.reactionsAll(), issueId] as const,
+  subscribersAll: () => ["issues", "subscribers"] as const,
   subscribers: (issueId: string) =>
-    ["issues", "subscribers", issueId] as const,
-  usage: (issueId: string) => ["issues", "usage", issueId] as const,
+    [...issueKeys.subscribersAll(), issueId] as const,
+  usageAll: () => ["issues", "usage"] as const,
+  usage: (issueId: string) => [...issueKeys.usageAll(), issueId] as const,
+  attachmentsAll: () => ["issues", "attachments"] as const,
   /** Issue-level attachments — used by the description editor so its
    *  inline file-card / image NodeViews can re-sign download URLs at
    *  click time. */
-  attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
-  /** Per-issue task list (issue-detail Execution log section). */
-  tasks: (issueId: string) => ["issues", "tasks", issueId] as const,
+  attachments: (issueId: string) =>
+    [...issueKeys.attachmentsAll(), issueId] as const,
   /** Prefix-match key for invalidating tasks across all issues — used by
    *  the global WS task: prefix path so any task lifecycle event refreshes
    *  every per-issue list, regardless of which issue is currently mounted. */
   tasksAll: () => ["issues", "tasks"] as const,
+  /** Per-issue task list (issue-detail Execution log section). */
+  tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
 };
 
 export type MyIssuesFilter = Pick<
   ListIssuesParams,
-  "assignee_id" | "assignee_ids" | "creator_id" | "project_id" | "involves_user_id"
+  | "assignee_id"
+  | "assignee_ids"
+  | "assignee_types"
+  | "creator_id"
+  | "project_id"
+  | "involves_user_id"
 >;
+
+/** Server-side contract for the flat table window. These facets must travel
+ * with every offset page (and live in the query key); post-filtering a loaded
+ * page can silently omit matching issues after the current offset. */
+export type IssueFlatFilter = MyIssuesFilter &
+  Pick<
+    ListIssuesParams,
+    | "q"
+    | "statuses"
+    | "priorities"
+    | "assignee_filters"
+    | "include_no_assignee"
+    | "creator_filters"
+    | "project_ids"
+    | "include_no_project"
+    | "label_ids"
+    | "top_level_only"
+    | "ids"
+  >;
 
 export type AssigneeGroupedIssuesFilter = Omit<
   ListGroupedIssuesParams,
@@ -95,9 +174,16 @@ export type AssigneeGroupedIssuesFilter = Omit<
 
 /** Page size per status column. */
 export const ISSUE_PAGE_SIZE = 50;
+export const ISSUE_FLAT_PAGE_SIZE = 100;
 
-/** Statuses the issues/my-issues pages paginate. Cancelled is intentionally excluded — it has never been surfaced in the list/board views. */
-export const PAGINATED_STATUSES: readonly IssueStatus[] = BOARD_STATUSES;
+/**
+ * Statuses fetched and paginated into the list/board cache — every lifecycle
+ * status, `cancelled` included. `cancelled` is a first-class default status
+ * (MUL-4290), so it lives in the cache and renders like any other column;
+ * there is no separate "visible board" subset. This constant governs
+ * fetch/cache membership.
+ */
+export const PAGINATED_STATUSES: readonly IssueStatus[] = ALL_STATUSES;
 
 /** Flatten a bucketed response to a single Issue[] for consumers that want the whole list. */
 export function flattenIssueBuckets(data: ListIssuesCache) {
@@ -142,6 +228,171 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortPara
  * total — pagination on the "All" scope is out of scope; the first
  * 50-per-status × 3 widening (deduped) is what the page renders.
  */
+const MERGE_PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 };
+const MERGE_STATUS_RANK: Record<string, number> = {
+  backlog: 0,
+  todo: 1,
+  in_progress: 2,
+  in_review: 3,
+  done: 4,
+  blocked: 5,
+  cancelled: 6,
+};
+
+/**
+ * Comparator mirroring the server's ORDER BY semantics (including
+ * `property:<id>` sorts and missing-values-last). The merged "All" scope
+ * concatenates three independently-ordered queries, so without a re-sort the
+ * relation order (assigned → created → involves) would override the sort the
+ * user picked — e.g. assigned=9 rendering before created=1 (review round 3).
+ */
+export function compareIssuesForSort(a: Issue, b: Issue, sort?: IssueSortParam): number {
+  const by = sort?.sort_by ?? "position";
+  const dir = by !== "position" && sort?.sort_direction === "desc" ? -1 : 1;
+  // created_at DESC then id DESC, mirroring the server's unique ORDER BY
+  // suffix — ids disambiguate bulk-created issues that share a timestamp.
+  const tieBreak = () =>
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime() ||
+    (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+
+  const missingAware = (av: string | null, bv: string | null): number => {
+    if (!av && !bv) return tieBreak();
+    if (!av) return 1;
+    if (!bv) return -1;
+    return dir * av.localeCompare(bv) || tieBreak();
+  };
+
+  if (by.startsWith("property:")) {
+    const propertyId = by.slice("property:".length);
+    const av = a.properties?.[propertyId];
+    const bv = b.properties?.[propertyId];
+    const aMissing = av === undefined || Array.isArray(av) || typeof av === "boolean";
+    const bMissing = bv === undefined || Array.isArray(bv) || typeof bv === "boolean";
+    if (aMissing && bMissing) return tieBreak();
+    if (aMissing) return 1;
+    if (bMissing) return -1;
+    if (typeof av === "number" && typeof bv === "number") return dir * (av - bv) || tieBreak();
+    return dir * String(av).localeCompare(String(bv)) || tieBreak();
+  }
+  switch (by) {
+    case "status":
+      return dir * ((MERGE_STATUS_RANK[a.status] ?? 9) - (MERGE_STATUS_RANK[b.status] ?? 9)) || tieBreak();
+    case "priority":
+      return dir * ((MERGE_PRIORITY_RANK[a.priority] ?? 9) - (MERGE_PRIORITY_RANK[b.priority] ?? 9)) || tieBreak();
+    case "title":
+      return dir * a.title.localeCompare(b.title) || tieBreak();
+    case "created_at":
+      return dir * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) || tieBreak();
+    case "updated_at":
+      return dir * (new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()) || tieBreak();
+    case "start_date":
+      return missingAware(a.start_date, b.start_date);
+    case "due_date":
+      return missingAware(a.due_date, b.due_date);
+    case "position":
+    default:
+      return a.position - b.position || tieBreak();
+  }
+}
+
+async function fetchAllFlatPages(
+  filter: IssueFlatFilter,
+  sort?: IssueSortParam,
+): Promise<Issue[]> {
+  const issues: Issue[] = [];
+  const seenIds = new Set<string>();
+  let offset = 0;
+  while (true) {
+    const response = await api.listIssues({
+      ...filter,
+      ...sort,
+      limit: ISSUE_FLAT_PAGE_SIZE,
+      offset,
+    });
+    let added = 0;
+    for (const issue of response.issues) {
+      if (seenIds.has(issue.id)) continue;
+      seenIds.add(issue.id);
+      issues.push(issue);
+      added += 1;
+    }
+    if (issues.length >= response.total) break;
+    if (response.issues.length === 0 || added === 0) {
+      throw new Error("Issue export pagination did not advance");
+    }
+    // Advance by what the server actually returned. This guarantees progress
+    // even if an older server clamps the requested page size differently.
+    offset += response.issues.length;
+  }
+  return issues;
+}
+
+async function fetchAllMyFlatIssues(
+  userId: string,
+  filter: IssueFlatFilter,
+  sort?: IssueSortParam,
+): Promise<Issue[]> {
+  const relations = await Promise.all([
+    fetchAllFlatPages({ ...filter, assignee_id: userId }, sort),
+    fetchAllFlatPages({ ...filter, creator_id: userId }, sort),
+    fetchAllFlatPages({ ...filter, involves_user_id: userId }, sort),
+  ]);
+  const byId = new Map<string, Issue>();
+  for (const issues of relations) {
+    for (const issue of issues) byId.set(issue.id, issue);
+  }
+  return [...byId.values()].sort((a, b) => compareIssuesForSort(a, b, sort));
+}
+
+export function issueFlatListOptions(
+  wsId: string,
+  scope: string,
+  filter: IssueFlatFilter,
+  userId?: string,
+  sort?: IssueSortParam,
+) {
+  const allMyIssues = scope === "all" && !!userId;
+  return infiniteQueryOptions({
+    queryKey: issueKeys.flat(wsId, scope, filter, sort),
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      if (allMyIssues) {
+        const issues = await fetchAllMyFlatIssues(userId, filter, sort);
+        return { issues, total: issues.length };
+      }
+      return api.listIssues({
+        ...filter,
+        ...sort,
+        limit: ISSUE_FLAT_PAGE_SIZE,
+        offset: pageParam,
+      });
+    },
+    getNextPageParam: (lastPage, allPages) => {
+      if (allMyIssues) return undefined;
+      const loaded = allPages.reduce((count, page) => count + page.issues.length, 0);
+      return loaded < lastPage.total ? loaded : undefined;
+    },
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function issueFlatExportOptions(
+  wsId: string,
+  scope: string,
+  filter: IssueFlatFilter,
+  userId?: string,
+  sort?: IssueSortParam,
+) {
+  return queryOptions({
+    queryKey: issueKeys.flatExport(wsId, scope, filter, sort),
+    queryFn: () =>
+      scope === "all" && userId
+        ? fetchAllMyFlatIssues(userId, filter, sort)
+        : fetchAllFlatPages(filter, sort),
+    staleTime: 0,
+  });
+}
+
 async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Promise<ListIssuesCache> {
   const [byAssignee, byCreator, byInvolves] = await Promise.all([
     fetchFirstPages({ assignee_id: userId }, sort),
@@ -161,6 +412,7 @@ async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Prom
         merged.push(issue);
       }
     }
+    merged.sort((a, b) => compareIssuesForSort(a, b, sort));
     byStatus[status] = { issues: merged, total: merged.length };
   }
   return { byStatus };
@@ -218,7 +470,11 @@ async function fetchAllMyAssigneeGroups(
       existing.total = existing.issues.length;
     }
   }
-  return { groups: [...merged.values()] };
+  const groups = [...merged.values()];
+  for (const group of groups) {
+    group.issues.sort((a, b) => compareIssuesForSort(a, b, sort));
+  }
+  return { groups };
 }
 
 /**
@@ -366,6 +622,37 @@ export function issueDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.detail(wsId, id),
     queryFn: () => api.getIssue(id),
+  });
+}
+
+/**
+ * Resolve a bare issue identifier ("MUL-123") to its issue, or `null`.
+ *
+ * Backs the Linear-style autolink: the backend `q` search matches an
+ * identifier on issue NUMBER only (prefix-agnostic — `MUL-123` and `TES-123`
+ * both hit number 123), so the exact `identifier === value` filter here is
+ * what enforces the workspace prefix. A non-existent or wrong-prefix
+ * identifier resolves to `null` and renders as plain text.
+ *
+ * Server state → TanStack Query; the key includes `wsId` and the identifier,
+ * so identical identifiers across the app share one request. Caller gates
+ * `enabled` (identifier shape + workspace prefix).
+ */
+export function issueIdentifierOptions(wsId: string, identifier: string) {
+  return queryOptions({
+    queryKey: issueKeys.identifier(wsId, identifier),
+    queryFn: async ({ signal }) => {
+      const res = await api.searchIssues({
+        q: identifier,
+        limit: 10,
+        include_closed: true,
+        signal,
+      });
+      return res.issues.find((i) => i.identifier === identifier) ?? null;
+    },
+    // Identifier→issue mapping is effectively immutable; avoid refetch churn
+    // when the same key renders across many comments/messages.
+    staleTime: 5 * 60_000,
   });
 }
 

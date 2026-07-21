@@ -43,16 +43,74 @@ type WorkspaceDiskUsage struct {
 // fields always reflect the entire scan, never the post-`--top` truncated
 // view — consumers that need the displayed subtotals can sum the slice.
 type DiskUsageReport struct {
-	WorkspacesRoot         string               `json:"workspaces_root"`
-	GeneratedAt            time.Time            `json:"generated_at"`
-	ArtifactPatterns       []string             `json:"artifact_patterns"`
-	Tasks                  []TaskDiskUsage      `json:"tasks"`
-	Workspaces             []WorkspaceDiskUsage `json:"workspaces"`
-	TotalTaskCount         int                  `json:"total_task_count"`
-	TotalWorkspaceCount    int                  `json:"total_workspace_count"`
-	TotalSizeBytes         int64                `json:"total_size_bytes"`
-	TotalArtifactSizeBytes int64                `json:"total_artifact_size_bytes"`
-	TotalArtifactRatio     float64              `json:"total_artifact_ratio"`
+	WorkspacesRoot          string               `json:"workspaces_root"`
+	GeneratedAt             time.Time            `json:"generated_at"`
+	ArtifactPatterns        []string             `json:"artifact_patterns"`
+	ManagedArtifactSubpaths []string             `json:"managed_artifact_subpaths"`
+	Tasks                   []TaskDiskUsage      `json:"tasks"`
+	Workspaces              []WorkspaceDiskUsage `json:"workspaces"`
+	TotalTaskCount          int                  `json:"total_task_count"`
+	TotalWorkspaceCount     int                  `json:"total_workspace_count"`
+	TotalSizeBytes          int64                `json:"total_size_bytes"`
+	TotalArtifactSizeBytes  int64                `json:"total_artifact_size_bytes"`
+	TotalArtifactRatio      float64              `json:"total_artifact_ratio"`
+}
+
+// DiskUsageRoot pairs a workspaces root with the profile it was derived from
+// ("" = the default root). ScanDiskUsageRoots scans each one and labels its
+// report with the profile so the cross-root view can attribute footprint back
+// to a profile (e.g. the Desktop app's `desktop-<host>` root).
+type DiskUsageRoot struct {
+	Profile string
+	Root    string
+}
+
+// RootDiskUsage is one root's report inside an AggregateDiskUsageReport.
+type RootDiskUsage struct {
+	Profile string          `json:"profile"`
+	Report  DiskUsageReport `json:"report"`
+}
+
+// AggregateDiskUsageReport is the result of scanning several workspace roots in
+// one pass. Total* fields are the grand totals across every root's full scan
+// (never the post-`--top` truncated view) so the combined footprint stays
+// accurate even when each root's table is trimmed for display.
+type AggregateDiskUsageReport struct {
+	GeneratedAt             time.Time       `json:"generated_at"`
+	ArtifactPatterns        []string        `json:"artifact_patterns"`
+	ManagedArtifactSubpaths []string        `json:"managed_artifact_subpaths"`
+	Roots                   []RootDiskUsage `json:"roots"`
+	TotalTaskCount          int             `json:"total_task_count"`
+	TotalWorkspaceCount     int             `json:"total_workspace_count"`
+	TotalSizeBytes          int64           `json:"total_size_bytes"`
+	TotalArtifactSizeBytes  int64           `json:"total_artifact_size_bytes"`
+	TotalArtifactRatio      float64         `json:"total_artifact_ratio"`
+}
+
+// ScanDiskUsageRoots scans every root in order and returns the combined report.
+// It reuses ScanDiskUsage per root — a missing root yields an empty per-root
+// report (not an error), matching the single-root command, so a never-used
+// profile root simply contributes zero. A genuinely unreadable root (e.g. a
+// permission error on the root directory itself) aborts the whole scan.
+func ScanDiskUsageRoots(roots []DiskUsageRoot, artifactPatterns []string) (AggregateDiskUsageReport, error) {
+	agg := AggregateDiskUsageReport{GeneratedAt: time.Now().UTC()}
+	matcher := newArtifactMatcher(artifactPatterns, execenv.ManagedReclaimableArtifactSubpaths())
+	agg.ArtifactPatterns = sortedKeys(matcher.basenames)
+	agg.ManagedArtifactSubpaths = matcher.managedSubpaths()
+
+	for _, r := range roots {
+		report, err := ScanDiskUsage(r.Root, artifactPatterns)
+		if err != nil {
+			return agg, err
+		}
+		agg.Roots = append(agg.Roots, RootDiskUsage{Profile: r.Profile, Report: report})
+		agg.TotalTaskCount += report.TotalTaskCount
+		agg.TotalWorkspaceCount += report.TotalWorkspaceCount
+		agg.TotalSizeBytes += report.TotalSizeBytes
+		agg.TotalArtifactSizeBytes += report.TotalArtifactSizeBytes
+	}
+	agg.TotalArtifactRatio = ratio(agg.TotalArtifactSizeBytes, agg.TotalSizeBytes)
+	return agg, nil
 }
 
 // DiskUsageKindUnknown is the kind reported for task directories whose
@@ -64,8 +122,9 @@ const DiskUsageKindUnknown = "unknown"
 // walk is read-only and follows the same safety contract as the GC artifact
 // cleaner: it never enters .git, never follows symlinks, and counts only
 // regular files. artifactPatterns is filtered through the basename-only check
-// used by cleanTaskArtifacts so the reported "artifact" footprint matches the
-// bytes the GC would actually reclaim. Missing roots return an empty report
+// used by cleanTaskArtifacts, and exact daemon-managed artifact paths are
+// included, so the reported "artifact" footprint matches the bytes the GC
+// would actually reclaim. Missing roots return an empty report
 // (not an error) — a daemon that's never run yet has no directory to walk.
 func ScanDiskUsage(workspacesRoot string, artifactPatterns []string) (DiskUsageReport, error) {
 	report := DiskUsageReport{
@@ -77,8 +136,9 @@ func ScanDiskUsage(workspacesRoot string, artifactPatterns []string) (DiskUsageR
 		return report, fmt.Errorf("disk-usage: workspaces root is required")
 	}
 
-	patternSet := buildPatternSet(artifactPatterns)
-	report.ArtifactPatterns = sortedKeys(patternSet)
+	matcher := newArtifactMatcher(artifactPatterns, execenv.ManagedReclaimableArtifactSubpaths())
+	report.ArtifactPatterns = sortedKeys(matcher.basenames)
+	report.ManagedArtifactSubpaths = matcher.managedSubpaths()
 
 	wsEntries, err := os.ReadDir(workspacesRoot)
 	if err != nil {
@@ -108,7 +168,7 @@ func ScanDiskUsage(workspacesRoot string, artifactPatterns []string) (DiskUsageR
 				continue
 			}
 			taskDir := filepath.Join(wsDir, t.Name())
-			usage := buildTaskUsage(taskDir, wsID, t.Name(), patternSet)
+			usage := buildTaskUsage(taskDir, wsID, t.Name(), matcher)
 
 			report.Tasks = append(report.Tasks, usage)
 			report.TotalSizeBytes += usage.SizeBytes
@@ -182,7 +242,7 @@ func sortedKeys(set map[string]struct{}) []string {
 	return out
 }
 
-func buildTaskUsage(taskDir, wsID, taskShort string, patternSet map[string]struct{}) TaskDiskUsage {
+func buildTaskUsage(taskDir, wsID, taskShort string, matcher artifactMatcher) TaskDiskUsage {
 	usage := TaskDiskUsage{
 		WorkspaceID:    wsID,
 		WorkspaceShort: ShortID(wsID),
@@ -191,31 +251,36 @@ func buildTaskUsage(taskDir, wsID, taskShort string, patternSet map[string]struc
 		Kind:           DiskUsageKindUnknown,
 	}
 
+	metaPresent := false
 	if meta, err := execenv.ReadGCMeta(taskDir); err == nil && meta != nil {
+		metaPresent = true
 		usage.Kind = string(meta.Kind)
 		if !meta.CompletedAt.IsZero() {
 			usage.AgeSeconds = int64(time.Since(meta.CompletedAt).Seconds())
+		} else if age, ok := gcMetaFileAge(taskDir); ok {
+			usage.AgeSeconds = int64(age.Seconds())
 		}
 	}
-	// Fall back to mtime when meta is missing or didn't carry a completed_at.
-	// Matches the orphanByMTime path the GC loop takes for the same case.
-	if usage.AgeSeconds <= 0 {
+	// With no readable metadata, use taskDir mtime just like orphanByMTime.
+	// Legacy readable metadata without completed_at uses its own file mtime,
+	// matching gcDecisionIssueResult's managed-only fallback.
+	if usage.AgeSeconds <= 0 && !metaPresent {
 		if info, err := os.Stat(taskDir); err == nil {
 			usage.AgeSeconds = int64(time.Since(info.ModTime()).Seconds())
 		}
 	}
 
-	usage.SizeBytes, usage.ArtifactSizeBytes = taskSize(taskDir, patternSet)
+	usage.SizeBytes, usage.ArtifactSizeBytes = taskSize(taskDir, matcher)
 	return usage
 }
 
 // taskSize walks taskDir and returns (totalBytes, artifactBytes). Both honor
 // the GC safety contract: never descends into .git, never follows symlinks,
-// counts only regular files. A directory whose basename matches patternSet
-// is treated as an artifact subtree — its size is added to both totals and
-// the walk does not descend further so the size matches what os.RemoveAll
-// would reclaim if the GC ran cleanTaskArtifacts on it.
-func taskSize(taskDir string, patternSet map[string]struct{}) (totalBytes int64, artifactBytes int64) {
+// counts only regular files. A directory matched by matcher is treated as an
+// artifact subtree — its size is added to both totals and the walk does not
+// descend further so the size matches what os.RemoveAll would reclaim if the
+// GC ran cleanTaskArtifacts on it.
+func taskSize(taskDir string, matcher artifactMatcher) (totalBytes int64, artifactBytes int64) {
 	if taskDir == "" {
 		return
 	}
@@ -242,11 +307,7 @@ func taskSize(taskDir string, patternSet map[string]struct{}) (totalBytes int64,
 			if entry.Name() == ".git" {
 				return filepath.SkipDir
 			}
-			if _, ok := patternSet[entry.Name()]; ok {
-				rel, relErr := filepath.Rel(absRoot, path)
-				if relErr != nil || rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
-					return filepath.SkipDir
-				}
+			if _, ok := matcher.matchDirectory(absRoot, path, entry); ok {
 				size := dirSize(path)
 				totalBytes += size
 				artifactBytes += size

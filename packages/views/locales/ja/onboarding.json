@@ -40,7 +40,14 @@
     "back": "戻る",
     "continue": "続ける",
     "skip": "スキップ",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "close": "閉じる"
+  },
+  "source_backfill": {
+    "eyebrow": "ちょっと質問",
+    "lede": "登録時にお答えいただかなかった項目です。Multica がどんな方に役立っているかを把握するのに役立ちます。一問だけ、終わればすぐ作業に戻れます。",
+    "submit": "送信",
+    "hint_ready": "OK です。準備ができたら送信を押してください。"
   },
   "questions": {
     "eyebrow_about_you": "あなたについて",

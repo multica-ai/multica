@@ -73,6 +73,14 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 	}
 }
 
+// ListArchivedInboxItemsRow carries the same columns as ListInboxItemsRow (both
+// queries select `inbox_item.*` plus the joined issue status), so the archived
+// row converts to the active one and reuses its mapper. If either query's
+// column list drifts, this conversion stops compiling — which is the point.
+func archivedInboxRowToResponse(r db.ListArchivedInboxItemsRow) InboxItemResponse {
+	return inboxRowToResponse(db.ListInboxItemsRow(r))
+}
+
 func (h *Handler) enrichInboxResponse(ctx context.Context, resp InboxItemResponse, issueID pgtype.UUID) InboxItemResponse {
 	if !issueID.Valid {
 		return resp
@@ -109,6 +117,43 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	resp := make([]InboxItemResponse, len(items))
 	for i, item := range items {
 		resp[i] = inboxRowToResponse(item)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ListArchivedInbox returns the recipient's archived notifications, backing the
+// inbox's "Archived" sub-view. Kept as its own endpoint rather than a flag on
+// ListInbox so installed clients keep their current contract, and so the
+// unbounded archive never rides along with the main list.
+//
+// The query drops any issue that also has an active row, keeping this list and
+// the main inbox mutually exclusive per issue group, and caps the response at
+// 200 rows — see the query comment for both.
+func (h *Handler) ListArchivedInbox(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
+	items, err := h.Queries.ListArchivedInboxItems(r.Context(), db.ListArchivedInboxItemsParams{
+		WorkspaceID:   wsUUID,
+		RecipientType: "member",
+		RecipientID:   parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list archived inbox")
+		return
+	}
+
+	resp := make([]InboxItemResponse, len(items))
+	for i, item := range items {
+		resp[i] = archivedInboxRowToResponse(item)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -171,6 +216,48 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// UnarchiveInboxItem restores an archived notification to the main inbox. It is
+// the inverse of ArchiveInboxItem and mirrors its issue-level scope: archiving
+// one item archives every sibling for the same issue, so restoring brings the
+// whole group back.
+//
+// `read` is untouched on purpose. An item archived while unread comes back
+// unread, which raises the unread badge again — the badge only ever counted
+// non-archived items, so restoring one is a real addition, not a bug.
+func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	prev, ok := h.loadInboxItemForUser(w, r, id)
+	if !ok {
+		return
+	}
+	item, err := h.Queries.UnarchiveInboxItem(r.Context(), prev.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to unarchive")
+		return
+	}
+
+	// Restore all sibling inbox items for the same issue (issue-level restore).
+	if item.IssueID.Valid {
+		h.Queries.UnarchiveInboxByIssue(r.Context(), db.UnarchiveInboxByIssueParams{
+			WorkspaceID:   item.WorkspaceID,
+			RecipientType: item.RecipientType,
+			RecipientID:   item.RecipientID,
+			IssueID:       item.IssueID,
+		})
+	}
+
+	userID := requestUserID(r)
+	workspaceID := uuidToString(item.WorkspaceID)
+	h.publish(protocol.EventInboxUnarchived, workspaceID, "member", userID, map[string]any{
+		"item_id":      uuidToString(item.ID),
+		"issue_id":     uuidToPtr(item.IssueID),
+		"recipient_id": uuidToString(item.RecipientID),
+	})
+
+	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -193,6 +280,42 @@ func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]int64{"count": count})
+}
+
+// InboxWorkspaceUnreadResponse is one workspace's unread inbox count in the
+// cross-workspace summary.
+type InboxWorkspaceUnreadResponse struct {
+	WorkspaceID string `json:"workspace_id"`
+	Count       int64  `json:"count"`
+}
+
+// UnreadInboxSummary returns per-workspace unread inbox counts across every
+// workspace the user belongs to. The sidebar uses it to light a dot on the
+// workspace switcher when a workspace OTHER than the active one has unread
+// items, without fetching each workspace's full inbox list. It is
+// account-level by nature: it ignores the active workspace and keys only on
+// the authenticated user.
+func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	rows, err := h.Queries.CountUnreadInboxByWorkspace(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to summarize unread inbox")
+		return
+	}
+
+	resp := make([]InboxWorkspaceUnreadResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = InboxWorkspaceUnreadResponse{
+			WorkspaceID: uuidToString(row.WorkspaceID),
+			Count:       row.Count,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {

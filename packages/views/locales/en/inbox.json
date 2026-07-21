@@ -18,17 +18,22 @@
       "minutes": "{{count}}m",
       "hours": "{{count}}h",
       "days": "{{count}}d"
-    }
+    },
+    "archived_title": "Archived",
+    "archived_empty": "No archived notifications",
+    "unarchive_tooltip": "Unarchive"
   },
   "detail": {
     "select_prompt": "Select a notification to view details",
     "empty": "Your inbox is empty",
     "original_input": "Original input",
     "edit_advanced": "Edit as advanced form",
-    "archive": "Archive"
+    "archive": "Archive",
+    "unarchive": "Unarchive"
   },
   "types": {
     "issue_assigned": "Assigned",
+    "issue_subscribed": "Subscribed",
     "unassigned": "Unassigned",
     "assignee_changed": "Assignee changed",
     "status_changed": "Status changed",
@@ -66,6 +71,8 @@
     "mark_all_read_failed": "Failed to mark all as read",
     "archive_all_failed": "Failed to archive all",
     "archive_all_read_failed": "Failed to archive read items",
-    "archive_completed_failed": "Failed to archive completed"
+    "archive_completed_failed": "Failed to archive completed",
+    "unarchive_failed": "Failed to unarchive",
+    "archived_load_failed": "Failed to load archived notifications"
   }
 }

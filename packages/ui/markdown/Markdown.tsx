@@ -1,8 +1,8 @@
 import * as React from 'react'
-import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
+import rehypeSanitize from 'rehype-sanitize'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -12,7 +12,9 @@ import { CODE_LIGATURE_CLASS } from '@multica/ui/lib/code-style'
 import { CodeBlock, InlineCode } from './CodeBlock'
 import { isAllowedFileCardHref, preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
+import { preprocessIssueIdentifiers } from './issue-identifiers'
 import { preprocessMentionShortcodes } from './mentions'
+import { markdownSanitizeSchema, markdownUrlTransform } from './sanitize'
 import 'katex/dist/katex.min.css'
 import './markdown.css'
 
@@ -75,46 +77,16 @@ export interface MarkdownProps {
    * the views-package `<Attachment>` component.
    */
   renderFileCard?: (props: { href: string; filename: string }) => React.ReactNode
+  /**
+   * When true, bare issue identifiers (e.g. `MUL-123`, `TES-1`) are rewritten
+   * to `mention://issue/<identifier>` links so `renderMention` can resolve them
+   * to a navigable issue chip. Off by default — enable only on surfaces whose
+   * `renderMention` knows how to resolve an identifier (see the app wrapper in
+   * packages/views/common/markdown.tsx). Detection is markdown-aware: code,
+   * existing links, URLs, and file/path tokens are skipped.
+   */
+  autolinkIssueIdentifiers?: boolean
 }
-
-// Sanitization schema — extends GitHub defaults to allow code highlighting classes
-// and the mention:// protocol used for @mentions.
-const sanitizeSchema = {
-  ...defaultSchema,
-  protocols: {
-    ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), 'mention'],
-  },
-  attributes: {
-    ...defaultSchema.attributes,
-    div: [
-      ...(defaultSchema.attributes?.div ?? []),
-      'dataType',
-      'dataHref',
-      'dataFilename',
-    ],
-    code: [
-      ...(defaultSchema.attributes?.code ?? []),
-      ['className', /^language-/],
-      ['className', /^math-/],
-      ['className', /^hljs/],
-    ],
-    img: [
-      ...(defaultSchema.attributes?.img ?? []),
-      'alt',
-    ],
-  },
-}
-
-/**
- * Custom URL transform that allows mention:// protocol (used for @mentions)
- * while keeping the default security for all other URLs.
- */
-function urlTransform(url: string): string {
-  if (url.startsWith('mention://')) return url
-  return defaultUrlTransform(url)
-}
-
 
 // File path detection regex - matches paths starting with /, ~/, or ./
 const FILE_PATH_REGEX =
@@ -178,9 +150,9 @@ function createComponents(
     },
     // Links: Make clickable with callbacks, or render as mention
     a: ({ href, children }) => {
-      // Mention links: mention://member/id, mention://agent/id, mention://issue/id, mention://all/all
+      // Mention links: mention://member/id, mention://agent/id, mention://issue/id, mention://project/id, mention://all/all
       if (href?.startsWith('mention://')) {
-        const mentionMatch = href.match(/^mention:\/\/(member|agent|issue|all)\/(.+)$/)
+        const mentionMatch = href.match(/^mention:\/\/(member|agent|issue|project|all)\/(.+)$/)
         if (mentionMatch?.[1] && mentionMatch[2]) {
           const type = mentionMatch[1]
           const id = mentionMatch[2]
@@ -202,6 +174,14 @@ function createComponents(
         }
         return (
           <span className="text-primary font-semibold mx-0.5">
+            {children}
+          </span>
+        )
+      }
+
+      if (href?.startsWith('slash://skill/')) {
+        return (
+          <span className="slash-command text-primary font-semibold mx-0.5">
             {children}
           </span>
         )
@@ -415,30 +395,39 @@ export function Markdown({
   renderMention,
   renderImage,
   renderFileCard,
-  cdnDomain
+  cdnDomain,
+  autolinkIssueIdentifiers
 }: MarkdownProps): React.JSX.Element {
   const components = React.useMemo(
     () => createComponents(mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard),
     [mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard]
   )
 
-  // Preprocess: convert mention shortcodes, raw URLs, and file cards to renderable content
+  // Preprocess: convert mention shortcodes, bare issue identifiers, raw URLs,
+  // and file cards to renderable content. Issue-identifier autolinking runs
+  // BEFORE linkify/file-card so those passes treat the rewritten spans as
+  // existing markdown links and skip them.
   const processedContent = React.useMemo(
     () => {
       let result = preprocessMentionShortcodes(children)
+      if (autolinkIssueIdentifiers) result = preprocessIssueIdentifiers(result)
       result = preprocessLinks(result)
       result = preprocessFileCards(result, cdnDomain ?? '')
       return result
     },
-    [children, cdnDomain]
+    [children, cdnDomain, autolinkIssueIdentifiers]
   )
 
   return (
     <div className={cn('markdown-content break-words', className)}>
       <ReactMarkdown
-        remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
-        urlTransform={urlTransform}
+        remarkPlugins={[
+          [remarkMath, { singleDollarTextMath: false }],
+          remarkBreaks,
+          [remarkGfm, { singleTilde: false }],
+        ]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSanitizeSchema], rehypeKatex]}
+        urlTransform={markdownUrlTransform}
         components={components}
       >
         {processedContent}

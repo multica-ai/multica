@@ -17,8 +17,10 @@
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useIssueLinkStore } from "@multica/core/issues/stores";
 import { useNavigation } from "../../navigation";
 import { IssueChip } from "../../issues/components/issue-chip";
+import { ProjectChip } from "../../projects/components/project-chip";
 
 export function MentionView({ node }: NodeViewProps) {
   const { type, id, label } = node.attrs;
@@ -31,10 +33,50 @@ export function MentionView({ node }: NodeViewProps) {
     );
   }
 
+  if (type === "project") {
+    return (
+      <NodeViewWrapper as="span" className="inline">
+        <ProjectMention projectId={id} fallbackLabel={label} />
+      </NodeViewWrapper>
+    );
+  }
+
   return (
     <NodeViewWrapper as="span" className="inline">
       <span className="mention">@{label ?? id}</span>
     </NodeViewWrapper>
+  );
+}
+
+function ProjectMention({
+  projectId,
+  fallbackLabel,
+}: {
+  projectId: string;
+  fallbackLabel?: string;
+}) {
+  const p = useWorkspacePaths();
+  const { push, openInNewTab } = useNavigation();
+  const projectPath = p.projectDetail(projectId);
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.metaKey || e.ctrlKey || e.shiftKey) {
+      if (openInNewTab) openInNewTab(projectPath, fallbackLabel);
+      return;
+    }
+    push(projectPath);
+  };
+
+  return (
+    <a href={projectPath} onClick={handleClick} className="project-mention">
+      <ProjectChip
+        projectId={projectId}
+        fallbackLabel={fallbackLabel}
+        className="cursor-pointer hover:bg-accent transition-colors"
+      />
+    </a>
   );
 }
 
@@ -47,20 +89,39 @@ function IssueMention({
 }) {
   const p = useWorkspacePaths();
   const { push, openInNewTab } = useNavigation();
+  const newTabPreferred = useIssueLinkStore((s) => s.openInNewTab);
   const issuePath = p.issueDetail(issueId);
 
   const handleClick = (e: React.MouseEvent) => {
-    e.preventDefault();
     e.stopPropagation();
     if (e.metaKey || e.ctrlKey || e.shiftKey) {
-      if (openInNewTab) openInNewTab(issuePath, fallbackLabel);
+      if (openInNewTab) {
+        e.preventDefault();
+        openInNewTab(issuePath, fallbackLabel);
+      }
+      // Web: no adapter — native modifier-click on the anchor opens a tab.
       return;
     }
+    if (newTabPreferred) {
+      if (openInNewTab) {
+        e.preventDefault();
+        openInNewTab(issuePath, fallbackLabel, { activate: true });
+      }
+      // Web: native target="_blank" opens a browser tab.
+      return;
+    }
+    e.preventDefault();
     push(issuePath);
   };
 
   return (
-    <a href={issuePath} onClick={handleClick} className="issue-mention inline-flex">
+    <a
+      href={issuePath}
+      target={newTabPreferred ? "_blank" : undefined}
+      rel={newTabPreferred ? "noopener noreferrer" : undefined}
+      onClick={handleClick}
+      className="issue-mention"
+    >
       <IssueChip
         issueId={issueId}
         fallbackLabel={fallbackLabel}

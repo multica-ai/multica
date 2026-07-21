@@ -4,8 +4,10 @@
     "italic": "斜体",
     "strikethrough": "删除线",
     "code": "代码",
+    "highlight": "高亮",
     "link": "链接",
     "list": "列表",
+    "task_list": "任务列表",
     "quote": "引用",
     "url_aria_label": "URL",
     "heading_dropdown": {
@@ -17,7 +19,8 @@
     },
     "list_dropdown": {
       "bullet_list": "无序列表",
-      "ordered_list": "有序列表"
+      "ordered_list": "有序列表",
+      "task_list": "任务列表"
     },
     "sub_issue": {
       "tooltip": "用选中内容创建子 issue",
@@ -55,7 +58,17 @@
     "group_issues": "Issues",
     "all_members": "所有成员",
     "searching": "搜索中...",
-    "no_results": "无结果"
+    "no_results": "无结果",
+    "group_current": "当前页面",
+    "group_recent": "最近浏览",
+    "group_search": "搜索结果"
+  },
+  "slash_command": {
+    "no_skills_configured": "暂无配置的技能",
+    "no_results": "没有匹配的技能",
+    "commands": {
+      "note": "添加备注 — 不触发任何 Agent"
+    }
   },
   "code_block": {
     "copy_code": "复制代码",
@@ -66,11 +79,31 @@
   "file_card": {
     "uploading": "正在上传 {{filename}}"
   },
+  "upload": {
+    "failed": "{{filename}} 上传失败：{{reason}}",
+    "in_progress": "上传中…"
+  },
   "title_editor": {
     "title_aria_label": "标题"
   },
   "mermaid": {
     "render_error": "无法渲染 Mermaid 图。",
-    "rendering": "渲染中…"
+    "rendering": "渲染中…",
+    "viewer_title": "图表",
+    "canvas_label": "图表画布,拖动可平移,滚动可缩放。",
+    "open_viewer": "打开图表查看器",
+    "close_viewer": "关闭",
+    "copy_source": "复制图表源码",
+    "show_source": "显示源码",
+    "show_diagram": "显示图表",
+    "zoom_in": "放大",
+    "zoom_out": "缩小",
+    "zoom_fit": "适应窗口",
+    "zoom_actual": "实际大小",
+    "reset_view": "重置视图",
+    "export": "导出",
+    "export_png": "下载 PNG",
+    "export_svg": "下载 SVG",
+    "export_source": "下载 .mmd"
   }
 }

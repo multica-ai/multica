@@ -35,7 +35,6 @@ func exactArgs(n int) cobra.PositionalArgs {
 	}
 }
 
-
 // initHelp configures the root command to use gh-style help output.
 func initHelp(root *cobra.Command) {
 	root.SetHelpTemplate(rootHelpTemplate)
@@ -139,6 +138,11 @@ USAGE
 
 COMMANDS
 {{formatCommandList .Commands}}
+{{- if .HasLocalFlags}}
+
+FLAGS
+{{.LocalFlags.FlagUsages}}
+{{- end}}
 INHERITED FLAGS
   --help   Show help for command
 {{- if .Example}}

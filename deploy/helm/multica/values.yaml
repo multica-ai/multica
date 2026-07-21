@@ -21,9 +21,20 @@ images:
 # -----------------------------------------------------------------------------
 # Pre-created Secret with sensitive values. Create it before `helm install`:
 #
+# Built-in postgres (default):
 #   kubectl -n <namespace> create secret generic multica-secrets \
 #     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
 #     --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+#     --from-literal=RESEND_API_KEY="" \
+#     --from-literal=GOOGLE_CLIENT_SECRET="" \
+#     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+#     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+#
+# External postgres (postgres.external.enabled=true):
+#   Replace POSTGRES_PASSWORD with DATABASE_URL pointing at your external cluster.
+#   kubectl -n <namespace> create secret generic multica-secrets \
+#     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
+#     --from-literal=DATABASE_URL="postgres://user:pass@host:5432/multica?sslmode=require" \
 #     --from-literal=RESEND_API_KEY="" \
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
@@ -38,6 +49,12 @@ existingSecret: multica-secrets
 # PostgreSQL (pgvector)
 # -----------------------------------------------------------------------------
 postgres:
+  # Set external.enabled=true to skip the built-in postgres Deployment/PVC and
+  # supply DATABASE_URL directly via the existingSecret instead. When true,
+  # the postgres Deployment, PVC, and Service are not created.
+  # Add DATABASE_URL to your existingSecret pointing at the external cluster.
+  external:
+    enabled: false
   database: multica
   user: multica
   persistence:
@@ -51,16 +68,47 @@ postgres:
     limits:
       cpu: 1000m
       memory: 1Gi
+  # Standard Kubernetes scheduling constraints for the postgres Deployment.
+  affinity: {}
+  tolerations: []
 
 # -----------------------------------------------------------------------------
 # Backend (Go API + WS server)
 # -----------------------------------------------------------------------------
 backend:
+  # Concurrent backend pods are now safe to start: cmd/migrate uses a
+  # Postgres session-level advisory lock to serialize the startup
+  # `migrate up` run, so late-arriving pods queue and then no-op (see
+  # GitHub multica-ai/multica#3647). 1 is still the recommended default
+  # because the chart Deployment uses strategy: Recreate and there is no
+  # leader-elected workload split — increase this only if you actually
+  # need horizontal scale of the API/WS server.
   replicas: 1
   uploads:
     persistence:
+      # When true (default) the chart provisions a PersistentVolumeClaim for
+      # /app/data/uploads and mounts it into the backend pod. The backend only
+      # uses this directory when S3 is NOT configured (`backend.config.s3Bucket`
+      # empty) — see server/cmd/server/router.go for the storage selection.
+      #
+      # Set to false when you have configured S3/CloudFront and don't want the
+      # chart to declare the uploads PVC at all. The default access mode is
+      # ReadWriteOnce, which prevents `backend.replicas > 1` from scheduling a
+      # second pod (Multi-Attach error); disabling persistence — or switching
+      # accessModes to a ReadWriteMany class — removes that constraint on the
+      # storage side. Note: backend startup migrations are not yet serialized
+      # across pods, so multi-replica still requires care beyond the chart.
+      enabled: true
       size: 5Gi
+      # Leave empty to use the cluster's default StorageClass.
       storageClass: ""
+      # PVC accessModes. Defaults to [ReadWriteOnce] to match the typical
+      # local-path / hostPath / EBS StorageClass on a single-node setup. Switch
+      # to [ReadWriteMany] (with a compatible StorageClass such as NFS, EFS,
+      # CephFS) if you intend to share the uploads volume across multiple
+      # backend replicas without S3.
+      accessModes:
+        - ReadWriteOnce
   # All non-secret backend env. Secret values come from `existingSecret`.
   config:
     appEnv: production
@@ -90,6 +138,9 @@ backend:
     limits:
       cpu: 1000m
       memory: 1Gi
+  # Standard Kubernetes scheduling constraints for the backend Deployment.
+  affinity: {}
+  tolerations: []
 
 # -----------------------------------------------------------------------------
 # Frontend (Next.js standalone)
@@ -117,6 +168,9 @@ frontend:
     limits:
       cpu: 1000m
       memory: 1Gi
+  # Standard Kubernetes scheduling constraints for the frontend Deployment.
+  affinity: {}
+  tolerations: []
 
 # -----------------------------------------------------------------------------
 # Ingress
@@ -132,3 +186,17 @@ ingress:
   # tls:
   #   - hosts: [multica.dev.lan, api.multica.dev.lan]
   #     secretName: multica-tls
+
+# -----------------------------------------------------------------------------
+# Monitoring
+# -----------------------------------------------------------------------------
+monitoring:
+  prometheusRule:
+    # Requires the Prometheus Operator CRD (monitoring.coreos.com/v1). Kept
+    # disabled by default so minimal self-host installs without that CRD still
+    # render and install.
+    enabled: false
+    additionalLabels: {}
+    samplerQueryErrorsFor: 5m
+    samplerQueryLatencyFor: 10m
+    severity: warning

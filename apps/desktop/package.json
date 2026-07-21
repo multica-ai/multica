@@ -19,8 +19,8 @@
   "scripts": {
     "bundle-cli": "node scripts/bundle-cli.mjs",
     "brand-dev-electron": "node scripts/brand-dev-electron.mjs",
-    "dev": "pnpm run bundle-cli && pnpm run brand-dev-electron && electron-vite dev",
-    "dev:staging": "pnpm run bundle-cli && pnpm run brand-dev-electron && electron-vite dev --mode staging",
+    "dev": "node scripts/dev.mjs",
+    "dev:staging": "node scripts/dev.mjs --mode staging",
     "build": "pnpm run bundle-cli && electron-vite build",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
@@ -49,6 +49,7 @@
     "electron-updater": "^6.8.3",
     "fix-path": "^5.0.0",
     "lucide-react": "catalog:",
+    "motion": "^12.38.0",
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-router-dom": "^7.6.0",

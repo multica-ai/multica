@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -92,21 +93,54 @@ type Client struct {
 	token   string
 	client  *http.Client
 
+	// bundleClient downloads skill bundles. Unlike client it carries no fixed
+	// Timeout: bundles can be large and slow on jittery links, so the caller
+	// supplies a per-request, size-scaled deadline via context instead of
+	// being capped by the 30s control-plane timeout that fits heartbeat /
+	// claim but not a multi-megabyte body read. (GitHub #4505)
+	bundleClient *http.Client
+
 	// Identity headers sent on every request as X-Client-*. Populated by
 	// SetIdentity(); empty values are simply omitted.
 	platform string
 	version  string
 	os       string
+
+	workspaceMu                    sync.Mutex
+	workspaceETag                  string
+	workspaceCache                 []WorkspaceInfo
+	workspaceCacheValid            bool
+	legacyWorkspaceEndpointEnabled bool
+	issueGCBatchMu                 sync.Mutex
+	legacyIssueGCBatchEnabled      bool
 }
 
 // NewClient creates a new daemon API client.
 func NewClient(baseURL string) *Client {
 	return &Client{
-		baseURL:  baseURL,
-		client:   &http.Client{Timeout: 30 * time.Second},
-		platform: "daemon",
-		os:       normalizeGOOS(runtime.GOOS),
+		baseURL:      baseURL,
+		client:       &http.Client{Timeout: 30 * time.Second, Transport: cloneDefaultTransport()},
+		bundleClient: &http.Client{},
+		platform:     "daemon",
+		os:           normalizeGOOS(runtime.GOOS),
 	}
+}
+
+func cloneDefaultTransport() http.RoundTripper {
+	if transport, ok := http.DefaultTransport.(*http.Transport); ok {
+		return transport.Clone()
+	}
+	return http.DefaultTransport
+}
+
+// CloseIdleConnections drops pooled control-plane HTTP connections. The
+// daemon calls this after repeated heartbeat transport failures so a stale
+// keep-alive socket from a server restart cannot delay recovery indefinitely.
+func (c *Client) CloseIdleConnections() {
+	if c == nil || c.client == nil {
+		return
+	}
+	c.client.CloseIdleConnections()
 }
 
 // normalizeGOOS maps Go's runtime.GOOS values to the protocol vocabulary
@@ -141,6 +175,20 @@ func (c *Client) setIdentityHeaders(req *http.Request) {
 	if c.os != "" {
 		req.Header.Set("X-Client-OS", c.os)
 	}
+	req.Header.Set("X-Client-Capabilities", daemonClientCapabilities())
+}
+
+// daemonClientCapabilities is the X-Client-Capabilities value the daemon
+// advertises on BOTH the HTTP control-plane requests and the WS handshake, so a
+// claim built over WS gets the same capability gating (skill refs,
+// coalesced-comments) as the HTTP path. rpc-v1 advertises WS request/response
+// support (MUL-4257).
+func daemonClientCapabilities() string {
+	return strings.Join([]string{
+		protocol.DaemonCapabilitySkillBundlesV1,
+		protocol.DaemonCapabilityCoalescedCommentsV1,
+		protocol.DaemonCapabilityRPCV1,
+	}, ",")
 }
 
 // SetToken sets the auth token for authenticated requests.
@@ -163,6 +211,113 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 	return resp.Task, nil
 }
 
+// batchClaimRequestTimeout is the short, request-scoped deadline for the
+// machine-level batch claim (MUL-4257). Unlike the per-runtime claim — which
+// gets the full 30s control-plane timeout because a stall there only blocks
+// that one runtime's goroutine — the batch call covers every runtime the
+// daemon hosts in a single request, so a slow claim would delay ALL of them
+// (the head-of-line coupling the per-runtime pollers were split to avoid,
+// MUL-1744). Bounding the batch to a few seconds caps that worst-case
+// starvation; a claim that commits server-side after the client gives up is
+// recovered by ReclaimStaleDispatchedTasksForRuntimes on the next poll. Kept
+// comfortably above p99 claim latency so recovery stays the exception.
+const batchClaimRequestTimeout = 5 * time.Second
+
+// ClaimTasks is the machine-level (MUL-4257) batch counterpart of ClaimTask:
+// it asks the server, in a single request, to claim up to maxTasks tasks across
+// every runtime the daemon hosts. daemonID scopes the request to this machine —
+// the server rejects any runtime_id whose runtime.daemon_id doesn't match, so a
+// stale/crossed runtime set can't claim another machine's tasks. Each returned
+// Task carries its own RuntimeID so the daemon routes it to the matching
+// runtime locally. The request runs under a short, request-scoped deadline
+// (batchClaimRequestTimeout) rather than the shared 30s control-plane timeout so
+// one slow claim cannot stall the whole batch; the deadline propagates to the
+// server and cancels the in-flight query there too.
+func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, batchClaimRequestTimeout)
+	defer cancel()
+	var resp struct {
+		Tasks []*Task `json:"tasks"`
+	}
+	if err := c.postJSON(reqCtx, "/api/daemon/tasks/claim", map[string]any{
+		"daemon_id":   daemonID,
+		"runtime_ids": runtimeIDs,
+		"max_tasks":   maxTasks,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Tasks, nil
+}
+
+// isBatchClaimUnsupported reports whether err is a 404 from the batch claim
+// endpoint — i.e. the server predates the /api/daemon/tasks/claim route and the
+// daemon must fall back to the legacy per-runtime claim (MUL-4257). The batch
+// handler itself never returns 404, so a 404 here means the route is
+// unregistered on an un-upgraded server.
+func isBatchClaimUnsupported(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	return reqErr.StatusCode == http.StatusNotFound
+}
+
+// claimTasksLegacy is the pre-batch compatibility fallback (MUL-4257): claim per
+// runtime via the legacy POST /api/daemon/runtimes/{id}/tasks/claim so a new
+// daemon still works against a server that has no batch route. Returns up to
+// maxTasks tasks. A per-runtime error is only propagated when nothing has been
+// claimed yet; otherwise the partial result is returned and the next poll
+// retries the rest.
+func (c *Client) claimTasksLegacy(ctx context.Context, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+	if maxTasks <= 0 {
+		return nil, nil
+	}
+	out := make([]*Task, 0, maxTasks)
+	for _, rid := range runtimeIDs {
+		if len(out) >= maxTasks {
+			break
+		}
+		task, err := c.ClaimTask(ctx, rid)
+		if err != nil {
+			if len(out) == 0 {
+				return nil, err
+			}
+			return out, nil
+		}
+		if task != nil {
+			out = append(out, task)
+		}
+	}
+	return out, nil
+}
+
+// ResolveSkillBundle downloads a single skill bundle. It uses bundleClient (no
+// fixed timeout) so the deadline is governed entirely by ctx, which the daemon
+// scales to the bundle's size, and retries transient transport blips within
+// whatever budget ctx leaves. Resolving one skill per request — rather than the
+// agent's whole bundle in one atomic body read — lets each download fit its own
+// deadline and be cached independently, so a slow link makes incremental
+// progress instead of failing the entire set on every dispatch. (GitHub #4505)
+func (c *Client) ResolveSkillBundle(ctx context.Context, runtimeID, taskID string, ref SkillRefData) (SkillData, error) {
+	var resp struct {
+		Bundles []SkillData `json:"bundles"`
+	}
+	path := fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/skill-bundles/resolve", runtimeID, taskID)
+	if err := c.postJSONViaWithRetry(ctx, c.bundleClient, path, map[string]any{
+		"skills": []SkillRefData{ref},
+	}, &resp, skillBundleResolveRetrySchedule); err != nil {
+		return SkillData{}, err
+	}
+	if len(resp.Bundles) != 1 {
+		return SkillData{}, fmt.Errorf("resolve skill bundle: expected 1 bundle, got %d", len(resp.Bundles))
+	}
+	return resp.Bundles[0], nil
+}
+
+func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/prepare-lease", runtimeID, taskID), map[string]any{}, nil)
+}
+
 func (c *Client) StartTask(ctx context.Context, taskID string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/start", taskID), map[string]any{}, nil)
 }
@@ -180,6 +335,15 @@ func (c *Client) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID, reas
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/wait-local-directory", taskID), map[string]any{
 		"reason": reason,
 	}, nil)
+}
+
+// AckTaskCancelled tells the server this daemon observed the task's
+// cancellation and has finished flushing the transcript (runner.run only
+// returns after executeAndDrain's drain wait), so the server can settle its
+// deferred chat finalization now instead of waiting out the sweeper grace
+// period (#5219). Idempotent server-side.
+func (c *Client) AckTaskCancelled(ctx context.Context, taskID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/cancel-ack", taskID), map[string]any{}, nil)
 }
 
 func (c *Client) ReportProgress(ctx context.Context, taskID, summary string, step, total int) error {
@@ -267,7 +431,8 @@ func (c *Client) RecoverOrphans(ctx context.Context, runtimeID string) error {
 }
 
 // GetTaskStatus returns the current status of a task. Used by the daemon to
-// detect if a task was cancelled while it was executing.
+// detect terminal/interruption signals (cancelled, failed, completed, or a
+// 404 task-not-found) while a task is executing.
 func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, error) {
 	var resp struct {
 		Status string `json:"status"`
@@ -292,8 +457,8 @@ type (
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":             runtimeID,
-		"supports_batch_import":  true,
+		"runtime_id":            runtimeID,
+		"supports_batch_import": true,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -347,8 +512,67 @@ func (c *Client) RenewToken(ctx context.Context) (*RenewTokenResponse, error) {
 	return &resp, nil
 }
 
-// ListWorkspaces fetches all workspaces the authenticated user belongs to.
+// ListWorkspaces fetches the minimal workspace membership set used by the
+// daemon. New servers expose a daemon-specific endpoint with ETag support;
+// when an installed daemon talks to an older server, the first 404 switches
+// this process to the legacy full-workspace endpoint for compatibility.
 func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
+	c.workspaceMu.Lock()
+	defer c.workspaceMu.Unlock()
+
+	if c.legacyWorkspaceEndpointEnabled {
+		return c.listLegacyWorkspaces(ctx)
+	}
+
+	const path = "/api/daemon/workspaces"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	c.setIdentityHeaders(req)
+	if c.workspaceETag != "" {
+		req.Header.Set("If-None-Match", c.workspaceETag)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		c.legacyWorkspaceEndpointEnabled = true
+		c.workspaceETag = ""
+		c.workspaceCache = nil
+		c.workspaceCacheValid = false
+		return c.listLegacyWorkspaces(ctx)
+	}
+	if resp.StatusCode == http.StatusNotModified {
+		if !c.workspaceCacheValid {
+			return nil, fmt.Errorf("GET %s returned 304 without a cached workspace set", path)
+		}
+		return append([]WorkspaceInfo(nil), c.workspaceCache...), nil
+	}
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, &requestError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+	}
+
+	var workspaces []WorkspaceInfo
+	if err := json.NewDecoder(resp.Body).Decode(&workspaces); err != nil {
+		return nil, err
+	}
+	c.workspaceETag = resp.Header.Get("ETag")
+	c.workspaceCache = append([]WorkspaceInfo(nil), workspaces...)
+	c.workspaceCacheValid = true
+	return append([]WorkspaceInfo(nil), workspaces...), nil
+}
+
+func (c *Client) listLegacyWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	var workspaces []WorkspaceInfo
 	if err := c.getJSON(ctx, "/api/workspaces", &workspaces); err != nil {
 		return nil, err
@@ -356,10 +580,98 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	return workspaces, nil
 }
 
+func (c *Client) usesLegacyWorkspaceEndpoint() bool {
+	c.workspaceMu.Lock()
+	defer c.workspaceMu.Unlock()
+	return c.legacyWorkspaceEndpointEnabled
+}
+
 // IssueGCStatus holds the minimal issue info returned by the GC check endpoint.
 type IssueGCStatus struct {
 	Status    string    `json:"status"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// IssueGCCheckResult is one explicit issue result from the workspace batch
+// endpoint. Found=false deliberately covers both a deleted issue and an ID
+// outside the requested workspace, preserving the server's anti-enumeration
+// contract. Err is only populated by the legacy per-issue fallback.
+type IssueGCCheckResult struct {
+	ID        string    `json:"id"`
+	Found     bool      `json:"found"`
+	Status    string    `json:"status,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	Err       error     `json:"-"`
+}
+
+type issueGCBatchResponse struct {
+	Issues []IssueGCCheckResult `json:"issues"`
+}
+
+// isIssueGCBatchUnsupported distinguishes chi's unmatched-route response on an
+// older server from the JSON 404 returned by a current server when the caller
+// cannot access the requested workspace. Only the former is a compatibility
+// signal; falling back on an authorization 404 would turn one denied request
+// into hundreds of legacy probes.
+func isIssueGCBatchUnsupported(err error) bool {
+	var reqErr *requestError
+	return errors.As(err, &reqErr) &&
+		reqErr.StatusCode == http.StatusNotFound &&
+		strings.TrimSpace(reqErr.Body) == "404 page not found"
+}
+
+// GetIssueGCChecks reconciles a workspace's issue IDs in one request. When a
+// new daemon reaches an older server that does not have the batch route, the
+// first 404 permanently switches this client process to the legacy per-issue
+// endpoint. Other batch failures are returned without fan-out so a transient
+// server problem cannot amplify request volume.
+func (c *Client) GetIssueGCChecks(ctx context.Context, workspaceID string, issueIDs []string) (map[string]IssueGCCheckResult, error) {
+	c.issueGCBatchMu.Lock()
+	defer c.issueGCBatchMu.Unlock()
+
+	if c.legacyIssueGCBatchEnabled {
+		return c.getLegacyIssueGCChecks(ctx, issueIDs), nil
+	}
+
+	path := fmt.Sprintf("/api/daemon/workspaces/%s/issues/gc-check", workspaceID)
+	var resp issueGCBatchResponse
+	err := c.postJSON(ctx, path, map[string]any{"issue_ids": issueIDs}, &resp)
+	if err != nil {
+		if !isIssueGCBatchUnsupported(err) {
+			return nil, err
+		}
+		c.legacyIssueGCBatchEnabled = true
+		return c.getLegacyIssueGCChecks(ctx, issueIDs), nil
+	}
+
+	results := make(map[string]IssueGCCheckResult, len(resp.Issues))
+	for _, result := range resp.Issues {
+		results[result.ID] = result
+	}
+	return results, nil
+}
+
+func (c *Client) getLegacyIssueGCChecks(ctx context.Context, issueIDs []string) map[string]IssueGCCheckResult {
+	results := make(map[string]IssueGCCheckResult, len(issueIDs))
+	for _, issueID := range issueIDs {
+		status, err := c.GetIssueGCCheck(ctx, issueID)
+		if err != nil {
+			var reqErr *requestError
+			if errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusNotFound {
+				results[issueID] = IssueGCCheckResult{ID: issueID, Found: false}
+			} else {
+				results[issueID] = IssueGCCheckResult{ID: issueID, Err: err}
+			}
+			continue
+		}
+		results[issueID] = IssueGCCheckResult{
+			ID:        issueID,
+			Found:     true,
+			Status:    status.Status,
+			UpdatedAt: status.UpdatedAt,
+		}
+	}
+	return results
 }
 
 // GetIssueGCCheck returns the status and updated_at of an issue for GC decisions.
@@ -390,9 +702,10 @@ func (c *Client) GetChatSessionGCCheck(ctx context.Context, sessionID string) (*
 }
 
 // AutopilotRunGCStatus carries the status of an autopilot run. CompletedAt
-// is the run's terminal timestamp (zero for non-terminal runs); the GC loop
-// uses it as the TTL anchor instead of UpdatedAt because autopilot_run rows
-// have no updated_at column.
+// is the run's terminal timestamp (zero for non-terminal runs). The GC loop
+// reclaims a terminal run's never-reused workdir as soon as it sees the
+// terminal status, so it no longer gates on CompletedAt; the field is kept for
+// the API response contract and diagnostics.
 type AutopilotRunGCStatus struct {
 	Status      string    `json:"status"`
 	CompletedAt time.Time `json:"completed_at"`
@@ -461,6 +774,43 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 	return &resp, nil
 }
 
+// RuntimeProfile mirrors the server's workspace custom runtime profile
+// (MUL-3284). protocol_family is the provider used for task routing (it
+// selects the agent backend), while command_name is the actual executable
+// the daemon resolves on PATH and launches. fixed_args are launch arguments
+// every agent on this runtime inherits.
+type RuntimeProfile struct {
+	ID             string   `json:"id"`
+	WorkspaceID    string   `json:"workspace_id"`
+	DisplayName    string   `json:"display_name"`
+	ProtocolFamily string   `json:"protocol_family"`
+	CommandName    string   `json:"command_name"`
+	Description    *string  `json:"description"`
+	FixedArgs      []string `json:"fixed_args"`
+	Visibility     string   `json:"visibility"`
+	Enabled        bool     `json:"enabled"`
+}
+
+// RuntimeProfilesResponse is the body of
+// GET /api/daemon/workspaces/{workspaceID}/runtime-profiles. The server only
+// returns enabled profiles for the workspace.
+type RuntimeProfilesResponse struct {
+	WorkspaceID     string           `json:"workspace_id"`
+	RuntimeProfiles []RuntimeProfile `json:"runtime_profiles"`
+}
+
+// GetRuntimeProfiles fetches the workspace's enabled custom runtime profiles.
+// Mirrors GetWorkspaceRepos. Callers must treat this as best-effort: an older
+// server with no profiles route returns 404, which the daemon swallows and
+// continues with built-in runtimes only.
+func (c *Client) GetRuntimeProfiles(ctx context.Context, workspaceID string) (*RuntimeProfilesResponse, error) {
+	var resp RuntimeProfilesResponse
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/runtime-profiles", workspaceID), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // defaultTerminalRetrySchedule is the backoff used by postJSONWithRetry for
 // terminal task callbacks (CompleteTask / FailTask). N entries → N+1 attempts
 // in the worst case (one immediate + N retries). Five backoffs totalling
@@ -473,6 +823,16 @@ var defaultTerminalRetrySchedule = []time.Duration{
 	16 * time.Second,
 	32 * time.Second,
 	64 * time.Second,
+}
+
+// skillBundleResolveRetrySchedule rides out brief transport blips on a single
+// bundle download. Kept short on purpose: the real budget is the size-scaled
+// context deadline the daemon sets per skill, and a skill that still fails is
+// retried on the next dispatch once its siblings are cached. N entries → N+1
+// attempts. (GitHub #4505)
+var skillBundleResolveRetrySchedule = []time.Duration{
+	500 * time.Millisecond,
+	2 * time.Second,
 }
 
 // retrySleep is the sleep used between retry attempts. Pulled into a package
@@ -533,6 +893,13 @@ func isTransientError(err error) bool {
 // idempotent success (see service/task.go), so a duplicate replay from a
 // retry is safe even if the server's prior response was lost in transit.
 func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any, respBody any, schedule []time.Duration) error {
+	return c.postJSONViaWithRetry(ctx, c.client, path, reqBody, respBody, schedule)
+}
+
+// postJSONViaWithRetry is postJSONWithRetry over an explicit http.Client, so
+// large-body endpoints can run on bundleClient (deadline from ctx) while the
+// control-plane keeps its fixed 30s client.
+func (c *Client) postJSONViaWithRetry(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any, schedule []time.Duration) error {
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -541,7 +908,7 @@ func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any
 			}
 			return err
 		}
-		err := c.postJSON(ctx, path, reqBody, respBody)
+		err := c.postJSONVia(ctx, httpClient, path, reqBody, respBody)
 		if err == nil {
 			return nil
 		}
@@ -559,6 +926,13 @@ func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
+	return c.postJSONVia(ctx, c.client, path, reqBody, respBody)
+}
+
+// postJSONVia is postJSON over an explicit http.Client. Callers pick the client
+// to control the timeout regime: c.client (fixed 30s) for control-plane calls,
+// c.bundleClient (deadline from ctx) for large skill-bundle downloads.
+func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any) error {
 	var body io.Reader
 	if reqBody != nil {
 		data, err := json.Marshal(reqBody)
@@ -578,7 +952,7 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 	}
 	c.setIdentityHeaders(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

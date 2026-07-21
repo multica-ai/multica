@@ -25,7 +25,9 @@ import { useMemo } from "react";
 import { Linking, Pressable, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { Attachment } from "@multica/core/types";
+import { standaloneAttachments } from "@/lib/attachment-dedup";
 import { MarkdownImage } from "@/lib/markdown/markdown-image";
+import { resolveAttachmentUrl } from "@/lib/attachment-url";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { Text } from "@/components/ui/text";
@@ -44,30 +46,14 @@ export function CommentAttachmentList({ attachments, content }: Props) {
   const { colorScheme } = useColorScheme();
   const theme = THEME[colorScheme];
 
-  const standalone = useMemo(() => {
-    if (!attachments || attachments.length === 0) return [];
-    if (!content) return attachments;
-    return attachments.filter((a) => {
-      // Skip attachments whose URL is already referenced inline in the
-      // markdown — they'll render via MarkdownImage (images) or a markdown
-      // link (files), and we'd otherwise show them twice.
-      if (content.includes(a.url)) return false;
-      // Dedup: if another attachment with the same file identity (name,
-      // type, size) is already inline in the content, this one is a
-      // duplicate upload — skip it. Mirrors web's
-      // `comment-card.tsx:132-140` defense.
-      const hasSiblingInContent = attachments.some(
-        (other) =>
-          other.id !== a.id &&
-          other.filename === a.filename &&
-          other.content_type === a.content_type &&
-          other.size_bytes === a.size_bytes &&
-          content.includes(other.url),
-      );
-      if (hasSiblingInContent) return false;
-      return true;
-    });
-  }, [attachments, content]);
+  // Only render attachments not already referenced inline in the body. The
+  // dedup lives in a pure helper (lib/attachment-dedup) so it can be unit
+  // tested; it matches every real URL form the server emits (stable path /
+  // url / download_url / markdown_url), mirroring web's AttachmentList.
+  const standalone = useMemo(
+    () => standaloneAttachments(attachments, content),
+    [attachments, content],
+  );
 
   if (standalone.length === 0) return null;
 
@@ -108,12 +94,19 @@ function FileCard({
   return (
     <Pressable
       onPress={() => {
-        // download_url is the signed HTTPS link; opening it hands off to
+        // download_url is the canonical link — opening it hands off to
         // Safari which handles auth-token-free download + previewing for
         // common types (PDF, txt). Mirrors what the markdown link renderer
         // does for `[name](url)`.
-        if (attachment.download_url) {
-          void Linking.openURL(attachment.download_url);
+        //
+        // The backend may return a server-relative URL like
+        // `/api/attachments/{id}/download` when no CloudFront signer is
+        // configured (MUL-2976). RN's `Linking.openURL` requires an
+        // absolute http(s) URL — it returns "Cannot open URL" otherwise —
+        // so resolve against `EXPO_PUBLIC_API_URL` first.
+        const target = resolveAttachmentUrl(attachment.download_url);
+        if (target) {
+          void Linking.openURL(target);
         }
       }}
       accessibilityRole="button"

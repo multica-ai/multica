@@ -1,10 +1,47 @@
 # Product Analytics
 
-This document is the source of truth for the analytics events Multica ships
-to PostHog. Events feed the acquisition → activation → expansion funnel that
-drives our weekly Active Workspaces (WAW) north-star metric.
+Multica's product analytics live in the **operational database** and in
+**Prometheus / Grafana**. This document is the catalogue of instrumentation and
+its history.
 
-See [MUL-1122](https://github.com/multica-ai/multica) for the design context.
+See [MUL-1122](https://github.com/multica-ai/multica) for the original design
+context and [MUL-4127](https://github.com/multica-ai/multica) for the PostHog
+retirement below.
+
+> **MUL-4127 — PostHog retired for product analytics.** PostHog had become a
+> chaotic, largely-unused second copy of data we already query from the DB, so
+> the redundant instrumentation was removed:
+>
+> - **Every server-side event is now Prometheus-only.** `signup`,
+>   `workspace_created`, `issue_created`, `issue_executed`, `chat_message_sent`,
+>   `team_invite_sent` / `team_invite_accepted`, `onboarding_started` /
+>   `onboarding_questionnaire_submitted` / `onboarding_completed`,
+>   `agent_created`, `cloud_waitlist_joined`, `feedback_submitted`,
+>   `contact_sales_submitted`, `squad_created`, `autopilot_created` — all are
+>   now flagged by `analytics.IsMetricsOnly`, so `metrics.RecordEvent`
+>   increments the Grafana counter but no longer ships to PostHog. The
+>   `analytics.*` event constructors are retained solely to drive those
+>   Prometheus counters; the underlying DB rows remain the source of truth. The
+>   runtime lifecycle (`runtime_*`), autopilot run lifecycle
+>   (`autopilot_run_*`), and `agent_task_*` were already Prometheus-only.
+> - **The frontend funnel instrumentation was removed**: `$pageview`,
+>   `download_intent_expressed` / `download_page_viewed` / `download_initiated`,
+>   the frontend `onboarding_started` mirror, `onboarding_runtime_path_selected`,
+>   `onboarding_runtime_detected`, `feedback_opened`, and the
+>   `source_backfill_*` events.
+> - **What still ships to PostHog (frontend only):** `$exception` autocapture
+>   (with `before_send` redaction + dedupe) and the desktop stability events
+>   `client_crash` / `client_unresponsive` — error / crash monitoring that has
+>   no DB equivalent. Identity (`$identify` / `$set`) is retained only to attach
+>   those.
+> - The `multica_signup_source` attribution cookie (`captureSignupSource`,
+>   independent of `$pageview`) is kept: it still feeds the `signup_source`
+>   Prometheus label. Persisting the raw source-channel / country to the DB —
+>   the one signal PostHog uniquely held — is tracked separately.
+>
+> The per-event sections below document the historical shapes for reference; the
+> server events still describe the `analytics.Event` that drives the Prometheus
+> counter, just no longer a PostHog contract.
 
 ## Configuration
 
@@ -83,21 +120,30 @@ handler → analytics.Client.Capture(Event)   ← non-blocking, returns immediat
   `$set_once` only for values that must never be overwritten (email,
   initial attribution, first-completion timestamp).
 
-## Taxonomy
+## Taxonomy (historical)
 
-Every event is assigned to one dashboard category:
+These categories described the PostHog dashboards each event once fed. After
+MUL-4127 those dashboards are retired: server events are Prometheus-only (DB is
+the source of truth) and the frontend funnel events were deleted. The `Status`
+column records where each event stands now.
 
-| Category | Events |
-|---|---|
-| `core_loop` | `workspace_created`, `runtime_registered`, `runtime_ready`, `runtime_failed`, `runtime_offline`, `agent_created`, `issue_created`, `chat_message_sent`, `agent_task_queued`, `agent_task_dispatched`, `agent_task_started`, `agent_task_completed`, `agent_task_failed`, `agent_task_cancelled`, `autopilot_run_started`, `autopilot_run_completed`, `autopilot_run_failed` |
-| `onboarding_support` | `onboarding_started`, `onboarding_questionnaire_submitted`, `onboarding_completed`, `onboarding_runtime_path_selected`, `onboarding_runtime_detected` |
-| `acquisition` | `signup`, `download_intent_expressed`, `download_page_viewed`, `download_initiated`, `cloud_waitlist_joined`, `contact_sales_submitted` |
-| `ops_feedback` | `feedback_opened`, `feedback_submitted` |
-| `system/noise` | `$pageview`, `$set`, `$identify`, `$autocapture`, `$rageclick` |
+| Category | Events | Status after MUL-4127 |
+|---|---|---|
+| `core_loop` | `workspace_created`, `agent_created`, `issue_created`, `chat_message_sent`, `issue_executed`, `autopilot_created`, `squad_created` | Prometheus-only |
+| `onboarding_support` (server) | `onboarding_started`, `onboarding_questionnaire_submitted`, `onboarding_completed` | Prometheus-only |
+| `onboarding_support` (frontend) | frontend `onboarding_started` mirror, `onboarding_runtime_path_selected`, `onboarding_runtime_detected` | **Removed** |
+| `acquisition` (server) | `signup`, `cloud_waitlist_joined`, `contact_sales_submitted` | Prometheus-only |
+| `acquisition` (frontend) | `download_intent_expressed`, `download_page_viewed`, `download_initiated` | **Removed** |
+| `ops_feedback` | `feedback_submitted` (server), `feedback_opened` (frontend) | server → Prometheus-only; frontend **removed** |
+| `attribution backfill` (frontend) | `source_backfill_shown` / `_submitted` / `_skipped` / `_dismissed` | **Removed** (modal kept; PATCHes DB) |
+| **still in PostHog (frontend only)** | `$exception`, `client_crash`, `client_unresponsive`, `$identify`, `$set` | **Shipped** |
+| `operational` (already Prometheus-only) | `runtime_registered/ready/failed/offline`, `agent_task_*`, `autopilot_run_started/completed/failed` | Prometheus-only |
 
 The v0 core dashboard must use only `core_loop` plus the specific
 `onboarding_support` steps used by the activation funnel. Acquisition,
-feedback, and system/noise events stay in separate dashboards.
+feedback, and system/noise events stay in separate dashboards. The
+`operational` row is **not shipped to PostHog** — those signals live in
+Grafana via `multica_*` business counters (see `server/internal/metrics`).
 
 ## Standard core properties
 
@@ -140,12 +186,13 @@ OAuth entry points (`findOrCreateUser` is the single emission site).
 | `signup_source` | string | Opaque attribution bundle from the frontend cookie `multica_signup_source` (UTM + referrer). Empty when the cookie is absent. |
 | `auth_method` | string | Optional. `"google"` for Google OAuth signups. Absent for verification-code signups. |
 
-Person properties set with `$set_once`:
+Historical PostHog person properties (`$set_once`) — **no longer emitted** since
+MUL-4127, because `signup` is now Prometheus-only and never reaches PostHog:
 
 | Property | Type | Description |
 |---|---|---|
-| `email` | string | Full email. Never broadcast per-event. |
-| `signup_source` | string | Same as above; kept on the person for later segmentation. |
+| `email` | string | Full email. Was never broadcast per-event. |
+| `signup_source` | string | Attribution bundle. Today only its bucketed form survives, as the `multica_signup_total{signup_source}` Prometheus label (see `NormalizeSignupSource`); it is no longer set as a person property for segmentation. |
 
 ### `workspace_created`
 
@@ -164,6 +211,13 @@ funnel with "first time user does X" or a cohort on
 `person_properties.$initial_event`). No information is lost.
 
 ### `runtime_registered`
+
+> **Prometheus-only — not shipped to PostHog** (see the note at the top of this
+> doc). The `analytics.Event` is still constructed so `metrics.IncForEvent` can
+> derive the Prometheus counter; the fields below are that **event** shape, not
+> a PostHog contract. Only the low-cardinality fields (`runtime_mode`,
+> `provider`) become Prometheus labels — ids like `runtime_id` / `daemon_id`
+> are not labels.
 
 Fires the first time a `(workspace_id, daemon_id, provider)` tuple is
 upserted. Heartbeats and repeat registrations never re-emit. First-time
@@ -186,6 +240,8 @@ under a single "anonymous" person.
 
 ### `runtime_ready`
 
+> **Prometheus-only — not shipped to PostHog.**
+
 Fires when a runtime is first registered in an online/ready state. This is the
 activation-funnel step that should replace treating `runtime_registered` as
 proof of readiness. The backend emits this only on the INSERT path for a new
@@ -203,6 +259,8 @@ distinct `runtime_id`.
 
 ### `runtime_failed`
 
+> **Prometheus-only — not shipped to PostHog.**
+
 Fires when runtime setup/registration fails before a ready runtime can be
 recorded. Today this is scoped to backend registration persistence failures;
 future setup flows should reuse it for provider detection or daemon boot
@@ -217,6 +275,8 @@ failures.
 | `recoverable` | bool | Whether retrying setup may succeed. |
 
 ### `runtime_offline`
+
+> **Prometheus-only — not shipped to PostHog.**
 
 Fires when a runtime is explicitly deregistered or the backend sweeper marks it
 offline after missed heartbeats. This is not an activation step; it supports
@@ -247,39 +307,51 @@ is queued.
 | `agent_id` | string (UUID) | Chat agent. |
 | `source` | string | Always `chat`. |
 
-### `agent_task_queued` / `agent_task_dispatched` / `agent_task_started` / `agent_task_completed`
+### agent task lifecycle (Prometheus-only)
 
-Canonical task lifecycle events emitted from `agent_task_queue` state
-transitions. `agent_task_dispatched` fires when the backend claims a queued
-task for a runtime, before the daemon marks it running with
-`agent_task_started`. These events replace `issue_executed` for core loop
-success metrics and allow the activation funnel to split queue backlog from
-claim/start handoff.
+> **Not shipped to PostHog and has no `analytics.Event`.** The agent task
+> lifecycle is recorded directly to Prometheus by the typed
+> `BusinessMetrics.RecordTask*` methods in `server/internal/service/task.go`.
+> The old PostHog event names (`agent_task_queued` / `dispatched` / `started` /
+> `completed` / `failed` / `cancelled`) and their properties (`task_id`,
+> `agent_id`, `issue_id`, `chat_session_id`, `autopilot_run_id`, `duration_ms`,
+> `error_type`, `will_retry`) no longer exist anywhere — those high-cardinality
+> ids were never Prometheus labels and must not be used in dashboards or
+> reconciliation.
 
-| Property | Type | Description |
+The actual metrics (defined in `server/internal/metrics/business.go`; label
+sets in `server/internal/metrics/labels.go`):
+
+| Metric | Type | Labels |
 |---|---|---|
-| `task_id` | string (UUID) | `agent_task_queue.id`; required. |
-| `agent_id` | string (UUID) | Owning agent. |
-| `issue_id` | string (UUID) | Present for issue-linked tasks. |
-| `chat_session_id` | string (UUID) | Present for chat tasks. |
-| `autopilot_run_id` | string (UUID) | Present for run-only autopilot tasks. |
-| `source` | string | `manual`, `chat`, or `autopilot`. |
-| `runtime_mode` | string | `local` / `cloud`. |
-| `provider` | string | Runtime provider. |
-| `duration_ms` | int64 | Terminal events only; measured from `started_at` when available. |
+| `multica_agent_task_enqueued_total` | counter | `source`, `runtime_mode` |
+| `multica_agent_task_dispatched_total` | counter | `source`, `runtime_mode` |
+| `multica_agent_task_started_total` | counter | `source`, `runtime_mode`, `provider` |
+| `multica_agent_task_terminal_total` | counter | `source`, `runtime_mode`, `terminal_status` |
+| `multica_agent_task_failed_total` | counter | `source`, `runtime_mode`, `failure_reason` |
+| `multica_agent_task_queue_wait_seconds` | histogram | `source`, `runtime_mode` |
+| `multica_agent_task_run_seconds` | histogram | `source`, `runtime_mode`, `terminal_status` |
+| `multica_agent_task_total_seconds` | histogram | `source`, `runtime_mode`, `terminal_status` |
 
-### `agent_task_failed` / `agent_task_cancelled`
-
-Terminal task lifecycle events. They use the same join fields as
-`agent_task_completed`. `agent_task_failed` also carries:
-
-| Property | Type | Description |
-|---|---|---|
-| `failure_reason` | string | Stable reason from `agent_task_queue.failure_reason`, default `agent_error`. |
-| `error_type` | string | Stable coarse classifier, e.g. `runtime`, `timeout`, `agent_output`, `cancelled`, `agent_error`. |
-| `will_retry` | bool | Whether the backend auto-retry policy will create another task attempt. |
+- `terminal_status` is the task's final `agent_task_queue.status` —
+  `completed` / `failed` / `cancelled`. There is **no** separate
+  completed/cancelled metric: all three land on
+  `multica_agent_task_terminal_total{terminal_status=…}`. Failures
+  additionally increment `multica_agent_task_failed_total` carrying the coarse
+  `failure_reason` (`agent_task_queue.failure_reason`, default `agent_error`).
+- Task wall-clock lives in the `*_seconds` histograms (queue wait / run /
+  total), replacing the old `duration_ms` event property.
+- `source` / `runtime_mode` / `provider` are the normalized label values
+  (`NormalizeTaskSource` / `NormalizeRuntimeMode` / `NormalizeRuntimeProvider`).
 
 ### `autopilot_run_started` / `autopilot_run_completed` / `autopilot_run_failed`
+
+> **Prometheus-only — not shipped to PostHog.** The `analytics.*` constructors
+> are retained only so `metrics.IncForEvent` can derive the Prometheus counter;
+> `analytics.IsMetricsOnly` keeps them out of PostHog. Only `cadence`,
+> `trigger_kind`, and `terminal_status` become Prometheus labels — the
+> `autopilot_id` / `autopilot_run_id` / `agent_id` fields below are event shape,
+> not labels.
 
 Fires from `autopilot_run` lifecycle changes. `source` is always
 `autopilot`; the trigger origin is carried in `trigger_source` (`manual`,
@@ -329,9 +401,12 @@ emit `n=1`. PostHog answers the same question at query time via
 and funnel steps of the form "workspace has had ≥2 `issue_executed`
 events" are expressible without the property. No information is lost.
 
-Compatibility: `issue_executed` remains a historical compatibility event for
-old dashboards. New core-loop success dashboards should use
-`agent_task_completed` and filter by `source`/`issue_id` as needed.
+`issue_executed` is the canonical core-loop success signal. Since MUL-4127 it is
+metrics-only like every server event: recorded to Prometheus as
+`multica_issue_executed_total{source}` (not PostHog) and backed in the DB by
+`issue.first_executed_at`. Per-task completion counts live in Grafana via
+`BusinessMetrics.RecordTaskTerminal`; use `multica_issue_executed_total` for the
+activation funnel and break down by `source` as needed.
 
 ### `team_invite_sent`
 
@@ -487,11 +562,28 @@ sent from a pre-workspace surface.
 
 ### Frontend-only events
 
-- `$pageview` — fired by `apps/web/components/pageview-tracker.tsx` on
-  every Next.js App Router path or query-string change. The tracker
-  mounts once under `WebProviders` and drives the acquisition funnel's
+> **Removed in MUL-4127**, except `$exception` (unchanged) and the
+> `client_crash` / `client_unresponsive` desktop stability events (documented in
+> `packages/core/diagnostics`). `$pageview`, `download_intent_expressed`,
+> `download_page_viewed`, `download_initiated`, `onboarding_runtime_path_selected`,
+> `onboarding_runtime_detected`, the frontend `onboarding_started` mirror,
+> `feedback_opened`, and `source_backfill_*` no longer fire. The descriptions
+> below are kept as historical reference only.
+
+- `$pageview` — fired by the web tracker
+  (`apps/web/components/pageview-tracker.tsx`) on Next.js App Router
+  **pathname** changes, and by the desktop tracker
+  (`apps/desktop/.../pageview-tracker.tsx`) on visible-surface changes.
+  Both mount once at the root and drive the acquisition funnel's
   `/ → signup` step. posthog-js's automatic pageview capture is
   disabled in `initAnalytics` so we own the event shape.
+  `capturePageview` (`packages/core/analytics`) **section-normalizes** the
+  path before emitting: query string / hash are stripped and resource-id
+  segments are collapsed, so `/acme/issues/8d5c…` and `/acme/issues/MUL-12`
+  both report as `/acme/issues`, and consecutive views of the same section
+  are deduplicated. This keeps PostHog at section granularity rather than
+  billing a `$pageview` per resource or per filter/sort/search change. The
+  tracker is deliberately NOT keyed on the query string.
 - `onboarding_runtime_path_selected` — fired from
   `packages/views/onboarding/steps/step-platform-fork.tsx` when the web
   user clicks one of the three Step 3 fork cards (before any server
@@ -604,8 +696,10 @@ sent from a pre-workspace surface.
 
 ## Reconciliation
 
-`agent_task_completed` is the canonical PostHog-side task success event. It
-should reconcile daily against the operational source of truth:
+Per-task completion is no longer shipped to PostHog. Task success now
+reconciles **DB ↔ Prometheus** instead of DB ↔ PostHog: the
+`BusinessMetrics.RecordTaskTerminal` counter (exported as a `multica_*` task
+metric) should track the operational source of truth:
 
 ```sql
 SELECT date_trunc('day', completed_at AT TIME ZONE 'UTC') AS day,
@@ -617,22 +711,14 @@ GROUP BY 1
 ORDER BY 1;
 ```
 
-Equivalent HogQL:
+Compare against the equivalent Prometheus counter in Grafana. The expected
+difference should be near zero; sustained drift means either an emission site
+is missing or the metrics pipeline is unhealthy.
 
-```sql
-SELECT toStartOfDay(timestamp) AS day,
-       count() AS posthog_completed_tasks
-FROM events
-WHERE event = 'agent_task_completed'
-  AND properties.environment = 'production'
-  AND timestamp >= now() - interval 30 day
-GROUP BY day
-ORDER BY day
-```
-
-The expected difference should be near zero. Allow a small delay window for
-PostHog ingestion and backend analytics queue drops; sustained drift means
-either an emission site is missing or PostHog shipping is unhealthy.
+`issue_executed` remains the product-level success signal (at most one per
+issue). Since MUL-4127 it is Prometheus-only, so reconcile
+`multica_issue_executed_total` against `issue.first_executed_at` rather than a
+PostHog event.
 
 ## Governance
 

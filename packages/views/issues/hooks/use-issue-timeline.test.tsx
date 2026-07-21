@@ -110,6 +110,11 @@ import { useIssueTimeline } from "./use-issue-timeline";
 describe("useIssueTimeline", () => {
   beforeEach(() => {
     wsHandlers.clear();
+    stableHandles.createMutateAsync.mockClear();
+    stableHandles.updateMutateAsync.mockClear();
+    stableHandles.deleteMutateAsync.mockClear();
+    stableHandles.resolveMutateAsync.mockClear();
+    stableHandles.toggleMutate.mockClear();
     queryState.data = [];
     queryState.isLoading = false;
     cacheUpdates.last = null;
@@ -150,6 +155,21 @@ describe("useIssueTimeline", () => {
     ];
     const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
     expect(result.current.timeline.map((e) => e.id)).toEqual(["c1", "c2", "c3"]);
+  });
+
+  it("passes suppressed agent ids through editComment", async () => {
+    const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+
+    await act(async () => {
+      await result.current.editComment("comment-1", "updated", ["attachment-1"], ["agent-1"]);
+    });
+
+    expect(stableHandles.updateMutateAsync).toHaveBeenCalledWith({
+      commentId: "comment-1",
+      content: "updated",
+      attachmentIds: ["attachment-1"],
+      suppressAgentIds: ["agent-1"],
+    });
   });
 
   it("comment:created appends the new entry to the cache", () => {

@@ -1,33 +1,22 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { AlertCircle, Info, LogIn } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
+import { toast } from "sonner";
+import {
+  SettingsCard,
+  SettingsRow,
+  SettingsSection,
+  SettingsTab,
+} from "@multica/views/settings";
+import { reauthenticateDaemon } from "../platform/daemon-reauth";
 import type { DaemonPrefs, DaemonStatus } from "../../../shared/daemon-types";
 import {
   DAEMON_STATE_COLORS,
   DAEMON_STATE_LABELS,
   formatUptime,
 } from "../../../shared/daemon-types";
-
-function SettingRow({
-  label,
-  description,
-  children,
-}: {
-  label: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-6 py-4">
-      <div className="min-w-0">
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-sm text-muted-foreground mt-0.5">{description}</p>
-      </div>
-      <div className="shrink-0">{children}</div>
-    </div>
-  );
-}
 
 // One row inside the diagnostics block. Values that are likely to be
 // long IDs / URLs render as monospaced + truncated with a tooltip.
@@ -61,6 +50,7 @@ export function DaemonSettingsTab() {
   const [cliInstalled, setCliInstalled] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<DaemonStatus>({ state: "stopped" });
+  const [reauthLoading, setReauthLoading] = useState(false);
 
   useEffect(() => {
     window.daemonAPI.getPrefs().then(setPrefs);
@@ -69,60 +59,116 @@ export function DaemonSettingsTab() {
     return window.daemonAPI.onStatusChange(setStatus);
   }, []);
 
+  const handleReauth = useCallback(async () => {
+    setReauthLoading(true);
+    await reauthenticateDaemon();
+    setReauthLoading(false);
+  }, []);
+
   const updatePref = useCallback(
     async (key: keyof DaemonPrefs, value: boolean) => {
       setSaving(true);
-      const updated = await window.daemonAPI.setPrefs({ [key]: value });
-      setPrefs(updated);
-      setSaving(false);
+      try {
+        const updated = await window.daemonAPI.setPrefs({ [key]: value });
+        setPrefs(updated);
+        toast.success("Daemon settings saved", { id: "settings-auto-save" });
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "Failed to save daemon settings",
+        );
+      } finally {
+        setSaving(false);
+      }
     },
     [],
   );
 
-  return (
-    <div>
-      <h2 className="text-lg font-semibold">Daemon</h2>
-      <p className="text-sm text-muted-foreground mt-1">
-        Configure how the local agent daemon behaves with the desktop app.
-      </p>
+  // The daemon runs somewhere the app can't drive (e.g. inside WSL2 behind a
+  // Windows desktop): /health is reachable but the lifecycle CLI can't reach
+  // its process. Auto-start/auto-stop can't work, so disable them and say why
+  // rather than letting the toggles silently no-op. See #3916.
+  const externallyManaged = status.externallyManaged === true;
 
-      <div className="mt-6 divide-y">
-        <SettingRow
+  return (
+    <SettingsTab
+      title="Daemon"
+      description="Configure how the local agent daemon behaves with the desktop app."
+    >
+
+      {status.state === "auth_expired" && (
+        <div className="mt-4 flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3">
+          <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-destructive">
+              Sign-in expired
+            </p>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              The local daemon couldn&apos;t authenticate, so this device
+              can&apos;t take tasks. Sign in again to restore it.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            className="shrink-0"
+            onClick={handleReauth}
+            disabled={reauthLoading}
+          >
+            <LogIn className="size-3.5 mr-1.5" />
+            Sign in again
+          </Button>
+        </div>
+      )}
+
+      {externallyManaged && (
+        <div className="mt-4 flex items-start gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+          <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <p className="min-w-0 text-sm text-muted-foreground">
+            This device&apos;s daemon runs outside the app — for example inside
+            WSL2 — so the app can&apos;t start or stop it. Start or stop it from
+            that environment with{" "}
+            <code className="font-mono text-xs">multica daemon start</code> /{" "}
+            <code className="font-mono text-xs">multica daemon stop</code>.
+          </p>
+        </div>
+      )}
+
+      <SettingsCard>
+        <SettingsRow
           label="Auto-start on launch"
           description="Automatically start the daemon when the app opens and you are logged in."
         >
           <Switch
             checked={prefs.autoStart}
             onCheckedChange={(checked) => updatePref("autoStart", checked)}
-            disabled={saving}
+            disabled={saving || externallyManaged}
           />
-        </SettingRow>
+        </SettingsRow>
 
-        <SettingRow
+        <SettingsRow
           label="Auto-stop on quit"
           description="Stop the daemon when the desktop app is closed. Disable this to keep the daemon running in the background."
         >
           <Switch
             checked={prefs.autoStop}
             onCheckedChange={(checked) => updatePref("autoStop", checked)}
-            disabled={saving}
+            disabled={saving || externallyManaged}
           />
-        </SettingRow>
+        </SettingsRow>
 
-        <div className="py-4">
-          <p className="text-sm font-medium">CLI Status</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            {cliInstalled === null
+        <SettingsRow
+          label="CLI Status"
+          description={
+            cliInstalled === null
               ? "Checking…"
               : cliInstalled
                 ? "multica CLI is installed and available in PATH."
-                : "multica CLI not found. Install it to enable daemon management."}
-          </p>
+                : "multica CLI not found. Install it to enable daemon management."
+          }
+        >
           {cliInstalled === false && (
             <Button
               variant="outline"
               size="sm"
-              className="mt-2"
               onClick={() =>
                 window.desktopAPI.openExternal(
                   "https://github.com/multica-ai/multica#cli-installation",
@@ -132,19 +178,19 @@ export function DaemonSettingsTab() {
               Installation Guide
             </Button>
           )}
-        </div>
-      </div>
+          {cliInstalled !== false && <span />}
+        </SettingsRow>
+      </SettingsCard>
 
       {/* Diagnostics — moved out of the logs panel so the panel can focus
           on logs. These fields matter for support tickets and bug reports,
           not for everyday use. */}
-      <div className="mt-8">
-        <h3 className="text-sm font-semibold">Diagnostics</h3>
-        <p className="text-xs text-muted-foreground mt-1">
-          Identification and connection details. Useful when filing a bug
-          report or investigating why a runtime isn&apos;t showing up.
-        </p>
-        <div className="mt-3 rounded-lg border bg-muted/20 px-4 py-2">
+      <SettingsSection
+        title="Diagnostics"
+        description="Identification and connection details. Useful when filing a bug report or investigating why a runtime isn't showing up."
+      >
+        <SettingsCard>
+          <div className="px-4 py-2">
           <DiagnosticsRow
             label="State"
             value={
@@ -194,8 +240,9 @@ export function DaemonSettingsTab() {
                 : "—"
             }
           />
-        </div>
-      </div>
-    </div>
+          </div>
+        </SettingsCard>
+      </SettingsSection>
+    </SettingsTab>
   );
 }

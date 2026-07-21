@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // FailureReason values for tasks whose session is "poisoned" — i.e.
@@ -24,10 +25,18 @@ import (
 //     stuck without agent progress. Resuming that Codex session can replay the
 //     same stuck state, while a fresh manual rerun may succeed. Detected via
 //     classifyResumeUnsafeTimeout.
+//
+// MUL-2946: ReasonIterationLimit and ReasonAPIInvalidRequest are aliased
+// to the canonical taskfailure values so the daemon and the in-flight
+// classifier (used by every other failure path) share a single source
+// of truth. agent_fallback_message and codex_semantic_inactivity are
+// pre-existing operational reasons not in the canonical 21 — kept as
+// string literals here until a follow-up PR migrates them or extends
+// the taxonomy.
 const (
-	FailureReasonIterationLimit          = "iteration_limit"
+	FailureReasonIterationLimit          = string(taskfailure.ReasonIterationLimit)
 	FailureReasonAgentFallbackMsg        = "agent_fallback_message"
-	FailureReasonAPIInvalidRequest       = "api_invalid_request"
+	FailureReasonAPIInvalidRequest       = string(taskfailure.ReasonAPIInvalidRequest)
 	FailureReasonCodexSemanticInactivity = "codex_semantic_inactivity"
 )
 

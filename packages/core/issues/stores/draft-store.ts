@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { IssueStatus, IssuePriority, IssueAssigneeType } from "../../types";
+import type {
+  IssueStatus,
+  IssuePriority,
+  IssueAssigneeType,
+  IssuePropertyValues,
+  Attachment,
+} from "../../types";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
@@ -13,6 +19,12 @@ interface IssueDraft {
   assigneeId?: string;
   startDate: string | null;
   dueDate: string | null;
+  /** Label IDs chosen in the create dialog. Attached to the issue right
+   *  after it is created (the create endpoint takes no labels), so they are
+   *  kept as a plain id list rather than full Label objects. */
+  labelIds: string[];
+  propertyValues: IssuePropertyValues;
+  attachments: Attachment[];
 }
 
 const EMPTY_DRAFT: IssueDraft = {
@@ -24,6 +36,9 @@ const EMPTY_DRAFT: IssueDraft = {
   assigneeId: undefined,
   startDate: null,
   dueDate: null,
+  labelIds: [],
+  propertyValues: {},
+  attachments: [],
 };
 
 interface IssueDraftStore {
@@ -59,12 +74,28 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
         set({ lastAssigneeType: type, lastAssigneeId: id }),
       hasDraft: () => {
         const { draft } = get();
-        return !!(draft.title || draft.description);
+        return !!(
+          draft.title ||
+          draft.description ||
+          Object.keys(draft.propertyValues).length > 0
+        );
       },
     }),
     {
       name: "multica_issue_draft",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
+      // Drafts persisted by older builds predate fields added later (e.g.
+      // `attachments`). Backfill EMPTY_DRAFT defaults on rehydrate so every
+      // read site can rely on the declared IssueDraft shape instead of
+      // re-defending with `?? fallback`.
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState ?? {}) as Partial<IssueDraftStore>;
+        return {
+          ...currentState,
+          ...persisted,
+          draft: { ...EMPTY_DRAFT, ...persisted.draft },
+        };
+      },
     },
   ),
 );

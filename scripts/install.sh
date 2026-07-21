@@ -41,6 +41,25 @@ fail()  { printf "${BOLD}${RED}✗ %s${RESET}\n" "$*" >&2; exit 1; }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
+running_in_ssh_session() {
+  [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_CLIENT:-}" ] || [ -n "${SSH_TTY:-}" ]
+}
+
+print_remote_server_token_hint() {
+  if ! running_in_ssh_session; then
+    return
+  fi
+
+  printf "  ${BOLD}Looks like a remote/SSH session.${RESET} Browser login may not be able to call back to this machine's localhost.\n"
+  printf "  Token login is usually simpler here:\n"
+  printf "     1. On your local computer, open ${CYAN}https://multica.ai/settings?tab=tokens${RESET}\n"
+  printf "        and create a token under ${BOLD}Settings > API Tokens${RESET}.\n"
+  printf "     2. On this server, run:\n"
+  printf "        ${CYAN}multica login --token <YOUR_TOKEN>${RESET}\n"
+  printf "        ${CYAN}multica daemon start${RESET}\n"
+  printf "\n"
+}
+
 env_file_value() {
   local file="$1"
   local key="$2"
@@ -262,8 +281,8 @@ upgrade_cli_brew() {
 install_cli() {
   if command_exists multica; then
     local current_ver
-    # `multica version` outputs "multica v0.1.13 (commit: abc1234)" — extract just the version
-    current_ver=$(multica version 2>/dev/null | awk '{print $2}' || echo "unknown")
+    # `multica version` outputs "multica 0.3.23 (commit: f46b929eb, built: 2026-06-16T10:11:56Z)" — extract just the version
+    current_ver=$(multica version 2>/dev/null | awk 'NR==1{print $2}' || echo "unknown")
 
     local latest_ver
     latest_ver=$(get_latest_version)
@@ -285,7 +304,7 @@ install_cli() {
     fi
 
     local new_ver
-    new_ver=$(multica version 2>/dev/null | awk '{print $2}' || echo "unknown")
+    new_ver=$(multica version 2>/dev/null | awk 'NR==1{print $2}' || echo "unknown")
     ok "Multica CLI upgraded ($current_ver → $new_ver)"
     return 0
   fi
@@ -357,16 +376,21 @@ setup_server() {
 
   # Generate .env if needed
   if [ ! -f .env ]; then
-    info "Creating .env with random JWT_SECRET..."
+    info "Creating .env with random secrets..."
     cp .env.example .env
-    local jwt
+    local jwt pgpass
     jwt=$(openssl rand -hex 32)
+    pgpass=$(openssl rand -hex 24)
     if [ "$(uname -s)" = "Darwin" ]; then
       sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$jwt/" .env
+      sed -i '' "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$pgpass/" .env
+      sed -i '' -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$pgpass\2#" .env
     else
       sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$jwt/" .env
+      sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$pgpass/" .env
+      sed -i -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$pgpass\2#" .env
     fi
-    ok "Generated .env with random JWT_SECRET"
+    ok "Generated .env with random JWT_SECRET and POSTGRES_PASSWORD"
   else
     ok "Using existing .env"
   fi
@@ -421,6 +445,7 @@ run_default() {
   printf "     ${CYAN}multica setup${RESET}                # Connect to Multica Cloud (multica.ai)\n"
   printf "     ${CYAN}multica setup self-host${RESET}       # Connect to a self-hosted server\n"
   printf "\n"
+  print_remote_server_token_hint
   printf "  ${BOLD}Self-hosting?${RESET} Install the server first:\n"
   printf "     curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server\n"
   printf "\n"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -167,6 +168,80 @@ func TestFailTask_AlreadyFinalized(t *testing.T) {
 	}
 }
 
+// TestProviderNetworkRetrySchedule locks in the three-tier schedule for a
+// transient provider stream cut (MUL-4910): first run + immediate retry + one
+// retry deferred ~5s, and only for provider_network — other retryable reasons
+// keep their generic max_attempts=2 (single, immediate retry).
+func TestProviderNetworkRetrySchedule(t *testing.T) {
+	const provNet = "agent_error.provider_network"
+
+	// Attempt ceiling: provider_network is raised to 3, but only ever WIDENS the
+	// budget and never overrides the max_attempts<=1 "retry disabled" contract.
+	ceilingCases := []struct {
+		reason string
+		max    int32
+		want   int32
+	}{
+		{provNet, 2, providerNetworkMaxAttempts}, // default budget → raised to 3
+		{provNet, 1, 1},                          // disabled → stays disabled, not revived
+		{provNet, 5, 5},                          // higher configured budget → kept (widen-only)
+		{"timeout", 2, 2},                        // unrelated reason → column value untouched
+		{"timeout", 1, 1},                        // unrelated + disabled → untouched
+	}
+	for _, tc := range ceilingCases {
+		if got := retryAttemptCeiling(tc.reason, tc.max); got != tc.want {
+			t.Errorf("ceiling(%q, %d) = %d, want %d", tc.reason, tc.max, got, tc.want)
+		}
+	}
+
+	// Backoff: only provider_network's final attempt (after the 2nd failure) is
+	// deferred; its first retry and every other reason are immediate.
+	delayCases := []struct {
+		reason        string
+		failedAttempt int32
+		want          time.Duration
+	}{
+		{provNet, 1, 0}, // first failure → immediate retry
+		{provNet, 2, providerNetworkFinalRetryWait}, // second failure → 5s-deferred retry
+		{"timeout", 2, 0}, // unrelated reason → never deferred
+	}
+	for _, tc := range delayCases {
+		if got := retryDelayForAttempt(tc.reason, tc.failedAttempt); got != tc.want {
+			t.Errorf("retryDelayForAttempt(%q, %d) = %s, want %s", tc.reason, tc.failedAttempt, got, tc.want)
+		}
+	}
+
+	// Eligibility across the whole chain. mkTask has an issue link and no
+	// autopilot run so only the reason/attempt/ceiling gate is exercised.
+	mkTask := func(attempt, max int32) db.AgentTaskQueue {
+		return db.AgentTaskQueue{
+			Attempt:     attempt,
+			MaxAttempts: max,
+			IssueID:     pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+		}
+	}
+	eligCases := []struct {
+		name    string
+		reason  string
+		attempt int32
+		max     int32
+		want    bool
+	}{
+		{"provider_network first run retries", provNet, 1, 2, true},
+		{"provider_network second run still retries (deferred tier)", provNet, 2, 2, true},
+		{"provider_network third run is the ceiling", provNet, 3, 2, false},
+		{"provider_network with retry disabled (max_attempts=1) never retries", provNet, 1, 1, false},
+		{"timeout keeps single immediate retry", "timeout", 1, 2, true},
+		{"timeout exhausts at attempt 2", "timeout", 2, 2, false},
+		{"non-retryable reason never retries", "agent_error.unknown", 1, 2, false},
+	}
+	for _, tc := range eligCases {
+		if got := retryEligible(tc.reason, mkTask(tc.attempt, tc.max)); got != tc.want {
+			t.Errorf("%s: retryEligible(%q, attempt=%d/max=%d) = %v, want %v", tc.name, tc.reason, tc.attempt, tc.max, got, tc.want)
+		}
+	}
+}
+
 func TestTaskFailureClassifiers(t *testing.T) {
 	cases := []struct {
 		reason       string
@@ -176,10 +251,17 @@ func TestTaskFailureClassifiers(t *testing.T) {
 	}{
 		{reason: "timeout", wantType: "timeout", wantResumeOK: true, wantRetry: true},
 		{reason: "codex_semantic_inactivity", wantType: "timeout", wantResumeOK: false, wantRetry: true},
+		// Transient mid-stream provider disconnect (MUL-4910): retryable, and
+		// resume-safe so the retry continues the truncated conversation.
+		{reason: "agent_error.provider_network", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
 		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
+		{reason: "agent_error.context_overflow", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
 		{reason: "agent_error", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
+		// Missing terminal result errors classify to agent_error.unknown. Keep
+		// that deterministic upstream failure outside the auto-retry allowlist.
+		{reason: "agent_error.unknown", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
 	}
 
 	for _, tc := range cases {

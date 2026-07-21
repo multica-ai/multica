@@ -18,17 +18,22 @@
       "minutes": "{{count}}분",
       "hours": "{{count}}시간",
       "days": "{{count}}일"
-    }
+    },
+    "archived_title": "보관됨",
+    "archived_empty": "보관된 알림이 없습니다",
+    "unarchive_tooltip": "보관 해제"
   },
   "detail": {
     "select_prompt": "자세히 볼 알림을 선택하세요",
     "empty": "인박스가 비어 있습니다",
     "original_input": "원본 입력",
     "edit_advanced": "고급 양식으로 수정",
-    "archive": "보관"
+    "archive": "보관",
+    "unarchive": "보관 해제"
   },
   "types": {
     "issue_assigned": "할당됨",
+    "issue_subscribed": "구독됨",
     "unassigned": "할당 해제됨",
     "assignee_changed": "담당자 변경됨",
     "status_changed": "상태 변경됨",
@@ -66,6 +71,8 @@
     "mark_all_read_failed": "모두 읽음으로 표시하지 못했습니다",
     "archive_all_failed": "모두 보관하지 못했습니다",
     "archive_all_read_failed": "읽은 항목을 보관하지 못했습니다",
-    "archive_completed_failed": "완료된 항목을 보관하지 못했습니다"
+    "archive_completed_failed": "완료된 항목을 보관하지 못했습니다",
+    "unarchive_failed": "보관 해제에 실패했습니다",
+    "archived_load_failed": "보관된 알림을 불러오지 못했습니다"
   }
 }

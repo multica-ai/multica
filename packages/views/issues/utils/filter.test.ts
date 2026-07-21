@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import type { Issue } from "@multica/core/types";
-import { filterIssues, type IssueFilters } from "./filter";
+import type { Issue, IssueAssigneeGroup } from "@multica/core/types";
+import {
+  applyIssueFilters,
+  filterAssigneeGroups,
+  filterIssues,
+  type IssueFilters,
+} from "./filter";
 
 const NO_FILTER: IssueFilters = {
   statusFilters: [],
@@ -30,9 +35,11 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     parent_issue_id: null,
     project_id: null,
     position: 0,
+    stage: null,
     start_date: null,
     due_date: null,
     metadata: {},
+    properties: {},
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
     ...overrides,
@@ -247,5 +254,202 @@ describe("filterIssues", () => {
     // Issue 2 is in_progress (filtered out by status), issue 1 is todo and
     // in the running set → only "1" survives.
     expect(result.map((i) => i.id)).toEqual(["1"]);
+  });
+
+  it("applies workingOnly from activity context without treating queued issues as working", () => {
+    const result = applyIssueFilters(
+      issues,
+      {
+        ...NO_FILTER,
+        workingOnly: true,
+      },
+      {
+        activityByIssueId: new Map([
+          ["1", { isWorking: true, isQueued: false, runningTasks: [], queuedTasks: [] }],
+          ["2", { isWorking: false, isQueued: true, runningTasks: [], queuedTasks: [] }],
+        ]),
+      },
+    );
+
+    expect(result.map((i) => i.id)).toEqual(["1"]);
+  });
+
+  // --- Show sub-issues display toggle ---
+  const parentChildIssues: Issue[] = [
+    makeIssue({ id: "P1", parent_issue_id: null }),
+    makeIssue({ id: "C1", parent_issue_id: "P1" }),
+    makeIssue({ id: "P2", parent_issue_id: null }),
+    makeIssue({ id: "C2", parent_issue_id: "P2" }),
+  ];
+
+  it("hides sub-issues when showSubIssues is false", () => {
+    const result = filterIssues(parentChildIssues, {
+      ...NO_FILTER,
+      showSubIssues: false,
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1", "P2"]);
+  });
+
+  it("keeps sub-issues when showSubIssues is true or omitted", () => {
+    expect(
+      filterIssues(parentChildIssues, { ...NO_FILTER, showSubIssues: true }),
+    ).toHaveLength(4);
+    // Omitting the flag entirely must preserve the show-all default.
+    expect(filterIssues(parentChildIssues, NO_FILTER)).toHaveLength(4);
+  });
+
+  it("composes showSubIssues with other filters (AND semantics)", () => {
+    const mixed: Issue[] = [
+      makeIssue({ id: "P", status: "todo", parent_issue_id: null }),
+      makeIssue({ id: "C", status: "todo", parent_issue_id: "P" }),
+      makeIssue({ id: "PD", status: "done", parent_issue_id: null }),
+    ];
+    const result = filterIssues(mixed, {
+      ...NO_FILTER,
+      statusFilters: ["todo"],
+      showSubIssues: false,
+    });
+    // "C" is a sub-issue (dropped), "PD" is done (dropped) → only "P" survives.
+    expect(result.map((i) => i.id)).toEqual(["P"]);
+  });
+});
+
+describe("filterAssigneeGroups", () => {
+  const group = (id: string, groupIssues: Issue[]): IssueAssigneeGroup => ({
+    id,
+    assignee_type: id === "none" ? null : "agent",
+    assignee_id: id === "none" ? null : id,
+    issues: groupIssues,
+    total: groupIssues.length,
+  });
+
+  it("returns the same reference when no client-side filter is active", () => {
+    const groups = [group("a1", [makeIssue({ id: "1" })])];
+    expect(filterAssigneeGroups(groups, {})).toBe(groups);
+    expect(filterAssigneeGroups(groups, { showSubIssues: true })).toBe(groups);
+    expect(filterAssigneeGroups(groups, { agentRunningFilter: false })).toBe(groups);
+  });
+
+  it("passes undefined through untouched", () => {
+    expect(filterAssigneeGroups(undefined, { showSubIssues: false })).toBeUndefined();
+  });
+
+  it("hides sub-issues, recomputes total, and drops emptied groups", () => {
+    const groups = [
+      group("a1", [
+        makeIssue({ id: "P1", parent_issue_id: null }),
+        makeIssue({ id: "C1", parent_issue_id: "P1" }),
+      ]),
+      // Every issue in this group is a sub-issue → group is removed entirely.
+      group("a2", [makeIssue({ id: "C2", parent_issue_id: "P2" })]),
+    ];
+    const result = filterAssigneeGroups(groups, { showSubIssues: false });
+    expect(
+      result!.map((g) => ({ id: g.id, ids: g.issues.map((i) => i.id), total: g.total })),
+    ).toEqual([{ id: "a1", ids: ["P1"], total: 1 }]);
+  });
+
+  it("keeps only running issues when agentRunningFilter is on", () => {
+    const groups = [
+      group("a1", [makeIssue({ id: "1" }), makeIssue({ id: "2" })]),
+      group("a2", [makeIssue({ id: "3" })]),
+      group("none", [makeIssue({ id: "4" })]),
+    ];
+    const result = filterAssigneeGroups(groups, {
+      agentRunningFilter: true,
+      runningIssueIds: new Set(["2", "4"]),
+    });
+    expect(
+      result!.map((g) => ({ id: g.id, ids: g.issues.map((i) => i.id), total: g.total })),
+    ).toEqual([
+      { id: "a1", ids: ["2"], total: 1 },
+      { id: "none", ids: ["4"], total: 1 },
+    ]);
+  });
+
+  it("composes showSubIssues and agentRunningFilter (AND semantics)", () => {
+    const groups = [
+      group("a1", [
+        makeIssue({ id: "P", parent_issue_id: null }),
+        makeIssue({ id: "C", parent_issue_id: "P" }),
+      ]),
+    ];
+    // "C" is running but is a sub-issue; "P" is a top-level issue but not
+    // running → both dropped, group removed.
+    const result = filterAssigneeGroups(groups, {
+      showSubIssues: false,
+      agentRunningFilter: true,
+      runningIssueIds: new Set(["C"]),
+    });
+    expect(result).toEqual([]);
+  });
+});
+
+describe("property filters", () => {
+  const sevId = "prop-severity";
+  const platId = "prop-platforms";
+  const doneId = "prop-done";
+  const critical = makeIssue({ id: "P1", properties: { [sevId]: "opt-critical" } });
+  const minor = makeIssue({ id: "P2", properties: { [sevId]: "opt-minor", [platId]: ["opt-ios", "opt-web"] } });
+  const unset = makeIssue({ id: "P3" });
+  const checked = makeIssue({ id: "P4", properties: { [doneId]: true } });
+
+  it("select values match by option id (OR within the definition)", () => {
+    const result = filterIssues([critical, minor, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-critical", "opt-minor"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1", "P2"]);
+  });
+
+  it("issues without a value never match a filtered definition", () => {
+    const result = filterIssues([critical, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-critical"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1"]);
+  });
+
+  it("multi_select matches on intersection", () => {
+    const result = filterIssues([critical, minor], {
+      ...NO_FILTER,
+      propertyFilters: { [platId]: ["opt-web"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P2"]);
+  });
+
+  it("checkbox values match the true/false pseudo-options", () => {
+    const result = filterIssues([checked, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [doneId]: ["true"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P4"]);
+  });
+
+  it("ANDs across definitions", () => {
+    const result = filterIssues([critical, minor], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-minor"], [platId]: ["opt-ios"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P2"]);
+  });
+
+  it("empty selections are inert", () => {
+    const result = filterIssues([critical, minor, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: [] },
+    });
+    expect(result).toHaveLength(3);
+  });
+
+  it("filterAssigneeGroups applies property filters per group", () => {
+    const groups: IssueAssigneeGroup[] = [
+      { id: "assignee:member:u-1", assignee_type: "member", assignee_id: "u-1", issues: [critical, minor], total: 2 },
+    ];
+    const result = filterAssigneeGroups(groups, {
+      propertyFilters: { [sevId]: ["opt-critical"] },
+    });
+    expect(result?.[0]?.issues.map((i) => i.id)).toEqual(["P1"]);
+    expect(result?.[0]?.total).toBe(1);
   });
 });

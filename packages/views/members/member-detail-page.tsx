@@ -58,7 +58,7 @@ export function MemberDetailPage({ userId }: { userId: string }) {
           name={member.name}
           initials={initials}
           avatarUrl={resolvePublicFileUrl(member.avatar_url)}
-          size={44}
+          size="xl"
           className="rounded-full"
         />
         <div className="min-w-0 flex-1">

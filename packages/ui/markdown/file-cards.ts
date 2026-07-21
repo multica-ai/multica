@@ -15,27 +15,46 @@
 
 const IMAGE_EXTS = /\.(png|jpe?g|gif|webp|svg|ico|bmp|tiff?)$/i
 
+// Keep in sync with UUID_RE in packages/core/types/attachment-url.ts.
+const ATTACHMENT_UUID_SOURCE =
+  '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+const ATTACHMENT_DOWNLOAD_URL_SOURCE = `/api/attachments/${ATTACHMENT_UUID_SOURCE}/download`
+const ATTACHMENT_DOWNLOAD_URL_RE = new RegExp(
+  `^${ATTACHMENT_DOWNLOAD_URL_SOURCE}$`,
+)
+
 /**
  * URL alternation accepted inside `!file[name](url)` markdown.
  *
  * Restricted to:
  * - `/uploads/...` site-relative paths (LocalStorage backend with no LOCAL_UPLOAD_BASE_URL)
+ * - `/api/attachments/<UUID>/download` site-relative attachment downloads
  * - `http(s)://...` absolute URLs (S3 / CloudFront / hosted)
  *
  * Anything else — `javascript:`, `data:`, protocol-relative `//host/x`, other
  * APIs `/api/…`, path-traversal `/../…` — is rejected so a stored file-card
  * cannot be turned into an out-of-band navigation.
  */
-export const FILE_CARD_URL_PATTERN = /\/uploads\/[^)]*|https?:\/\/[^)]+/
+export const FILE_CARD_URL_PATTERN = new RegExp(
+  `/uploads/[^)]*|https?:\\/\\/[^)]+|${ATTACHMENT_DOWNLOAD_URL_SOURCE}`,
+)
 
 /** Prefix test applied by renderers to validate `data-href` before opening it. */
 export function isAllowedFileCardHref(href: string): boolean {
-  return /^(https?:\/\/|\/uploads\/)/i.test(href)
+  return (
+    /^(https?:\/\/|\/uploads\/)/i.test(href) ||
+    ATTACHMENT_DOWNLOAD_URL_RE.test(href)
+  )
 }
 
-/** New syntax: !file[name](url) — unambiguous, no hostname matching needed. */
+/**
+ * New syntax: !file[name](url) — unambiguous, no hostname matching needed.
+ * Backslash is excluded from the label char class so "\x" runs can only be
+ * consumed by \\. — overlapping alternatives backtrack in 2^n ways (ReDoS,
+ * GitHub #4881). This runs on every comment/description render.
+ */
 const NEW_FILE_CARD_RE = new RegExp(
-  `^!file\\[((?:\\\\.|[^\\]])*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)$`,
+  `^!file\\[((?:\\\\.|[^\\]\\\\])*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)$`,
 )
 
 /** Legacy syntax: [name](cdnUrl) on its own line — matched by CDN hostname. */

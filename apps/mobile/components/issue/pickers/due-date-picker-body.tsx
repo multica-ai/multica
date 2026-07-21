@@ -3,40 +3,40 @@
  * (a formSheet route) renders the Done / Clear actions in its own header
  * area — this body only handles the picker spinner + the local draft state.
  *
- * Backend (server/internal/handler/issue.go CreateIssue / UpdateIssue) parses
- * with time.Parse(time.RFC3339, ...) — strict. Mirrors web's
- * packages/views/issues/components/pickers/due-date-picker.tsx which sends
- * d.toISOString().
+ * due_date is a calendar day (date-only "YYYY-MM-DD", no time/timezone — see
+ * @multica/core/issues/date and GH #3618). Mirrors web's
+ * packages/views/issues/components/pickers/due-date-picker.tsx: read the stored
+ * day into a local-midnight Date for the spinner, write back the picked local
+ * day as a date-only string.
  */
 import { useState, useEffect, useImperativeHandle, forwardRef } from "react";
 import { View } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import { toDateOnly, dateOnlyToLocalDate } from "@multica/core/issues/date";
 
 interface Props {
   value: string | null;
 }
 
 export interface DueDatePickerBodyHandle {
-  /** Returns the currently-displayed date as an ISO 8601 string. */
+  /** Returns the currently-displayed day as a date-only "YYYY-MM-DD" string. */
   getIso: () => string;
 }
 
-function isoToDate(iso: string | null): Date {
-  if (!iso) return new Date();
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? new Date() : d;
+function toLocalDay(value: string | null): Date {
+  return dateOnlyToLocalDate(value) ?? new Date();
 }
 
 export const DueDatePickerBody = forwardRef<DueDatePickerBodyHandle, Props>(
   function DueDatePickerBody({ value }, ref) {
-    const [draft, setDraft] = useState<Date>(() => isoToDate(value));
+    const [draft, setDraft] = useState<Date>(() => toLocalDay(value));
 
     useEffect(() => {
-      setDraft(isoToDate(value));
+      setDraft(toLocalDay(value));
     }, [value]);
 
     useImperativeHandle(ref, () => ({
-      getIso: () => draft.toISOString(),
+      getIso: () => toDateOnly(draft),
     }));
 
     return (

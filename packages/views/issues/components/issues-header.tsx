@@ -4,8 +4,8 @@ import { useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  CalendarDays,
   ChartGantt,
-  Check,
   ChevronDown,
   CircleDot,
   Columns3,
@@ -17,12 +17,14 @@ import {
   SlidersHorizontal,
   X,
   Tag,
+  Table2,
   User,
   UserMinus,
   UserPen,
   Waves,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -43,6 +45,7 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
+import { Calendar } from "@multica/ui/components/ui/calendar";
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
   ALL_STATUSES,
@@ -54,18 +57,30 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { labelListOptions } from "@multica/core/labels/queries";
+import { propertyListOptions } from "@multica/core/properties";
+import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
+import type { IssueProperty } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PropertyIcon } from "../../common/property-icon";
 import { LabelChip } from "../../labels/label-chip";
 import {
   SORT_OPTIONS,
   GROUPING_OPTIONS,
   SWIMLANE_GROUPINGS,
   CARD_PROPERTY_OPTIONS,
+  TABLE_SYSTEM_COLUMNS,
   type ActorFilterValue,
+  type IssueDateField,
+  type IssueDateFilter,
+  type SortField,
+  type IssueGrouping,
+  type SwimlaneGrouping,
+  type TableGrouping,
+  type ViewMode,
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
-import type { SortField, IssueGrouping, SwimlaneGrouping, ViewMode } from "@multica/core/issues/stores/view-store";
+import { addDaysDateOnly, dateOnlyToLocalDate, formatDateOnly, toDateOnly, todayDateOnly } from "@multica/core/issues/date";
 import {
   useIssuesScopeStore,
   type IssuesScope,
@@ -74,25 +89,13 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import type { Issue } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
+import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
 
-// ---------------------------------------------------------------------------
-// HoverCheck — shadcn official pattern (PR #6862)
-// ---------------------------------------------------------------------------
-
-const FILTER_ITEM_CLASS =
-  "group/fitem pr-1.5! [&>[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden";
-
-function HoverCheck({ checked }: { checked: boolean }) {
-  return (
-    <div
-      className="border-input data-[selected=true]:border-primary data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground pointer-events-none size-4 shrink-0 rounded-[4px] border transition-all select-none *:[svg]:opacity-0 data-[selected=true]:*:[svg]:opacity-100 opacity-0 group-hover/fitem:opacity-100 group-focus/fitem:opacity-100 data-[selected=true]:opacity-100"
-      data-selected={checked}
-    >
-      <Check className="size-3.5 text-current" />
-    </div>
-  );
-}
+type LocalDateRange = {
+  from: Date | undefined;
+  to?: Date;
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -107,6 +110,8 @@ function getActiveFilterCount(state: {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  propertyFilters?: Record<string, string[]>;
+  dateFilter?: IssueDateFilter | null;
 }) {
   let count = 0;
   if (state.statusFilters.length > 0) count++;
@@ -115,8 +120,29 @@ function getActiveFilterCount(state: {
   if (state.creatorFilters.length > 0) count++;
   if (state.projectFilters.length > 0 || state.includeNoProject) count++;
   if (state.labelFilters.length > 0) count++;
+  for (const selected of Object.values(state.propertyFilters ?? {})) {
+    if (selected.length > 0) count++;
+  }
+  if (state.dateFilter) count++;
   return count;
 }
+
+function shortDateLabel(dateOnly: string) {
+  return formatDateOnly(dateOnly, { month: "short", day: "numeric" }) || dateOnly;
+}
+
+function normalizeDateRange(from: Date, to: Date) {
+  return from <= to ? [from, to] as const : [to, from] as const;
+}
+
+const DATE_FIELD_LABEL_KEY: Record<IssueDateField, "date_field_created" | "date_field_updated"> = {
+  created_at: "date_field_created",
+  updated_at: "date_field_updated",
+};
+
+/** Feeding this to useIssueCounts hides every per-option badge (badges only
+ *  render at count > 0) without touching the option lists themselves. */
+const NO_COUNT_ISSUES: Issue[] = [];
 
 function useIssueCounts(allIssues: Issue[]) {
   return useMemo(() => {
@@ -126,6 +152,9 @@ function useIssueCounts(allIssues: Issue[]) {
     const creator = new Map<string, number>();
     const project = new Map<string, number>();
     const label = new Map<string, number>();
+    // property definition id → option key → count. Checkbox values count
+    // under the "true"/"false" pseudo-option keys the filter store uses.
+    const property = new Map<string, Map<string, number>>();
     let noAssignee = 0;
     let noProject = 0;
 
@@ -154,9 +183,29 @@ function useIssueCounts(allIssues: Issue[]) {
           label.set(l.id, (label.get(l.id) ?? 0) + 1);
         }
       }
+
+      for (const [propertyId, value] of Object.entries(issue.properties ?? {})) {
+        const optionKeys =
+          typeof value === "string"
+            ? [value]
+            : Array.isArray(value)
+              ? value
+              : typeof value === "boolean"
+                ? [String(value)]
+                : [];
+        if (optionKeys.length === 0) continue;
+        let perOption = property.get(propertyId);
+        if (!perOption) {
+          perOption = new Map<string, number>();
+          property.set(propertyId, perOption);
+        }
+        for (const key of optionKeys) {
+          perOption.set(key, (perOption.get(key) ?? 0) + 1);
+        }
+      }
     }
 
-    return { status, priority, assignee, creator, noAssignee, project, noProject, label };
+    return { status, priority, assignee, creator, noAssignee, project, noProject, label, property };
   }, [allIssues]);
 }
 
@@ -257,7 +306,7 @@ function ActorSubContent({
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={checked} />
-                  <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
+                  <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
                   <span className="truncate">{m.name}</span>
                   {count > 0 && (
                     <span className="ml-auto text-xs text-muted-foreground">
@@ -286,7 +335,7 @@ function ActorSubContent({
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={checked} />
-                  <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                  <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                   <span className="truncate">{a.name}</span>
                   {count > 0 && (
                     <span className="ml-auto text-xs text-muted-foreground">
@@ -315,7 +364,7 @@ function ActorSubContent({
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={checked} />
-                  <ActorAvatar actorType="squad" actorId={s.id} size={18} />
+                  <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
                   <span className="truncate">{s.name}</span>
                   {count > 0 && (
                     <span className="ml-auto text-xs text-muted-foreground">
@@ -494,16 +543,231 @@ function LabelSubContent({
   );
 }
 
+/**
+ * Option checkboxes for one custom property inside the Filter dropdown.
+ * Select/multi_select list the definition's options (dot + name); checkbox
+ * definitions expose the "true"/"false" pseudo-options with Yes/No labels.
+ */
+function PropertyFilterOptions({
+  property,
+  counts,
+  selected,
+  onToggle,
+}: {
+  property: IssueProperty;
+  counts: Map<string, number> | undefined;
+  selected: string[];
+  onToggle: (optionId: string) => void;
+}) {
+  const { t } = useT("issues");
+  const options =
+    property.type === "checkbox"
+      ? [
+          { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined },
+          { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined },
+        ]
+      : (property.config.options ?? []).map((option) => ({
+          id: option.id,
+          name: option.name,
+          color: option.color as string | undefined,
+        }));
+
+  return (
+    <>
+      {options.map((option) => {
+        const checked = selected.includes(option.id);
+        const count = counts?.get(option.id) ?? 0;
+        return (
+          <DropdownMenuCheckboxItem
+            key={option.id}
+            checked={checked}
+            onCheckedChange={() => onToggle(option.id)}
+            className={FILTER_ITEM_CLASS}
+          >
+            <HoverCheck checked={checked} />
+            {option.color && (
+              <span
+                className="size-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: option.color }}
+              />
+            )}
+            <span className="truncate">{option.name}</span>
+            {count > 0 && (
+              <span className="ml-auto text-xs text-muted-foreground">
+                {count}
+              </span>
+            )}
+          </DropdownMenuCheckboxItem>
+        );
+      })}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Date sub-menu content
+// ---------------------------------------------------------------------------
+
+function DateSubContent({
+  value,
+  onChange,
+}: {
+  value: IssueDateFilter | null;
+  onChange: (filter: IssueDateFilter | null) => void;
+}) {
+  const { t } = useT("issues");
+  const [field, setField] = useState<IssueDateField>(value?.field ?? "created_at");
+  const [range, setRange] = useState<LocalDateRange | undefined>(() => {
+    if (!value) return undefined;
+    const from = dateOnlyToLocalDate(value.from);
+    if (!from) return undefined;
+    return { from, to: dateOnlyToLocalDate(value.to) };
+  });
+
+  const setFieldValue = (next: IssueDateField) => {
+    setField(next);
+    if (value) onChange({ ...value, field: next });
+  };
+
+  const applyPreset = (days: 1 | 3 | 7) => {
+    onChange({
+      field,
+      from: addDaysDateOnly(1 - days),
+      to: todayDateOnly(),
+    });
+  };
+
+  const applyCustom = () => {
+    if (!range?.from) return;
+    const [from, to] = normalizeDateRange(range.from, range.to ?? range.from);
+    onChange({
+      field,
+      from: toDateOnly(from),
+      to: toDateOnly(to),
+    });
+  };
+
+  return (
+    <>
+      <DropdownMenuGroup>
+        <DropdownMenuLabel>{t(($) => $.filters.date_field)}</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={field} onValueChange={(next) => setFieldValue(next as IssueDateField)}>
+          {(["created_at", "updated_at"] as const).map((option) => (
+            <DropdownMenuRadioItem key={option} value={option}>
+              {t(($) => $.filters[DATE_FIELD_LABEL_KEY[option]])}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuGroup>
+
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onClick={() => applyPreset(1)}>
+        {t(($) => $.filters.date_today)}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => applyPreset(3)}>
+        {t(($) => $.filters.date_last_3_days)}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => applyPreset(7)}>
+        {t(($) => $.filters.date_last_7_days)}
+      </DropdownMenuItem>
+
+      <div className="px-1.5 py-1">
+        <Popover>
+          <PopoverTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-full justify-start px-0 text-sm font-normal"
+              >
+                {t(($) => $.filters.date_custom_range)}
+              </Button>
+            }
+          />
+          <PopoverContent align="start" side="right" className="w-auto gap-0 p-0">
+            <Calendar
+              mode="range"
+              selected={range}
+              onSelect={(next) => setRange(next)}
+              captionLayout="dropdown"
+            />
+            <div className="flex justify-end border-t p-2">
+              <Button size="sm" onClick={applyCustom} disabled={!range?.from}>
+                {t(($) => $.filters.date_apply)}
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      {value && (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => {
+              setRange(undefined);
+              onChange(null);
+            }}
+          >
+            {t(($) => $.filters.date_clear)}
+          </DropdownMenuItem>
+        </>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ViewRefreshIndicator
+// ---------------------------------------------------------------------------
+
+/**
+ * Neutral "view is revalidating" slot for the header controls cluster.
+ * Driven by the surface's isRefreshing (placeholder-backed revalidation:
+ * sort/date change, grouped-board filter change) — trigger-agnostic on
+ * purpose, so any view change that puts a request in flight lights it.
+ *
+ * The slot is fixed-width so appearing/disappearing never shifts the
+ * controls; the 300ms appear delay keeps fast networks indicator-free
+ * (NN/g: sub-second responses need no feedback) while slow ones get a
+ * "working on it" signal instead of a dead click.
+ */
+export function ViewRefreshIndicator({ active }: { active: boolean }) {
+  return (
+    <span className="flex w-4 shrink-0 items-center justify-center">
+      {active && (
+        <span className="animate-in fade-in fill-mode-backwards [animation-delay:300ms]">
+          <Spinner className="size-3.5 text-muted-foreground" />
+        </span>
+      )}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // IssuesHeader
 // ---------------------------------------------------------------------------
 
 export function IssuesHeader({
   scopedIssues,
+  workingIssues,
   allowGantt = false,
+  dateFilter = null,
+  onDateFilterChange,
+  isRefreshing = false,
+  facetCountsExact = true,
 }: {
   scopedIssues: Issue[];
+  /** The rows the agents-working filter would leave on screen — undefined
+   *  when the set is unknown (chip renders indeterminate). Scopes the chip:
+   *  it counts the agents working on these rows. */
+  workingIssues: Issue[] | undefined;
   allowGantt?: boolean;
+  dateFilter?: IssueDateFilter | null;
+  onDateFilterChange?: (filter: IssueDateFilter | null) => void;
+  isRefreshing?: boolean;
+  /** See IssueDisplayControls.facetCountsExact. */
+  facetCountsExact?: boolean;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -515,14 +779,6 @@ export function IssuesHeader({
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const toggleAgentRunningFilter = useViewStore(
     (s) => s.toggleAgentRunningFilter,
-  );
-  // Scope the chip to whatever issues this page is currently showing.
-  // /issues uses the full workspace minus Members/Agents pill filtering;
-  // passing the visible-issue id set lets the chip count match the list
-  // length when the filter is on.
-  const scopedIssueIds = useMemo(
-    () => new Set(scopedIssues.map((i) => i.id)),
-    [scopedIssues],
   );
   const SCOPE_LABEL_KEY: Record<IssuesScope, "all_label" | "members_label" | "agents_label"> = {
     all: "all_label",
@@ -598,9 +854,16 @@ export function IssuesHeader({
           <WorkspaceAgentWorkingChip
             value={agentRunningFilter}
             onToggle={toggleAgentRunningFilter}
-            scopedIssueIds={scopedIssueIds}
+            workingIssues={workingIssues}
           />
-          <IssueDisplayControls scopedIssues={scopedIssues} allowGantt={allowGantt} />
+          <IssueDisplayControls
+            scopedIssues={scopedIssues}
+            allowGantt={allowGantt}
+            dateFilter={dateFilter}
+            onDateFilterChange={onDateFilterChange}
+            facetCountsExact={facetCountsExact}
+          />
+          <ViewRefreshIndicator active={isRefreshing} />
         </div>
       </div>
     </div>
@@ -611,13 +874,27 @@ export function IssueDisplayControls({
   scopedIssues,
   hideViewToggle = false,
   allowGantt = false,
+  dateFilter = null,
+  onDateFilterChange,
+  facetCountsExact = true,
 }: {
   scopedIssues: Issue[];
   hideViewToggle?: boolean;
+  dateFilter?: IssueDateFilter | null;
+  onDateFilterChange?: (filter: IssueDateFilter | null) => void;
   // Only Project Detail renders <GanttView>; other surfaces (global /issues,
   // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
   // fall back to List if the option were exposed there. Keep Gantt opt-in.
   allowGantt?: boolean;
+  /**
+   * Whether `scopedIssues` covers the surface's full window. The table's
+   * offset pagination hands us only the loaded pages — presenting counts
+   * derived from a partial window as per-option totals under-reports
+   * (round-2 review P2#3), so the badges are suppressed until the window is
+   * complete. Filter OPTIONS are unaffected; they come from the
+   * member/agent/project/label directories.
+   */
+  facetCountsExact?: boolean;
 }) {
   const { t } = useT("issues");
   const viewMode = useViewStore((s) => s.viewMode);
@@ -629,33 +906,90 @@ export function IssueDisplayControls({
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const propertyFilters = useViewStore((s) => s.propertyFilters);
+  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const grouping = useViewStore((s) => s.grouping);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const cardProperties = useViewStore((s) => s.cardProperties);
+  const tableColumns = useViewStore((s) => s.tableColumns);
+  const tableGrouping = useViewStore((s) => s.tableGrouping ?? "none");
+  const tableHierarchy = useViewStore((s) => s.tableHierarchy ?? true);
+  const showSubIssues = useViewStore((s) => s.showSubIssues);
   const act = useViewStoreApi().getState();
+  const headerWsId = useWorkspaceId();
+  // Active custom-property catalog: drives the filter sections, dynamic
+  // sort/grouping options, and the card-property toggles below.
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(headerWsId));
+  const propertyById = useMemo(
+    () => new Map(workspaceProperties.map((p) => [p.id, p])),
+    [workspaceProperties],
+  );
+  const filterableProperties = useMemo(
+    () =>
+      workspaceProperties.filter((p) =>
+        p.type === "select" || p.type === "multi_select" || p.type === "checkbox",
+      ),
+    [workspaceProperties],
+  );
+  const sortableProperties = useMemo(
+    () => workspaceProperties.filter((p) => p.type === "number" || p.type === "date"),
+    [workspaceProperties],
+  );
+  const groupableProperties = useMemo(
+    () => workspaceProperties.filter((p) => p.type === "select"),
+    [workspaceProperties],
+  );
+  const tableGroupableProperties = useMemo(
+    () =>
+      workspaceProperties.filter((p) =>
+        ["select", "multi_select", "checkbox"].includes(p.type),
+      ),
+    [workspaceProperties],
+  );
+  const visibleTableColumns = useMemo(
+    () => new Set(tableColumns.map((column) => column.key)),
+    [tableColumns],
+  );
 
-  const counts = useIssueCounts(scopedIssues);
+  const counts = useIssueCounts(
+    facetCountsExact ? scopedIssues : NO_COUNT_ISSUES,
+  );
+  const showDateFilter = !!onDateFilterChange;
+
+  // Only count filters whose definition is still active — a filter pinned to
+  // an archived definition is stripped by the surface controller and must
+  // not light the badge for an effect that no longer exists.
+  const effectivePropertyFilters = useMemo(() => {
+    const activeIds = new Set(filterableProperties.map((p) => p.id));
+    return Object.fromEntries(
+      Object.entries(propertyFilters).filter(([id, selected]) => selected.length > 0 && activeIds.has(id)),
+    );
+  }, [filterableProperties, propertyFilters]);
 
   const activeFilterCount = getActiveFilterCount({
     statusFilters,
     priorityFilters,
+    propertyFilters: effectivePropertyFilters,
     assigneeFilters,
     includeNoAssignee,
     creatorFilters,
     projectFilters,
     includeNoProject,
     labelFilters,
+    dateFilter: showDateFilter ? dateFilter : null,
   });
   const hasActiveFilters = activeFilterCount > 0;
 
-  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_title"> = {
+  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_status" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_updated" | "sort_title"> = {
     position: "sort_manual",
+    status: "sort_status",
     priority: "sort_priority",
     start_date: "sort_start_date",
     due_date: "sort_due_date",
     created_at: "sort_created",
+    updated_at: "sort_updated",
     title: "sort_title",
   };
   const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee"> = {
@@ -677,9 +1011,38 @@ export function IssueDisplayControls({
     labels: "card_labels",
     childProgress: "card_child_progress",
   };
-  const sortLabel = t(($) => $.display[SORT_LABEL_KEY[sortBy]]);
-  const groupingLabel = t(($) => $.display[GROUPING_LABEL_KEY[grouping]]);
+  const dateFilterLabel = showDateFilter && dateFilter
+    ? `${t(($) => $.filters[DATE_FIELD_LABEL_KEY[dateFilter.field]])}: ${
+        dateFilter.from === dateFilter.to
+          ? shortDateLabel(dateFilter.from)
+          : `${shortDateLabel(dateFilter.from)} - ${shortDateLabel(dateFilter.to)}`
+      }`
+    : null;
+  const sortPropertyId = propertyIdFromViewKey(sortBy);
+  const groupingPropertyId = propertyIdFromViewKey(grouping);
+  const tableGroupingPropertyId = propertyIdFromViewKey(tableGrouping);
+  // Property-backed sort/grouping label straight from the definition name;
+  // a stale persisted id (archived/deleted definition) falls back to the
+  // manual/status default label.
+  const sortLabel = sortPropertyId
+    ? propertyById.get(sortPropertyId)?.name ?? t(($) => $.display.sort_manual)
+    : t(($) => $.display[SORT_LABEL_KEY[sortBy as keyof typeof SORT_LABEL_KEY]]);
+  const groupingLabel = groupingPropertyId
+    ? propertyById.get(groupingPropertyId)?.name ?? t(($) => $.display.group_status)
+    : t(($) => $.display[GROUPING_LABEL_KEY[grouping as keyof typeof GROUPING_LABEL_KEY]]);
   const swimlaneGroupingLabel = t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[swimlaneGrouping]]);
+  const effectiveTableGrouping =
+    tableGroupingPropertyId && !propertyById.has(tableGroupingPropertyId)
+      ? "none"
+      : tableGrouping;
+  const tableGroupingLabel = tableGroupingPropertyId
+    ? propertyById.get(tableGroupingPropertyId)?.name ??
+      t(($) => $.table.group_none)
+    : effectiveTableGrouping === "status"
+      ? t(($) => $.table.columns.status)
+      : effectiveTableGrouping === "assignee"
+        ? t(($) => $.table.columns.assignee)
+        : t(($) => $.table.group_none);
   const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
 
   return (
@@ -714,7 +1077,12 @@ export function IssueDisplayControls({
                           role="button"
                           tabIndex={-1}
                           className="-mr-1 ml-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); act.clearFilters(); }}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            act.clearFilters();
+                            onDateFilterChange?.(null);
+                          }}
                           onPointerDown={(e) => e.stopPropagation()}
                         >
                           <X className="size-3" />
@@ -799,6 +1167,26 @@ export function IssueDisplayControls({
                 })}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
+
+            {showDateFilter && onDateFilterChange && (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <CalendarDays className="size-3.5" />
+                  <span className="flex-1">{t(($) => $.filters.section_date)}</span>
+                  {dateFilterLabel && (
+                    <span className="max-w-36 truncate text-xs text-primary font-medium">
+                      {dateFilterLabel}
+                    </span>
+                  )}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-56">
+                  <DateSubContent
+                    value={dateFilter}
+                    onChange={onDateFilterChange}
+                  />
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            )}
 
             {/* Assignee */}
             <DropdownMenuSub>
@@ -888,11 +1276,47 @@ export function IssueDisplayControls({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
+            {/* Custom properties — one sub per filterable definition */}
+            {filterableProperties.length > 0 && <DropdownMenuSeparator />}
+            {filterableProperties.map((property) => {
+              const selected = propertyFilters[property.id] ?? [];
+              return (
+                <DropdownMenuSub key={property.id}>
+                  <DropdownMenuSubTrigger>
+                    {property.icon ? (
+                      <PropertyIcon property={property} className="size-3.5 text-xs" />
+                    ) : (
+                      <SlidersHorizontal className="size-3.5" />
+                    )}
+                    <span className="flex-1 truncate">{property.name}</span>
+                    {selected.length > 0 && (
+                      <span className="text-xs text-primary font-medium">
+                        {selected.length}
+                      </span>
+                    )}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-auto min-w-44 p-1">
+                    <PropertyFilterOptions
+                      property={property}
+                      counts={counts.property.get(property.id)}
+                      selected={selected}
+                      onToggle={(optionId) => act.togglePropertyFilter(property.id, optionId)}
+                    />
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              );
+            })}
+
             {/* Reset */}
             {hasActiveFilters && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={act.clearFilters}>
+                <DropdownMenuItem
+                  onClick={() => {
+                    act.clearFilters();
+                    onDateFilterChange?.(null);
+                  }}
+                >
                   {t(($) => $.filters.reset)}
                 </DropdownMenuItem>
               </>
@@ -908,14 +1332,8 @@ export function IssueDisplayControls({
                 <TooltipTrigger
                   render={
                     <Button variant="outline" size="sm" className={controlButtonClass}>
-                      {sortBy === "position" ? (
-                        <SlidersHorizontal className="size-3.5" />
-                      ) : sortDirection === "asc" ? (
-                        <ArrowUp className="size-3.5" />
-                      ) : (
-                        <ArrowDown className="size-3.5" />
-                      )}
-                      <span className="hidden md:inline">{sortLabel}</span>
+                      <SlidersHorizontal className="size-3.5" />
+                      <span className="hidden md:inline">{t(($) => $.display.button)}</span>
                     </Button>
                   }
                 />
@@ -948,6 +1366,12 @@ export function IssueDisplayControls({
                         {GROUPING_OPTIONS.map((opt) => (
                           <DropdownMenuRadioItem key={opt.value} value={opt.value}>
                             {t(($) => $.display[GROUPING_LABEL_KEY[opt.value]])}
+                          </DropdownMenuRadioItem>
+                        ))}
+                        {groupableProperties.map((property) => (
+                          <DropdownMenuRadioItem key={property.id} value={`property:${property.id}`}>
+                            <PropertyIcon property={property} className="size-3.5 text-xs" />
+                            <span>{property.name}</span>
                           </DropdownMenuRadioItem>
                         ))}
                       </DropdownMenuRadioGroup>
@@ -992,6 +1416,75 @@ export function IssueDisplayControls({
               </div>
             )}
 
+            {viewMode === "table" && (
+              <div className="border-b px-3 py-2.5">
+                <label className="flex cursor-pointer items-center justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block text-sm">
+                      {t(($) => $.table.hierarchy)}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {t(($) => $.table.hierarchy_description)}
+                    </span>
+                  </span>
+                  <Switch
+                    size="sm"
+                    checked={tableHierarchy}
+                    onCheckedChange={() => act.toggleTableHierarchy()}
+                  />
+                </label>
+                <div className="mt-3">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {t(($) => $.table.group_label)}
+                  </span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-1.5 w-full justify-between text-xs"
+                        >
+                          {tableGroupingLabel}
+                          <ChevronDown className="size-3 text-muted-foreground" />
+                        </Button>
+                      }
+                    />
+                    <DropdownMenuContent align="start" className="w-auto min-w-48">
+                      <DropdownMenuRadioGroup
+                        value={effectiveTableGrouping}
+                        onValueChange={(value) =>
+                          act.setTableGrouping(value as TableGrouping)
+                        }
+                      >
+                        <DropdownMenuRadioItem value="none">
+                          {t(($) => $.table.group_none)}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="status">
+                          {t(($) => $.table.columns.status)}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="assignee">
+                          {t(($) => $.table.columns.assignee)}
+                        </DropdownMenuRadioItem>
+                        {tableGroupableProperties.map((property) => (
+                          <DropdownMenuRadioItem
+                            key={property.id}
+                            value={`property:${property.id}`}
+                          >
+                            <PropertyIcon
+                              property={property}
+                              className="size-3.5 text-xs"
+                            />
+                            <span>{property.name}</span>
+                          </DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            )}
+
             <div className="border-b px-3 py-2.5">
               <span className="text-xs font-medium text-muted-foreground">
                 {t(($) => $.display.ordering_section)}
@@ -1014,7 +1507,13 @@ export function IssueDisplayControls({
                     <DropdownMenuRadioGroup value={sortBy} onValueChange={(v) => act.setSortBy(v as SortField)}>
                       {SORT_OPTIONS.map((opt) => (
                         <DropdownMenuRadioItem key={opt.value} value={opt.value}>
-                          {t(($) => $.display[SORT_LABEL_KEY[opt.value]])}
+                          {t(($) => $.display[SORT_LABEL_KEY[opt.value as keyof typeof SORT_LABEL_KEY]])}
+                        </DropdownMenuRadioItem>
+                      ))}
+                      {sortableProperties.map((property) => (
+                        <DropdownMenuRadioItem key={property.id} value={`property:${property.id}`}>
+                          <PropertyIcon property={property} className="size-3.5 text-xs" />
+                          <span>{property.name}</span>
                         </DropdownMenuRadioItem>
                       ))}
                     </DropdownMenuRadioGroup>
@@ -1039,26 +1538,120 @@ export function IssueDisplayControls({
               </div>
             </div>
 
-            <div className="px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                {t(($) => $.display.card_properties_section)}
-              </span>
-              <div className="mt-2 space-y-2">
-                {CARD_PROPERTY_OPTIONS.map((opt) => (
-                  <label
-                    key={opt.key}
-                    className="flex cursor-pointer items-center justify-between"
-                  >
-                    <span className="text-sm">{t(($) => $.display[CARD_PROPERTY_LABEL_KEY[opt.key]])}</span>
-                    <Switch
-                      size="sm"
-                      checked={cardProperties[opt.key]}
-                      onCheckedChange={() => act.toggleCardProperty(opt.key)}
-                    />
-                  </label>
-                ))}
+            <label className="flex cursor-pointer items-center justify-between border-b px-3 py-2.5">
+              <span className="text-sm">{t(($) => $.display.show_sub_issues)}</span>
+              <Switch
+                size="sm"
+                checked={showSubIssues}
+                onCheckedChange={() => act.toggleShowSubIssues()}
+              />
+            </label>
+
+            {viewMode === "table" ? (
+              <div className="max-h-80 overflow-y-auto px-3 py-2.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t(($) => $.table.columns.section)}
+                </span>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {t(($) => $.table.columns.system_section)}
+                </p>
+                <div className="mt-1.5 space-y-2">
+                  {TABLE_SYSTEM_COLUMNS.map((key) => (
+                    <label
+                      key={key}
+                      className={
+                        key === "title"
+                          ? "flex items-center justify-between"
+                          : "flex cursor-pointer items-center justify-between"
+                      }
+                    >
+                      <span className="text-sm">
+                        {t(($) => $.table.columns[key])}
+                      </span>
+                      <Switch
+                        size="sm"
+                        checked={visibleTableColumns.has(key)}
+                        disabled={key === "title"}
+                        onCheckedChange={() => act.toggleTableColumn(key)}
+                      />
+                    </label>
+                  ))}
+                </div>
+                {workspaceProperties.length > 0 && (
+                  <>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      {t(($) => $.table.columns.property_section)}
+                    </p>
+                    <div className="mt-1.5 space-y-2">
+                      {workspaceProperties.map((property) => {
+                        const key = `property:${property.id}` as const;
+                        return (
+                          <label
+                            key={property.id}
+                            className="flex cursor-pointer items-center justify-between gap-3"
+                          >
+                            <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
+                              <PropertyIcon
+                                property={property}
+                                className="size-3.5 text-xs"
+                              />
+                              <span className="truncate">{property.name}</span>
+                            </span>
+                            <Switch
+                              size="sm"
+                              checked={visibleTableColumns.has(key)}
+                              onCheckedChange={() =>
+                                act.toggleTableColumn(key)
+                              }
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
               </div>
-            </div>
+            ) : (
+              <div className="px-3 py-2.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t(($) => $.display.card_properties_section)}
+                </span>
+                <div className="mt-2 space-y-2">
+                  {CARD_PROPERTY_OPTIONS.map((opt) => (
+                    <label
+                      key={opt.key}
+                      className="flex cursor-pointer items-center justify-between"
+                    >
+                      <span className="text-sm">{t(($) => $.display[CARD_PROPERTY_LABEL_KEY[opt.key]])}</span>
+                      <Switch
+                        size="sm"
+                        checked={cardProperties[opt.key]}
+                        onCheckedChange={() => act.toggleCardProperty(opt.key)}
+                      />
+                    </label>
+                  ))}
+                  {workspaceProperties.map((property) => (
+                    <label
+                      key={property.id}
+                      className="flex cursor-pointer items-center justify-between"
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
+                        <PropertyIcon
+                          property={property}
+                          className="size-3.5 text-xs"
+                        />
+                        <span className="truncate">{property.name}</span>
+                      </span>
+                      <Switch
+                        size="sm"
+                        checked={cardPropertyIds.includes(property.id)}
+                        onCheckedChange={() => act.toggleCardPropertyId(property.id)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </PopoverContent>
         </Popover>
 
@@ -1075,6 +1668,8 @@ export function IssueDisplayControls({
                       <Button variant="outline" size="sm" className={controlButtonClass}>
                         {viewMode === "board" ? (
                           <Columns3 className="size-3.5" />
+                        ) : viewMode === "table" ? (
+                          <Table2 className="size-3.5" />
                         ) : viewMode === "swimlane" ? (
                           <Waves className="size-3.5" />
                         ) : viewMode === "gantt" && allowGantt ? (
@@ -1085,6 +1680,8 @@ export function IssueDisplayControls({
                         <span className="hidden md:inline">
                           {viewMode === "board"
                             ? t(($) => $.view.board)
+                            : viewMode === "table"
+                            ? t(($) => $.view.table)
                             : viewMode === "swimlane"
                             ? t(($) => $.view.swimlane)
                             : viewMode === "gantt" && allowGantt
@@ -1099,6 +1696,8 @@ export function IssueDisplayControls({
               <TooltipContent side="bottom">
                 {viewMode === "board"
                   ? t(($) => $.view.tooltip_board)
+                  : viewMode === "table"
+                  ? t(($) => $.view.tooltip_table)
                   : viewMode === "swimlane"
                   ? t(($) => $.view.tooltip_swimlane)
                   : viewMode === "gantt" && allowGantt
@@ -1118,6 +1717,10 @@ export function IssueDisplayControls({
                 <DropdownMenuRadioItem value="list">
                   <List />
                   {t(($) => $.view.list)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="table">
+                  <Table2 />
+                  {t(($) => $.view.table)}
                 </DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="swimlane">
                   <Waves />

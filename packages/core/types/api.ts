@@ -12,9 +12,14 @@ export interface CreateIssueRequest {
   assignee_id?: string;
   parent_issue_id?: string;
   project_id?: string;
+  /** Ordered stage (>= 1) grouping this sub-issue under its parent. */
+  stage?: number;
   start_date?: string;
   due_date?: string;
   attachment_ids?: string[];
+  /** Issue-scoped label IDs to attach in the same transaction as the create.
+   *  Unknown or non-issue ids are rejected by the server with 400. */
+  label_ids?: string[];
 }
 
 export interface UpdateIssueRequest {
@@ -29,22 +34,86 @@ export interface UpdateIssueRequest {
   due_date?: string | null;
   parent_issue_id?: string | null;
   project_id?: string | null;
+  /** Ordered stage (>= 1); null clears it (unstaged). */
+  stage?: number | null;
   /** Attachment IDs to bind to this issue alongside the description update.
    *  Used by the description editor to register newly uploaded files so they
    *  surface in `issueAttachments` and keep their preview Eye on refresh. */
   attachment_ids?: string[];
+  /** Skip starting the agent run this write would trigger ("暂时不启动",
+   *  MUL-3375). The assignee/status change still applies. Control field —
+   *  strip from optimistic cache patches; never written onto the Issue. */
+  suppress_run?: boolean;
+  /** Free-text handoff instruction injected into the started run's opening
+   *  context (MUL-3375). Only consumed when a run actually starts. Control
+   *  field — strip from optimistic cache patches. */
+  handoff_note?: string;
+}
+
+/** Inputs to `POST /api/issues/preview-trigger`. A nil prospective field means
+ *  "leave unchanged"; `isCreate` previews a not-yet-persisted issue. */
+export interface IssueTriggerPreviewParams {
+  issueIds?: string[];
+  isCreate?: boolean;
+  assigneeType?: IssueAssigneeType | null;
+  assigneeId?: string | null;
+  status?: IssueStatus;
+}
+
+/** One issue that WILL start a run under the prospective write. `agent_id` is
+ *  the runnable agent (squad leader for squads). `handoff_supported` is the
+ *  soft-gate signal: false when the target runtime is too old to render a
+ *  handoff note (gray the note box; the assignment still works). */
+export interface IssueTriggerPreviewItem {
+  issue_id: string;
+  agent_id: string;
+  source: string;
+  handoff_supported: boolean;
+}
+
+export interface IssueTriggerPreview {
+  triggers: IssueTriggerPreviewItem[];
+  total_count: number;
 }
 
 export interface ListIssuesParams {
   limit?: number;
   offset?: number;
   workspace_id?: string;
+  /** Flat-table quick search. Matches issue title words or an exact issue number. */
+  q?: string;
   status?: IssueStatus;
+  /** Multi-value table facet. OR within the field. */
+  statuses?: IssueStatus[];
   priority?: IssuePriority;
+  /** Multi-value table facet. OR within the field. */
+  priorities?: IssuePriority[];
   assignee_id?: string;
   assignee_ids?: string[];
+  /**
+   * Narrow to issues assigned to the given actor kinds (member / agent /
+   * squad). Same semantics as `ListGroupedIssuesParams.assignee_types` —
+   * powers the workspace Members/Agents tabs server-side.
+   */
+  assignee_types?: IssueAssigneeType[];
   creator_id?: string;
   project_id?: string;
+  /** Actor-aware table facets. OR within each field. */
+  assignee_filters?: IssueActorRef[];
+  include_no_assignee?: boolean;
+  creator_filters?: IssueActorRef[];
+  project_ids?: string[];
+  include_no_project?: boolean;
+  label_ids?: string[];
+  /** Restrict the window to root issues instead of filtering loaded pages. */
+  top_level_only?: boolean;
+  /**
+   * Hard restriction of the window to the given issue ids (the table's
+   * agents-working facet sends the live running-issue set). An EMPTY array is
+   * meaningful and yields an EMPTY window — omit the field entirely for "no
+   * restriction".
+   */
+  ids?: string[];
   /**
    * Widen the assignee filter to issues where the user is the *indirect*
    * assignee — assignee is one of the user's owned agents, or a squad that
@@ -56,6 +125,9 @@ export interface ListIssuesParams {
   involves_user_id?: string;
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
+  /** Custom-property filter: definition id → accepted values (option ids or
+   *  "true"/"false" for checkbox). OR within a definition, AND across. */
+  properties?: Record<string, string[]>;
   open_only?: boolean;
   /**
    * Restrict the result to issues with at least one of `start_date` /
@@ -64,7 +136,19 @@ export interface ListIssuesParams {
    * majority on the client.
    */
   scheduled?: boolean;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  date_field?: "created_at" | "updated_at";
+  date_start?: string;
+  date_end?: string;
+  sort_by?:
+    | "position"
+    | "status"
+    | "priority"
+    | "title"
+    | "created_at"
+    | "updated_at"
+    | "start_date"
+    | "due_date"
+    | `property:${string}`;
   sort_direction?: "asc" | "desc";
 }
 
@@ -89,6 +173,9 @@ export interface ListGroupedIssuesParams {
   involves_user_id?: string;
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
+  /** Custom-property filter: definition id → accepted values (option ids or
+   *  "true"/"false" for checkbox). OR within a definition, AND across. */
+  properties?: Record<string, string[]>;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];
@@ -97,7 +184,19 @@ export interface ListGroupedIssuesParams {
   label_ids?: string[];
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  date_field?: "created_at" | "updated_at";
+  date_start?: string;
+  date_end?: string;
+  sort_by?:
+    | "position"
+    | "status"
+    | "priority"
+    | "title"
+    | "created_at"
+    | "updated_at"
+    | "start_date"
+    | "due_date"
+    | `property:${string}`;
   sort_direction?: "asc" | "desc";
 }
 

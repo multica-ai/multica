@@ -23,6 +23,7 @@ import type {
   Issue,
   IssuePriority,
 } from "@multica/core/types";
+import { formatDateOnly } from "@multica/core/issues/date";
 import { Text } from "@/components/ui/text";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { PriorityIcon } from "@/components/ui/priority-icon";
@@ -67,11 +68,11 @@ const ISSUE_PICKER_PATHNAMES = {
   "due-date": "/[workspace]/issue/[id]/picker/due-date",
 } as const satisfies Record<IssuePickerField, string>;
 
+// due_date is a calendar day — format timezone-safely so the day never shifts
+// with the viewer's offset. Mirrors web's formatDate in list-row/board-card.
 function formatDueDate(iso: string | null): string | null {
   if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return formatDateOnly(iso, { month: "short", day: "numeric" }, "en-US") || null;
 }
 
 export function AttributeRow({ issue }: { issue: Issue }) {

@@ -15,6 +15,7 @@ import type {
   IssueStatus,
   TimelineEntry,
 } from "@multica/core/types";
+import { formatDateOnly } from "@multica/core/issues/date";
 
 const STATUS_LABEL: Record<IssueStatus, string> = {
   backlog: "Backlog",
@@ -44,12 +45,11 @@ function priorityName(p: string | undefined): string {
   return p ?? "?";
 }
 
+// start_date / due_date are calendar days — format timezone-safely (no offset
+// day shift). Mirrors web's formatActivity in issue-detail.tsx.
 function shortDate(date: string | undefined): string {
   if (!date) return "?";
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
 }
 
 export function formatActivity(

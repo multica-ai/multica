@@ -29,6 +29,7 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 import type {
@@ -293,6 +294,16 @@ function DeliveryDetailDialog({
               value={String(full.attempt_count)}
             />
             <MetaRow
+              label={t(($) => $.deliveries.detail.dispatch_attempts)}
+              value={String(full.dispatch_attempts)}
+            />
+            {full.status === "queued" && (
+              <MetaRow
+                label={t(($) => $.deliveries.detail.available_at)}
+                value={formatDate(full.available_at)}
+              />
+            )}
+            <MetaRow
               label={t(($) => $.deliveries.detail.response_status)}
               value={full.response_status != null ? String(full.response_status) : "—"}
             />
@@ -438,12 +449,11 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
   const display = isTruncated ? value.slice(0, TRUNCATE_AT) : value;
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
+    if (await copyText(value)) {
       setCopied(true);
       toast.success(t(($) => $.webhook_payload.copied));
       setTimeout(() => setCopied(false), 1500);
-    } catch {
+    } else {
       toast.error(t(($) => $.webhook_payload.copy_failed));
     }
   };
