@@ -13,13 +13,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// MUL-4809 §4.1 P0-2 — migration 211 re-run safety.
+// MUL-4809 §4.1 P0-2 — migration 212 re-run safety.
 //
-// 211 builds a UNIQUE index CONCURRENTLY on agent_task_queue.retry_of_task_id, and
+// 212 builds a UNIQUE index CONCURRENTLY on agent_task_queue.retry_of_task_id, and
 // CreateRetryTask's idempotent ON CONFLICT resolves against it. Real PostgreSQL leaves an
 // INVALID index behind when a concurrent unique build fails on pre-existing duplicates,
 // and `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS` then SUCCEEDS on the re-run — which
-// would record 211 as applied while every auto-retry still fails with 42P10. These tests
+// would record 212 as applied while every auto-retry still fails with 42P10. These tests
 // pin the pre-migration hook that makes the sequence safe.
 //
 // The hook references agent_task_queue unqualified, so the sandbox gives it a private
@@ -68,17 +68,17 @@ func newRetryOfHookSandbox(t *testing.T) (*pgxpool.Pool, string) {
 	return pool, schema
 }
 
-// retryOfMigrationOpts writes the real 211 body to a temp dir and wires runOptions to the
+// retryOfMigrationOpts writes the real 212 body to a temp dir and wires runOptions to the
 // sandbox bookkeeping table plus the PRODUCTION hook map.
 func retryOfMigrationOpts(t *testing.T, schema string) runOptions {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "211_agent_task_retry_of_unique.up.sql")
+	path := filepath.Join(dir, "212_agent_task_retry_of_unique.up.sql")
 	body := "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS " + retryOfUniqueIndexName + "\n" +
 		"    ON agent_task_queue (retry_of_task_id)\n" +
 		"    WHERE retry_of_task_id IS NOT NULL;\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatalf("write 211 migration: %v", err)
+		t.Fatalf("write 212 migration: %v", err)
 	}
 	return runOptions{
 		Direction:             "up",
@@ -110,14 +110,14 @@ func retryOfAppliedCount(t *testing.T, pool *pgxpool.Pool, table string) int {
 	var n int
 	if err := pool.QueryRow(context.Background(),
 		fmt.Sprintf(`SELECT count(*) FROM %s WHERE version = $1`, table),
-		"211_agent_task_retry_of_unique").Scan(&n); err != nil {
+		"212_agent_task_retry_of_unique").Scan(&n); err != nil {
 		t.Fatalf("count applied versions: %v", err)
 	}
 	return n
 }
 
 // TestRetryOfUniqueHookBlocksPreexistingDuplicates: nothing constrained retry_of_task_id
-// before 211, so a rolling deploy could carry duplicates. The hook must hard-fail the run
+// before 212, so a rolling deploy could carry duplicates. The hook must hard-fail the run
 // rather than let a silently-unenforced index through, and the failed migration must NOT be
 // recorded as applied.
 func TestRetryOfUniqueHookBlocksPreexistingDuplicates(t *testing.T) {
