@@ -24,6 +24,7 @@ export function StatusPicker({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  mode = "id",
 }: {
   /**
    * The currently-selected status, used to check the matching row. `null`
@@ -44,6 +45,13 @@ export function StatusPicker({
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  /**
+   * "id" (default) emits `status_id`, which is the only way to reach a CUSTOM
+   * status. "legacy" emits the legacy `status` token and offers only the
+   * built-ins — for callers whose endpoint does not accept status_id yet (the
+   * create-issue dialog). Remove once the create path resolves status_id too.
+   */
+  mode?: "id" | "legacy";
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
@@ -57,6 +65,7 @@ export function StatusPicker({
   // server predating custom statuses (or a workspace not seeded yet) — fall back
   // to the 7 legacy tokens so the picker always works.
   const options = useMemo(() => {
+    if (mode === "legacy") return [];
     const active = catalog.filter((s) => !s.archived);
     if (active.length === 0) return [];
     return [...active].sort((a, b) => {
@@ -65,7 +74,7 @@ export function StatusPicker({
         CATEGORY_ORDER.indexOf(b.category as (typeof CATEGORY_ORDER)[number]);
       return byCategory !== 0 ? byCategory : a.position - b.position;
     });
-  }, [catalog]);
+  }, [catalog, mode]);
 
   const triggerContent =
     customTrigger ??

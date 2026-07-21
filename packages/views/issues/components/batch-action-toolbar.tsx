@@ -109,7 +109,9 @@ export function BatchActionToolbar({
   // handleBatchAssignee — that is the only batch action that should preview a
   // run fan-out.
   const handleBatchStatus = (updates: Partial<UpdateIssueRequest>) => {
-    if (!updates.status) return;
+    // The picker emits status_id for catalog statuses and the legacy token only
+    // when it falls back, so accept either (MUL-4809).
+    if (!updates.status && !updates.status_id) return;
     void handleBatchUpdate(updates);
   };
 
