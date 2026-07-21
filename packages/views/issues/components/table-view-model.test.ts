@@ -7,7 +7,9 @@ import {
   calculateIssueTableColumn,
   getIssueTableSelectionRange,
   isTableStructureSuspended,
+  refreshFrozenTableRows,
   shouldAutoLoadNextWindowPage,
+  type IssueTableDisplayRow,
 } from "./table-view-model";
 
 function makeIssue(id: string, overrides: Partial<Issue> = {}): Issue {
@@ -259,6 +261,57 @@ describe("getIssueTableSelectionRange", () => {
     expect(
       getIssueTableSelectionRange(issueIds, "issue-1", "missing"),
     ).toBeNull();
+  });
+});
+
+describe("refreshFrozenTableRows", () => {
+  const groupRow: IssueTableDisplayRow = {
+    kind: "group",
+    key: "status:todo",
+    label: "Todo",
+    count: 2,
+    collapsed: false,
+  };
+
+  it("keeps structure and keys while swapping in live issue objects", () => {
+    const staleA = makeIssue("issue-1", { title: "Stale A" });
+    const staleB = makeIssue("issue-2", { title: "Stale B" });
+    const snapshot: IssueTableDisplayRow[] = [
+      groupRow,
+      { kind: "issue", key: staleA.id, issue: staleA, depth: 0, hasChildren: true, collapsed: false },
+      { kind: "issue", key: staleB.id, issue: staleB, depth: 1, hasChildren: false, collapsed: false },
+    ];
+    const liveA = makeIssue("issue-1", { title: "Live A" });
+
+    const refreshed = refreshFrozenTableRows(
+      snapshot,
+      new Map([[liveA.id, liveA], [staleB.id, staleB]]),
+    );
+
+    expect(refreshed.map((row) => row.key)).toEqual([
+      "status:todo",
+      "issue-1",
+      "issue-2",
+    ]);
+    expect(refreshed[1]).toMatchObject({
+      issue: liveA,
+      depth: 0,
+      hasChildren: true,
+    });
+    // Identical live object → the snapshot row is reused untouched.
+    expect(refreshed[2]).toBe(snapshot[2]);
+    expect(refreshed[0]).toBe(groupRow);
+  });
+
+  it("keeps the stale issue when it vanished from the live window", () => {
+    const stale = makeIssue("issue-9", { title: "Deleted remotely" });
+    const snapshot: IssueTableDisplayRow[] = [
+      { kind: "issue", key: stale.id, issue: stale, depth: 0, hasChildren: false, collapsed: false },
+    ];
+
+    const refreshed = refreshFrozenTableRows(snapshot, new Map());
+
+    expect(refreshed[0]).toBe(snapshot[0]);
   });
 });
 

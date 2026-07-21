@@ -113,6 +113,7 @@
     "sort_ascending": "升序",
     "sort_descending": "降序",
     "toggle_sub_issues": "展开或折叠子 issue",
+    "rename_title": "重命名 issue",
     "empty_value": "空",
     "quick_create_placeholder": "添加 issue…",
     "quick_create_submit": "添加",

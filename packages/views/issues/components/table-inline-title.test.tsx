@@ -3,6 +3,7 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 
 import type { Issue } from "@multica/core/types";
 import { InlineTitle } from "./table-view";
@@ -50,20 +51,93 @@ function makeRow(title: string): Extract<
   };
 }
 
+const baseProps = {
+  onUpdate: vi.fn(),
+  onOpen: vi.fn(),
+  onToggleParent: vi.fn(),
+  toggleLabel: "Toggle sub-issues",
+  renameLabel: "Rename issue",
+};
+
+/** Editing state lives in the table (one editor at a time); mirror that. */
+function Harness({
+  title,
+  onOpen,
+  onUpdate,
+  onEditingChange,
+}: {
+  title: string;
+  onOpen?: () => void;
+  onUpdate?: (updates: unknown) => void;
+  onEditingChange?: (editing: boolean) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  return (
+    <InlineTitle
+      {...baseProps}
+      row={makeRow(title)}
+      editing={editing}
+      onEditingChange={(next) => {
+        setEditing(next);
+        onEditingChange?.(next);
+      }}
+      onOpen={onOpen ?? baseProps.onOpen}
+      onUpdate={onUpdate ?? baseProps.onUpdate}
+    />
+  );
+}
+
 describe("InlineTitle", () => {
-  it("preserves an active draft when a realtime title snapshot arrives", () => {
-    const props = {
-      onUpdate: vi.fn(),
-      onToggleParent: vi.fn(),
-      toggleLabel: "Toggle sub-issues",
-    };
-    const view = render(<InlineTitle row={makeRow("Original")} {...props} />);
+  it("opens the issue when the title is clicked instead of entering edit mode", () => {
+    const onOpen = vi.fn();
+    const rowClick = vi.fn();
+    render(
+      // The title's click must not also bubble into the row, which would be
+      // a second, duplicate navigation through onRowClick.
+      <div onClick={rowClick}>
+        <Harness title="Original" onOpen={onOpen} />
+      </div>,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Original" }));
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(rowClick).not.toHaveBeenCalled();
+  });
+
+  it("enters edit mode from the rename affordance and commits on Enter", () => {
+    const onUpdate = vi.fn();
+    render(<Harness title="Original" onUpdate={onUpdate} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename issue" }));
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "Renamed" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onUpdate).toHaveBeenCalledWith({ title: "Renamed" });
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("preserves an active draft when a realtime title snapshot arrives", () => {
+    function SnapshotHarness({ title }: { title: string }) {
+      const [editing, setEditing] = useState(false);
+      return (
+        <InlineTitle
+          {...baseProps}
+          row={makeRow(title)}
+          editing={editing}
+          onEditingChange={setEditing}
+        />
+      );
+    }
+    const view = render(<SnapshotHarness title="Original" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename issue" }));
     const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "Local draft" } });
 
-    view.rerender(<InlineTitle row={makeRow("Remote title")} {...props} />);
+    view.rerender(<SnapshotHarness title="Remote title" />);
 
     expect(screen.getByRole("textbox")).toHaveValue("Local draft");
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
