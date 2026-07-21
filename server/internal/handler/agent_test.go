@@ -556,6 +556,54 @@ func TestUpdateAgentEnv_PreservesSentinelValues(t *testing.T) {
 	}
 }
 
+func TestUpdateAgentEnv_TracksSemanticChanges(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "env-change-timestamp-agent", nil)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent
+		SET custom_env = '{"EXISTING":"value"}'::jsonb,
+			custom_env_updated_at = NULL
+		WHERE id = $1
+	`, agentID); err != nil {
+		t.Fatalf("failed to seed custom_env: %v", err)
+	}
+
+	update := func(customEnv map[string]string) {
+		t.Helper()
+		req := newRequest(http.MethodPut, "/api/agents/"+agentID+"/env", map[string]any{"custom_env": customEnv})
+		req = withURLParam(req, "id", agentID)
+		w := httptest.NewRecorder()
+		testHandler.UpdateAgentEnv(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("UpdateAgentEnv: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+	changeTimestampIsNull := func() bool {
+		t.Helper()
+		var isNull bool
+		if err := testPool.QueryRow(ctx, `
+			SELECT custom_env_updated_at IS NULL FROM agent WHERE id = $1
+		`, agentID).Scan(&isNull); err != nil {
+			t.Fatalf("read custom_env_updated_at: %v", err)
+		}
+		return isNull
+	}
+
+	update(map[string]string{"EXISTING": "value"})
+	if !changeTimestampIsNull() {
+		t.Fatal("semantic no-op unexpectedly changed custom_env_updated_at")
+	}
+
+	update(map[string]string{"EXISTING": "rotated"})
+	if changeTimestampIsNull() {
+		t.Fatal("changed env did not set custom_env_updated_at")
+	}
+}
+
 func TestUpdateAgent_RejectsCustomEnvInBody(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

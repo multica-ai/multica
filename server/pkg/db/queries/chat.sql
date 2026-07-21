@@ -239,18 +239,34 @@ RETURNING *;
 -- excluded because replaying those sessions deterministically reproduces the
 -- same terminal state. Keep this list in sync with resumeUnsafeFailureReason
 -- and GetLastTaskSession.
-SELECT session_id, work_dir, runtime_id FROM agent_task_queue
-WHERE chat_session_id = $1
+--
+-- A custom_env change invalidates provider sessions whose tasks were claimed
+-- before it. custom_env is captured while building the claim response, before
+-- the daemon reports started_at, so dispatched_at is the conservative boundary
+-- (with legacy fallbacks). A resumed provider thread may retain its old shell
+-- environment snapshot. Surface that decision separately from session_id;
+-- work_dir remains reusable so an env rotation does not discard uncommitted
+-- files.
+SELECT atq.session_id,
+       atq.work_dir,
+       atq.runtime_id,
+       (
+         a.custom_env_updated_at IS NULL
+         OR COALESCE(atq.dispatched_at, atq.started_at, atq.created_at) >= a.custom_env_updated_at
+       ) AS session_has_current_env
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE atq.chat_session_id = $1
   AND (
-    status = 'completed'
+    atq.status = 'completed'
     OR (
-      status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
-      AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
+      atq.status = 'failed'
+      AND COALESCE(atq.failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
+      AND NOT (COALESCE(atq.error, '') ILIKE '%400%' AND COALESCE(atq.error, '') ILIKE '%invalid_request_error%')
     )
   )
-  AND session_id IS NOT NULL
-ORDER BY completed_at DESC
+  AND atq.session_id IS NOT NULL
+ORDER BY atq.completed_at DESC
 LIMIT 1;
 
 -- name: GetPendingChatTask :one

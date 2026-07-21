@@ -3547,6 +3547,85 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	}
 }
 
+func TestClaimTask_EnvUpdateInvalidatesIssueSessionButKeepsWorkdir(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'env freshness issue fixture', 'in_progress', 'none', $2, 'member', 81207, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, dispatched_at, started_at, completed_at,
+			session_id, work_dir
+		)
+		VALUES (
+			$1, $2, $3, 'completed', 0,
+			now() - interval '2 minutes', now(), now(),
+			'pre-env-issue-session', '/tmp/env-issue-workdir'
+		)
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("setup: create pre-env task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent
+		SET custom_env = '{"ROTATED":"new"}'::jsonb,
+			custom_env_updated_at = now() - interval '1 minute'
+		WHERE id = $1
+	`, agentID); err != nil {
+		t.Fatalf("setup: mark env updated: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("setup: create first post-env task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("stale env session: expected empty PriorSessionID, got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/env-issue-workdir" {
+		t.Fatalf("stale env session: PriorWorkDir = %q, want preserved workdir", task.PriorWorkDir)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'completed', started_at = COALESCE(started_at, now()), completed_at = now(),
+			session_id = 'post-env-issue-session', work_dir = '/tmp/env-issue-workdir'
+		WHERE issue_id = $1 AND status IN ('dispatched', 'running')
+	`, issueID); err != nil {
+		t.Fatalf("setup: complete first post-env task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("setup: create second post-env task: %v", err)
+	}
+
+	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "post-env-issue-session" {
+		t.Fatalf("fresh env session: PriorSessionID = %q, want post-env-issue-session", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/env-issue-workdir" {
+		t.Fatalf("fresh env session: PriorWorkDir = %q, want preserved workdir", task.PriorWorkDir)
+	}
+}
+
 // TestClaimTask_ManualRetryReusesWorkdir is the MUL-4869 claim-layer contract: a
 // manual retry (rerun_of_task_id set) ALWAYS hands back the source task's
 // workdir, and resumes the session only when the source failure did not poison
@@ -3587,9 +3666,13 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 		if err := testPool.QueryRow(ctx, `
 			INSERT INTO agent_task_queue (
 				agent_id, runtime_id, issue_id, status, priority,
-				failure_reason, error, session_id, work_dir
+				failure_reason, error, session_id, work_dir,
+				dispatched_at, started_at, completed_at
 			)
-			VALUES ($1, $2, $3, 'failed', 0, $4, $5, $6, $7)
+			VALUES (
+				$1, $2, $3, 'failed', 0, $4, $5, $6, $7,
+				now() - interval '2 minutes', now() - interval '1 minute', now()
+			)
 			RETURNING id
 		`, agentID, sourceRuntimeID, issueID, failureReason, errorText, session, workdir).Scan(&sourceID); err != nil {
 			t.Fatalf("setup: insert source task: %v", err)
@@ -3650,6 +3733,23 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 		}
 		if task.PriorSessionID != "" {
 			t.Fatalf("PriorSessionID = %q, want empty (cross-runtime session cannot resolve)", task.PriorSessionID)
+		}
+	})
+
+	t.Run("env_changed_after_source_reuses_workdir_drops_session", func(t *testing.T) {
+		if _, err := testPool.Exec(ctx, `
+			UPDATE agent
+			SET custom_env_updated_at = now() + interval '1 minute'
+			WHERE id = $1
+		`, agentID); err != nil {
+			t.Fatalf("setup: mark env newer than source: %v", err)
+		}
+		task := insertRerun(t, runtimeID, "timeout", "", "stale-env-rerun-session", "/tmp/retry-stale-env-workdir")
+		if task.PriorWorkDir != "/tmp/retry-stale-env-workdir" {
+			t.Fatalf("PriorWorkDir = %q, want /tmp/retry-stale-env-workdir", task.PriorWorkDir)
+		}
+		if task.PriorSessionID != "" {
+			t.Fatalf("PriorSessionID = %q, want empty (session predates env change)", task.PriorSessionID)
 		}
 	})
 }
@@ -3741,6 +3841,95 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	}
 	if task.PriorWorkDir != "/tmp/same-chat-workdir" {
 		t.Fatalf("chat runtime match: expected PriorWorkDir='/tmp/same-chat-workdir', got %q", task.PriorWorkDir)
+	}
+}
+
+func TestClaimTask_EnvUpdateInvalidatesChatSessionButKeepsWorkdir(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	var chatSessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (
+			workspace_id, agent_id, creator_id, title,
+			session_id, work_dir, runtime_id
+		)
+		VALUES ($1, $2, $3, 'env freshness chat fixture', 'pre-env-chat-session', '/tmp/env-chat-workdir', $4)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("setup: create chat session: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, chat_session_id,
+			status, priority, dispatched_at, started_at, completed_at,
+			session_id, work_dir
+		)
+		VALUES (
+			$1, $2, $3, 'completed', 0,
+			now() - interval '2 minutes', now(), now(),
+			'pre-env-chat-session', '/tmp/env-chat-workdir'
+		)
+	`, agentID, runtimeID, chatSessionID); err != nil {
+		t.Fatalf("setup: create pre-env chat task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent
+		SET custom_env = '{"ROTATED":"new"}'::jsonb,
+			custom_env_updated_at = now() - interval '1 minute'
+		WHERE id = $1
+	`, agentID); err != nil {
+		t.Fatalf("setup: mark env updated: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, agentID, runtimeID, chatSessionID); err != nil {
+		t.Fatalf("setup: create first post-env chat task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("stale chat env session: expected empty PriorSessionID, got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/env-chat-workdir" {
+		t.Fatalf("stale chat env session: PriorWorkDir = %q, want preserved workdir", task.PriorWorkDir)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'completed', started_at = COALESCE(started_at, now()), completed_at = now(),
+			session_id = 'post-env-chat-session', work_dir = '/tmp/env-chat-workdir'
+		WHERE chat_session_id = $1 AND status IN ('dispatched', 'running')
+	`, chatSessionID); err != nil {
+		t.Fatalf("setup: complete first post-env chat task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE chat_session
+		SET session_id = 'post-env-chat-session', work_dir = '/tmp/env-chat-workdir', runtime_id = $2
+		WHERE id = $1
+	`, chatSessionID, runtimeID); err != nil {
+		t.Fatalf("setup: advance chat session pointer: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, agentID, runtimeID, chatSessionID); err != nil {
+		t.Fatalf("setup: create second post-env chat task: %v", err)
+	}
+
+	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "post-env-chat-session" {
+		t.Fatalf("fresh chat env session: PriorSessionID = %q, want post-env-chat-session", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/env-chat-workdir" {
+		t.Fatalf("fresh chat env session: PriorWorkDir = %q, want preserved workdir", task.PriorWorkDir)
 	}
 }
 

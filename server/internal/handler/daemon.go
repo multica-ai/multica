@@ -1590,6 +1590,7 @@ type claimBuildFailure struct {
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
+	var customEnvUpdatedAt pgtype.Timestamptz
 	supportsCoalescedComments := requestHasClientCapability(r, protocol.DaemonCapabilityCoalescedCommentsV1)
 	// Empty-but-non-nil so pgx persists '{}' rather than NULL for tasks without
 	// comment input. Comment tasks replace this with the ids actually embedded
@@ -1600,6 +1601,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.ConnectedApps = parseRuntimeConnectedAppsForClaim(task.RuntimeConnectedApps, task.ID)
 	}
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
+		customEnvUpdatedAt = agent.CustomEnvUpdatedAt
 		useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 		var customEnv map[string]string
 		if agent.CustomEnv != nil {
@@ -1994,7 +1996,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if src.WorkDir.Valid {
 					resp.PriorWorkDir = src.WorkDir.String
 				}
-				if !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) &&
+				envCapturedAt := src.DispatchedAt
+				if !envCapturedAt.Valid {
+					envCapturedAt = src.StartedAt
+				}
+				if !envCapturedAt.Valid {
+					envCapturedAt = src.CreatedAt
+				}
+				sessionHasCurrentEnv := !customEnvUpdatedAt.Valid ||
+					(envCapturedAt.Valid && !envCapturedAt.Time.Before(customEnvUpdatedAt.Time))
+				if sessionHasCurrentEnv &&
+					!service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) &&
 					src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = src.SessionID.String
 				}
@@ -2008,8 +2020,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
-			}); err == nil && prior.SessionID.Valid {
-				if prior.RuntimeID == task.RuntimeID {
+			}); err == nil {
+				if prior.SessionHasCurrentEnv.Valid && prior.SessionHasCurrentEnv.Bool &&
+					prior.SessionID.Valid && prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 				}
 				if prior.WorkDir.Valid {
@@ -2090,14 +2103,19 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				// otherwise a single failed turn would silently drop the entire
 				// conversation memory on the next message. The fallback also
 				// requires runtime to match.
-				if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
+				// Once this agent has ever changed custom_env, the task row is the
+				// source of truth for session freshness. The chat_session pointer has
+				// no task start timestamp, so it cannot prove that its provider thread
+				// was created after the latest env change.
+				if !customEnvUpdatedAt.Valid && cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = cs.SessionID.String
 				}
 				if cs.WorkDir.Valid {
 					resp.PriorWorkDir = cs.WorkDir.String
 				}
-				if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
-					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
+				if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil {
+					if resp.PriorSessionID == "" && prior.SessionHasCurrentEnv.Valid && prior.SessionHasCurrentEnv.Bool &&
+						prior.SessionID.Valid && prior.RuntimeID == task.RuntimeID {
 						resp.PriorSessionID = prior.SessionID.String
 					}
 					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
