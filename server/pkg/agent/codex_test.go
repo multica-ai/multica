@@ -2880,6 +2880,174 @@ func TestCodexExecuteRetriesAfterModelCatalogRefreshFailure(t *testing.T) {
 	}
 }
 
+// TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume covers the
+// resume case: the stalled attempt already reached turn/started on the prior
+// thread, so the retry must not resume it again. It starts a fresh thread and
+// keeps ResumeExpected so the lost context is disclosed to the agent.
+func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	// Each invocation records the JSON-RPC lines it received so the test can
+	// assert which thread RPC the retry used.
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`LOG="$DIR/rpc-$ATTEMPT.log"`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`if [ "$ATTEMPT" = "1" ]; then`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-prior"}}}'`+"\n"+
+		`  read line; echo "$line" >> "$LOG"`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-prior","turn":{"id":"turn-prior"}}}'`+"\n"+
+		`  echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`  sleep 2`+"\n"+
+		`else`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-fresh"}}}'`+"\n"+
+		`  read line; echo "$line" >> "$LOG"`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-fresh","turn":{"id":"turn-fresh"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-fresh","item":{"type":"agentMessage","id":"msg-1","text":"Fresh"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-fresh","turn":{"id":"turn-fresh","status":"completed"}}}'`+"\n"+
+		`fi`+"\n")
+
+	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		ResumeSessionID:           "thr-prior",
+		ResumeExpected:            true,
+		Timeout:                   20 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	}, 20*time.Second)
+
+	if result.Status != "completed" {
+		t.Fatalf("expected the retry to complete, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.SessionID != "thr-fresh" {
+		t.Fatalf("expected the retry to land on a fresh thread, got %q", result.SessionID)
+	}
+	dir := filepath.Dir(fakePath)
+	first, err := os.ReadFile(filepath.Join(dir, "rpc-1.log"))
+	if err != nil {
+		t.Fatalf("read first attempt rpc log: %v", err)
+	}
+	if !strings.Contains(string(first), "thread/resume") {
+		t.Fatalf("expected the first attempt to resume the prior thread, got %s", first)
+	}
+	second, err := os.ReadFile(filepath.Join(dir, "rpc-2.log"))
+	if err != nil {
+		t.Fatalf("read second attempt rpc log: %v", err)
+	}
+	if strings.Contains(string(second), "thread/resume") {
+		t.Fatalf("retry must not resume the stalled thread, got %s", second)
+	}
+	if !strings.Contains(string(second), "thread/start") {
+		t.Fatalf("expected the retry to start a fresh thread, got %s", second)
+	}
+	// ResumeExpected survives the cleared pointer, so the agent is told the
+	// prior context could not be restored.
+	if !strings.Contains(string(second), "previous conversation context could not be restored") {
+		t.Fatalf("expected the retry input to carry the continuity notice, got %s", second)
+	}
+}
+
+// TestCodexExecuteDoesNotRetryCatalogFailureWhenCleanupUnconfirmed keeps the
+// retry gate tied to a reaped process tree: a surviving app-server would race
+// the second attempt, so an unconfirmed cleanup must not retry.
+func TestCodexExecuteDoesNotRetryCatalogFailureWhenCleanupUnconfirmed(t *testing.T) {
+	// Not t.Parallel(): this test mutates package-level Codex overrides.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+	codexCleanupConfirmationOverride.Store(-1)
+	t.Cleanup(func() { codexCleanupConfirmationOverride.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-unreaped"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-unreaped","turn":{"id":"turn-unreaped"}}}'`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+// TestCodexExecuteDoesNotRetryCatalogFailureAfterSemanticProgress is the core
+// no-duplicate-side-effects guard: once a turn has produced content or run a
+// tool, the catalog signal must not buy it a replay.
+func TestCodexExecuteDoesNotRetryCatalogFailureAfterSemanticProgress(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-worked"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-worked","turn":{"id":"turn-worked"}}}'`+"\n"+
+		// A tool ran: this turn has side effects and must never be replayed,
+		// even though the catalog signal is present in stderr.
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-worked","item":{"type":"commandExecution","id":"cmd-1","aggregatedOutput":"deployed"}}}'`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+func assertCodexAttemptCount(t *testing.T, fakePath, want string) {
+	t.Helper()
+	attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
+	if err != nil {
+		t.Fatalf("read attempt counter: %v", err)
+	}
+	if got := strings.TrimSpace(string(attempts)); got != want {
+		t.Fatalf("expected %s attempt(s), got %q", want, got)
+	}
+}
+
 // TestCodexExecuteDoesNotRetryFirstTurnNoProgressWithoutCatalogSignal keeps the
 // retry gate narrow: a stalled first turn with no model catalog evidence in
 // stderr is not known to be transient, so it must fail on the first attempt.
@@ -2914,13 +3082,7 @@ func TestCodexExecuteDoesNotRetryFirstTurnNoProgressWithoutCatalogSignal(t *test
 	if result.Status != "timeout" {
 		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
 	}
-	attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
-	if err != nil {
-		t.Fatalf("read attempt counter: %v", err)
-	}
-	if got := strings.TrimSpace(string(attempts)); got != "1" {
-		t.Fatalf("expected exactly one attempt without the catalog signal, got %q", got)
-	}
+	assertCodexAttemptCount(t, fakePath, "1")
 }
 
 func TestCodexExecuteTurnCompletionCanPrecedeTurnStartResponse(t *testing.T) {

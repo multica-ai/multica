@@ -637,21 +637,23 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		defer close(msgCh)
 		defer close(resCh)
 		session := firstSession
+		attemptOpts := opts
 		for attempt := 1; attempt <= 2; attempt++ {
 			if attempt > 1 {
 				var err error
-				session, err = b.executeOnce(ctx, prompt, opts, attempt)
+				session, err = b.executeOnce(ctx, prompt, attemptOpts, attempt)
 				if err != nil {
 					resCh <- Result{Status: "failed", Error: err.Error()}
 					return
 				}
 			}
 			// Hold back the leading session-pin status messages until this
-			// attempt proves it made real progress. A retried attempt runs on a
-			// fresh Codex thread, so forwarding a discarded attempt's pin would
-			// leave the resume pointer aimed at a thread that never produced a
-			// turn (MUL-5110). The first non-pin message means the attempt is
-			// live: flush and stream normally from then on.
+			// attempt proves it made real progress. A retry never continues the
+			// discarded attempt's thread (initialize retries fail before any
+			// thread exists; catalog retries clear ResumeSessionID below), so
+			// forwarding its pin would leave the resume pointer aimed at a
+			// thread that never produced a turn (MUL-5110). The first non-pin
+			// message means the attempt is live: flush and stream from then on.
 			var heldPins []Message
 			holdingPins := true
 			flushHeldPins := func() {
@@ -696,6 +698,18 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			backoff := 75*time.Millisecond + time.Duration(time.Now().UnixNano()%50)*time.Millisecond
 			if retryReason == "model_catalog_refresh" {
 				backoff = 500*time.Millisecond + time.Duration(time.Now().UnixNano()%1000)*time.Millisecond
+				// The stalled attempt already reached turn/started, so the prior
+				// thread may hold the submitted input or an unfinished turn.
+				// Resuming it again could duplicate that input; start a fresh
+				// thread instead and keep ResumeExpected so codexTurnInput
+				// prepends the continuity notice about the lost context.
+				if attemptOpts.ResumeSessionID != "" {
+					b.cfg.Logger.Warn("codex retry dropping resume pointer after model catalog refresh failure",
+						"prior_thread_id", attemptOpts.ResumeSessionID,
+					)
+					attemptOpts.ResumeSessionID = ""
+					attemptOpts.ResumeExpected = true
+				}
 			}
 			b.cfg.Logger.Warn("codex retry scheduled", "reason", retryReason, "attempt", attempt, "next_attempt", attempt+1, "backoff", backoff.String())
 			select {
@@ -1272,12 +1286,14 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// A first turn that produced no semantic progress because Codex could
 		// not load its model catalog is a startup-only failure: no tool ran and
 		// no content reached the user, so replaying the prompt cannot duplicate
-		// side effects. Require the reaped process tree for the same reason
-		// initialize retries do — a surviving app-server would race the retry.
+		// side effects. Reuse the same process-tree evidence initialize retries
+		// require (cleanupConfirmed plus platform support) rather than a bare
+		// ProcessState check: on Windows the daemon cannot prove the whole tree
+		// is gone, and a surviving app-server would race the retry.
 		startupRefreshRetrySafe := timeoutDiagnostic.Kind == codexTimeoutFirstTurnNoProgress &&
 			!firstTurnProgressObserved &&
 			strings.Contains(stderrTail, codexModelCatalogRefreshFailureSignal) &&
-			cmd.ProcessState != nil
+			cleanupConfirmed && codexInitializeRetrySupported()
 		if startupRefreshRetrySafe {
 			b.cfg.Logger.Warn("codex startup model catalog refresh failure is retry safe",
 				"pid", cmd.Process.Pid,
