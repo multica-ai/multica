@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { IssueStatusDefinition } from "@multica/core/types";
+import type { Issue, IssueStatusDefinition } from "@multica/core/types";
 import { issueMatchesStatusFilter, resolveStatusFilterIds } from "./status-filter";
 
 // MUL-4809 — status filter selections are persisted, and older builds stored the
@@ -73,16 +73,26 @@ describe("issueMatchesStatusFilter", () => {
   });
 
   it("matches an issue by its status_id", () => {
-    const issue = { status: "in_progress", status_id: CUSTOM.id };
+    const issue: Pick<Issue, "status" | "status_id"> = {
+      status: "in_progress",
+      status_id: CUSTOM.id,
+    };
     expect(issueMatchesStatusFilter(issue, [CUSTOM.id], CATALOG)).toBe(true);
     expect(issueMatchesStatusFilter(issue, [REVIEW.id], CATALOG)).toBe(false);
   });
 
   it("resolves a legacy selection against the issue's status_id", () => {
-    const issue = { status: "in_review", status_id: REVIEW.id };
+    const issue: Pick<Issue, "status" | "status_id"> = {
+      status: "in_review",
+      status_id: REVIEW.id,
+    };
     expect(issueMatchesStatusFilter(issue, ["in_review"], CATALOG)).toBe(true);
     // The custom status shares the Category but is a different lane.
-    expect(issueMatchesStatusFilter({ status: "in_progress", status_id: CUSTOM.id }, ["in_review"], CATALOG)).toBe(false);
+    const custom: Pick<Issue, "status" | "status_id"> = {
+      status: "in_progress",
+      status_id: CUSTOM.id,
+    };
+    expect(issueMatchesStatusFilter(custom, ["in_review"], CATALOG)).toBe(false);
   });
 
   it("falls back to the legacy token when the issue has no status_id", () => {

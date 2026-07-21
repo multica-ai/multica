@@ -217,8 +217,15 @@ export interface IssueViewState {
   togglePropertyFilter: (propertyId: string, optionId: string) => void;
   setDateFilter: (filter: IssueDateFilter | null) => void;
   toggleAgentRunningFilter: () => void;
-  hideStatus: (status: IssueStatus) => void;
-  showStatus: (status: IssueStatus) => void;
+  /**
+   * Column show/hide is expressed through statusFilters, which now holds catalog
+   * ids as well as legacy tokens (MUL-4809) — so these take the same widened key.
+   * NOTE: hideStatus still seeds from ALL_STATUSES when no filter is active; that
+   * seed becomes wrong once the board renders one column per CATALOG status, and
+   * must then be passed the actual visible column keys.
+   */
+  hideStatus: (status: string) => void;
+  showStatus: (status: string) => void;
   clearFilters: () => void;
   setSortBy: (field: SortField) => void;
   setSortDirection: (dir: SortDirection) => void;
