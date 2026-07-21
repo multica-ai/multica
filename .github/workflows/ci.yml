@@ -205,7 +205,9 @@ jobs:
         # so it cannot live in the ubuntu backend job. Scoped to the launcher
         # tests, which are windows-tagged and therefore run nowhere else today;
         # the backend job still runs the full package on Linux.
-        run: go test ./pkg/agent -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation)' -count=1 -timeout=5m
+        # -v so a silent skip (no PowerShell host resolved, or a -run pattern
+        # that stops matching) is visible in the log instead of passing as "ok".
+        run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation)' -count=1 -timeout=5m
 
       - name: Build Windows CLI helper entrypoint
         working-directory: server
