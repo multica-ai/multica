@@ -13,7 +13,7 @@ const CHECK_IN_HEALTH_OPTIONS = [
 
 const formatDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(value));
 
-export function RockDetail({ wsId, rock, terminology, onEdit }: { wsId: string; rock: Rock; terminology: Terminology; onEdit: () => void }) {
+export function RockDetail({ wsId, rock, terminology }: { wsId: string; rock: Rock; terminology: Terminology }) {
   const saveCheckIn = useRockCheckIn(wsId);
   const [confidence, setConfidence] = useState(rock.confidence);
   const [reportedHealth, setReportedHealth] = useState(rock.reported_health === "unknown" ? "unset" : rock.reported_health);
@@ -29,7 +29,6 @@ export function RockDetail({ wsId, rock, terminology, onEdit }: { wsId: string; 
       <div className="min-w-0">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Under this {terminology.rock} — {rock.title}</p><h2 className="mt-1 text-xl font-semibold">Connected execution</h2></div>
-          <button type="button" onClick={onEdit} className="h-9 rounded-md border px-3 text-sm font-medium">Edit {terminology.rock}</button>
         </div>
         <div className="mt-4 grid gap-3">
           {rock.projects.length === 0 && rock.issues.length === 0 && <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">This {terminology.rock.toLowerCase()} currently stands on its own. Add connections whenever execution is ready.</p>}

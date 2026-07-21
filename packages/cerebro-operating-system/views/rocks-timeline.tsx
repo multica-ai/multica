@@ -10,7 +10,9 @@ interface RocksTimelineProps {
   periods: OperatingPeriod[];
   terminology: Terminology;
   groupBy: "owner" | "type";
+  openRockId?: string;
   onSelect: (id: string) => void;
+  onEdit?: (id: string) => void;
   onRename?: (rock: Rock, title: string) => void;
   onCreate?: (input: RockInput, reset: () => void) => void;
   isCreating?: boolean;
@@ -27,7 +29,7 @@ function groupDefaults(rocks: Rock[], group: string, groupKey: (rock: Rock) => s
   return { goal_type_id: representative.goal_type_id || undefined };
 }
 
-export function RocksTimeline({ rocks, periods, terminology, groupBy, onSelect, onRename, onCreate, isCreating }: RocksTimelineProps) {
+export function RocksTimeline({ rocks, periods, terminology, groupBy, openRockId, onSelect, onEdit, onRename, onCreate, isCreating }: RocksTimelineProps) {
   const sorted = [...periods].sort((a, b) => a.starts_on.localeCompare(b.starts_on));
   const groupKey = (rock: Rock) => (groupBy === "owner" ? rock.owner_name || "No owner" : rock.goal_type_name || "No type");
   const groups = [...new Set(rocks.map(groupKey))].sort((a, b) => a.localeCompare(b));
@@ -57,7 +59,7 @@ export function RocksTimeline({ rocks, periods, terminology, groupBy, onSelect, 
 
   return (
     <section aria-label={`${terminology.rocks} timeline`} className="overflow-x-auto rounded-xl border bg-card">
-      <div className="grid min-w-fit" style={{ gridTemplateColumns: `11rem repeat(${sorted.length}, minmax(15rem, 1fr))` }}>
+      <div className="grid" style={{ gridTemplateColumns: `11rem repeat(${sorted.length}, minmax(15rem, 1fr))` }}>
         <div className="border-b bg-muted/40 px-4 py-3" />
         {sorted.map((period) => (
           <div key={period.id} className="border-b border-l bg-muted/40 px-4 py-3">
@@ -76,7 +78,7 @@ export function RocksTimeline({ rocks, periods, terminology, groupBy, onSelect, 
               return (
                 <div key={period.id} className="grid content-start gap-2 border-b border-l p-2">
                   {rocks.filter((rock) => rock.period_id === period.id && groupKey(rock) === group).map((rock) => (
-                    <div key={rock.id} className="rounded-lg border bg-background p-2.5 hover:bg-muted/40">
+                    <div key={rock.id} className={`rounded-lg border bg-background p-2.5 ${openRockId === rock.id ? "border-primary bg-primary/5" : "hover:bg-muted/40"}`}>
                       {renamingId === rock.id ? (
                         <input
                           aria-label={`${rock.title} new title`}
@@ -92,6 +94,7 @@ export function RocksTimeline({ rocks, periods, terminology, groupBy, onSelect, 
                             {rock.goal_type_color && <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: rock.goal_type_color }} />}
                             <button type="button" onClick={() => onSelect(rock.id)} aria-label={`Open ${rock.title}`} className="min-w-0 flex-1 truncate text-left text-sm font-medium hover:underline">{rock.title}</button>
                             {onRename && <button type="button" aria-label={`Rename ${rock.title}`} onClick={() => setRenamingId(rock.id)} className="shrink-0 rounded px-1 text-xs text-muted-foreground hover:bg-muted">✎</button>}
+                            {onEdit && <button type="button" aria-label={`Edit ${rock.title}`} onClick={() => onEdit(rock.id)} className="shrink-0 rounded px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-muted">Edit</button>}
                           </span>
                           <span className="mt-1.5 flex items-center gap-2"><HealthBadge state={rock.derived_health.state} /><span className="text-xs text-muted-foreground">{rock.confidence}%</span></span>
                         </>
