@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY idx_issue_external_identity_workspace_issue ON issue_external_identity(workspace_id, issue_id);

@@ -123,6 +123,13 @@ func TestRedisWebhookRateLimiter_RejectsAboveLimit(t *testing.T) {
 	}
 }
 
+func TestRedisAuthorityRateLimiter_FailsClosedWithoutRedis(t *testing.T) {
+	l := NewRedisAuthorityRateLimiter(nil, WebhookRateLimit{Limit: 1, Window: time.Minute})
+	if l.Allow(context.Background(), "127.0.0.1") {
+		t.Fatal("authority limiter must reject when Redis is unavailable")
+	}
+}
+
 func TestRedisWebhookIPRateLimiter_HasSeparateBudgetFromTokenLimiter(t *testing.T) {
 	// Per-IP and per-token use the SAME Lua script but DIFFERENT key
 	// prefixes. Exhausting one budget must not affect the other —

@@ -100,6 +100,14 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "codex_handshake_timeout:", valueOrDefault(cfg.CodexHandshakeTimeout, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_auto_update:", cfg.DisableAutoUpdate)
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "auto_update_check_interval:", valueOrDefault(cfg.AutoUpdateCheckInterval, "(not set)"))
+	if cfg.AuthorityPin == nil {
+		fmt.Fprintf(os.Stdout, "%-34s %s\n", "authority:", "(not set)")
+	} else {
+		fmt.Fprintf(os.Stdout, "%-34s %s\n", "authority.server_url:", valueOrDefault(cfg.AuthorityPin.ServerURL, "(not set)"))
+		fmt.Fprintf(os.Stdout, "%-34s %s\n", "authority.id:", valueOrDefault(cfg.AuthorityPin.AuthorityID, "(not set)"))
+		fmt.Fprintf(os.Stdout, "%-34s %s\n", "authority.public_key:", valueOrDefault(cfg.AuthorityPin.PublicKey, "(not set)"))
+		fmt.Fprintf(os.Stdout, "%-34s %s/%d/%s\n", "authority.db_identity:", cfg.AuthorityPin.DBIdentity.SystemIdentifier, cfg.AuthorityPin.DBIdentity.DatabaseOID, cfg.AuthorityPin.DBIdentity.DatabaseName)
+	}
 	return nil
 }
 

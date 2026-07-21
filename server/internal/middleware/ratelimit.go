@@ -74,16 +74,21 @@ func RateLimit(rdb *redis.Client, limit int, window time.Duration, trustedProxie
 				return
 			}
 			if count > int64(limit) {
-				w.Header().Set("Retry-After", fmt.Sprintf("%d", int(window.Seconds())))
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusTooManyRequests)
-				json.NewEncoder(w).Encode(map[string]string{"error": "too many requests"})
+				writeRateLimitExceeded(w, window)
 				return
 			}
 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func writeRateLimitExceeded(w http.ResponseWriter, window time.Duration) {
+	w.Header().Set("Retry-After", fmt.Sprintf("%d", int(window.Seconds())))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusTooManyRequests)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "too many requests"})
 }
 
 // extractIP determines the client IP for rate limiting purposes.

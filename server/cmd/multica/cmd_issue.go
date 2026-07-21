@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/authority"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -200,6 +203,12 @@ var issueCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new issue",
 	RunE:  runIssueCreate,
+}
+
+var issueUpsertExternalCmd = &cobra.Command{
+	Use:   "upsert-external",
+	Short: "Create or claim an issue by external identity aliases",
+	RunE:  runIssueUpsertExternal,
 }
 
 var issueUpdateCmd = &cobra.Command{
@@ -410,6 +419,7 @@ func init() {
 	issueCmd.AddCommand(issuePullRequestsCmd)
 	issueCmd.AddCommand(issueChildrenCmd)
 	issueCmd.AddCommand(issueCreateCmd)
+	issueCmd.AddCommand(issueUpsertExternalCmd)
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
@@ -475,6 +485,8 @@ func init() {
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
+
+	registerIssueUpsertExternalFlags(issueUpsertExternalCmd)
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
@@ -565,6 +577,23 @@ func init() {
 	issueSubscriberRemoveCmd.Flags().String("user", "", "Member or agent name to unsubscribe (fuzzy match; defaults to the caller)")
 	issueSubscriberRemoveCmd.Flags().String("user-id", "", "Member or agent UUID to unsubscribe (mutually exclusive with --user)")
 	issueSubscriberRemoveCmd.Flags().String("output", "json", "Output format: table or json")
+}
+
+func registerIssueUpsertExternalFlags(cmd *cobra.Command) {
+	cmd.Flags().StringArray("alias", nil, "External identity alias namespace=external_id (repeatable)")
+	cmd.Flags().String("target-issue", "", "Existing issue ID to claim when no mapping exists")
+	cmd.Flags().StringArray("metadata", nil, "Metadata patch key=value (repeatable; values JSON-parsed like issue metadata)")
+	cmd.Flags().String("body", "", "Full JSON request body")
+	cmd.Flags().Bool("body-stdin", false, "Read full JSON request body from stdin")
+	cmd.Flags().String("title", "", "Issue title to create when no mapping exists")
+	cmd.Flags().String("description", "", "Issue description")
+	cmd.Flags().String("status", "", "Issue status for create")
+	cmd.Flags().String("priority", "", "Issue priority for create")
+	cmd.Flags().String("parent", "", "Parent issue ID for create")
+	cmd.Flags().String("project", "", "Project ID for create")
+	cmd.Flags().String("start-date", "", "Start date for create (YYYY-MM-DD)")
+	cmd.Flags().String("due-date", "", "Due date for create (YYYY-MM-DD)")
+	cmd.Flags().String("output", "json", "Output format: json or table")
 }
 
 // ---------------------------------------------------------------------------
@@ -1224,6 +1253,180 @@ func activeDuplicateIssueCreateMessage(err error) (string, bool) {
 		return "", false
 	}
 	return payload.Error, true
+}
+
+func runIssueUpsertExternal(cmd *cobra.Command, _ []string) error {
+	body, err := buildIssueUpsertExternalBody(cmd)
+	if err != nil {
+		return err
+	}
+	nonce, err := authority.GenerateNonce(nil)
+	if err != nil {
+		return fmt.Errorf("generate write nonce: %w", err)
+	}
+	body["nonce"] = nonce
+	body["write_receipt_protocol"] = authority.WriteReceiptProtocolV2
+	rawRequest, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encode external upsert request: %w", err)
+	}
+	requestDigest := sha256.Sum256(rawRequest)
+	cfg, err := cli.LoadCLIConfigForProfile(resolveProfile(cmd))
+	if err != nil {
+		return err
+	}
+	if cfg.AuthorityPin == nil {
+		return fmt.Errorf("authority pin is not configured; run multica authority pin with operator-provided values")
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var envelope struct {
+		Issue   json.RawMessage        `json:"issue"`
+		Receipt authority.WriteReceipt `json:"receipt"`
+	}
+	if err := client.PostRawJSONStrict(ctx, "/api/issues/upsert-external", rawRequest, &envelope, 256*1024); err != nil {
+		return fmt.Errorf("upsert external issue: %w", err)
+	}
+	result, err := decodeExternalUpsertIssueStrict(envelope.Issue)
+	if err != nil {
+		return fmt.Errorf("decode external upsert issue: %w", err)
+	}
+	if err := validateExternalUpsertWorkspace(result, client.WorkspaceID); err != nil {
+		return err
+	}
+	issueID := strVal(result, "id")
+	expected := authority.WriteReceiptExpectation{Protocol: authority.WriteReceiptProtocolV2, Operation: authority.OperationIssueUpsertExternal, RequestSHA256: fmt.Sprintf("%x", requestDigest), ResourceID: issueID, WorkspaceID: client.WorkspaceID, Nonce: nonce}
+	if err := authority.VerifyBoundWriteReceipt(envelope.Receipt, expected, *cfg.AuthorityPin, client.BaseURL, time.Now(), 2*time.Minute, 30*time.Second); err != nil {
+		return fmt.Errorf("verify write receipt: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY"}
+		rows := [][]string{{
+			issueDisplayKey(result),
+			strVal(result, "title"),
+			strVal(result, "status"),
+			strVal(result, "priority"),
+		}}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func validateExternalUpsertWorkspace(result map[string]any, configuredWorkspaceID string) error {
+	configuredWorkspaceID = strings.TrimSpace(configuredWorkspaceID)
+	returnedWorkspaceID, ok := result["workspace_id"].(string)
+	if configuredWorkspaceID == "" || !ok || returnedWorkspaceID != configuredWorkspaceID {
+		return fmt.Errorf("external upsert issue workspace does not match configured workspace")
+	}
+	return nil
+}
+
+func decodeExternalUpsertIssueStrict(raw json.RawMessage) (map[string]any, error) {
+	allowed := map[string]struct{}{}
+	for _, key := range []string{
+		"id", "workspace_id", "number", "identifier", "title", "description", "status", "priority",
+		"assignee_type", "assignee_id", "creator_type", "creator_id", "parent_issue_id", "project_id",
+		"position", "stage", "start_date", "due_date", "created_at", "updated_at", "metadata", "properties",
+		"reactions", "attachments", "labels",
+	} {
+		allowed[key] = struct{}{}
+	}
+	var fields map[string]json.RawMessage
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if err := dec.Decode(&fields); err != nil || fields == nil {
+		return nil, fmt.Errorf("issue must be a JSON object")
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("issue contains trailing JSON")
+	}
+	for key := range fields {
+		if _, ok := allowed[key]; !ok {
+			return nil, fmt.Errorf("unknown issue field %q", key)
+		}
+	}
+	var issue map[string]any
+	if err := json.Unmarshal(raw, &issue); err != nil {
+		return nil, err
+	}
+	return issue, nil
+}
+
+func buildIssueUpsertExternalBody(cmd *cobra.Command) (map[string]any, error) {
+	bodyFlag, _ := cmd.Flags().GetString("body")
+	bodyStdin, _ := cmd.Flags().GetBool("body-stdin")
+	if bodyFlag != "" && bodyStdin {
+		return nil, fmt.Errorf("--body and --body-stdin are mutually exclusive")
+	}
+	if bodyFlag != "" || bodyStdin {
+		raw := bodyFlag
+		if bodyStdin {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return nil, fmt.Errorf("read --body-stdin: %w", err)
+			}
+			raw = string(data)
+		}
+		var body map[string]any
+		if err := json.Unmarshal([]byte(raw), &body); err != nil {
+			return nil, fmt.Errorf("parse body JSON: %w", err)
+		}
+		return body, nil
+	}
+
+	aliasFlags, _ := cmd.Flags().GetStringArray("alias")
+	if len(aliasFlags) == 0 {
+		return nil, fmt.Errorf("--alias is required unless --body is used")
+	}
+	aliases := make([]map[string]string, 0, len(aliasFlags))
+	for _, raw := range aliasFlags {
+		idx := strings.IndexByte(raw, '=')
+		if idx <= 0 {
+			return nil, fmt.Errorf("--alias %q must be namespace=external_id", raw)
+		}
+		aliases = append(aliases, map[string]string{
+			"namespace":   raw[:idx],
+			"external_id": raw[idx+1:],
+		})
+	}
+	body := map[string]any{"aliases": aliases}
+	if target, _ := cmd.Flags().GetString("target-issue"); target != "" {
+		body["target_issue_id"] = target
+	}
+	create := map[string]any{}
+	for _, key := range []string{"title", "description", "status", "priority", "start-date", "due-date"} {
+		if value, _ := cmd.Flags().GetString(key); value != "" {
+			jsonKey := strings.ReplaceAll(key, "-", "_")
+			create[jsonKey] = value
+		}
+	}
+	if parent, _ := cmd.Flags().GetString("parent"); parent != "" {
+		create["parent_issue_id"] = parent
+	}
+	if project, _ := cmd.Flags().GetString("project"); project != "" {
+		create["project_id"] = project
+	}
+	if len(create) > 0 {
+		body["create"] = create
+	}
+	if mdFlags, _ := cmd.Flags().GetStringArray("metadata"); len(mdFlags) > 0 {
+		encoded, err := buildMetadataFilterQueryParam(mdFlags)
+		if err != nil {
+			return nil, err
+		}
+		var md map[string]any
+		if err := json.Unmarshal([]byte(encoded), &md); err != nil {
+			return nil, err
+		}
+		body["metadata"] = md
+	}
+	return body, nil
 }
 
 func runIssueUpdate(cmd *cobra.Command, args []string) error {

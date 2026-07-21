@@ -341,6 +341,68 @@ func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// PostJSONStrict performs a POST request and requires exactly one JSON value
+// with no unknown fields. It is intended for trust-establishing responses where
+// permissive forward-compatible decoding would weaken the verification boundary.
+func (c *APIClient) PostJSONStrict(ctx context.Context, path string, body any, out any, maxResponseBytes int64) error {
+	if maxResponseBytes <= 0 {
+		return fmt.Errorf("max response bytes must be positive")
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	return c.PostRawJSONStrict(ctx, path, data, out, maxResponseBytes)
+}
+
+// PostRawJSONStrict posts caller-supplied exact JSON bytes and strictly decodes
+// one bounded response value. It is used when a signed receipt binds the wire
+// bytes, so remarshal-after-hashing would break the security boundary.
+func (c *APIClient) PostRawJSONStrict(ctx context.Context, path string, data []byte, out any, maxResponseBytes int64) error {
+	if maxResponseBytes <= 0 {
+		return fmt.Errorf("max response bytes must be positive")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.setHeaders(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return newHTTPError(http.MethodPost, path, resp)
+	}
+	if out == nil {
+		return nil
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
+	if int64(len(raw)) > maxResponseBytes {
+		return fmt.Errorf("response exceeds %d bytes", maxResponseBytes)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(out); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("response contains trailing JSON value")
+		}
+		return fmt.Errorf("decode trailing response: %w", err)
+	}
+	return nil
+}
+
 // PutJSON performs a PUT request with a JSON body.
 func (c *APIClient) PutJSON(ctx context.Context, path string, body any, out any) error {
 	data, err := json.Marshal(body)

@@ -97,13 +97,13 @@ SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE;
 -- their workspace-owned rows here so they commit or roll back atomically with
 -- the workspace row.
 WITH ws_installations AS (
-    SELECT id FROM channel_installation WHERE workspace_id = $1
+    SELECT id FROM channel_installation WHERE channel_installation.workspace_id = $1
 ),
 ws_agents AS (
-    SELECT id FROM agent WHERE workspace_id = $1
+    SELECT id FROM agent WHERE agent.workspace_id = $1
 ),
 ws_skills AS (
-    SELECT id FROM skill WHERE workspace_id = $1
+    SELECT id FROM skill WHERE skill.workspace_id = $1
 ),
 cleared_agent_label_assignments AS (
     DELETE FROM agent_to_label WHERE agent_id IN (SELECT id FROM ws_agents)
@@ -133,7 +133,7 @@ cleared_draft_restores AS (
     -- the caller must already hold LockChatSessionsByWorkspace: that lock is what
     -- keeps FinalizeDeferredCancelledChat from inserting one behind it.
     DELETE FROM chat_draft_restore
-    WHERE chat_session_id IN (SELECT id FROM chat_session WHERE workspace_id = $1)
+    WHERE chat_session_id IN (SELECT id FROM chat_session WHERE chat_session.workspace_id = $1)
 ),
 cleared_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM ws_installations)
@@ -145,18 +145,26 @@ cleared_audit AS (
     DELETE FROM channel_inbound_audit WHERE installation_id IN (SELECT id FROM ws_installations)
 ),
 cleared_user_bindings AS (
-    DELETE FROM channel_user_binding WHERE workspace_id = $1
+    DELETE FROM channel_user_binding WHERE channel_user_binding.workspace_id = $1
 ),
 cleared_binding_tokens AS (
-    DELETE FROM channel_binding_token WHERE workspace_id = $1
+    DELETE FROM channel_binding_token WHERE channel_binding_token.workspace_id = $1
 ),
 cleared_installations AS (
-    DELETE FROM channel_installation WHERE workspace_id = $1
+    DELETE FROM channel_installation WHERE channel_installation.workspace_id = $1
 ),
 cleared_issue_properties AS (
-    DELETE FROM issue_property WHERE workspace_id = $1
+    DELETE FROM issue_property WHERE issue_property.workspace_id = $1
 ),
 deleted_pending_check_suites AS (
-    DELETE FROM github_pending_check_suite WHERE workspace_id = $1
+    DELETE FROM github_pending_check_suite WHERE github_pending_check_suite.workspace_id = $1
+),
+deleted_workspace AS (
+    DELETE FROM workspace WHERE workspace.id = $1
+    RETURNING id
 )
-DELETE FROM workspace WHERE workspace.id = $1;
+-- External identities intentionally have no workspace/issue FK. Make cleanup
+-- depend on the parent delete so an upsert that held an issue lock and committed
+-- while the workspace cascade waited cannot leave an orphan alias.
+DELETE FROM issue_external_identity
+WHERE issue_external_identity.workspace_id IN (SELECT id FROM deleted_workspace);

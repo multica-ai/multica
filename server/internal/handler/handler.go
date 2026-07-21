@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/authority"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -52,6 +53,10 @@ type dbExecutor interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+type writeReceiptSigner interface {
+	SignWriteReceipt(authority.WriteReceiptStatement) (authority.WriteReceipt, error)
 }
 
 type Config struct {
@@ -112,6 +117,10 @@ type Config struct {
 	// Surfaced through /api/config so self-hosted operators can confirm which
 	// server build is deployed. Empty in dev builds.
 	ServerVersion string
+	// External identity aliases are immutable claims. The endpoint fails closed
+	// unless both an exact authenticated user UUID and namespace allowlist are configured.
+	ExternalUpsertPrincipalID string
+	ExternalUpsertNamespaces  []string
 }
 
 type cloudRuntimeProxy interface {
@@ -161,6 +170,7 @@ type Handler struct {
 	WebhookRateLimiter           WebhookRateLimiter
 	WebhookIPRateLimiter         WebhookRateLimiter
 	WebhookAbsoluteIPRateLimiter WebhookRateLimiter
+	AuthorityRateLimiter         WebhookRateLimiter
 	WebhookDeliveryWorker        *WebhookDeliveryWorker
 	CloudRuntime                 cloudRuntimeProxy
 	// Lark integration. All three are nil when the Lark master key
@@ -228,7 +238,13 @@ type Handler struct {
 	// Config); when unconfigured its Enabled() reports false and callers fall
 	// back silently.
 	LLM *llm.Client
-	cfg Config
+	// AuthoritySigner backs the public Ed25519 authority attestation endpoint.
+	// Nil means the deployment has not opted in; the public endpoint returns
+	// 503 and no private material is logged or exposed.
+	AuthoritySigner    *authority.Signer
+	writeReceiptSigner writeReceiptSigner
+	ServerCommit       string
+	cfg                Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
@@ -288,6 +304,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
 		WebhookIPRateLimiter:         NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
 		WebhookAbsoluteIPRateLimiter: NewMemoryWebhookAbsoluteIPRateLimiter(DefaultWebhookAbsoluteIPRateLimit()),
+		AuthorityRateLimiter:         NewMemoryAuthorityRateLimiter(DefaultAuthorityRateLimit()),
 		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
 			BaseURL: cfg.CloudRuntimeFleetURL,
 			Timeout: cfg.CloudRuntimeFleetTimeout,

@@ -6,16 +6,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/multica-ai/multica/server/internal/authority"
 )
 
 const defaultCLIConfigPath = ".multica/config.json"
 
 // CLIConfig holds persistent CLI settings.
 type CLIConfig struct {
-	ServerURL   string `json:"server_url,omitempty"`
-	AppURL      string `json:"app_url,omitempty"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	Token       string `json:"token,omitempty"`
+	ServerURL    string         `json:"server_url,omitempty"`
+	AppURL       string         `json:"app_url,omitempty"`
+	WorkspaceID  string         `json:"workspace_id,omitempty"`
+	Token        string         `json:"token,omitempty"`
+	AuthorityPin *authority.Pin `json:"authority_pin,omitempty"`
 
 	// DeviceName is the human-readable label shown in the server's Runtimes
 	// UI for the daemon started with this profile. When multiple daemons run

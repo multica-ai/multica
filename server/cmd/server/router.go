@@ -19,6 +19,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/authority"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -167,6 +168,8 @@ type RouterOptions struct {
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
 	// tests leave this nil and get the legacy synchronous behavior.
 	HeartbeatScheduler handler.HeartbeatScheduler
+	AuthoritySigner    *authority.Signer
+	ServerCommit       string
 }
 
 // NewRouterWithOptions builds the fully-configured Chi router and
@@ -200,24 +203,28 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	origins := allowedOrigins()
 
 	signupConfig := handler.Config{
-		AllowSignup:              os.Getenv("ALLOW_SIGNUP") != "false",
-		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
-		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
-		DisableWorkspaceCreation: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
-		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
-		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
-		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
-		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
-		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
-		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
-		AttachmentFrameAncestors: origins,
-		LLMAPIKey:                strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
-		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
-		LLMDefaultModel:          strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
-		ServerVersion:            normalizeServerVersion(version),
+		AllowSignup:               os.Getenv("ALLOW_SIGNUP") != "false",
+		AllowedEmails:             splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
+		AllowedEmailDomains:       splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		DisableWorkspaceCreation:  os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
+		PublicURL:                 strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
+		TrustedProxies:            parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
+		CloudRuntimeFleetURL:      cloudRuntimeFleetURLFromEnv(),
+		CloudRuntimeFleetTimeout:  envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
+		AttachmentDownloadMode:    os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
+		AttachmentDownloadURLTTL:  envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
+		AttachmentFrameAncestors:  origins,
+		LLMAPIKey:                 strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
+		LLMBaseURL:                strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
+		LLMDefaultModel:           strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
+		ServerVersion:             normalizeServerVersion(version),
+		ExternalUpsertPrincipalID: strings.TrimSpace(os.Getenv("MULTICA_EXTERNAL_UPSERT_PRINCIPAL_ID")),
+		ExternalUpsertNamespaces:  splitAndTrim(os.Getenv("MULTICA_EXTERNAL_UPSERT_NAMESPACES")),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	h.Metrics = opts.BusinessMetrics
+	h.AuthoritySigner = opts.AuthoritySigner
+	h.ServerCommit = opts.ServerCommit
 	h.FeatureFlags = opts.FeatureFlags
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
@@ -248,6 +255,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.WebhookRateLimiter = handler.NewRedisWebhookRateLimiter(rdb, handler.DefaultWebhookRateLimit())
 		h.WebhookIPRateLimiter = handler.NewRedisWebhookIPRateLimiter(rdb, handler.DefaultWebhookIPRateLimit())
 		h.WebhookAbsoluteIPRateLimiter = handler.NewRedisWebhookAbsoluteIPRateLimiter(rdb, handler.DefaultWebhookAbsoluteIPRateLimit())
+		h.AuthorityRateLimiter = handler.NewRedisAuthorityRateLimiter(rdb, handler.DefaultAuthorityRateLimit())
 	}
 
 	// Channel engine (MUL-3620): the platform-agnostic inbound runtime.
@@ -723,6 +731,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	authRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH", 5), time.Minute, trustedProxies)
 	authVerifyRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH_VERIFY", 20), time.Minute, trustedProxies)
 	contactSalesRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_CONTACT_SALES", 5), time.Hour, trustedProxies)
+	authorityRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTHORITY_ATTEST", 30), time.Minute, trustedProxies)
 	r.With(authRL).Post("/auth/send-code", h.SendCode)
 	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
@@ -730,6 +739,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Public API
 	r.Get("/api/config", h.GetConfig)
+	r.With(authorityRL).Post("/api/authority/attest", h.AttestAuthority)
 	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
 
 	// Webhook ingress for autopilots. Outside the authenticated group on
@@ -1043,6 +1053,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/query", h.QueryIssues)
 				r.Post("/", h.CreateIssue)
 				r.Post("/quick-create", h.QuickCreateIssue)
+				r.Post("/upsert-external", h.UpsertIssueExternalIdentity)
 				r.Post("/preview-trigger", h.PreviewIssueTrigger)
 				r.Post("/batch-update", h.BatchUpdateIssues)
 				r.Post("/batch-delete", h.BatchDeleteIssues)

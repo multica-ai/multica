@@ -98,6 +98,24 @@ func TestRateLimit_RetryAfterHeader(t *testing.T) {
 	if retryAfter != "120" {
 		t.Fatalf("expected Retry-After=120, got %q", retryAfter)
 	}
+	if cacheControl := rec.Header().Get("Cache-Control"); cacheControl != "no-store" {
+		t.Fatalf("expected Cache-Control=no-store on 429, got %q", cacheControl)
+	}
+}
+
+func TestWriteRateLimitExceededDisablesCaching(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeRateLimitExceeded(rec, 2*time.Minute)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", rec.Code)
+	}
+	if cacheControl := rec.Header().Get("Cache-Control"); cacheControl != "no-store" {
+		t.Fatalf("expected Cache-Control=no-store on 429, got %q", cacheControl)
+	}
+	if retryAfter := rec.Header().Get("Retry-After"); retryAfter != "120" {
+		t.Fatalf("expected Retry-After=120, got %q", retryAfter)
+	}
 }
 
 func TestRateLimit_DifferentIPs(t *testing.T) {

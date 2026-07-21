@@ -172,6 +172,18 @@ multica issue property unset <issue-id> --name Environment
   filter by, and a definition exists, prefer the property. Metadata stays the
   free-form scratchpad for run state (`pr_url`, `waiting_on`, ...).
 
+## External identity imports
+
+Use `multica issue upsert-external` only when an integration or migration has
+a stable external identity namespace plus opaque external id. The deployment
+must authorize the bridge's exact user UUID and namespace with
+`MULTICA_EXTERNAL_UPSERT_PRINCIPAL_ID` and
+`MULTICA_EXTERNAL_UPSERT_NAMESPACES`; Task Threads uses only `github-node`.
+Each write carries a fresh nonce and is accepted by the CLI only after it
+verifies a pinned, fresh signed receipt binding the exact request bytes and
+resulting issue. Task-token actors are rejected. Do not use title matching for
+import idempotency.
+
 ## Status changes have server side effects
 
 A status change is not cosmetic — the server enqueues or skips agent work based

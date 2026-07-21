@@ -2704,9 +2704,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Track which fields were explicitly present in JSON (even if null)
+	// Track which fields were explicitly present in JSON (even if null).
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
+	// External-identity relationships are application-owned, so issue workspace
+	// identity is immutable at this boundary rather than guarded by a database FK.
+	if _, attemptedMove := rawFields["workspace_id"]; attemptedMove {
+		writeError(w, http.StatusBadRequest, "workspace_id is immutable")
+		return
+	}
 
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
@@ -3146,15 +3152,45 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
 	h.Queries.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 
-	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
+	// Collect all attachment URLs (issue-level + comment-level) before delete.
 	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
 
-	err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start issue deletion")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// External identities deliberately have no foreign key or cascade. Keep the
+	// application-owned relationship cleanup atomic with the parent deletion.
+	if err := qtx.DeleteIssueExternalIdentitiesByIssue(r.Context(), db.DeleteIssueExternalIdentitiesByIssueParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     issue.ID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete issue external identities")
+		return
+	}
+	if err := qtx.DeleteIssue(r.Context(), db.DeleteIssueParams{
 		ID:          issue.ID,
 		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete issue")
+		return
+	}
+	// Reap again after the parent delete. Upsert locks the parent issue through
+	// alias insertion, so this second pass closes the race where the first pass
+	// saw no alias and then waited behind an in-flight upsert at DeleteIssue.
+	if err := qtx.DeleteIssueExternalIdentitiesByIssue(r.Context(), db.DeleteIssueExternalIdentitiesByIssueParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     issue.ID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to finalize issue external identity cleanup")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit issue deletion")
 		return
 	}
 
@@ -3524,11 +3560,40 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		// Collect attachment URLs before CASCADE delete to clean up S3 objects.
 		attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
 
-		if err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
+		// Keep alias cleanup and parent deletion in the same transaction; this
+		// relationship deliberately has no database foreign key or cascade.
+		tx, err := h.TxStarter.Begin(r.Context())
+		if err != nil {
+			slog.Warn("batch delete transaction begin failed", "issue_id", issueID, "error", err)
+			continue
+		}
+		qtx := h.Queries.WithTx(tx)
+		if err := qtx.DeleteIssueExternalIdentitiesByIssue(r.Context(), db.DeleteIssueExternalIdentitiesByIssueParams{
+			WorkspaceID: issue.WorkspaceID,
+			IssueID:     issue.ID,
+		}); err != nil {
+			_ = tx.Rollback(r.Context())
+			slog.Warn("batch delete external identity cleanup failed", "issue_id", issueID, "error", err)
+			continue
+		}
+		if err := qtx.DeleteIssue(r.Context(), db.DeleteIssueParams{
 			ID:          issue.ID,
 			WorkspaceID: issue.WorkspaceID,
 		}); err != nil {
+			_ = tx.Rollback(r.Context())
 			slog.Warn("batch delete issue failed", "issue_id", issueID, "error", err)
+			continue
+		}
+		if err := qtx.DeleteIssueExternalIdentitiesByIssue(r.Context(), db.DeleteIssueExternalIdentitiesByIssueParams{
+			WorkspaceID: issue.WorkspaceID,
+			IssueID:     issue.ID,
+		}); err != nil {
+			_ = tx.Rollback(r.Context())
+			slog.Warn("batch delete final external identity cleanup failed", "issue_id", issueID, "error", err)
+			continue
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			slog.Warn("batch delete issue commit failed", "issue_id", issueID, "error", err)
 			continue
 		}
 

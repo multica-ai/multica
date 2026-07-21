@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY uq_issue_external_identity_workspace_namespace_external_id ON issue_external_identity(workspace_id, namespace, external_id);
