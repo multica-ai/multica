@@ -1455,7 +1455,7 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	// First attempt: resume fails (no SessionID in result).
 	opts := agent.ExecOptions{ResumeSessionID: "stale-id"}
 	var msgSeq atomic.Int32
-	result, _, err := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
+	result, tools, err := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
 	if err != nil {
 		t.Fatalf("first call error: %v", err)
 	}
@@ -1463,8 +1463,8 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 		t.Fatalf("expected failed result with empty SessionID, got %+v", result)
 	}
 
-	// Simulate the retry logic from runTask.
-	if result.Status == "failed" && result.SessionID == "" {
+	// Mirrors the retry in runTask, gated on the same production predicate.
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools) {
 		firstUsage := result.Usage
 		opts.ResumeSessionID = ""
 		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
@@ -1663,7 +1663,7 @@ func TestExecuteAndDrain_ContextCancelled_FlushesPendingTranscript(t *testing.T)
 	}
 }
 
-func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
+func TestExecuteAndDrain_NoRetryAfterToolsExecuted(t *testing.T) {
 	t.Parallel()
 
 	d := newTestDaemon(t)
@@ -1675,18 +1675,109 @@ func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
 	}
 
 	opts := agent.ExecOptions{ResumeSessionID: "some-id"}
-	result, _, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t", new(atomic.Int32))
+	result, tools, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t", new(atomic.Int32))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// SessionID is set → session was established → should NOT retry.
-	shouldRetry := result.Status == "failed" && result.SessionID == ""
-	if shouldRetry {
-		t.Fatal("should not retry when SessionID is present")
+	// A run that executed tools may have mutated the world (posted a comment,
+	// opened a PR, written commits into the reused workdir). Re-running it
+	// from scratch would duplicate those side effects, so the fallback must
+	// stay out regardless of what the backend reported as SessionID.
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools+1) {
+		t.Fatal("should not retry once tools have executed")
 	}
 	if int(fb.idx.Load()) != 1 {
 		t.Fatalf("expected 1 call, got %d", fb.idx.Load())
+	}
+}
+
+func TestShouldRetryWithFreshSession(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		result         agent.Result
+		priorSessionID string
+		tools          int32
+		want           bool
+	}{
+		{
+			name:           "resume rejected before any tool retries",
+			result:         agent.Result{Status: "failed", Error: "session not found"},
+			priorSessionID: "stale-id",
+			want:           true,
+		},
+		{
+			// The reported bug: the session belongs to a different provider
+			// account, and the backend echoes the requested id back on the
+			// rejection. The old SessionID == "" gate never fired here.
+			name: "account-ownership rejection echoing session id retries",
+			result: agent.Result{
+				Status:    "failed",
+				Error:     "API Error: 400 invalid_request_error: session not owned by this account",
+				SessionID: "stale-id",
+			},
+			priorSessionID: "stale-id",
+			want:           true,
+		},
+		{
+			name:           "no resume requested never retries",
+			result:         agent.Result{Status: "failed", Error: "boom"},
+			priorSessionID: "",
+			want:           false,
+		},
+		{
+			name:           "successful run never retries",
+			result:         agent.Result{Status: "completed", SessionID: "sess"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "failure after a tool ran never retries",
+			result:         agent.Result{Status: "failed", Error: "session not found"},
+			priorSessionID: "stale-id",
+			tools:          1,
+			want:           false,
+		},
+		{
+			// Bad credentials cannot succeed on a second attempt; retrying
+			// only burns a full run. Previously a 401 before the first stream
+			// message left SessionID empty and did trigger the fallback.
+			name:           "provider auth failure does not retry",
+			result:         agent.Result{Status: "failed", Error: "API Error: 401 Unauthorized"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "not logged in does not retry",
+			result:         agent.Result{Status: "failed", Error: "Not logged in · Please run /login"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			// Mid-execution terminals carry their own status and must never
+			// reach the fallback.
+			name:           "idle watchdog terminal does not retry",
+			result:         agent.Result{Status: "idle_watchdog", Error: "no activity"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "cancelled terminal does not retry",
+			result:         agent.Result{Status: "cancelled"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := shouldRetryWithFreshSession(tt.result, tt.priorSessionID, tt.tools); got != tt.want {
+				t.Fatalf("shouldRetryWithFreshSession() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
