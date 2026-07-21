@@ -9,6 +9,8 @@ import {
 import { motion, useReducedMotion } from "motion/react";
 import {
   Inbox,
+  Activity,
+  BarChart3,
   CircleUser,
   ListTodo,
   Bot,
@@ -61,6 +63,8 @@ import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 const TAB_ICONS: Record<string, LucideIcon> = {
   Inbox,
+  Activity,
+  BarChart3,
   CircleUser,
   ListTodo,
   Bot,

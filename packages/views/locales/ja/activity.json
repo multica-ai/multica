@@ -1,0 +1,72 @@
+{
+  "title": "アクティビティ",
+  "heading": "ワークスペースアクティビティ",
+  "subtitle": "このワークスペースのアクティビティとプロジェクト変更です。",
+  "tabs": {
+    "activity": "タイムライン",
+    "wrapup": "まとめ"
+  },
+  "filters": {
+    "showing": "表示",
+    "all_projects": "すべてのプロジェクト",
+    "by": "by",
+    "everyone": "全員",
+    "filter_placeholder": "フィルター..."
+  },
+  "dates": {
+    "today": "今日",
+    "yesterday": "昨日"
+  },
+  "activity": {
+    "title": "最新アクティビティ",
+    "description": "最近のイシュー、プロジェクト、agent の変更です。",
+    "empty_title": "まだアクティビティがありません",
+    "empty_body": "作業が動き始めると、ワークスペースのアクティビティがここに表示されます。",
+    "issue_count_one": "{{count}} 件のイシュー",
+    "issue_count_other": "{{count}} 件のイシュー",
+    "active_agents_one": "{{count}} 件の agent がアクティブ",
+    "active_agents_other": "{{count}} 件の agent がアクティブ",
+    "kind": {
+      "issue": "イシュー",
+      "project": "プロジェクト",
+      "agent": "Agent"
+    },
+    "actions": {
+      "issue_created": "作成",
+      "issue_updated": "更新",
+      "issue_done": "完了",
+      "issue_blocked": "ブロック",
+      "project_created": "プロジェクトを作成",
+      "project_updated": "プロジェクトを更新",
+      "agent_created": "agent を作成",
+      "agent_updated": "agent を更新",
+      "agent_archived": "agent をアーカイブ"
+    }
+  },
+  "wrapup": {
+    "title": "プロジェクト",
+    "description": "最近のアクティビティ順のプロジェクトグループです。",
+    "date_label": "今日",
+    "section_title": "プロジェクト内",
+    "project_count_one": "{{count}} 件のプロジェクト",
+    "project_count_other": "{{count}} 件のプロジェクト",
+    "empty_title": "まだプロジェクトがありません",
+    "empty_body": "プロジェクトや未分類のイシューが作成されると、ここに表示されます。",
+    "no_project": "プロジェクトなし",
+    "open_issues_one": "{{count}} 件未完了",
+    "open_issues_other": "{{count}} 件未完了",
+    "done_issues_one": "{{count}} 件完了",
+    "done_issues_other": "{{count}} 件完了",
+    "resources_one": "{{count}} 件のリソース",
+    "resources_other": "{{count}} 件のリソース"
+  },
+  "status": {
+    "agent": {
+      "idle": "待機中",
+      "working": "作業中",
+      "blocked": "ブロック",
+      "error": "エラー",
+      "offline": "オフライン"
+    }
+  }
+}

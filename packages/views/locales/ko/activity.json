@@ -1,0 +1,72 @@
+{
+  "title": "활동",
+  "heading": "워크스페이스 활동",
+  "subtitle": "이 워크스페이스의 활동과 프로젝트 변경입니다.",
+  "tabs": {
+    "activity": "타임라인",
+    "wrapup": "요약"
+  },
+  "filters": {
+    "showing": "표시",
+    "all_projects": "모든 프로젝트",
+    "by": "작성자",
+    "everyone": "모두",
+    "filter_placeholder": "필터..."
+  },
+  "dates": {
+    "today": "오늘",
+    "yesterday": "어제"
+  },
+  "activity": {
+    "title": "최근 활동",
+    "description": "최근 이슈, 프로젝트, agent 변경입니다.",
+    "empty_title": "아직 활동 없음",
+    "empty_body": "작업이 시작되면 워크스페이스 활동이 여기에 표시됩니다.",
+    "issue_count_one": "이슈 {{count}}개",
+    "issue_count_other": "이슈 {{count}}개",
+    "active_agents_one": "활성 agent {{count}}개",
+    "active_agents_other": "활성 agent {{count}}개",
+    "kind": {
+      "issue": "이슈",
+      "project": "프로젝트",
+      "agent": "Agent"
+    },
+    "actions": {
+      "issue_created": "생성",
+      "issue_updated": "업데이트",
+      "issue_done": "완료",
+      "issue_blocked": "차단",
+      "project_created": "프로젝트 생성",
+      "project_updated": "프로젝트 업데이트",
+      "agent_created": "agent 생성",
+      "agent_updated": "agent 업데이트",
+      "agent_archived": "agent 보관"
+    }
+  },
+  "wrapup": {
+    "title": "프로젝트",
+    "description": "최근 활동 순으로 정렬된 프로젝트 그룹입니다.",
+    "date_label": "오늘",
+    "section_title": "프로젝트",
+    "project_count_one": "프로젝트 {{count}}개",
+    "project_count_other": "프로젝트 {{count}}개",
+    "empty_title": "아직 프로젝트 없음",
+    "empty_body": "프로젝트와 그룹 없는 이슈가 생기면 여기에 표시됩니다.",
+    "no_project": "프로젝트 없음",
+    "open_issues_one": "{{count}}개 열림",
+    "open_issues_other": "{{count}}개 열림",
+    "done_issues_one": "{{count}}개 완료",
+    "done_issues_other": "{{count}}개 완료",
+    "resources_one": "리소스 {{count}}개",
+    "resources_other": "리소스 {{count}}개"
+  },
+  "status": {
+    "agent": {
+      "idle": "유휴",
+      "working": "작업 중",
+      "blocked": "차단됨",
+      "error": "오류",
+      "offline": "오프라인"
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "title": "Activity",
+  "heading": "Workspace Activity",
+  "subtitle": "Activity and project changes across this workspace.",
+  "tabs": {
+    "activity": "Timeline",
+    "wrapup": "Wrap-up"
+  },
+  "filters": {
+    "showing": "Showing",
+    "all_projects": "All projects",
+    "by": "by",
+    "everyone": "Everyone",
+    "filter_placeholder": "Filter..."
+  },
+  "dates": {
+    "today": "Today",
+    "yesterday": "Yesterday"
+  },
+  "activity": {
+    "title": "Latest Activity",
+    "description": "Recent issue, project, and agent changes.",
+    "empty_title": "No activity yet",
+    "empty_body": "Workspace activity will appear here as work starts moving.",
+    "issue_count_one": "{{count}} issue",
+    "issue_count_other": "{{count}} issues",
+    "active_agents_one": "{{count}} agent active",
+    "active_agents_other": "{{count}} agents active",
+    "kind": {
+      "issue": "Issue",
+      "project": "Project",
+      "agent": "Agent"
+    },
+    "actions": {
+      "issue_created": "Created",
+      "issue_updated": "Updated",
+      "issue_done": "Completed",
+      "issue_blocked": "Blocked",
+      "project_created": "Created project",
+      "project_updated": "Updated project",
+      "agent_created": "Created agent",
+      "agent_updated": "Updated agent",
+      "agent_archived": "Archived agent"
+    }
+  },
+  "wrapup": {
+    "title": "Projects",
+    "description": "Recent project groups sorted by last activity.",
+    "date_label": "Today",
+    "section_title": "In projects",
+    "project_count_one": "{{count}} project",
+    "project_count_other": "{{count}} projects",
+    "empty_title": "No projects yet",
+    "empty_body": "Projects and ungrouped issues will appear here once they exist.",
+    "no_project": "No project",
+    "open_issues_one": "{{count}} open",
+    "open_issues_other": "{{count}} open",
+    "done_issues_one": "{{count}} done",
+    "done_issues_other": "{{count}} done",
+    "resources_one": "{{count}} resource",
+    "resources_other": "{{count}} resources"
+  },
+  "status": {
+    "agent": {
+      "idle": "Idle",
+      "working": "Working",
+      "blocked": "Blocked",
+      "error": "Error",
+      "offline": "Offline"
+    }
+  }
+}

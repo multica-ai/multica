@@ -32,6 +32,7 @@ import {
   SquarePen,
   CircleUser,
   FolderKanban,
+  Activity,
   BarChart3,
   X,
   Zap,
@@ -125,6 +126,7 @@ type NavKey =
   | "agents"
   | "squads"
   | "usage"
+  | "activity"
   | "runtimes"
   | "skills"
   | "settings";
@@ -140,6 +142,7 @@ type NavLabelKey =
   | "agents"
   | "squads"
   | "usage"
+  | "activity"
   | "runtimes"
   | "skills"
   | "settings";
@@ -157,6 +160,7 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "squads", labelKey: "squads", icon: Users },
   { key: "usage", labelKey: "usage", icon: BarChart3 },
+  { key: "activity", labelKey: "activity", icon: Activity },
 ];
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
@@ -489,7 +493,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         ? list.find((w) => w.id === invitation.workspace_id)
         : null;
       if (joined) {
-        push(paths.workspace(joined.slug).issues());
+        push(paths.workspace(joined.slug).root());
       }
     },
   });
@@ -561,7 +565,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <DropdownMenuItem
                         key={ws.id}
                         render={
-                          <AppLink href={paths.workspace(ws.slug).issues()} />
+                          <AppLink href={paths.workspace(ws.slug).root()} />
                         }
                       >
                         <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />

@@ -113,7 +113,7 @@ vi.mock("@multica/core/chat", () => ({
   ),
 }));
 vi.mock("@multica/core/paths", () => ({
-  paths: { workspace: (slug: string) => ({ issues: () => `/${slug}/issues` }) },
+  paths: { workspace: (slug: string) => ({ root: () => `/${slug}/issues`, issues: () => `/${slug}/issues` }) },
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
@@ -125,6 +125,7 @@ vi.mock("@multica/core/paths", () => ({
     agents: () => "/acme/agents",
     squads: () => "/acme/squads",
     usage: () => "/acme/usage",
+    activity: () => "/acme/activity",
     runtimes: () => "/acme/runtimes",
     skills: () => "/acme/skills",
     settings: () => "/acme/settings",
