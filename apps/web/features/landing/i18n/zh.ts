@@ -294,6 +294,25 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.7",
+        date: "2026-07-21",
+        title: "新增 Qwen Code 运行时，聊天图表与 Windows 修复",
+        changes: [],
+        features: [
+          "你现在可以基于 Qwen Code 运行时搭建智能体了。",
+          "智能体在聊天里画的图表，现在会真正显示为图表了。",
+        ],
+        improvements: [
+          "指派确认弹窗现在秒开，不再有加载等待。",
+        ],
+        fixes: [
+          "在 Windows 上，提示词里包含命令行参数时，Cursor 任务不再失败。",
+          "在 Windows 上，Codex 任务不再在开始前就被拒绝。",
+          "自托管的自定义模型，现在首轮不再登录失败了。",
+          "创建 Issue 时选好项目后，项目下拉菜单现在会自动关闭。",
+        ],
+      },
+      {
         version: "0.4.5",
         date: "2026-07-20",
         title: "可自定义的 Issue 表格、实时排序的看板，以及更稳的智能体任务",
