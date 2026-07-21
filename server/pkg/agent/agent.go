@@ -147,6 +147,11 @@ type Result struct {
 	// process tree was reaped. It is intentionally not part of the public
 	// result contract.
 	codexInitializeRetrySafe bool
+	// codexStartupRefreshRetrySafe is provider-internal evidence that the
+	// first turn produced no semantic progress because Codex could not load
+	// its model catalog, and that the process tree was reaped afterwards.
+	// Like codexInitializeRetrySafe it is not part of the public contract.
+	codexStartupRefreshRetrySafe bool
 }
 
 // Config configures a Backend instance.
