@@ -179,11 +179,11 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16,
-    -- Phase 2 double-write (MUL-4809): mirror the legacy status token into the
-    -- authoritative status_id via its built-in system_key. Stays NULL until the
-    -- workspace catalog is seeded (rolling deploy), where status remains the
-    -- source of truth.
-    (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = $1 AND system_key = $4)
+    -- Phase 2 double-write (MUL-4809 §6.1). status_id is supplied explicitly by
+    -- the caller, which resolved it through issuestatus.ResolveForWrite and
+    -- derived the legacy ` + "`" + `status` + "`" + ` above from the SAME row. NULL while the
+    -- workspace catalog is unseeded, where status stays the source of truth.
+    $17
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, status_id
 `
 
@@ -204,6 +204,7 @@ type CreateIssueParams struct {
 	Number        int32       `json:"number"`
 	ProjectID     pgtype.UUID `json:"project_id"`
 	Stage         pgtype.Int4 `json:"stage"`
+	StatusID      pgtype.UUID `json:"status_id"`
 }
 
 func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error) {
@@ -224,6 +225,7 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		arg.Number,
 		arg.ProjectID,
 		arg.Stage,
+		arg.StatusID,
 	)
 	var i Issue
 	err := row.Scan(
@@ -267,8 +269,8 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17, $18,
-    -- Phase 2 double-write (MUL-4809): see CreateIssue.
-    (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = $1 AND system_key = $4)
+    -- Phase 2 double-write (MUL-4809 §6.1): see CreateIssue.
+    $19
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, status_id
 `
 
@@ -291,6 +293,7 @@ type CreateIssueWithOriginParams struct {
 	OriginType    pgtype.Text `json:"origin_type"`
 	OriginID      pgtype.UUID `json:"origin_id"`
 	Stage         pgtype.Int4 `json:"stage"`
+	StatusID      pgtype.UUID `json:"status_id"`
 }
 
 func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWithOriginParams) (Issue, error) {
@@ -313,6 +316,7 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		arg.OriginType,
 		arg.OriginID,
 		arg.Stage,
+		arg.StatusID,
 	)
 	var i Issue
 	err := row.Scan(

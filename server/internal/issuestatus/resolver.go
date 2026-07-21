@@ -31,6 +31,29 @@ func CategoryForStatusToken(status string) string {
 	}
 }
 
+// ResolveForWrite is Resolve for issue WRITE paths, with the one degradation the
+// two-phase rollout requires (MUL-4809 §6.1): a workspace whose catalog has not
+// been seeded yet has nothing to resolve against, so it reports resolved=false
+// and the caller writes only the legacy `status` token, leaving status_id NULL.
+// That is the same behaviour the create path had before the catalog existed, and
+// it keeps status authoritative until the backfill lands.
+//
+// A seeded workspace always resolves, so an unknown input is still a hard error.
+func ResolveForWrite(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, input string) (db.IssueStatus, bool, error) {
+	seeded, err := q.CountWorkspaceIssueStatuses(ctx, workspaceID)
+	if err != nil {
+		return db.IssueStatus{}, false, fmt.Errorf("count workspace issue statuses: %w", err)
+	}
+	if seeded == 0 {
+		return db.IssueStatus{}, false, nil
+	}
+	resolved, err := Resolve(ctx, q, workspaceID, input)
+	if err != nil {
+		return db.IssueStatus{}, false, err
+	}
+	return resolved, true, nil
+}
+
 // LegacyStatusToken projects a catalog status onto the legacy `issue.status`
 // token that the compat column, older clients, and every not-yet-migrated read
 // path still use (MUL-4809 §6.1). Built-ins keep their exact system_key, so

@@ -133,8 +133,12 @@ func (h *Handler) resolveIssueStatusInput(
 	}
 	if seeded == 0 {
 		if statusID != nil {
+			// Nothing to target: the catalog this id would name does not exist yet.
 			writeError(w, http.StatusBadRequest, "status_id does not name a status in this workspace")
 			return db.IssueStatus{}, "", false
+		}
+		if status == nil {
+			return db.IssueStatus{}, "", true
 		}
 		if !validateIssueEnum(w, "status", *status, validIssueStatuses) {
 			return db.IssueStatus{}, "", false
@@ -2603,9 +2607,13 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
-	Title         string   `json:"title"`
-	Description   *string  `json:"description"`
+	Title       string  `json:"title"`
+	Description *string `json:"description"`
+	// Status is the alias form (Category alias / legacy alias / exact display
+	// name); StatusID targets a catalog row directly and is the only way to
+	// create straight into a CUSTOM status (MUL-4809 §3.1).
 	Status        string   `json:"status"`
+	StatusID      *string  `json:"status_id"`
 	Priority      string   `json:"priority"`
 	AssigneeType  *string  `json:"assignee_type"`
 	AssigneeID    *string  `json:"assignee_id"`
@@ -2658,17 +2666,29 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status := req.Status
-	if status == "" {
-		status = "todo"
-	}
 	priority := req.Priority
 	if priority == "" {
 		priority = "none"
 	}
-	if !validateIssueEnum(w, "status", status, validIssueStatuses) {
+	// Resolve through the catalog so a create can target a custom status, and so
+	// status_id + the compat token come from one row (MUL-4809 §6.1). Degrades to
+	// legacy-token validation on an unseeded workspace.
+	//
+	// Only forward `status` when the client actually sent one: defaulting it to
+	// "todo" here and passing it alongside status_id would look like a caller
+	// asking for two different statuses and trip the conflict check.
+	var statusInput *string
+	if req.Status != "" {
+		statusInput = &req.Status
+	} else if req.StatusID == nil {
+		fallback := "todo"
+		statusInput = &fallback
+	}
+	resolvedStatus, statusToken, ok := h.resolveIssueStatusInput(w, r, wsUUID, statusInput, req.StatusID)
+	if !ok {
 		return
 	}
+	status := statusToken
 	if !validateIssueEnum(w, "priority", priority, validIssuePriorities) {
 		return
 	}
@@ -2827,6 +2847,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
+		StatusID:       resolvedStatus.ID,
 		WorkspaceID:    wsUUID,
 		Title:          req.Title,
 		Description:    ptrToText(req.Description),

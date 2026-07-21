@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -784,11 +785,25 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("get next issue position: %w", err)
 	}
 
+	// Resolve the Category alias through the catalog so the issue lands on the
+	// workspace's CURRENT default Todo status (which may be a renamed built-in or
+	// a custom status) and carries the authoritative status_id (MUL-4809 §6.1).
+	// An unseeded workspace degrades to the legacy token with a NULL status_id.
+	newStatus := "todo"
+	var newStatusID pgtype.UUID
+	if resolved, ok, rerr := issuestatus.ResolveForWrite(ctx, qtx, ap.WorkspaceID, "todo"); rerr != nil {
+		return fmt.Errorf("resolve todo status: %w", rerr)
+	} else if ok {
+		newStatus = issuestatus.LegacyStatusToken(resolved)
+		newStatusID = resolved.ID
+	}
+
 	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 		WorkspaceID:  ap.WorkspaceID,
 		Title:        title,
 		Description:  description,
-		Status:       "todo",
+		Status:       newStatus,
+		StatusID:     newStatusID,
 		Priority:     "none",
 		AssigneeType: pgtype.Text{String: ap.AssigneeType, Valid: true},
 		AssigneeID:   ap.AssigneeID,

@@ -7,6 +7,12 @@ export interface CreateIssueRequest {
   title: string;
   description?: string;
   status?: IssueStatus;
+  /**
+   * Targets a catalog row directly — the only way to create an issue straight
+   * into a CUSTOM status (MUL-4809 §3.1). Sending it together with `status` is
+   * accepted only when both resolve to the same status.
+   */
+  status_id?: string;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType;
   assignee_id?: string;

@@ -89,11 +89,11 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('stage'),
-    -- Phase 2 double-write (MUL-4809): mirror the legacy status token into the
-    -- authoritative status_id via its built-in system_key. Stays NULL until the
-    -- workspace catalog is seeded (rolling deploy), where status remains the
-    -- source of truth.
-    (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = $1 AND system_key = $4)
+    -- Phase 2 double-write (MUL-4809 §6.1). status_id is supplied explicitly by
+    -- the caller, which resolved it through issuestatus.ResolveForWrite and
+    -- derived the legacy `status` above from the SAME row. NULL while the
+    -- workspace catalog is unseeded, where status stays the source of truth.
+    sqlc.narg('status_id')
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -144,8 +144,8 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'),
-    -- Phase 2 double-write (MUL-4809): see CreateIssue.
-    (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = $1 AND system_key = $4)
+    -- Phase 2 double-write (MUL-4809 §6.1): see CreateIssue.
+    sqlc.narg('status_id')
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec

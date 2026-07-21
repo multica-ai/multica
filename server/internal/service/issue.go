@@ -51,10 +51,14 @@ func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.
 // to IssueService.Create. The handler owns the parsing step that turns its
 // request payload into this struct; the service stays transport-agnostic.
 type IssueCreateParams struct {
-	WorkspaceID   pgtype.UUID
-	Title         string
-	Description   pgtype.Text
-	Status        string
+	WorkspaceID pgtype.UUID
+	Title       string
+	Description pgtype.Text
+	Status      string
+	// StatusID is the resolved catalog row for Status (MUL-4809 §6.1). Invalid
+	// (NULL) while the workspace catalog is unseeded, where Status stays
+	// authoritative — the handler resolves both together.
+	StatusID      pgtype.UUID
 	Priority      string
 	AssigneeType  pgtype.Text
 	AssigneeID    pgtype.UUID
@@ -260,6 +264,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			Title:         p.Title,
 			Description:   p.Description,
 			Status:        p.Status,
+			StatusID:      p.StatusID,
 			Priority:      p.Priority,
 			AssigneeType:  p.AssigneeType,
 			AssigneeID:    p.AssigneeID,
@@ -281,6 +286,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			Title:         p.Title,
 			Description:   p.Description,
 			Status:        p.Status,
+			StatusID:      p.StatusID,
 			Priority:      p.Priority,
 			AssigneeType:  p.AssigneeType,
 			AssigneeID:    p.AssigneeID,

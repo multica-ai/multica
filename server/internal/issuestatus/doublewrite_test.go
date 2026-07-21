@@ -38,10 +38,24 @@ func builtinStatusID(ctx context.Context, t *testing.T, q *db.Queries, wsID pgty
 
 func createTestIssue(ctx context.Context, t *testing.T, q *db.Queries, wsID pgtype.UUID, status string) db.Issue {
 	t.Helper()
+	// Mirror the handler: CreateIssue no longer derives status_id from system_key,
+	// so the caller resolves the token through the catalog and double-writes the
+	// pair. An unseeded workspace resolves to nothing and keeps status_id NULL.
+	token := status
+	var statusID pgtype.UUID
+	resolved, ok, err := ResolveForWrite(ctx, q, wsID, status)
+	if err != nil {
+		t.Fatalf("resolve status %q: %v", status, err)
+	}
+	if ok {
+		token = LegacyStatusToken(resolved)
+		statusID = resolved.ID
+	}
 	iss, err := q.CreateIssue(ctx, db.CreateIssueParams{
 		WorkspaceID: wsID,
 		Title:       "double-write-test",
-		Status:      status,
+		Status:      token,
+		StatusID:    statusID,
 		Priority:    "none",
 		CreatorType: "member",
 		CreatorID:   newUUID(ctx, t),

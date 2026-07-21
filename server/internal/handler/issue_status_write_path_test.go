@@ -194,3 +194,68 @@ func TestUpdateIssueRejectsArchivedAndUnknownStatus(t *testing.T) {
 		t.Fatalf("malformed status_id: expected 400, got %d %s", code, body)
 	}
 }
+
+// createIssueWithStatusFields POSTs an issue with whichever status inputs are given.
+func createIssueWithStatusFields(t *testing.T, body map[string]any) (IssueResponse, int, string) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	testHandler.CreateIssue(w, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, body))
+	var resp IssueResponse
+	if w.Code == http.StatusCreated {
+		json.NewDecoder(w.Body).Decode(&resp)
+	}
+	return resp, w.Code, w.Body.String()
+}
+
+// A new issue can start directly in a custom status (MUL-4809 §6.1) — the create
+// path resolves the same way the update path does.
+func TestCreateIssueAcceptsCustomStatus(t *testing.T) {
+	ensureTestWorkspaceStatuses(t)
+	custom, code, body := createStatus(t, map[string]any{
+		"name": "Triaging", "category": "todo", "icon": "todo", "color": "info",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create custom status: %d %s", code, body)
+	}
+	t.Cleanup(func() { deleteStatus(t, custom.ID, "") })
+
+	created, code, body := createIssueWithStatusFields(t, map[string]any{
+		"title": "starts in a custom status", "status_id": custom.ID, "priority": "none",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create by status_id: %d %s", code, body)
+	}
+	t.Cleanup(func() { deleteTestIssue(t, created.ID) })
+
+	status, statusID := readIssueStatusColumns(t, created.ID)
+	if statusID != custom.ID {
+		t.Fatalf("persisted status_id = %q, want %s", statusID, custom.ID)
+	}
+	if status != "todo" {
+		t.Fatalf("compat status projection = %q, want todo (the custom status Category)", status)
+	}
+}
+
+// The create path applies the same guards as update: unknown / archived / a
+// conflicting pair are all rejected rather than silently falling back.
+func TestCreateIssueRejectsBadStatusInput(t *testing.T) {
+	ensureTestWorkspaceStatuses(t)
+	custom, code, body := createStatus(t, map[string]any{
+		"name": "Create Guard", "category": "done", "icon": "done", "color": "success",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create custom status: %d %s", code, body)
+	}
+	t.Cleanup(func() { deleteStatus(t, custom.ID, "") })
+
+	if _, code, body := createIssueWithStatusFields(t, map[string]any{
+		"title": "conflict", "status": "todo", "status_id": custom.ID, "priority": "none",
+	}); code != http.StatusBadRequest {
+		t.Fatalf("conflicting status + status_id: expected 400, got %d %s", code, body)
+	}
+	if _, code, body := createIssueWithStatusFields(t, map[string]any{
+		"title": "unknown", "status": "no such status", "priority": "none",
+	}); code != http.StatusBadRequest {
+		t.Fatalf("unknown status: expected 400, got %d %s", code, body)
+	}
+}
