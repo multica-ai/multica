@@ -7,7 +7,12 @@
 #
 # Reads from secret bag (env):   MULTICA_PAT, MULTICA_WORKSPACE_ID, WORKSPACE_SLUG, ANTHROPIC_API_KEY, OPENAI_API_KEY
 # Optional from secret bag:      JIRA_EMAIL, JIRA_PAT
-#                                (both together trigger acli auth; either missing skips)
+#                                (both together trigger acli auth in this shell AND get
+#                                forwarded as agent custom_env — see step 5 — so an
+#                                invoked agent's isolated runtime, which may resolve a
+#                                different $HOME than this shell's acli session wrote to,
+#                                can still re-authenticate acli itself; AIPLAT-147.
+#                                Either missing skips both.)
 #                                DEFAULT_GIT_REPO (comma-separated URLs; seeds workspace repos)
 # Defaulted constant:            ATLASSIAN_SITE (https://g2crowd.atlassian.net)
 # Env-overridable (default set): MULTICA_SERVER_URL (dev pipeline points it at the dev server)
@@ -100,6 +105,15 @@ done < <(multica runtime list --output json \
 #      into agent-runtime-base/Dockerfile:174-175.
 #    - GEMINI_API_KEY deliberately omitted: bundled templates pin
 #      claude-sonnet-4-6; gandalf does not write a Gemini key per workspace.
+#    - JIRA_EMAIL/JIRA_PAT/ATLASSIAN_SITE (when the pair is present) also ride
+#      along here as agent custom_env, not just the pod-startup acli auth done
+#      in step 1 above. The acli auth performed at pod startup writes to
+#      *this shell's* $HOME/.config/acli/ — an isolated per-task agent
+#      runtime resolves its own HOME (invoked-agent sandboxing can redirect
+#      it), so that on-disk acli session is not guaranteed visible there
+#      (AIPLAT-147). Shipping the raw credentials as custom_env lets the
+#      acli skill re-authenticate itself inside whatever runtime it lands in,
+#      instead of depending on pod-startup state it may never see.
 CUSTOM_ENV_FILE="$(mktemp)"
 chmod 600 "${CUSTOM_ENV_FILE}"
 jq -n \
@@ -107,12 +121,21 @@ jq -n \
   --arg anthropic_key "${ANTHROPIC_API_KEY}" \
   --arg openai_url "${LITELLM_BASE_URL}/v1" \
   --arg openai_key "${OPENAI_API_KEY}" \
+  --arg jira_email "${JIRA_EMAIL:-}" \
+  --arg jira_pat "${JIRA_PAT:-}" \
+  --arg atlassian_site "${ATLASSIAN_SITE}" \
   '{
     ANTHROPIC_BASE_URL: $anthropic_url,
     ANTHROPIC_API_KEY:  $anthropic_key,
     OPENAI_BASE_URL:    $openai_url,
     OPENAI_API_KEY:     $openai_key
-  }' > "${CUSTOM_ENV_FILE}"
+  } + (
+    if $jira_email != "" and $jira_pat != "" then
+      {JIRA_EMAIL: $jira_email, JIRA_PAT: $jira_pat, ATLASSIAN_SITE: $atlassian_site}
+    else
+      {}
+    end
+  )' > "${CUSTOM_ENV_FILE}"
 
 # ── 6. Loop the bundled templates. ───────────────────────────────────────────
 #    Default kit ships two: Engineer (lifecycle-triggered) + Reviewer (on-demand,

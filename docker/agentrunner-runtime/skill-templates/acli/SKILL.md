@@ -19,7 +19,18 @@ Before running any commands, verify authentication is working:
 acli jira workitem search --jql "project = AIPLAT"
 ```
 
-If this fails, check that the acli config has valid credentials (URL, username, API token).
+If this fails with an unauthorized/authentication error, **do not assume Jira access is unavailable.** `acli` stores its session under `$HOME/.config/acli/` (keyed off `$HOME`, not `XDG_CONFIG_HOME`), and this agent's isolated runtime can resolve a different `$HOME` than the one the pod authenticated at startup — so the on-disk session from pod startup may simply not be visible here, even though the agent's environment still carries `JIRA_EMAIL` / `JIRA_PAT` / `ATLASSIAN_SITE`. Re-authenticate in this runtime and retry once:
+
+```bash
+if [ -n "${JIRA_EMAIL:-}" ] && [ -n "${JIRA_PAT:-}" ]; then
+  printf '%s' "${JIRA_PAT}" | acli jira auth login \
+    --site  "${ATLASSIAN_SITE#*//}" \
+    --email "${JIRA_EMAIL}" \
+    --token
+fi
+```
+
+Only after that re-auth attempt fails (or `JIRA_EMAIL`/`JIRA_PAT` aren't set) should you report Jira as unavailable.
 
 ## JIRA Work Item Operations
 

@@ -27,9 +27,10 @@ netcat-openbsd, the agentfarm bootstrap, agent templates, and opencode config.
 |------------------------|---------------------------------|----------------------------------------------------------------------------|
 | `GITHUB_PAT`           | (empty)                         | GitHub PAT (written by gandalf). When present, exported as `GH_TOKEN` and wires `gh` as the git credential helper for HTTPS clones against private repos. |
 | `GIT_USER_NAME`        | (empty)                         | Git identity (`user.name`).                                                |
-| `GIT_USER_EMAIL`       | (empty)                         | Git identity (`user.email`). Together with `JIRA_PAT`, triggers `acli jira auth login`. |
-| `JIRA_PAT`             | (empty)                         | Atlassian API token. Together with `GIT_USER_EMAIL`, authenticates acli. Piped via stdin — never on argv. |
-| `ATLASSIAN_SITE`       | `https://g2crowd.atlassian.net` | Atlassian Cloud site URL. Override to target a different instance.         |
+| `GIT_USER_EMAIL`       | (empty)                         | Git identity (`user.email`). Unrelated to Jira/acli auth — see `JIRA_EMAIL` below. |
+| `JIRA_EMAIL`           | (empty)                         | Atlassian account email. Together with `JIRA_PAT`, triggers `acli jira auth login` at pod startup AND is forwarded as agent `custom_env` so an invoked agent's isolated runtime — which may resolve a different `$HOME` than the pod-startup shell — can re-authenticate acli itself (AIPLAT-147; see the `acli` skill template). |
+| `JIRA_PAT`             | (empty)                         | Atlassian API token. Together with `JIRA_EMAIL`, authenticates acli. Piped via stdin — never on argv. Also forwarded as agent `custom_env`, same reasoning as `JIRA_EMAIL` above. |
+| `ATLASSIAN_SITE`       | `https://g2crowd.atlassian.net` | Atlassian Cloud site URL. Override to target a different instance. Also forwarded as agent `custom_env` (only set) alongside `JIRA_EMAIL`/`JIRA_PAT`. |
 | `OPENCODE_HOST`        | `0.0.0.0`                       | Bind address for `opencode serve`.                                         |
 | `OPENCODE_PORT`        | `4096`                          | Port for `opencode serve`.                                                 |
 | `OPENCODE_EXTRA_ARGS`  | (empty)                         | Appended verbatim to `opencode serve`, e.g. `--cors https://...`.          |
