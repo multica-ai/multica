@@ -11,7 +11,7 @@ An issue is a self-contained unit of work in Multica — a bug, a new feature, a
 
 ## Assigning an issue to an agent
 
-[Assigning](/assigning-issues) an issue to an agent hands that work over to it. The agent **starts automatically** — executing within seconds and reporting progress in comments. When it finishes a delivery, the convention is to move the issue to `in_review` and let a human close it out — one finished run doesn't mean the issue is done (details below under [Status](#status)).
+[Assigning](/assigning-issues) an issue to an agent hands that work over to it. The agent **starts automatically** — the run enqueues immediately, typically begins within seconds when its runtime is online (offline, it waits in the queue), and reports progress in comments. When it finishes a delivery, the convention is to move the issue to `in_review` and let a human close it out — one finished run doesn't mean the issue is done (details below under [Status](#status)).
 
 <Callout type="info">
 For agent identity, configuration, and where they run, see [Agents](/agents).

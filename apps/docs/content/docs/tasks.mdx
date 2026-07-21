@@ -16,7 +16,7 @@ Tasks and [issues](/issues) are two different objects. A single issue can be ass
 graph LR
     Q["Queued<br/>queued"] -->|daemon claims| D["Dispatched<br/>dispatched"]
     D -->|agent starts| R["Running<br/>running"]
-    D -->|needs local directory| W["Waiting<br/>waiting_local_directory"]
+    D -->|local directory busy| W["Waiting<br/>waiting_local_directory"]
     W --> R
     R -->|success| C["Completed<br/>completed"]
     R -->|error or timeout| F["Failed<br/>failed"]
@@ -28,13 +28,13 @@ graph LR
 
 - **Queued** — the task is in the persistent queue, waiting for its runtime's daemon to claim it. An offline runtime doesn't fail the task — it just waits here (up to 2 hours; see below)
 - **Dispatched** — a daemon has claimed it and is starting the AI coding tool
-- **Waiting** (`waiting_local_directory`) — the task needs a local project directory that isn't available on the claiming machine yet; it holds until the directory is ready
+- **Waiting** (`waiting_local_directory`) — the task targets a local project directory that another in-flight task is currently using; it holds until that run releases the directory lock (the UI shows the contested path)
 - **Running** — the AI coding tool is actually doing the work
 - **Completed** — finished successfully; the output (comments, code commits, status changes) is written back to the server
 - **Failed** — aborted with an error or timeout; if the failure reason is retryable, the task automatically returns to `queued` for another attempt
 - **Cancelled** — the user cancelled it
 
-There is one more state you may spot in internals: **`deferred`** — a comment arrived for an agent that was already mid-run, so instead of starting a parallel run, Multica holds it and folds it into a single follow-up run when the current one finishes. See [Mentioning agents](/mentioning-agents#what-happens-when-you--multiple-agents).
+There is one more state you may spot in internals: **`deferred`** — a task scheduled to fire at a later time rather than now. It's used in several places: a comment that arrives while its target agent is already mid-run (folded into a single follow-up run afterwards — see [Mentioning agents](/mentioning-agents#what-happens-when-you--multiple-agents)), the delayed assignee-fallback escalation of comment routing, and `provider_network`'s final short-delay retry.
 
 ## What happens when a task times out
 

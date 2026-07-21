@@ -22,7 +22,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 **member は誰も招待できません** — 招待は admin 層の権限です。**owner だけが他の人を owner に昇格できます** — admin は member や他の admin を昇格・降格できますが、新しい owner を作成することはできません。同様に、admin は member や他の admin を削除できますが、**既存の owner には手を出せません**。要点は、最上位の層をすでに保有している人だけがその層を付与できるようにすることです — 権限は上方向に漏れません。
 
 <Callout type="info">
-エージェントの可視性には「workspace」と「private」の2種類があります。private エージェントは owner と admin だけがイシューに割り当てられます — これは特定の人だけが利用するように作られた構成を保護するためです。[エージェント](/agents)を参照してください。
+あるエージェントを誰が使えるかは、ワークスペースのロールではなく、そのエージェント自身の **Access** 設定 — **Only me**、**Entire workspace**、**Specific people** — によって決まります。「Only me」エージェントを実行できるのはオーナーだけで、ワークスペースの owner や admin にも**バイパスはありません**（すべてのエージェントを見て、その構成の大半を編集できますが、実行することと Access を変更することは、オーナーが許可した人にのみ残されます）。[エージェント → 誰がエージェントを実行できるか](/agents#who-can-run-an-agent)を参照してください。
 </Callout>
 
 ## 新しいメンバーを招待する

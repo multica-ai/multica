@@ -22,7 +22,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 **member는 누구도 초대할 수 없습니다** — 초대는 admin 등급의 권한입니다. **owner만 다른 사람을 owner로 승격할 수 있습니다** — admin은 member나 다른 admin을 승격하거나 강등할 수 있지만, 새 owner를 만들 수는 없습니다. 마찬가지로 admin은 member나 다른 admin을 제거할 수 있지만 **기존 owner는 건드릴 수 없습니다**. 핵심은 최고 등급을 이미 보유한 사람만이 그 등급을 부여할 수 있도록 하는 것입니다 — 권한은 위쪽으로 새어 나가지 않습니다.
 
 <Callout type="info">
-에이전트 가시성에는 "workspace"와 "private" 두 가지가 있습니다. private 에이전트는 owner와 admin만 이슈에 할당할 수 있습니다 — 이는 특정 사람들만 사용하도록 만든 구성을 보호하기 위함입니다. [에이전트](/agents)를 참고하세요.
+주어진 에이전트를 누가 사용할 수 있는지는 워크스페이스 역할이 아니라 에이전트 자체의 **접근(Access)** 설정 — **나만(Only me)**, **워크스페이스 전체(Entire workspace)**, **특정 사용자(Specific people)** — 에 따라 결정됩니다. "나만" 에이전트는 그 owner만 실행할 수 있으며, 워크스페이스 owner와 admin에게도 **우회 경로가 없습니다**(모든 에이전트를 보고 대부분의 구성을 편집할 수 있지만, 실행과 접근 변경은 owner가 부여한 사람에게만 남습니다). [에이전트 → 누가 에이전트를 실행할 수 있나](/agents#who-can-run-an-agent)를 참고하세요.
 </Callout>
 
 ## 새 멤버 초대하기

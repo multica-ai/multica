@@ -8,7 +8,7 @@ import { Mermaid } from "@/components/mermaid";
 
 In Multica, [agents](/agents) do **not** run on our servers — they run on your own machines, driven by a small program called the **daemon** that invokes the [AI coding tools](/providers) installed locally. The Multica server only coordinates: it stores [issues](/issues), queues [tasks](/tasks), and dispatches them to the right **runtime** (runtime = daemon × one AI coding tool).
 
-This structure is the biggest difference between Multica and Linear / Jira: **your API keys, toolchain, and code directories stay on your machine** — the Multica server never sees any of them. That means "my agent isn't working" is almost always a local problem — the daemon isn't running, an AI tool isn't installed, a key has expired. Check locally first; see [Troubleshooting](/troubleshooting) for a guide.
+This structure is the biggest difference between Multica and Linear / Jira: **the AI tools, their own credentials, and your code directories stay on your machine** — the Multica server never sees them. (The one exception is secrets you deliberately save into an agent's [custom environment variables](/agents-create#custom-environment-variables-custom_env), which are stored server-side.) That means "my agent isn't working" is almost always a local problem — the daemon isn't running, an AI tool isn't installed, a key has expired. Check locally first; see [Troubleshooting](/troubleshooting) for a guide.
 
 ## Starting the daemon
 

@@ -1,11 +1,11 @@
 ---
 title: Create and configure an agent
-description: The minimum fields to create an agent, plus every optional setting — system instructions, environment variables, visibility, concurrency limit, and archiving.
+description: The minimum fields to create an agent, plus every optional setting — system instructions, environment variables, access, concurrency limit, and archiving.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Creating an [agent](/agents) takes only two things: **a name** and **a choice of [AI coding tool](/providers)**. Everything else is optional — system instructions, model, environment variables, CLI arguments, visibility, concurrency limit — the defaults work fine. Get it running first and tune later; every field can be changed at any time.
+Creating an [agent](/agents) takes only two things: **a name** and **a choice of [AI coding tool](/providers)**. Everything else is optional — system instructions, model, environment variables, CLI arguments, access, concurrency limit — the defaults work fine. Get it running first and tune later; every field can be changed at any time.
 
 ## Create an agent
 
@@ -104,7 +104,7 @@ The **Access** section controls who can run the agent (assign it, `@`-mention it
 
 New agents default to **Only me**. Access can be changed later, but **only by the agent's owner** — workspace admins can edit the rest of the configuration, not access.
 
-**Restricted access does not mean hidden** — every member sees the agent's name and description in the list, they just can't read sensitive config (env values never appear in agent list/get responses; MCP config is masked for non-owners). Full meaning in [Agents → Who can run an agent](/agents#who-can-run-an-agent).
+**Access also controls who sees the agent.** A regular member only sees agents they're allowed to run — your "Only me" agent doesn't appear in other members' lists at all (workspace owners/admins see every agent, though they still can't run ones they're not granted). Sensitive config stays owner-only regardless: env values never appear in agent list/get responses, and MCP config is masked for non-owners. Full meaning in [Agents → Who can run an agent](/agents#who-can-run-an-agent).
 
 ## Concurrency limit
 

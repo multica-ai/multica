@@ -15,7 +15,7 @@ Multica 是一个**分布式**平台。你看到的 Web 界面只是前台——
 - **守护进程**（daemon）——Multica CLI 的一部分，跑在你自己的机器上。启动后它探测本地装了哪些 AI 编程工具，注册到 server，并与它保持一条 WebSocket 长连接。新任务通过这条连接**实时推送**给守护进程；一个轮询循环（每 30 秒）在推送丢失时作为兜底，心跳每 15 秒发一次。
 - **AI 编程工具**——[Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[CodeBuddy](/providers#codebuddy)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)、[Qoder](/providers#qoder)、[Trae CLI](/providers#trae)、[DevEco Code](/providers#deveco-code)、[Grok](/providers#grok) 16 款之一（或多款并存）。守护进程领到任务后，用这些工具真正去写代码。
 
-工具链在本地的结果：**你的 API 密钥、代码目录、已授权的工具**都只在本地使用；Multica 服务器一个都看不到。自部署还是用 Cloud 都不改变这一点。
+工具链在本地的结果：**AI 工具自己的凭据、你的代码目录、以及工具本身**都只在本地使用；Multica 服务器都看不到，无论自部署还是用 Cloud。一个刻意的例外：你选择存进 Multica 本身的 secret——某个智能体的 [自定义环境变量](/agents-create#自定义环境变量custom_env)——会存在服务器上，好让它把这些值交给运行时；把它们当作服务器侧的 secret 来对待，相应地控制权限范围。
 
 ## 四个对象，以及它们的关系
 
@@ -37,7 +37,7 @@ Multica 是一个**分布式**平台。你看到的 Web 界面只是前台——
 5. AI 在本地写代码、跑测试、发评论回服务器。
 6. 执行结束。守护进程把结果汇报给服务器，任务状态变 `completed` 或 `failed`。你在 Web 上看到进度实时更新（WebSocket 推送）。
 
-有一件事平台**从不**做：它绝不会强行把你的 issue 标记成完成。issue 状态的变化（`in_progress`、`in_review`、`done`）由智能体在工作过程中自己完成——一次 run 完成只代表"这次执行结束了"，不代表"issue 做完了"。生命周期惯例见 [Issues](/issues)。
+有一件事平台**基本上**不做：它不会强行把你的 issue 标记成完成。issue 状态的变化（`in_progress`、`in_review`、`done`）由智能体在工作过程中自己完成——一次 run 完成只代表"这次执行结束了"，不代表"issue 做完了"。唯一的例外：当一个带 close 意图（`Closes MUL-123`）的关联 GitHub PR 被合并时，issue 会自动转到 `done`。生命周期惯例见 [Issues](/issues)。
 
 详细机制见 [守护进程与运行时](/daemon-runtimes) 和 [执行任务](/tasks)。
 

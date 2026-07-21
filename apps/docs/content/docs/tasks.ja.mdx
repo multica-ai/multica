@@ -16,7 +16,7 @@ import { Mermaid } from "@/components/mermaid";
 graph LR
     Q["Queued<br/>queued"] -->|daemon claims| D["Dispatched<br/>dispatched"]
     D -->|agent starts| R["Running<br/>running"]
-    D -->|needs local directory| W["Waiting<br/>waiting_local_directory"]
+    D -->|local directory busy| W["Waiting<br/>waiting_local_directory"]
     W --> R
     R -->|success| C["Completed<br/>completed"]
     R -->|error or timeout| F["Failed<br/>failed"]
@@ -28,13 +28,13 @@ graph LR
 
 - **Queued（キュー待ち）** — タスクは永続的なキューにあり、ランタイムのデーモンが占有するのを待っている状態。ランタイムがオフラインでもタスクは失敗せず、ここで待機します（最長 2 時間。下記参照）
 - **Dispatched（ディスパッチ済み）** — デーモンがタスクを占有し、AI コーディングツールを起動中
-- **Waiting（待機中、`waiting_local_directory`）** — タスクに必要なローカルのプロジェクトディレクトリが、占有したマシン上でまだ利用できない状態。ディレクトリが準備できるまで保留されます
+- **Waiting（待機中、`waiting_local_directory`）** — タスクが対象とするローカルのプロジェクトディレクトリを、別の実行中タスクが現在使用している状態。その実行がディレクトリのロックを解放するまで保留されます（UI には競合しているパスが表示されます）
 - **Running（実行中）** — AI コーディングツールが実際に作業を実行中
 - **Completed（完了）** — 正常に終了し、成果物（コメント、コードコミット、ステータス変更）がサーバーに書き戻されます
 - **Failed（失敗）** — エラーまたはタイムアウトで中断。失敗理由がリトライ可能な場合、タスクは自動的に `queued` 状態に戻り、再試行されます
 - **Cancelled（キャンセル済み）** — ユーザーがキャンセルした場合
 
-内部でもう 1 つ見かけることのあるステートがあります: **`deferred`** — すでに実行中のエージェントにコメントが届いたため、並列実行を始める代わりに、Multica がそれを保留し、現在の実行が終わったときに単一の後続実行へ畳み込みます。[エージェントのメンション](/mentioning-agents#what-happens-when-you--multiple-agents)を参照してください。
+内部でもう 1 つ見かけることのあるステートがあります: **`deferred`** — 今すぐではなく後で発火するようにスケジュールされたタスクです。いくつかの用途で使われます。対象のエージェントがすでに実行中のときに届いたコメント（並列実行を始める代わりに保留し、現在の実行が終わったときに単一の後続実行へ畳み込みます — [エージェントのメンション](/mentioning-agents#what-happens-when-you--multiple-agents)を参照）、コメントルーティングにおける遅延の assignee フォールバックのエスカレーション、そして `provider_network` の最後の短い遅延を伴うリトライです。
 
 ## タスクがタイムアウトしたときに起きること
 

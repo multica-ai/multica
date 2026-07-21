@@ -16,7 +16,7 @@ import { Mermaid } from "@/components/mermaid";
 graph LR
     Q["排队中<br/>queued"] -->|daemon 领取| D["已派发<br/>dispatched"]
     D -->|agent 开始| R["运行中<br/>running"]
-    D -->|需要本地目录| W["等待中<br/>waiting_local_directory"]
+    D -->|本地目录被占用| W["等待中<br/>waiting_local_directory"]
     W --> R
     R -->|成功| C["完成<br/>completed"]
     R -->|出错或超时| F["失败<br/>failed"]
@@ -28,13 +28,13 @@ graph LR
 
 - **排队中（queued）**——任务在持久化队列里，等待它所属运行时的守护进程来领。运行时离线不会让任务失败——它就在这儿等着（最长 2 小时；见下文）
 - **已派发（dispatched）**——守护进程领走了，正在启动对应的 AI 编程工具
-- **等待中**（`waiting_local_directory`）——任务需要一个本地项目目录，但领取它的机器上还没有；它会一直挂着，直到目录就绪
+- **等待中**（`waiting_local_directory`）——任务的目标本地项目目录正被另一条在途任务占用；它会一直挂着，直到那条 run 释放目录锁（UI 会显示争用的路径）
 - **运行中（running）**——AI 编程工具在真正干活
 - **完成（completed）**——成功结束，产出（评论、代码提交、状态变化等）写回服务器
 - **失败（failed）**——出错或超时终止；如果失败原因可重试，会自动回到 `queued` 再来一次
 - **取消（cancelled）**——用户主动取消
 
-还有一个你可能在内部看到的状态：**`deferred`**——一条评论到达时，对应的智能体已经在 run 中，于是 Multica 不启动并行 run，而是先把它按住，等当前 run 结束时折叠成单独的一个跟进 run。见 [在评论里 @ 智能体](/mentioning-agents)。
+还有一个你可能在内部看到的状态：**`deferred`**——一个被安排在稍后某个时间点、而非立刻触发的任务。它用在好几个地方：一条评论到达时目标智能体已经在 run 中（之后折叠成单独的一个跟进 run——见 [在评论里 @ 智能体](/mentioning-agents#-多个智能体会怎样)）、评论路由里延迟的 assignee 兜底升级、以及 `provider_network` 最后一次短延迟重试。
 
 ## 任务超时会怎样
 

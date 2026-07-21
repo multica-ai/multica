@@ -15,7 +15,7 @@ Multica is a **distributed** platform. The web interface you see is just the fro
 - **Daemon** — part of the Multica CLI, running on your own machine. On start it detects which AI coding tools are installed locally, registers with the server, and holds a WebSocket connection to it. New work is **pushed to the daemon in real time** over that connection; a polling loop (every 30 seconds) acts as the fallback when the push is missed, and heartbeats go out every 15 seconds.
 - **AI coding tools** — one of the sixteen (or several in parallel): [Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [CodeBuddy](/providers#codebuddy), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi), [Qoder](/providers#qoder), [Trae CLI](/providers#trae), [DevEco Code](/providers#deveco-code), [Grok](/providers#grok). Once the daemon has picked up a task, it uses these tools to actually do the work.
 
-Because the toolchain stays local, **your API keys, code directories, and authorized tools** are only ever used on your machine — the Multica server never sees any of them. This holds whether you self-host or use Cloud.
+Because the toolchain stays local, **the AI tools' own credentials, your code directories, and the tools themselves** are only ever used on your machine — the Multica server never sees them, whether you self-host or use Cloud. One deliberate exception: secrets you choose to save into Multica itself — an agent's [custom environment variables](/agents-create#custom-environment-variables-custom_env) — are stored on the server so it can hand them to the runtime; treat those as server-side secrets and scope them accordingly.
 
 ## The four objects, and how they relate
 
@@ -37,7 +37,7 @@ Take the most common scenario — you assign an issue to an agent:
 5. The AI writes code locally, runs tests, and posts comments back to the server.
 6. Execution ends. The daemon reports the result to the server, and task status becomes `completed` or `failed`. You see the progress update in real time in the web UI (via WebSocket).
 
-One thing the platform does **not** do: it never force-marks your issue finished. Issue status changes (`in_progress`, `in_review`, `done`) are made by the agent itself as it works — a completed run means "this execution ended," not "the issue is done." See [Issues](/issues) for the lifecycle conventions.
+One thing the platform mostly does **not** do: it doesn't force-mark your issue finished. Issue status changes (`in_progress`, `in_review`, `done`) are made by the agent itself as it works — a completed run means "this execution ended," not "the issue is done." The single exception: when a linked GitHub PR with close intent (`Closes MUL-123`) is merged, the issue does move to `done` automatically. See [Issues](/issues) for the lifecycle conventions.
 
 For the detailed mechanics, see [Daemon and runtimes](/daemon-runtimes) and [Tasks](/tasks).
 

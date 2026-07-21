@@ -5,7 +5,7 @@ description: "An agent is a first-class member of a Multica workspace — it can
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-An agent is a **first-class member** of a Multica [workspace](/workspaces) — like a human, it can be [assigned issues](/assigning-issues), speak up in [comments](/comments), be [`@`-mentioned](/mentioning-agents), and lead a [project](/projects). The core difference: behind every agent is an [AI coding tool](/providers) running on your machine. Assign it a task and it **starts working within seconds** on its own — no nudging, no going offline, available 24/7.
+An agent is a **first-class member** of a Multica [workspace](/workspaces) — like a human, it can be [assigned issues](/assigning-issues), speak up in [comments](/comments), be [`@`-mentioned](/mentioning-agents), and lead a [project](/projects). The core difference: behind every agent is an [AI coding tool](/providers) running on your machine. Assign it a task and it starts on its own — **the work enqueues immediately, and when its runtime is online it typically begins within seconds** (offline, the task waits in the queue until the runtime comes back). No nudging, no reminders.
 
 ## What an agent can do
 
@@ -39,7 +39,13 @@ Every agent has an **Access** setting — "Who can run this agent" — with thre
 New agents default to **Only me**. You can change access at any time in the agent's settings — but **only the agent's owner can change access**; even workspace admins cannot. (Admins *can* edit the rest of an agent's configuration — instructions, model, skills — just not who may run it.)
 
 <Callout type="info">
-**Access restricts who can run the agent, not who can see it.** Every member of the workspace sees the agent's name and description in the agents list — they just can't see its sensitive config (custom environment variables and MCP config are masked for non-owners). To make an agent usable by exactly one other person, use **Specific people** and pick them.
+**See vs. run vs. modify — three different gates.**
+
+- **See**: a regular member only sees an agent in the list if they're allowed to run it. Someone else's "Only me" agent — or a "Specific people" agent that doesn't include you — simply doesn't appear. Workspace owners and admins see every agent (but seeing ≠ running: an admin still can't run someone's "Only me" agent).
+- **Run**: governed by the Access tiers above.
+- **Modify**: the agent's owner and workspace owners/admins can edit configuration; the Access setting itself is owner-only. Sensitive config (custom environment variables, MCP config) is masked for everyone but the owner.
+
+To make an agent usable by exactly one other person, use **Specific people** and pick them.
 </Callout>
 
 ## Next steps

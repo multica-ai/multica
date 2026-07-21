@@ -22,7 +22,7 @@ The table below lists the most important differences across team-management acti
 **Members can't invite anyone** — inviting is an admin-tier permission. **Only owners can promote someone to owner** — admins can promote and demote members or other admins, but they can't create a new owner. Likewise, admins can remove members or other admins but **can't touch existing owners**. The point is to make sure the highest tier can only be granted by someone who already holds it — permissions don't leak upward.
 
 <Callout type="info">
-Agent visibility comes in two flavors: "workspace" and "private." Private agents can only be assigned to issues by owners and admins — this protects configurations meant for a specific set of people. See [Agents](/agents).
+Who can use a given agent is governed by the agent's own **Access** setting — **Only me**, **Entire workspace**, or **Specific people** — not by workspace role. An "Only me" agent can be run only by its owner; workspace owners and admins get **no bypass** (they can see every agent and edit most of its configuration, but running it and changing its Access stay with the people the owner granted). See [Agents → Who can run an agent](/agents#who-can-run-an-agent).
 </Callout>
 
 ## Inviting a new member

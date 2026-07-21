@@ -13,7 +13,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 - [AI 编程工具矩阵](/zh/providers) — 每款工具的能力差异（会话续接、MCP、模型选择）
 
 <Callout type="info">
-Multica 服务器从不接触你的 API key，也不接触工具本身。下面这些操作 —— 安装、登录、模型访问 —— 全部发生在你本机。出问题几乎都是本地问题。
+Multica 服务器从不接触这些工具，也不接触它们用来认证的凭据。下面这些操作 —— 安装、登录、模型访问 —— 全部发生在你本机。出问题几乎都是本地问题。（另外：你刻意存进某个智能体 [自定义环境变量](/zh/agents-create#自定义环境变量custom_env) 里的 secret 会存在服务器上 —— 那是和工具自己的本地登录不同的另一条通道。）
 </Callout>
 
 ## 开始前
