@@ -147,6 +147,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		invalidEventCount := 0
 		assistantEventCount := 0
 		toolUseCount := 0
+		cadence := newStreamEventCadence(startTime)
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
@@ -170,6 +171,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				continue
 			}
 			eventCount++
+			cadence.observe(time.Now(), msg.Type, claudeEventIsProgress(msg.Type))
 
 			switch msg.Type {
 			case "assistant":
@@ -213,6 +215,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				b.handleControlRequest(msg, stdin)
 			}
 		}
+		// Snapshot here, not after cmd.Wait(): the stream is what stalled, so
+		// the trailing gap has to be measured to the moment stdout stopped
+		// producing events, before process teardown adds its own delay.
+		cadenceSnapshot := cadence.snapshot(time.Now())
+
 		scanErr := scanner.Err()
 		if scanErr != nil {
 			// Scanner stopped consuming stdout. Close the pipe before Wait so a
@@ -270,6 +277,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			invalidEventCount:          invalidEventCount,
 			assistantEventCount:        assistantEventCount,
 			toolUseCount:               toolUseCount,
+			eventTypeCounts:            cadenceSnapshot.typeCounts,
+			maxEventGap:                cadenceSnapshot.maxGap,
+			maxEventGapEndedBy:         cadenceSnapshot.maxGapEndedBy,
+			maxProgressGap:             cadenceSnapshot.maxProgressGap,
 			sawResult:                  sawResult,
 			resultIsError:              resultIsError,
 			resultBytes:                len(finalResultText),
@@ -299,6 +310,20 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// claudeEventIsProgress classifies a raw claude stream event the same way the
+// daemon's idle watchdog classifies the Messages it produces: assistant turns,
+// tool traffic (which arrives as `user` events), and the terminal result carry
+// work forward. `system` pings, `log` lines, and control-plane traffic do not —
+// a run blocked on a dead provider stream keeps emitting those (MUL-5042).
+func claudeEventIsProgress(eventType string) bool {
+	switch eventType {
+	case "assistant", "user", "result":
+		return true
+	default:
+		return false
+	}
 }
 
 func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage) (string, int) {
