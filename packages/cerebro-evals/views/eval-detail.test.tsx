@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { EvalDetail } from "./eval-detail";
 import type { CerebroEval, EvalBinding } from "../types";
 
@@ -46,12 +46,21 @@ describe("EvalDetail", () => {
     expect(screen.getByText("Pass rate ≥ 80% · every critical task must pass")).toBeInTheDocument();
   });
 
-  it("activates a draft through the lifecycle button", () => {
+  // Lifecycle moves live only on the Settings tab — they used to be duplicated
+  // in the detail header, which left two controls firing the same transition.
+  it("activates a draft from the Settings tab", () => {
     const onStatusChange = vi.fn();
     const item = makeEval({ status: "draft" });
-    render(<EvalDetail {...baseProps} item={item} versions={[item]} onStatusChange={onStatusChange} />);
-    fireEvent.click(screen.getAllByText("Activate")[0]!);
+    render(<EvalDetail {...baseProps} item={item} versions={[item]} initialTab="settings" onStatusChange={onStatusChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Activate" }));
     expect(onStatusChange).toHaveBeenCalledWith("active");
+  });
+
+  it("keeps the lifecycle controls out of the detail header", () => {
+    const item = makeEval({ status: "draft" });
+    render(<EvalDetail {...baseProps} item={item} versions={[item]} />);
+    // Overview is the default tab; Activate is reachable from Settings only.
+    expect(screen.queryByRole("button", { name: "Activate" })).not.toBeInTheDocument();
   });
 
   it("runs an active eval from the detail header", () => {
@@ -62,15 +71,22 @@ describe("EvalDetail", () => {
     expect(onRunNow).toHaveBeenCalledOnce();
   });
 
-  it("confirms before retiring an active eval", () => {
+  // Retiring ends a version, so it asks first — through the themed AlertDialog
+  // the rest of the workspace uses, not the browser's native confirm().
+  it("asks in a dialog before retiring an active eval", async () => {
     const onStatusChange = vi.fn();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     const item = makeEval({ status: "active" });
-    render(<EvalDetail {...baseProps} item={item} versions={[item]} onStatusChange={onStatusChange} />);
-    fireEvent.click(screen.getAllByText("Retire")[0]!);
-    expect(confirmSpy).toHaveBeenCalled();
+    render(<EvalDetail {...baseProps} item={item} versions={[item]} initialTab="settings" onStatusChange={onStatusChange} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retire" }));
+    // Opening the dialog must not retire anything on its own.
     expect(onStatusChange).not.toHaveBeenCalled();
-    confirmSpy.mockRestore();
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText("Retire 1.0.0?")).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Retire" }));
+    expect(onStatusChange).toHaveBeenCalledWith("retired");
   });
 
   it("lists version history and opens another version", () => {

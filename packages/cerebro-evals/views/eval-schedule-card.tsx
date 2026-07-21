@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@multica/ui/components/ui/button";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@multica/ui/components/ui/native-select";
 import type { EvalSchedule, EvalScheduleInput } from "../types";
 
 type ScheduleMode = "manual" | "daily" | "weekly";
@@ -58,18 +60,20 @@ export function EvalScheduleCard({ schedule, loading, pending, error, onSave, on
       {loading ? <p className="text-xs text-muted-foreground">Loading schedule…</p> : <>
         <div className="grid gap-3 sm:grid-cols-3">
           <label className="flex flex-col gap-1 text-xs font-medium">Frequency
-            <select aria-label="Frequency" className="h-9 rounded-md border bg-background px-3 text-sm" value={mode} onChange={(event) => setMode(event.target.value as ScheduleMode)}>
-              <option value="manual">Manual only</option><option value="daily">Daily</option><option value="weekly">Weekly</option>
-            </select>
+            <NativeSelect className="w-full" aria-label="Frequency" value={mode} onChange={(event) => setMode(event.target.value as ScheduleMode)}>
+              <NativeSelectOption value="manual">Manual only</NativeSelectOption>
+              <NativeSelectOption value="daily">Daily</NativeSelectOption>
+              <NativeSelectOption value="weekly">Weekly</NativeSelectOption>
+            </NativeSelect>
           </label>
           {mode === "weekly" && <label className="flex flex-col gap-1 text-xs font-medium">Weekday
-            <select aria-label="Weekday" className="h-9 rounded-md border bg-background px-3 text-sm" value={weekday} onChange={(event) => setWeekday(event.target.value)}>
-              {WEEKDAYS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
+            <NativeSelect className="w-full" aria-label="Weekday" value={weekday} onChange={(event) => setWeekday(event.target.value)}>
+              {WEEKDAYS.map(([value, label]) => <NativeSelectOption key={value} value={value}>{label}</NativeSelectOption>)}
+            </NativeSelect>
           </label>}
           {mode !== "manual" && <label className="flex flex-col gap-1 text-xs font-medium">Time<Input aria-label="Time" type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label>}
         </div>
-        {mode !== "manual" && <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />Schedule enabled</label>}
+        {mode !== "manual" && <label className="flex items-center gap-2 text-xs"><Checkbox checked={enabled} onCheckedChange={(checked) => setEnabled(checked === true)} />Schedule enabled</label>}
         {schedule?.next_run_at && mode !== "manual" && <p className="text-[11px] text-muted-foreground">Next run: {new Date(schedule.next_run_at).toLocaleString()}</p>}
         {error && <p className="text-xs text-destructive">Failed to save schedule.</p>}
         <div><Button size="sm" disabled={pending} onClick={() => onSave(buildScheduleInput(mode, time, weekday, enabled))}>Save schedule</Button></div>

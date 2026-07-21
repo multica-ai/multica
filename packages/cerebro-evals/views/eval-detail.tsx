@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formFromEval } from "./form";
 import { describeGrader, describeThreshold, nextTransitions, versionsForKey } from "./lifecycle";
 import { RunDetail } from "./run-detail";
+import { ConfirmDelete } from "./confirm-delete";
 import { EvalScheduleCard } from "./eval-schedule-card";
 import { formatCost, formatDuration } from "../format";
 import type { CerebroEval, EvalBinding, EvalRun, EvalSchedule, EvalScheduleInput, EvalStatus } from "../types";
@@ -69,34 +70,32 @@ export function EvalDetail({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
+      {/* Both rows wrap: on a phone the title, badges and up to four actions
+          cannot share one line, and without wrapping the actions were squeezed
+          off the edge. */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <Button size="icon-sm" variant="ghost" aria-label="Back to catalog" onClick={onClose}><ArrowLeft /></Button>
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-semibold">{item.title}</h2>
               <Badge variant={item.status === "active" ? "default" : item.status === "retired" ? "outline" : "secondary"}>{item.status}</Badge>
               <span className="font-mono text-xs text-muted-foreground">{item.version}</span>
             </div>
-            <p className="text-xs text-muted-foreground">{item.key}</p>
+            <p className="truncate text-xs text-muted-foreground">{item.key}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        {/* Run now is the one action that belongs next to the title. Editing and
+            the lifecycle moves live in Settings, so each has exactly one home. */}
+        <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" disabled={runPending || item.status !== "active"} onClick={onRunNow}>{runPending ? "Running…" : "Run now"}</Button>
-          {transitions.map((t) => (
-            <Button key={t.to} size="sm" variant={t.confirm ? "outline" : "default"} disabled={statusPending}
-              onClick={() => { if (!t.confirm || confirm(`Retire "${item.title} · ${item.version}"? It will stop being used as a gate.`)) onStatusChange(t.to); }}>
-              {t.label}
-            </Button>
-          ))}
-          <Button size="sm" variant="ghost" onClick={onEdit}><Pencil className="size-4" />Edit</Button>
         </div>
       </div>
       {statusError && <p className="text-sm text-destructive">Failed to change status.</p>}
       {runError && <p className="text-sm text-destructive">Failed to run eval. Check that it has tasks, a grader, and an available target.</p>}
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as EvalDetailTab)}>
-        <TabsList>
+        <TabsList className="no-scrollbar flex h-auto w-full flex-nowrap justify-start gap-1 overflow-x-auto sm:w-fit">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="tasks">Tasks · {tasks.length}</TabsTrigger>
           <TabsTrigger value="runs">Runs</TabsTrigger>
@@ -175,12 +174,17 @@ export function EvalDetail({
             <p className="text-[11px] text-muted-foreground">A draft is activated when it is ready to gate work; pause it to take it out of use without losing it; retire it when the version is done.</p>
             <div className="flex flex-wrap gap-2">
               {transitions.length === 0 && <p className="text-xs text-muted-foreground">This version is retired — the end of its lifecycle.</p>}
-              {transitions.map((t) => (
-                <Button key={t.to} size="sm" variant={t.confirm ? "outline" : "default"} disabled={statusPending}
-                  onClick={() => { if (!t.confirm || confirm(`Retire "${item.title} · ${item.version}"? It will stop being used as a gate.`)) onStatusChange(t.to); }}>
-                  {t.label}
-                </Button>
-              ))}
+              {transitions.map((t) => (t.confirm ? (
+                <ConfirmDelete
+                  key={t.to}
+                  trigger={<Button size="sm" variant="outline" disabled={statusPending}>{t.label}</Button>}
+                  title={`Retire ${item.version}?`}
+                  description={`"${item.title} · ${item.version}" will stop being used as a gate. Retiring ends this version — it cannot be reactivated.`}
+                  actionLabel="Retire" onConfirm={() => onStatusChange(t.to)} pending={statusPending}
+                />
+              ) : (
+                <Button key={t.to} size="sm" disabled={statusPending} onClick={() => onStatusChange(t.to)}>{t.label}</Button>
+              )))}
             </div>
           </div>
           <div className="flex flex-col gap-2 rounded-md border p-3">
@@ -188,7 +192,12 @@ export function EvalDetail({
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={onEdit}><Pencil className="size-4" />Edit</Button>
               <Button size="sm" variant="outline" onClick={onDuplicate}><Copy className="size-4" />Duplicate as new version</Button>
-              <Button size="sm" variant="outline" onClick={() => confirm(`Delete eval "${item.title} · ${item.version}"?`) && onDelete()}><Trash2 className="size-4 text-destructive" />Delete</Button>
+              <ConfirmDelete
+                trigger={<Button size="sm" variant="outline"><Trash2 className="size-4 text-destructive" />Delete</Button>}
+                title="Delete eval?"
+                description={`This permanently removes "${item.title} · ${item.version}". It will stop being used as a gate. This cannot be undone.`}
+                actionLabel="Delete" onConfirm={onDelete}
+              />
             </div>
           </div>
         </TabsContent>

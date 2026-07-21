@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@multica/ui/components/ui/button";
+import { NativeSelect, NativeSelectOption } from "@multica/ui/components/ui/native-select";
 import type { EvalBindingPhase } from "../types";
 
 export interface GateBinderEval {
@@ -45,25 +46,25 @@ export function GateBinder({ evals, workflows, pending = false, onBind }: GateBi
 
   return (
     <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto_auto_auto]">
-      <select aria-label="Eval" className="h-9 rounded-md border bg-background px-3 text-sm" value={evalId} onChange={(e) => setEvalId(e.target.value)}>
-        <option value="">Select eval…</option>
-        {evals.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.version}</option>)}
-      </select>
-      <select aria-label="Issue workflow" className="h-9 rounded-md border bg-background px-3 text-sm" value={workflowId} onChange={(e) => setWorkflowId(e.target.value)}>
-        <option value="">Select Issue workflow…</option>
-        {workflows.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-      </select>
-      <select aria-label="Phase" className="h-9 rounded-md border bg-background px-3 text-sm capitalize" value={phase} onChange={(e) => {
+      <NativeSelect className="w-full" aria-label="Eval" value={evalId} onChange={(e) => setEvalId(e.target.value)}>
+        <NativeSelectOption value="">Select eval…</NativeSelectOption>
+        {evals.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.title} · {item.version}</NativeSelectOption>)}
+      </NativeSelect>
+      <NativeSelect className="w-full" aria-label="Issue workflow" value={workflowId} onChange={(e) => setWorkflowId(e.target.value)}>
+        <NativeSelectOption value="">Select Issue workflow…</NativeSelectOption>
+        {workflows.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}
+      </NativeSelect>
+      <NativeSelect className="w-full capitalize" aria-label="Phase" value={phase} onChange={(e) => {
         const nextPhase = e.target.value as EvalBindingPhase;
         setPhase(nextPhase);
         if (nextPhase === "monitor") setBlocking(false);
       }}>
-        {PHASES.map((p) => <option key={p} value={p}>{p}</option>)}
-      </select>
-      <select aria-label="Enforcement" className="h-9 rounded-md border bg-background px-3 text-sm" value={blocking ? "block" : "warn"} disabled={phase === "monitor"} onChange={(e) => setBlocking(e.target.value === "block")}>
-        <option value="block">Block</option>
-        <option value="warn">Warn only</option>
-      </select>
+        {PHASES.map((p) => <NativeSelectOption key={p} value={p}>{p}</NativeSelectOption>)}
+      </NativeSelect>
+      <NativeSelect className="w-full" aria-label="Enforcement" value={blocking ? "block" : "warn"} disabled={phase === "monitor"} onChange={(e) => setBlocking(e.target.value === "block")}>
+        <NativeSelectOption value="block">Block</NativeSelectOption>
+        <NativeSelectOption value="warn">Warn only</NativeSelectOption>
+      </NativeSelect>
       <Button disabled={!evalId || !workflowId || pending} onClick={submit}>{blocking ? "Add blocking gate" : "Add advisory gate"}</Button>
     </div>
   );

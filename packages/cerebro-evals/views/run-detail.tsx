@@ -39,7 +39,7 @@ export function RunDetail({ run, onClose, onOpenEvidence }: {
 
       {report ? (
         <>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
             <Summary label="Verdict" value={report.outcome.status} />
             <Summary label="Passed" value={`${report.outcome.passed}/${report.outcome.total} · ${pct(report.outcome.pass_rate)}`} />
             <Summary label="Pass rate needed" value={`${pct(report.outcome.min_pass_rate)} · ${report.outcome.threshold_met ? "met" : "not met"}`} />
