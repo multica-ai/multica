@@ -1410,14 +1410,15 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 }
 
 // openclawAgentEntry is the shape parseOpenclawAgentsJSON expects
-// from `openclaw agents list --json`. `id` is the routing key
-// passed to `openclaw agent --agent <id>`; `name` is the human
-// display label set via `openclaw agents set-identity --name` and
-// is only used to enrich the dropdown label. The two are not
-// interchangeable — see openclawEntriesToModels for the mapping.
-// Older openclaw versions may emit only `name`; in that case we
-// fall back to using it as the id for backward compatibility.
-// `model` is optional and only used to enrich the dropdown label.
+// from `openclaw agents list --json`. `model` is the routing key
+// passed to `openclaw agent --model <provider/model-or-id>` (see
+// `openclaw agent --help`, KAV-14). `name` is the human display
+// label set via `openclaw agents set-identity --name` and is only
+// used to enrich the dropdown label. `id` is the registered
+// agent's routing identifier, surfaced in the label so users can
+// tell multiple registered agents apart when they share a model.
+// Older openclaw versions may emit only `name` or `id`; we fall
+// back through them as the routing key for backward compatibility.
 type openclawAgentEntry struct {
 	Name  string `json:"name"`
 	ID    string `json:"id"`
@@ -1453,12 +1454,18 @@ func openclawEntriesToModels(entries []openclawAgentEntry) []Model {
 	models := make([]Model, 0, len(entries))
 	seen := map[string]bool{}
 	for _, e := range entries {
-		// Use ID as the model identifier because openclaw resolves
-		// --agent by id, not by display name. Names may contain spaces
-		// (e.g. "Sub2API OPS") which openclaw's normalizeAgentId would
-		// mangle into a different string ("sub2api-ops"), causing a
-		// lookup miss and "no parseable output" errors.
-		id := e.ID
+		// KAV-14: use the agent's bound `model` as the Model.ID so the
+		// value forwarded via `--model <id>` is the routing key
+		// OpenClaw's per-run flag expects. Falls back to `id` (then
+		// `name`) for older openclaw builds that omit `model`,
+		// preserving the prior behaviour of using the registered
+		// agent id as the routing key. The display name still comes
+		// from `name` (or `id`) so the label keeps distinguishing
+		// agents when several share the same model.
+		id := e.Model
+		if id == "" {
+			id = e.ID
+		}
 		if id == "" {
 			id = e.Name
 		}
@@ -1468,12 +1475,18 @@ func openclawEntriesToModels(entries []openclawAgentEntry) []Model {
 		seen[id] = true
 		displayName := e.Name
 		if displayName == "" {
+			displayName = e.ID
+		}
+		if displayName == "" {
 			displayName = id
 		}
-		label := displayName
-		if e.Model != "" {
-			label = displayName + " (" + e.Model + ")"
-		}
+		// Label format: "<displayName> (<routing key>)" — gives the
+		// user a stable handle on which registered agent the model
+		// came from when several agents share a model. Kept even when
+		// displayName equals id (older openclaw builds where the
+		// agent id happened to match the model id) so the label
+		// format stays predictable.
+		label := displayName + " (" + id + ")"
 		models = append(models, Model{ID: id, Label: label, Provider: "openclaw"})
 	}
 	return models
@@ -1505,13 +1518,24 @@ func parseOpenclawAgents(output string) []Model {
 		if !isOpenclawIdentifier(name) || !isOpenclawIdentifier(model) {
 			continue
 		}
-		if seen[name] {
+		// KAV-14: route via the model id (matching the JSON path), not
+		// the agent name. The text fallback only fires for older
+		// openclaw builds that don't emit JSON, and those builds'
+		// first-column token is the model id emitted by the CLI's
+		// plain-text listing anyway. Dedup by id only — the name is
+		// purely display, and double-marking (first by name, then by
+		// id) would skip the first valid row whenever name == model.
+		id := model
+		if id == "" {
+			id = name
+		}
+		if seen[id] {
 			continue
 		}
-		seen[name] = true
+		seen[id] = true
 		models = append(models, Model{
-			ID:       name,
-			Label:    name + " (" + model + ")",
+			ID:       id,
+			Label:    name + " (" + id + ")",
 			Provider: "openclaw",
 		})
 	}

@@ -761,7 +761,7 @@ claude-sonnet claude-sonnet-4-6
 			t.Errorf("section header leaked into result: %+v", m)
 		}
 	}
-	if models[0].ID != "deepseek-v4" || models[1].ID != "claude-sonnet" {
+	if models[0].ID != "deepseek-v4" || models[1].ID != "claude-sonnet-4-6" {
 		t.Errorf("unexpected agents: %+v", models)
 	}
 }
@@ -778,8 +778,12 @@ func TestParseOpenclawAgentsJSONArray(t *testing.T) {
 	if len(models) != 2 {
 		t.Fatalf("got %d, want 2: %+v", len(models), models)
 	}
-	if models[0].ID != "deepseek-v4" || models[0].Label != "deepseek-v4 (deepseek-v4)" {
-		t.Errorf("unexpected first entry: %+v", models[0])
+	// KAV-14: model id is the routing key for `openclaw agent --model`.
+	if models[0].ID != "deepseek-v4" {
+		t.Errorf("unexpected first entry id: %+v", models[0])
+	}
+	if models[0].Label != "deepseek-v4 (deepseek-v4)" {
+		t.Errorf("unexpected first entry label: %+v", models[0])
 	}
 }
 
@@ -789,15 +793,18 @@ func TestParseOpenclawAgentsJSONWrapped(t *testing.T) {
 	if !ok {
 		t.Fatal("expected parseOpenclawAgentsJSON to accept wrapped object")
 	}
-	if len(models) != 1 || models[0].ID != "foo" {
+	// KAV-14: when only name+model are present, ID is the model id.
+	if len(models) != 1 || models[0].ID != "bar" {
 		t.Errorf("unexpected: %+v", models)
 	}
 }
 
 func TestOpenclawEntriesToModelsUsesIDOverName(t *testing.T) {
-	// When both id and name are present, Model.ID should use the id field
-	// because openclaw resolves --agent by id. Names with spaces (e.g.
-	// "Sub2API OPS") would be mangled by openclaw's normalizeAgentId.
+	// KAV-14: when id, name and model are all present, Model.ID should
+	// use the model field because openclaw agent's per-run flag
+	// `--model <provider/model-or-id>` expects the bound model id.
+	// The agent id still surfaces in the label so users can tell
+	// registered agents apart when several share a model.
 	input := []byte(`[{"id": "sub2api", "name": "Sub2API OPS", "model": "gpt-4o"}]`)
 	models, ok := parseOpenclawAgentsJSON(input)
 	if !ok {
@@ -806,11 +813,11 @@ func TestOpenclawEntriesToModelsUsesIDOverName(t *testing.T) {
 	if len(models) != 1 {
 		t.Fatalf("got %d models, want 1", len(models))
 	}
-	if models[0].ID != "sub2api" {
-		t.Errorf("Model.ID = %q, want %q (should use id, not name)", models[0].ID, "sub2api")
+	if models[0].ID != "gpt-4o" {
+		t.Errorf("Model.ID = %q, want %q (should use model, then id, then name)", models[0].ID, "gpt-4o")
 	}
 	if models[0].Label != "Sub2API OPS (gpt-4o)" {
-		t.Errorf("Model.Label = %q, want %q (should use name for display)", models[0].Label, "Sub2API OPS (gpt-4o)")
+		t.Errorf("Model.Label = %q, want %q (should surface id in label)", models[0].Label, "Sub2API OPS (gpt-4o)")
 	}
 }
 

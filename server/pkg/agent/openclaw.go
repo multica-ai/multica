@@ -41,9 +41,14 @@ var openclawBlockedArgs = map[string]blockedArgMode{
 	"--json":          blockedStandalone, // JSON output for daemon communication
 	"--session-id":    blockedWithValue,  // managed by daemon for session resumption
 	"--message":       blockedWithValue,  // prompt is set by daemon
-	"--model":         blockedWithValue,  // openclaw agent does not accept --model; model is bound at registration via `openclaw agents add/update --model`
+	"--agent":         blockedWithValue,  // KAV-14: --agent is the legacy routing flag; daemon now forwards --model from the dropdown
 	"--system-prompt": blockedWithValue,  // openclaw agent does not accept --system-prompt; instructions are injected into --message
 }
+// Note: --model is intentionally NOT blocked — openclaw agent supports
+// `--model <provider/model-or-id>` as a per-run override (see
+// `openclaw agent --help`). The daemon emits it from opts.Model, which
+// is the model id selected via the UI dropdown (populated by
+// openclawEntriesToModels).
 
 // openclawBackend implements Backend by spawning `openclaw agent --message <prompt>
 // --output-format stream-json --yes` and reading streaming NDJSON events from
@@ -137,10 +142,10 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 		// Build usage map. Prefer the model openclaw reported in
 		// `meta.agentMeta.model` (the actual LLM, e.g. `deepseek-chat`).
-		// Fall back to opts.Model — which for openclaw is the agent name
-		// passed via `--agent`, not a real model identifier — only when
-		// the runtime didn't surface its own model. Last resort is the
-		// daemon's `unknown` placeholder.
+		// Fall back to opts.Model — which for openclaw is the model id
+		// passed via `--model` (KAV-14) — only when the runtime didn't
+		// surface its own model. Last resort is the daemon's `unknown`
+		// placeholder.
 		var usage map[string]TokenUsage
 		u := scanResult.usage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
@@ -169,12 +174,13 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 // buildOpenclawArgs assembles the argv for a one-shot `openclaw agent` invocation.
 //
-// The CLI only accepts --local, --json, --session-id, --timeout, --message (and
-// flags like --agent / --channel that users pass through CustomArgs). Notably
-// it does NOT accept --model or --system-prompt — model is bound at agent
-// registration time via `openclaw agents add/update --model`, and instructions
-// must be injected inline into --message because openclaw loads AGENTS.md from
-// its own workspace directory, not from cwd.
+// The CLI accepts --local, --json, --session-id, --timeout, --message, --model,
+// and flags like --channel that users pass through CustomArgs. `--agent` is
+// intentionally blocked (KAV-14): it was the legacy routing key and now
+// conflicts with the per-run `--model <provider/model-or-id>` override the
+// daemon auto-emits from the dropdown. `--system-prompt` is still rejected;
+// instructions must be injected inline into --message because openclaw loads
+// AGENTS.md from its own workspace directory, not from cwd.
 //
 // Routing (issue #3260): `openclaw agent` defaults to Gateway routing; --local
 // is the embedded-mode opt-in. The daemon historically forced --local so every
@@ -193,17 +199,17 @@ func buildOpenclawArgs(prompt, sessionID string, opts ExecOptions, logger *slog.
 	if opts.Timeout > 0 {
 		args = append(args, "--timeout", fmt.Sprintf("%d", int(opts.Timeout.Seconds())))
 	}
-	// OpenClaw binds models to pre-registered agents at `openclaw agents
-	// add/update --model` time; the daemon selects one at runtime by
-	// passing --agent <id>. The model dropdown populates its list from
-	// `openclaw agents list`, so opts.Model here is an agent id (see
-	// openclawEntriesToModels — the agent's display name lives in the
-	// dropdown label, not in opts.Model). Only inject when the user
-	// hasn't already set --agent via custom_args — custom_args wins for
-	// backward compatibility with existing configs.
+	// KAV-14: openclaw agent's per-run flag is `--model <provider/model-or-id>`
+	// (confirmed via `openclaw agent --help`). The previous shape
+	// `--agent <agent-id>` was rejected with "Unknown agent id" when the
+	// dropdown value was a model id rather than a registered agent id.
+	// The dropdown now publishes model ids (see openclawEntriesToModels),
+	// so opts.Model is the value to pass through. Inject only when the
+	// user hasn't already set --model via custom_args — custom_args wins
+	// for backward compatibility with existing configs.
 	customArgs := filterCustomArgs(opts.CustomArgs, openclawBlockedArgs, logger)
-	if opts.Model != "" && !customArgsContains(customArgs, "--agent") {
-		args = append(args, "--agent", opts.Model)
+	if opts.Model != "" && !customArgsContains(customArgs, "--model") {
+		args = append(args, "--model", opts.Model)
 	}
 	args = append(args, customArgs...)
 
@@ -291,8 +297,10 @@ type openclawEventResult struct {
 	// model is the LLM identifier reported by openclaw in its result blob
 	// (`meta.agentMeta.model`). Empty when the run did not emit it (older
 	// openclaw versions, partial outputs). Distinct from `opts.Model`,
-	// which for the openclaw backend is the openclaw *agent* name passed
-	// via `--agent`, not the underlying model.
+	// which for the openclaw backend is the model id passed via `--model`
+	// (KAV-14) — usually the same string openclaw reports here, but the
+	// dashboard treats the runtime-reported value as authoritative when
+	// present.
 	model string
 }
 

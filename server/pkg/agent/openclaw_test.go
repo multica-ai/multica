@@ -947,57 +947,62 @@ func TestBuildOpenclawArgsMinimal(t *testing.T) {
 	}
 }
 
-func TestBuildOpenclawArgsMapsModelToAgent(t *testing.T) {
+func TestBuildOpenclawArgsForwardsModelToFlag(t *testing.T) {
 	t.Parallel()
 
-	// For openclaw, agent.model stores the pre-registered agent name;
-	// the daemon must translate that to `--agent <name>` because the
-	// CLI rejects `--model` entirely. `--system-prompt` is also
-	// rejected and must not be emitted as a flag.
+	// KAV-14: openclaw agent's per-run flag is `--model <provider/model-or-id>`
+	// (confirmed via `openclaw agent --help`). The daemon forwards the
+	// dropdown-selected model id via `--model`. `--system-prompt` is still
+	// rejected by OpenClaw and must not be emitted.
 	args := buildOpenclawArgs("task", "ses-2", ExecOptions{
-		Model:        "deepseek-v4-agent",
+		Model:        "deepseek/deepseek-v4-flash",
 		SystemPrompt: "You are a helpful agent.",
 	}, slog.Default())
 
-	if idx := indexOf(args, "--model"); idx != -1 {
-		t.Fatalf("unexpected --model flag at %d: %v", idx, args)
-	}
+	// --system-prompt must not be forwarded (still rejected by OpenClaw).
 	if idx := indexOf(args, "--system-prompt"); idx != -1 {
 		t.Fatalf("unexpected --system-prompt flag at %d: %v", idx, args)
 	}
 
-	agentIdx := indexOf(args, "--agent")
-	if agentIdx == -1 || agentIdx+1 >= len(args) {
-		t.Fatalf("expected --agent <value> in args: %v", args)
+	// opts.Model is forwarded as `--model <id>` (the per-run override).
+	modelIdx := indexOf(args, "--model")
+	if modelIdx == -1 || modelIdx+1 >= len(args) {
+		t.Fatalf("expected --model <value> in args: %v", args)
 	}
-	if got := args[agentIdx+1]; got != "deepseek-v4-agent" {
-		t.Errorf("--agent value = %q, want %q", got, "deepseek-v4-agent")
+	if got := args[modelIdx+1]; got != "deepseek/deepseek-v4-flash" {
+		t.Errorf("--model value = %q, want %q", got, "deepseek/deepseek-v4-flash")
+	}
+
+	// --agent must not be auto-emitted by the daemon — routing via
+	// agent id is the user's responsibility through custom_args.
+	if idx := indexOf(args, "--agent"); idx != -1 {
+		t.Errorf("daemon must not auto-emit --agent, got args: %v", args)
 	}
 }
 
-func TestBuildOpenclawArgsCustomAgentWinsOverModel(t *testing.T) {
+func TestBuildOpenclawArgsCustomModelWinsOverDropdown(t *testing.T) {
 	t.Parallel()
 
-	// If the user already configured --agent via custom_args, their
+	// If the user already configured --model via custom_args, their
 	// value wins — we don't double-inject. This keeps existing configs
 	// working when they later set agent.model.
 	args := buildOpenclawArgs("task", "ses-2b", ExecOptions{
 		Model:      "from-dropdown",
-		CustomArgs: []string{"--agent", "from-custom-args"},
+		CustomArgs: []string{"--model", "from-custom-args"},
 	}, slog.Default())
 
 	count := 0
 	for _, a := range args {
-		if a == "--agent" {
+		if a == "--model" {
 			count++
 		}
 	}
 	if count != 1 {
-		t.Fatalf("expected exactly one --agent flag, got %d: %v", count, args)
+		t.Fatalf("expected exactly one --model flag, got %d: %v", count, args)
 	}
-	agentIdx := indexOf(args, "--agent")
-	if args[agentIdx+1] != "from-custom-args" {
-		t.Errorf("custom --agent should win, got %q", args[agentIdx+1])
+	modelIdx := indexOf(args, "--model")
+	if args[modelIdx+1] != "from-custom-args" {
+		t.Errorf("custom --model should win, got %q", args[modelIdx+1])
 	}
 }
 
@@ -1052,8 +1057,11 @@ func TestBuildOpenclawArgsTimeout(t *testing.T) {
 func TestBuildOpenclawArgsFiltersBlockedCustomArgs(t *testing.T) {
 	t.Parallel()
 
-	// Users must not be able to re-introduce the banned flags via custom_args —
-	// they would crash `openclaw agent` just like the direct forward did.
+	// KAV-14: --agent is now blocked (legacy routing flag), --model is
+	// NOT blocked (OpenClaw accepts it as a per-run override and the
+	// daemon forwards it from the dropdown). Users must not be able to
+	// re-introduce the banned flags via custom_args — they would crash
+	// `openclaw agent` just like the direct forward did.
 	args := buildOpenclawArgs("task", "ses-6", ExecOptions{
 		CustomArgs: []string{
 			"--agent", "research-bot",
@@ -1064,15 +1072,16 @@ func TestBuildOpenclawArgsFiltersBlockedCustomArgs(t *testing.T) {
 		},
 	}, slog.Default())
 
-	if idx := indexOf(args, "--model"); idx != -1 {
-		t.Errorf("--model should be filtered from custom_args: %v", args)
+	// --agent is now blocked; user-supplied value must be stripped.
+	if idx := indexOf(args, "--agent"); idx != -1 {
+		t.Errorf("--agent should be filtered from custom_args: %v", args)
+	}
+	// --model is no longer blocked — user-supplied value survives.
+	if idx := indexOf(args, "--model"); idx == -1 || idx+1 >= len(args) || args[idx+1] != "gpt-4o" {
+		t.Errorf("expected --model gpt-4o to survive filtering: %v", args)
 	}
 	if idx := indexOf(args, "--system-prompt"); idx != -1 {
 		t.Errorf("--system-prompt should be filtered from custom_args: %v", args)
-	}
-	// Whitelisted pass-through flag must survive filtering.
-	if idx := indexOf(args, "--agent"); idx == -1 || idx+1 >= len(args) || args[idx+1] != "research-bot" {
-		t.Errorf("expected --agent research-bot to survive filtering: %v", args)
 	}
 	// --session-id and --message appear exactly once — the daemon-managed ones.
 	if count := countOccurrences(args, "--session-id"); count != 1 {
