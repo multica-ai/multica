@@ -122,6 +122,12 @@ describe("Vision Plan", () => {
     expect(state.updateSection).toHaveBeenCalledWith(expect.objectContaining({ id: "values", input: expect.objectContaining({ position: 1 }) }));
   });
 
+  it("renders drag grips so columns and cards can be reordered on the canvas", () => {
+    renderEdit();
+    expect(screen.getByRole("button", { name: "Reorder Core Values" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reorder Own the outcome" })).toBeInTheDocument();
+  });
+
   it("offers Goal connections only for One-Year Plan items", () => {
     renderEdit();
 
