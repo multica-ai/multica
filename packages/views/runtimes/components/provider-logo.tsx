@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { Monitor } from "lucide-react";
+import qwenLogo from "./qwen-logo.svg";
 
 // Claude (Anthropic) — official mark, sourced from Bootstrap Icons (bi-claude)
 function ClaudeLogo({ className }: { className: string }) {
@@ -283,22 +284,12 @@ function GrokLogo({ className }: { className: string }) {
   );
 }
 
-// Qwen Code — compact Q mark using Qwen's violet/blue brand palette. The
-// inline SVG keeps the runtime list crisp at small sizes without another asset.
+// Qwen Code — official SVG copied verbatim from QwenLM/qwen-code's desktop
+// brand assets (packages/desktop/apps/electron/resources/brands/qwen-code/icon.svg).
+const qwenLogoSrc = typeof qwenLogo === "string" ? qwenLogo : qwenLogo.src;
+
 function QwenLogo({ className }: { className: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
-      <defs>
-        <linearGradient id="qwen-logo-gradient" x1="4" y1="3" x2="20" y2="21">
-          <stop stopColor="#7C4DFF" />
-          <stop offset="1" stopColor="#2F80ED" />
-        </linearGradient>
-      </defs>
-      <rect width="24" height="24" rx="5" fill="url(#qwen-logo-gradient)" />
-      <circle cx="11.5" cy="11.5" r="5.25" stroke="white" strokeWidth="2.25" />
-      <path d="m15.2 15.2 3.1 3.1" stroke="white" strokeWidth="2.25" strokeLinecap="round" />
-    </svg>
-  );
+  return <img src={qwenLogoSrc} alt="" aria-hidden className={className} />;
 }
 
 export function ProviderLogo({
