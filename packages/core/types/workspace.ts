@@ -19,6 +19,15 @@ export interface Workspace {
   updated_at: string;
 }
 
+export interface WorkspaceEnvResponse {
+  workspace_id: string;
+  global_env: Record<string, string>;
+}
+
+export interface UpdateWorkspaceEnvRequest {
+  global_env: Record<string, string>;
+}
+
 export interface Member {
   id: string;
   workspace_id: string;

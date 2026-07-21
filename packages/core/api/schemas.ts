@@ -36,6 +36,7 @@ import type {
   TimelineEntry,
   User,
   WebhookDelivery,
+  WorkspaceEnvResponse,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
@@ -364,6 +365,16 @@ export const CreateFeedbackResponseSchema = z.object({
 export const EMPTY_CREATE_FEEDBACK_RESPONSE: CreateFeedbackResponse = {
   id: "",
   created_at: "",
+};
+
+export const WorkspaceEnvResponseSchema = z.object({
+  workspace_id: z.string(),
+  global_env: z.record(z.string(), z.string()).default({}),
+}).loose();
+
+export const EMPTY_WORKSPACE_ENV_RESPONSE: WorkspaceEnvResponse = {
+  workspace_id: "",
+  global_env: {},
 };
 
 export const CommentSchema = z.object({

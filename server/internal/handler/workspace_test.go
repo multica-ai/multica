@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -34,6 +36,246 @@ func TestCreateWorkspace_RejectsReservedSlug(t *testing.T) {
 				t.Fatalf("slug %q: expected 400, got %d: %s", slug, w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestWorkspaceEnv_UpdateRevealAndRedactedWorkspaceResponse(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	var priorSettings []byte
+	if err := testPool.QueryRow(ctx, `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&priorSettings); err != nil {
+		t.Fatalf("read workspace.settings: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = $1 WHERE id = $2`, []byte(`{"global_env":{"KEEP":"secret","DROP":"old"},"theme":"dark"}`), testWorkspaceID); err != nil {
+		t.Fatalf("seed workspace.settings: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `UPDATE workspace SET settings = $1 WHERE id = $2`, priorSettings, testWorkspaceID)
+	})
+
+	updateReq := newRequest(http.MethodPut, "/api/workspaces/"+testWorkspaceID+"/env", map[string]any{
+		"global_env": map[string]string{
+			"KEEP":  "****",
+			"DROP":  "",
+			"ADDED": "fresh",
+		},
+	})
+	updateReq = withURLParam(updateReq, "id", testWorkspaceID)
+	updateW := httptest.NewRecorder()
+	testHandler.UpdateWorkspaceEnv(updateW, updateReq)
+	if updateW.Code != http.StatusOK {
+		t.Fatalf("UpdateWorkspaceEnv: expected 200, got %d: %s", updateW.Code, updateW.Body.String())
+	}
+
+	var updateResp WorkspaceEnvResponse
+	if err := json.Unmarshal(updateW.Body.Bytes(), &updateResp); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	wantEnv := map[string]string{"KEEP": "secret", "DROP": "", "ADDED": "fresh"}
+	if !reflect.DeepEqual(updateResp.GlobalEnv, wantEnv) {
+		t.Fatalf("updated global_env = %#v, want %#v", updateResp.GlobalEnv, wantEnv)
+	}
+
+	getReq := newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/env", nil)
+	getReq = withURLParam(getReq, "id", testWorkspaceID)
+	getW := httptest.NewRecorder()
+	testHandler.GetWorkspaceEnv(getW, getReq)
+	if getW.Code != http.StatusOK {
+		t.Fatalf("GetWorkspaceEnv: expected 200, got %d: %s", getW.Code, getW.Body.String())
+	}
+	var getResp WorkspaceEnvResponse
+	if err := json.Unmarshal(getW.Body.Bytes(), &getResp); err != nil {
+		t.Fatalf("decode reveal response: %v", err)
+	}
+	if !reflect.DeepEqual(getResp.GlobalEnv, wantEnv) {
+		t.Fatalf("revealed global_env = %#v, want %#v", getResp.GlobalEnv, wantEnv)
+	}
+
+	wsReq := newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID, nil)
+	wsReq = withURLParam(wsReq, "id", testWorkspaceID)
+	wsW := httptest.NewRecorder()
+	testHandler.GetWorkspace(wsW, wsReq)
+	if wsW.Code != http.StatusOK {
+		t.Fatalf("GetWorkspace: expected 200, got %d: %s", wsW.Code, wsW.Body.String())
+	}
+	if body := wsW.Body.String(); strings.Contains(body, "secret") || strings.Contains(body, "fresh") {
+		t.Fatalf("workspace response leaked env values: %s", body)
+	}
+	var wsResp WorkspaceResponse
+	if err := json.Unmarshal(wsW.Body.Bytes(), &wsResp); err != nil {
+		t.Fatalf("decode workspace response: %v", err)
+	}
+	settings, ok := wsResp.Settings.(map[string]any)
+	if !ok {
+		t.Fatalf("workspace settings shape = %#v", wsResp.Settings)
+	}
+	globalEnv, ok := settings["global_env"].(map[string]any)
+	if !ok {
+		t.Fatalf("workspace settings.global_env missing redacted metadata: %#v", settings)
+	}
+	if got, _ := globalEnv["key_count"].(float64); got != 3 {
+		t.Fatalf("redacted key_count = %v, want 3", globalEnv["key_count"])
+	}
+
+	var details string
+	if err := testPool.QueryRow(ctx, `
+		SELECT details::text FROM activity_log
+		WHERE workspace_id = $1 AND action = 'workspace_env_updated'
+		ORDER BY created_at DESC LIMIT 1
+	`, testWorkspaceID).Scan(&details); err != nil {
+		t.Fatalf("expected workspace_env_updated activity row: %v", err)
+	}
+	for _, leak := range []string{"secret", "fresh"} {
+		if strings.Contains(details, leak) {
+			t.Fatalf("audit details leaked value %q: %s", leak, details)
+		}
+	}
+}
+
+func TestWorkspaceEnv_IsScopedPerWorkspace(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	var priorSettings []byte
+	if err := testPool.QueryRow(ctx, `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&priorSettings); err != nil {
+		t.Fatalf("read primary workspace.settings: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `UPDATE workspace SET settings = $1 WHERE id = $2`, priorSettings, testWorkspaceID)
+	})
+
+	otherSlug := "handler-env-scope-test"
+	var otherWorkspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix, settings)
+		VALUES ($1, $2, $3, $4, '{}'::jsonb)
+		RETURNING id
+	`, "Handler Env Scope Test", otherSlug, "Temporary workspace for env scope test", "ENV").Scan(&otherWorkspaceID); err != nil {
+		t.Fatalf("create secondary workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, otherWorkspaceID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'owner')
+	`, otherWorkspaceID, testUserID); err != nil {
+		t.Fatalf("create secondary workspace membership: %v", err)
+	}
+
+	updateEnv := func(workspaceID string, env map[string]string) WorkspaceEnvResponse {
+		t.Helper()
+		req := newRequest(http.MethodPut, "/api/workspaces/"+workspaceID+"/env", map[string]any{"global_env": env})
+		req.Header.Set("X-Workspace-ID", workspaceID)
+		req = withURLParam(req, "id", workspaceID)
+		w := httptest.NewRecorder()
+		testHandler.UpdateWorkspaceEnv(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("UpdateWorkspaceEnv(%s): expected 200, got %d: %s", workspaceID, w.Code, w.Body.String())
+		}
+		var resp WorkspaceEnvResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode update response for %s: %v", workspaceID, err)
+		}
+		return resp
+	}
+	revealEnv := func(workspaceID string) WorkspaceEnvResponse {
+		t.Helper()
+		req := newRequest(http.MethodGet, "/api/workspaces/"+workspaceID+"/env", nil)
+		req.Header.Set("X-Workspace-ID", workspaceID)
+		req = withURLParam(req, "id", workspaceID)
+		w := httptest.NewRecorder()
+		testHandler.GetWorkspaceEnv(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GetWorkspaceEnv(%s): expected 200, got %d: %s", workspaceID, w.Code, w.Body.String())
+		}
+		var resp WorkspaceEnvResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode reveal response for %s: %v", workspaceID, err)
+		}
+		return resp
+	}
+
+	primaryResp := updateEnv(testWorkspaceID, map[string]string{"ONLY_PRIMARY": "primary-secret"})
+	otherResp := updateEnv(otherWorkspaceID, map[string]string{"ONLY_OTHER": "other-secret"})
+
+	if primaryResp.WorkspaceID != testWorkspaceID {
+		t.Fatalf("primary response workspace_id = %s, want %s", primaryResp.WorkspaceID, testWorkspaceID)
+	}
+	if otherResp.WorkspaceID != otherWorkspaceID {
+		t.Fatalf("other response workspace_id = %s, want %s", otherResp.WorkspaceID, otherWorkspaceID)
+	}
+	if !reflect.DeepEqual(revealEnv(testWorkspaceID).GlobalEnv, map[string]string{"ONLY_PRIMARY": "primary-secret"}) {
+		t.Fatalf("primary workspace env crossed workspace boundary")
+	}
+	if !reflect.DeepEqual(revealEnv(otherWorkspaceID).GlobalEnv, map[string]string{"ONLY_OTHER": "other-secret"}) {
+		t.Fatalf("secondary workspace env crossed workspace boundary")
+	}
+
+	var primaryStored, otherStored []byte
+	if err := testPool.QueryRow(ctx, `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&primaryStored); err != nil {
+		t.Fatalf("read primary stored settings: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT settings FROM workspace WHERE id = $1`, otherWorkspaceID).Scan(&otherStored); err != nil {
+		t.Fatalf("read secondary stored settings: %v", err)
+	}
+	if strings.Contains(string(primaryStored), "other-secret") || strings.Contains(string(otherStored), "primary-secret") {
+		t.Fatalf("workspace settings leaked across rows: primary=%s other=%s", string(primaryStored), string(otherStored))
+	}
+}
+
+func TestUpdateWorkspaceSettingsPreservesGlobalEnv(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	var priorSettings []byte
+	if err := testPool.QueryRow(ctx, `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&priorSettings); err != nil {
+		t.Fatalf("read workspace.settings: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = $1 WHERE id = $2`, []byte(`{"global_env":{"SECRET":"real"},"theme":"dark"}`), testWorkspaceID); err != nil {
+		t.Fatalf("seed workspace.settings: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `UPDATE workspace SET settings = $1 WHERE id = $2`, priorSettings, testWorkspaceID)
+	})
+
+	req := newRequest(http.MethodPatch, "/api/workspaces/"+testWorkspaceID, map[string]any{
+		"settings": map[string]any{
+			"global_env": map[string]any{"key_count": 1},
+			"theme":      "light",
+		},
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	w := httptest.NewRecorder()
+	testHandler.UpdateWorkspace(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateWorkspace: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var stored []byte
+	if err := testPool.QueryRow(ctx, `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&stored); err != nil {
+		t.Fatalf("read stored settings: %v", err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(stored, &settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	globalEnv, ok := settings["global_env"].(map[string]any)
+	if !ok {
+		t.Fatalf("stored global_env missing: %#v", settings)
+	}
+	if got := globalEnv["SECRET"]; got != "real" {
+		t.Fatalf("stored global_env.SECRET = %#v, want real", got)
+	}
+	if got := settings["theme"]; got != "light" {
+		t.Fatalf("stored theme = %#v, want light", got)
 	}
 }
 

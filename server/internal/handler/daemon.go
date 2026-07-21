@@ -1599,6 +1599,16 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if composioMCPEnabled {
 		resp.ConnectedApps = parseRuntimeConnectedAppsForClaim(task.RuntimeConnectedApps, task.ID)
 	}
+	var workspaceEnv map[string]string
+	if ws, err := h.Queries.GetWorkspace(r.Context(), runtime.WorkspaceID); err == nil {
+		workspaceEnv = workspaceGlobalEnvFromSettings(ws.Settings)
+	} else {
+		slog.Warn("task claim: failed to load workspace for global env",
+			"task_id", uuidToString(task.ID),
+			"workspace_id", runtimeWorkspaceID,
+			"error", err,
+		)
+	}
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 		var customEnv map[string]string
@@ -1642,7 +1652,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			ID:            uuidToString(agent.ID),
 			Name:          agent.Name,
 			Instructions:  agent.Instructions,
-			CustomEnv:     customEnv,
+			CustomEnv:     mergeWorkspaceAndAgentEnv(workspaceEnv, customEnv),
 			CustomArgs:    customArgs,
 			McpConfig:     mcpConfig,
 			Model:         agent.Model.String,
