@@ -11,7 +11,7 @@
 # runs this script via the smoke skill imported from ai-enhancement-hub.
 #
 # Required env (all injected via agentrunner-secrets ESO envFrom — no new SSM keys):
-#   MULTICA_PAT            Bot PAT
+#   MULTICA_PAT            Bot PAT (falls back to MULTICA_TOKEN when run as an agent task)
 #   MULTICA_WORKSPACE_ID   Smoke workspace UUID (long-lived, provisioned once)
 #   MULTICA_SERVER_URL     https://agentfarm.development.g2.com
 #   ANTHROPIC_API_KEY      LiteLLM virtual key (confirms LLM path is wired)
@@ -24,7 +24,8 @@
 set -euo pipefail
 
 # ── Configuration ──────────────────────────────────────────────────────────
-: "${MULTICA_PAT:?MULTICA_PAT is required}"
+MULTICA_PAT="${MULTICA_PAT:-${MULTICA_TOKEN:-}}"
+: "${MULTICA_PAT:?MULTICA_PAT is required (and MULTICA_TOKEN is also unset)}"
 : "${MULTICA_WORKSPACE_ID:?MULTICA_WORKSPACE_ID is required}"
 : "${MULTICA_SERVER_URL:?MULTICA_SERVER_URL is required}"
 : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
