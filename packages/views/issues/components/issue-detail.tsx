@@ -49,13 +49,15 @@ import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
-import { formatDateOnly } from "@multica/core/issues/date";
+import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
 import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
-import { IssueActionsDropdown, useIssueActions } from "../actions";
+import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
+import { LabelChip } from "../../labels/label-chip";
+import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
@@ -73,7 +75,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -582,13 +584,21 @@ function ActivityBlock({
 // SubIssueRow — sub-issue list item with inline status & assignee editing
 // ---------------------------------------------------------------------------
 
-function SubIssueRow({ child }: { child: Issue }) {
+function SubIssueRow({
+  child,
+  childProgress,
+}: {
+  child: Issue;
+  /** The sub-issue's OWN children progress (it can itself be a parent). */
+  childProgress?: { done: number; total: number };
+}) {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
   const updateIssue = useUpdateIssue();
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(child.id));
   const toggleSelected = useIssueSelectionStore((s) => s.toggle);
   const isDone = child.status === "done" || child.status === "cancelled";
+  const labels = child.labels ?? [];
 
   const handleUpdate = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
@@ -610,80 +620,141 @@ function SubIssueRow({ child }: { child: Issue }) {
   // AppLink wraps only the title/identifier area. Pickers and checkbox are
   // siblings, so their clicks never navigate — no stopPropagation acrobatics
   // and no risk of the native checkbox / picker triggers being blocked.
+  // Right-click anywhere on the row opens the shared issue actions menu
+  // (priority, labels, dates, delete, …) — the same menu as list rows.
   return (
-    <div
-      className={cn(
-        "flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
-        selected && "bg-accent/30",
-      )}
-    >
+    <IssueActionsContextMenu issue={child}>
       <div
         className={cn(
-          "flex h-4 w-4 shrink-0 items-center justify-center transition-opacity",
-          selected
-            ? "opacity-100"
-            : "opacity-0 group-hover/row:opacity-100 focus-within:opacity-100",
+          "flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
+          selected && "bg-accent/30",
         )}
       >
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={() => toggleSelected(child.id)}
-          aria-label={`Select ${child.identifier}`}
-          className="cursor-pointer accent-primary"
+        {/* Priority ⇄ checkbox slot, mirroring the main list rows: the
+            priority icon yields to the selection checkbox on hover/focus.
+            Opacity (not display) swap keeps the checkbox keyboard-tabbable. */}
+        <div className="relative flex h-4 w-4 shrink-0 items-center justify-center">
+          <PriorityIcon
+            priority={child.priority}
+            className={cn(
+              "transition-opacity",
+              selected
+                ? "opacity-0"
+                : "group-hover/row:opacity-0 group-focus-within/row:opacity-0",
+            )}
+          />
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => toggleSelected(child.id)}
+            aria-label={`Select ${child.identifier}`}
+            className={cn(
+              "absolute inset-0 cursor-pointer accent-primary transition-opacity",
+              selected
+                ? "opacity-100"
+                : "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100",
+            )}
+          />
+        </div>
+        <StatusPicker
+          status={child.status}
+          onUpdate={handleUpdate}
+          align="start"
+          trigger={
+            <StatusIcon
+              status={child.status}
+              className="h-[15px] w-[15px] shrink-0"
+            />
+          }
+        />
+        <AppLink
+          href={paths.issueDetail(child.id)}
+          className="flex min-w-0 flex-1 items-center gap-2.5"
+        >
+          <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
+            {child.identifier}
+          </span>
+          <IssueAgentActivityIndicator issueId={child.id} />
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span
+              className={cn(
+                "text-sm truncate",
+                isDone
+                  ? "text-muted-foreground"
+                  : "group-hover/row:text-foreground",
+              )}
+            >
+              {child.title}
+            </span>
+            {labels.length > 0 && (
+              <span className="hidden max-w-[200px] shrink-0 items-center gap-1 overflow-hidden md:inline-flex">
+                {labels.slice(0, 2).map((label) => (
+                  <LabelChip key={label.id} label={label} />
+                ))}
+                {labels.length > 2 && (
+                  <span className="text-[11px] text-muted-foreground">
+                    +{labels.length - 2}
+                  </span>
+                )}
+              </span>
+            )}
+            {childProgress && childProgress.total > 0 && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
+                <ProgressRing
+                  done={childProgress.done}
+                  total={childProgress.total}
+                  size={11}
+                />
+                <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                  {childProgress.done}/{childProgress.total}
+                </span>
+              </span>
+            )}
+          </span>
+        </AppLink>
+        {child.due_date && (
+          <DueDatePicker
+            dueDate={child.due_date}
+            onUpdate={handleUpdate}
+            align="end"
+            trigger={
+              <span
+                className={cn(
+                  "flex shrink-0 items-center gap-1 text-xs tabular-nums",
+                  !isDone && isPastDateOnly(child.due_date)
+                    ? "text-destructive"
+                    : "text-muted-foreground",
+                )}
+              >
+                <CalendarDays className="size-3" />
+                {shortDate(child.due_date)}
+              </span>
+            }
+          />
+        )}
+        <AssigneePicker
+          assigneeType={child.assignee_type}
+          assigneeId={child.assignee_id}
+          onUpdate={handleUpdate}
+          align="end"
+          trigger={
+            child.assignee_type && child.assignee_id ? (
+              <ActorAvatar
+                actorType={child.assignee_type}
+                actorId={child.assignee_id}
+                size="sm"
+                className="shrink-0"
+              />
+            ) : (
+              <span
+                aria-hidden
+                className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
+              />
+            )
+          }
         />
       </div>
-      <StatusPicker
-        status={child.status}
-        onUpdate={handleUpdate}
-        align="start"
-        trigger={
-          <StatusIcon
-            status={child.status}
-            className="h-[15px] w-[15px] shrink-0"
-          />
-        }
-      />
-      <AppLink
-        href={paths.issueDetail(child.id)}
-        className="flex min-w-0 flex-1 items-center gap-2.5"
-      >
-        <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
-          {child.identifier}
-        </span>
-        <span
-          className={cn(
-            "text-sm truncate flex-1",
-            isDone
-              ? "text-muted-foreground"
-              : "group-hover/row:text-foreground",
-          )}
-        >
-          {child.title}
-        </span>
-      </AppLink>
-      <AssigneePicker
-        assigneeType={child.assignee_type}
-        assigneeId={child.assignee_id}
-        onUpdate={handleUpdate}
-        align="end"
-        trigger={
-          child.assignee_type && child.assignee_id ? (
-            <ActorAvatar
-              actorType={child.assignee_type}
-              actorId={child.assignee_id}
-              size="sm"
-              className="shrink-0"
-            />
-          ) : (
-            <span
-              aria-hidden
-              className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
-            />
-          )
-        }
-      />
-    </div>
+    </IssueActionsContextMenu>
   );
 }
 
@@ -1200,6 +1271,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { data: parentChildIssues = [] } = useQuery({
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
+  });
+  // Workspace-wide parent→(done/total) map; lets each sub-issue row show its
+  // OWN nested progress ring without opening it. Same query the list
+  // surfaces use, so it's usually already cached.
+  const { data: subIssueProgress } = useQuery({
+    ...childIssueProgressOptions(wsId),
+    enabled: childIssues.length > 0,
   });
   const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
 
@@ -2227,6 +2305,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {childIssues.length > 0 && (() => {
             const doneCount = childIssues.filter((c) => c.status === "done").length;
             return (
+              // Provider hosts the shared right-click actions menu the rows
+              // delegate to (one singleton menu, not one per row).
+              <IssueContextMenuProvider>
               <div className="mt-10 group/sub-issues">
                 {/* Header */}
                 <div className="flex items-center gap-2 mb-2">
@@ -2301,7 +2382,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             </div>
                           )}
                           {items.map((child) => (
-                            <SubIssueRow key={child.id} child={child} />
+                            <SubIssueRow
+                              key={child.id}
+                              child={child}
+                              childProgress={subIssueProgress?.get(child.id)}
+                            />
                           ))}
                         </Fragment>
                       ))}
@@ -2309,6 +2394,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   );
                 })()}
               </div>
+              </IssueContextMenuProvider>
             );
           })()}
 

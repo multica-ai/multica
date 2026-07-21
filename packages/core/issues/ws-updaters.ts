@@ -216,6 +216,19 @@ export function patchIssueLabels(
   qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
   );
+  // Patch every per-parent children cache holding this issue — the parent
+  // issue's sub-issues panel renders label chips from these arrays, so a
+  // label change made elsewhere (agent, other tab, the child's own detail
+  // page) must not leave the panel stale.
+  for (const [key, data] of qc.getQueriesData<Issue[]>({
+    queryKey: [...issueKeys.all(wsId), "children"],
+  })) {
+    if (!data || !data.some((c) => c.id === issueId)) continue;
+    qc.setQueryData<Issue[]>(
+      key,
+      data.map((c) => (c.id === issueId ? { ...c, labels } : c)),
+    );
+  }
   // Patch the Project Gantt caches in-place: the Gantt view applies
   // `labelFilters` to the row data, so a stale `labels` array would silently
   // hide or surface bars after another tab/agent attached or detached a
@@ -234,6 +247,10 @@ export function patchIssueLabels(
 
 /** Reconcile server-filtered label windows only after the write commits. */
 export function invalidateIssueLabelDerivatives(qc: QueryClient, wsId: string) {
+  // Batched children caches hold Map-shaped data (parentId → Issue[]) that
+  // patchIssueLabels can't surgically update — refetch instead so swimlane
+  // child lanes pick up the new label set.
+  qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });

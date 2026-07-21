@@ -203,6 +203,40 @@ describe("onIssueLabelsChanged", () => {
     onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
     expectInvalidated(qc, flatKey);
   });
+
+  it("patches the parent's children cache so the sub-issues panel stays fresh", () => {
+    const child = { ...baseIssue, parent_issue_id: PARENT_ISSUE_ID };
+    qc.setQueryData<Issue[]>(issueKeys.children(WS_ID, PARENT_ISSUE_ID), [
+      child,
+      otherIssue,
+    ]);
+    // A children cache that does NOT hold the issue must keep its reference
+    // (no pointless rerender of unrelated sub-issue panels).
+    const unrelated = [otherIssue];
+    qc.setQueryData<Issue[]>(issueKeys.children(WS_ID, "parent-9"), unrelated);
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
+
+    const children = qc.getQueryData<Issue[]>(
+      issueKeys.children(WS_ID, PARENT_ISSUE_ID),
+    );
+    expect(children?.find((i) => i.id === ISSUE_ID)?.labels).toEqual([labelB]);
+    expect(children?.find((i) => i.id === OTHER_ISSUE_ID)?.labels).toEqual([
+      labelA,
+    ]);
+    expect(qc.getQueryData<Issue[]>(issueKeys.children(WS_ID, "parent-9"))).toBe(
+      unrelated,
+    );
+  });
+
+  it("invalidates batched children caches (Map-shaped, not patchable)", () => {
+    const batchedKey = issueKeys.childrenByParents(WS_ID, [PARENT_ISSUE_ID]);
+    qc.setQueryData(batchedKey, new Map([[PARENT_ISSUE_ID, [baseIssue]]]));
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
+
+    expectInvalidated(qc, batchedKey);
+  });
 });
 
 describe("onIssueMetadataChanged", () => {
