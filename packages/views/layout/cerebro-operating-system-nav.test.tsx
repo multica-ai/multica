@@ -26,8 +26,8 @@ describe("OperatingSystemNavItems", () => {
     expect(screen.getByText("NEW")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Rocks" })).toHaveAttribute("href", "/acme/rocks");
     expect(screen.getByRole("link", { name: "Strategy" })).toHaveAttribute("href", "/acme/strategy");
-    expect(screen.getByRole("link", { name: "Meetings" })).toHaveAttribute("href", "/acme/meetings"); // CEREBRO-PATCH(operating-system-stage4-nav): Verify Meetings link.
-    expect(screen.getByRole("link", { name: "Org Chart" })).toHaveAttribute("href", "/acme/org-chart"); // CEREBRO-PATCH(operating-system-stage4-nav): Verify Org Chart link.
+    expect(screen.getByRole("link", { name: "Cycles" })).toHaveAttribute("href", "/acme/meetings"); // CEREBRO-PATCH(operating-system-stage4-nav): Verify Cycles link.
+    expect(screen.getByRole("link", { name: "Roles" })).toHaveAttribute("href", "/acme/org-chart"); // CEREBRO-PATCH(operating-system-stage4-nav): Verify Roles link.
   });
 
   it("renders nothing when disabled", () => {

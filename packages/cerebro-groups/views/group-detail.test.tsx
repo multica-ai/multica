@@ -437,16 +437,17 @@ describe("GroupDetailView", () => {
     expect(section.className).toContain("shadow-sm");
     expect(section.className).not.toContain("rounded-md");
 
-    // All four boolean capabilities still render, each with a Switch control
+    // All boolean capabilities render with a Switch control
     // (the correct control for a grant — not an allow/ask/deny verdict pill).
     for (const testId of [
       "capability-create-runtime",
       "capability-create-agent",
       "capability-create-shared-filters",
       "capability-create-memory",
+      "capability-set-blocking-gate",
     ]) {
       expect(screen.getByTestId(testId)).toBeInTheDocument();
     }
-    expect(screen.getAllByRole("switch")).toHaveLength(4);
+    expect(screen.getAllByRole("switch")).toHaveLength(5);
   });
 });

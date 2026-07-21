@@ -74,3 +74,10 @@ export const evalBindingSchema = z.object({
 }).passthrough();
 
 export const evalBindingsListSchema = z.object({ bindings: z.array(evalBindingSchema).default([]) }).passthrough();
+
+export const evalScheduleSchema = z.object({
+  id: z.string(), workspace_id: z.string(), eval_id: z.string(), schedule_expr: z.string(),
+  timezone: z.string().default("Europe/Copenhagen"), enabled: z.boolean().default(true),
+  next_run_at: z.string().optional(), last_run_at: z.string().optional(),
+  created_by_id: z.string(), created_at: z.string(),
+}).passthrough();

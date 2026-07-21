@@ -31,7 +31,7 @@ type ToolExecutorInvoker interface {
 	// userID: authorship (member when set, agent when zero).
 	// cascadeUserID: passed to GetCascadeEnabledToolsForAgent for permission
 	// resolution. For task tokens: task.OriginalUserID. For user tokens: caller.
-	Invoke(ctx context.Context, agentID, workspaceID, userID, cascadeUserID pgtype.UUID, toolName string, args map[string]any) (string, error)
+	Invoke(ctx context.Context, agentID, workspaceID, userID, cascadeUserID, taskID pgtype.UUID, toolName string, args map[string]any) (string, error)
 }
 
 // InvokeAgentTool handles POST /api/agents/{id}/tools/{name}/invoke.
@@ -57,9 +57,10 @@ func (h *Handler) InvokeAgentTool(w http.ResponseWriter, r *http.Request) {
 	// CEREBRO-PATCH(invoke-cascade-perm): TECH-3226 — resolve caller identities.
 	// Task tokens: agent authorship + task's OriginalUserID drives cascade.
 	// User tokens: member authorship + calling user drives cascade.
-	var callerUserID, cascadeUserID pgtype.UUID
+	var callerUserID, cascadeUserID, taskID pgtype.UUID
 	if r.Header.Get("X-Actor-Source") == "task_token" {
-		if taskID, err := util.ParseUUID(r.Header.Get("X-Task-ID")); err == nil {
+		if parsedTaskID, err := util.ParseUUID(r.Header.Get("X-Task-ID")); err == nil {
+			taskID = parsedTaskID
 			if task, err := h.Queries.GetAgentTask(r.Context(), taskID); err == nil {
 				cascadeUserID = task.OriginalUserID
 			}
@@ -80,7 +81,7 @@ func (h *Handler) InvokeAgentTool(w http.ResponseWriter, r *http.Request) {
 		body.Args = map[string]any{}
 	}
 
-	result, err := h.ToolExecutor.Invoke(r.Context(), agent.ID, agent.WorkspaceID, callerUserID, cascadeUserID, toolName, body.Args)
+	result, err := h.ToolExecutor.Invoke(r.Context(), agent.ID, agent.WorkspaceID, callerUserID, cascadeUserID, taskID, toolName, body.Args)
 	if err != nil {
 		if errors.Is(err, ErrToolNotPermitted) {
 			writeError(w, http.StatusForbidden, "tool not granted or not enabled for this agent")

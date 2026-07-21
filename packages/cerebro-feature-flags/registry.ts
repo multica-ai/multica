@@ -168,6 +168,7 @@ export type CerebroFlagKey =
   | "cerebro_tasks"
   | "cerebro_pin_input"
   | "cerebro_workflows"
+  | "cerebro_workflows_engine"
   | "cerebro_evals"
   | "cerebro_workflow_hooks"
   | "cerebro_workflow_step_model_override"
@@ -556,6 +557,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_browser: false,
   cerebro_pin_input: true,
   cerebro_workflows: false,
+  cerebro_workflows_engine: false,
   cerebro_evals: false,
   cerebro_workflow_hooks: false,
   cerebro_workflow_step_model_override: true,
@@ -1307,7 +1309,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Workflow engine",
     group: "workspace",
     description:
-      "Enable the cerebro workflow engine and the /:workspace/workflows page (data-driven status/trigger rules, builder UI, run log). Server-side execution is additionally gated by the CEREBRO_WORKFLOWS_ENABLED env var.",
+      "Enable the cerebro workflow engine and the /:workspace/workflows page (data-driven status/trigger rules, builder UI, run log). Server-side execution is gated by the cerebro_workflows_engine sub-flag below.",
+  },
+  {
+    key: "cerebro_workflows_engine",
+    label: "Run workflow automations (engine)",
+    group: "workspace",
+    description:
+      "Actually fire workflow rules for this workspace. cerebro_workflows shows the Workflows UI and builder; this sub-flag runs the server-side engine that executes triggers, conditions, and actions. Off means rules can be created but never fire. Replaces the CEREBRO_WORKFLOWS_ENABLED env var so the engine can be toggled without a redeploy.",
   },
   {
     key: "cerebro_evals",

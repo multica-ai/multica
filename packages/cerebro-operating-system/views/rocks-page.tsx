@@ -80,11 +80,10 @@ export function RocksPage() {
   const list = useQuery(rocksOptions(wsId));
   const save = useSaveRock(wsId);
   const savePeriod = useSavePeriod(wsId);
-  const [formRock, setFormRock] = useState<Rock | undefined>(undefined);
-  const [selectedId, setSelectedId] = useState<string>();
+  const [openRockId, setOpenRockId] = useState<string>();
   const [typeFilter, setTypeFilter] = useState<string>("");
   const [periodFilter, setPeriodFilter] = useState<string>("");
-  const [view, setView] = useState<"list" | "timeline">("list");
+  const [view, setView] = useState<"list" | "timeline">("timeline");
   const [groupBy, setGroupBy] = useState<"owner" | "type">("owner");
   const [renamingId, setRenamingId] = useState<string>();
 
@@ -94,7 +93,7 @@ export function RocksPage() {
   const types = goalTypes.data?.goal_types ?? [];
   const allRocks = list.data?.rocks ?? [];
   const rocks = allRocks.filter((rock) => (!typeFilter || rock.goal_type_id === typeFilter) && (!periodFilter || rock.period_id === periodFilter));
-  const selected = allRocks.find((rock) => rock.id === selectedId);
+  const openRock = allRocks.find((rock) => rock.id === openRockId);
   const metrics = useMemo(() => {
     const tracked = rocks.filter((rock) => rock.derived_health.state !== "unset" && rock.derived_health.state !== "unknown");
     return {
@@ -156,16 +155,14 @@ export function RocksPage() {
           <div className="p-4"><p className="text-xs font-semibold tracking-wide text-muted-foreground">DAYS LEFT IN {currentPeriod?.name?.split(" ")[0] ?? "PERIOD"}</p><p className="mt-1 text-2xl font-semibold">{daysLeft(currentPeriod?.ends_on)}</p></div>
         </section>
 
-        {formRock !== undefined && <RockForm wsId={wsId} terminology={terminology} periods={periodList} strategyItems={strategy.data?.strategy_items ?? []} rock={formRock} onSaved={() => setFormRock(undefined)} onCancel={() => setFormRock(undefined)} />}
-
         {view === "timeline" ? (
-          <RocksTimeline rocks={rocks} periods={periodList} terminology={terminology} groupBy={groupBy} onSelect={(id) => setSelectedId(selectedId === id ? undefined : id)} onRename={(rock, title) => saveInline(rock, { title })} onCreate={(input, reset) => save.mutate({ input }, { onSuccess: reset })} isCreating={save.isPending} />
+          <RocksTimeline rocks={rocks} periods={periodList} terminology={terminology} groupBy={groupBy} openRockId={openRockId} onSelect={(id) => setOpenRockId(openRockId === id ? undefined : id)} onEdit={(id) => setOpenRockId(id)} onRename={(rock, title) => saveInline(rock, { title })} onCreate={(input, reset) => save.mutate({ input }, { onSuccess: reset })} isCreating={save.isPending} />
         ) : (
           <section className="overflow-visible rounded-xl border bg-card">
             <div className="hidden grid-cols-[minmax(16rem,2fr)_minmax(11rem,1fr)_minmax(10rem,1fr)_7rem_minmax(9rem,1fr)] gap-4 border-b bg-muted/40 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground md:grid"><span>{terminology.rock}</span><span>Owner</span><span>Issues &amp; Projects</span><span>Health</span><span>Period</span></div>
             <InlineRockAdd terminology={terminology} periods={periodList} goalTypes={types} defaultPeriodId={periodFilter || currentPeriod?.id || ""} onPlanPeriod={planNextPeriod} onCreate={(input, reset) => save.mutate({ input }, { onSuccess: reset })} isPending={save.isPending} />
             {list.isLoading ? <p className="p-8 text-sm text-muted-foreground">Loading {terminology.rocks}…</p> : list.isError ? <p role="alert" className="p-8 text-sm text-destructive">{terminology.rocks} could not be loaded.</p> : rocks.length === 0 ? <div className="p-10 text-center"><h2 className="font-semibold">No {terminology.rocks} yet</h2><p className="mt-1 text-sm text-muted-foreground">Type a title above to create the first one — connections can come later.</p></div> : rocks.map((rock) => (
-              <div key={rock.id} className={`grid w-full gap-3 border-b px-4 py-3 last:border-b-0 md:grid-cols-[minmax(16rem,2fr)_minmax(11rem,1fr)_minmax(10rem,1fr)_7rem_minmax(9rem,1fr)] md:items-center md:gap-4 ${selectedId === rock.id ? "bg-primary/5" : "hover:bg-muted/40"}`}>
+              <div key={rock.id} className={`grid w-full gap-3 border-b px-4 py-3 last:border-b-0 md:grid-cols-[minmax(16rem,2fr)_minmax(11rem,1fr)_minmax(10rem,1fr)_7rem_minmax(9rem,1fr)] md:items-center md:gap-4 ${openRockId === rock.id ? "bg-primary/5" : "hover:bg-muted/40"}`}>
                 <span className="min-w-0">
                   <span className="flex min-w-0 items-center gap-2">
                     {renamingId === rock.id ? (
@@ -182,24 +179,34 @@ export function RocksPage() {
                       />
                     ) : (
                       <>
-                        <button type="button" aria-label={`View ${rock.title}`} onClick={() => setSelectedId(selectedId === rock.id ? undefined : rock.id)} className="min-w-0 truncate text-left text-sm font-semibold hover:underline">{rock.title}</button>
+                        <button type="button" aria-label={`View ${rock.title}`} onClick={() => setOpenRockId(openRockId === rock.id ? undefined : rock.id)} className="min-w-0 truncate text-left text-sm font-semibold hover:underline">{rock.title}</button>
                         <button type="button" aria-label={`Rename ${rock.title}`} onClick={() => setRenamingId(rock.id)} className="shrink-0 rounded px-1 text-xs text-muted-foreground hover:bg-muted">✎</button>
+                        <button type="button" aria-label={`Edit ${rock.title}`} onClick={() => setOpenRockId(rock.id)} className="shrink-0 rounded px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-muted">Edit</button>
                         <SearchSelect compact className="w-28 shrink-0" label={`${rock.title} type`} options={types.map(typeOption)} value={rock.goal_type_id ?? ""} onChange={(value) => saveInline(rock, { goal_type_id: value || undefined })} clearLabel="No type" placeholder="Type" />
                       </>
                     )}
                   </span>
                   <span className="mt-1 block truncate text-xs text-muted-foreground">{rock.strategy_item_title ? `↳ 1-Year Plan · ${rock.strategy_item_title}` : `No ${terminology.strategy} connection`}</span>
                 </span>
-                <SearchSelect compact label={`${rock.title} owner`} options={ownerOptions} value={rock.owner_id ? `${rock.owner_type}:${rock.owner_id}` : ""} onChange={(value) => { const [ownerType, ownerId] = value.split(":"); saveInline(rock, { owner_type: ownerId ? (ownerType as "member" | "agent") : undefined, owner_id: ownerId || undefined }); }} clearLabel="No owner" placeholder="No owner" />
-                <span className="text-sm">{rock.done_issue_count}/{rock.issue_count} issues · {rock.project_count} {rock.project_count === 1 ? "project" : "projects"}</span>
-                <span><HealthBadge state={rock.derived_health.state} /></span>
-                <SearchSelect compact label={`${rock.title} period`} options={periodList.map(periodOption)} value={rock.period_id} onChange={(value) => { if (value) saveInline(rock, { period_id: value }); }} actionLabel="Plan next period" onAction={() => planNextPeriod((id) => saveInline(rock, { period_id: id }))} placeholder="Period" />
+                <span className="grid min-w-0 gap-1"><span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">Owner</span><SearchSelect compact label={`${rock.title} owner`} options={ownerOptions} value={rock.owner_id ? `${rock.owner_type}:${rock.owner_id}` : ""} onChange={(value) => { const [ownerType, ownerId] = value.split(":"); saveInline(rock, { owner_type: ownerId ? (ownerType as "member" | "agent") : undefined, owner_id: ownerId || undefined }); }} clearLabel="No owner" placeholder="No owner" /></span>
+                <span className="grid gap-1 text-sm"><span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">Issues &amp; Projects</span><span>{rock.done_issue_count}/{rock.issue_count} issues · {rock.project_count} {rock.project_count === 1 ? "project" : "projects"}</span></span>
+                <span className="grid gap-1"><span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">Health</span><span><HealthBadge state={rock.derived_health.state} /></span></span>
+                <span className="grid min-w-0 gap-1"><span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:hidden">Period</span><SearchSelect compact label={`${rock.title} period`} options={periodList.map(periodOption)} value={rock.period_id} onChange={(value) => { if (value) saveInline(rock, { period_id: value }); }} actionLabel="Plan next period" onAction={() => planNextPeriod((id) => saveInline(rock, { period_id: id }))} placeholder="Period" /></span>
               </div>
             ))}
           </section>
         )}
 
-        {selected && <RockDetail wsId={wsId} rock={selected} terminology={terminology} onEdit={() => setFormRock(selected)} />}
+        {openRock && (
+          <section aria-label={`Edit ${openRock.title}`} className="grid gap-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold">{openRock.title}</h2>
+              <button type="button" aria-label="Close" onClick={() => setOpenRockId(undefined)} className="h-8 rounded-md border px-3 text-sm font-medium">Close</button>
+            </div>
+            <RockForm wsId={wsId} terminology={terminology} periods={periodList} strategyItems={strategy.data?.strategy_items ?? []} rock={openRock} onSaved={() => setOpenRockId(undefined)} onCancel={() => setOpenRockId(undefined)} />
+            <RockDetail wsId={wsId} rock={openRock} terminology={terminology} />
+          </section>
+        )}
 
         <footer className="rounded-xl border border-dashed bg-card px-5 py-4 text-center text-sm text-muted-foreground"><strong className="text-foreground">Built on Multica</strong> — a {terminology.rock} can stand alone or connect to Projects and Issues.</footer>
       </div>

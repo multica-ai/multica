@@ -56,3 +56,55 @@ test("forwards pause and delete lifecycle operations to the provider", async () 
   assert.deepEqual(calls, [["pause", "service-1"], ["delete", "service-2"]]);
   await assert.rejects(manager.lifecycle("restart", "service-3"), /Unsupported app lifecycle operation/);
 });
+
+test("reaps superseded versions only after the new version is reported ready", async () => {
+  const order = [];
+  const manager = new DeploymentManager({
+    provider: {
+      async createOrDeploy() {
+        order.push("deploy");
+        return { serviceId: "service-1", internalDomain: "app.internal" };
+      },
+      async reapSuperseded(appId, version) {
+        order.push(`reap:${appId}@${version}`);
+        return 3;
+      },
+    },
+    backend: {
+      deploymentInput: async (value) => value,
+      callback: async () => order.push("ready"),
+      pending: async () => [],
+    },
+  });
+
+  await manager.deploy(request);
+  assert.deepEqual(order, ["deploy", "ready", `reap:${request.appId}@${request.version}`]);
+});
+
+test("a reap failure never fails an otherwise healthy deploy", async () => {
+  const manager = new DeploymentManager({
+    provider: {
+      createOrDeploy: async () => ({ serviceId: "service-1", internalDomain: "app.internal" }),
+      reapSuperseded: async () => {
+        throw new Error("sliplane list unreachable");
+      },
+    },
+    backend: {
+      deploymentInput: async (value) => value,
+      callback: async () => {},
+      pending: async () => [],
+    },
+  });
+
+  const result = await manager.deploy(request);
+  assert.deepEqual(result, { serviceId: "service-1", internalDomain: "app.internal" });
+});
+
+test("deploy still succeeds against a provider without a reaper", async () => {
+  const manager = new DeploymentManager({
+    provider: { createOrDeploy: async () => ({ serviceId: "service-1", internalDomain: "app.internal" }) },
+    backend: { deploymentInput: async (value) => value, callback: async () => {}, pending: async () => [] },
+  });
+  const result = await manager.deploy(request);
+  assert.equal(result.serviceId, "service-1");
+});

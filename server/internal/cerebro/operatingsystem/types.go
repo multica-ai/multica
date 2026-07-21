@@ -276,11 +276,12 @@ type MeetingAgendaSectionResponse struct {
 }
 
 type MeetingNoteTypeResponse struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	CadenceUnit  string `json:"cadence_unit"`
-	CadenceCount int32  `json:"cadence_count"`
-	Enabled      bool   `json:"enabled"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	CadenceUnit   string `json:"cadence_unit"`
+	CadenceCount  int32  `json:"cadence_count"`
+	Enabled       bool   `json:"enabled"`
+	CurrentNoteID string `json:"current_note_id,omitempty"`
 }
 
 type MeetingConfigInput struct {
@@ -294,6 +295,7 @@ type MeetingConfigResponse struct {
 	WorkspaceID        string                         `json:"workspace_id"`
 	NoteTypeID         string                         `json:"note_type_id,omitempty"`
 	NoteTypeName       string                         `json:"note_type_name,omitempty"`
+	CurrentNoteID      string                         `json:"current_note_id,omitempty"`
 	CadenceUnit        string                         `json:"cadence_unit"`
 	CadenceCount       int32                          `json:"cadence_count"`
 	Agenda             []MeetingAgendaSectionResponse `json:"agenda"`

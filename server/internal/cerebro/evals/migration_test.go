@@ -23,3 +23,20 @@ func TestEvalMigrationDefinesCatalogRunsAndWorkflowBindings(t *testing.T) {
 		}
 	}
 }
+
+func TestEvalFollowupMigrationsProtectDelivery(t *testing.T) {
+	for file, contracts := range map[string][]string{
+		"9150_cerebro_eval_advisory_dedupe.up.sql": {"UNIQUE INDEX", "notification_key"},
+		"9151_cerebro_eval_schedule_lease.up.sql": {"claimed_until", "schedule_claim_due_idx"},
+	} {
+		raw, err := os.ReadFile("../../../migrations/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, contract := range contracts {
+			if !strings.Contains(string(raw), contract) {
+				t.Fatalf("%s is missing %s", file, contract)
+			}
+		}
+	}
+}

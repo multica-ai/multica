@@ -1,10 +1,12 @@
 package evals
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -13,16 +15,48 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 type Handler struct {
-	store *Store
-	// executor is the real-run engine behind the default-OFF "Run now" flag
-	// (FIR-3496). Nil keeps POST /{id}/run disabled; see run_now.go.
-	executor RunExecutor
+	store         *Store
+	runNowEnabled bool
+	actorResolver ActorResolver
+	// blockingGate authorizes *blocking* eval bindings (FIR-3496). Nil fails
+	// closed; production wires the grouppermissions-backed authorizer in router.go.
+	blockingGate BlockingGateAuthorizer
 }
 
+// BlockingGateAuthorizer decides whether a member may create a blocking eval
+// binding in a workspace. A workspace admin always may; otherwise the member
+// must belong to a group granted the set_blocking_gate capability. Implemented
+// by an adapter over grouppermissions.Service (router.go).
+type BlockingGateAuthorizer interface {
+	CanSetBlockingGate(ctx context.Context, workspaceID, userID uuid.UUID, isAdmin bool) (bool, error)
+}
+
+type ActorResolver func(r *http.Request, userID, workspaceID string) (actorType, actorID string)
+
 func NewHandler(pool *pgxpool.Pool) *Handler { return &Handler{store: NewStore(pool)} }
+
+func (h *Handler) WithRunExecutor(executor RunExecutor) *Handler {
+	h.store.WithRunExecutor(executor)
+	h.runNowEnabled = executor != nil
+	return h
+}
+
+func (h *Handler) WithActorResolver(resolve ActorResolver) *Handler {
+	h.actorResolver = resolve
+	return h
+}
+
+// WithBlockingGateAuthorizer enables the "who may set a blocking gate" check on
+// CreateBinding. With no authorizer wired, blocking bindings fail closed.
+// Returns the handler for chained wiring.
+func (h *Handler) WithBlockingGateAuthorizer(a BlockingGateAuthorizer) *Handler {
+	h.blockingGate = a
+	return h
+}
 
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
@@ -37,11 +71,14 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/{id}/runs", h.ListRuns)
 	r.Post("/{id}/runs", h.CreateRun)
 	r.Post("/{id}/run", h.RunNow)
+	r.Get("/{id}/schedule", h.GetSchedule)
+	r.Put("/{id}/schedule", h.UpsertSchedule)
+	r.Delete("/{id}/schedule", h.DeleteSchedule)
 	return r
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	_, workspaceID, _, ok := requestContext(w, r)
+	_, workspaceID, _, ok := h.requestContext(w, r)
 	if !ok {
 		return
 	}
@@ -54,7 +91,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
-	_, workspaceID, _, ok := requestContext(w, r)
+	_, workspaceID, _, ok := h.requestContext(w, r)
 	if !ok {
 		return
 	}
@@ -71,7 +108,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	actorID, workspaceID, actorType, ok := requestContext(w, r)
+	actorID, workspaceID, actorType, ok := h.requestContext(w, r)
 	if !ok {
 		return
 	}
@@ -92,7 +129,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
-	_, workspaceID, _, ok := requestContext(w, r)
+	actorID, workspaceID, actorType, ok := h.requestContext(w, r)
 	if !ok {
 		return
 	}
@@ -108,6 +145,18 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Only the eval's owner (its creator) or a workspace admin may edit an eval
+	// (FIR-3496). Load it first so the ownership check has the creator to compare.
+	existing, err := h.store.Get(r.Context(), workspaceID, id)
+	if err != nil {
+		h.storeError(w, r, err)
+		return
+	}
+	member, memberOK := middleware.MemberFromContext(r.Context())
+	if !canEditEval(member, memberOK, actorID, actorType, existing) {
+		writeError(w, http.StatusForbidden, "only the eval owner or a workspace admin may edit this eval")
+		return
+	}
 	item, err := h.store.Update(r.Context(), workspaceID, id, input)
 	if err != nil {
 		h.storeError(w, r, err)
@@ -116,8 +165,17 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, item)
 }
 
+// canEditEval reports whether the actor may edit the eval: a workspace admin
+// (owner/admin role) always may; otherwise only the eval's creator may.
+func canEditEval(member db.Member, memberOK bool, actorID uuid.UUID, actorType string, eval Eval) bool {
+	if memberOK && (member.Role == "owner" || member.Role == "admin") {
+		return true
+	}
+	return eval.CreatedByID == actorID && eval.CreatedByType == actorType
+}
+
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
-	_, workspaceID, _, ok := requestContext(w, r)
+	actorID, workspaceID, actorType, ok := h.requestContext(w, r)
 	if !ok {
 		return
 	}
@@ -125,15 +183,116 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.store.Delete(r.Context(), workspaceID, id); err != nil {
+	if _, ok := h.requireEvalEditor(w, r, actorID, actorType, workspaceID, id); !ok {
+		return
+	}
+	hasBlocking, err := h.store.HasBlockingBinding(r.Context(), workspaceID, id)
+	if err != nil {
+		h.storeError(w, r, err)
+		return
+	}
+	allowBlocking := false
+	if hasBlocking {
+		if !h.authorizeBlockingGate(w, r, workspaceID) {
+			return
+		}
+		allowBlocking = true
+	}
+	if err := h.store.Delete(r.Context(), workspaceID, id, allowBlocking); err != nil {
+		if errors.Is(err, ErrBlockingBindingProtected) {
+			writeError(w, http.StatusForbidden, "only admins or granted members may remove a blocking eval gate")
+			return
+		}
 		h.storeError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *Handler) GetSchedule(w http.ResponseWriter, r *http.Request) {
+	_, workspaceID, _, ok := h.requestContext(w, r)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	item, err := h.store.GetSchedule(r.Context(), workspaceID, id)
+	if errors.Is(err, ErrNotFound) {
+		writeJSON(w, http.StatusOK, nil)
+		return
+	}
+	if err != nil {
+		h.storeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *Handler) UpsertSchedule(w http.ResponseWriter, r *http.Request) {
+	actorID, workspaceID, actorType, ok := h.requestContext(w, r)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	if _, ok := h.requireEvalEditor(w, r, actorID, actorType, workspaceID, id); !ok {
+		return
+	}
+	var input EvalScheduleInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if _, err := nextScheduleRun(input.ScheduleExpr, input.Timezone, time.Now()); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	item, err := h.store.UpsertSchedule(r.Context(), workspaceID, id, actorID, input.ScheduleExpr, input.Timezone, input.Enabled)
+	if err != nil {
+		h.storeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *Handler) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
+	actorID, workspaceID, actorType, ok := h.requestContext(w, r)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	if _, ok := h.requireEvalEditor(w, r, actorID, actorType, workspaceID, id); !ok {
+		return
+	}
+	if err := h.store.DeleteSchedule(r.Context(), workspaceID, id); err != nil {
+		h.storeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) requireEvalEditor(w http.ResponseWriter, r *http.Request, actorID uuid.UUID, actorType string, workspaceID, evalID uuid.UUID) (Eval, bool) {
+	item, err := h.store.Get(r.Context(), workspaceID, evalID)
+	if err != nil {
+		h.storeError(w, r, err)
+		return Eval{}, false
+	}
+	member, memberOK := middleware.MemberFromContext(r.Context())
+	if !canEditEval(member, memberOK, actorID, actorType, item) {
+		writeError(w, http.StatusForbidden, "only the eval owner or a workspace admin may edit this eval")
+		return Eval{}, false
+	}
+	return item, true
+}
+
 func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
-	_, workspaceID, _, ok := requestContext(w, r)
+	_, workspaceID, _, ok := h.requestContext(w, r)
 	if !ok {
 		return
 	}
@@ -150,7 +309,7 @@ func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
-	actorID, workspaceID, actorType, ok := requestContext(w, r)
+	actorID, workspaceID, actorType, ok := h.requestContext(w, r)
 	if !ok {
 		return
 	}
@@ -175,7 +334,7 @@ func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListBindings(w http.ResponseWriter, r *http.Request) {
-	_, workspaceID, _, ok := requestContext(w, r)
+	_, workspaceID, _, ok := h.requestContext(w, r)
 	if !ok {
 		return
 	}
@@ -197,7 +356,7 @@ func (h *Handler) ListBindings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreateBinding(w http.ResponseWriter, r *http.Request) {
-	actorID, workspaceID, _, ok := requestContext(w, r)
+	actorID, workspaceID, _, ok := h.requestContext(w, r)
 	if !ok {
 		return
 	}
@@ -209,6 +368,12 @@ func (h *Handler) CreateBinding(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// A blocking binding needs the set_blocking_gate right (FIR-3496): a
+	// workspace admin, or a member of a group granted it. Advisory bindings are
+	// unrestricted. Only enforced when an authorizer is wired.
+	if input.Blocking && !h.authorizeBlockingGate(w, r, workspaceID) {
+		return
+	}
 	item, err := h.store.CreateBinding(r.Context(), workspaceID, actorID, input)
 	if err != nil {
 		h.storeError(w, r, err)
@@ -218,12 +383,20 @@ func (h *Handler) CreateBinding(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteBinding(w http.ResponseWriter, r *http.Request) {
-	_, workspaceID, _, ok := requestContext(w, r)
+	_, workspaceID, _, ok := h.requestContext(w, r)
 	if !ok {
 		return
 	}
 	id, ok := pathUUID(w, r, "bindingId")
 	if !ok {
+		return
+	}
+	binding, err := h.store.GetBinding(r.Context(), workspaceID, id)
+	if err != nil {
+		h.storeError(w, r, err)
+		return
+	}
+	if binding.Blocking && !h.authorizeBlockingGate(w, r, workspaceID) {
 		return
 	}
 	if err := h.store.DeleteBinding(r.Context(), workspaceID, id); err != nil {
@@ -233,24 +406,42 @@ func (h *Handler) DeleteBinding(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func requestContext(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, string, bool) {
+func (h *Handler) authorizeBlockingGate(w http.ResponseWriter, r *http.Request, workspaceID uuid.UUID) bool {
+	if h.blockingGate == nil {
+		writeError(w, http.StatusForbidden, "only admins or granted members may manage a blocking eval gate")
+		return false
+	}
+	member, memberOK := middleware.MemberFromContext(r.Context())
+	if !memberOK || !member.UserID.Valid {
+		writeError(w, http.StatusForbidden, "only admins or granted members may manage a blocking eval gate")
+		return false
+	}
+	userID, err := uuid.FromBytes(member.UserID.Bytes[:])
+	if err != nil {
+		writeError(w, http.StatusForbidden, "invalid user identity")
+		return false
+	}
+	isAdmin := member.Role == "owner" || member.Role == "admin"
+	allowed, err := h.blockingGate.CanSetBlockingGate(r.Context(), workspaceID, userID, isAdmin)
+	if err != nil {
+		h.internalError(w, r, "failed to check blocking-gate permission", err)
+		return false
+	}
+	if !allowed {
+		writeError(w, http.StatusForbidden, "only admins or granted members may manage a blocking eval gate")
+		return false
+	}
+	return true
+}
+
+func (h *Handler) requestContext(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, string, bool) {
 	member, ok := middleware.MemberFromContext(r.Context())
 	if !ok || !member.UserID.Valid {
 		writeError(w, http.StatusUnauthorized, "user not authenticated")
 		return uuid.Nil, uuid.Nil, "", false
 	}
 	actorType := "member"
-	actorRaw := member.UserID.Bytes[:]
-	if agentID := r.Header.Get("X-Agent-ID"); agentID != "" {
-		parsed, err := uuid.Parse(agentID)
-		if err != nil {
-			writeError(w, http.StatusUnauthorized, "invalid agent identity")
-			return uuid.Nil, uuid.Nil, "", false
-		}
-		actorType = "agent"
-		actorRaw = parsed[:]
-	}
-	actorID, err := uuid.FromBytes(actorRaw)
+	actorID, err := uuid.FromBytes(member.UserID.Bytes[:])
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid user identity")
 		return uuid.Nil, uuid.Nil, "", false
@@ -259,6 +450,19 @@ func requestContext(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUI
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid workspace_id")
 		return uuid.Nil, uuid.Nil, "", false
+	}
+	if h.actorResolver != nil {
+		resolvedType, resolvedID := h.actorResolver(r, actorID.String(), workspaceID.String())
+		if resolvedType != "member" && resolvedType != "agent" {
+			writeError(w, http.StatusUnauthorized, "invalid actor identity")
+			return uuid.Nil, uuid.Nil, "", false
+		}
+		actorID, err = uuid.Parse(resolvedID)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "invalid actor identity")
+			return uuid.Nil, uuid.Nil, "", false
+		}
+		actorType = resolvedType
 	}
 	return actorID, workspaceID, actorType, true
 }

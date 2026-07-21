@@ -62,7 +62,7 @@ func NewService(queries *cerebrodb.Queries, projects ProjectReader) *Service {
 func DefaultTerminology() Terminology {
 	return Terminology{
 		Strategy: "Strategy", Rock: "Goal", Rocks: "Goals",
-		VisionPlan: "Vision Plan", Meetings: "Meetings", OrgChart: "Org Chart",
+		VisionPlan: "Vision Plan", Meetings: "Cycles", OrgChart: "Roles",
 		Scorecard: "Scorecard", IssuesList: "Issues List", StrategyMap: "Strategy Map",
 	}
 }
@@ -563,6 +563,7 @@ func (s *Service) meetingNoteTypes(ctx context.Context, workspaceID pgtype.UUID)
 		out = append(out, MeetingNoteTypeResponse{
 			ID: util.UUIDToString(row.ID), Name: row.Name,
 			CadenceUnit: row.CadenceUnit, CadenceCount: row.CadenceCount, Enabled: row.Enabled,
+			CurrentNoteID: util.UUIDToString(row.RunningDocArtifactID),
 		})
 	}
 	return out, nil
@@ -577,6 +578,7 @@ func applyMeetingNoteType(response *MeetingConfigResponse, noteTypes []MeetingNo
 			continue
 		}
 		response.NoteTypeName = noteType.Name
+		response.CurrentNoteID = noteType.CurrentNoteID
 		response.CadenceUnit = noteType.CadenceUnit
 		response.CadenceCount = noteType.CadenceCount
 		return

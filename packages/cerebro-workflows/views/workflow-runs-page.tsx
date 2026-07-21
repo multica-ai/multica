@@ -203,6 +203,13 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
+              {runs.isLoading && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                    Loading runs…
+                  </TableCell>
+                </TableRow>
+              )}
               {rows.length === 0 && !runs.isLoading && (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
@@ -237,7 +244,7 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
           </Table>
 
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Side {Math.floor(offset / PAGE_SIZE) + 1}</span>
+            <span>Page {Math.floor(offset / PAGE_SIZE) + 1}</span>
             <div className="flex gap-2">
               <Button
                 size="sm"

@@ -122,7 +122,7 @@ func TestGateEvaluator_StopsOnMaxRevisions(t *testing.T) {
 	check := []string{"go", "test", "./..."}
 	value := CheckGateConfig{
 		Checks: [][]string{check},
-		Caps:   Caps{MaxIterations: 10, MaxRevisions: 2, NoProgressStalls: 10},
+		Caps:   GateLimits{MaxIterations: 10, MaxRevisions: 2, NoProgressStalls: 10},
 	}
 
 	// Round 1 fails -> revision 1, round advances to 2, not stopped yet.
@@ -229,7 +229,7 @@ func TestGateEvaluator_MultiPhase_ChainsBuildReviewPairs(t *testing.T) {
 	c1 := []string{"pnpm", "test"}
 	cfg := CheckGateConfig{
 		AgentID:      "11111111-1111-1111-1111-111111111111",
-		Caps:         Caps{MaxIterations: 10, MaxRevisions: 5, NoProgressStalls: 5},
+		Caps:         GateLimits{MaxIterations: 10, MaxRevisions: 5, NoProgressStalls: 5},
 		RevertStatus: "in_progress",
 		Phases: []GatePhase{
 			{Name: "Backend", BuildSkill: "build-be", Checks: [][]string{c0}},

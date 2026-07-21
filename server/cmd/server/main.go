@@ -20,6 +20,7 @@ import (
 	cerebroapprovals "github.com/multica-ai/multica/server/internal/cerebro/approvals" // CEREBRO-PATCH(main-request-approval): FIR-3266 agent-callable approval intake.
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroevals "github.com/multica-ai/multica/server/internal/cerebro/evals"                   // CEREBRO-PATCH(main-eval-gate): FIR-3308 blocking workflow evals.
+	cerebroevalrun "github.com/multica-ai/multica/server/internal/cerebro/evals/runservice"      // CEREBRO-PATCH(main-eval-schedule-sweeper): FIR-3496 reuse the Run-now executor for scheduled evals.
 	cerebroplatformaction "github.com/multica-ai/multica/server/internal/cerebro/platformaction" // CEREBRO-PATCH(main-platform-action-gate): FIR-3266 gateway mutation floor.
 	// CEREBRO-PATCH(main-gws-group-sync): FIR-2596 Google Workspace group sync worker import
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
@@ -358,7 +359,9 @@ func main() {
 	// CEREBRO-PATCH(main-loop-gate-evaluator): FIR-2283 plug the loop delivery-gate evaluator (check_passes) into the engine, with the egress that dispatches enqueued checks to the worker agent's runtime.
 	// CEREBRO-PATCH(main-loop-status-reverter): FIR-2283 v2 — also plug in the status-revert egress, so a gate revising visibly moves the board back to Build/Plan.
 	baseLoopGate := cerebroloops.NewGateEvaluator(pool).WithDispatcher(cerebroloops.NewTaskDispatcher(queries).WithSessionStamper(workflowSessionStamper)).WithStatusSetter(cerebroloops.NewIssueStatusSetter(queries)) // CEREBRO-PATCH(main-eval-gate): FIR-3308 preserve existing checks.
-	workflowSvc.WithGateEvaluator(cerebroevals.NewGateEvaluator(baseLoopGate, cerebroevals.NewStore(pool)))                                                                                                             // CEREBRO-PATCH(main-eval-gate): require bound eval runs after normal checks.
+	evalGateStore := cerebroevals.NewStore(pool)                                                                                                                                                                        // CEREBRO-PATCH(main-eval-advisory): FIR-3496 share one store between the blocking gate and the advisory warner.
+	evalAdvisoryWarner := cerebroevals.NewAdvisoryWarner(evalGateStore, cerebrodb.New(pool), queries, bus)                                                                                                              // CEREBRO-PATCH(main-eval-advisory): FIR-3496 warn owners/admins on failing advisory (non-blocking) eval bindings.
+	workflowSvc.WithGateEvaluator(cerebroevals.NewGateEvaluator(baseLoopGate, evalGateStore).WithAdvisoryWarner(evalAdvisoryWarner))                                                                                    // CEREBRO-PATCH(main-eval-gate): require bound eval runs after normal checks.
 	// CEREBRO-PATCH(router-push-service): pushSvc threaded through to handlers.
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, pushSvc, RouterOptions{
 		HTTPMetrics:        httpMetrics,
@@ -446,6 +449,10 @@ func main() {
 	go cerebronotetypes.NewSweeper(pool, cerebrodb.New(pool)).Run(sweepCtx, 24*time.Hour)
 	// CEREBRO-PATCH(main-skill-learning-sweeper): TECH-3077 skill self-learning. Turns threshold-crossing observations into change-request proposals. No-ops for workspaces with cerebro_skill_learning flag off.
 	go cerebrolearn.NewLearningSweeper(pool, cerebrodb.New(pool), queries).Run(sweepCtx, 6*time.Hour)
+	// CEREBRO-PATCH(main-eval-schedule-sweeper): FIR-3496 scheduled eval runs. Deployment kill switch plus per-workspace cerebro_evals flag.
+	go cerebroevals.NewScheduleSweeper(cerebroevals.NewStore(pool), cerebroevalrun.New(pool)).Run(sweepCtx, time.Minute)
+	// CEREBRO-PATCH(main-eval-drift-sweeper): FIR-3496 daily eval drift alarm (fail + pass-rate regression). Gated OFF by CEREBRO_EVAL_DRIFT_ENABLED.
+	go cerebroevals.NewDriftSweeper(cerebroevals.NewStore(pool), cerebrodb.New(pool), queries, bus).Run(sweepCtx, 24*time.Hour)
 	if gatewayCfg, err := cerebroruntime.LoadFirtalGatewayRuntimeConfig(); err != nil {
 		slog.Error("invalid firtal gateway server runtime config", "error", err)
 		os.Exit(1)

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	"github.com/multica-ai/multica/server/internal/handler"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -27,7 +28,8 @@ type ToolExecutorInvoker struct {
 	// firtal_registry (data-source allowlist, allowed_apps, allow_write).
 	// Without it the registry is db-less and every grant config reads empty,
 	// silently denying config-gated actions through this server-side path.
-	Pool *pgxpool.Pool
+	Pool      *pgxpool.Pool
+	LoopStore *cerebroloops.Store
 }
 
 // compile-time interface check
@@ -39,8 +41,13 @@ var _ handler.ToolExecutorInvoker = (*ToolExecutorInvoker)(nil)
 // cascadeUserID is passed to GetCascadeEnabledToolsForAgent for permission
 // resolution; for task tokens this is task.OriginalUserID, for user tokens
 // it equals userID.
-func (e *ToolExecutorInvoker) Invoke(ctx context.Context, agentID, workspaceID, userID, cascadeUserID pgtype.UUID, toolName string, args map[string]any) (string, error) {
-	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, UserID: userID}
+func (e *ToolExecutorInvoker) Invoke(ctx context.Context, agentID, workspaceID, userID, cascadeUserID, taskID pgtype.UUID, toolName string, args map[string]any) (string, error) {
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, UserID: userID, TaskID: taskID, LoopStore: e.LoopStore}
+	if taskID.Valid && e.Queries != nil {
+		if task, err := e.Queries.GetAgentTask(ctx, taskID); err == nil && task.AgentID == agentID {
+			tctx.LoopStep = loopStepCapabilityFromTask(task)
+		}
+	}
 	reg := NewDefaultRegistry(nil, e.Queries, tctx, e.CerebroQueries)
 	// NewDefaultRegistry leaves the pool unset (it only registers tools); wire
 	// it here so tools can read their per-agent grant config (mirrors how the
@@ -57,7 +64,7 @@ func (e *ToolExecutorInvoker) Invoke(ctx context.Context, agentID, workspaceID, 
 		reg.Register(t)
 		enabledTools = append(enabledTools, t)
 	}
-	toolAllowed := false
+	toolAllowed := toolName == "open_loop_step" && tctx.LoopStep != nil
 	for _, t := range enabledTools {
 		if t.Name() == toolName {
 			toolAllowed = true

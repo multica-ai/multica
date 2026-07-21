@@ -20,6 +20,8 @@ RUN apk add --no-cache ca-certificates chromium freetype harfbuzz nodejs npm nss
     && chown -R app:app /home/app
 
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
+    AGENT_BROWSER_ARGS=--no-sandbox,--disable-dev-shm-usage \
+    AGENT_BROWSER_PROXY_BYPASS=*.internal,localhost,127.0.0.1 \
     HOME=/home/app
 WORKDIR /app
 COPY --from=builder /src/server/bin/browser-verifier-runner .

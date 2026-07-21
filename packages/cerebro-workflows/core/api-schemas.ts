@@ -13,6 +13,55 @@ import type {
 } from "./types";
 
 // ---------------------------------------------------------------------------
+
+const loopAgentRefSchema = z
+  .object({
+    agent_id: z.string(),
+    model: z.string().optional(),
+    thinking_level: z.string().optional(),
+  })
+  .passthrough();
+
+const loopBlockSchema = z
+  .object({
+    id: z.string(),
+    type: z.enum(["session", "command", "review", "human", "eval"]),
+    name: z.string().optional(),
+    agents: z.array(loopAgentRefSchema).optional(),
+    on_all_busy: z.enum(["wait", "pause", "wakeup", "ping_member"]).optional(),
+    steps: z.object({ allowed: z.boolean(), max: z.number().int().positive().optional() }).passthrough().optional(),
+    skill: z.string().optional(),
+    goal: z.string().optional(),
+    check: z.array(z.string()).optional(),
+    expect: z.literal("exit_zero").optional(),
+    rubric: z.string().optional(),
+    prompt: z.string().optional(),
+    approver_type: z.enum(["agent", "member"]).optional(),
+    approver_id: z.string().optional(),
+    eval_key: z.string().optional(),
+    eval_phase: z.string().optional(),
+  })
+  .passthrough();
+
+export const loopChainSchema = z
+  .object({
+    version: z.literal(2),
+    phases: z.array(z.object({
+      id: z.string(),
+      name: z.string().optional(),
+      status: z.string().optional(),
+      blocks: z.array(loopBlockSchema),
+      limits: z.object({
+        max_steps: z.number().int().positive(),
+        max_rounds: z.number().int().positive(),
+        no_progress_stalls: z.number().int().positive(),
+        max_wait_seconds: z.number().int().nonnegative().optional(),
+      }).passthrough(),
+    }).passthrough()),
+    done_status: z.string().optional(),
+  })
+  .passthrough();
+
 // Zod schemas for the cerebro-workflows REST surface — the boundary defense
 // against API drift that CLAUDE.md "API Response Compatibility" mandates for
 // any installed-app consuming a server it may outlive.
@@ -64,7 +113,7 @@ export const workflowSchema = z
     // FIR-2283. Default "standard" so an older backend that omits the field
     // entirely renders as the pre-existing workflow type, never crashes.
     workflow_type: z.string().optional().default("standard"),
-    loop_spec: z.unknown().optional(),
+    loop_spec: loopChainSchema.optional(),
   })
   .passthrough();
 

@@ -483,6 +483,9 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	}
 	var completion GatewayCompletion
 	hasCallableTools := e.agentHasCallableTools(runCtx, task.AgentID, plan.workspaceID, task.OriginalUserID, agent.OwnerID)
+	if loopStepCapabilityFromTask(task) != nil {
+		hasCallableTools = true
+	}
 	if hasCallableTools {
 		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID, task.OriginalUserID, pruneOn && !pruneHeldOut)
 	} else {
@@ -1011,6 +1014,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 			if task, taskErr := e.queries.GetAgentTask(ctx, taskID); taskErr == nil {
 				tctx.ChatSessionID = task.ChatSessionID
 				tctx.TriggerCommentID = task.TriggerCommentID
+				tctx.LoopStep = loopStepCapabilityFromTask(task)
 			}
 		}
 	}
@@ -1071,6 +1075,11 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		enabledTools, policyHandled = e.policyEnabledTools(ctx, taskRegistry, agentID, workspaceID)
 		if !policyHandled {
 			enabledTools = taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, cascadeUserID)
+		}
+		if tctx.LoopStep != nil {
+			if tool, ok := taskRegistry.Get("open_loop_step"); ok {
+				enabledTools = append([]Tool{tool}, enabledTools...)
+			}
 		}
 		enabledTools = limitFirtalGatewayTools(enabledTools)
 		if len(enabledTools) > 0 {

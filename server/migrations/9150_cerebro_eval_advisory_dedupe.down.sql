@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS inbox_item_eval_advisory_notification_key_unique;

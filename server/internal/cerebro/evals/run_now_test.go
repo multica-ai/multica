@@ -10,8 +10,8 @@ import (
 // stubExecutor lets the wiring test flip the flag on without a live engine.
 type stubExecutor struct{}
 
-func (stubExecutor) ExecuteRun(context.Context, Eval) (EvalRunInput, error) {
-	return EvalRunInput{}, nil
+func (stubExecutor) Execute(context.Context, Eval) (RunExecution, error) {
+	return RunExecution{}, nil
 }
 
 // TestRunNowDisabledByDefault proves the flag is OFF by default: with no
@@ -32,8 +32,8 @@ func TestRunNowDisabledByDefault(t *testing.T) {
 // TestWithRunExecutorEnablesFlag proves WithRunExecutor arms the endpoint and
 // returns the handler for chained wiring.
 func TestWithRunExecutorEnablesFlag(t *testing.T) {
-	h := (&Handler{}).WithRunExecutor(stubExecutor{})
-	if h.executor == nil {
+	h := (&Handler{store: NewStore(nil)}).WithRunExecutor(stubExecutor{})
+	if !h.runNowEnabled {
 		t.Fatal("WithRunExecutor did not set the executor")
 	}
 }

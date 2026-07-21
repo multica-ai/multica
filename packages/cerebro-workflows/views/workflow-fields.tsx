@@ -268,7 +268,7 @@ export function WebhookInboundFields({
             onClick={runTokenRegen}
             data-testid="inbound-webhook-rotate-token"
           >
-            {tokenMutation.isPending ? "…" : "Rotér"}
+            {tokenMutation.isPending ? "…" : "Rotate"}
           </Button>
         </div>
       </Field>

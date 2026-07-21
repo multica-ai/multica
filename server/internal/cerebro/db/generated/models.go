@@ -10,6 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type ActiveIssueLoopCutover struct {
+	RecipeID      pgtype.UUID `json:"recipe_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	ProjectID     pgtype.UUID `json:"project_id"`
+	CreatedByID   pgtype.UUID `json:"created_by_id"`
+	CreatedByType string      `json:"created_by_type"`
+}
+
 type ActivityLog struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -977,6 +986,20 @@ type CerebroEvalRun struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroEvalSchedule struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	EvalID       pgtype.UUID        `json:"eval_id"`
+	ScheduleExpr string             `json:"schedule_expr"`
+	Timezone     string             `json:"timezone"`
+	Enabled      bool               `json:"enabled"`
+	NextRunAt    pgtype.Timestamptz `json:"next_run_at"`
+	LastRunAt    pgtype.Timestamptz `json:"last_run_at"`
+	CreatedByID  pgtype.UUID        `json:"created_by_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	ClaimedUntil pgtype.Timestamptz `json:"claimed_until"`
+}
+
 type CerebroExchangeRate struct {
 	BaseCurrency   string             `json:"base_currency"`
 	TargetCurrency string             `json:"target_currency"`
@@ -1225,6 +1248,32 @@ type CerebroLoopPhase struct {
 	Phase     int32              `json:"phase"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroLoopPhaseState struct {
+	IssueID              pgtype.UUID        `json:"issue_id"`
+	WorkflowID           pgtype.UUID        `json:"workflow_id"`
+	PhaseID              string             `json:"phase_id"`
+	StepsOpened          int32              `json:"steps_opened"`
+	RoundsUsed           int32              `json:"rounds_used"`
+	ConsecutiveStalls    int32              `json:"consecutive_stalls"`
+	LastOutcomeSignature string             `json:"last_outcome_signature"`
+	Status               string             `json:"status"`
+	FailureReason        string             `json:"failure_reason"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroLoopStep struct {
+	IssueID    pgtype.UUID        `json:"issue_id"`
+	WorkflowID pgtype.UUID        `json:"workflow_id"`
+	PhaseID    string             `json:"phase_id"`
+	BlockID    string             `json:"block_id"`
+	StepNumber int32              `json:"step_number"`
+	Status     string             `json:"status"`
+	Outcome    []byte             `json:"outcome"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroNote struct {

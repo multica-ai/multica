@@ -20,6 +20,7 @@ var errRuntimeUnavailable = errors.New("app runtime is unavailable")
 
 type RuntimeDeploymentRequest struct {
 	AppID        string `json:"app_id"`
+	AppName      string `json:"app_name"`
 	Version      string `json:"version"`
 	BundleSHA256 string `json:"bundle_sha256"`
 }

@@ -1780,5 +1780,8 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 		r.Register(&FirtalReportLoopCheckTool{store: tctx.LoopStore, tctx: tctx})
 		r.Register(&FirtalReportLoopJudgeTool{store: tctx.LoopStore, tctx: tctx})
 		r.Register(&FirtalReportLoopHumanTool{store: tctx.LoopStore, tctx: tctx})
+		if tctx.LoopStep != nil {
+			r.Register(&FirtalOpenLoopStepTool{store: tctx.LoopStore, capability: *tctx.LoopStep})
+		}
 	}
 }

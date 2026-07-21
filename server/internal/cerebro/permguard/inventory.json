@@ -333,6 +333,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/cerebro/evals/{id}/schedule",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/status-models/default",
       "gate": "workspace_admin"
     },
@@ -1825,6 +1829,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/cerebro/evals/{id}/schedule",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/cerebro/strategy-items/{id}",
       "gate": "workspace_member"
     },
@@ -2235,6 +2243,10 @@
       "gate": "via:DELETE /api/cerebro/evals/{id}"
     },
     {
+      "id": "delete_eval_schedule",
+      "gate": "via:DELETE /api/cerebro/evals/{id}/schedule"
+    },
+    {
       "id": "delete_workflow",
       "gate": "via:DELETE /api/cerebro/workflows/{id}"
     },
@@ -2245,6 +2257,10 @@
     {
       "id": "get_eval",
       "exempt": "read-only — wraps GET /api/cerebro/evals/{id}"
+    },
+    {
+      "id": "get_eval_schedule",
+      "exempt": "read-only — wraps GET /api/cerebro/evals/{id}/schedule"
     },
     {
       "id": "get_active_workflow",
@@ -2297,6 +2313,14 @@
     {
       "id": "record_eval_run",
       "gate": "via:POST /api/cerebro/evals/{id}/runs"
+    },
+    {
+      "id": "run_eval",
+      "gate": "via:POST /api/cerebro/evals/{id}/run"
+    },
+    {
+      "id": "set_eval_schedule",
+      "gate": "via:PUT /api/cerebro/evals/{id}/schedule"
     },
     {
       "id": "test_workflow_hook",

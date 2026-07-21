@@ -245,7 +245,7 @@ func (h *Handler) InstallAllergenFormatter(w http.ResponseWriter, r *http.Reques
 		writeError(w, 500, "failed to install Allergen Formatter")
 		return
 	}
-	deployment := RuntimeDeploymentRequest{AppID: appID.String(), Version: "1.0.0", BundleSHA256: bundle.SHA256}
+	deployment := RuntimeDeploymentRequest{AppID: appID.String(), AppName: "Allergen Formatter", Version: "1.0.0", BundleSHA256: bundle.SHA256}
 	if h.runtime == nil || h.runtime.Deploy(r.Context(), deployment) != nil {
 		_, _ = h.pool.Exec(r.Context(), `UPDATE cerebro_app_deployment SET status='failed',last_error='App runtime is unavailable',updated_at=now() WHERE app_id=$1 AND version='1.0.0'`, appID)
 		slog.Error("built-in mini app runtime deployment failed", "app_id", appID)

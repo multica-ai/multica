@@ -1,5 +1,5 @@
 "use client";
 
-import { MeetingsPage } from "@multica/cerebro-operating-system/views";
+import { CyclesPage } from "@multica/cerebro-notes/views";
 
-export default function MeetingsRoute() { return <MeetingsPage />; }
+export default function MeetingsRoute() { return <CyclesPage />; }

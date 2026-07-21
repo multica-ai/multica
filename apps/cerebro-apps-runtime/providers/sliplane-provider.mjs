@@ -5,10 +5,13 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$/;
 const COMMIT_SHA = /^[0-9a-f]{40}$/i;
 
-export function serviceNameForVersion(appId, version) {
-  if (!UUID.test(appId) || !SEMVER.test(version)) throw new Error("Invalid app version identity");
-  const identity = createHash("sha256").update(`${appId.toLowerCase()}@${version}`).digest("hex").slice(0, 12);
-  return `cerebro-app-${appId.slice(0, 8).toLowerCase()}-${identity}`;
+export function serviceNameForVersion(appName, appId, version) {
+  const humanName = String(appName ?? "").replace(/\s+/g, " ").trim();
+  if (!humanName || /[\u0000-\u001f\u007f]/.test(humanName) || !UUID.test(appId) || !SEMVER.test(version)) {
+    throw new Error("Invalid app version identity");
+  }
+  const identity = createHash("sha256").update(`${appId.toLowerCase()}@${version}`).digest("hex").slice(0, 8);
+  return `${humanName} · ${version} · ${identity}`;
 }
 
 export class SliplaneProvider extends AppProvider {
@@ -30,19 +33,21 @@ export class SliplaneProvider extends AppProvider {
   async createOrDeploy(deployment) {
     try {
       this.#requireConfiguration();
-      const name = serviceNameForVersion(deployment.appId, deployment.version);
-      let service = await this.#createService(name, deployment);
-      if (service?.id) {
-        service = await this.#getService(service.id);
-      } else if (!service) {
-        service = await this.#findExistingService(name);
-        if (!this.#matchesDeployment(service, deployment)) throw new Error("existing Sliplane service identity mismatch");
+      const name = serviceNameForVersion(deployment.appName, deployment.appId, deployment.version);
+      let service = await this.#findExistingDeployment(name, deployment);
+      let created = false;
+      if (!service) {
+        service = await this.#createService(name, deployment);
+        if (service?.id) {
+          created = true;
+        } else if (!service) {
+          service = await this.#findExistingDeployment(name, deployment);
+          if (!service) throw new Error("existing Sliplane service identity mismatch");
+        }
       }
       if (!service?.id || service.serverId && service.serverId !== this.serverId) throw new Error("invalid Sliplane service");
-      const internalDomain = service.network?.internalDomain ?? service.internalDomain;
-      if (!internalDomain || !internalDomain.endsWith(".internal")) throw new Error("missing internal domain");
       await this.#request(`/projects/${this.projectId}/services/${service.id}/deploy`, { method: "POST", body: "{}" }, [200, 202, 204]);
-      await this.#waitUntilHealthy(internalDomain);
+      const internalDomain = await this.#waitUntilHealthy(service.id, created ? null : service);
       return { serviceId: service.id, internalDomain };
     } catch (error) {
       console.error("Sliplane app deployment failed", { error, appId: deployment.appId, version: deployment.version });
@@ -66,6 +71,41 @@ export class SliplaneProvider extends AppProvider {
       console.error("Sliplane app delete failed", { error, serviceId });
       throw new Error("App lifecycle operation failed");
     }
+  }
+
+  // Delete every superseded worker service for an app so old versions do not
+  // pile up on the host (each published version otherwise leaves a dead
+  // service behind — the accumulation that overloaded the staging host).
+  // Best-effort: a scan or per-service delete failure never rejects, so a
+  // healthy just-deployed version is never taken down by cleanup.
+  async reapSuperseded(appId, keepVersion) {
+    if (!UUID.test(String(appId ?? "")) || !SEMVER.test(String(keepVersion ?? ""))) return 0;
+    let reaped = 0;
+    try {
+      if (!this.apiKey || !this.projectId || !this.serverId || typeof this.fetch !== "function") throw new Error("Sliplane provider is not configured for reaping");
+      const response = await this.#request(`/projects/${this.projectId}/services`, {}, [200], true);
+      const services = await response.json();
+      const superseded = services.filter((service) => this.#isSupersededAppService(service, appId, keepVersion));
+      for (const service of superseded) {
+        try {
+          await this.#request(`/projects/${this.projectId}/services/${service.id}`, { method: "DELETE" }, [200, 202, 204, 404]);
+          reaped++;
+        } catch (error) {
+          console.error("Sliplane superseded app service delete failed", { error, serviceId: service.id, appId });
+        }
+      }
+    } catch (error) {
+      console.error("Sliplane superseded app service scan failed", { error, appId });
+    }
+    return reaped;
+  }
+
+  #isSupersededAppService(service, appId, keepVersion) {
+    if (!service?.id || service.serverId !== this.serverId) return false;
+    const env = new Map((service.env ?? []).map((entry) => [entry.key, String(entry.value ?? "")]));
+    if (env.get("APP_ID") !== appId) return false;
+    const version = env.get("APP_VERSION");
+    return Boolean(version) && version !== keepVersion;
   }
 
   async #createService(name, deployment) {
@@ -97,10 +137,10 @@ export class SliplaneProvider extends AppProvider {
     return response.json();
   }
 
-  async #findExistingService(name) {
+  async #findExistingDeployment(name, deployment) {
     const response = await this.#request(`/projects/${this.projectId}/services`, {}, [200], true);
     const services = await response.json();
-    return services.find((service) => service.name === name && service.serverId === this.serverId);
+    return services.find((service) => service.name === name && service.serverId === this.serverId && this.#matchesDeployment(service, deployment));
   }
 
   async #getService(serviceId) {
@@ -117,20 +157,29 @@ export class SliplaneProvider extends AppProvider {
       && env.get("WORKER_COMMIT") === this.workerCommit;
   }
 
-  async #waitUntilHealthy(internalDomain) {
+  async #waitUntilHealthy(serviceId, initialService = null) {
     const deadline = Date.now() + this.healthTimeoutMs;
-    const healthUrl = `http://${internalDomain}:${this.workerPort}/healthz`;
+    let service = initialService;
     while (Date.now() < deadline) {
+      let internalDomain = "";
       try {
+        service ??= await this.#getService(serviceId);
+        if (!service?.id || service.serverId && service.serverId !== this.serverId) throw new Error("invalid Sliplane service");
+        if (service.status === "failed") throw new Error("private app worker deployment failed");
+        internalDomain = service.network?.internalDomain ?? service.internalDomain ?? "";
+        if (!internalDomain.endsWith(".internal")) throw new Error("missing internal domain");
+        if (service.status && service.status !== "live") throw new Error("private app worker is not live");
+        const healthUrl = `http://${internalDomain}:${this.workerPort}/healthz`;
         const remaining = Math.max(1, deadline - Date.now());
         const response = await this.fetch(healthUrl, { signal: AbortSignal.timeout(Math.min(this.timeoutMs, remaining)) });
         if (response.ok) {
           const body = await response.json().catch(() => null);
-          if (body?.status === "ok" && body?.commit === this.workerCommit) return;
+          if (body?.status === "ok" && body?.commit === this.workerCommit) return internalDomain;
         }
       } catch (error) {
-        console.error("Sliplane app health check failed", { error, internalDomain });
+        console.error("Sliplane app health check failed", { error, serviceId, internalDomain });
       }
+      service = null;
       await new Promise((resolve) => setTimeout(resolve, Math.min(this.healthPollMs, Math.max(0, deadline - Date.now()))));
     }
     throw new Error("private app worker did not become healthy");

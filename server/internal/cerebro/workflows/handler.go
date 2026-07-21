@@ -45,8 +45,6 @@ type Handler struct {
 	// rejected (see requireIssueLoopColumns). Wired via
 	// WithIssueLoopColumns from router.go.
 	issueLoopColumns *IssueLoopColumnStore
-	// loopCheckStore is optional and nil-safe: see issue_loop_state.go.
-	loopCheckStore LoopCheckStore
 	// planDocuments is optional and nil-safe: when wired, issue workflow
 	// activation maintains the shared plan artifact under Agents > Workflow.
 	planDocuments *PlanDocumentService
@@ -1032,11 +1030,16 @@ type loopStateResponse struct {
 // through it (the recipe itself has no single "the" issue — a person picks
 // one to watch, typically the test issue they just ran it on).
 func (h *Handler) LoopState(w http.ResponseWriter, r *http.Request) {
+	memberID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 	row, ok := h.loadWorkflowForWrite(w, r)
 	if !ok {
 		return
 	}
-	if h.issueLoopColumns == nil || h.loopCheckStore == nil {
+	reader, ok := h.issueLoopCompiler.(IssueLoopStateReader)
+	if !ok {
 		writeError(w, http.StatusServiceUnavailable, "issue workflow live state is not wired on this server")
 		return
 	}
@@ -1046,50 +1049,23 @@ func (h *Handler) LoopState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gateID, err := h.issueLoopColumns.GeneratedChildIDByName(r.Context(), row.ID, "loop:delivery-gate")
+	issueID, err := util.ParseUUID(issueIDStr)
 	if err != nil {
-		// Not compiled yet (e.g. a brand-new recipe that failed to sync) —
-		// report the zero state rather than an error; there is nothing to
-		// watch yet.
-		writeJSON(w, http.StatusOK, loopStateResponse{PendingHumanChecks: []PendingHumanCheck{}})
+		writeError(w, http.StatusBadRequest, "invalid issue_id")
 		return
 	}
-	gate := util.UUIDToString(gateID)
-
-	state, err := h.loopCheckStore.GateState(r.Context(), issueIDStr, gate)
+	state, err := reader.ReadIssueLoopState(r.Context(), row.ID, issueID, memberID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load loop state")
 		return
 	}
-	pending, err := h.loopCheckStore.PendingHumanChecks(r.Context(), issueIDStr, gate)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load pending human checks")
-		return
+	if state.PendingHumanChecks == nil {
+		state.PendingHumanChecks = []PendingHumanCheck{}
 	}
-	if pending == nil {
-		pending = []PendingHumanCheck{}
-	}
-
-	maxIterations := 0
-	if h.issueLoopColumns != nil {
-		if fields, err := h.issueLoopColumns.Get(r.Context(), row.ID); err == nil && len(fields.LoopSpec) > 0 {
-			var spec struct {
-				Caps struct {
-					MaxIterations int `json:"max_iterations"`
-				} `json:"caps"`
-			}
-			if json.Unmarshal(fields.LoopSpec, &spec) == nil {
-				maxIterations = spec.Caps.MaxIterations
-			}
-		}
-	}
-
 	writeJSON(w, http.StatusOK, loopStateResponse{
-		Round:              state.Round,
-		MaxIterations:      maxIterations,
 		Stopped:            state.Stopped,
 		StopReason:         state.StopReason,
-		PendingHumanChecks: pending,
+		PendingHumanChecks: state.PendingHumanChecks,
 	})
 }
 
@@ -1101,7 +1077,7 @@ func (h *Handler) LoopState(w http.ResponseWriter, r *http.Request) {
 // natural pass (the same reconciliation loop a reported check/judge verdict
 // feeds).
 func (h *Handler) ApproveHumanCheck(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireUserID(w, r)
+	memberID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
@@ -1109,7 +1085,7 @@ func (h *Handler) ApproveHumanCheck(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if h.issueLoopColumns == nil || h.loopCheckStore == nil {
+	if h.issueLoopColumns == nil || h.issueLoopCompiler == nil {
 		writeError(w, http.StatusServiceUnavailable, "issue workflow approvals are not wired on this server")
 		return
 	}
@@ -1137,13 +1113,21 @@ func (h *Handler) ApproveHumanCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gateID, err := h.issueLoopColumns.GeneratedChildIDByName(r.Context(), row.ID, "loop:delivery-gate")
+	issueID, err := util.ParseUUID(req.IssueID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "this recipe has not been compiled onto the engine yet")
+		writeError(w, http.StatusBadRequest, "invalid issue_id")
 		return
 	}
-
-	if err := h.loopCheckStore.ApproveHumanCheck(r.Context(), req.IssueID, util.UUIDToString(gateID), checkID, req.Approved, req.Note, actorID(r, userID), actorType(r)); err != nil {
+	resolver, ok := h.issueLoopCompiler.(HumanBlockResolver)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "issue workflow chain is not wired on this server")
+		return
+	}
+	if err := resolver.ResolveHumanBlock(r.Context(), row.ID, issueID, checkID, req.Approved, req.Note, memberID); err != nil {
+		if strings.Contains(err.Error(), "not authorized") {
+			writeError(w, http.StatusForbidden, "approval is assigned to another member")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to record decision")
 		return
 	}
@@ -1200,82 +1184,12 @@ func (h *Handler) ActivateForIssue(ctx context.Context, workspaceID, workflowID,
 	if err := h.issueLoopCompiler.ActivateOnIssue(ctx, workspaceID, row.ID, row.ProjectID, creatorID, issueID, createdByType, fields.LoopSpec); err != nil {
 		return err
 	}
-	// FIR-2283 followup point 1 — activation only MATERIALIZES the loop's
-	// rules; it does not START them. The first phase (plan, or build when the
-	// recipe has no planning phase) is dispatched by a StatusChanged rule, but
-	// an issue born directly on a workflow never changes status, so that rule
-	// never fires and the agent never receives the plan-mode prompt. Synthesize
-	// the entry StatusChanged event here so the just-materialized first-phase
-	// rule fires exactly as it would on a real board move.
-	h.kickoffFirstPhase(ctx, workspaceID, row.ProjectID, issueID, fields.LoopSpec)
 	return nil
 }
 
-// loopEntryFields is the minimal projection of a loop_spec the activator needs
-// to decide which status enters the first phase: the planning toggle and the
-// two entry statuses (planning vs build). The keys match issueLoopSpecWire /
-// loops.Spec so this stays in sync with what Compile reads.
-type loopEntryFields struct {
-	Planning       bool   `json:"planning"`
-	PlanningStatus string `json:"planning_status"`
-	BuildStatus    string `json:"build_status"`
-}
-
-// kickoffFirstPhase dispatches the synthetic entry StatusChanged event that
-// starts a freshly-activated issue loop. The event's ToStatus is the loop's
-// entry status (planning status when the recipe plans, else build status), so
-// the loop:planning-dispatch (plan-mode) or loop:dispatch-build rule that
-// Compile just materialized for this issue fires. The issue-scope condition on
-// those rules matches on Raw["issue"]["id"], so that is the one field the
-// synthetic Raw payload must carry. Best-effort: a nil engine (unit wiring
-// without a Service) or a dispatch error is logged, never surfaced — the loop's
-// rules are already persisted and a later real status move still drives them.
-func (h *Handler) kickoffFirstPhase(ctx context.Context, workspaceID, projectID, issueID pgtype.UUID, loopSpecJSON []byte) {
-	if h.Service == nil {
-		return
-	}
-	var entry loopEntryFields
-	if err := json.Unmarshal(loopSpecJSON, &entry); err != nil {
-		slog.Warn("issue loop kickoff: parse loop_spec failed",
-			"issue_id", util.UUIDToString(issueID), "error", err)
-		return
-	}
-	toStatus := entry.BuildStatus
-	if entry.Planning {
-		toStatus = entry.PlanningStatus
-		if toStatus == "" {
-			toStatus = "todo"
-		}
-	} else if toStatus == "" {
-		toStatus = "in_progress"
-	}
-	issueIDStr := util.UUIDToString(issueID)
-	te := TriggerEvent{
-		// Stable per issue: a re-activation replaces the rule rows (new row
-		// ids), so the idempotency key — keyed on (EventID, rule row id) — is
-		// still fresh and the plan re-dispatches after an intentional re-sync.
-		EventID:     "loop_activate:" + issueIDStr,
-		WorkspaceID: util.UUIDToString(workspaceID),
-		ProjectID:   util.UUIDToString(projectID),
-		IssueID:     issueIDStr,
-		Type:        TriggerStatusChanged,
-		ToStatus:    toStatus,
-		Raw: map[string]any{
-			"issue": map[string]any{"id": issueIDStr},
-		},
-	}
-	if err := h.Service.Dispatch(ctx, te); err != nil {
-		slog.Warn("issue loop kickoff: dispatch failed",
-			"issue_id", issueIDStr, "to_status", toStatus, "error", err)
-	}
-}
-
 // ActivateWorkflow handles POST /api/cerebro/workflows/{id}/activate.
-// Body: { issue_id }. {id} must be an issue_loop recipe. Compiles it scoped
-// to issue_id alone (FIR-2283 v2 point 8 — "per-issue workflow activation")
-// — the recipe stays a reusable template; this creates/replaces just that
-// one issue's independent set of compiled rules, leaving the project-wide
-// compile and every other issue's activation untouched.
+// Body: { issue_id }. {id} must be an issue_loop recipe. Starts its Chain v2
+// runtime for that issue while keeping the recipe reusable.
 func (h *Handler) ActivateWorkflow(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {

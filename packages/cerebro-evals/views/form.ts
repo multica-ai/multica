@@ -28,6 +28,39 @@ export interface DraftForm {
 
 export const GRADER_MATCHES = ["iexact", "exact", "icontains", "contains"] as const;
 
+// TARGET_KINDS is the closed set of things an eval can be pointed at. It was a
+// free-text field, which let a typo save an eval the runner could never resolve
+// — the failure only surfaced later, on Run now. The runner resolves these in
+// server/internal/cerebro/evals/runner/target.go.
+export const TARGET_KINDS = ["agent", "skill", "workflow", "prompt", "code"] as const;
+
+// slugify derives the url-safe catalog key from a title, matching the
+// [a-z0-9]+(?:-[a-z0-9]+)* pattern the key field validates against.
+export function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// defaultSourcePath is where an in-app eval is filed in the source repository.
+// The user used to have to type this by hand — a file-repo concept leaking into
+// the in-app builder — so it is now derived from the key and only editable
+// under Advanced.
+export function defaultSourcePath(key: string): string {
+  return key ? `evals/${key}/eval.json` : "";
+}
+
+// withDerivedIdentity fills the identity fields the user no longer types. The
+// key follows the title and the source path follows the key, but only while the
+// user has not overridden them — once either is edited by hand (or prefilled
+// from an existing eval) the typed value wins and is never overwritten.
+export function withDerivedIdentity(form: DraftForm, keyTouched: boolean, sourcePathTouched: boolean): DraftForm {
+  const key = keyTouched ? form.key : slugify(form.title);
+  const sourcePath = sourcePathTouched ? form.sourcePath : defaultSourcePath(key);
+  return { ...form, key, sourcePath };
+}
+
 export const EMPTY_FORM: DraftForm = {
   key: "", title: "", version: "1.0.0", objective: "", targetKind: "workflow", targetLocator: "",
   targetRef: "main", sourceRepository: "https://github.com/firtal-group/firtal-evals", sourceCommit: "", sourcePath: "",

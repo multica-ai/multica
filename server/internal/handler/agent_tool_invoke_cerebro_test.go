@@ -26,14 +26,16 @@ type mockToolExecutor struct {
 	capturedWorkspaceID pgtype.UUID
 	capturedUserID      pgtype.UUID
 	capturedCascadeUID  pgtype.UUID
+	capturedTaskID      pgtype.UUID
 	capturedToolName    string
 }
 
-func (m *mockToolExecutor) Invoke(_ context.Context, agentID, workspaceID, userID, cascadeUserID pgtype.UUID, toolName string, _ map[string]any) (string, error) {
+func (m *mockToolExecutor) Invoke(_ context.Context, agentID, workspaceID, userID, cascadeUserID, taskID pgtype.UUID, toolName string, _ map[string]any) (string, error) {
 	m.capturedAgentID = agentID
 	m.capturedWorkspaceID = workspaceID
 	m.capturedUserID = userID
 	m.capturedCascadeUID = cascadeUserID
+	m.capturedTaskID = taskID
 	m.capturedToolName = toolName
 	return m.result, m.err
 }
@@ -200,5 +202,12 @@ func TestInvokeAgentTool_TaskToken_ZeroCallerUserID_OriginalUserIDForCascade(t *
 	}
 	if mock.capturedCascadeUID != expectedCascadeUID {
 		t.Errorf("cascadeUserID: got %v, want originalUserID %v", mock.capturedCascadeUID, expectedCascadeUID)
+	}
+	expectedTaskID, err := util.ParseUUID(taskID)
+	if err != nil {
+		t.Fatalf("parse taskID: %v", err)
+	}
+	if mock.capturedTaskID != expectedTaskID {
+		t.Errorf("taskID: got %v, want %v", mock.capturedTaskID, expectedTaskID)
 	}
 }

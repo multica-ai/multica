@@ -59,6 +59,39 @@ func TestRemoteRunnerAllowsPrivateSliplaneInternalURL(t *testing.T) {
 	}
 }
 
+func TestRemoteRunnerPreservesOnlySafeRunnerStageErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		want     string
+	}{
+		{name: "safe stage", response: `{"error":"internal browser stage open failed"}`, want: "internal browser stage open failed"},
+		{name: "safe open class", response: `{"error":"internal browser stage open dns failed"}`, want: "internal browser stage open dns failed"},
+		{name: "untrusted detail", response: `{"error":"password leaked from browser"}`, want: "internal browser verification failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = w.Write([]byte(tt.response))
+			}))
+			defer server.Close()
+
+			runner, err := NewRemoteRunner(server.URL, "runner-token", server.Client())
+			if err != nil {
+				t.Fatalf("NewRemoteRunner: %v", err)
+			}
+			_, err = runner.Verify(context.Background(), "registry", Credential{Username: "user", Password: "secret"})
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("Verify error = %v, want %q", err, tt.want)
+			}
+			if strings.Contains(err.Error(), "password") || strings.Contains(err.Error(), "secret") {
+				t.Fatalf("Verify error leaked untrusted runner detail: %v", err)
+			}
+		})
+	}
+}
+
 func TestRunnerHTTPHandlerRejectsWrongTokenBeforeBrowserExecution(t *testing.T) {
 	handler := NewRunnerHTTPHandler("correct-token", NewRunner(failingCommander{}))
 	req := httptest.NewRequest(http.MethodPost, "/verify", strings.NewReader(`{"app":"registry","credential":{"username":"u","password":"p"}}`))

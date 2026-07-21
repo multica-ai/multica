@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Rock } from "../core/types";
@@ -82,8 +82,16 @@ describe("RocksPage", () => {
     expect(render(<RocksPage />).container).toBeEmptyDOMElement();
   });
 
+  it("defaults to the timeline view", () => {
+    state.rocks = [rock];
+    render(<RocksPage />);
+    expect(screen.getByLabelText("Rocks timeline")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Cut fulfilment cost 12%" })).toBeInTheDocument();
+  });
+
   it("renders the header, KPI strip, inline add row and empty state", () => {
     render(<RocksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "List view" }));
     expect(screen.getByRole("heading", { name: "Rocks" })).toBeInTheDocument();
     expect(screen.getByText(/Priorities · Q3 2026/)).toBeInTheDocument();
     expect(screen.getByText("OVERALL HEALTH")).toBeInTheDocument();
@@ -97,6 +105,7 @@ describe("RocksPage", () => {
   it("communicates loading and error states", () => {
     state.rocksLoading = true;
     const { rerender } = render(<RocksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "List view" }));
     expect(screen.getByText("Loading Rocks…")).toBeInTheDocument();
     state.rocksLoading = false;
     state.rocksError = true;
@@ -107,7 +116,8 @@ describe("RocksPage", () => {
   it("renders the Rock table and connected execution details", () => {
     state.rocks = [rock];
     render(<RocksPage />);
-    expect(screen.getByText("Cut fulfilment cost 12%")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "List view" }));
+    expect(screen.getByRole("button", { name: "View Cut fulfilment cost 12%" })).toBeInTheDocument();
     expect(screen.getByText("↳ 1-Year Plan · Best-in-class logistics cost")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cut fulfilment cost 12% owner" })).toHaveTextContent("Sara");
     expect(screen.getByRole("button", { name: "Cut fulfilment cost 12% period" })).toHaveTextContent("Q3 2026");
@@ -121,6 +131,7 @@ describe("RocksPage", () => {
 
   it("creates a Rock inline from the add row with Enter", () => {
     render(<RocksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "List view" }));
     fireEvent.change(screen.getByLabelText("New Rock title"), { target: { value: "Independent Rock" } });
     fireEvent.keyDown(screen.getByLabelText("New Rock title"), { key: "Enter" });
     expect(state.mutate).toHaveBeenCalledWith(
@@ -132,6 +143,7 @@ describe("RocksPage", () => {
   it("creates a typed Rock via the inline type picker", () => {
     state.goalTypes = [{ id: "type-1", workspace_id: "workspace-1", name: "Company", color: "#22C55E", scope_label: "", position: 0, created_at: "", updated_at: "" }];
     render(<RocksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "List view" }));
     fireEvent.change(screen.getByLabelText("New Rock title"), { target: { value: "Typed goal" } });
     fireEvent.click(screen.getByRole("button", { name: "New Rock type" }));
     fireEvent.click(screen.getByRole("option", { name: /Company/ }));
@@ -162,6 +174,7 @@ describe("RocksPage", () => {
   it("changes a Rock owner inline from the list", () => {
     state.rocks = [rock];
     render(<RocksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "List view" }));
     fireEvent.click(screen.getByRole("button", { name: "Cut fulfilment cost 12% owner" }));
     fireEvent.click(screen.getByRole("option", { name: "Jesper" }));
     expect(state.mutate).toHaveBeenCalledWith(expect.objectContaining({
@@ -204,9 +217,23 @@ describe("RocksPage", () => {
   it("records a weekly check-in directly from the selected Rock", () => {
     state.rocks = [rock];
     render(<RocksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "List view" }));
     fireEvent.click(screen.getByRole("button", { name: "View Cut fulfilment cost 12%" }));
     fireEvent.change(screen.getByLabelText("Check-in note"), { target: { value: "Decision needed" } });
     fireEvent.click(screen.getByRole("button", { name: "Save check-in" }));
     expect(state.checkIn).toHaveBeenCalledWith(expect.objectContaining({ id: "rock-1", input: expect.objectContaining({ note: "Decision needed" }) }), expect.any(Object));
+  });
+
+  it("opens one combined edit panel with the form, linked-project chip and check-in history", () => {
+    state.rocks = [rock];
+    render(<RocksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit Cut fulfilment cost 12%" }));
+    const panel = screen.getByRole("region", { name: "Edit Cut fulfilment cost 12%" });
+    expect(within(panel).getByRole("heading", { name: "Edit Rock" })).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "Remove project Carrier migration" })).toBeInTheDocument();
+    expect(within(panel).getByText("Under this Rock — Cut fulfilment cost 12%")).toBeInTheDocument();
+    expect(within(panel).getByText("Weekly check-in history")).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("region", { name: "Edit Cut fulfilment cost 12%" })).not.toBeInTheDocument();
   });
 });

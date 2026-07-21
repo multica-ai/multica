@@ -146,9 +146,9 @@ function decisionDescription(decision: WorkflowHook["decision"]) { return ({ all
 function failModeLabel(mode: WorkflowHook["fail_mode"]) { return ({ open: "Continue", closed: "Stop", warn: "Continue and log" })[mode]; }
 function failModeDescription(mode: WorkflowHook["fail_mode"]) { return ({ open: "Let the action continue.", closed: "Stop the action to be safe.", warn: "Let the action continue and record that the check could not run." })[mode]; }
 
-const ACTION_OPTIONS = [
+export const ACTION_OPTIONS = [
   { value: "member.notify", label: "Notify member" }, { value: "agent.dispatch", label: "Start agent" }, { value: "squad.dispatch", label: "Start squad" },
-  { value: "skill.run", label: "Run skill" }, { value: "judge.gate", label: "Judge gate" },
+  { value: "skill.run", label: "Run skill" }, { value: "judge.gate", label: "Judge gate" }, { value: "eval.run", label: "Run eval" }, { value: "eval.gate", label: "Eval gate" },
   { value: "wakeup.create", label: "Create wakeup" }, { value: "wakeup.cancel", label: "Cancel wakeup" }, { value: "session.handoff", label: "Start Handoff" },
   { value: "task.retry", label: "Repeat current step" }, { value: "task.cancel", label: "Cancel task" }, { value: "artifact.create_or_update", label: "Create or update artifact" },
   { value: "workflow.activate", label: "Start workflow" }, { value: "workflow.pause", label: "Pause workflow" }, { value: "workflow.resume", label: "Resume workflow" }, { value: "workflow.stop", label: "Stop workflow" },

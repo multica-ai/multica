@@ -28,10 +28,18 @@ type HookEngine struct {
 	now         func() time.Time
 	beforeMatch func()
 	actions     *ActionRegistry
+	resolver    HookConditionResolver
 }
 
 func (e *HookEngine) WithActionRegistry(actions *ActionRegistry) *HookEngine {
 	e.actions = actions
+	return e
+}
+
+// WithConditionResolver injects the DB-backed resolver for deferred condition
+// operators (eval_passed). Left nil, those conditions fail closed.
+func (e *HookEngine) WithConditionResolver(resolver HookConditionResolver) *HookEngine {
+	e.resolver = resolver
 	return e
 }
 
@@ -78,7 +86,8 @@ func (e *HookEngine) Evaluate(ctx context.Context, event HookEvent) (HookResult,
 		if policy.Mode == HookModeOff || !eventListed(policy.Events, event.Type) || !policyMatches(policy, event) {
 			continue
 		}
-		if !evaluate(policy.Conditions, hookConditionContext(event)) {
+		pure, deferred := splitHookConditions(policy.Conditions)
+		if !evaluate(pure, hookConditionContext(event)) || !resolveHookConditions(ctx, e.resolver, deferred, event) {
 			continue
 		}
 		binding, ok := mostSpecificBinding(policy.Bindings, event)

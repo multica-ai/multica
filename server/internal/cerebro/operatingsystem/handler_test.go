@@ -172,14 +172,14 @@ func TestHandlerListsElements(t *testing.T) {
 
 func TestHandlerGetsMeeting(t *testing.T) {
 	h := NewHandler(&fakeHandlerService{getMeeting: func(context.Context, pgtype.UUID) (MeetingConfigResponse, error) {
-		return MeetingConfigResponse{CadenceUnit: "week", CadenceCount: 1}, nil
+		return MeetingConfigResponse{CadenceUnit: "week", CadenceCount: 1, CurrentNoteID: "note-current"}, nil
 	}})
 	req := memberRequest(http.MethodGet, "/api/cerebro/meetings", "")
 	rec := httptest.NewRecorder()
 
 	h.GetMeeting(rec, req)
 
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"cadence_unit":"week"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"cadence_unit":"week"`) || !strings.Contains(rec.Body.String(), `"current_note_id":"note-current"`) {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
 }

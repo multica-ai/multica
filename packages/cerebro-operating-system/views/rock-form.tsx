@@ -103,11 +103,28 @@ export function RockForm({ wsId, terminology, periods, strategyItems, rock, onSa
       <div className="grid gap-1 text-sm sm:col-span-2"><span>{terminology.strategy} connection</span>
         <SearchSelect label="Strategy connection" options={strategyItems.filter((item) => item.state === "active").map((item) => ({ value: item.id, label: item.title }))} value={strategyItemId} onChange={setStrategyItemId} clearLabel={`No ${terminology.strategy} connection`} placeholder={`No ${terminology.strategy} connection`} />
       </div>
-      <div className="grid gap-1 text-sm"><span>Projects <span className="text-xs text-muted-foreground">Optional · select multiple</span></span>
+      <div className="grid gap-1.5 text-sm"><span>Projects <span className="text-xs text-muted-foreground">Optional · select multiple</span></span>
         <SearchSelect label="Projects" multiple options={(projects.data ?? []).map((project) => ({ value: project.id, label: project.title }))} values={projectIds} onValuesChange={setProjectIds} placeholder="No projects linked" />
+        {projectIds.length > 0 && (
+          <ul aria-label="Linked projects" className="flex flex-wrap gap-1.5">
+            {projectIds.map((id) => {
+              const label = (projects.data ?? []).find((project) => project.id === id)?.title ?? id;
+              return <li key={id}><button type="button" aria-label={`Remove project ${label}`} onClick={() => setProjectIds(projectIds.filter((value) => value !== id))} className="flex max-w-full items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs"><span className="truncate">{label}</span><span aria-hidden className="text-muted-foreground">×</span></button></li>;
+            })}
+          </ul>
+        )}
       </div>
-      <div className="grid gap-1 text-sm"><span>Issues <span className="text-xs text-muted-foreground">Optional · select multiple</span></span>
+      <div className="grid gap-1.5 text-sm"><span>Issues <span className="text-xs text-muted-foreground">Optional · select multiple</span></span>
         <SearchSelect label="Issues" multiple options={(issues.data ?? []).map((issue) => ({ value: issue.id, label: `${issue.identifier} · ${issue.title}` }))} values={issueIds} onValuesChange={setIssueIds} placeholder="No issues linked" />
+        {issueIds.length > 0 && (
+          <ul aria-label="Linked issues" className="flex flex-wrap gap-1.5">
+            {issueIds.map((id) => {
+              const issue = (issues.data ?? []).find((candidate) => candidate.id === id);
+              const label = issue ? `${issue.identifier} · ${issue.title}` : id;
+              return <li key={id}><button type="button" aria-label={`Remove issue ${label}`} onClick={() => setIssueIds(issueIds.filter((value) => value !== id))} className="flex max-w-full items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs"><span className="truncate">{label}</span><span aria-hidden className="text-muted-foreground">×</span></button></li>;
+            })}
+          </ul>
+        )}
       </div>
       {save.isError && <p role="alert" className="text-sm text-destructive sm:col-span-2">The {terminology.rock.toLowerCase()} could not be saved.</p>}
       <div className="flex justify-end gap-2 sm:col-span-2">

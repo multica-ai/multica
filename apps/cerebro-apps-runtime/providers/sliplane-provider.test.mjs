@@ -5,6 +5,7 @@ import { SliplaneProvider, serviceNameForVersion } from "./sliplane-provider.mjs
 
 const deployment = {
   appId: "f1540000-0000-4154-8154-000000000001",
+  appName: "Allergen Formatter",
   version: "1.2.3",
   bundleUrl: "http://multica-backend-8nnfh2.internal:8080/api/cerebro/apps-internal/f1540000-0000-4154-8154-000000000001/1.2.3/bundle",
   bundleToken: "signed-bundle-token",
@@ -25,6 +26,12 @@ test("requires an explicit worker branch and exact worker commit before creating
   assert.equal(requests, 0);
 });
 
+test("uses the app's human name as the Sliplane service name", () => {
+  const name = serviceNameForVersion(deployment.appName, deployment.appId, deployment.version);
+  assert.match(name, /^Allergen Formatter · 1\.2\.3 · [0-9a-f]{8}$/);
+  assert.doesNotMatch(name, /cerebro-app|f1540000/);
+});
+
 test("creates a private service on the runtime server and explicitly deploys it", async () => {
   const requests = [];
   let healthChecks = 0;
@@ -35,9 +42,10 @@ test("creates a private service on the runtime server and explicitly deploys it"
     workerBranch: "main",
     workerCommit,
     healthPollMs: 1,
-    healthTimeoutMs: 100,
+    healthTimeoutMs: 5_000,
     fetch: async (url, init = {}) => {
       requests.push({ url, init, body: init.body ? JSON.parse(init.body) : null });
+      if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) return Response.json([]);
       if (String(url).endsWith("/services") && init.method === "POST") {
         return Response.json({ id: "service-1", network: { internalDomain: "cerebro-app-f1540000-v1-2-3.internal" } }, { status: 201 });
       }
@@ -54,9 +62,9 @@ test("creates a private service on the runtime server and explicitly deploys it"
   });
 
   const result = await provider.createOrDeploy(deployment);
-  const create = requests[0];
+  const create = requests.find((request) => String(request.url).endsWith("/services") && request.init.method === "POST");
   assert.equal(create.init.headers.authorization, "Bearer sliplane-secret");
-  assert.equal(create.body.name, serviceNameForVersion(deployment.appId, deployment.version));
+  assert.equal(create.body.name, serviceNameForVersion(deployment.appName, deployment.appId, deployment.version));
   assert.equal(create.body.serverId, "server-1");
   assert.deepEqual(create.body.network, { public: false });
   assert.equal(create.body.deployment.branch, "main");
@@ -75,7 +83,7 @@ test("creates a private service on the runtime server and explicitly deploys it"
   ]);
   assert.ok(!JSON.stringify(create.body).includes("sliplane.app"));
   assert.deepEqual(result, { serviceId: "service-1", internalDomain: "cerebro-app-f1540000-v1-2-3.internal" });
-  assert.match(requests[2].url, /projects\/project-1\/services\/service-1\/deploy$/);
+  assert.ok(requests.some((request) => /projects\/project-1\/services\/service-1\/deploy$/.test(request.url)));
   assert.equal(healthChecks, 2);
 });
 
@@ -89,6 +97,7 @@ test("treats Sliplane's empty 204 deploy response as success", async () => {
     healthPollMs: 1,
     healthTimeoutMs: 100,
     fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) return Response.json([]);
       if (String(url).endsWith("/services") && init.method === "POST") {
         return Response.json({ id: "service-1", network: { internalDomain: "ready.internal" } }, { status: 201 });
       }
@@ -106,6 +115,7 @@ test("treats Sliplane's empty 204 deploy response as success", async () => {
 
 test("refreshes a created service before using its canonical internal domain", async () => {
   const healthUrls = [];
+  let deployed = false;
   const provider = new SliplaneProvider({
     apiKey: "key",
     projectId: "project-1",
@@ -113,8 +123,9 @@ test("refreshes a created service before using its canonical internal domain", a
     workerBranch: "main",
     workerCommit,
     healthPollMs: 1,
-    healthTimeoutMs: 5,
+    healthTimeoutMs: 5_000,
     fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) return Response.json([]);
       if (String(url).endsWith("/services") && init.method === "POST") {
         return Response.json({
           id: "service-1",
@@ -126,10 +137,14 @@ test("refreshes a created service before using its canonical internal domain", a
         return Response.json({
           id: "service-1",
           serverId: "server-1",
-          network: { internalDomain: "canonical.internal" },
+          status: deployed ? "live" : "pending",
+          network: { internalDomain: deployed ? "canonical.internal" : "provisional-ujd9pc.internal" },
         });
       }
-      if (String(url).endsWith("/services/service-1/deploy")) return new Response(null, { status: 204 });
+      if (String(url).endsWith("/services/service-1/deploy")) {
+        deployed = true;
+        return new Response(null, { status: 204 });
+      }
       if (String(url).endsWith("/healthz")) {
         healthUrls.push(String(url));
         if (String(url) === "http://canonical.internal:4311/healthz") {
@@ -148,8 +163,40 @@ test("refreshes a created service before using its canonical internal domain", a
   assert.deepEqual(healthUrls, ["http://canonical.internal:4311/healthz"]);
 });
 
+test("reuses an existing deployment before creating another Sliplane service", async () => {
+  let creates = 0;
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    workerBranch: "main",
+    workerCommit,
+    fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) {
+        return Response.json([{ id: "existing", name: serviceNameForVersion(deployment.appName, deployment.appId, deployment.version), serverId: "server-1", network: { internalDomain: "existing.internal" }, env: [
+          { key: "APP_ID", value: deployment.appId },
+          { key: "APP_VERSION", value: deployment.version },
+          { key: "BUNDLE_SHA256", value: "" },
+          { key: "WORKER_COMMIT", value: workerCommit },
+        ] }]);
+      }
+      if (String(url).endsWith("/services") && init.method === "POST") {
+        creates++;
+        return Response.json({}, { status: 201 });
+      }
+      if (String(url).endsWith("/services/existing/deploy")) return new Response(null, { status: 204 });
+      if (String(url) === "http://existing.internal:4311/healthz") return Response.json({ status: "ok", commit: workerCommit });
+      throw new Error(`unexpected request ${init.method} ${url}`);
+    },
+  });
+
+  assert.deepEqual(await provider.createOrDeploy(deployment), { serviceId: "existing", internalDomain: "existing.internal" });
+  assert.equal(creates, 0);
+});
+
 test("reuses a deterministic service after a create conflict", async () => {
   let creates = 0;
+  let lists = 0;
   const provider = new SliplaneProvider({
     apiKey: "key",
     projectId: "project-1",
@@ -162,7 +209,9 @@ test("reuses a deterministic service after a create conflict", async () => {
         return new Response("already exists", { status: 409 });
       }
       if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) {
-        return Response.json([{ id: "existing", name: serviceNameForVersion(deployment.appId, deployment.version), serverId: "server-1", network: { internalDomain: "existing.internal" }, env: [
+        lists++;
+        if (lists === 1) return Response.json([]);
+        return Response.json([{ id: "existing", name: serviceNameForVersion(deployment.appName, deployment.appId, deployment.version), serverId: "server-1", network: { internalDomain: "existing.internal" }, env: [
           { key: "APP_ID", value: deployment.appId },
           { key: "APP_VERSION", value: deployment.version },
           { key: "BUNDLE_SHA256", value: "" },
@@ -179,14 +228,14 @@ test("reuses a deterministic service after a create conflict", async () => {
   assert.equal(creates, 1);
 });
 
-test("service identity cannot collide on UUID prefixes or prerelease punctuation", () => {
+test("service identity cannot collide on app IDs or prerelease punctuation", () => {
   assert.notEqual(
-    serviceNameForVersion("aaaaaaaa-1111-4111-8111-111111111111", "1.0.0"),
-    serviceNameForVersion("aaaaaaaa-2222-4222-8222-222222222222", "1.0.0"),
+    serviceNameForVersion("Formatter", "aaaaaaaa-1111-4111-8111-111111111111", "1.0.0"),
+    serviceNameForVersion("Formatter", "aaaaaaaa-2222-4222-8222-222222222222", "1.0.0"),
   );
   assert.notEqual(
-    serviceNameForVersion(deployment.appId, "1.0.0-alpha.1"),
-    serviceNameForVersion(deployment.appId, "1.0.0-alpha-1"),
+    serviceNameForVersion(deployment.appName, deployment.appId, "1.0.0-alpha.1"),
+    serviceNameForVersion(deployment.appName, deployment.appId, "1.0.0-alpha-1"),
   );
 });
 
@@ -202,7 +251,7 @@ test("rejects an existing service whose immutable deployment identity mismatches
       if (String(url).endsWith("/services") && init.method === "POST") return new Response("exists", { status: 409 });
       if (String(url).endsWith("/services")) return Response.json([{
         id: "wrong-service",
-        name: serviceNameForVersion(deployment.appId, deployment.version),
+        name: serviceNameForVersion(deployment.appName, deployment.appId, deployment.version),
         serverId: "server-1",
         network: { internalDomain: "wrong.internal" },
         env: [{ key: "APP_ID", value: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }],
@@ -225,6 +274,7 @@ test("fails safely when the private worker never becomes healthy", async () => {
     healthPollMs: 1,
     healthTimeoutMs: 5,
     fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) return Response.json([]);
       if (String(url).endsWith("/services") && init.method === "POST") {
         return Response.json({ id: "service-1", network: { internalDomain: "never-ready.internal" } }, { status: 201 });
       }
@@ -245,6 +295,7 @@ test("rejects a healthy worker running a different commit", async () => {
     apiKey: "key", projectId: "project-1", serverId: "server-1", workerBranch: "main", workerCommit,
     healthPollMs: 1, healthTimeoutMs: 5,
     fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) return Response.json([]);
       if (String(url).endsWith("/services") && init.method === "POST") return Response.json({ id: "service-1", network: { internalDomain: "wrong-commit.internal" } }, { status: 201 });
       if (String(url).endsWith("/services/service-1") && (!init.method || init.method === "GET")) return Response.json({ id: "service-1", serverId: "server-1", network: { internalDomain: "wrong-commit.internal" } });
       if (String(url).endsWith("/services/service-1/deploy")) return Response.json({}, { status: 202 });
@@ -285,4 +336,73 @@ test("pauses and deletes only the concrete private service", async () => {
     ["https://ctrl.sliplane.io/v0/projects/project-1/services/service-1/pause", "POST"],
     ["https://ctrl.sliplane.io/v0/projects/project-1/services/service-1", "DELETE"],
   ]);
+});
+
+const APP_A = "f1540000-0000-4154-8154-000000000001";
+const APP_B = "a1540000-0000-4154-8154-000000000002";
+
+function appService(id, appId, version, { serverId = "server-1" } = {}) {
+  return { id, serverId, env: [{ key: "APP_ID", value: appId }, { key: "APP_VERSION", value: version }] };
+}
+
+test("reaps only superseded worker services of the same app on this server", async () => {
+  const requests = [];
+  const services = [
+    appService("keep", APP_A, "2.0.0"), // current version — keep
+    appService("old-1", APP_A, "1.9.0"), // superseded — reap
+    appService("old-2", APP_A, "1.0.0"), // superseded — reap
+    appService("other-app", APP_B, "1.0.0"), // different app — keep
+    appService("other-server", APP_A, "1.0.0", { serverId: "server-2" }), // different server — keep
+    { id: "core-postgres", serverId: "server-1", env: [] }, // non-app core service — keep
+  ];
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    fetch: async (url, init = {}) => {
+      requests.push([String(url), init.method ?? "GET"]);
+      if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) return Response.json(services);
+      if (init.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`unexpected request ${init.method} ${url}`);
+    },
+  });
+
+  const reaped = await provider.reapSuperseded(APP_A, "2.0.0");
+  assert.equal(reaped, 2);
+  const deletes = requests.filter(([, method]) => method === "DELETE").map(([url]) => url).sort();
+  assert.deepEqual(deletes, [
+    "https://ctrl.sliplane.io/v0/projects/project-1/services/old-1",
+    "https://ctrl.sliplane.io/v0/projects/project-1/services/old-2",
+  ]);
+});
+
+test("reap tolerates a single delete failure and still removes the rest", async () => {
+  const services = [appService("old-1", APP_A, "1.0.0"), appService("old-2", APP_A, "1.1.0")];
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) return Response.json(services);
+      if (init.method === "DELETE" && String(url).endsWith("old-1")) return new Response(null, { status: 500 });
+      if (init.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`unexpected request ${init.method} ${url}`);
+    },
+  });
+
+  const reaped = await provider.reapSuperseded(APP_A, "2.0.0");
+  assert.equal(reaped, 1);
+});
+
+test("reap does nothing for an invalid app id or version and never lists services", async () => {
+  let calls = 0;
+  const provider = new SliplaneProvider({
+    apiKey: "key",
+    projectId: "project-1",
+    serverId: "server-1",
+    fetch: async () => (calls++, Response.json([])),
+  });
+  assert.equal(await provider.reapSuperseded("not-a-uuid", "1.0.0"), 0);
+  assert.equal(await provider.reapSuperseded(APP_A, "not-semver"), 0);
+  assert.equal(calls, 0);
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseWithFallback } from "@multica/core/api";
-import { evalRunsListSchema, evalsListSchema } from "./schemas";
+import { evalRunSchema, evalRunsListSchema, evalScheduleSchema, evalsListSchema } from "./schemas";
 import type { EvalRun } from "./types";
 
 const emptyRuns: { runs: EvalRun[] } = { runs: [] };
@@ -25,5 +25,10 @@ describe("eval API schemas", () => {
     );
     expect(withoutKey.runs).toHaveLength(1);
     expect(withoutKey.runs[0]?.issue_key).toBeUndefined();
+  });
+
+  it("fails malformed run and schedule responses closed", () => {
+    expect(parseWithFallback({ status: "passed" }, evalRunSchema, null, { endpoint: "run" })).toBeNull();
+    expect(parseWithFallback({ enabled: "yes" }, evalScheduleSchema, null, { endpoint: "schedule" })).toBeNull();
   });
 });

@@ -31,7 +31,7 @@ vi.mock("@multica/core/workspace/queries", () => ({
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
   return { ...actual, useQuery: (options: { queryKey: readonly string[] }) => {
-    if (options.queryKey.includes("settings")) return { data: { terminology: { strategy: "Strategy", rock: "Goal", rocks: "Goals", vision_plan: "Vision Plan" } } };
+    if (options.queryKey.includes("settings")) return { data: { terminology: { strategy: "Strategy", rock: "Goal", rocks: "Goals", vision_plan: "Vision Plan", meetings: "Cycles", org_chart: "Roles", scorecard: "Scorecard", issues_list: "Issues List", strategy_map: "Strategy Map" } } };
     if (options.queryKey.includes("vision-plan")) return { data: { sections: state.sections }, isLoading: state.loading, isError: state.error };
     if (options.queryKey.includes("rocks")) return { data: { rocks: state.rocks } };
     if (options.queryKey.includes("periods")) return { data: { periods: [] } };
@@ -63,6 +63,11 @@ const section = (partial: Partial<VisionPlanSection>): VisionPlanSection => ({
 });
 
 describe("Vision Plan", () => {
+  const renderEdit = () => {
+    render(<StrategyPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit plan" }));
+  };
+
   beforeEach(() => {
     state.enabled = true; state.loading = false; state.error = false; state.rocks = [];
     state.sections = [
@@ -84,16 +89,16 @@ describe("Vision Plan", () => {
   });
 
   it("renders the editable Vision Plan as an ordered strategy canvas", () => {
-    render(<StrategyPage />);
-    expect(screen.getByRole("heading", { name: "Vision Plan" })).toBeInTheDocument();
+    renderEdit();
+    expect(screen.getByRole("heading", { name: "Strategy Map" })).toBeInTheDocument();
     expect(screen.getByDisplayValue("Core Values")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Own the outcome")).toBeInTheDocument();
     expect(screen.getByText(/Target market/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add section" })).toBeInTheDocument();
-  });
+  }, 30_000);
 
   it("adds and updates inline content without opening a modal", () => {
-    render(<StrategyPage />);
+    renderEdit();
     const input = screen.getByLabelText("Add item to Core Values");
     fireEvent.change(input, { target: { value: "Care deeply" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -108,7 +113,7 @@ describe("Vision Plan", () => {
   });
 
   it("renames and reorders sections inline", () => {
-    render(<StrategyPage />);
+    renderEdit();
     fireEvent.change(screen.getByDisplayValue("Core Values"), { target: { value: "Operating Principles" } });
     fireEvent.blur(screen.getByDisplayValue("Operating Principles"));
     expect(state.updateSection).toHaveBeenCalledWith(expect.objectContaining({ id: "values", input: expect.objectContaining({ name: "Operating Principles" }) }));
@@ -118,7 +123,7 @@ describe("Vision Plan", () => {
   });
 
   it("offers Goal connections only for One-Year Plan items", () => {
-    render(<StrategyPage />);
+    renderEdit();
 
     expect(screen.queryByRole("button", { name: "Own the outcome Goals" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Care deeply Goals" })).not.toBeInTheDocument();

@@ -3,13 +3,16 @@ package loops
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/workflows"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func seedIssueLoopRecipe(t *testing.T, workspaceID pgtype.UUID, name string, loopSpecJSON []byte) pgtype.UUID {
@@ -47,16 +50,13 @@ func TestIssueLoopBridge_ProjectWideSyncMaterializesNoRules(t *testing.T) {
 		t.Fatalf("load issue workspace: %v", err)
 	}
 
-	loopSpecJSON, err := json.Marshal(issueLoopSpecWire{
-		Spec:       *goodSpec(t),
-		BuildSkill: "build",
-	})
+	loopSpecJSON, err := json.Marshal(testWaitingChain())
 	if err != nil {
 		t.Fatalf("marshal loop spec: %v", err)
 	}
 
 	recipe := seedIssueLoopRecipe(t, workspaceID, "project-wide sync recipe", loopSpecJSON)
-	bridge := NewIssueLoopBridge(cerebrodb.New(loopTestPool), workflows.NewIssueLoopColumnStore(loopTestPool))
+	bridge := NewIssueLoopBridge(loopTestPool, cerebrodb.New(loopTestPool), db.New(loopTestPool), workflows.NewIssueLoopColumnStore(loopTestPool)).WithEvalBlockRunner(&waitingEvalBlockRunner{})
 
 	// Project-wide sync (recipe save) must create zero generated rules.
 	if err := bridge.SyncIssueLoop(ctx, workspaceID, recipe, pgtype.UUID{}, pgtype.UUID{}, "member", loopSpecJSON); err != nil {
@@ -101,10 +101,7 @@ func TestIssueLoopBridge_ActivateOnIssueReplacesPriorRecipeForSameIssue(t *testi
 		t.Fatalf("load issue workspace: %v", err)
 	}
 
-	loopSpecJSON, err := json.Marshal(issueLoopSpecWire{
-		Spec:       *goodSpec(t),
-		BuildSkill: "build",
-	})
+	loopSpecJSON, err := json.Marshal(testWaitingChain())
 	if err != nil {
 		t.Fatalf("marshal loop spec: %v", err)
 	}
@@ -112,7 +109,7 @@ func TestIssueLoopBridge_ActivateOnIssueReplacesPriorRecipeForSameIssue(t *testi
 	firstRecipe := seedIssueLoopRecipe(t, workspaceID, "first issue loop recipe", loopSpecJSON)
 	secondRecipe := seedIssueLoopRecipe(t, workspaceID, "second issue loop recipe", loopSpecJSON)
 
-	bridge := NewIssueLoopBridge(cerebrodb.New(loopTestPool), workflows.NewIssueLoopColumnStore(loopTestPool))
+	bridge := NewIssueLoopBridge(loopTestPool, cerebrodb.New(loopTestPool), db.New(loopTestPool), workflows.NewIssueLoopColumnStore(loopTestPool)).WithEvalBlockRunner(&waitingEvalBlockRunner{})
 	if err := bridge.ActivateOnIssue(ctx, workspaceID, firstRecipe, pgtype.UUID{}, firstRecipe, issueID, "member", loopSpecJSON); err != nil {
 		t.Fatalf("activate first recipe: %v", err)
 	}
@@ -146,5 +143,147 @@ func TestIssueLoopBridge_ActivateOnIssueReplacesPriorRecipeForSameIssue(t *testi
 
 	if len(active) != 1 || active[0] != util.UUIDToString(secondRecipe) {
 		t.Fatalf("issue should have only the latest active recipe, got %v; want %s", active, util.UUIDToString(secondRecipe))
+	}
+}
+
+func testWaitingChain() *Chain {
+	return &Chain{Version: ChainVersion, Phases: []Phase{{ID: "phase", Blocks: []Block{{ID: "gate", Type: BlockEval, EvalKey: "delivery"}}, Limits: PhaseLimits{MaxSteps: 3, MaxRounds: 3, NoProgressStalls: 1}}}}
+}
+
+type phaseRecordingEvalRunner struct {
+	phases []string
+}
+
+type fakeMonitorBindingLister struct{ keys []string }
+
+func (f *fakeMonitorBindingLister) ListMonitorAdvisoryEvalKeys(_ context.Context, _ pgtype.UUID) ([]string, error) {
+	return f.keys, nil
+}
+
+func (r *phaseRecordingEvalRunner) RunEvalBlock(_ context.Context, d BlockDispatch) (StepStatus, json.RawMessage, error) {
+	phase := d.Block.EvalPhase
+	if phase == "" {
+		phase = "delivery"
+	}
+	r.phases = append(r.phases, phase)
+	return StepCompleted, json.RawMessage(`{"warning":true}`), nil
+}
+
+func TestIssueLoopBridge_MonitorAdvisoryRunsAfterDeliveryAndKeepsDoneTerminal(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	var workspaceID pgtype.UUID
+	if err := loopTestPool.QueryRow(ctx, `SELECT workspace_id FROM issue WHERE id=$1`, issueID).Scan(&workspaceID); err != nil {
+		t.Fatal(err)
+	}
+	chain := &Chain{
+		Version: ChainVersion,
+		Phases: []Phase{
+			{ID: "delivery", Status: "todo", Blocks: []Block{{ID: "delivery-eval", Type: BlockEval, EvalKey: "quality", EvalPhase: "delivery"}}, Limits: PhaseLimits{MaxSteps: 2, MaxRounds: 1, NoProgressStalls: 1}},
+		},
+		DoneStatus: "done",
+	}
+	raw, err := json.Marshal(chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipe := seedIssueLoopRecipe(t, workspaceID, "monitor advisory chain", raw)
+	runner := &phaseRecordingEvalRunner{}
+	bridge := NewIssueLoopBridge(loopTestPool, cerebrodb.New(loopTestPool), db.New(loopTestPool), workflows.NewIssueLoopColumnStore(loopTestPool)).
+		WithEvalBlockRunner(runner).
+		WithMonitorEvalBindingLister(&fakeMonitorBindingLister{keys: []string{"quality"}})
+	if err := bridge.ActivateOnIssue(ctx, workspaceID, recipe, pgtype.UUID{}, recipe, issueID, "member", raw); err != nil {
+		t.Fatalf("activate monitor chain: %v", err)
+	}
+	issue, err := db.New(loopTestPool).GetIssue(ctx, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue.Status != "done" {
+		t.Fatalf("monitor advisory changed terminal status to %q", issue.Status)
+	}
+	if len(runner.phases) != 2 || runner.phases[0] != "delivery" || runner.phases[1] != "monitor" {
+		t.Fatalf("eval phases=%v, want delivery then monitor", runner.phases)
+	}
+}
+
+func TestIssueLoopBridge_ResolveHumanBlockCompletesStep(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	var workspaceID pgtype.UUID
+	if err := loopTestPool.QueryRow(ctx, `SELECT workspace_id FROM issue WHERE id=$1`, issueID).Scan(&workspaceID); err != nil {
+		t.Fatal(err)
+	}
+	approverID := uuid.NewString()
+	chain := &Chain{Version: ChainVersion, DoneStatus: "done", Phases: []Phase{{ID: "approval", Limits: PhaseLimits{MaxSteps: 2, MaxRounds: 2, NoProgressStalls: 1}, Blocks: []Block{{ID: "signoff", Type: BlockHuman, Prompt: "Approve", ApproverType: AssigneeMember, ApproverID: approverID}}}}}
+	raw, _ := json.Marshal(chain)
+	recipe := seedIssueLoopRecipe(t, workspaceID, "human chain", raw)
+	store := NewStore(loopTestPool)
+	ref := StepRef{PhaseRunKey: PhaseRunKey{IssueID: issueID, WorkflowID: recipe, PhaseID: "approval"}, BlockID: "signoff", Number: 1}
+	if _, _, err := store.OpenStep(ctx, ref, chain.Phases[0].Limits); err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err := store.ClaimStep(ctx, ref); err != nil || !claimed {
+		t.Fatalf("claim: %v %v", claimed, err)
+	}
+	if err := store.RecordStepOutcome(ctx, ref, StepWaiting, json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	bridge := NewIssueLoopBridge(loopTestPool, cerebrodb.New(loopTestPool), db.New(loopTestPool), workflows.NewIssueLoopColumnStore(loopTestPool))
+	state, err := bridge.ReadIssueLoopState(ctx, recipe, issueID, approverID)
+	if err != nil || len(state.PendingHumanChecks) != 1 || state.PendingHumanChecks[0].CheckID != "signoff" {
+		t.Fatalf("pending approval state=%+v err=%v", state, err)
+	}
+	state, err = bridge.ReadIssueLoopState(ctx, recipe, issueID, uuid.NewString())
+	if err != nil || len(state.PendingHumanChecks) != 0 {
+		t.Fatalf("other member state=%+v err=%v", state, err)
+	}
+	if err := bridge.ResolveHumanBlock(ctx, recipe, issueID, "signoff", true, "no", uuid.NewString()); err == nil || !strings.Contains(err.Error(), "not authorized") {
+		t.Fatalf("unexpected unauthorized approval result: %v", err)
+	}
+	if err := bridge.ResolveHumanBlock(ctx, recipe, issueID, "signoff", true, "ok", approverID); err != nil {
+		t.Fatal(err)
+	}
+	steps, err := store.ListSteps(ctx, ref.PhaseRunKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 1 || steps[0].Status != StepCompleted {
+		t.Fatalf("steps=%+v", steps)
+	}
+}
+
+func TestIssueLoopBridge_ResumeActiveIssueLoopsStartsCutoverMarker(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	var workspaceID pgtype.UUID
+	if err := loopTestPool.QueryRow(ctx, `SELECT workspace_id FROM issue WHERE id=$1`, issueID).Scan(&workspaceID); err != nil {
+		t.Fatal(err)
+	}
+	chain := testWaitingChain()
+	raw, _ := json.Marshal(chain)
+	recipe := seedIssueLoopRecipe(t, workspaceID, "cutover resume", raw)
+	if _, err := loopTestPool.Exec(ctx, `INSERT INTO cerebro_workflow (workspace_id,name,enabled,trigger_type,trigger_config,conditions,action_type,action_config,editor_mode,editor_layout,created_by_id,created_by_type,generated_from_workflow_id,generated_for_issue_id) VALUES ($1,'loop:chain-activation',false,'status_changed','{"to_status":"__chain_driver__"}','[]','set_status','{"status":"done"}','form','null',gen_random_uuid(),'member',$2,$3)`, workspaceID, recipe, issueID); err != nil {
+		t.Fatal(err)
+	}
+	bridge := NewIssueLoopBridge(loopTestPool, cerebrodb.New(loopTestPool), db.New(loopTestPool), workflows.NewIssueLoopColumnStore(loopTestPool)).WithEvalBlockRunner(&fakeEvalBlockRunner{})
+	if err := bridge.ResumeActiveIssueLoops(ctx); err != nil {
+		t.Fatal(err)
+	}
+	steps, err := NewStore(loopTestPool).ListSteps(ctx, PhaseRunKey{IssueID: issueID, WorkflowID: recipe, PhaseID: "phase"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 1 || steps[0].Status != StepCompleted {
+		t.Fatalf("steps=%+v", steps)
 	}
 }

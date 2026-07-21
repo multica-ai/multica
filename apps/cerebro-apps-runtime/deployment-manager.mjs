@@ -23,11 +23,25 @@ export class DeploymentManager {
         external_service_id: result.serviceId,
         internal_domain: result.internalDomain,
       });
+      await this.#reapSuperseded(request.appId, request.version);
       return result;
     } catch (error) {
       console.error("mini-app deployment manager failed", { appId: request.appId, version: request.version, error });
       await this.backend.callback(request.appId, request.version, { status: "failed", error: "App deployment failed" });
       throw new Error("App deployment failed");
+    }
+  }
+
+  // Runs only after the new version is live and reported ready, so cleanup can
+  // never take down a healthy deploy. Reaping is best-effort: a failure here
+  // leaves stale services for the next deploy to sweep, it never fails the deploy.
+  async #reapSuperseded(appId, version) {
+    try {
+      if (typeof this.provider.reapSuperseded !== "function") return;
+      const reaped = await this.provider.reapSuperseded(appId, version);
+      if (reaped) console.info("mini-app superseded versions reaped", { appId, version, reaped });
+    } catch (error) {
+      console.error("mini-app reap after deploy failed", { appId, version, error });
     }
   }
 

@@ -10,4 +10,8 @@ export class AppProvider {
   async delete() {
     throw new Error("Provider must implement delete");
   }
+
+  async reapSuperseded() {
+    return 0;
+  }
 }

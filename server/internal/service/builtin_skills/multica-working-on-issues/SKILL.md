@@ -271,6 +271,12 @@ multica issue session list <issue>
 multica issue session handoff <issue> <root-comment-id> \
   --summary "..." --done "..." --remaining "..."
 
+# CEREBRO-PATCH(handoff-brief-flags-verbatim): FIR-3565 — StringArray, not StringSlice.
+# --done and --remaining take the value verbatim, so a bullet may contain
+# commas. Repeat the flag for more than one bullet — never comma-separate them.
+multica issue session handoff <issue> <root-comment-id> \
+  --done "Rewrote the runner, added tests" --done "Verified registry passes"
+
 # One-command handoff: also open a NEW session and start a fresh run on it
 # (the issue's assignee agent, no memory of the old thread). No need to post
 # the new top-level comment yourself. --prompt sets the new session's opening

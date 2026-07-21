@@ -188,7 +188,7 @@ test("accepts only signed deployment requests and dispatches them once", async (
     runtimeServiceKey: "service-secret",
     deploymentManager: { deploy: async (value) => deployments.push(value) },
   });
-  const body = Buffer.from(JSON.stringify({ app_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", version: "1.0.0", bundle_sha256: "a".repeat(64) }));
+  const body = Buffer.from(JSON.stringify({ app_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", app_name: "Allergen Formatter", version: "1.0.0", bundle_sha256: "a".repeat(64) }));
   const unsigned = await runtime.fetch(new Request("http://runtime/deployments", { method: "POST", body }));
   assert.equal(unsigned.status, 401);
   const signed = signServiceRequest("service-secret", "POST", "/deployments", body);
@@ -199,7 +199,7 @@ test("accepts only signed deployment requests and dispatches them once", async (
   }));
   assert.equal(accepted.status, 202);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(deployments, [{ appId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", version: "1.0.0", bundleSha256: "a".repeat(64) }]);
+  assert.deepEqual(deployments, [{ appId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", appName: "Allergen Formatter", version: "1.0.0", bundleSha256: "a".repeat(64) }]);
 });
 
 test("accepts only signed pause and delete lifecycle requests", async () => {
