@@ -8,6 +8,7 @@ export {
   ISSUE_IDENTIFIER_PATTERN,
 } from './issue-identifiers'
 export { preprocessMentionShortcodes } from './mentions'
+export { markdownSanitizeSchema, markdownUrlTransform } from './sanitize'
 export {
   preprocessFileCards,
   isCdnUrl,
