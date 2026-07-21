@@ -2911,8 +2911,8 @@ type UpdateIssueRequest struct {
 	// status's exact display name (MUL-4809 §3.1). StatusID targets a catalog
 	// row directly and is what the UI status picker sends. Either may be used;
 	// sending both is only accepted when they resolve to the SAME status.
-	Status   *string `json:"status"`
-	StatusID *string `json:"status_id"`
+	Status        *string  `json:"status"`
+	StatusID      *string  `json:"status_id"`
 	Priority      *string  `json:"priority"`
 	AssigneeType  *string  `json:"assignee_type"`
 	AssigneeID    *string  `json:"assignee_id"`
