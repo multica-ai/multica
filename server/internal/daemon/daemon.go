@@ -3617,6 +3617,7 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 var runtimeDisplayNameOverrides = map[string]string{
 	"traecli": "Trae",
 	"grok":    "Grok",
+	"qwen":    "Qwen Code",
 }
 
 // providerDisplayName returns the human-facing runtime name for a provider key.
@@ -5636,6 +5637,8 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 		args = cfg.CodexArgs
 	case "codebuddy":
 		args = cfg.CodebuddyArgs
+	case "qwen":
+		args = cfg.QwenArgs
 	default:
 		return nil
 	}
