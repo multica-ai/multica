@@ -81,6 +81,32 @@ func codexGracefulShutdown() time.Duration {
 	return codexGracefulShutdownTimeout
 }
 
+type codexStderrClassification struct {
+	modelRefreshTimeout int
+	mcpInitTransport    int
+	bareTimeout         int
+}
+
+// classifyCodexStartupStderr emits bounded counters only. It deliberately does
+// not make retry decisions: stderr is sibling diagnostic evidence, not proof
+// that thread/start did or did not create a provider-side thread.
+func classifyCodexStartupStderr(stderr string, timedOut bool) codexStderrClassification {
+	lower := strings.ToLower(sanitizeCodexDiagnostic(stderr))
+	classification := codexStderrClassification{
+		modelRefreshTimeout: strings.Count(lower, codexModelCatalogRefreshTimeoutSignal),
+	}
+	for _, line := range strings.Split(lower, "\n") {
+		if strings.Contains(line, "mcp") && strings.Contains(line, "transport") &&
+			(strings.Contains(line, "error") || strings.Contains(line, "failed") || strings.Contains(line, "closed")) {
+			classification.mcpInitTransport++
+		}
+	}
+	if timedOut && classification.modelRefreshTimeout == 0 && classification.mcpInitTransport == 0 {
+		classification.bareTimeout = 1
+	}
+	return classification
+}
+
 // CodexSemanticInactivityMarker prefixes timeout errors emitted when Codex
 // stops making semantic progress while the process is still alive.
 const CodexSemanticInactivityMarker = "codex semantic inactivity timeout"
@@ -100,6 +126,7 @@ const CodexHandshakeTimeoutMarker = "codex app-server handshake timeout"
 // prefix rather than one variant: they are all the same startup-blocking
 // failure from the daemon's point of view.
 const codexModelCatalogRefreshFailureSignal = "failed to refresh available models"
+const codexModelCatalogRefreshTimeoutSignal = "failed to refresh available models: timeout waiting for child process to exit"
 
 var errCodexProcessExited = errors.New("codex process exited")
 
@@ -868,6 +895,9 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		pending:              make(map[int]*pendingRPC),
 		processDone:          make(chan struct{}),
 		handshakeTimeout:     handshakeTimeout,
+		pid:                  cmd.Process.Pid,
+		attempt:              attempt,
+		activeLaunches:       activeLaunches,
 		notificationProtocol: "unknown",
 		acceptNotification:   turnNotificationGate.accept,
 		onDiscardedNotification: func(string, map[string]any) {
@@ -1097,7 +1127,31 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		if err != nil {
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			finalError = withAgentStderr(err.Error(), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
+			stderrTail := sanitizeCodexDiagnostic(stderrBuf.Tail())
+			finalError = withAgentStderr(err.Error(), "codex", stderrTail)
+			if c.threadStartSent {
+				var handshakeErr *codexHandshakeTimeoutError
+				timedOut := errors.As(err, &handshakeErr) && handshakeErr.Method == "thread/start"
+				classification := classifyCodexStartupStderr(stderrTail, timedOut)
+				b.cfg.Logger.Warn("codex lifecycle",
+					"phase", "thread_start_failure",
+					"task_id", b.cfg.TaskID,
+					"runtime_id", b.cfg.RuntimeID,
+					"pid", cmd.Process.Pid,
+					"attempt", attempt,
+					"active_launches", activeLaunches,
+					"method", "thread/start",
+					"latency", time.Since(c.threadStartStarted).Round(time.Millisecond).String(),
+					"latency_ms", time.Since(c.threadStartStarted).Milliseconds(),
+					"cleanup_confirmed", cleanupConfirmed,
+					"reaped", cleanupConfirmed,
+					"retry_safe", false,
+					"retry_attempted", false,
+					"stderr_model_refresh_timeout_count", classification.modelRefreshTimeout,
+					"stderr_mcp_init_transport_count", classification.mcpInitTransport,
+					"stderr_bare_timeout_count", classification.bareTimeout,
+				)
+			}
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -1425,10 +1479,32 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"persistExtendedHistory": true,
 	}
 	applyCodexReasoningEffort(startParams, opts.ThinkingLevel)
+	c.threadStartSent = true
+	c.threadStartStarted = time.Now()
+	logger.Info("codex lifecycle",
+		"phase", "thread_start_sent",
+		"task_id", c.cfg.TaskID,
+		"runtime_id", c.cfg.RuntimeID,
+		"pid", c.pid,
+		"attempt", c.attempt,
+		"active_launches", c.activeLaunches,
+		"method", "thread/start",
+	)
 	startResult, err := c.request(ctx, "thread/start", startParams)
 	if err != nil {
 		return "", false, fmt.Errorf("codex thread/start failed: %w", err)
 	}
+	logger.Info("codex lifecycle",
+		"phase", "thread_start_response",
+		"task_id", c.cfg.TaskID,
+		"runtime_id", c.cfg.RuntimeID,
+		"pid", c.pid,
+		"attempt", c.attempt,
+		"active_launches", c.activeLaunches,
+		"method", "thread/start",
+		"latency", time.Since(c.threadStartStarted).Round(time.Millisecond).String(),
+		"latency_ms", time.Since(c.threadStartStarted).Milliseconds(),
+	)
 	threadID := extractThreadID(startResult)
 	if threadID == "" {
 		return "", false, fmt.Errorf("codex thread/start returned no thread ID")
@@ -1650,6 +1726,11 @@ type codexClient struct {
 	processDone        chan struct{}
 	processErr         error
 	handshakeTimeout   time.Duration
+	pid                int
+	attempt            int
+	activeLaunches     int64
+	threadStartSent    bool
+	threadStartStarted time.Time
 	threadID           string
 	turnID             string
 	onMessage          func(Message)
