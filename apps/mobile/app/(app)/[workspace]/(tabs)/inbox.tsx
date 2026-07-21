@@ -1,10 +1,14 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import {
   ActionSheetIOS,
   Alert,
   FlatList,
+  InteractionManager,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -31,6 +35,9 @@ import { THEME } from "@/lib/theme";
 import { deduplicateInboxItems } from "@/lib/inbox-display";
 
 export default function Inbox() {
+  const listRef = useRef<FlatList<InboxItem>>(null);
+  const scrollOffsetRef = useRef(0);
+  const returnOffsetRef = useRef<number | null>(null);
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { colorScheme } = useColorScheme();
@@ -50,6 +57,28 @@ export default function Inbox() {
   const archiveAllRead = useArchiveAllReadInbox();
   const archiveCompleted = useArchiveCompletedInbox();
 
+  const rememberScrollOffset = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+    },
+    [],
+  );
+
+  // The tabs screen remains mounted while an issue detail is pushed. Restore
+  // the offset captured immediately before navigation after the native pop
+  // transition, so events while the list is covered cannot overwrite it.
+  useFocusEffect(
+    useCallback(() => {
+      if (returnOffsetRef.current == null) return;
+      const offset = returnOffsetRef.current;
+      const task = InteractionManager.runAfterInteractions(() => {
+        listRef.current?.scrollToOffset({ offset, animated: false });
+        returnOffsetRef.current = null;
+      });
+      return () => task.cancel();
+    }, []),
+  );
+
   const onPressItem = (item: InboxItem) => {
     if (!item.read) {
       // Optimistic read flip lives in useMarkInboxRead.onMutate — fires
@@ -59,6 +88,7 @@ export default function Inbox() {
       markRead.mutate(item.id);
     }
     if (item.issue_id && wsSlug) {
+      returnOffsetRef.current = scrollOffsetRef.current;
       router.push({
         pathname: "/[workspace]/issue/[id]",
         params: {
@@ -143,8 +173,11 @@ export default function Inbox() {
         <InboxEmpty iconColor={THEME[colorScheme].mutedForeground} />
       ) : (
         <FlatList
+          ref={listRef}
           data={data}
           keyExtractor={(item) => item.id}
+          onScroll={rememberScrollOffset}
+          scrollEventThrottle={16}
           ItemSeparatorComponent={() => (
             <View className="h-px bg-border ml-16" />
           )}
