@@ -165,7 +165,7 @@ export function RunConfirmModal({
   };
 
   // States the action, not a prediction: the assignment is certain, the run is
-  // conditional. No count here — the real one arrives in the result toast.
+  // conditional, so the copy names no run count.
   const headline: ReactNode = boldName(
     issueIds.length > 1
       ? t(($) => $.run_confirm.assign_batch, {
