@@ -3640,6 +3640,60 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	}
 }
 
+const (
+	maxClaudeInitialImages     = 4
+	maxClaudeInitialImageBytes = 10 * 1024 * 1024
+)
+
+func shouldSeedClaudeInitialImages(provider string, task Task) bool {
+	return provider == "claude" && task.PriorSessionID == ""
+}
+
+func (d *Daemon) claudeInitialImages(ctx context.Context, task Task, taskLog *slog.Logger) []agent.InputImage {
+	attachments := make([]AttachmentMeta, 0, len(task.IssueAttachments)+len(task.ChatMessageAttachments))
+	attachments = append(attachments, task.IssueAttachments...)
+	attachments = append(attachments, task.ChatMessageAttachments...)
+	if len(attachments) == 0 {
+		return nil
+	}
+
+	images := make([]agent.InputImage, 0, min(len(attachments), maxClaudeInitialImages))
+	for _, attachment := range attachments {
+		if len(images) >= maxClaudeInitialImages {
+			break
+		}
+		if attachment.ID == "" || !isClaudeInitialImageMediaType(attachment.ContentType) {
+			continue
+		}
+		_, data, err := d.client.DownloadAttachment(ctx, attachment.ID)
+		if err != nil {
+			taskLog.Warn("claude initial image download failed", "attachment_id", attachment.ID, "error", err)
+			continue
+		}
+		if len(data) == 0 || len(data) > maxClaudeInitialImageBytes {
+			taskLog.Warn("claude initial image skipped due to size", "attachment_id", attachment.ID, "bytes", len(data))
+			continue
+		}
+		mediaType := attachment.ContentType
+		filename := attachment.Filename
+		images = append(images, agent.InputImage{
+			Filename:  filename,
+			MediaType: mediaType,
+			Data:      data,
+		})
+	}
+	return images
+}
+
+func isClaudeInitialImageMediaType(mediaType string) bool {
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
+		return true
+	default:
+		return false
+	}
+}
+
 // gateResumeToReusedWorkdir clears the task's prior session unless the task
 // runs in the exact workdir the session was recorded against, and reports
 // whether that workdir was reused. CLI backends key their session stores to
@@ -4589,6 +4643,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		McpConfig:      mcpConfig,
 		ThinkingLevel:  thinkingLevel,
 		OpenclawMode:   openclawMode,
+	}
+	if shouldSeedClaudeInitialImages(provider, task) {
+		execOpts.InitialImages = d.claudeInitialImages(ctx, task, taskLog)
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:

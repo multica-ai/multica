@@ -322,11 +322,12 @@ type AgentTaskResponse struct {
 	TriggerAuthorName        string                 `json:"trigger_author_name,omitempty"`         // display name of the triggering comment author
 	NewCommentCount          int                    `json:"new_comment_count,omitempty"`           // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
 	NewCommentsSince         string                 `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
+	IssueAttachments         []AttachmentMeta       `json:"issue_attachments,omitempty"`           // attachments linked to the issue
 	ChatSessionID            string                 `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
 	ChatChannelType          string                 `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
 	ChatInThread             bool                   `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
 	ChatMessage              string                 `json:"chat_message,omitempty"`                // user message for chat tasks
-	ChatMessageAttachments   []ChatAttachmentMeta   `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
+	ChatMessageAttachments   []AttachmentMeta       `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
 	ChatIntro                bool                   `json:"chat_intro,omitempty"`                  // true for the agent's proactive self-introduction chat (is_agent_intro session, no user message); the daemon builds an intro prompt instead of a reply prompt
 	AutopilotRunID           string                 `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks
 	AutopilotID              string                 `json:"autopilot_id,omitempty"`                // autopilot that spawned this task
@@ -522,13 +523,13 @@ func attributionsOf(resps []AgentTaskResponse) []*TaskAttribution {
 	return out
 }
 
-// ChatAttachmentMeta is the structured attachment metadata embedded in
-// claim responses for chat tasks. The agent uses these to run
-// `multica attachment download <id>` rather than guessing from the
-// markdown URL (which is signed and 30-min expiring on private CDN).
+// AttachmentMeta is the structured attachment metadata embedded in
+// claim responses. The daemon uses these to embed image attachments directly
+// for Claude or to tell agents which IDs they can download through the CLI
+// rather than guessing from signed markdown URLs.
 // The mirror struct on the daemon side lives in internal/daemon/types.go
 // and uses the same JSON field names.
-type ChatAttachmentMeta struct {
+type AttachmentMeta struct {
 	ID          string `json:"id"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type,omitempty"`

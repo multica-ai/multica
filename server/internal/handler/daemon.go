@@ -1814,6 +1814,20 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					resp.Repos = repos
 				}
 			}
+
+			if atts, attErr := h.Queries.ListAttachmentsByIssue(r.Context(), db.ListAttachmentsByIssueParams{
+				IssueID:     issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+			}); attErr == nil && len(atts) > 0 {
+				resp.IssueAttachments = make([]AttachmentMeta, len(atts))
+				for j, a := range atts {
+					resp.IssueAttachments[j] = AttachmentMeta{
+						ID:          uuidToString(a.ID),
+						Filename:    a.Filename,
+						ContentType: a.ContentType,
+					}
+				}
+			}
 		}
 
 		// Load every planned input as one chronological, de-duplicated set.
@@ -2151,7 +2165,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					WorkspaceID:   parseUUID(resp.WorkspaceID),
 				}); attErr == nil && len(atts) > 0 {
 					for _, a := range atts {
-						resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
+						resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, AttachmentMeta{
 							ID:          uuidToString(a.ID),
 							Filename:    a.Filename,
 							ContentType: a.ContentType,
