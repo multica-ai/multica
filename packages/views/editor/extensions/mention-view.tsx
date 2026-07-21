@@ -3,7 +3,10 @@
 /**
  * MentionView — NodeView for rendering @mentions inline in the editor.
  *
- * Member/agent mentions: plain "@Name" text with .mention class styling.
+ * Member/agent/squad/@all mentions: ActorMentionChip (avatar pill) wrapped in
+ * a MentionHoverCard. The chip is focusable so keyboard users get the same
+ * identity popup on focus that mouse users get on hover (the Base UI preview
+ * card opens on trigger focus).
  * Issue mentions: IssueChip inside a custom <a> that supports cmd/shift-click
  * to open in a new tab (AppLink doesn't expose that intent hook).
  *
@@ -21,6 +24,11 @@ import { useIssueLinkStore } from "@multica/core/issues/stores";
 import { useNavigation } from "../../navigation";
 import { IssueChip } from "../../issues/components/issue-chip";
 import { ProjectChip } from "../../projects/components/project-chip";
+import {
+  ActorMentionChip,
+  isActorMentionType,
+} from "@multica/ui/components/common/actor-mention-chip";
+import { MentionHoverCard } from "../mention-hover-card";
 
 export function MentionView({ node }: NodeViewProps) {
   const { type, id, label } = node.attrs;
@@ -41,9 +49,25 @@ export function MentionView({ node }: NodeViewProps) {
     );
   }
 
+  const name = (label ?? id) as string;
+  const initials = name.charAt(0);
+
+  // Member/agent/squad/@all only — issue/project are handled above. Guard the
+  // untyped Tiptap attr rather than casting; an unknown type falls back to the
+  // legacy plain-text mention.
+  if (!isActorMentionType(type)) {
+    return (
+      <NodeViewWrapper as="span" className="inline">
+        <span className="mention">@{name}</span>
+      </NodeViewWrapper>
+    );
+  }
+
   return (
     <NodeViewWrapper as="span" className="inline">
-      <span className="mention">@{label ?? id}</span>
+      <MentionHoverCard type={type} id={id}>
+        <ActorMentionChip type={type} label={name} initials={initials} focusable />
+      </MentionHoverCard>
     </NodeViewWrapper>
   );
 }

@@ -387,7 +387,12 @@
   text-decoration: none;
 }
 
-/* Mentions */
+/* Mentions — LEGACY plain-text mention styling.
+   Actor mentions (member/agent/squad/@all) now render via ActorMentionChip
+   (avatar pill) in both the editor and readonly content. This rule only
+   applies to leftover plain-text mention spans (e.g. unrecognized mention
+   hrefs that fall through to the `.mention` fallback in ReadonlyLink). Remove
+   once all rendering paths are migrated and the fallback is gone. */
 .rich-text-editor .mention {
   color: var(--primary);
   font-weight: 600;

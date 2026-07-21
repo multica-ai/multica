@@ -803,3 +803,62 @@ describe("ReadonlyContent bare URL autolinking (MUL-4242)", () => {
     expect(anchor?.textContent).toBe("看");
   });
 });
+
+describe("ReadonlyContent actor mention chips", () => {
+  it("renders a member mention as a non-focusable avatar chip with a single @", () => {
+    const { container } = render(
+      <ReadonlyContent content="[@张三](mention://member/u1)" />,
+    );
+    const chip = container.querySelector(".actor-mention-chip");
+    expect(chip).not.toBeNull();
+    expect(chip!.className).toContain("bg-muted");
+    // The markdown label carries a leading "@"; the chip must not double it.
+    expect(chip!.textContent).toContain("@张三");
+    expect(chip!.textContent).not.toContain("@@");
+    // Readonly chips are non-focusable — no tab stop per mention (R14).
+    expect(chip!.getAttribute("tabindex")).toBeNull();
+  });
+
+  it("renders an agent mention with brand tint", () => {
+    const chip = render(
+      <ReadonlyContent content="[@ReviewerBot](mention://agent/a1)" />,
+    ).container.querySelector(".actor-mention-chip")!;
+    expect(chip.className).toContain("bg-brand/10");
+  });
+
+  it("renders a squad mention with info tint", () => {
+    const chip = render(
+      <ReadonlyContent content="[@设计组](mention://squad/s1)" />,
+    ).container.querySelector(".actor-mention-chip")!;
+    expect(chip.className).toContain("bg-info/10");
+  });
+
+  it("renders an @all mention with warning tint", () => {
+    const chip = render(
+      <ReadonlyContent content="[@all](mention://all/all)" />,
+    ).container.querySelector(".actor-mention-chip")!;
+    expect(chip.className).toContain("bg-warning/10");
+    expect(chip.getAttribute("aria-label")).toBe(
+      "Mention: all workspace members",
+    );
+  });
+
+  it("renders mixed mention types in one paragraph with distinct tints", () => {
+    const { container } = render(
+      <ReadonlyContent content="Assigned to [@张三](mention://member/u1), reviewed by [@ReviewerBot](mention://agent/a1), and notified [@设计组](mention://squad/s1)." />,
+    );
+    const chips = container.querySelectorAll(".actor-mention-chip");
+    expect(chips).toHaveLength(3);
+    expect(chips[0]!.className).toContain("bg-muted");
+    expect(chips[1]!.className).toContain("bg-brand/10");
+    expect(chips[2]!.className).toContain("bg-info/10");
+  });
+
+  it("does not regress issue mention rendering (IssueMentionCard, not an actor chip)", () => {
+    const { getByTestId, container } = render(
+      <ReadonlyContent content="[MUL-1](mention://issue/i1)" />,
+    );
+    expect(getByTestId("issue-mention-card").textContent).toBe("MUL-1");
+    expect(container.querySelector(".actor-mention-chip")).toBeNull();
+  });
+});

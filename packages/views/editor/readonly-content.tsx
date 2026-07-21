@@ -39,6 +39,11 @@ import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectChip } from "../projects/components/project-chip";
+import {
+  ActorMentionChip,
+  isActorMentionType,
+} from "@multica/ui/components/common/actor-mention-chip";
+import { MentionHoverCard } from "./mention-hover-card";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { isAllowedFileCardHref, isIssueIdentifier } from "@multica/ui/markdown";
@@ -258,7 +263,7 @@ function ReadonlyLink({
   }
 
   if (isMentionHref(href)) {
-    const match = href.match(/^mention:\/\/(member|agent|issue|project|all)\/(.+)$/);
+    const match = href.match(/^mention:\/\/(member|agent|squad|issue|project|all)\/(.+)$/);
     if (match?.[1] === "issue" && match[2]) {
       // A bare identifier (from the autolink preprocessor) is carried as the id
       // segment; a real mention carries a UUID. Dispatch on the id shape.
@@ -282,7 +287,28 @@ function ReadonlyLink({
             : undefined;
       return <ProjectMentionLink projectId={match[2]} label={label} />;
     }
-    // Member / agent / all mentions
+    // Member / agent / squad / @all mentions render as avatar chips.
+    // Readonly chips are non-focusable (no tab stop per mention) — R14 — so
+    // the chip's aria-label conveys identity to screen readers and mouse hover
+    // still opens the MentionHoverCard.
+    if (match?.[1] && match[2] && isActorMentionType(match[1])) {
+      const rawLabel =
+        typeof children === "string"
+          ? children
+          : Array.isArray(children)
+            ? children.join("")
+            : (match[2] ?? "");
+      // The mention markdown serializes the label WITH a leading "@" (e.g.
+      // "[@张三](mention://...)"); the chip adds its own "@" prefix, so strip
+      // one leading "@" to avoid rendering "@@张三".
+      const label = rawLabel.startsWith("@") ? rawLabel.slice(1) : rawLabel;
+      const initials = label.charAt(0);
+      return (
+        <MentionHoverCard type={match[1]} id={match[2]}>
+          <ActorMentionChip type={match[1]} label={label} initials={initials} />
+        </MentionHoverCard>
+      );
+    }
     return <span className="mention">{children}</span>;
   }
 
