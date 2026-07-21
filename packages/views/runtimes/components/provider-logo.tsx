@@ -286,7 +286,10 @@ function GrokLogo({ className }: { className: string }) {
 
 // Qwen Code — official SVG copied verbatim from QwenLM/qwen-code's desktop
 // brand assets (packages/desktop/apps/electron/resources/brands/qwen-code/icon.svg).
-const qwenLogoSrc = typeof qwenLogo === "string" ? qwenLogo : qwenLogo.src;
+const qwenLogoSrc: string = (() => {
+  const asset = qwenLogo as unknown;
+  return typeof asset === "string" ? asset : (asset as { src: string }).src;
+})();
 
 function QwenLogo({ className }: { className: string }) {
   return <img src={qwenLogoSrc} alt="" aria-hidden className={className} />;

@@ -26,9 +26,13 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   getCoreRowModel,
   useReactTable,
+  type CellContext,
   type ColumnDef,
   type ColumnSizingState,
+  type HeaderContext,
   type OnChangeFn,
+  type Table as TanstackTable,
+  type TableMeta,
 } from "@tanstack/react-table";
 import {
   ArrowDown,
@@ -39,6 +43,7 @@ import {
   EyeOff,
   GripVertical,
   Loader2,
+  Pencil,
   Plus,
   Search,
   X,
@@ -67,7 +72,6 @@ import {
   TABLE_SYSTEM_COLUMNS,
   propertyIdFromViewKey,
   type SortField,
-  type TableColumnConfig,
   type TableColumnKey,
   type TableSystemColumnKey,
 } from "@multica/core/issues/stores/view-store";
@@ -111,6 +115,7 @@ import {
   buildIssueTableRows,
   getIssueTableSelectionRange,
   isTableStructureSuspended,
+  refreshFrozenTableRows,
   shouldAutoLoadNextWindowPage,
   type IssueTableDisplayRow,
 } from "./table-view-model";
@@ -467,19 +472,37 @@ export function TableIssueSearch({
 
 export function InlineTitle({
   row,
+  editing,
+  onEditingChange,
   onUpdate,
+  onOpen,
   onToggleParent,
   toggleLabel,
+  renameLabel,
 }: {
   row: Extract<IssueTableDisplayRow, { kind: "issue" }>;
+  /** Rename state is owned by the table (one editor at a time) so it also
+   *  survives cell remounts and drives the structure freeze. */
+  editing: boolean;
+  onEditingChange: (editing: boolean) => void;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
+  /** Navigate to the issue — clicking the title is the primary way IN. */
+  onOpen: () => void;
   onToggleParent: () => void;
   toggleLabel: string;
+  renameLabel: string;
 }) {
-  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(row.issue.title);
   const editingRef = useRef(editing);
   editingRef.current = editing;
+  // True between the mousedown and the click of ONE gesture when that gesture
+  // began while the rename input was up. onBlur commits and flips `editing`
+  // off synchronously, before the click that caused the blur lands — so a
+  // guard keyed only on the current `editing` value is already gone by click
+  // time, and the commit-click bubbles into row navigation (and could hit the
+  // title's own open handler): clicking away to save a rename would also open
+  // the issue (MUL-5108 review R1#2).
+  const gestureStartedWhileEditingRef = useRef(false);
 
   useEffect(() => {
     // Realtime/cache snapshots should refresh the passive label, but must not
@@ -489,7 +512,7 @@ export function InlineTitle({
 
   const commit = () => {
     const title = draft.trim();
-    setEditing(false);
+    onEditingChange(false);
     if (title && title !== row.issue.title) onUpdate({ title });
     else setDraft(row.issue.title);
   };
@@ -498,14 +521,30 @@ export function InlineTitle({
     <div
       className="flex min-w-0 items-center gap-1.5"
       style={{ paddingLeft: row.depth * 18 }}
-      onClick={stopRowNavigation}
+      // Record whether the gesture began while editing (mousedown fires before
+      // the blur that commits), then swallow that click in the capture phase —
+      // before it can reach the row (navigation) or the title's open handler.
+      // A gesture that began while NOT editing passes through untouched, so
+      // clicking dead space still opens the issue.
+      onMouseDownCapture={() => {
+        gestureStartedWhileEditingRef.current = editingRef.current;
+      }}
+      onClickCapture={(event) => {
+        if (editing || gestureStartedWhileEditingRef.current) {
+          event.stopPropagation();
+        }
+        gestureStartedWhileEditingRef.current = false;
+      }}
     >
       {row.hasChildren ? (
         <button
           type="button"
           aria-label={toggleLabel}
           className="rounded p-0.5 text-muted-foreground hover:bg-accent"
-          onClick={onToggleParent}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleParent();
+          }}
         >
           {row.collapsed ? (
             <ChevronRight className="size-3.5" />
@@ -529,36 +568,60 @@ export function InlineTitle({
             if (event.key === "Enter") commit();
             if (event.key === "Escape") {
               setDraft(row.issue.title);
-              setEditing(false);
+              onEditingChange(false);
             }
           }}
           className="h-7 min-w-0 flex-1 px-2"
         />
       ) : (
-        <button
-          type="button"
-          className="min-w-0 flex-1 truncate text-left hover:underline"
-          onClick={() => setEditing(true)}
-        >
-          {row.issue.title}
-        </button>
+        <>
+          <button
+            type="button"
+            className="min-w-0 flex-1 truncate text-left hover:underline"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpen();
+            }}
+          >
+            {row.issue.title}
+          </button>
+          <button
+            type="button"
+            aria-label={renameLabel}
+            className="shrink-0 rounded p-1 text-muted-foreground/60 opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+            onClick={(event) => {
+              event.stopPropagation();
+              setDraft(row.issue.title);
+              onEditingChange(true);
+            }}
+          >
+            <Pencil className="size-3" />
+          </button>
+        </>
       )}
     </div>
   );
 }
 
-function LazyLabelCell({ issue }: { issue: Issue }) {
+function LazyLabelCell({
+  issue,
+  open,
+  onOpenChange,
+}: {
+  issue: Issue;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const { t } = useT("issues");
-  const [editing, setEditing] = useState(false);
   const labels = issue.labels ?? [];
-  if (editing) {
+  if (open) {
     return (
       <div onClick={stopRowNavigation}>
         <LabelPicker
           issueId={issue.id}
           open
-          onOpenChange={(open) => {
-            if (!open) setEditing(false);
+          onOpenChange={(next) => {
+            if (!next) onOpenChange(false);
           }}
           triggerRender={<button type="button" className="flex max-w-full gap-1" />}
         />
@@ -571,7 +634,7 @@ function LazyLabelCell({ issue }: { issue: Issue }) {
       className="flex max-w-full items-center gap-1 overflow-hidden rounded px-1 py-0.5 hover:bg-accent"
       onClick={(event) => {
         event.stopPropagation();
-        setEditing(true);
+        onOpenChange(true);
       }}
     >
       {labels.length > 0 ? (
@@ -645,6 +708,353 @@ function propertyDisplayValue(
   return String(value);
 }
 
+/**
+ * Render-time context for the module-level cell/header components below,
+ * carried on `table.options.meta`. The renderers MUST be module-level
+ * components with stable identities: TanStack's flexRender mounts a
+ * function-typed `cell`/`header` as a React component, so a renderer closure
+ * rebuilt when any lookup changed identity (childProgressMap on every
+ * realtime refetch, propertyById, actor names…) was a NEW element type and
+ * React remounted every cell — closing any open picker popup and dropping
+ * in-progress drafts the moment workspace activity refreshed the window
+ * (MUL-5108). Data flows through meta instead so the element types never
+ * change.
+ */
+type TableViewMeta = {
+  childProgressMap: Map<string, ChildProgress>;
+  propertyById: Map<string, IssueProperty>;
+  properties: IssueProperty[];
+  visibleIssueIds: string[];
+  /** `${row.key}:${column.id}` of the cell whose editor popup / rename input
+   *  is open, or null. Owned by TableView so the open editor survives cell
+   *  remounts and freezes the table structure while it is up. */
+  editingCellKey: string | null;
+  setEditingCellKey: (key: string | null) => void;
+  updateIssue: (issueId: string, updates: Partial<UpdateIssueRequest>) => void;
+  openIssue: (issueId: string) => void;
+  toggleTableParentCollapsed: (issueId: string) => void;
+  handleIssueSelection: (issueId: string, shiftKey: boolean) => void;
+  getActorName: (actorType: string, actorId: string) => string;
+  columnLabel: (key: TableColumnKey) => string;
+  sortBy: SortField;
+  sortDirection: "asc" | "desc";
+  onSort: (field: SortField, direction: "asc" | "desc") => void;
+  toggleTableColumn: (key: TableColumnKey) => void;
+};
+
+function getTableViewMeta(
+  table: TanstackTable<IssueTableDisplayRow>,
+): TableViewMeta {
+  return table.options.meta as unknown as TableViewMeta;
+}
+
+/**
+ * Release the hoisted editing key when the cell that owns it unmounts.
+ *
+ * Row virtualization (see data-table.tsx) unmounts a cell as its row scrolls
+ * out of the rendered window. Base UI does NOT call onOpenChange(false) on
+ * unmount, so without this the open picker's key — and the frozen row
+ * structure keyed off it — would persist after the anchor row leaves the
+ * viewport: the table would stay frozen, and scrolling the row back would
+ * silently reopen the picker and discard any in-progress rename draft
+ * (MUL-5108 review R1#3). Clearing the key iff this unmounting cell still owns
+ * it thaws the structure and closes the editor.
+ *
+ * Live values are read through refs so the empty-dep cleanup always sees the
+ * current key/setter. At initial mount a cell is never yet the active editor
+ * (the editor is opened by a later interaction, which does not remount the
+ * cell), so this never fires spuriously — including under StrictMode's
+ * mount → unmount → mount probe, whose first cleanup sees `editingCellKey`
+ * still unequal to this cell's key.
+ */
+export function useReleaseEditingCellOnUnmount(
+  cellKey: string | null,
+  editingCellKey: string | null,
+  setEditingCellKey: (key: string | null) => void,
+) {
+  const editingCellKeyRef = useRef(editingCellKey);
+  editingCellKeyRef.current = editingCellKey;
+  const setEditingCellKeyRef = useRef(setEditingCellKey);
+  setEditingCellKeyRef.current = setEditingCellKey;
+  useEffect(() => {
+    return () => {
+      if (cellKey !== null && editingCellKeyRef.current === cellKey) {
+        setEditingCellKeyRef.current(null);
+      }
+    };
+  }, [cellKey]);
+}
+
+function IssueTableSelectHeader({
+  table,
+}: HeaderContext<IssueTableDisplayRow, unknown>) {
+  const meta = getTableViewMeta(table);
+  const { t } = useT("issues");
+  return (
+    <SelectAllCheckbox
+      issueIds={meta.visibleIssueIds}
+      label={t(($) => $.table.select_all)}
+    />
+  );
+}
+
+function IssueTableSelectCell({
+  row,
+  table,
+}: CellContext<IssueTableDisplayRow, unknown>) {
+  const meta = getTableViewMeta(table);
+  const selection = useIssueSurfaceSelection();
+  const { t } = useT("issues");
+  if (row.original.kind !== "issue") return null;
+  const issue = row.original.issue;
+  return (
+    <IssueCheckbox
+      checked={selection.selectedIds.has(issue.id)}
+      label={t(($) => $.table.select_issue, { identifier: issue.identifier })}
+      onToggle={(shiftKey) => meta.handleIssueSelection(issue.id, shiftKey)}
+    />
+  );
+}
+
+function IssueTableAddColumnHeader({
+  table,
+}: HeaderContext<IssueTableDisplayRow, unknown>) {
+  const meta = getTableViewMeta(table);
+  const { t } = useT("issues");
+  return (
+    <TableColumnPicker
+      properties={meta.properties}
+      trigger={
+        <button
+          type="button"
+          aria-label={t(($) => $.table.columns.add)}
+          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <Plus className="size-3.5" />
+        </button>
+      }
+    />
+  );
+}
+
+function IssueTableEmptyCell() {
+  return null;
+}
+
+function IssueTableHeaderCell({
+  column,
+  table,
+}: HeaderContext<IssueTableDisplayRow, unknown>) {
+  const meta = getTableViewMeta(table);
+  const { t } = useT("issues");
+  const key = column.id as TableColumnKey;
+  const propertyId = propertyIdFromViewKey(key);
+  const property = propertyId ? meta.propertyById.get(propertyId) : undefined;
+  const staticSort = propertyId
+    ? property && !["multi_select", "checkbox"].includes(property.type)
+      ? (`property:${propertyId}` as SortField)
+      : undefined
+    : SORTABLE_COLUMNS[key as TableSystemColumnKey];
+  const label = meta.columnLabel(key);
+  return (
+    <SortableColumnHeader
+      columnKey={key}
+      label={label}
+      sortField={staticSort}
+      sortBy={meta.sortBy}
+      sortDirection={meta.sortDirection}
+      onSort={meta.onSort}
+      onHide={key === "title" ? undefined : () => meta.toggleTableColumn(key)}
+      ascendingLabel={t(($) => $.table.sort_ascending)}
+      descendingLabel={t(($) => $.table.sort_descending)}
+      hideLabel={t(($) => $.table.columns.hide)}
+      reorderLabel={t(($) => $.table.columns.reorder, { column: label })}
+    />
+  );
+}
+
+function IssueTableBodyCell({
+  row,
+  column,
+  table,
+}: CellContext<IssueTableDisplayRow, unknown>) {
+  const meta = getTableViewMeta(table);
+  const { t, i18n } = useT("issues");
+  // Computed (and the unmount responder registered) before the early return so
+  // the hook order is stable across issue/group rows.
+  const cellKey =
+    row.original.kind === "issue" ? `${row.original.key}:${column.id}` : null;
+  useReleaseEditingCellOnUnmount(
+    cellKey,
+    meta.editingCellKey,
+    meta.setEditingCellKey,
+  );
+  if (row.original.kind !== "issue") return null;
+  const issueRow = row.original;
+  const issue = issueRow.issue;
+  const key = column.id as TableColumnKey;
+  const editorOpen = meta.editingCellKey === cellKey;
+  const setEditorOpen = (open: boolean) =>
+    meta.setEditingCellKey(open ? cellKey : null);
+  const onUpdate = (updates: Partial<UpdateIssueRequest>) =>
+    meta.updateIssue(issue.id, updates);
+
+  const propertyId = propertyIdFromViewKey(key);
+  if (propertyId) {
+    const property = meta.propertyById.get(propertyId);
+    if (!property) return null;
+    return (
+      <div onClick={stopRowNavigation}>
+        <CustomPropertyValueEditor
+          issue={issue}
+          property={property}
+          open={editorOpen}
+          onOpenChange={setEditorOpen}
+        />
+      </div>
+    );
+  }
+  switch (key) {
+    case "title":
+      return (
+        <InlineTitle
+          row={issueRow}
+          editing={editorOpen}
+          onEditingChange={setEditorOpen}
+          onUpdate={onUpdate}
+          onOpen={() => meta.openIssue(issue.id)}
+          onToggleParent={() => meta.toggleTableParentCollapsed(issue.id)}
+          toggleLabel={t(($) => $.table.toggle_sub_issues)}
+          renameLabel={t(($) => $.table.rename_title)}
+        />
+      );
+    case "identifier":
+      return (
+        <span className="text-xs text-muted-foreground">{issue.identifier}</span>
+      );
+    case "status":
+      return (
+        <div onClick={stopRowNavigation}>
+          <StatusPicker
+            status={issue.status}
+            onUpdate={onUpdate}
+            align="start"
+            open={editorOpen}
+            onOpenChange={setEditorOpen}
+          />
+        </div>
+      );
+    case "priority":
+      return (
+        <div onClick={stopRowNavigation}>
+          <PriorityPicker
+            priority={issue.priority}
+            onUpdate={onUpdate}
+            align="start"
+            open={editorOpen}
+            onOpenChange={setEditorOpen}
+          />
+        </div>
+      );
+    case "assignee":
+      return (
+        <div onClick={stopRowNavigation}>
+          <AssigneePicker
+            assigneeType={issue.assignee_type}
+            assigneeId={issue.assignee_id}
+            onUpdate={onUpdate}
+            align="start"
+            open={editorOpen}
+            onOpenChange={setEditorOpen}
+          />
+        </div>
+      );
+    case "labels":
+      return (
+        <LazyLabelCell
+          issue={issue}
+          open={editorOpen}
+          onOpenChange={setEditorOpen}
+        />
+      );
+    case "project":
+      return (
+        <div onClick={stopRowNavigation}>
+          <ProjectPicker
+            projectId={issue.project_id}
+            onUpdate={onUpdate}
+            open={editorOpen}
+            onOpenChange={setEditorOpen}
+            triggerRender={
+              <button
+                type="button"
+                className="flex max-w-full items-center gap-1.5 rounded px-1 py-0.5 hover:bg-accent"
+              />
+            }
+          />
+        </div>
+      );
+    case "start_date":
+      return (
+        <div onClick={stopRowNavigation}>
+          <StartDatePicker
+            startDate={issue.start_date}
+            onUpdate={onUpdate}
+            open={editorOpen}
+            onOpenChange={setEditorOpen}
+          />
+        </div>
+      );
+    case "due_date":
+      return (
+        <div onClick={stopRowNavigation}>
+          <DueDatePicker
+            dueDate={issue.due_date}
+            onUpdate={onUpdate}
+            open={editorOpen}
+            onOpenChange={setEditorOpen}
+          />
+        </div>
+      );
+    case "created_at":
+    case "updated_at":
+      return (
+        <span className="text-xs text-muted-foreground">
+          {new Intl.DateTimeFormat(i18n.language, {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          }).format(new Date(issue[key]))}
+        </span>
+      );
+    case "child_progress": {
+      const progress = meta.childProgressMap.get(issue.id);
+      return progress ? (
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          <ProgressRing done={progress.done} total={progress.total} size={15} />
+          {progress.done}/{progress.total}
+        </span>
+      ) : (
+        <span className="text-muted-foreground">{t(($) => $.table.empty_value)}</span>
+      );
+    }
+    case "creator":
+      return (
+        <span className="flex min-w-0 items-center gap-1.5">
+          <ActorAvatar
+            actorType={issue.creator_type}
+            actorId={issue.creator_id}
+            size="sm"
+          />
+          <span className="truncate">
+            {meta.getActorName(issue.creator_type, issue.creator_id)}
+          </span>
+        </span>
+      );
+  }
+  return null;
+}
+
 export function TableView({
   issues,
   childProgressMap,
@@ -658,7 +1068,7 @@ export function TableView({
   exportIssues,
   resolveExportLookups,
 }: TableViewProps) {
-  const { t, i18n } = useT("issues");
+  const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const queryClient = useQueryClient();
   const navigation = useNavigation();
@@ -695,6 +1105,9 @@ export function TableView({
   const setSortDirection = useViewStore((state) => state.setSortDirection);
   const [exporting, setExporting] = useState<"all" | "selected" | null>(null);
   const selectionAnchorRef = useRef<string | null>(null);
+  // The one cell whose editor (picker popup / rename input) is open — see
+  // TableViewMeta.editingCellKey.
+  const [editingCellKey, setEditingCellKey] = useState<string | null>(null);
 
   const groupingPropertyId = propertyIdFromViewKey(tableGrouping);
   const effectiveTableGrouping =
@@ -752,7 +1165,7 @@ export function TableView({
     [activePropertyIds, tableColumns],
   );
 
-  const displayRows = useMemo(
+  const liveDisplayRows = useMemo(
     () =>
       buildIssueTableRows(issues, {
         grouping: structureGrouping,
@@ -779,6 +1192,33 @@ export function TableView({
       structureGrouping,
       structureHierarchy,
     ],
+  );
+
+  // While a cell editor popup / rename input is open, hold the row structure
+  // still: window materialization, the end-of-load hierarchy assembly, and
+  // realtime refetches all rebuild the row list, and a reorder can move the
+  // anchor row out of the virtualized render window — unmounting the cell and
+  // closing the popup the user just opened (MUL-5108). The snapshot freezes
+  // ORDER only; issue objects inside the rows keep tracking the live cache so
+  // the open editor reflects optimistic updates. Live structure snaps back
+  // the moment the editor closes. Ref writes happen during render on purpose:
+  // the snapshot must be captured from the same render that flips `editing`
+  // on, and both branches are idempotent under StrictMode double-render.
+  const frozenRowsRef = useRef<IssueTableDisplayRow[] | null>(null);
+  if (editingCellKey === null) frozenRowsRef.current = null;
+  else if (frozenRowsRef.current === null)
+    frozenRowsRef.current = liveDisplayRows;
+  const frozenRows = frozenRowsRef.current;
+  const issueById = useMemo(
+    () => new Map(issues.map((issue) => [issue.id, issue])),
+    [issues],
+  );
+  const displayRows = useMemo(
+    () =>
+      frozenRows && frozenRows !== liveDisplayRows
+        ? refreshFrozenTableRows(frozenRows, issueById)
+        : liveDisplayRows,
+    [frozenRows, issueById, liveDisplayRows],
   );
   const visibleIssueIds = useMemo(
     () =>
@@ -832,177 +1272,40 @@ export function TableView({
     [actions],
   );
 
-  const makeColumn = useCallback(
-    (config: TableColumnConfig): ColumnDef<IssueTableDisplayRow> => {
-      const propertyId = propertyIdFromViewKey(config.key);
-      const property = propertyId ? propertyById.get(propertyId) : undefined;
-      const staticSort = propertyId
-        ? property && !["multi_select", "checkbox"].includes(property.type)
-          ? (`property:${propertyId}` as SortField)
-          : undefined
-        : SORTABLE_COLUMNS[config.key as TableSystemColumnKey];
-      const definition: ColumnDef<IssueTableDisplayRow> = {
-        id: config.key,
-        minSize: config.key === "title" ? 260 : 96,
-        maxSize: 640,
-        enableResizing: true,
-        header: () => (
-          <SortableColumnHeader
-            columnKey={config.key}
-            label={columnLabel(config.key)}
-            sortField={staticSort}
-            sortBy={sortBy}
-            sortDirection={sortDirection}
-            onSort={(field, direction) => {
-              setSortBy(field);
-              setSortDirection(direction);
-            }}
-            onHide={
-              config.key === "title"
-                ? undefined
-                : () => toggleTableColumn(config.key)
-            }
-            ascendingLabel={t(($) => $.table.sort_ascending)}
-            descendingLabel={t(($) => $.table.sort_descending)}
-            hideLabel={t(($) => $.table.columns.hide)}
-            reorderLabel={t(($) => $.table.columns.reorder, {
-              column: columnLabel(config.key),
-            })}
-          />
-        ),
-        cell: ({ row }) => {
-          if (row.original.kind !== "issue") return null;
-          const issueRow = row.original;
-          const issue = issueRow.issue;
-          const onUpdate = (updates: Partial<UpdateIssueRequest>) =>
-            updateIssue(issue.id, updates);
-
-          if (property) {
-            return (
-              <div onClick={stopRowNavigation}>
-                <CustomPropertyValueEditor issue={issue} property={property} />
-              </div>
-            );
-          }
-          switch (config.key) {
-            case "title":
-              return (
-                <InlineTitle
-                  row={issueRow}
-                  onUpdate={onUpdate}
-                  onToggleParent={() =>
-                    toggleTableParentCollapsed(issue.id)
-                  }
-                  toggleLabel={t(($) => $.table.toggle_sub_issues)}
-                />
-              );
-            case "identifier":
-              return <span className="text-xs text-muted-foreground">{issue.identifier}</span>;
-            case "status":
-              return (
-                <div onClick={stopRowNavigation}>
-                  <StatusPicker status={issue.status} onUpdate={onUpdate} align="start" />
-                </div>
-              );
-            case "priority":
-              return (
-                <div onClick={stopRowNavigation}>
-                  <PriorityPicker priority={issue.priority} onUpdate={onUpdate} align="start" />
-                </div>
-              );
-            case "assignee":
-              return (
-                <div onClick={stopRowNavigation}>
-                  <AssigneePicker
-                    assigneeType={issue.assignee_type}
-                    assigneeId={issue.assignee_id}
-                    onUpdate={onUpdate}
-                    align="start"
-                  />
-                </div>
-              );
-            case "labels":
-              return <LazyLabelCell issue={issue} />;
-            case "project":
-              return (
-                <div onClick={stopRowNavigation}>
-                  <ProjectPicker
-                    projectId={issue.project_id}
-                    onUpdate={onUpdate}
-                    triggerRender={<button type="button" className="flex max-w-full items-center gap-1.5 rounded px-1 py-0.5 hover:bg-accent" />}
-                  />
-                </div>
-              );
-            case "start_date":
-              return (
-                <div onClick={stopRowNavigation}>
-                  <StartDatePicker startDate={issue.start_date} onUpdate={onUpdate} />
-                </div>
-              );
-            case "due_date":
-              return (
-                <div onClick={stopRowNavigation}>
-                  <DueDatePicker dueDate={issue.due_date} onUpdate={onUpdate} />
-                </div>
-              );
-            case "created_at":
-            case "updated_at":
-              return (
-                <span className="text-xs text-muted-foreground">
-                  {new Intl.DateTimeFormat(i18n.language, {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  }).format(new Date(issue[config.key]))}
-                </span>
-              );
-            case "child_progress": {
-              const progress = childProgressMap.get(issue.id);
-              return progress ? (
-                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <ProgressRing done={progress.done} total={progress.total} size={15} />
-                  {progress.done}/{progress.total}
-                </span>
-              ) : (
-                <span className="text-muted-foreground">{t(($) => $.table.empty_value)}</span>
-              );
-            }
-            case "creator":
-              return (
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <ActorAvatar
-                    actorType={issue.creator_type}
-                    actorId={issue.creator_id}
-                    size="sm"
-                  />
-                  <span className="truncate">
-                    {getActorName(issue.creator_type, issue.creator_id)}
-                  </span>
-                </span>
-              );
-          }
-          return null;
-        },
-      };
-      if (config.width !== undefined) definition.size = config.width;
-      return definition;
-    },
-    [
-      childProgressMap,
-      columnLabel,
-      getActorName,
-      i18n.language,
-      propertyById,
-      setSortBy,
-      setSortDirection,
-      sortBy,
-      sortDirection,
-      t,
-      toggleTableColumn,
-      toggleTableParentCollapsed,
-      updateIssue,
-    ],
+  const openIssue = useCallback(
+    (issueId: string) => navigation.push(paths.issueDetail(issueId)),
+    [navigation, paths],
   );
+
+  const onSort = useCallback(
+    (field: SortField, direction: "asc" | "desc") => {
+      setSortBy(field);
+      setSortDirection(direction);
+    },
+    [setSortBy, setSortDirection],
+  );
+
+  // Fresh object every render is fine — cells read it through
+  // table.options.meta at render time. What must NOT change per render are
+  // the column defs' component identities below.
+  const viewMeta: TableViewMeta = {
+    childProgressMap,
+    propertyById,
+    properties,
+    visibleIssueIds,
+    editingCellKey,
+    setEditingCellKey,
+    updateIssue,
+    openIssue,
+    toggleTableParentCollapsed,
+    handleIssueSelection,
+    getActorName,
+    columnLabel,
+    sortBy,
+    sortDirection,
+    onSort,
+    toggleTableColumn,
+  };
 
   const columns = useMemo<ColumnDef<IssueTableDisplayRow>[]>(
     () => [
@@ -1012,59 +1315,32 @@ export function TableView({
         minSize: 44,
         maxSize: 44,
         enableResizing: false,
-        header: () => (
-          <SelectAllCheckbox
-            issueIds={visibleIssueIds}
-            label={t(($) => $.table.select_all)}
-          />
-        ),
-        cell: ({ row }) => {
-          if (row.original.kind !== "issue") return null;
-          const issue = row.original.issue;
-          return (
-            <IssueCheckbox
-              checked={selection.selectedIds.has(issue.id)}
-              label={t(($) => $.table.select_issue, {
-                identifier: issue.identifier,
-              })}
-              onToggle={(shiftKey) => handleIssueSelection(issue.id, shiftKey)}
-            />
-          );
-        },
+        header: IssueTableSelectHeader,
+        cell: IssueTableSelectCell,
       },
-      ...visibleColumnConfigs.map(makeColumn),
+      ...visibleColumnConfigs.map((config): ColumnDef<IssueTableDisplayRow> => {
+        const definition: ColumnDef<IssueTableDisplayRow> = {
+          id: config.key,
+          minSize: config.key === "title" ? 260 : 96,
+          maxSize: 640,
+          enableResizing: true,
+          header: IssueTableHeaderCell,
+          cell: IssueTableBodyCell,
+        };
+        if (config.width !== undefined) definition.size = config.width;
+        return definition;
+      }),
       {
         id: ADD_COLUMN_ID,
         size: 48,
         minSize: 48,
         maxSize: 48,
         enableResizing: false,
-        header: () => (
-          <TableColumnPicker
-            properties={properties}
-            trigger={
-              <button
-                type="button"
-                aria-label={t(($) => $.table.columns.add)}
-                className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <Plus className="size-3.5" />
-              </button>
-            }
-          />
-        ),
-        cell: () => null,
+        header: IssueTableAddColumnHeader,
+        cell: IssueTableEmptyCell,
       },
     ],
-    [
-      handleIssueSelection,
-      makeColumn,
-      properties,
-      selection.selectedIds,
-      t,
-      visibleColumnConfigs,
-      visibleIssueIds,
-    ],
+    [visibleColumnConfigs],
   );
 
   const columnSizing = useMemo<ColumnSizingState>(
@@ -1096,6 +1372,7 @@ export function TableView({
       columnSizing,
       columnPinning: { left: [SELECT_COLUMN_ID, "title"], right: [] },
     },
+    meta: viewMeta as TableMeta<IssueTableDisplayRow>,
     onColumnSizingChange: handleColumnSizingChange,
     columnResizeMode: "onChange",
   });
@@ -1332,7 +1609,7 @@ export function TableView({
             emptyMessage={t(($) => $.table.empty)}
             onRowClick={(row) => {
               if (row.original.kind === "issue") {
-                navigation.push(paths.issueDetail(row.original.issue.id));
+                openIssue(row.original.issue.id);
               }
             }}
             renderRow={(row) => {
