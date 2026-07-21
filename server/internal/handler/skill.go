@@ -593,8 +593,8 @@ func validImportOnConflict(strategy string) bool {
 
 // Per-import bundle limits. These mirror the local-runtime importer so that
 // URL imports cannot smuggle in payloads that the rest of the stack would
-// reject. fetchRawFile enforces the per-file cap; importedSkill.addFile
-// enforces the bundle-wide caps.
+// reject. fetchRawFile enforces the per-file cap for text-like files;
+// importedSkill.addFile enforces the bundle-wide caps.
 const (
 	maxImportFileSize  = 1 << 20 // 1 MiB per file
 	maxImportTotalSize = 8 << 20 // 8 MiB per import bundle (sum of supporting files)
@@ -630,13 +630,12 @@ func isCapError(err error) bool {
 // returns an error when either the file count or aggregate byte budget would
 // be exceeded so the caller fails the import instead of silently truncating.
 //
-// Binary files (images, fonts, archives) are silently skipped: their bytes
-// can't survive a PG TEXT column (SQLSTATE 22021), and they're reference
-// assets the agent never reads as text anyway. Logging the skip leaves a
-// breadcrumb if a user expected one of these to import.
+// Binary files (images, fonts, archives) are skipped: their bytes can't survive
+// a PG TEXT column (SQLSTATE 22021), and they're reference assets the agent
+// never reads as text anyway. URL importers also call skipBinaryImportFile
+// before downloading so oversized binary assets do not trip the text-file cap.
 func (s *importedSkill) addFile(path, content string) error {
-	if isLikelyBinaryFilePath(path) {
-		slog.Info("skill import: skipping binary file", "path", path, "size", len(content))
+	if skipBinaryImportFile(path, len(content)) {
 		return nil
 	}
 	if len(s.files) >= maxImportFileCount {
@@ -648,6 +647,18 @@ func (s *importedSkill) addFile(path, content string) error {
 	s.bundleSize += len(content)
 	s.files = append(s.files, importedFile{path: path, content: content})
 	return nil
+}
+
+func skipBinaryImportFile(path string, size int) bool {
+	if !isLikelyBinaryFilePath(path) {
+		return false
+	}
+	attrs := []any{"path", path}
+	if size >= 0 {
+		attrs = append(attrs, "size", size)
+	}
+	slog.Info("skill import: skipping binary file", attrs...)
+	return true
 }
 
 // isLikelyBinaryFilePath reports whether the file's extension indicates a
@@ -987,11 +998,14 @@ func fetchFromClawHub(httpClient *http.Client, rawURL string) (*importedSkill, e
 		if latestVersion != "" {
 			fileURL += "&version=" + url.QueryEscape(latestVersion)
 		}
+		if fp != "SKILL.md" && skipBinaryImportFile(fp, -1) {
+			continue
+		}
 		body, err := fetchRawFile(httpClient, fileURL)
 		if err != nil {
-			// Cap violations must abort: silently dropping a file would
-			// produce an incomplete bundle that looks valid. SKILL.md is
-			// load-bearing, so any failure on it is fatal too.
+			// Cap violations on text-like files must abort: silently dropping
+			// them would produce an incomplete bundle that looks valid. SKILL.md
+			// is load-bearing, so any failure on it is fatal too.
 			if isCapError(err) || fp == "SKILL.md" {
 				return nil, fmt.Errorf("clawhub import: %s: %w", fp, err)
 			}
@@ -1136,6 +1150,10 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 		if entry.DownloadURL == "" {
 			continue
 		}
+		relPath := strings.TrimPrefix(entry.Path, basePath)
+		if skipBinaryImportFile(relPath, -1) {
+			continue
+		}
 		body, err := fetchRawFile(httpClient, entry.DownloadURL)
 		if err != nil {
 			if isCapError(err) {
@@ -1144,8 +1162,6 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 			slog.Warn("github import: file download failed", "path", entry.Path, "error", err)
 			continue
 		}
-		// Convert absolute GitHub path to relative path within skill
-		relPath := strings.TrimPrefix(entry.Path, basePath)
 		if err := result.addFile(relPath, string(body)); err != nil {
 			return nil, err
 		}
@@ -1698,6 +1714,10 @@ func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, er
 		if entry.DownloadURL == "" {
 			continue
 		}
+		relPath := strings.TrimPrefix(entry.Path, basePath)
+		if skipBinaryImportFile(relPath, -1) {
+			continue
+		}
 		body, err := fetchRawFile(httpClient, entry.DownloadURL)
 		if err != nil {
 			if isCapError(err) {
@@ -1706,7 +1726,6 @@ func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, er
 			slog.Warn("github import: file download failed", "path", entry.Path, "error", err)
 			continue
 		}
-		relPath := strings.TrimPrefix(entry.Path, basePath)
 		if err := result.addFile(relPath, string(body)); err != nil {
 			return nil, err
 		}
@@ -1744,7 +1763,7 @@ func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
 		return nil, err
 	}
 	if len(body) > maxImportFileSize {
-		return nil, fmt.Errorf("%w: file exceeds %d byte limit", errImportCapExceeded, maxImportFileSize)
+		return nil, fmt.Errorf("%w: file exceeds 1 MiB per-file import limit (%d bytes)", errImportCapExceeded, maxImportFileSize)
 	}
 	return body, nil
 }

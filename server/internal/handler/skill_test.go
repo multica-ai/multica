@@ -899,8 +899,8 @@ func TestFetchRawFile_ReturnsErrorOnOversizedFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for oversized file, got nil")
 	}
-	if !strings.Contains(err.Error(), "byte limit") {
-		t.Fatalf("error = %q, want byte limit message", err.Error())
+	if !strings.Contains(err.Error(), "per-file import limit") {
+		t.Fatalf("error = %q, want per-file import limit message", err.Error())
 	}
 	if !isCapError(err) {
 		t.Fatalf("error %q must be classified as a cap error so callers fail-fast", err.Error())
@@ -979,7 +979,7 @@ func TestFetchFromGitHub_OversizedSupportingFileFailsImport(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected oversized supporting file to fail the whole import")
 	}
-	if !strings.Contains(err.Error(), "huge.bin") || !strings.Contains(err.Error(), "byte limit") {
+	if !strings.Contains(err.Error(), "huge.bin") || !strings.Contains(err.Error(), "per-file import limit") {
 		t.Fatalf("error %q should name the file and the cap", err.Error())
 	}
 }
@@ -1024,6 +1024,116 @@ func TestFetchFromSkillsSh_OversizedSupportingFileFailsImport(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "huge.bin") {
 		t.Fatalf("error %q should name the offending file", err.Error())
+	}
+}
+
+func TestFetchFromGitHub_SkipsOversizedBinaryAsset(t *testing.T) {
+	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills/commits/main":
+				w.Write([]byte("deadbeef"))
+			case "/repos/acme/skills/contents/foo":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "theme-style-grid.png",
+						Path:        "foo/assets/skill/theme-style-grid.png",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/foo/assets/skill/theme-style-grid.png",
+					},
+					{
+						Name:        "notes.md",
+						Path:        "foo/references/notes.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/foo/references/notes.md",
+					},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/skills/main/foo/SKILL.md":
+				w.Write([]byte("---\nname: foo\n---\nbody"))
+			case "/acme/skills/main/foo/references/notes.md":
+				w.Write([]byte("notes"))
+			case "/acme/skills/main/foo/assets/skill/theme-style-grid.png":
+				t.Fatalf("binary asset should be skipped before raw download")
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromGitHub(client, "https://github.com/acme/skills/tree/main/foo")
+	if err != nil {
+		t.Fatalf("fetchFromGitHub: %v", err)
+	}
+	if got := importedFilePaths(result.files); !equalStrings(got, []string{"references/notes.md"}) {
+		t.Fatalf("files = %v, want only text support file", got)
+	}
+	for _, request := range *requests {
+		if strings.Contains(request, "theme-style-grid.png") && strings.HasPrefix(request, "raw.githubusercontent.com ") {
+			t.Fatalf("binary asset should not be fetched: %v", *requests)
+		}
+	}
+}
+
+func TestFetchFromSkillsSh_SkipsOversizedBinaryAsset(t *testing.T) {
+	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/contents/skills/foo":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "theme-style-grid.png",
+						Path:        "skills/foo/assets/skill/theme-style-grid.png",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/skills/foo/assets/skill/theme-style-grid.png",
+					},
+					{
+						Name:        "notes.md",
+						Path:        "skills/foo/references/notes.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/skills/foo/references/notes.md",
+					},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/skills/main/skills/foo/SKILL.md":
+				w.Write([]byte("---\nname: foo\n---\nbody"))
+			case "/acme/skills/main/skills/foo/references/notes.md":
+				w.Write([]byte("notes"))
+			case "/acme/skills/main/skills/foo/assets/skill/theme-style-grid.png":
+				t.Fatalf("binary asset should be skipped before raw download")
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromSkillsSh(client, "https://skills.sh/acme/skills/foo")
+	if err != nil {
+		t.Fatalf("fetchFromSkillsSh: %v", err)
+	}
+	if got := importedFilePaths(result.files); !equalStrings(got, []string{"references/notes.md"}) {
+		t.Fatalf("files = %v, want only text support file", got)
+	}
+	for _, request := range *requests {
+		if strings.Contains(request, "theme-style-grid.png") && strings.HasPrefix(request, "raw.githubusercontent.com ") {
+			t.Fatalf("binary asset should not be fetched: %v", *requests)
+		}
 	}
 }
 
