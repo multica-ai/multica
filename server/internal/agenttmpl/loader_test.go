@@ -33,6 +33,10 @@ func TestReleaseNotesTemplate_ReviewAndPublishGuardrails(t *testing.T) {
 	required := []string{
 		"actual previous announcement",
 		"same audience and channel",
+		"fixed Feishu Wiki parent",
+		"Never leave the release document in personal Drive space",
+		"For every headline feature, give a detailed explanation",
+		"Every headline feature with an applicable UI must have at least one screenshot",
 		"exact recipient or target group",
 		"message format",
 		"sending identity and profile",
