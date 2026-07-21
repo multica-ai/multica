@@ -495,6 +495,14 @@ export function InlineTitle({
   const [draft, setDraft] = useState(row.issue.title);
   const editingRef = useRef(editing);
   editingRef.current = editing;
+  // True between the mousedown and the click of ONE gesture when that gesture
+  // began while the rename input was up. onBlur commits and flips `editing`
+  // off synchronously, before the click that caused the blur lands — so a
+  // guard keyed only on the current `editing` value is already gone by click
+  // time, and the commit-click bubbles into row navigation (and could hit the
+  // title's own open handler): clicking away to save a rename would also open
+  // the issue (MUL-5108 review R1#2).
+  const gestureStartedWhileEditingRef = useRef(false);
 
   useEffect(() => {
     // Realtime/cache snapshots should refresh the passive label, but must not
@@ -513,11 +521,20 @@ export function InlineTitle({
     <div
       className="flex min-w-0 items-center gap-1.5"
       style={{ paddingLeft: row.depth * 18 }}
-      // While the rename input is up, a click anywhere in the cell (e.g. the
-      // blur-to-commit click) must not double as row navigation. Outside of
-      // editing, dead space stays transparent so the row click opens the
-      // issue — only the controls below stop propagation themselves.
-      onClick={editing ? stopRowNavigation : undefined}
+      // Record whether the gesture began while editing (mousedown fires before
+      // the blur that commits), then swallow that click in the capture phase —
+      // before it can reach the row (navigation) or the title's open handler.
+      // A gesture that began while NOT editing passes through untouched, so
+      // clicking dead space still opens the issue.
+      onMouseDownCapture={() => {
+        gestureStartedWhileEditingRef.current = editingRef.current;
+      }}
+      onClickCapture={(event) => {
+        if (editing || gestureStartedWhileEditingRef.current) {
+          event.stopPropagation();
+        }
+        gestureStartedWhileEditingRef.current = false;
+      }}
     >
       {row.hasChildren ? (
         <button
@@ -731,6 +748,43 @@ function getTableViewMeta(
   return table.options.meta as unknown as TableViewMeta;
 }
 
+/**
+ * Release the hoisted editing key when the cell that owns it unmounts.
+ *
+ * Row virtualization (see data-table.tsx) unmounts a cell as its row scrolls
+ * out of the rendered window. Base UI does NOT call onOpenChange(false) on
+ * unmount, so without this the open picker's key — and the frozen row
+ * structure keyed off it — would persist after the anchor row leaves the
+ * viewport: the table would stay frozen, and scrolling the row back would
+ * silently reopen the picker and discard any in-progress rename draft
+ * (MUL-5108 review R1#3). Clearing the key iff this unmounting cell still owns
+ * it thaws the structure and closes the editor.
+ *
+ * Live values are read through refs so the empty-dep cleanup always sees the
+ * current key/setter. At initial mount a cell is never yet the active editor
+ * (the editor is opened by a later interaction, which does not remount the
+ * cell), so this never fires spuriously — including under StrictMode's
+ * mount → unmount → mount probe, whose first cleanup sees `editingCellKey`
+ * still unequal to this cell's key.
+ */
+export function useReleaseEditingCellOnUnmount(
+  cellKey: string | null,
+  editingCellKey: string | null,
+  setEditingCellKey: (key: string | null) => void,
+) {
+  const editingCellKeyRef = useRef(editingCellKey);
+  editingCellKeyRef.current = editingCellKey;
+  const setEditingCellKeyRef = useRef(setEditingCellKey);
+  setEditingCellKeyRef.current = setEditingCellKey;
+  useEffect(() => {
+    return () => {
+      if (cellKey !== null && editingCellKeyRef.current === cellKey) {
+        setEditingCellKeyRef.current(null);
+      }
+    };
+  }, [cellKey]);
+}
+
 function IssueTableSelectHeader({
   table,
 }: HeaderContext<IssueTableDisplayRow, unknown>) {
@@ -826,11 +880,19 @@ function IssueTableBodyCell({
 }: CellContext<IssueTableDisplayRow, unknown>) {
   const meta = getTableViewMeta(table);
   const { t, i18n } = useT("issues");
+  // Computed (and the unmount responder registered) before the early return so
+  // the hook order is stable across issue/group rows.
+  const cellKey =
+    row.original.kind === "issue" ? `${row.original.key}:${column.id}` : null;
+  useReleaseEditingCellOnUnmount(
+    cellKey,
+    meta.editingCellKey,
+    meta.setEditingCellKey,
+  );
   if (row.original.kind !== "issue") return null;
   const issueRow = row.original;
   const issue = issueRow.issue;
   const key = column.id as TableColumnKey;
-  const cellKey = `${issueRow.key}:${column.id}`;
   const editorOpen = meta.editingCellKey === cellKey;
   const setEditorOpen = (open: boolean) =>
     meta.setEditingCellKey(open ? cellKey : null);

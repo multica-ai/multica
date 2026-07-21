@@ -9,7 +9,7 @@
  * TYPES, so React remounted every cell and the just-opened picker closed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
@@ -21,7 +21,7 @@ import { renderWithI18n } from "../../test/i18n";
 import { IssueSurfaceSelectionProvider } from "../surface/selection-context";
 import type { IssueSurfaceSelection } from "../surface/selection-context";
 import type { ChildProgress } from "./list-row";
-import { TableView } from "./table-view";
+import { TableView, useReleaseEditingCellOnUnmount } from "./table-view";
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -185,8 +185,13 @@ describe("TableView cell editors under data refresh", () => {
     vi.unstubAllGlobals();
   });
 
+  // Explicit timeout: this mounts the full TableView with every picker + a
+  // QueryClient, so it is heavier than a unit test. `delay: null` drives
+  // userEvent off fake-synchronous timing instead of the default real-timer
+  // gaps between events, which were what let the whole gesture blow past the
+  // 5s default under concurrent CI worker load (MUL-5108 review R1#1).
   it("keeps the status picker open and the row order frozen across a refresh, then catches up on close", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
     const issueA = makeIssue("a", "Alpha task", "todo");
     const issueB = makeIssue("b", "Beta task", "in_progress");
     const progress1 = new Map<string, ChildProgress>();
@@ -235,5 +240,86 @@ describe("TableView cell editors under data refresh", () => {
     await user.click(screen.getByRole("button", { name: /Backlog/ }));
     expect(screen.queryByRole("button", { name: /Backlog/ })).toBeNull();
     expect(identifiers()).toEqual(["MUL-b", "MUL-a"]);
+  }, 20_000);
+});
+
+// Row virtualization unmounts a cell when its row scrolls out of the window
+// (data-table.tsx). Base UI does not fire onOpenChange(false) on unmount, so
+// the hoisted editing key — and the frozen structure it holds — needs an
+// explicit release when the owning cell leaves the DOM (MUL-5108 review R1#3).
+// A cell unmounting is exactly what a virtual-window change does; probing the
+// hook directly keeps the assertion deterministic (jsdom has no layout for a
+// real virtualizer to react to).
+describe("useReleaseEditingCellOnUnmount", () => {
+  function Probe({
+    cellKey,
+    editingCellKey,
+    setEditingCellKey,
+  }: {
+    cellKey: string | null;
+    editingCellKey: string | null;
+    setEditingCellKey: (key: string | null) => void;
+  }) {
+    useReleaseEditingCellOnUnmount(cellKey, editingCellKey, setEditingCellKey);
+    return null;
+  }
+
+  afterEach(cleanup);
+
+  it("clears the key when the cell that owns the open editor unmounts", () => {
+    const setEditingCellKey = vi.fn();
+    const { unmount } = render(
+      <Probe
+        cellKey="issue-a:status"
+        editingCellKey="issue-a:status"
+        setEditingCellKey={setEditingCellKey}
+      />,
+    );
+
+    unmount();
+
+    expect(setEditingCellKey).toHaveBeenCalledWith(null);
+  });
+
+  it("leaves the key untouched when a different cell unmounts", () => {
+    const setEditingCellKey = vi.fn();
+    const { unmount } = render(
+      <Probe
+        cellKey="issue-b:status"
+        editingCellKey="issue-a:status"
+        setEditingCellKey={setEditingCellKey}
+      />,
+    );
+
+    unmount();
+
+    expect(setEditingCellKey).not.toHaveBeenCalled();
+  });
+
+  it("does not fire on mount while the cell is not yet the active editor", () => {
+    const setEditingCellKey = vi.fn();
+    // Mount not-owning, then the editor opens on THIS cell (rerender, no
+    // remount), then it unmounts — the responder reads the latest key.
+    const { rerender, unmount } = render(
+      <Probe
+        cellKey="issue-a:status"
+        editingCellKey={null}
+        setEditingCellKey={setEditingCellKey}
+      />,
+    );
+    expect(setEditingCellKey).not.toHaveBeenCalled();
+
+    rerender(
+      <Probe
+        cellKey="issue-a:status"
+        editingCellKey="issue-a:status"
+        setEditingCellKey={setEditingCellKey}
+      />,
+    );
+    expect(setEditingCellKey).not.toHaveBeenCalled();
+
+    unmount();
+    expect(setEditingCellKey).toHaveBeenCalledTimes(1);
+    expect(setEditingCellKey).toHaveBeenCalledWith(null);
   });
 });

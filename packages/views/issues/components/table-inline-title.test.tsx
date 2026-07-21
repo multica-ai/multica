@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 
@@ -117,6 +118,32 @@ describe("InlineTitle", () => {
 
     expect(onUpdate).toHaveBeenCalledWith({ title: "Renamed" });
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("commits on click-away without also navigating into the issue", async () => {
+    const user = userEvent.setup({ delay: null });
+    const onUpdate = vi.fn();
+    const rowClick = vi.fn();
+    render(
+      // The row's onClick is the navigation handler. Committing a rename by
+      // clicking away (which blurs the input) must not bubble into it.
+      <div onClick={rowClick}>
+        <Harness title="Original" onUpdate={onUpdate} />
+      </div>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Rename issue" }));
+    const input = screen.getByRole("textbox");
+    await user.clear(input);
+    await user.type(input, "Renamed");
+    // The identifier is inside the title cell and not focusable, so clicking
+    // it blurs the input (→ commit) and is the click that previously leaked
+    // into row navigation.
+    await user.click(screen.getByText("MUL-1"));
+
+    expect(onUpdate).toHaveBeenCalledWith({ title: "Renamed" });
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(rowClick).not.toHaveBeenCalled();
   });
 
   it("preserves an active draft when a realtime title snapshot arrives", () => {
