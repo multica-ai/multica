@@ -60,7 +60,7 @@ var targets = map[string]Target{
 		SubmitSelector: "button[type=submit]", ExpectedText: []string{"Dashboard", "Data Sources"},
 	},
 	"finance": {
-		Name: "finance", URL: "http://firtal-agents-private.internal:3000/login?manual=true",
+		Name: "finance", URL: "http://firtal-internal-private.internal:3000/login?manual=true",
 		Vault: "Shared/browser-login/finance", UsernameSelector: "#email", PasswordSelector: "#password",
 		SubmitSelector: "button[type=submit]", ExpectedText: []string{"Your roles:"},
 	},

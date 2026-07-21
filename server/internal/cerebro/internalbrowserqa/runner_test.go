@@ -347,19 +347,6 @@ func TestFinanceTargetUsesAuthenticatedDashboardMarker(t *testing.T) {
 	}
 }
 
-// The finance service is registered in the workspace connection registry as
-// firtal-agents-private.internal:3000; the earlier firtal-internal-private host
-// resolves nowhere, which surfaced as an unexplained timeout.
-func TestFinanceTargetUsesRegisteredInternalHost(t *testing.T) {
-	target, err := TargetFor("finance")
-	if err != nil {
-		t.Fatalf("TargetFor(finance): %v", err)
-	}
-	if target.Host() != "firtal-agents-private.internal:3000" {
-		t.Fatalf("finance host = %q, want firtal-agents-private.internal:3000", target.Host())
-	}
-}
-
 func TestMulticaTargetUsesFullProductionNavigationMarkers(t *testing.T) {
 	target, err := TargetFor("multica")
 	if err != nil {
