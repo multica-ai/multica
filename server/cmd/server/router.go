@@ -731,6 +731,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Public API
 	r.Get("/api/config", h.GetConfig)
 	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
+	// A setup credential is the authentication for this single exchange. It is
+	// short-lived, one-time, hash-stored, and protected by the stricter auth
+	// verification rate limit.
+	r.With(authVerifyRL).Post("/api/setup-tokens/redeem", h.RedeemSetupToken)
 
 	// Webhook ingress for autopilots. Outside the authenticated group on
 	// purpose: the bearer token in the URL path IS the credential. Workspace
@@ -860,6 +864,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/", h.GetWorkspace)
+					r.With(handler.RequireHumanActor).Post("/setup-tokens", h.CreateSetupToken)
+					r.With(handler.RequireHumanActor).Get("/setup-tokens/{setupTokenId}", h.GetSetupToken)
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)

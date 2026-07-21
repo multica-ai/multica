@@ -37,6 +37,18 @@ func GeneratePATToken() (string, error) {
 	return "mul_" + hex.EncodeToString(b), nil
 }
 
+// GenerateSetupToken creates a short-lived, single-use setup credential:
+// "mst_" + 40 random hex chars. It is never accepted by the normal Auth or
+// DaemonAuth middleware; only POST /api/setup-tokens/redeem can exchange it
+// for a regular user PAT.
+func GenerateSetupToken() (string, error) {
+	b := make([]byte, 20)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate setup token: %w", err)
+	}
+	return "mst_" + hex.EncodeToString(b), nil
+}
+
 // GenerateDaemonToken creates a new daemon auth token: "mdt_" + 40 random hex chars.
 func GenerateDaemonToken() (string, error) {
 	b := make([]byte, 20) // 20 bytes = 40 hex chars

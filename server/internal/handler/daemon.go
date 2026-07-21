@@ -169,8 +169,9 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 // ---------------------------------------------------------------------------
 
 type DaemonRegisterRequest struct {
-	WorkspaceID string `json:"workspace_id"`
-	DaemonID    string `json:"daemon_id"`
+	WorkspaceID    string `json:"workspace_id"`
+	DaemonID       string `json:"daemon_id"`
+	SetupSessionID string `json:"setup_session_id"`
 	// LegacyDaemonIDs lists prior hostname-derived daemon_ids this machine
 	// may have registered under before switching to a persistent UUID. The
 	// handler merges any matching runtime rows into the new row so agents
@@ -343,6 +344,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 
 	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
 	req.DaemonID = strings.TrimSpace(req.DaemonID)
+	req.SetupSessionID = strings.TrimSpace(req.SetupSessionID)
 	req.DeviceName = strings.TrimSpace(req.DeviceName)
 
 	if req.DaemonID == "" {
@@ -353,7 +355,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
-	if len(req.Runtimes) == 0 && len(req.FailedProfiles) == 0 {
+	if len(req.Runtimes) == 0 && len(req.FailedProfiles) == 0 && req.SetupSessionID == "" {
 		writeError(w, http.StatusBadRequest, "at least one runtime or failed profile is required")
 		return
 	}
@@ -380,6 +382,27 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ownerID = member.UserID
+	}
+
+	var setupSessionID pgtype.UUID
+	if req.SetupSessionID != "" {
+		if !ownerID.Valid {
+			writeError(w, http.StatusForbidden, "setup session requires user authentication")
+			return
+		}
+		var valid bool
+		setupSessionID, valid = parseUUIDOrBadRequest(w, req.SetupSessionID, "setup_session_id")
+		if !valid {
+			return
+		}
+		if _, err := h.Queries.GetRedeemedSetupTokenForDaemon(r.Context(), db.GetRedeemedSetupTokenForDaemonParams{
+			ID:          setupSessionID,
+			WorkspaceID: wsUUID,
+			UserID:      ownerID,
+		}); err != nil {
+			writeError(w, http.StatusForbidden, "invalid setup session")
+			return
+		}
 	}
 
 	ws, err := h.Queries.GetWorkspace(r.Context(), wsUUID)
@@ -651,6 +674,26 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventDaemonRegister, req.WorkspaceID, "system", "", map[string]any{
 		"runtimes": resp,
 	})
+
+	if req.SetupSessionID != "" {
+		progress, err := h.Queries.MarkSetupTokenDaemonConnected(r.Context(), db.MarkSetupTokenDaemonConnectedParams{
+			DaemonID:     strToText(req.DaemonID),
+			RuntimeCount: int32(len(resp)),
+			ID:           setupSessionID,
+			WorkspaceID:  wsUUID,
+			UserID:       ownerID,
+		})
+		if err != nil {
+			slog.Warn("mark setup daemon connected failed", "workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID, "error", err)
+		} else {
+			h.publish(protocol.EventSetupProgress, req.WorkspaceID, "system", "", map[string]any{
+				"setup_session_id": uuidToString(progress.ID),
+				"status":           "daemon_connected",
+				"daemon_id":        req.DaemonID,
+				"runtime_count":    progress.RuntimeCount,
+			})
+		}
+	}
 
 	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings)
 

@@ -806,6 +806,21 @@ type RuntimeProfile struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+// Short-lived one-time mst_ credentials for non-browser CLI setup, plus observable setup progress. No raw token, FK, or cascade is stored.
+type SetupToken struct {
+	ID                pgtype.UUID        `json:"id"`
+	UserID            pgtype.UUID        `json:"user_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	TokenHash         string             `json:"token_hash"`
+	TokenPrefix       string             `json:"token_prefix"`
+	ExpiresAt         pgtype.Timestamptz `json:"expires_at"`
+	RedeemedAt        pgtype.Timestamptz `json:"redeemed_at"`
+	DaemonConnectedAt pgtype.Timestamptz `json:"daemon_connected_at"`
+	DaemonID          pgtype.Text        `json:"daemon_id"`
+	RuntimeCount      int32              `json:"runtime_count"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type Skill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

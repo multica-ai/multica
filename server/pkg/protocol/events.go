@@ -129,6 +129,7 @@ const (
 	EventDaemonHeartbeat              = "daemon:heartbeat"
 	EventDaemonHeartbeatAck           = "daemon:heartbeat_ack"
 	EventDaemonRegister               = "daemon:register"
+	EventSetupProgress                = "setup:progress"
 	EventDaemonTaskAvailable          = "daemon:task_available"
 	EventDaemonRuntimeProfilesChanged = "daemon:runtime_profiles_changed"
 	EventDaemonWorkspacesChanged      = "daemon:workspaces_changed"
