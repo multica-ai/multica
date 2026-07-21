@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -9,8 +10,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/automation"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 )
 
 // seedQueuedExecution creates the hook + revision + source event + `queued`
@@ -91,6 +94,27 @@ func (f matcherFixture) effectCount(t *testing.T, execID string) int {
 		t.Fatalf("count effects: %v", err)
 	}
 	return n
+}
+
+// effectRows returns each action's durable effect as (action_index, status).
+func (f matcherFixture) effectRows(t *testing.T, execID string) map[int]string {
+	t.Helper()
+	rows, err := f.pool.Query(context.Background(),
+		`SELECT action_index, status FROM hook_action_effect WHERE execution_id = $1`, execID)
+	if err != nil {
+		t.Fatalf("load effects: %v", err)
+	}
+	defer rows.Close()
+	out := map[int]string{}
+	for rows.Next() {
+		var idx int
+		var status string
+		if err := rows.Scan(&idx, &status); err != nil {
+			t.Fatalf("scan effect: %v", err)
+		}
+		out[idx] = status
+	}
+	return out
 }
 
 func (f matcherFixture) setIssueStatusAction(status string) string {
@@ -263,6 +287,14 @@ func TestExecutorExpiredLeaseWritesNothing(t *testing.T) {
 		t.Errorf("expired-lease worker wrote terminal status %q", s.status)
 	}
 
+	// Losing the lease now also backs the execution off (see
+	// TestExecutorExpiredLeaseDoesNotStarveQueue), so it is not immediately
+	// claimable. Advance past that backoff to reach the retry.
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE hook_execution SET next_attempt_at = now() WHERE id = $1`, execID); err != nil {
+		t.Fatalf("clear backoff: %v", err)
+	}
+
 	// With a live lease the same execution runs normally.
 	ExecutorLeaseTTL = original
 	if _, err := f.svc.ClaimAndRun(ctx, 5); err != nil {
@@ -339,8 +371,23 @@ func TestExecutorForeignTargetIsTerminalSkip(t *testing.T) {
 	if s.retryQueued {
 		t.Error("an unavailable target must be terminal, not scheduled for retry")
 	}
-	if n := f.effectCount(t, execID); n != 0 {
-		t.Errorf("a skipped action left %d effect(s), want 0", n)
+	// A terminal action still leaves its durable audit row, carrying the reason —
+	// otherwise skipped actions are invisible in the effect trace.
+	effects := f.effectRows(t, execID)
+	if len(effects) != 1 || effects[0] != hookExecSkipped {
+		t.Errorf("effects = %v, want exactly action 0 recorded as skipped", effects)
+	}
+	var code, resolved string
+	if err := f.pool.QueryRow(ctx, `
+		SELECT COALESCE(error_code,''), COALESCE(resolved_input::text,'')
+		FROM hook_action_effect WHERE execution_id = $1`, execID).Scan(&code, &resolved); err != nil {
+		t.Fatal(err)
+	}
+	if code != skipTargetUnavailable {
+		t.Errorf("effect error_code = %q, want %s", code, skipTargetUnavailable)
+	}
+	if resolved == "" {
+		t.Error("terminal effect recorded no resolved_input")
 	}
 }
 
@@ -369,8 +416,11 @@ func TestExecutorPartialExecutionKeepsCommittedAction(t *testing.T) {
 	if s.actionIndex != 1 {
 		t.Errorf("action cursor = %d, want 1 (action 0 committed, action 1 failed)", s.actionIndex)
 	}
-	if n := f.effectCount(t, execID); n != 1 {
-		t.Errorf("effect rows = %d, want 1 (only the committed action)", n)
+	// The partial trace is complete: the committed action AND the one that ended it.
+	effects := f.effectRows(t, execID)
+	if len(effects) != 2 || effects[0] != hookExecSucceeded || effects[1] != hookExecSkipped {
+		t.Errorf("effects = %v, want action 0 succeeded and action 1 skipped — a partial "+
+			"execution must show the action that failed, not only the ones that worked", effects)
 	}
 }
 
@@ -447,3 +497,227 @@ func TestExecutorInfraFailureBacksOffThenFails(t *testing.T) {
 }
 
 var _ = pgtype.UUID{}
+
+// ---------------------------------------------------------------------------
+// Regressions for the executor review round: independent execution gate, lease
+// forward progress, principal-invalid fail-closed, terminal effect audit.
+// ---------------------------------------------------------------------------
+
+// Blocker 1 — execution has its OWN default-off switch, so enabling the engine for
+// shadow evaluation cannot start performing real side effects.
+func TestExecutionGateIsIndependentOfEventHooksFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		hooks     bool
+		execution bool
+		want      bool
+	}{
+		{"both off", false, false, false},
+		{"hooks on, execution off — shadow mode", true, false, false},
+		{"execution on without the engine", false, true, false},
+		{"both on", true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := featureflag.NewStaticProvider()
+			provider.Set(featureflags.EventHooks, featureflag.Rule{Default: tc.hooks})
+			provider.Set(featureflags.EventHookExecution, featureflag.Rule{Default: tc.execution})
+			flags := featureflag.NewService(provider)
+			if got := featureflags.EventHookExecutionEnabled(context.Background(), flags); got != tc.want {
+				t.Errorf("EventHookExecutionEnabled = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// Blocker 2 — an execution whose lease keeps elapsing must not hold the head of the
+// queue. Elon's repro: the oldest execution reliably outlives its TTL, a healthy one
+// sits behind it, and a bounded ClaimAndRun must still reach the healthy one.
+func TestExecutorExpiredLeaseDoesNotStarveQueue(t *testing.T) {
+	f := newMatcherFixture(t)
+	ctx := context.Background()
+	f.setIssueStatus(t, "todo")
+
+	// The head execution's action always takes longer than the lease below.
+	_, stuckExec, _ := f.seedQueuedExecution(t, f.setIssueStatusAction("done"))
+	f.sleepBeforeEffectInsert(t, stuckExec, 0.4)
+
+	// A healthy execution queued behind it: no actions, so it completes instantly.
+	_, healthyExec, _ := f.seedQueuedExecution(t, `[]`)
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE hook_execution SET created_at = now() + interval '1 second' WHERE id = $1`, healthyExec); err != nil {
+		t.Fatalf("order executions: %v", err)
+	}
+
+	original := ExecutorLeaseTTL
+	t.Cleanup(func() { ExecutorLeaseTTL = original })
+	ExecutorLeaseTTL = 100 * time.Millisecond
+
+	// Two slots, exactly as the reviewer drove it: without a backoff the stuck row
+	// consumes both and the healthy one is never reached.
+	if _, err := f.svc.ClaimAndRun(ctx, 2); err != nil {
+		t.Fatalf("claim and run: %v", err)
+	}
+
+	stuck := f.execState(t, stuckExec)
+	if stuck.status == hookExecSucceeded {
+		t.Fatalf("the stuck execution unexpectedly succeeded; the lease did not expire")
+	}
+	if !stuck.retryQueued {
+		t.Error("the expired-lease execution was not backed off — it stays the oldest " +
+			"claimable row and will be re-selected on every tick")
+	}
+	if got := f.issueStatus(t); got != "todo" {
+		t.Errorf("issue status = %q, want todo — an expired-lease worker committed its action", got)
+	}
+	if s := f.execState(t, healthyExec); s.status != hookExecSucceeded {
+		t.Errorf("execution behind the stuck one = %q, want succeeded — one execution whose "+
+			"lease keeps expiring is starving the whole queue", s.status)
+	}
+}
+
+// Blocker 3 — if the hook cannot be paused, the skip must NOT be committed. Recording
+// the execution as handled while the rule stays enabled is fail-open: it would keep
+// producing executions under authority nobody holds.
+func TestExecutorPrincipalInvalidFailsClosedWhenPauseFails(t *testing.T) {
+	f := newMatcherFixture(t)
+	ctx := context.Background()
+	f.setIssueStatus(t, "todo")
+	hookID, execID, _ := f.seedQueuedExecution(t, f.setIssueStatusAction("done"))
+
+	if _, err := f.pool.Exec(ctx,
+		`DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, f.ws, f.userID); err != nil {
+		t.Fatalf("remove principal: %v", err)
+	}
+
+	// Make the pause write fail the way an infrastructure fault would.
+	trigger := "pause_fail_" + util.UUIDToString(util.NewUUID())[:8]
+	fn := trigger + "_fn"
+	if _, err := f.pool.Exec(ctx, `
+		CREATE FUNCTION `+quoteIdent(fn)+`() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN RAISE EXCEPTION 'injected pause failure'; END; $$;`); err != nil {
+		t.Fatalf("create pause-failure function: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx, `
+		CREATE TRIGGER `+quoteIdent(trigger)+` BEFORE UPDATE OF enabled ON hook
+		FOR EACH ROW WHEN (NEW.id = `+quoteLiteral(hookID)+`::uuid)
+		EXECUTE FUNCTION `+quoteIdent(fn)+`();`); err != nil {
+		t.Fatalf("create pause-failure trigger: %v", err)
+	}
+	dropTrigger := func() {
+		f.pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS `+quoteIdent(trigger)+` ON hook`)
+		f.pool.Exec(context.Background(), `DROP FUNCTION IF EXISTS `+quoteIdent(fn)+`()`)
+	}
+	t.Cleanup(dropTrigger)
+
+	if _, err := f.svc.ClaimAndRun(ctx, 5); err != nil {
+		t.Fatalf("claim and run: %v", err)
+	}
+
+	// The hook is still enabled because the pause failed — so the execution must NOT
+	// read as terminally handled.
+	var enabled bool
+	if err := f.pool.QueryRow(ctx, `SELECT enabled FROM hook WHERE id = $1`, hookID).Scan(&enabled); err != nil {
+		t.Fatal(err)
+	}
+	if !enabled {
+		t.Fatal("the pause unexpectedly succeeded; the failure injection did not take")
+	}
+	if s := f.execState(t, execID); s.status == hookExecSkipped {
+		t.Error("execution was finalized as skipped while its hook stayed enabled — " +
+			"fail-open: the rule keeps producing executions under a departed principal")
+	}
+
+	// Once the pause can be written, the outcome converges: hook paused, execution
+	// terminally skipped, and the admins who can re-arm it are notified.
+	dropTrigger()
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE hook_execution SET next_attempt_at = now() WHERE id = $1`, execID); err != nil {
+		t.Fatalf("clear backoff: %v", err)
+	}
+	if _, err := f.svc.ClaimAndRun(ctx, 5); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+
+	var reason string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT enabled, COALESCE(disabled_reason,'') FROM hook WHERE id = $1`, hookID).Scan(&enabled, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if enabled || reason != hookDisabledPrincipalInvalid {
+		t.Errorf("hook = (enabled=%v, reason=%q), want paused with %s", enabled, reason, hookDisabledPrincipalInvalid)
+	}
+	if s := f.execState(t, execID); s.status != hookExecSkipped || s.skipReason != skipPrincipalInvalid {
+		t.Errorf("execution = (%q, %q), want skipped/%s", s.status, s.skipReason, skipPrincipalInvalid)
+	}
+	if got := f.issueStatus(t); got != "todo" {
+		t.Errorf("issue status = %q, want todo — the action ran under a departed principal", got)
+	}
+}
+
+// Blocker 4 — a terminal effect survives a restart as exactly ONE row per
+// (execution, action index): re-running must update the audit row, never duplicate it.
+func TestExecutorTerminalEffectIsSingleRowAcrossRetries(t *testing.T) {
+	f := newMatcherFixture(t)
+	ctx := context.Background()
+	foreign := uuid.NewString()
+	actions := `[{"type":"set_issue_status","issue_id":"` + foreign + `","status":"done"}]`
+	_, execID, _ := f.seedQueuedExecution(t, actions)
+
+	if _, err := f.svc.ClaimAndRun(ctx, 5); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if effects := f.effectRows(t, execID); len(effects) != 1 || effects[0] != hookExecSkipped {
+		t.Fatalf("effects after first run = %v, want one skipped row", effects)
+	}
+
+	// Replay the same execution, as a restart that lost the terminal write would.
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE hook_execution
+		SET status = 'queued', skip_reason = NULL, completed_at = NULL,
+		    lease_token = NULL, lease_expires_at = NULL, next_attempt_at = now()
+		WHERE id = $1`, execID); err != nil {
+		t.Fatalf("replay execution: %v", err)
+	}
+	if _, err := f.svc.ClaimAndRun(ctx, 5); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+
+	effects := f.effectRows(t, execID)
+	if len(effects) != 1 || effects[0] != hookExecSkipped {
+		t.Errorf("effects after replay = %v, want still exactly one skipped row for "+
+			"(execution, action 0)", effects)
+	}
+	var attempts int
+	if err := f.pool.QueryRow(ctx,
+		`SELECT attempts FROM hook_action_effect WHERE execution_id = $1`, execID).Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if attempts < 2 {
+		t.Errorf("effect attempts = %d, want the replay counted on the same row", attempts)
+	}
+}
+
+// sleepBeforeEffectInsert makes one execution's action effect insert pause, so the
+// action reliably outlives a short lease TTL.
+func (f matcherFixture) sleepBeforeEffectInsert(t *testing.T, execID string, seconds float64) {
+	t.Helper()
+	ctx := context.Background()
+	name := fmt.Sprintf("hook_effect_sleep_%d", time.Now().UnixNano())
+	fn := name + "_fn"
+	if _, err := f.pool.Exec(ctx, fmt.Sprintf(`
+		CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN PERFORM pg_sleep(%f); RETURN NEW; END; $$;`, quoteIdent(fn), seconds)); err != nil {
+		t.Fatalf("create effect sleep function: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx, fmt.Sprintf(`
+		CREATE TRIGGER %s BEFORE INSERT ON hook_action_effect
+		FOR EACH ROW WHEN (NEW.execution_id = %s::uuid)
+		EXECUTE FUNCTION %s();`, quoteIdent(name), quoteLiteral(execID), quoteIdent(fn))); err != nil {
+		t.Fatalf("create effect sleep trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		f.pool.Exec(bg, fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON hook_action_effect", quoteIdent(name)))
+		f.pool.Exec(bg, fmt.Sprintf("DROP FUNCTION IF EXISTS %s()", quoteIdent(fn)))
+	})
+}

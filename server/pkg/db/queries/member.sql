@@ -51,3 +51,12 @@ FROM member m
 JOIN "user" u ON u.id = m.user_id
 WHERE m.workspace_id = $1
 ORDER BY m.created_at ASC;
+
+-- name: ListWorkspaceMembersByRoles :many
+-- Members holding any of the given roles, for notifications that must reach the
+-- people able to act on them (e.g. an automation paused because its authorization
+-- principal left). Role filtering elsewhere is a per-caller authorization check;
+-- this is the fan-out selector, which did not previously exist.
+SELECT * FROM member
+WHERE workspace_id = $1 AND role = ANY(@roles::text[])
+ORDER BY created_at ASC;

@@ -272,3 +272,50 @@ RETURNING *;
 UPDATE hook_action_effect
 SET status = 'succeeded', output_type = @output_type, output_id = @output_id, completed_at = now()
 WHERE effect_key = $1;
+
+-- name: HeartbeatHookExecution :execrows
+-- Extend the lease of an execution this worker still owns (§7.2). A long action must
+-- not lose its lease simply because it is slow; the heartbeat keeps a live worker's
+-- claim valid while an ABANDONED claim still expires on schedule.
+UPDATE hook_execution
+SET lease_expires_at = clock_timestamp() + make_interval(secs => @lease_ttl_seconds::float8)
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp();
+
+-- name: DeferExpiredHookExecution :execrows
+-- Back off an execution whose lease elapsed while THIS worker was running it. The
+-- CAS is on lease_token only — deliberately without the not-expired condition, since
+-- the lease is expired by definition here — so it fires only while the row still
+-- carries our token. If another worker has already reclaimed it the token differs,
+-- nothing is written, and the new owner is left alone. Without this the row keeps its
+-- original ordering position and the next claim selects it again immediately,
+-- starving everything behind it.
+UPDATE hook_execution
+SET status = 'queued',
+    next_attempt_at = now() + make_interval(secs => @backoff_seconds::int),
+    lease_token = NULL,
+    lease_expires_at = NULL
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2;
+
+-- name: UpsertTerminalHookActionEffect :exec
+-- Record the durable audit row for an action that ended terminally — skipped or
+-- failed — carrying its resolved input and the reason. The success path writes its
+-- effect inside the action transaction, which rolls back on failure, so without this
+-- a skipped/failed action would leave no trace at all and a partial execution would
+-- show only the actions that succeeded. Keyed on effect_key so a retry updates the
+-- same row rather than creating a second one for the same (execution, action index).
+INSERT INTO hook_action_effect (
+    id, effect_key, execution_id, action_index, action_type,
+    status, resolved_input, attempts, error_code, error, completed_at
+) VALUES ($1, $2, $3, $4, $5, @status, $6, 1, @error_code, @error, now())
+ON CONFLICT (effect_key) DO UPDATE SET
+    status = EXCLUDED.status,
+    resolved_input = EXCLUDED.resolved_input,
+    attempts = hook_action_effect.attempts + 1,
+    error_code = EXCLUDED.error_code,
+    error = EXCLUDED.error,
+    completed_at = now();

@@ -225,6 +225,47 @@ func (q *Queries) ListMembersWithUser(ctx context.Context, workspaceID pgtype.UU
 	return items, nil
 }
 
+const listWorkspaceMembersByRoles = `-- name: ListWorkspaceMembersByRoles :many
+SELECT id, workspace_id, user_id, role, created_at FROM member
+WHERE workspace_id = $1 AND role = ANY($2::text[])
+ORDER BY created_at ASC
+`
+
+type ListWorkspaceMembersByRolesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Roles       []string    `json:"roles"`
+}
+
+// Members holding any of the given roles, for notifications that must reach the
+// people able to act on them (e.g. an automation paused because its authorization
+// principal left). Role filtering elsewhere is a per-caller authorization check;
+// this is the fan-out selector, which did not previously exist.
+func (q *Queries) ListWorkspaceMembersByRoles(ctx context.Context, arg ListWorkspaceMembersByRolesParams) ([]Member, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceMembersByRoles, arg.WorkspaceID, arg.Roles)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Member{}
+	for rows.Next() {
+		var i Member
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.Role,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateMemberRole = `-- name: UpdateMemberRole :one
 UPDATE member SET role = $2
 WHERE id = $1

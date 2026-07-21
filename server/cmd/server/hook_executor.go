@@ -14,10 +14,11 @@ import (
 // stays dormant (a cheap flag check) while automation_event_hooks is off.
 const hookExecutorTick = 2 * time.Second
 
-// runHookExecutor is the Event Hooks executor loop (MUL-4332 PR3 §7.2). It only runs
-// actions when the automation_event_hooks flag is enabled, so with the default-off
-// flag it does nothing and production behaviour is unchanged. The matcher produces
-// `queued` executions; this loop leases them and runs their actions.
+// runHookExecutor is the Event Hooks executor loop (MUL-4332 PR3 §7.2). It is gated
+// on its OWN default-off switch, separate from the one that opens the policy API,
+// dry-run and the matcher: enabling the engine for shadow evaluation must never
+// start performing real side effects. Only automation_event_hook_execution (on top
+// of automation_event_hooks) lets this loop claim queued executions.
 func runHookExecutor(ctx context.Context, svc *service.HookService, flags *featureflag.Service) {
 	if svc == nil {
 		return
@@ -29,7 +30,7 @@ func runHookExecutor(ctx context.Context, svc *service.HookService, flags *featu
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !featureflags.EventHooksEnabled(ctx, flags) {
+			if !featureflags.EventHookExecutionEnabled(ctx, flags) {
 				continue
 			}
 			if _, err := svc.ClaimAndRun(ctx, service.ExecutorBatchSize); err != nil {

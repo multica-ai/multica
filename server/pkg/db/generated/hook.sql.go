@@ -439,6 +439,38 @@ func (q *Queries) CreateHookRevision(ctx context.Context, arg CreateHookRevision
 	return i, err
 }
 
+const deferExpiredHookExecution = `-- name: DeferExpiredHookExecution :execrows
+UPDATE hook_execution
+SET status = 'queued',
+    next_attempt_at = now() + make_interval(secs => $3::int),
+    lease_token = NULL,
+    lease_expires_at = NULL
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+`
+
+type DeferExpiredHookExecutionParams struct {
+	ID             pgtype.UUID `json:"id"`
+	LeaseToken     pgtype.UUID `json:"lease_token"`
+	BackoffSeconds int32       `json:"backoff_seconds"`
+}
+
+// Back off an execution whose lease elapsed while THIS worker was running it. The
+// CAS is on lease_token only — deliberately without the not-expired condition, since
+// the lease is expired by definition here — so it fires only while the row still
+// carries our token. If another worker has already reclaimed it the token differs,
+// nothing is written, and the new owner is left alone. Without this the row keeps its
+// original ordering position and the next claim selects it again immediately,
+// starving everything behind it.
+func (q *Queries) DeferExpiredHookExecution(ctx context.Context, arg DeferExpiredHookExecutionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deferExpiredHookExecution, arg.ID, arg.LeaseToken, arg.BackoffSeconds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getHookActionEffect = `-- name: GetHookActionEffect :one
 SELECT id, effect_key, execution_id, action_index, action_type, status, resolved_input, output_type, output_id, attempts, error_code, error, created_at, completed_at FROM hook_action_effect WHERE effect_key = $1
 `
@@ -655,6 +687,32 @@ func (q *Queries) GetOwnedHookExecution(ctx context.Context, arg GetOwnedHookExe
 		&i.CompletedAt,
 	)
 	return i, err
+}
+
+const heartbeatHookExecution = `-- name: HeartbeatHookExecution :execrows
+UPDATE hook_execution
+SET lease_expires_at = clock_timestamp() + make_interval(secs => $3::float8)
+WHERE id = $1
+  AND status = 'running'
+  AND lease_token = $2
+  AND lease_expires_at > clock_timestamp()
+`
+
+type HeartbeatHookExecutionParams struct {
+	ID              pgtype.UUID `json:"id"`
+	LeaseToken      pgtype.UUID `json:"lease_token"`
+	LeaseTtlSeconds float64     `json:"lease_ttl_seconds"`
+}
+
+// Extend the lease of an execution this worker still owns (§7.2). A long action must
+// not lose its lease simply because it is slow; the heartbeat keeps a live worker's
+// claim valid while an ABANDONED claim still expires on schedule.
+func (q *Queries) HeartbeatHookExecution(ctx context.Context, arg HeartbeatHookExecutionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, heartbeatHookExecution, arg.ID, arg.LeaseToken, arg.LeaseTtlSeconds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listActiveHookRevisionsForEvent = `-- name: ListActiveHookRevisionsForEvent :many
@@ -1121,4 +1179,51 @@ func (q *Queries) SetHookEnabled(ctx context.Context, arg SetHookEnabledParams) 
 		&i.ArchivedAt,
 	)
 	return i, err
+}
+
+const upsertTerminalHookActionEffect = `-- name: UpsertTerminalHookActionEffect :exec
+INSERT INTO hook_action_effect (
+    id, effect_key, execution_id, action_index, action_type,
+    status, resolved_input, attempts, error_code, error, completed_at
+) VALUES ($1, $2, $3, $4, $5, $7, $6, 1, $8, $9, now())
+ON CONFLICT (effect_key) DO UPDATE SET
+    status = EXCLUDED.status,
+    resolved_input = EXCLUDED.resolved_input,
+    attempts = hook_action_effect.attempts + 1,
+    error_code = EXCLUDED.error_code,
+    error = EXCLUDED.error,
+    completed_at = now()
+`
+
+type UpsertTerminalHookActionEffectParams struct {
+	ID            pgtype.UUID `json:"id"`
+	EffectKey     string      `json:"effect_key"`
+	ExecutionID   pgtype.UUID `json:"execution_id"`
+	ActionIndex   int32       `json:"action_index"`
+	ActionType    string      `json:"action_type"`
+	ResolvedInput []byte      `json:"resolved_input"`
+	Status        string      `json:"status"`
+	ErrorCode     pgtype.Text `json:"error_code"`
+	Error         pgtype.Text `json:"error"`
+}
+
+// Record the durable audit row for an action that ended terminally — skipped or
+// failed — carrying its resolved input and the reason. The success path writes its
+// effect inside the action transaction, which rolls back on failure, so without this
+// a skipped/failed action would leave no trace at all and a partial execution would
+// show only the actions that succeeded. Keyed on effect_key so a retry updates the
+// same row rather than creating a second one for the same (execution, action index).
+func (q *Queries) UpsertTerminalHookActionEffect(ctx context.Context, arg UpsertTerminalHookActionEffectParams) error {
+	_, err := q.db.Exec(ctx, upsertTerminalHookActionEffect,
+		arg.ID,
+		arg.EffectKey,
+		arg.ExecutionID,
+		arg.ActionIndex,
+		arg.ActionType,
+		arg.ResolvedInput,
+		arg.Status,
+		arg.ErrorCode,
+		arg.Error,
+	)
+	return err
 }

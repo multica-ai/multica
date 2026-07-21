@@ -28,6 +28,15 @@ const (
 	// this flag stays off until the PR3 matcher/executor ships so no reaction
 	// ever fires from a partially-built engine. Server-only, default off.
 	EventHooks = "automation_event_hooks"
+	// EventHookExecution gates ACTION EXECUTION specifically, separately from
+	// EventHooks. The two are deliberately distinct rollout stages: EventHooks
+	// alone opens the policy API, dry-run/explain and the matcher, which only
+	// record queued/skipped decisions, so a workspace can run the engine in shadow
+	// and inspect what it *would* do. Only this second switch lets the executor
+	// claim those queued executions and perform real side effects, so turning the
+	// engine on for shadow evaluation can never start mutating data.
+	// Server-only, default off, and required IN ADDITION to EventHooks.
+	EventHookExecution = "automation_event_hook_execution"
 )
 
 var frontendPublicFlags = []string{
@@ -53,6 +62,13 @@ func ResourceLabelsEnabled(ctx context.Context, flags *featureflag.Service) bool
 // PR3 matcher/executor can gate execution behind a default-off switch.
 func EventHooksEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, EventHooks, false)
+}
+
+// EventHookExecutionEnabled reports whether the executor may run real actions. It
+// requires BOTH switches: the engine as a whole, and execution specifically. A
+// workspace that has only enabled EventHooks stays in shadow mode.
+func EventHookExecutionEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return EventHooksEnabled(ctx, flags) && flags.IsEnabled(ctx, EventHookExecution, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
