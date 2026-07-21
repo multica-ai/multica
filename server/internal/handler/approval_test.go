@@ -91,6 +91,9 @@ func TestApproval_Lifecycle_Approve_Execute(t *testing.T) {
 	if err := testPool.QueryRow(context.Background(), `INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id`, testWorkspaceID, "Approval Test Project").Scan(&projectID); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+	})
 
 	// Create the approval request.
 	w := httptest.NewRecorder()
@@ -365,15 +368,39 @@ func seedProjectID(t *testing.T) string {
 	if err := testPool.QueryRow(context.Background(), `INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id`, testWorkspaceID, "Seed Project").Scan(&id); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, id)
+	})
 	return id
 }
 
 func seedIssueID(t *testing.T) string {
 	t.Helper()
+	ctx := context.Background()
+	// Assign a real per-workspace number via the workspace counter (matches the
+	// insertIssueTo helper). The issue.number column defaults to 0, so a bare
+	// insert would collide on uq_issue_workspace_number as soon as a second
+	// issue is seeded or any later test inserts its own number=0 issue.
+	var number int32
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+		WHERE id = $1
+		RETURNING issue_counter
+	`, testWorkspaceID).Scan(&number); err != nil {
+		t.Fatalf("next issue number: %v", err)
+	}
 	var id string
-	if err := testPool.QueryRow(context.Background(), `INSERT INTO issue (workspace_id, title, creator_type, creator_id) VALUES ($1, $2, 'member', $3) RETURNING id`, testWorkspaceID, "Seed Issue", testUserID).Scan(&id); err != nil {
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id, number)
+		VALUES ($1, $2, 'member', $3, $4)
+		RETURNING id
+	`, testWorkspaceID, "Seed Issue", testUserID, number).Scan(&id); err != nil {
 		t.Fatalf("seed issue: %v", err)
 	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id)
+	})
 	return id
 }
 
