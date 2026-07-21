@@ -97,6 +97,9 @@
   "detail": {
     "all_skills": "All skills",
     "read_only": "Read-only",
+    "sync_aria": "Sync skill from source",
+    "sync_tooltip": "Sync from source",
+    "sync_dirty_tooltip": "Save or discard changes before syncing",
     "delete_aria": "Delete skill",
     "delete_tooltip": "Delete skill",
     "supporting_data_warning": "Some workspace data failed to load. Creator attribution, runtime names, or edit permissions may appear incomplete until the next refresh.",
@@ -159,6 +162,8 @@
     },
     "toast_saved": "Skill saved",
     "toast_save_failed": "Failed to save skill",
+    "toast_synced": "Skill synced",
+    "toast_sync_failed": "Failed to sync skill",
     "toast_deleted": "Skill deleted",
     "toast_delete_failed": "Failed to delete skill",
     "delete_dialog": {

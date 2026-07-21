@@ -104,6 +104,9 @@
   "detail": {
     "all_skills": "全部 skill",
     "read_only": "只读",
+    "sync_aria": "从来源同步 skill",
+    "sync_tooltip": "从来源同步",
+    "sync_dirty_tooltip": "请先保存或丢弃修改，再同步",
     "delete_aria": "删除 skill",
     "delete_tooltip": "删除 skill",
     "supporting_data_warning": "部分工作区数据加载失败。创建者归属、运行时名称、编辑权限可能要等下次刷新才完整。",
@@ -165,6 +168,8 @@
     },
     "toast_saved": "已保存 skill",
     "toast_save_failed": "保存 skill 失败",
+    "toast_synced": "已同步 skill",
+    "toast_sync_failed": "同步 skill 失败",
     "toast_deleted": "已删除 skill",
     "toast_delete_failed": "删除 skill 失败",
     "delete_dialog": {

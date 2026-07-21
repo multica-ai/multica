@@ -92,6 +92,9 @@
   "detail": {
     "all_skills": "すべてのスキル",
     "read_only": "読み取り専用",
+    "sync_aria": "ソースからスキルを同期",
+    "sync_tooltip": "ソースから同期",
+    "sync_dirty_tooltip": "同期する前に変更を保存または破棄してください",
     "delete_aria": "スキルを削除",
     "delete_tooltip": "スキルを削除",
     "supporting_data_warning": "一部のワークスペースデータを読み込めませんでした。次回の更新まで、作成者の表示、ランタイム名、編集権限が不完全に見える場合があります。",
@@ -153,6 +156,8 @@
     },
     "toast_saved": "スキルを保存しました",
     "toast_save_failed": "スキルを保存できませんでした",
+    "toast_synced": "スキルを同期しました",
+    "toast_sync_failed": "スキルを同期できませんでした",
     "toast_deleted": "スキルを削除しました",
     "toast_delete_failed": "スキルを削除できませんでした",
     "delete_dialog": {
