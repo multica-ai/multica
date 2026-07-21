@@ -55,3 +55,78 @@ describe("AgentCapabilitiesSchema runtime_options", () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe("AgentCapabilitiesSchema availability", () => {
+  it("parses verified tool evidence and the card summary", () => {
+    const parsed = AgentCapabilitiesSchema.parse({
+      tools: [
+        {
+          key: "get_agent_capabilities",
+          availability: {
+            level: "verified",
+            proven: true,
+            reason: "probe passed",
+          },
+        },
+      ],
+      availability: {
+        runtime_type: "firtal_gateway",
+        status: "known",
+        verified: 1,
+        unproven: 0,
+      },
+    });
+
+    expect(parsed.tools[0]?.availability).toEqual({
+      level: "verified",
+      proven: true,
+      reason: "probe passed",
+    });
+    expect(parsed.availability).toEqual({
+      runtime_type: "firtal_gateway",
+      status: "known",
+      verified: 1,
+      unproven: 0,
+    });
+  });
+
+  it("fails closed when availability evidence has invalid types or enums", () => {
+    const parsed = AgentCapabilitiesSchema.parse({
+      tools: [
+        {
+          key: "get_agent_capabilities",
+          availability: {
+            level: "invented",
+            proven: "yes",
+            reason: 42,
+          },
+        },
+      ],
+      availability: {
+        runtime_type: 7,
+        status: "certain",
+        verified: -2,
+        unproven: "none",
+      },
+    });
+
+    expect(parsed.tools[0]?.availability).toEqual({
+      level: "declared",
+      proven: false,
+      reason: "availability evidence is invalid",
+    });
+    expect(parsed.availability).toEqual({
+      runtime_type: "",
+      status: "unknown",
+      verified: 0,
+      unproven: 0,
+    });
+  });
+
+  it("defaults missing availability to an honest unknown state", () => {
+    const parsed = AgentCapabilitiesSchema.parse({ tools: [{ key: "get_issue" }] });
+
+    expect(parsed.tools[0]?.availability.proven).toBe(false);
+    expect(parsed.availability.status).toBe("unknown");
+  });
+});

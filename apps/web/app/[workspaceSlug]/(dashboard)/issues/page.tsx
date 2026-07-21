@@ -2,8 +2,8 @@
 
 import { IssuesPage } from "@multica/views/issues/components/issues-page";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
-import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { IssueListReferenceFilter } from "@multica/cerebro-references/views";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags/api";
+import { IssueListReferenceFilter } from "@multica/cerebro-references/views/issue-list-reference-filter";
 
 export default function Page() {
   const referencesEnabled = useFeatureFlag("cerebro_references");

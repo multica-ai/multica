@@ -1,7 +1,7 @@
 package runtime
 
 // CEREBRO-PATCH(tool-executor-invoker-test): TECH-3226 — integration tests for
-// ToolExecutorInvoker.Invoke: real cascade permission check + real tool execution,
+// ToolExecutorInvoker.Invoke: real policy permission check + real tool execution,
 // not mocks. Validates that the invoke path is equivalent to firtal-gateway.
 
 import (
@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -41,47 +42,27 @@ func createInvokerTestAgent(t *testing.T, name string) pgtype.UUID {
 	return agentID
 }
 
-// grantCascadeTool upserts a cerebro_runtime_tool row (enabled) and a user
-// grant for runtimeAccountTestUserID, which is what ResolveCerebroAgentToolAccess
-// checks when the acting user is not workspace owner/admin.
-func grantCascadeTool(t *testing.T, toolName string) {
+func setInvokerToolPolicy(t *testing.T, agentID pgtype.UUID, toolName string, setting toolpolicy.Setting) {
 	t.Helper()
-	ctx := context.Background()
-	pool := runtimeAccountTestPool
-	rid := runtimeAccountTestRuntimeID
-	uid := runtimeAccountTestUserID
-
-	// Upsert the tool registration on the runtime (source='cloud', enabled).
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO cerebro_runtime_tool (runtime_id, tool_name, source, enabled)
-		VALUES ($1, $2, 'cloud', true)
-		ON CONFLICT (runtime_id, tool_name, mcp_server_name) DO UPDATE SET enabled = true
-	`, rid, toolName); err != nil {
-		t.Fatalf("upsert cerebro_runtime_tool %q: %v", toolName, err)
-	}
-	// Grant the tool to the test user directly.
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO cerebro_runtime_tool_user_grant (runtime_id, tool_name, user_id)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (runtime_id, tool_name, user_id) DO NOTHING
-	`, rid, toolName, uid); err != nil {
-		t.Fatalf("insert user grant for %q: %v", toolName, err)
+	if _, err := runtimeAccountTestPool.Exec(context.Background(), `
+		INSERT INTO cerebro_tool_policy (workspace_id, tool_key, layer, subject_id, setting)
+		VALUES ($1, $2, 'agent', $3, $4)
+		ON CONFLICT (workspace_id, tool_key, layer, subject_id, resource_pattern)
+		DO UPDATE SET setting = EXCLUDED.setting
+	`, runtimeAccountTestWSID, toolName, agentID, string(setting)); err != nil {
+		t.Fatalf("set tool policy %q: %v", toolName, err)
 	}
 	t.Cleanup(func() {
-		pool.Exec(context.Background(), `
-			DELETE FROM cerebro_runtime_tool_user_grant
-			WHERE runtime_id = $1 AND tool_name = $2 AND user_id = $3
-		`, rid, toolName, uid)
-		pool.Exec(context.Background(), `
-			DELETE FROM cerebro_runtime_tool
-			WHERE runtime_id = $1 AND tool_name = $2
-		`, rid, toolName)
+		runtimeAccountTestPool.Exec(context.Background(), `
+			DELETE FROM cerebro_tool_policy
+			WHERE workspace_id = $1 AND tool_key = $2 AND layer = 'agent' AND subject_id = $3
+		`, runtimeAccountTestWSID, toolName, agentID)
 	})
 }
 
 // TestToolExecutorInvoker_ListIssues_RealDB verifies that Invoke runs the real
 // list_issues tool against the DB when the cascade grants allow it.
-// Sets up cerebro_runtime_tool + user grant (the production cascade path).
+// Sets up the canonical tool-policy decision used by the production path.
 func TestToolExecutorInvoker_ListIssues_RealDB(t *testing.T) {
 	if runtimeAccountTestPool == nil {
 		t.Skip("database not available")
@@ -89,11 +70,13 @@ func TestToolExecutorInvoker_ListIssues_RealDB(t *testing.T) {
 	ctx := context.Background()
 
 	agentID := createInvokerTestAgent(t, "larry-invoke-list-issues")
-	grantCascadeTool(t, "list_issues")
+	setInvokerToolPolicy(t, agentID, "list_issues", toolpolicy.SettingAllow)
 
 	invoker := &ToolExecutorInvoker{
 		Queries:        db.New(runtimeAccountTestPool),
 		CerebroQueries: cerebrodb.New(runtimeAccountTestPool),
+		Pool:           runtimeAccountTestPool,
+		Policy:         toolpolicy.NewStore(runtimeAccountTestPool),
 	}
 
 	result, err := invoker.Invoke(
@@ -125,12 +108,15 @@ func TestToolExecutorInvoker_ToolNotGranted_ReturnsErrToolNotPermitted(t *testin
 	}
 	ctx := context.Background()
 
-	// Agent with NO grants (no cerebro_runtime_tool and no agent_tool_grant).
+	// Agent with an explicit canonical policy denial.
 	agentID := createInvokerTestAgent(t, "larry-invoke-no-grant")
+	setInvokerToolPolicy(t, agentID, "list_issues", toolpolicy.SettingDeny)
 
 	invoker := &ToolExecutorInvoker{
 		Queries:        db.New(runtimeAccountTestPool),
 		CerebroQueries: cerebrodb.New(runtimeAccountTestPool),
+		Pool:           runtimeAccountTestPool,
+		Policy:         toolpolicy.NewStore(runtimeAccountTestPool),
 	}
 
 	_, err := invoker.Invoke(

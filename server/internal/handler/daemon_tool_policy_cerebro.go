@@ -12,17 +12,8 @@ package handler
 // on Ask, raises an approval in the SAME inbox the gateway gate uses — one
 // model, not a parallel one.
 //
-// Staged rollout (the security requirement) is driven by WORKSPACE SETTINGS —
-// the cerebro feature-flag model, the same place cerebro_approval_gate lives —
-// NOT an environment variable, so an admin stages it from Settings → Features
-// with no daemon or server restart (Jesper's requirement, TECH-3173):
-//   - cerebro_local_tool_policy         off → ModeOff (default, no behaviour change)
-//   - cerebro_local_tool_policy on, ..._enforce off → ModeObserve (resolve + log, allow)
-//   - cerebro_local_tool_policy on, ..._enforce on  → ModeEnforce (act on the verdict)
-// The pure off/observe/enforce decision lives in
-// server/internal/cerebro/localtoolpolicy; this file is only the IO seam
-// (read the settings stage, resolve, raise the inbox ask), mirroring
-// repo_approval_cerebro.go.
+// Local-runtime enforcement is always on. The former rollout flags were
+// removed once all supported adapters had contract coverage (FIR-3401).
 
 import (
 	"context"
@@ -41,6 +32,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/permissions"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -52,6 +44,7 @@ import (
 // informational context attached to the inbox ask, never part of the decision.
 type daemonToolPolicyResolveRequest struct {
 	AgentID         string         `json:"agent_id"`
+	TaskID          string         `json:"task_id"`
 	ToolName        string         `json:"tool_name"`
 	ResourcePattern string         `json:"resource_pattern"`
 	Args            map[string]any `json:"args"`
@@ -63,7 +56,7 @@ type daemonToolPolicyResolveRequest struct {
 // POST /api/daemon/workspaces/{workspaceId}/tool-policy/resolve
 //
 // Response: { allowed, decision, mode, enforced, would_block, observed, reason,
-// approval_id? }. On an enforce-stage Ask the daemon long-polls
+// approval_id? }. On Ask the daemon long-polls
 // PollDaemonToolPolicyApproval with approval_id until it reaches a terminal
 // status, exactly as the repo-checkout flow does.
 func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request) {
@@ -81,26 +74,17 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "tool_name is required")
 		return
 	}
+	if strings.TrimSpace(req.TaskID) == "" {
+		writeError(w, http.StatusBadRequest, "task_id is required")
+		return
+	}
 
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
 		return
 	}
 
-	// Rollout stage comes from workspace settings (the cerebro feature-flag
-	// model), resolved server-side — an admin stages off → observe → enforce
-	// from Settings → Features with no daemon or server restart (TECH-3173).
-	mode := h.localToolPolicyMode(r.Context(), wsUUID)
-
-	// Off is the default and the fast path: never resolve, never log, never
-	// touch the inbox — a local CLI spawns exactly as it did before this feature.
-	if mode == localtoolpolicy.ModeOff {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"allowed": true, "decision": string(localtoolpolicy.KindAllow),
-			"mode": string(mode), "enforced": false, "would_block": false,
-		})
-		return
-	}
+	const mode = "enforce"
 
 	agentID := pgtype.UUID{}
 	if req.AgentID != "" {
@@ -111,29 +95,38 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 		}
 		agentID = parsed
 	}
+	taskID, err := util.ParseUUID(req.TaskID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid task_id")
+		return
+	}
+	// CEREBRO-PATCH(daemon-tool-policy-mandate-key): FIR-3403 — the mandate snapshots
+	// canonical capability keys (built-ins as "tools:<Name>"); match under the same
+	// PolicyToolKey the policy-chain resolve below uses, not the bare hook tool name.
+	if err := taskmandate.NewStoreDB(h.DB).Authorize(r.Context(), taskID, wsUUID, agentID, claudehook.PolicyToolKey(req.ToolName)); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"allowed": false, "decision": string(localtoolpolicy.KindDeny),
+			"mode": mode, "enforced": true, "would_block": true,
+			"reason": "task mandate denied the call",
+		})
+		return
+	}
 
 	// The chain's Runtime and User/Group layers key on the agent's runtime and
 	// owner. Resolve them server-side from the agent row (never trust the
-	// caller), exactly as guardToolCallViaPolicy does. A lookup failure fails
-	// closed under enforce so a missing user-ceiling can't under-enforce; under
-	// observe we log and resolve with what we have, since a dry run must never
-	// stall work.
+	// caller), exactly as guardToolCallViaPolicy does. Lookup failure fails closed.
 	var runtimeID, ownerID pgtype.UUID
 	if agentID.Valid {
 		agent, err := h.Queries.GetAgent(r.Context(), agentID)
 		if err != nil {
-			if mode == localtoolpolicy.ModeEnforce {
-				slog.Warn("local tool-policy: agent lookup failed — failing closed",
-					"workspace_id", workspaceID, "agent_id", req.AgentID, "tool", req.ToolName, "error", err)
-				writeJSON(w, http.StatusOK, map[string]any{
-					"allowed": false, "decision": string(localtoolpolicy.KindDeny),
-					"mode": string(mode), "enforced": true, "would_block": true,
-					"reason": "agent lookup failed",
-				})
-				return
-			}
-			slog.Warn("local tool-policy observe: agent lookup failed — resolving without runtime/owner",
+			slog.Warn("local tool-policy: agent lookup failed — failing closed",
 				"workspace_id", workspaceID, "agent_id", req.AgentID, "tool", req.ToolName, "error", err)
+			writeJSON(w, http.StatusOK, map[string]any{
+				"allowed": false, "decision": string(localtoolpolicy.KindDeny),
+				"mode": mode, "enforced": true, "would_block": true,
+				"reason": "agent lookup failed",
+			})
+			return
 		} else {
 			runtimeID = agent.RuntimeID
 			ownerID = agent.OwnerID
@@ -145,7 +138,7 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	// screen authors a built-in-tool Deny under "tools:<Name>" (claudehook
 	// .PolicyToolKey); a bare-name lookup never matched it, so a Deny on Bash/
 	// WebFetch/Edit silently let the tool through on local runtimes.
-	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
+	store := toolpolicy.NewStoreDB(h.DB, h.CerebroQueries)
 	toolKey := claudehook.PolicyToolKey(req.ToolName)
 	// Capability-wide row (resource_pattern "") — the shape an "All tools" Deny is
 	// written under, and the same shape the gateway gate resolves. A concrete
@@ -216,18 +209,14 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	if connTool := connectionToolFromName(req.ToolName); connTool != "" {
 		connEff, resolvedConn, cErr := store.ConnectionToolEffective(r.Context(), wsUUID, runtimeID, agentID, ownerID, connTool)
 		if cErr != nil {
-			if mode == localtoolpolicy.ModeEnforce {
-				slog.Warn("local tool-policy: connection resolve failed — failing closed",
-					"workspace_id", workspaceID, "agent_id", req.AgentID, "tool", req.ToolName, "error", cErr)
-				writeJSON(w, http.StatusOK, map[string]any{
-					"allowed": false, "decision": string(localtoolpolicy.KindDeny),
-					"mode": string(mode), "enforced": true, "would_block": true,
-					"reason": "connection permission check failed",
-				})
-				return
-			}
-			slog.Warn("local tool-policy observe: connection resolve failed — keeping base verdict",
+			slog.Warn("local tool-policy: connection resolve failed — failing closed",
 				"workspace_id", workspaceID, "agent_id", req.AgentID, "tool", req.ToolName, "error", cErr)
+			writeJSON(w, http.StatusOK, map[string]any{
+				"allowed": false, "decision": string(localtoolpolicy.KindDeny),
+				"mode": mode, "enforced": true, "would_block": true,
+				"reason": "connection permission check failed",
+			})
+			return
 		} else {
 			// Record the deciding connection name so the ask context can surface
 			// "which integration" even when the connection verdict does not tighten
@@ -239,7 +228,7 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	decision := localtoolpolicy.Decide(mode, eff)
+	decision := localtoolpolicy.Decide(eff)
 
 	// FIR-3091 punkt 8 fase 3: usage log — one row per ENFORCED local-CLI
 	// verdict, so the permission detail page can show every time the tool's
@@ -271,7 +260,7 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Enforce-stage Ask: raise (or rejoin) one shared-inbox approval and return
+	// Ask: raise (or rejoin) one shared-inbox approval and return
 	// its decision + id so the daemon can long-poll. Gate off while enforce is on
 	// is a misconfiguration — fail closed rather than silently allow.
 	if decision.NeedsApproval() {
@@ -305,18 +294,10 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Observe dry run: surface what an enforce would have blocked so an operator
-	// can watch a machine's would-block stream before flipping to enforce.
-	if mode == localtoolpolicy.ModeObserve && decision.WouldBlock {
-		slog.Info("local tool-policy OBSERVE would-block",
-			"workspace_id", workspaceID, "agent_id", req.AgentID, "tool", req.ToolName,
-			"resource", req.ResourcePattern, "setting", string(eff.Setting), "reason", eff.Reason)
-	}
-
 	writeJSON(w, http.StatusOK, map[string]any{
 		"allowed":     decision.Allowed,
 		"decision":    string(decision.Kind),
-		"mode":        string(mode),
+		"mode":        mode,
 		"enforced":    decision.Enforced,
 		"would_block": decision.WouldBlock,
 		"observed":    string(eff.Setting),
@@ -340,7 +321,7 @@ const agentBrowserToolKey = "tools:agent-browser"
 // Only an explicit allow/ask at some layer opens it; deny — or no grant at all —
 // keeps it shut. A resolve error fails closed (sealed), never open.
 func (h *Handler) resolveAgentBrowserAllowed(ctx context.Context, wsID, runtimeID, agentID, ownerID pgtype.UUID) bool {
-	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
+	store := toolpolicy.NewStoreDB(h.DB, h.CerebroQueries)
 	eff, err := store.Resolve(ctx, toolpolicy.Query{
 		WorkspaceID: wsID,
 		ToolKey:     agentBrowserToolKey,
@@ -406,31 +387,6 @@ func connectionToolFromName(toolName string) string {
 		return ""
 	}
 	return tool
-}
-
-// localToolPolicyMode resolves the staged-rollout Mode for a workspace from the
-// cerebro feature-flag settings (TECH-3173) — NOT an env var, so the stage is
-// changed from Settings → Features with no restart. cerebro_local_tool_policy is
-// the on/off master; cerebro_local_tool_policy_enforce flips observe→enforce once
-// on. Both default OFF, and a workspace-flag lookup failure folds to OFF, so the
-// endpoint is fail-safe to "no behaviour change".
-func (h *Handler) localToolPolicyMode(ctx context.Context, wsID pgtype.UUID) localtoolpolicy.Mode {
-	rows, err := h.CerebroQueries.ListCerebroWorkspaceFeatureFlags(ctx, wsID)
-	if err != nil {
-		slog.Warn("local tool-policy: workspace flag lookup failed — staying OFF",
-			"workspace_id", util.UUIDToString(wsID), "error", err)
-		return localtoolpolicy.ModeOff
-	}
-	var enabled, enforce bool
-	for _, row := range rows {
-		switch row.FlagKey {
-		case "cerebro_local_tool_policy":
-			enabled = row.Enabled
-		case "cerebro_local_tool_policy_enforce":
-			enforce = row.Enabled
-		}
-	}
-	return localtoolpolicy.ModeFromFlags(enabled, enforce)
 }
 
 // daemonMemberOverrideEnabled reports whether cerebro_member_override is on for

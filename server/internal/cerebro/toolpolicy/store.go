@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -25,7 +27,7 @@ import (
 
 // Store reads and writes the explicit per-layer tool settings.
 type Store struct {
-	pool *pgxpool.Pool
+	pool roleQueryer
 	q    *cerebrodb.Queries
 	// vaults, when set, lets the credentials table surface Agent Vault boxes as
 	// grantable agentvault-vault:<name> rows (FIR-1739). Optional and nil-safe:
@@ -33,9 +35,21 @@ type Store struct {
 	vaults agentvault.VaultLister
 }
 
+type roleQueryer interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 // NewStore constructs a Store backed by the given pool.
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool, q: cerebrodb.New(pool)}
+}
+
+// NewStoreDB preserves role-binding resolution for callers that already own a
+// generated query set plus the handler's database interface.
+func NewStoreDB(db roleQueryer, q *cerebrodb.Queries) *Store {
+	return &Store{pool: db, q: q}
 }
 
 // WithVaultLister wires an Agent Vault vault lister so the credentials tab also
@@ -51,14 +65,15 @@ func (s *Store) WithVaultLister(v agentvault.VaultLister) *Store {
 	return s
 }
 
-// NewStoreFromQueries constructs a Store for the resolution path only — Resolve,
-// ListForSubject, Set, Clear, and group expansion all need just the generated
-// queries. The Table read model additionally needs a *pgxpool.Pool for its
-// custom join query, so callers that render the admin table must use NewStore;
-// the runtime enforcement gate, which only resolves, uses this lighter
-// constructor and never touches Table.
+// NewStoreFromQueries constructs a fully connected Store from an existing
+// generated query set. Queries retains the same DBTX adapter used to create it,
+// so custom role-binding reads must use that adapter too; otherwise callers of
+// this constructor would silently resolve without active roles.
 func NewStoreFromQueries(q *cerebrodb.Queries) *Store {
-	return &Store{q: q}
+	if q == nil {
+		return &Store{}
+	}
+	return &Store{pool: q.Database(), q: q}
 }
 
 // ErrUnknownLayer / ErrUnknownSetting guard the authoring API against values the
@@ -294,7 +309,59 @@ func (s *Store) loadInput(ctx context.Context, in Query) (Input, error) {
 	if len(groupSettings) > 0 {
 		input.Settings[LayerGroup] = CombineGroups(groupSettings...)
 	}
+	roleSettings, err := s.activeRoleSettings(ctx, in)
+	if err != nil {
+		return Input{}, err
+	}
+	if len(roleSettings) > 0 {
+		roleSetting := CombineGroups(roleSettings...)
+		if existing, ok := input.Settings[LayerAgent]; ok {
+			// A role grant folds into the agent layer, but it may only TIGHTEN an
+			// explicit agent-layer choice, never loosen it. CombineGroups is most-
+			// permissive (allow<ask<deny), so combining a role `allow` with an
+			// explicit agent `deny` here silently erased the deny — a role could
+			// cancel an administrator's "Deny this tool for this agent" (FIR-3403).
+			// Where the agent has no explicit row the role setting applies verbatim
+			// (this branch is skipped), so a role still grants access as intended.
+			roleSetting = MoreRestrictive(existing, roleSetting)
+		}
+		input.Settings[LayerAgent] = roleSetting
+	}
 	return input, nil
+}
+
+// activeRoleSettings expands unexpired member/agent bindings into the policy
+// decision. An expired binding is filtered by the database clock on every
+// resolve, so access disappears at the call itself without a cleanup worker.
+func (s *Store) activeRoleSettings(ctx context.Context, in Query) ([]Setting, error) {
+	if s == nil || s.pool == nil {
+		return nil, errors.New("toolpolicy: role binding store is not configured")
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT r.permissions -> $4 ->> 'setting'
+		FROM cerebro_role_assignment b
+		JOIN cerebro_role r ON r.id=b.role_id
+		WHERE r.workspace_id=$1
+		  AND (b.expires_at IS NULL OR b.expires_at > now())
+		  AND ((b.subject_type='agent' AND b.subject_id=$2)
+		    OR (b.subject_type='member' AND b.subject_id=$3))
+		  AND r.permissions ? $4`, in.WorkspaceID, in.AgentID, in.UserID, in.ToolKey)
+	if err != nil {
+		return nil, fmt.Errorf("toolpolicy: load role bindings: %w", err)
+	}
+	defer rows.Close()
+	var out []Setting
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		setting := Setting(raw)
+		if validSetting(setting) && setting != SettingInherit {
+			out = append(out, setting)
+		}
+	}
+	return out, rows.Err()
 }
 
 // resolveGroupIDs returns the group ids that enter the chain at LayerGroup.

@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/capabilityregistry"
-	"github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 )
 
 // pool is the shared db pool. Tests skip cleanly when DATABASE_URL is unset so
@@ -34,7 +33,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// fakeReporter / fakeUpserter let the non-DB unit test assert the exact wire
+// fakeReporter lets the non-DB unit test assert the exact wire
 // shape the scanner produces without standing up Postgres.
 type fakeReporter struct {
 	gotWorkspace pgtype.UUID
@@ -49,15 +48,6 @@ func (f *fakeReporter) Report(_ context.Context, ws pgtype.UUID, reporter capabi
 	return nil, nil
 }
 
-type fakeUpserter struct {
-	got []runtimetools.UpsertToolInput
-}
-
-func (f *fakeUpserter) UpsertTool(_ context.Context, in runtimetools.UpsertToolInput) (runtimetools.Tool, error) {
-	f.got = append(f.got, in)
-	return runtimetools.Tool{}, nil
-}
-
 func mustUUID(t *testing.T) pgtype.UUID {
 	t.Helper()
 	var u pgtype.UUID
@@ -69,12 +59,10 @@ func mustUUID(t *testing.T) pgtype.UUID {
 
 // TestScanWireShape pins the contract the scanner emits: capability key is the
 // BARE tool name (so it binds to the gateway's policy enforcement, which
-// resolves by tool name), category "tools", source "scan", and the legacy
-// inventory upsert carries source=cloud with a last_scanned_at.
+// resolves by tool name), category "tools", and source "scan".
 func TestScanWireShape(t *testing.T) {
 	rep := &fakeReporter{}
-	ups := &fakeUpserter{}
-	s := New(rep, ups, []ToolMeta{
+	s := New(rep, []ToolMeta{
 		{Name: "add_comment", Description: "Post a comment."},
 		{Name: "", Description: "skipped — blank name"},
 		{Name: "web_fetch", Description: "Fetch a URL."},
@@ -99,18 +87,6 @@ func TestScanWireShape(t *testing.T) {
 	if first.Category != "tools" || first.Source != "scan" {
 		t.Errorf("cap category/source = %q/%q, want tools/scan", first.Category, first.Source)
 	}
-	if len(ups.got) != 2 {
-		t.Fatalf("upserted %d runtime tools, want 2", len(ups.got))
-	}
-	if ups.got[0].Source != runtimetools.SourceCloud {
-		t.Errorf("runtime tool source = %q, want cloud", ups.got[0].Source)
-	}
-	if !ups.got[0].LastScannedAt.Valid {
-		t.Error("runtime tool LastScannedAt not set")
-	}
-	if ups.got[0].Enabled != nil {
-		t.Error("Enabled should be nil so a re-scan preserves admin overrides")
-	}
 }
 
 func TestScanNilAndInvalid(t *testing.T) {
@@ -118,16 +94,15 @@ func TestScanNilAndInvalid(t *testing.T) {
 	if err := s.Scan(context.Background(), pgtype.UUID{}, pgtype.UUID{}); err == nil {
 		t.Error("nil scanner should error")
 	}
-	good := New(&fakeReporter{}, &fakeUpserter{}, []ToolMeta{{Name: "x"}})
+	good := New(&fakeReporter{}, []ToolMeta{{Name: "x"}})
 	if err := good.Scan(context.Background(), pgtype.UUID{}, pgtype.UUID{}); err == nil {
 		t.Error("invalid (zero) ids should error")
 	}
 }
 
-// TestScanPopulatesBothInventories is the integration test: a real cloud-runtime
-// scan must land rows in cerebro_capability (the unified table's source) AND
-// cerebro_runtime_tool, and be idempotent.
-func TestScanPopulatesBothInventories(t *testing.T) {
+// TestScanPopulatesCapabilityRegister proves a real cloud-runtime scan lands
+// in the canonical register and is idempotent.
+func TestScanPopulatesCapabilityRegister(t *testing.T) {
 	if pool == nil {
 		t.Skip("DATABASE_URL not set")
 	}
@@ -157,7 +132,7 @@ func TestScanPopulatesBothInventories(t *testing.T) {
 		{Name: "scan_tool_alpha", Description: "alpha"},
 		{Name: "scan_tool_beta", Description: "beta"},
 	}
-	s := New(capabilityregistry.New(pool), runtimetools.New(pool), builtins)
+	s := New(capabilityregistry.New(pool), builtins)
 
 	// Two passes prove idempotency (no duplicate capability rows).
 	for i := 0; i < 2; i++ {
@@ -177,18 +152,5 @@ func TestScanPopulatesBothInventories(t *testing.T) {
 	}
 	if capCount != 2 {
 		t.Fatalf("cerebro_capability rows = %d, want 2 (idempotent)", capCount)
-	}
-
-	var rtToolCount int
-	if err := pool.QueryRow(ctx,
-		`SELECT count(*) FROM cerebro_runtime_tool
-		 WHERE runtime_id = $1 AND source = 'cloud' AND last_scanned_at IS NOT NULL
-		   AND tool_name = ANY($2)`,
-		rtID, keys,
-	).Scan(&rtToolCount); err != nil {
-		t.Fatalf("count runtime tools: %v", err)
-	}
-	if rtToolCount != 2 {
-		t.Fatalf("cerebro_runtime_tool rows = %d, want 2 with last_scanned_at", rtToolCount)
 	}
 }

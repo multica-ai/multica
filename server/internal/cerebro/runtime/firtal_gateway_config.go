@@ -80,12 +80,6 @@ type FirtalGatewayRuntimeConfig struct {
 	WorkspaceIDs    []pgtype.UUID
 	EntryMode       string
 
-	// ToolsEnabledAgentIDs is loaded from MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS
-	// for backward compatibility only. Tool-loop gating uses the runtime tools
-	// cascade (see FirtalGatewayExecutor.agentHasCallableTools); this list is
-	// no longer consulted at execution time (FIR-2761).
-	ToolsEnabledAgentIDs []pgtype.UUID
-
 	// MaxToolRounds overrides firtalGatewayMaxToolRounds when > 0. Loaded from
 	// MULTICA_SERVER_FIRTAL_GATEWAY_MAX_TOOL_ITERATIONS.
 	MaxToolRounds int
@@ -118,20 +112,6 @@ func (c FirtalGatewayRuntimeConfig) costSavingHoldoutPct() int {
 		return 100
 	}
 	return pct
-}
-
-// ToolsEnabledForAgent reports whether agentID appears in ToolsEnabledAgentIDs.
-// Deprecated for execution: kept for config parsing tests only.
-func (c FirtalGatewayRuntimeConfig) ToolsEnabledForAgent(agentID pgtype.UUID) bool {
-	if !agentID.Valid {
-		return false
-	}
-	for _, id := range c.ToolsEnabledAgentIDs {
-		if id.Valid && id.Bytes == agentID.Bytes {
-			return true
-		}
-	}
-	return false
 }
 
 type WorkspaceFirtalGatewaySettings struct {
@@ -242,16 +222,6 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 				return FirtalGatewayRuntimeConfig{}, fmt.Errorf("invalid MULTICA_SERVER_FIRTAL_GATEWAY_WORKSPACE_IDS value %q: %w", part, err)
 			}
 			cfg.WorkspaceIDs = append(cfg.WorkspaceIDs, id)
-		}
-	}
-
-	if raw := strings.TrimSpace(os.Getenv("MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS")); raw != "" {
-		for _, part := range splitCSV(raw) {
-			id, err := util.ParseUUID(part)
-			if err != nil {
-				return FirtalGatewayRuntimeConfig{}, fmt.Errorf("invalid MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS value %q: %w", part, err)
-			}
-			cfg.ToolsEnabledAgentIDs = append(cfg.ToolsEnabledAgentIDs, id)
 		}
 	}
 

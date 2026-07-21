@@ -265,6 +265,100 @@ func TestConstraintInvariants(t *testing.T) {
 	})
 }
 
+// TestRetiredAccessTablesAbsentFromLiveSchema is the FIR-3403 schema guard.
+// CEREBRO-PATCH(retired-access-tables-schema-guard): closes the hole the static
+// legacy-scan cannot see. The retired access stores (cerebro_runtime_tool,
+// agent_tool_grant, cerebro_agent_pass) must not exist in the schema a fresh DB
+// ends on after ALL migrations run. The Go/SQL source scan
+// (legacy_runtime_tools_regression_test.go) deliberately skips server/migrations
+// — fresh DBs legitimately CREATE these tables before a later migration DROPs
+// them — so a NEW migration that recreated one would pass that scan green. This
+// test asserts the end-state of the live schema instead, so a resurrecting
+// migration fails loudly.
+func TestRetiredAccessTablesAbsentFromLiveSchema(t *testing.T) {
+	ctx := context.Background()
+	testPool := newMigratedTestDB(t)
+
+	retired := []string{"cerebro_runtime_tool", "agent_tool_grant", "cerebro_agent_pass"}
+	for _, table := range retired {
+		var reg *string
+		if err := testPool.QueryRow(ctx, `SELECT to_regclass($1)::text`, "public."+table).Scan(&reg); err != nil {
+			t.Fatalf("to_regclass(%q): %v", table, err)
+		}
+		if reg != nil {
+			t.Errorf("retired table %q exists in the migrated schema (%s); a migration resurrected it", table, *reg)
+		}
+	}
+}
+
+// newMigratedTestDB spins up a throwaway database, applies every up migration to
+// it, and returns a pool connected to it. The database is dropped on cleanup.
+// Skips (does not fail) when no database is reachable, matching the other
+// migration tests in this file.
+func newMigratedTestDB(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	ctx := context.Background()
+
+	baseURL := os.Getenv("DATABASE_URL")
+	if baseURL == "" {
+		baseURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		t.Skipf("DATABASE_URL is not parseable: %v", err)
+	}
+	probe, err := pgxpool.New(ctx, baseURL)
+	if err != nil {
+		t.Skipf("Skipping: could not open pool: %v", err)
+	}
+	if err := probe.Ping(ctx); err != nil {
+		probe.Close()
+		t.Skipf("Skipping: database not reachable: %v", err)
+	}
+	probe.Close()
+
+	adminParsed := *parsed
+	adminParsed.Path = "/postgres"
+	adminPool, err := pgxpool.New(ctx, adminParsed.String())
+	if err != nil {
+		t.Skipf("Skipping: could not open admin pool: %v", err)
+	}
+	t.Cleanup(adminPool.Close)
+
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	testDBName := "multica_schemaguard_" + hex.EncodeToString(suffix)
+	if _, err := adminPool.Exec(ctx, fmt.Sprintf("CREATE DATABASE %s", testDBName)); err != nil {
+		t.Fatalf("create test database: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = adminPool.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", testDBName))
+	})
+
+	testParsed := *parsed
+	testParsed.Path = "/" + testDBName
+	testPool, err := pgxpool.New(ctx, testParsed.String())
+	if err != nil {
+		t.Fatalf("connect to test database: %v", err)
+	}
+	t.Cleanup(testPool.Close)
+
+	files, err := filepath.Glob(filepath.Join(findMigrationsDir(t), "*.up.sql"))
+	if err != nil {
+		t.Fatalf("glob migrations: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("no migrations found")
+	}
+	sort.Strings(files)
+	if err := applyAll(ctx, testPool, files); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+	return testPool
+}
+
 func findMigrationsDir(t *testing.T) string {
 	t.Helper()
 	candidates := []string{

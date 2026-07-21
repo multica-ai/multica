@@ -31,6 +31,7 @@ import {
 
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { getAgentCapabilities } from "@multica/cerebro-agent-capabilities";
 
 import {
   getPermissionChanges,
@@ -46,6 +47,7 @@ import {
 import type {
   PermissionAuditCell,
   PermissionAuditEffectiveCell,
+  PermissionAuditResolved,
   PermissionAuditRow,
 } from "./permission-audit";
 import { useHolderDirectory } from "./use-holder-directory";
@@ -223,7 +225,7 @@ function EffectiveCellList({
             </div>
             <DecisionBadge setting={cell.setting} />
             <div className="mt-1 text-[11px] text-muted-foreground">
-              {cell.source}
+              Why: {cell.source}
             </div>
           </div>
         ),
@@ -284,7 +286,7 @@ function PermissionAuditMatrix({ rows }: { rows: PermissionAuditRow[] }) {
                 <TableCell className="sticky left-0 z-10 bg-card align-top whitespace-normal">
                   <div className="font-medium">{row.user.name}</div>
                   <div className="mt-1 text-xs capitalize text-muted-foreground">
-                    {row.user.role}
+                    {row.user.role} · {row.severity} severity
                   </div>
                 </TableCell>
                 {AUDIT_LAYERS.map(([, key]) => (
@@ -318,7 +320,7 @@ function PermissionAuditMatrix({ rows }: { rows: PermissionAuditRow[] }) {
                   {row.user.name}
                 </span>
                 <span className="block text-xs capitalize text-muted-foreground">
-                  {row.user.role}
+                  {row.user.role} · {row.severity} severity
                 </span>
               </div>
               <span className="sr-only">
@@ -409,27 +411,45 @@ export function PermissionDetailPage({
         context.id,
       ],
       queryFn: async () => {
-        const rows = await fetchToolPolicyTable(wsId, {
-          userId: context.userId,
-          agentId: context.agentId,
-          runtimeId: context.runtimeId,
-        });
+        const [rows, capabilities] = await Promise.all([
+          fetchToolPolicyTable(wsId, {
+            userId: context.userId,
+            agentId: context.agentId,
+            runtimeId: context.runtimeId,
+          }),
+          context.agentId
+            ? getAgentCapabilities(context.agentId).catch(() => null)
+            : Promise.resolve(null),
+        ]);
         const row = rows.find((candidate) => candidate.tool_key === toolKey);
         if (!row) return null;
+        const normalizedToolKey = toolKey.toLocaleLowerCase();
+        const capabilityTool = capabilities?.tools.find(
+          (tool) =>
+            tool.key.toLocaleLowerCase() === normalizedToolKey ||
+            tool.title.toLocaleLowerCase() === normalizedToolKey,
+        );
+        const observedTool = capabilities?.observed_access.tools.find(
+          (tool) => tool.name.toLocaleLowerCase() === normalizedToolKey,
+        );
+        const setting = capabilityTool?.permission || row.effective.setting;
         return {
-          setting: row.effective.setting,
-          decidedBy: row.effective.decided_by,
+          setting,
+          policySetting: row.effective.setting,
+          availabilityLevel: capabilityTool?.availability.level,
+          governanceSeverity: observedTool?.drift ? "critical" : undefined,
+          decidedBy:
+            capabilityTool && setting !== row.effective.setting
+              ? "availability"
+              : row.effective.decided_by,
           cappedBy: row.effective.capped_by,
-        };
+        } satisfies PermissionAuditResolved;
       },
       enabled: enabled && Boolean(wsId && toolKey),
     })),
   });
   const resolvedByContext = useMemo(() => {
-    const result = new Map<
-      string,
-      { setting: string; decidedBy: string; cappedBy: string }
-    >();
+    const result = new Map<string, PermissionAuditResolved>();
     contexts.forEach((context, index) => {
       const resolved = resolvedQueries[index]?.data;
       if (resolved) result.set(context.id, resolved);
@@ -539,10 +559,11 @@ export function PermissionDetailPage({
             <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <h2 id="permission-audit-heading" className="font-semibold">
-                  Permission audit
+                  Why Access and Permission audit
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  See every permission that applies to each user.
+                  See the effective answer and why it applies, ordered by live
+                  access risk, runtime evidence, and governance findings.
                 </p>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

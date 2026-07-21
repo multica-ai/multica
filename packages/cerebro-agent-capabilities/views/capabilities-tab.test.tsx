@@ -280,6 +280,61 @@ describe("CerebroCapabilitiesTab", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders the tool availability summary when the runtime proof is known (FIR-3398)", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      agent_id: "agent-1",
+      name: "Tine",
+      model: "claude",
+      tools: [
+        {
+          key: "add_comment",
+          permission: "allow",
+          availability: { level: "verified", proven: true, reason: "seen on runtime" },
+        },
+        {
+          key: "gogcli_sheets_write",
+          permission: "allow",
+          availability: { level: "declared", proven: false, reason: "not seen on runtime" },
+        },
+      ],
+      availability: {
+        runtime_type: "firtal_gateway",
+        status: "known",
+        verified: 1,
+        unproven: 1,
+      },
+    });
+
+    renderTab();
+
+    // The headline reports proved vs declared against the runtime.
+    expect(
+      await screen.findByText(/1 of 2 proved on the firtal_gateway runtime/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/1 only declared/i)).toBeInTheDocument();
+    // Both tools still render as pills regardless of proof.
+    expect(screen.getByText("add_comment")).toBeInTheDocument();
+    expect(screen.getByText("gogcli_sheets_write")).toBeInTheDocument();
+  });
+
+  it("shows availability as unknown rather than implying nothing works (FIR-3398)", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      agent_id: "agent-1",
+      name: "Tine",
+      model: "claude",
+      tools: [{ key: "add_comment", permission: "allow" }],
+      // No availability summary → schema default status "unknown".
+    });
+
+    renderTab();
+
+    expect(
+      await screen.findByText(
+        /runtime availability unknown — tools are shown as granted, not as proved/i,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("survives a malformed response without throwing (fallback to empty)", async () => {
     // Missing fields, wrong types, null arrays — every defense at once.
     mockCerebroRequest.mockResolvedValue({

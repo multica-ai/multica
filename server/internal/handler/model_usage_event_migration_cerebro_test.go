@@ -69,7 +69,6 @@ func TestModelUsageConsumersReadCompatibilityRollup(t *testing.T) {
 	files := []string{
 		"../../pkg/db/queries/task_usage.sql",
 		"../../pkg/db/queries/runtime_usage.sql",
-		"../cerebro/queries/agent_pass.sql",
 		"../cerebro/queries/chat_message_cost.sql",
 		"../cerebro/queries/comment_cost.sql",
 		"../cerebro/queries/dashboard.sql",

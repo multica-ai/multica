@@ -3848,24 +3848,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			agentEnv[k] = v
 		}
 	}
-	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — wire Claude Code's
-	// PreToolUse hook to the local tool-policy resolve IPC when the workspace
-	// has opted in (claim carries the resolved stage). No-op for the default
-	// "off" stage and for non-Claude providers.
+	// CEREBRO-PATCH(daemon-tool-policy-ipc): FIR-3401 — wire every supported
+	// local provider to the mandatory tool-policy resolve IPC. Claude's combined
+	// settings document must retain the task's fast-mode choice.
 	speedMode := speedModeForTask(task)
-	toolPolicySpawn, tperr := d.prepareToolPolicySpawn(
-		provider,
-		task.LocalToolPolicyStage,
-		env.WorkDir,
-		provider == "claude" && speedMode == "fast",
-	)
+	toolPolicySpawn, tperr := d.prepareToolPolicySpawn(provider, env.WorkDir, provider == "claude" && speedMode == "fast")
 	if tperr != nil {
 		return TaskResult{}, fmt.Errorf("tool-policy prep: %w", tperr)
 	}
-	if toolPolicySpawn != nil {
-		for k, v := range toolPolicySpawn.Env {
-			agentEnv[k] = v
-		}
+	policyAgentID := ""
+	if task.Agent != nil {
+		policyAgentID = task.Agent.ID
 	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
@@ -3873,6 +3866,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		Logger:         d.logger,
 		// CEREBRO-PATCH(runtime-sandbox-override-claim): JEH-418 — honour the claim's per-runtime sandbox override + policy at spawn (restored after upstream sync #4530, FIR-2743).
 		Sandbox: d.buildSandboxConfig(provider, task.SandboxEnabled, parseRuntimeSandboxPolicy(task.RuntimeSandboxPolicy), task.Agent),
+		ToolPolicy: func(ctx context.Context, tool string, args map[string]any) (bool, string) {
+			return d.resolveToolPolicy(ctx, toolPolicyResolveRequest{
+				WorkspaceID: task.WorkspaceID,
+				AgentID:     policyAgentID,
+				TaskID:      task.ID,
+				ToolName:    tool,
+				Args:        args,
+			})
+		},
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
@@ -3901,7 +3903,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		mcpConfig = task.Agent.McpConfig
 	}
 	// CEREBRO-PATCH(daemon-pi-harness): FIR-3272 lock Pi to the Firtal Connections + policy extension.
-	customArgs, err = preparePiHarness(task.PiHarnessEnabled, provider, env.WorkDir, task.LocalToolPolicyStage, customArgs, mcpConfig, agentEnv)
+	customArgs, err = preparePiHarness(task.PiHarnessEnabled, provider, env.WorkDir, "enforce", customArgs, mcpConfig, agentEnv) // CEREBRO-PATCH(daemon-policy-switch-retirement): FIR-3403 policy enforcement is mandatory.
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("prepare Pi harness: %w", err)
 	}

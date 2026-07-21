@@ -489,9 +489,6 @@ var catalog = []Capability{
 			"POST /api/agents/{id}/skills/add",
 			"PUT /api/agents/{id}/env",
 			"PUT /api/agents/{id}/infisical-folders",
-			"PUT /api/agents/{id}/tools/{name}/",
-			"PUT /api/agents/{id}/tool-overrides/{toolName}",
-			"DELETE /api/agents/{id}/tool-overrides/{toolName}",
 			// Agent Office — versioning + governance for agent context (FIR-1775),
 			// the direct analog of skill governance under manage_skills: editing an
 			// agent's context (proposing a change-request, reviewing one, rolling
@@ -541,17 +538,6 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:           "manage_agent_passes",
-		Title:         "Manage agent passes",
-		Category:      CategoryAgents,
-		Description:   "Issue or revoke an agent pass (a scoped, time-boxed permission for an agent to act on an issue).",
-		DescriptionZh: "签发或撤销 agent 通行证（一种限定范围、有时限、允许 agent 在工单上行动的权限）。",
-		Ops: []string{
-			"POST /api/cerebro/agent-passes/",
-			"DELETE /api/cerebro/agent-passes/{passId}",
-		},
-	},
-	{
 		Key:           "manage_work_sessions",
 		Title:         "Drive agent work session",
 		Category:      CategoryAgents,
@@ -585,26 +571,10 @@ var catalog = []Capability{
 			"PATCH /api/runtimes/{runtimeId}/sandbox-policy",
 			"PATCH /api/runtimes/{runtimeId}/tools-config",
 			"PUT /api/cerebro/terminal/runtimes/{runtimeId}/presentation-mode",
-			"PATCH /api/runtimes/{runtimeId}/tools/{toolName}",
 			"POST /api/runtimes/{runtimeId}/tools/scan-now",
 			"POST /api/runtimes/{runtimeId}/local-skills",
 			"POST /api/runtimes/{runtimeId}/local-skills/import",
 			"POST /api/runtimes/{runtimeId}/models",
-		},
-	},
-	{
-		Key:           "manage_runtime_tool_access",
-		Title:         "Grant runtime tool access",
-		Category:      CategoryRuntimes,
-		Description:   "Grant or revoke a specific runtime tool for a group or user (per-tool allowlist on a machine, or through an agent's assigned runtime).",
-		DescriptionZh: "为群组或用户授予或撤销特定 runtime 工具（机器上的按工具白名单，或通过 agent 所分配的 runtime）。",
-		Ops: []string{
-			"POST /api/agents/{id}/tool-grants",
-			"DELETE /api/agents/{id}/tool-grants",
-			"POST /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
-			"DELETE /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
-			"POST /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
-			"DELETE /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
 		},
 	},
 	{

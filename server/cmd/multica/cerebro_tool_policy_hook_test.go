@@ -43,19 +43,21 @@ func runHookForTest(t *testing.T, payload string, env map[string]string) (exit i
 
 type hookExitSentinel struct{}
 
-func TestHook_DefaultAllowToolSkipsServer(t *testing.T) {
+func TestHook_ReadToolUsesServer(t *testing.T) {
 	hit := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = true }))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		json.NewEncoder(w).Encode(map[string]any{"allowed": true})
+	}))
 	defer srv.Close()
 	exit, _ := runHookForTest(t, `{"tool_name":"Read","tool_input":{"file_path":"/x"}}`, map[string]string{
-		"MULTICA_DAEMON_PORT":      portOf(t, srv),
-		"CEREBRO_TOOLPOLICY_STAGE": "enforce",
+		"MULTICA_DAEMON_PORT": portOf(t, srv),
 	})
 	if exit != 0 {
 		t.Errorf("exit = %d, want 0 (allow)", exit)
 	}
-	if hit {
-		t.Error("default-allow tool should not hit the daemon")
+	if !hit {
+		t.Error("every named tool must hit the daemon")
 	}
 }
 
@@ -65,8 +67,7 @@ func TestHook_GatedAllow(t *testing.T) {
 	}))
 	defer srv.Close()
 	exit, _ := runHookForTest(t, `{"tool_name":"Bash","tool_input":{"command":"ls"}}`, map[string]string{
-		"MULTICA_DAEMON_PORT":      portOf(t, srv),
-		"CEREBRO_TOOLPOLICY_STAGE": "enforce",
+		"MULTICA_DAEMON_PORT": portOf(t, srv),
 	})
 	if exit != 0 {
 		t.Errorf("exit = %d, want 0 (allow)", exit)
@@ -79,8 +80,7 @@ func TestHook_GatedDeny(t *testing.T) {
 	}))
 	defer srv.Close()
 	exit, stderr := runHookForTest(t, `{"tool_name":"Bash","tool_input":{"command":"curl https://x"}}`, map[string]string{
-		"MULTICA_DAEMON_PORT":      portOf(t, srv),
-		"CEREBRO_TOOLPOLICY_STAGE": "enforce",
+		"MULTICA_DAEMON_PORT": portOf(t, srv),
 	})
 	if exit != hookExitDeny {
 		t.Errorf("exit = %d, want %d (deny)", exit, hookExitDeny)
@@ -90,22 +90,19 @@ func TestHook_GatedDeny(t *testing.T) {
 	}
 }
 
-func TestHook_TransportErrorRespectsStage(t *testing.T) {
+func TestHook_TransportErrorFailsClosed(t *testing.T) {
 	// No server listening on this port → transport error.
 	const deadPort = "1" // unusable; dial fails fast
-	enforceExit, _ := runHookForTest(t, `{"tool_name":"Bash","tool_input":{"command":"ls"}}`, map[string]string{
-		"MULTICA_DAEMON_PORT":      deadPort,
-		"CEREBRO_TOOLPOLICY_STAGE": "enforce",
+	exit, _ := runHookForTest(t, `{"tool_name":"Bash","tool_input":{"command":"ls"}}`, map[string]string{
+		"MULTICA_DAEMON_PORT": deadPort,
 	})
-	if enforceExit != hookExitDeny {
-		t.Errorf("enforce transport error exit = %d, want %d (fail closed)", enforceExit, hookExitDeny)
+	if exit != hookExitDeny {
+		t.Errorf("transport error exit = %d, want %d (fail closed)", exit, hookExitDeny)
 	}
-	observeExit, _ := runHookForTest(t, `{"tool_name":"Bash","tool_input":{"command":"ls"}}`, map[string]string{
-		"MULTICA_DAEMON_PORT":      deadPort,
-		"CEREBRO_TOOLPOLICY_STAGE": "observe",
-	})
-	if observeExit != 0 {
-		t.Errorf("observe transport error exit = %d, want 0 (fail open)", observeExit)
+
+	malformedExit, _ := runHookForTest(t, `not-json`, map[string]string{})
+	if malformedExit != hookExitDeny {
+		t.Errorf("malformed payload exit = %d, want %d", malformedExit, hookExitDeny)
 	}
 }
 

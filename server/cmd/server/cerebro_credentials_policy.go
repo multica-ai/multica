@@ -103,9 +103,8 @@ type multicaCredentialPolicy struct {
 	// a missing-agent lookup to widen access.
 	agents agentRuntimeLookup
 	// CEREBRO-PATCH(cerebro-credentials-approval-gate): FIR-2586 — shared approval
-	// seam. nil when CEREBRO_APPROVAL_GATE_ENABLED is off, so a needs-approval
-	// verdict falls through to deny exactly as before; non-nil routes it to the
-	// one /approvals inbox and blocks until a human decides.
+	// seam. Production wires the one shared gate so a needs-approval verdict
+	// reaches the inbox.
 	gate *permgate.Gate
 	// cerebroQueries reads the cerebro_policy_cel feature flag so a CEL Expr
 	// condition on a credential cap row evaluates (FIR-1609). nil leaves Query.Eval
@@ -478,9 +477,8 @@ func (m *multicaCredentialPolicy) awaitApproval(ctx context.Context, req credent
 // cerebroQueries is nil the multica layer is omitted and only the owner check
 // fires — the deny-by-default behaviour from JEH-1197.
 //
-// gate is the shared approval seam (nil when CEREBRO_APPROVAL_GATE_ENABLED is
-// off). When non-nil a credential needs-approval verdict lands in the one
-// /approvals inbox and blocks until a human decides, instead of a silent deny.
+// gate is the shared approval seam. A credential needs-approval verdict lands
+// in the one /approvals inbox and blocks until a human decides.
 func newCredentialsPolicy(cerebroQueries *cerebrodb.Queries, queries *db.Queries, gate *permgate.Gate) credentials.PolicyChecker {
 	if queries == nil {
 		return credentials.DenyAllChecker

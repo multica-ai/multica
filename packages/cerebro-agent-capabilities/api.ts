@@ -40,8 +40,42 @@ const AgentCapabilityToolSchema = z
     reason: z.string().default(""),
     managed_externally: z.boolean().default(false),
     capped_by_groups: z.array(z.string()).default([]),
+    availability: z
+      .object({
+        level: z.enum(["declared", "discovered", "verified"]).catch("declared"),
+        proven: z.boolean().catch(false),
+        reason: z.string().catch("availability evidence is invalid"),
+      })
+      .loose()
+      .catch({
+        level: "declared",
+        proven: false,
+        reason: "availability evidence is invalid",
+      })
+      .default({
+        level: "declared",
+        proven: false,
+        reason: "availability evidence is missing",
+      }),
   })
   .loose();
+
+const AgentCapabilityAvailabilitySummarySchema = z
+  .object({
+    runtime_type: z.string().catch(""),
+    status: z.enum(["known", "unknown"]).catch("unknown"),
+    verified: z.number().int().nonnegative().catch(0),
+    unproven: z.number().int().nonnegative().catch(0),
+  })
+  .loose()
+  .catch({ runtime_type: "", status: "unknown", verified: 0, unproven: 0 });
+
+const EMPTY_AVAILABILITY = {
+  runtime_type: "",
+  status: "unknown" as const,
+  verified: 0,
+  unproven: 0,
+};
 
 const AgentCapabilityConnEndpointSchema = z
   .object({
@@ -244,6 +278,9 @@ export const AgentCapabilitiesSchema = z
     observed_access: AgentCapabilityObservedAccessSchema.default(
       EMPTY_OBSERVED_ACCESS,
     ),
+    availability: AgentCapabilityAvailabilitySummarySchema.default(
+      EMPTY_AVAILABILITY,
+    ),
     limits: AgentCapabilityLimitsSchema.default({
       mcp_servers: [],
       has_mcp_config: false,
@@ -256,6 +293,9 @@ export const AgentCapabilitiesSchema = z
 
 export type AgentCapabilitySkill = z.infer<typeof AgentCapabilitySkillSchema>;
 export type AgentCapabilityTool = z.infer<typeof AgentCapabilityToolSchema>;
+export type AgentCapabilityAvailabilitySummary = z.infer<
+  typeof AgentCapabilityAvailabilitySummarySchema
+>;
 export type AgentCapabilityRepo = z.infer<typeof AgentCapabilityRepoSchema>;
 export type AgentCapabilityConnection = z.infer<
   typeof AgentCapabilityConnectionSchema
@@ -301,6 +341,7 @@ const EMPTY_CAPABILITIES: AgentCapabilities = {
   agent_secrets: EMPTY_AGENT_SECRET_SET,
   runtime_secrets: EMPTY_RUNTIME_SECRET_SET,
   observed_access: EMPTY_OBSERVED_ACCESS,
+  availability: EMPTY_AVAILABILITY,
   limits: { mcp_servers: [], has_mcp_config: false },
   runtime_options: EMPTY_RUNTIME_OPTIONS,
 };

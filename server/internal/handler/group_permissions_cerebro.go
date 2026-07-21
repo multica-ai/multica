@@ -183,7 +183,7 @@ func (h *Handler) cerebroRequireCapability(w http.ResponseWriter, r *http.Reques
 // and member level, exactly like every other platform capability.
 //
 // The chain is consulted unconditionally (like the daemon repo-checkout gate),
-// so it is live regardless of CEREBRO_APPROVAL_GATE_ENABLED. Base = Allow: with
+// so it is live regardless of approval-inbox availability. Base = Allow: with
 // no stored rows the action is permitted, preserving today's behavior 1:1; an
 // admin tightens specific groups/members to Deny to turn local runtimes off.
 // Admins (workspace owner/admin) always pass. Resolve auto-loads the viewer's
@@ -247,7 +247,7 @@ func (h *Handler) cerebroRequireLocalRuntimePolicy(w http.ResponseWriter, r *htt
 // member level like every other platform capability.
 //
 // The chain is consulted unconditionally (like the local-runtime and repo-
-// checkout gates), so it is live regardless of CEREBRO_APPROVAL_GATE_ENABLED.
+// checkout gates), so it is live regardless of approval-inbox availability.
 // Base = Allow + admin bypass preserve today's behavior 1:1 (owner/admin still
 // pass with no stored rows); an admin tightens a group/member to Ask/Deny to
 // restrict. Ask has no inbox path here, so anything other than Allow blocks.
@@ -326,7 +326,7 @@ func (h *Handler) RequireConnectionsManagePolicy(param string) func(http.Handler
 // only workspace owners/admins (who alone author the platform/repo/tool rows).
 //
 // The chain is consulted unconditionally (like the connections and local-runtime
-// gates), so it is live regardless of CEREBRO_APPROVAL_GATE_ENABLED. Base = Allow +
+// gates), so it is live regardless of approval-inbox availability. Base = Allow +
 // admin bypass preserve owner/admin authority 1:1 (they pass with no stored rows); an
 // admin tightens a group/member to Ask/Deny to restrict. Ask has no inbox path here,
 // so anything other than Allow blocks.

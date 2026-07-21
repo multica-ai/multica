@@ -12,6 +12,7 @@
     "./core": "./core/index.ts",
     "./core/renderers": "./core/renderers/index.ts",
     "./views": "./views/index.tsx",
+    "./views/issue-list-reference-filter": "./views/components/issue-list-reference-filter.tsx",
     "./views/components": "./views/components/index.ts",
     "./views/pages": "./views/pages/index.ts"
   },

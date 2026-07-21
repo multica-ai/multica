@@ -37,6 +37,7 @@ import {
   type AgentCapabilitySecretSet,
   type AgentCapabilityObservedAccess,
   type AgentCapabilityObservedTool,
+  type AgentCapabilityAvailabilitySummary,
 } from "../api";
 
 export interface AgentCapabilitiesTabExtension {
@@ -111,6 +112,12 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
       tools: [],
       drift_count: 0,
     },
+    availability: {
+      runtime_type: "",
+      status: "unknown",
+      verified: 0,
+      unproven: 0,
+    },
     limits: { mcp_servers: [], has_mcp_config: false },
     runtime_options: {
       status: "unknown",
@@ -137,6 +144,13 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
 
       {/* Tools + permissions */}
       <Section icon={Wrench} title="Tools" count={caps.tools.length}>
+        {/* FIR-3398 — availability headline: how many granted tools are actually
+            PROVED on the agent's runtime vs merely declared. status=unknown means
+            the runtime's proof could not be read (never "nothing is proved"). */}
+        <ToolsAvailabilitySummary
+          availability={caps.availability}
+          total={caps.tools.length}
+        />
         {caps.tools.length === 0 ? (
           <Empty>No tools resolved.</Empty>
         ) : (
@@ -286,12 +300,62 @@ function toolTitle(t: AgentCapabilityTool): string {
   if (t.reason) parts.push(t.reason);
   if (t.capped_by_groups.length > 0)
     parts.push(`capped by ${t.capped_by_groups.join(", ")}`);
+  // FIR-3398: fold the tool's runtime-availability proof into the tooltip, so a
+  // reviewer hovering a pill sees whether the granted tool is actually present on
+  // the agent's runtime — not just that policy allows it.
+  parts.push(
+    t.availability.proven
+      ? "proved on runtime"
+      : `not proved on runtime: ${t.availability.reason}`,
+  );
   return parts.join(" · ");
 }
 
-function ToolPill({ tool }: { tool: AgentCapabilityTool }) {
+// ToolsAvailabilitySummary is the FIR-3398 headline for the Tools section: of the
+// tools policy grants this agent, how many are actually PROVED present on its
+// runtime. status=unknown (the runtime's proof could not be read) shows an
+// explicit "unknown" note rather than implying nothing is proved — an empty proof
+// must never read as "no tools work". Renders nothing when there are no tools.
+function ToolsAvailabilitySummary({
+  availability,
+  total,
+}: {
+  availability: AgentCapabilityAvailabilitySummary;
+  total: number;
+}) {
+  if (total === 0) return null;
+  const runtime = availability.runtime_type
+    ? ` ${availability.runtime_type}`
+    : "";
   return (
-    <Pill className={permissionPill(tool.permission)} title={toolTitle(tool)}>
+    <div className="flex flex-wrap items-center gap-1.5">
+      <StatusBadge status={availability.status} />
+      {availability.status === "known" ? (
+        <span className="text-xs text-muted-foreground">
+          {availability.verified} of {total} proved on the{runtime} runtime
+          {availability.unproven > 0
+            ? ` · ${availability.unproven} only declared`
+            : ""}
+        </span>
+      ) : (
+        <span className="text-xs text-muted-foreground">
+          runtime availability unknown — tools are shown as granted, not as proved
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ToolPill({ tool }: { tool: AgentCapabilityTool }) {
+  // FIR-3398: an unproved tool (policy allows it but the runtime has not shown it
+  // exists) renders with a dashed border, so "granted" and "actually there" read
+  // differently at a glance. The permission colour is unchanged.
+  const availabilityCue = tool.availability.proven ? "" : "border-dashed";
+  return (
+    <Pill
+      className={`${permissionPill(tool.permission)} ${availabilityCue}`}
+      title={toolTitle(tool)}
+    >
       {tool.title || tool.key}
     </Pill>
   );

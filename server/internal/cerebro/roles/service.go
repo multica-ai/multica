@@ -52,7 +52,15 @@ func NewService(cerebro *cerebrodb.Queries, upstream *db.Queries, bus *events.Bu
 }
 
 func (s *Service) List(ctx context.Context, workspaceID pgtype.UUID) ([]cerebrodb.CerebroRole, error) {
-	return s.Cerebro.ListCerebroRoles(ctx, workspaceID)
+	rows, err := s.Cerebro.ListCerebroRoles(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]cerebrodb.CerebroRole, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, roleFromListRow(row))
+	}
+	return out, nil
 }
 
 func (s *Service) Get(ctx context.Context, workspaceID, roleID pgtype.UUID) (cerebrodb.CerebroRole, error) {
@@ -66,7 +74,7 @@ func (s *Service) Get(ctx context.Context, workspaceID, roleID pgtype.UUID) (cer
 	if role.WorkspaceID != workspaceID {
 		return cerebrodb.CerebroRole{}, ErrRoleNotFound
 	}
-	return role, nil
+	return roleFromGetRow(role), nil
 }
 
 func (s *Service) Create(ctx context.Context, workspaceID, actorID pgtype.UUID, name string, description *string) (cerebrodb.CerebroRole, error) {
@@ -83,8 +91,9 @@ func (s *Service) Create(ctx context.Context, workspaceID, actorID pgtype.UUID, 
 	if err != nil {
 		return cerebrodb.CerebroRole{}, err
 	}
-	s.publish(EventRoleCreated, workspaceID, actorID, map[string]any{"role": roleResponseFromModel(role)})
-	return role, nil
+	model := roleFromCreateRow(role)
+	s.publish(EventRoleCreated, workspaceID, actorID, map[string]any{"role": roleResponseFromModel(model)})
+	return model, nil
 }
 
 func (s *Service) Update(ctx context.Context, workspaceID, actorID, roleID pgtype.UUID, name, description *string) (cerebrodb.CerebroRole, error) {
@@ -109,8 +118,9 @@ func (s *Service) Update(ctx context.Context, workspaceID, actorID, roleID pgtyp
 	if err != nil {
 		return cerebrodb.CerebroRole{}, err
 	}
-	s.publish(EventRoleUpdated, workspaceID, actorID, map[string]any{"role": roleResponseFromModel(role)})
-	return role, nil
+	model := roleFromUpdateRow(role)
+	s.publish(EventRoleUpdated, workspaceID, actorID, map[string]any{"role": roleResponseFromModel(model)})
+	return model, nil
 }
 
 func (s *Service) Delete(ctx context.Context, workspaceID, actorID, roleID pgtype.UUID) (cerebrodb.CerebroRole, error) {
@@ -175,9 +185,25 @@ func (s *Service) Unassign(ctx context.Context, workspaceID, actorID, roleID, su
 	}
 	s.publish(EventRoleUnassigned, workspaceID, actorID, map[string]any{
 		"role_id":    util.UUIDToString(roleID),
-		"assignment": roleAssignmentResponseFromModel(assignment),
+		"assignment": roleAssignmentResponseFromModel(assignmentFromUnassignRow(assignment)),
 	})
-	return assignment, nil
+	return assignmentFromUnassignRow(assignment), nil
+}
+
+func roleFromListRow(r cerebrodb.ListCerebroRolesRow) cerebrodb.CerebroRole {
+	return cerebrodb.CerebroRole{ID: r.ID, WorkspaceID: r.WorkspaceID, Name: r.Name, Description: r.Description, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+}
+func roleFromGetRow(r cerebrodb.GetCerebroRoleRow) cerebrodb.CerebroRole {
+	return cerebrodb.CerebroRole{ID: r.ID, WorkspaceID: r.WorkspaceID, Name: r.Name, Description: r.Description, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+}
+func roleFromCreateRow(r cerebrodb.CreateCerebroRoleRow) cerebrodb.CerebroRole {
+	return cerebrodb.CerebroRole{ID: r.ID, WorkspaceID: r.WorkspaceID, Name: r.Name, Description: r.Description, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+}
+func roleFromUpdateRow(r cerebrodb.UpdateCerebroRoleRow) cerebrodb.CerebroRole {
+	return cerebrodb.CerebroRole{ID: r.ID, WorkspaceID: r.WorkspaceID, Name: r.Name, Description: r.Description, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+}
+func assignmentFromUnassignRow(r cerebrodb.UnassignCerebroRoleRow) cerebrodb.CerebroRoleAssignment {
+	return cerebrodb.CerebroRoleAssignment{RoleID: r.RoleID, SubjectType: r.SubjectType, SubjectID: r.SubjectID, AddedBy: r.AddedBy, AddedAt: r.AddedAt}
 }
 
 func (s *Service) ListAssignments(ctx context.Context, workspaceID, roleID pgtype.UUID) ([]cerebrodb.ListCerebroRoleAssignmentsWithNamesRow, error) {

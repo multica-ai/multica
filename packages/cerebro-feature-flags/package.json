@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./index.tsx",
+    "./api": "./api.ts",
     "./settings-tabs": "./settings-tabs.tsx"
   },
   "scripts": {

@@ -149,6 +149,10 @@ type Config struct {
 	// macOS sandbox-exec and a deny-by-default Seatbelt profile. Backends
 	// that have their own sandbox (codex) ignore this field.
 	Sandbox *SandboxConfig
+	// CEREBRO-PATCH(local-tool-policy-seam): ToolPolicy resolves a local runtime built-in immediately before dispatch.
+	// A nil callback is reserved for unmanaged callers; daemon-spawned local
+	// runtimes always provide one.
+	ToolPolicy func(context.Context, string, map[string]any) (bool, string)
 }
 
 // New creates a Backend for the given agent type.

@@ -27,9 +27,8 @@ package runtime
 // The in-process request still flows through the server's normal middleware, so
 // authorization is unchanged — the bridge swaps the TRANSPORT, never the auth.
 //
-// Admin off at runtime level: the authoritative lever is the existing
-// cerebro_runtime_tool cascade (a row with enabled=false hides a tool for a
-// runtime, no code). DefaultInAppAdminDenylist is a static belt to that
+// Admin off at runtime level: the authoritative lever is canonical tool policy
+// (a runtime-layer Deny hides a tool for that runtime). DefaultInAppAdminDenylist is a static belt to that
 // suspenders — even if a future upstream tool is added and someone forgets to
 // seed the cascade, the bridge will not surface an access-control MUTATION tool
 // to an in-app answer-assistant.
@@ -157,8 +156,7 @@ func mcpResultText(res mcp.CallToolResult) string {
 // "read everything, do the normal work, but no write access to who-can-do-what".
 //
 // This is a STATIC safety net. The per-runtime, authoritative lever is the
-// cerebro_runtime_tool cascade seed (enabled=false), which another runtime can
-// flip back on later with no code change. The denylist exists so a forgotten
+// runtime layer in canonical tool policy. The denylist exists so a forgotten
 // seed can never silently leak an admin-write tool to an answer assistant.
 func DefaultInAppAdminDenylist() map[string]bool {
 	names := []string{

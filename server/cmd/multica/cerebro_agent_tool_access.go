@@ -46,10 +46,6 @@ type effectiveTool struct {
 		Effective string `json:"effective"`
 		Reason    string `json:"reason"`
 	} `json:"policy"`
-	RuntimeGrant struct {
-		Effective string `json:"effective"`
-		Reason    string `json:"reason"`
-	} `json:"runtime_grant"`
 	Protocol struct {
 		Effective string `json:"effective"`
 	} `json:"protocol"`
@@ -75,7 +71,7 @@ func init() {
 	}
 	cmd.Flags().String("user", "", "User to check access for (UUID or email)")
 	cmd.Flags().String("output", "table", "Output format: table or json")
-	cmd.Flags().Bool("full", false, "Show the full 5-layer effective decision per tool (inventory · policy · grant · protocol · credential)")
+	cmd.Flags().Bool("full", false, "Show the full effective decision per tool (inventory · policy · protocol · credential)")
 	_ = cmd.MarkFlagRequired("user")
 	agentCmd.AddCommand(cmd)
 }
@@ -147,7 +143,7 @@ func runAgentToolAccessFull(ctx context.Context, client *cli.APIClient, base too
 		return cli.PrintJSON(os.Stdout, tools)
 	}
 
-	headers := []string{"TOOL", "EXPOSED", "INVENTORY", "POLICY", "GRANT", "PROTOCOL", "CREDENTIAL", "WHY"}
+	headers := []string{"TOOL", "EXPOSED", "INVENTORY", "POLICY", "PROTOCOL", "CREDENTIAL", "WHY"}
 	rows := make([][]string, 0, len(tools))
 	for _, t := range tools {
 		exposed := "yes"
@@ -163,7 +159,6 @@ func runAgentToolAccessFull(ctx context.Context, client *cli.APIClient, base too
 			exposed,
 			inv,
 			dash(t.Policy.Effective),
-			dash(t.RuntimeGrant.Effective),
 			dash(t.Protocol.Effective),
 			dash(t.Credential.Effective),
 			t.ExposureEffective.Reason,

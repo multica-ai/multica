@@ -17,6 +17,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -25,10 +26,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
 	cerebrocapabilities "github.com/multica-ai/multica/server/internal/cerebro/capabilities"
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	pkgagent "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -109,6 +113,10 @@ type AgentCapabilityTool struct {
 	Reason            string   `json:"reason,omitempty"`
 	ManagedExternally bool     `json:"managed_externally"`
 	CappedByGroups    []string `json:"capped_by_groups,omitempty"`
+	// CEREBRO-PATCH(agent-capabilities-tool-availability): FIR-3398 — what has
+	// been PROVED about this tool on the agent's runtime. Permission above is
+	// what policy allows; this is whether the capability is really there.
+	Availability AgentCapabilityAvailability `json:"availability"`
 }
 
 // AgentCapabilityRepo groups one repository's permissions (read / check out /
@@ -247,7 +255,10 @@ type AgentCapabilities struct {
 	// the agent was observed to actually use recently, each compared against its
 	// declared policy so undeclared/blocked use (drift) is visible on the card.
 	ObservedAccess AgentCapabilityObservedAccess `json:"observed_access"`
-	Limits         AgentCapabilityLimits         `json:"limits"`
+	// CEREBRO-PATCH(agent-capabilities-availability-summary): FIR-3398 — how the
+	// agent's tools split between PROVED on its runtime and merely claimed.
+	Availability AgentCapabilityAvailabilitySummary `json:"availability"`
+	Limits       AgentCapabilityLimits              `json:"limits"`
 	// CEREBRO-PATCH(agent-capabilities-runtime-options): FIR-3212 slice 6 — which
 	// run settings the agent's runtime provider actually honours, so the Setup
 	// screen can derive its fields from the engine instead of a hand-written list.
@@ -326,7 +337,70 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	card := h.buildAgentCapabilitiesCard(r, agent)
+	if middleware.AuthScopeFromContext(r.Context()) == middleware.ScopeTask {
+		scope := middleware.TaskScopeFromContext(r.Context())
+		taskID, taskErr := util.ParseUUID(scope.TaskID)
+		workspaceID, workspaceErr := util.ParseUUID(scope.WorkspaceID)
+		if taskErr != nil || workspaceErr != nil || scope.AgentID != uuidToString(agent.ID) {
+			http.Error(w, "invalid task scope", http.StatusForbidden)
+			return
+		}
+		ApplyTaskMandate(r.Context(), taskmandate.NewStoreDB(h.DB), taskID, workspaceID, agent.ID, &card)
+	}
+	writeJSON(w, http.StatusOK, card)
+}
 
+// AgentCapabilityTaskMandate is the one call-time ceiling needed to make the
+// HTTP/app card and runtime self-lookup report the same task-scoped answer.
+type AgentCapabilityTaskMandate interface {
+	Authorize(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, string) error
+}
+
+// ApplyTaskMandate overlays the immutable task ceiling on a canonical card.
+// Both the HTTP route and Gateway tool call this exact function.
+func ApplyTaskMandate(ctx context.Context, mandates AgentCapabilityTaskMandate, taskID, workspaceID, agentID pgtype.UUID, card *AgentCapabilities) {
+	if mandates == nil || card == nil || !taskID.Valid {
+		return
+	}
+	for i := range card.Tools {
+		if err := mandates.Authorize(ctx, taskID, workspaceID, agentID, card.Tools[i].Key); err != nil {
+			card.Tools[i].Permission = "deny"
+			card.Tools[i].Reason = fmt.Sprintf("task mandate denied the capability: %v", err)
+		}
+	}
+}
+
+// BuildAgentCapabilitiesCard assembles the same card as the HTTP route for an
+// in-process caller that has no *http.Request — the Firtal Gateway's
+// get_agent_capabilities tool (FIR-3398). It exists so the gateway answers the
+// self-lookup from the one card implementation instead of a second, drifting
+// copy: the gateway is the runtime where a lookup silently going missing is
+// exactly the failure this step is closing.
+//
+// The synthetic request carries only the context, so it has no authenticated
+// user. That is the point, not a shortcut: every user-scoped read below then
+// resolves as it already does for an agent calling via CLI/MCP — no user
+// ceiling, and secret names redacted by mayRevealAgentSecretNames. The
+// redaction floor is preserved 1:1 because it is literally the same code path.
+func (h *Handler) BuildAgentCapabilitiesCard(ctx context.Context, agentID pgtype.UUID) (AgentCapabilities, error) {
+	if h.Queries == nil {
+		return AgentCapabilities{}, fmt.Errorf("agent capabilities: queries not configured")
+	}
+	agent, err := h.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return AgentCapabilities{}, fmt.Errorf("agent capabilities: load agent: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
+	if err != nil {
+		return AgentCapabilities{}, fmt.Errorf("agent capabilities: build request: %w", err)
+	}
+	return h.buildAgentCapabilitiesCard(req, agent), nil
+}
+
+// buildAgentCapabilitiesCard is the single card assembly shared by the HTTP
+// route and the gateway tool.
+func (h *Handler) buildAgentCapabilitiesCard(r *http.Request, agent db.Agent) AgentCapabilities {
 	out := AgentCapabilities{
 		AgentID:          uuidToString(agent.ID),
 		Name:             agent.Name,
@@ -418,6 +492,12 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 	// runtime-usage signal recorded; observed secret use is not tracked anywhere.
 	out.ObservedAccess = h.buildObservedAccess(r, agent.ID, rows)
 
+	// AVAILABILITY (FIR-3398) — what is PROVED on the runtime this agent really
+	// runs on, as opposed to what the rows above are granted. Stamped last so it
+	// judges the same tools the card presents; only verified is shown as reality.
+	out.Tools, out.Availability = applyAgentCapabilityAvailability(
+		out.Tools, h.agentRuntimeType(r, agent), h.CapabilityEvidence)
+
 	// LIMITS — sandbox policy + MCP server surface.
 	out.Limits = buildAgentCapabilityLimits(agent.RuntimeConfig, agent.McpConfig)
 
@@ -425,7 +505,23 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 	// actually runs on, so the Setup screen offers only fields the engine honours.
 	out.RuntimeOptions = h.buildRuntimeExecOptions(r, agent)
 
-	writeJSON(w, http.StatusOK, out)
+	return out
+}
+
+// agentRuntimeType resolves which runtime family's evidence applies to this
+// agent, from the runtime row it is actually bound to. A runtime that cannot be
+// read falls back to the local family, never to the Gateway: the Gateway is the
+// only runtime this server probes in-process, so guessing it would hand an
+// unknown runtime another runtime's proofs.
+func (h *Handler) agentRuntimeType(r *http.Request, agent db.Agent) availabilityevidence.RuntimeType {
+	rt, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID:          agent.RuntimeID,
+		WorkspaceID: agent.WorkspaceID,
+	})
+	if err != nil {
+		return availabilityevidence.RuntimeLocal
+	}
+	return availabilityevidence.RuntimeTypeForProvider(rt.Provider)
 }
 
 // builtinSkillCardDescription resolves a one-line description for a built-in

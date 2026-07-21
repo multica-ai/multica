@@ -126,7 +126,9 @@ describe("PermissionDetailPage permission audit", () => {
     renderPage();
 
     expect(
-      await screen.findByRole("heading", { name: "Permission audit" }),
+      await screen.findByRole("heading", {
+        name: "Why Access and Permission audit",
+      }),
     ).toBeInTheDocument();
     const table = await screen.findByRole("table", { name: "Permission audit" });
     for (const heading of [
