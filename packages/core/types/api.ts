@@ -98,6 +98,12 @@ export interface ListIssuesParams {
   status?: IssueStatus;
   /** Exact custom-status filter by catalog id (MUL-4809). */
   status_id?: string;
+  /**
+   * Multi-select custom-status facet by catalog id (MUL-4809). OR within the
+   * field. This is what the catalog-driven board columns and filter chips send;
+   * `statuses` remains the legacy-token equivalent for older clients.
+   */
+  status_ids?: string[];
   /** Filter by one of the 5 status Categories (MUL-4809). */
   status_category?: StatusCategory;
   /** Multi-value table facet. OR within the field. */
@@ -182,6 +188,12 @@ export interface ListGroupedIssuesParams {
   statuses?: IssueStatus[];
   /** Exact custom-status filter by catalog id (MUL-4809). */
   status_id?: string;
+  /**
+   * Multi-select custom-status facet by catalog id (MUL-4809). OR within the
+   * field. This is what the catalog-driven board columns and filter chips send;
+   * `statuses` remains the legacy-token equivalent for older clients.
+   */
+  status_ids?: string[];
   /** Filter by one of the 5 status Categories (MUL-4809). */
   status_category?: StatusCategory;
   priorities?: IssuePriority[];

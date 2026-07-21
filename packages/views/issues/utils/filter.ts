@@ -1,9 +1,14 @@
-import type { Issue, IssueStatus, IssuePriority, IssueAssigneeGroup } from "@multica/core/types";
+import { issueMatchesStatusFilter } from "./status-filter";
+import type { Issue, IssuePriority, IssueAssigneeGroup, IssueStatusDefinition } from "@multica/core/types";
 import type { ActorFilterValue } from "@multica/core/issues/stores/view-store";
 import type { IssueActivityState } from "../surface/activity";
 
 export interface IssueFilters {
-  statusFilters: IssueStatus[];
+  statusFilters: string[];
+  /** Workspace status catalog, so a selection of catalog ids can be matched
+   *  against each issue's status_id (MUL-4809). Optional: an unloaded catalog
+   *  falls back to legacy-token matching. */
+  statusCatalog?: IssueStatusDefinition[];
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
@@ -28,7 +33,11 @@ export interface IssueFilters {
 }
 
 export interface IssueFilterState {
-  statusFilters: IssueStatus[];
+  statusFilters: string[];
+  /** Workspace status catalog, so a selection of catalog ids can be matched
+   *  against each issue's status_id (MUL-4809). Optional: an unloaded catalog
+   *  falls back to legacy-token matching. */
+  statusCatalog?: IssueStatusDefinition[];
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
@@ -96,7 +105,7 @@ export function applyIssueFilters(
   filters: IssueFilterState,
   context: IssueFilterContext = {},
 ): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, workingOnly } = filters;
+  const { statusFilters, statusCatalog, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, workingOnly } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
@@ -111,7 +120,7 @@ export function applyIssueFilters(
 
     if (hideSubIssues && issue.parent_issue_id) return false;
 
-    if (statusFilters.length > 0 && !statusFilters.includes(issue.status))
+    if (!issueMatchesStatusFilter(issue, statusFilters, statusCatalog ?? []))
       return false;
 
     if (priorityFilters.length > 0 && !priorityFilters.includes(issue.priority))
@@ -171,6 +180,7 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
     issues,
     {
       statusFilters: filters.statusFilters,
+      statusCatalog: filters.statusCatalog,
       priorityFilters: filters.priorityFilters,
       assigneeFilters: filters.assigneeFilters,
       includeNoAssignee: filters.includeNoAssignee,

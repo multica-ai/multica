@@ -147,7 +147,12 @@ export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }
 export interface IssueViewState {
   viewMode: ViewMode;
   grouping: IssueGrouping;
-  statusFilters: IssueStatus[];
+  /**
+   * Selected statuses. Entries are catalog ids (MUL-4809); a selection persisted
+   * by an older build may still hold legacy status tokens, which the views
+   * resolve at query time rather than rewriting storage.
+   */
+  statusFilters: string[];
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
@@ -201,7 +206,7 @@ export interface IssueViewState {
   setGanttZoom: (zoom: GanttZoom) => void;
   toggleGanttShowCompleted: () => void;
   setGrouping: (grouping: IssueGrouping) => void;
-  toggleStatusFilter: (status: IssueStatus) => void;
+  toggleStatusFilter: (status: string) => void;
   togglePriorityFilter: (priority: IssuePriority) => void;
   toggleAssigneeFilter: (value: ActorFilterValue) => void;
   toggleNoAssignee: () => void;

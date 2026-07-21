@@ -23,7 +23,7 @@ import {
   issueSurfaceListOptions,
 } from "@multica/core/issues/surface/repository";
 import type { IssueSurfaceQueryPlan } from "@multica/core/issues/surface/query-plan";
-import type { IssueStatus } from "@multica/core/types";
+import type { IssueStatus, IssueStatusDefinition } from "@multica/core/types";
 import {
   applyIssueFilters,
   filterAssigneeGroups,
@@ -133,6 +133,8 @@ export function useIssueSurfaceData({
   workingFacets,
   activity,
   statusFilters,
+  statusFilterIds,
+  statusCatalog,
   priorityFilters,
   assigneeFilters,
   includeNoAssignee,
@@ -163,7 +165,13 @@ export function useIssueSurfaceData({
   /** Owned by the controller so the agents-working facet and the client
    *  display filters read the same task snapshot. */
   activity: IssueSurfaceActivity;
-  statusFilters: IssueStatus[];
+  /** Selected statuses: catalog ids, or legacy tokens from an older persisted
+   *  selection (MUL-4809). */
+  statusFilters: string[];
+  /** The same selection resolved to catalog ids, and the catalog itself, so the
+   *  server facet and the client predicate agree. */
+  statusFilterIds: string[];
+  statusCatalog: IssueStatusDefinition[];
   priorityFilters: IssueFilterState["priorityFilters"];
   assigneeFilters: IssueFilterState["assigneeFilters"];
   includeNoAssignee: boolean;
@@ -184,7 +192,15 @@ export function useIssueSurfaceData({
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
       ...queryPlan.groupedScopeFilter,
-      statuses: statusFilters.length > 0 ? statusFilters : [...ALL_STATUSES],
+      // Prefer the catalog facet so a selection can name a custom status; fall
+      // back to legacy tokens when the catalog is unavailable (MUL-4809).
+      ...(statusFilterIds.length > 0
+        ? { status_ids: statusFilterIds }
+        : {
+            statuses: (statusFilters.length > 0
+              ? statusFilters
+              : [...ALL_STATUSES]) as IssueStatus[],
+          }),
       priorities: priorityFilters,
       assignee_filters: assigneeFilters,
       include_no_assignee: includeNoAssignee,
@@ -203,6 +219,7 @@ export function useIssueSurfaceData({
       projectFilters,
       queryPlan.groupedScopeFilter,
       statusFilters,
+      statusFilterIds,
     ],
   );
 
@@ -349,6 +366,7 @@ export function useIssueSurfaceData({
       showSubIssues,
     }),
     [
+      statusCatalog,
       agentRunningFilter,
       assigneeFilters,
       creatorFilters,
@@ -591,6 +609,10 @@ export function useIssueSurfaceData({
 
   const activeFilters = useMemo(
     () => ({
+      // The catalog travels with the display filters so the client predicate can
+      // match a selection of catalog ids against each issue's status_id, the
+      // same way the server facet does (MUL-4809).
+      statusCatalog,
       priorityFilters,
       assigneeFilters,
       includeNoAssignee,

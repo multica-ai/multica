@@ -575,6 +575,7 @@ export class ApiClient {
     if (params?.status_id) search.set("status_id", params.status_id);
     if (params?.status_category) search.set("status_category", params.status_category);
     if (params?.statuses?.length) search.set("statuses", params.statuses.join(","));
+    if (params?.status_ids?.length) search.set("status_ids", params.status_ids.join(","));
     if (params?.priority) search.set("priority", params.priority);
     if (params?.priorities?.length) search.set("priorities", params.priorities.join(","));
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
@@ -637,6 +638,7 @@ export class ApiClient {
     if (params.offset) search.set("offset", String(params.offset));
     if (params.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params.statuses?.length) search.set("statuses", params.statuses.join(","));
+    if (params.status_ids?.length) search.set("status_ids", params.status_ids.join(","));
     if (params.status_id) search.set("status_id", params.status_id);
     if (params.status_category) search.set("status_category", params.status_category);
     if (params.priorities?.length) search.set("priorities", params.priorities.join(","));

@@ -25,6 +25,8 @@ import type { IssueScope } from "@multica/core/issues/surface/scope";
 import { issueSurfaceFlatExportOptions } from "@multica/core/issues/surface/repository";
 import type { IssueDateFilter, SortField } from "@multica/core/issues/stores/view-store";
 import { propertyListOptions } from "@multica/core/properties";
+import { issueStatusListOptions } from "@multica/core/issue-statuses";
+import { resolveStatusFilterIds } from "../utils/status-filter";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { IssueFilters } from "../utils/filter";
@@ -281,10 +283,24 @@ export function useIssueSurfaceController({
     [activity.runningIssueIds],
   );
 
+  // Selected statuses resolve to catalog ids (MUL-4809). A stored selection may
+  // still hold legacy tokens from an older build; resolveStatusFilterIds accepts
+  // both. When the catalog is unavailable (old server / unseeded workspace) the
+  // resolution is empty and we fall back to the legacy `statuses` token facet.
+  const { data: statusCatalog = [] } = useQuery(issueStatusListOptions(wsId));
+  const statusFilterIds = useMemo(
+    () => resolveStatusFilterIds(statusFilters, statusCatalog),
+    [statusFilters, statusCatalog],
+  );
+
   const baseTableFacets = useMemo<IssueFlatFilter>(
     () => ({
       ...(debouncedTableSearch ? { q: debouncedTableSearch } : {}),
-      ...(statusFilters.length > 0 ? { statuses: statusFilters } : {}),
+      ...(statusFilterIds.length > 0
+        ? { status_ids: statusFilterIds }
+        : statusFilters.length > 0
+          ? { statuses: statusFilters as IssueStatus[] }
+          : {}),
       ...(priorityFilters.length > 0 ? { priorities: priorityFilters } : {}),
       ...(assigneeFilters.length > 0
         ? { assignee_filters: assigneeFilters }
@@ -384,6 +400,8 @@ export function useIssueSurfaceController({
     workingFacets,
     activity,
     statusFilters,
+    statusFilterIds,
+    statusCatalog,
     priorityFilters,
     assigneeFilters,
     includeNoAssignee,

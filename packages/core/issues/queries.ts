@@ -156,6 +156,7 @@ export type IssueFlatFilter = MyIssuesFilter &
     ListIssuesParams,
     | "q"
     | "statuses"
+    | "status_ids"
     | "priorities"
     | "assignee_filters"
     | "include_no_assignee"
