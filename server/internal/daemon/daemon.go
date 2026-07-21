@@ -1247,7 +1247,11 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	// previously cached on the workspaceState.
 	profileSig := d.appendProfileRuntimes(ctx, workspaceID, &runtimes, &failedProfiles)
 
-	if len(runtimes) == 0 && len(failedProfiles) == 0 {
+	setupSessionID := ""
+	if workspaceID == d.cfg.SetupWorkspaceID {
+		setupSessionID = d.cfg.SetupSessionID
+	}
+	if len(runtimes) == 0 && len(failedProfiles) == 0 && setupSessionID == "" {
 		// profileSig is still meaningful even when nothing resolves: the
 		// refresh path uses it to remember "we already converged on the
 		// disabled-everywhere state" so duplicate change notifications are a
@@ -1266,12 +1270,15 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"runtimes":          runtimes,
 		"failed_profiles":   failedProfiles,
 	}
+	if setupSessionID != "" {
+		req["setup_session_id"] = setupSessionID
+	}
 
 	resp, err := d.client.Register(ctx, req)
 	if err != nil {
 		return nil, "", fmt.Errorf("register runtimes: %w", err)
 	}
-	if len(resp.Runtimes) == 0 && len(failedProfiles) == 0 {
+	if len(resp.Runtimes) == 0 && len(failedProfiles) == 0 && setupSessionID == "" {
 		return nil, "", fmt.Errorf("register runtimes: empty response")
 	}
 	d.logger.Debug("register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos), "repos_version", resp.ReposVersion)

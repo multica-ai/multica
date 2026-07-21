@@ -83,6 +83,25 @@ func TestBuildDaemonStartArgsForwardsCodexHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestBuildDaemonStartArgsForwardsSetupProgressSession(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("setup-session-id", "", "")
+	cmd.Flags().String("setup-workspace-id", "", "")
+	if err := cmd.Flags().Set("setup-session-id", "session-1"); err != nil {
+		t.Fatalf("set setup session: %v", err)
+	}
+	if err := cmd.Flags().Set("setup-workspace-id", "workspace-1"); err != nil {
+		t.Fatalf("set setup workspace: %v", err)
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	got := strings.Join(args, " ")
+	want := "daemon start --foreground --setup-session-id session-1 --setup-workspace-id workspace-1"
+	if got != want {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", got, want)
+	}
+}
+
 // TestPrintDaemonStatusOmitsVersionWhenMissing pins the back-compat contract:
 // when the daemon doesn't report cli_version (older daemon paired with a newer
 // CLI) or reports an empty string, the CLI must skip the line entirely instead

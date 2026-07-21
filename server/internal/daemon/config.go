@@ -90,6 +90,8 @@ type Config struct {
 	RuntimeName                    string
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
+	SetupSessionID                 string                // one-time web setup progress session; empty for normal starts
+	SetupWorkspaceID               string                // workspace that owns SetupSessionID
 	Profile                        string                // profile name (empty = default)
 	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli, grok, qwen
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
@@ -145,6 +147,8 @@ type Overrides struct {
 	RuntimeName                    string
 	Profile                        string // profile name (empty = default)
 	HealthPort                     int    // health check port (0 = use default)
+	SetupSessionID                 string // internal flag forwarded by `multica setup --token`
+	SetupWorkspaceID               string // internal flag forwarded by `multica setup --token`
 	// DisableAutoUpdate, when true, forces the auto-update poller off. There
 	// is no symmetric "force on" override because the env/default already
 	// resolves to enabled; the flag exists so users can opt out from the CLI.
@@ -573,6 +577,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		LegacyDaemonIDs:                legacyDaemonIDs,
 		DeviceName:                     deviceName,
 		RuntimeName:                    runtimeName,
+		SetupSessionID:                 strings.TrimSpace(overrides.SetupSessionID),
+		SetupWorkspaceID:               strings.TrimSpace(overrides.SetupWorkspaceID),
 		Profile:                        profile,
 		Agents:                         agents,
 		WorkspacesRoot:                 workspacesRoot,

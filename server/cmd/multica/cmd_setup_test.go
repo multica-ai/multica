@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -9,6 +12,97 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 )
+
+func TestRunSetupTokenExchangesBeforeSavingAndStartsTrackedDaemon(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	const (
+		setupToken = "mst_0123456789abcdef0123456789abcdef01234567"
+		pat        = "mul_0123456789abcdef0123456789abcdef01234567"
+		workspace  = "11111111-1111-1111-1111-111111111111"
+		session    = "22222222-2222-2222-2222-222222222222"
+	)
+	var sawRedeem bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/setup-tokens/redeem":
+			sawRedeem = true
+			if r.Header.Get("Authorization") != "" {
+				t.Errorf("redeem unexpectedly authenticated")
+			}
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode redeem: %v", err)
+			}
+			if body["token"] != setupToken {
+				t.Errorf("setup token = %q", body["token"])
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"token": pat, "setup_session_id": session, "workspace_id": workspace,
+				"expires_at": "2026-10-01T00:00:00Z",
+			})
+		case "/api/me":
+			if r.Header.Get("Authorization") != "Bearer "+pat {
+				t.Errorf("PAT was not verified")
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"name": "Test", "email": "test@example.com"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	oldStarter := startDaemonForSetup
+	t.Cleanup(func() { startDaemonForSetup = oldStarter })
+	var gotSession, gotWorkspace string
+	startDaemonForSetup = func(_ *cobra.Command, sessionID, workspaceID string) error {
+		gotSession, gotWorkspace = sessionID, workspaceID
+		return nil
+	}
+
+	if err := runSetupToken(&cobra.Command{}, setupToken, server.URL, "https://app.example", ""); err != nil {
+		t.Fatalf("runSetupToken: %v", err)
+	}
+	if !sawRedeem || gotSession != session || gotWorkspace != workspace {
+		t.Fatalf("progress handoff: redeem=%v session=%q workspace=%q", sawRedeem, gotSession, gotWorkspace)
+	}
+	cfg, err := cli.LoadCLIConfig()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Token != pat || cfg.WorkspaceID != workspace || cfg.ServerURL != server.URL {
+		t.Fatalf("saved config = %+v", cfg)
+	}
+}
+
+func TestRunSetupTokenFailedExchangePreservesConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	existing := cli.CLIConfig{ServerURL: "https://old.example", Token: "mul_existing"}
+	if err := cli.SaveCLIConfig(existing); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":"expired"}`, http.StatusGone)
+	}))
+	defer server.Close()
+
+	err := runSetupToken(
+		&cobra.Command{},
+		"mst_0123456789abcdef0123456789abcdef01234567",
+		server.URL,
+		"https://app.example",
+		"",
+	)
+	if err == nil {
+		t.Fatal("expected exchange error")
+	}
+	got, loadErr := cli.LoadCLIConfig()
+	if loadErr != nil {
+		t.Fatalf("load config: %v", loadErr)
+	}
+	if got.Token != existing.Token || got.ServerURL != existing.ServerURL {
+		t.Fatalf("failed exchange overwrote config: %+v", got)
+	}
+}
 
 // TestPersistSelfHostConfigIfReachable verifies the fix for the
 // setup-wipes-token bug: a failed reachability probe must leave the existing

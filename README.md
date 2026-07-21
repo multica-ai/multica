@@ -83,6 +83,12 @@ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/ins
 
 Use this if Homebrew is not available. The script installs the Multica CLI on macOS and Linux by using Homebrew when it is on `PATH`, otherwise it downloads the binary directly.
 
+For a remote or headless computer, open **Runtimes → Add a computer** in the
+web app and run its generated command instead. That single command installs
+the CLI, exchanges a 30-minute one-use setup token for the normal 90-day CLI
+credential, and starts the daemon without opening a browser. Self-hosted
+deployments generate the same command with their backend and app URLs included.
+
 ### Windows (PowerShell)
 
 ```powershell
@@ -142,8 +148,8 @@ The `multica` CLI connects your local machine to Multica — authenticate, manag
 | `multica login` | Authenticate (opens browser) |
 | `multica daemon start` | Start the local agent runtime |
 | `multica daemon status` | Check daemon status |
-| `multica setup` | One-command setup for Multica Cloud (configure + login + start daemon) |
-| `multica setup self-host` | Same, but for self-hosted deployments |
+| `multica setup` | One-command setup for Multica Cloud (configure + login + start daemon); accepts a generated `--token mst_...` for non-interactive setup |
+| `multica setup self-host` | Same, but for self-hosted deployments; token mode also accepts explicit `--server-url` and `--app-url` |
 | `multica workspace list` | List your workspaces (current is marked with `*`) |
 | `multica workspace switch <id\|slug>` | Switch the default workspace for this profile |
 | `multica issue list` | List issues in your workspace |
@@ -191,4 +197,3 @@ make dev
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow, worktree support, testing, and troubleshooting.
 
 An iOS mobile client lives in [`apps/mobile/`](apps/mobile/) — see its [README](apps/mobile/README.md) for how to build it onto your own iPhone.
-

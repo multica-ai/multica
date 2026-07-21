@@ -15,6 +15,9 @@ _setup_sandbox() {
 
   cat >"$payload_dir/multica" <<'STUB'
 #!/usr/bin/env bash
+if [[ -n "${MULTICA_TEST_ARGS_LOG:-}" && "${1:-}" != "version" ]]; then
+  printf '%s\n' "$@" >"$MULTICA_TEST_ARGS_LOG"
+fi
 echo "multica v0.3.2 (commit: test)"
 STUB
   chmod +x "$payload_dir/multica"
@@ -236,8 +239,44 @@ STUB
   fi
 }
 
+test_setup_token_runs_noninteractive_setup_without_printing_secret() {
+  local tmp token
+  tmp="$(mktemp -d)"
+  token="mst_0123456789abcdef0123456789abcdef01234567"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_sandbox "$tmp"
+  if ! PATH="$tmp/stub-bin:$tmp/install-bin:/usr/bin:/bin" \
+    MULTICA_BIN_DIR="$tmp/install-bin" \
+    MULTICA_TEST_ARCHIVE="$tmp/multica.tar.gz" \
+    MULTICA_TEST_ARGS_LOG="$tmp/setup.args" \
+    bash "$ROOT_DIR/scripts/install.sh" --token "$token" >"$tmp/install.out" 2>"$tmp/install.err"; then
+    echo "token installer exited non-zero" >&2
+    cat "$tmp/install.out" >&2 || true
+    cat "$tmp/install.err" >&2 || true
+    return 1
+  fi
+
+  local actual expected
+  actual="$(cat "$tmp/setup.args")"
+  expected="$(printf 'setup\n--token\n%s' "$token")"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "unexpected setup args: $actual" >&2
+    return 1
+  fi
+  if grep -qF "$token" "$tmp/install.out" "$tmp/install.err"; then
+    echo "setup token leaked into installer output" >&2
+    return 1
+  fi
+  if grep -q "Next: configure your environment" "$tmp/install.out"; then
+    echo "one-command setup should not print the manual next step" >&2
+    return 1
+  fi
+}
+
 test_brew_install_failure_falls_back_to_release_binary
 test_brew_tap_failure_falls_back_to_release_binary
 test_remote_ssh_install_prints_token_login_hint
 test_local_install_does_not_print_token_login_hint
+test_setup_token_runs_noninteractive_setup_without_printing_secret
 echo "install.sh tests passed"

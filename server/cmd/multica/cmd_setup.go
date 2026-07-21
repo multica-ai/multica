@@ -22,6 +22,9 @@ var setupCmd = &cobra.Command{
 	Long: `Configures the CLI to connect to Multica Cloud (multica.ai), then
 authenticates via browser and starts the agent daemon.
 
+Pass --token with a setup token copied from the Runtimes page to configure a
+headless machine without a browser or interactive prompt.
+
 If a configuration already exists, you will be prompted before overwriting.
 
 Use 'multica setup self-host' to connect to a self-hosted server instead.
@@ -71,13 +74,16 @@ Examples:
 
 func init() {
 	setupCmd.Flags().String(callbackHostFlag, "", callbackHostFlagHelp)
+	setupCmd.Flags().String("token", "", "Short-lived setup token from the Runtimes page")
 	setupCloudCmd.Flags().String(callbackHostFlag, "", callbackHostFlagHelp)
+	setupCloudCmd.Flags().String("token", "", "Short-lived setup token from the Runtimes page")
 
 	setupSelfHostCmd.Flags().String("server-url", "", "Backend server URL (e.g. https://api.internal.co) (env: MULTICA_SERVER_URL)")
 	setupSelfHostCmd.Flags().String("app-url", "", "Frontend app URL (e.g. https://app.internal.co) (env: MULTICA_APP_URL)")
 	setupSelfHostCmd.Flags().Int("port", 8080, "Backend server port (used when --server-url is not set)")
 	setupSelfHostCmd.Flags().Int("frontend-port", 3000, "Frontend port (used when --app-url is not set)")
 	setupSelfHostCmd.Flags().String(callbackHostFlag, "", callbackHostFlagHelp)
+	setupSelfHostCmd.Flags().String("token", "", "Short-lived setup token from the Runtimes page")
 
 	setupCmd.AddCommand(setupCloudCmd)
 	setupCmd.AddCommand(setupSelfHostCmd)
@@ -145,6 +151,9 @@ func runSetupCloud(cmd *cobra.Command, args []string) error {
 		ServerURL: defaultCloudServerURL,
 		AppURL:    defaultCloudAppURL,
 	}
+	if setupToken, _ := cmd.Flags().GetString("token"); strings.TrimSpace(setupToken) != "" {
+		return runSetupToken(cmd, strings.TrimSpace(setupToken), cfg.ServerURL, cfg.AppURL, profile)
+	}
 
 	ok, err := confirmOverwrite(profile, cfg.ServerURL, cfg.AppURL)
 	if err != nil {
@@ -198,6 +207,10 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 
 	if appURL == "" {
 		if userProvidedServerURL && !serverHostIsLocal(serverURL) {
+			setupToken, _ := cmd.Flags().GetString("token")
+			if strings.TrimSpace(setupToken) != "" {
+				return fmt.Errorf("--app-url is required with --token when --server-url points at a remote host")
+			}
 			// We can't guess the frontend URL for a remote server: api.x.co
 			// and app.x.co, or an https-fronted deployment, would silently
 			// produce a broken login URL. Ask the user instead.
@@ -212,6 +225,9 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 		} else {
 			appURL = fmt.Sprintf("http://localhost:%d", frontendPort)
 		}
+	}
+	if setupToken, _ := cmd.Flags().GetString("token"); strings.TrimSpace(setupToken) != "" {
+		return runSetupToken(cmd, strings.TrimSpace(setupToken), serverURL, appURL, profile)
 	}
 
 	ok, err := confirmOverwrite(profile, serverURL, appURL)
@@ -254,6 +270,69 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 
+	return nil
+}
+
+type setupTokenExchangeResponse struct {
+	Token          string `json:"token"`
+	SetupSessionID string `json:"setup_session_id"`
+	WorkspaceID    string `json:"workspace_id"`
+	ExpiresAt      string `json:"expires_at"`
+}
+
+var startDaemonForSetup = runDaemonBackgroundWithSetup
+
+// runSetupToken is the non-interactive setup path used by the one-command web
+// guide. It exchanges the short-lived mst_ credential before touching the
+// existing config, verifies the returned PAT, then saves atomically and starts
+// a daemon carrying the progress-session identifiers.
+func runSetupToken(cmd *cobra.Command, setupToken, serverURL, appURL, profile string) error {
+	if !strings.HasPrefix(setupToken, "mst_") {
+		return fmt.Errorf("invalid setup token format")
+	}
+	deviceName, err := os.Hostname()
+	if err != nil || strings.TrimSpace(deviceName) == "" {
+		deviceName = "unknown device"
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	client := cli.NewAPIClient(serverURL, "", "")
+	var exchange setupTokenExchangeResponse
+	if err := client.PostJSON(ctx, "/api/setup-tokens/redeem", map[string]any{
+		"token":       setupToken,
+		"device_name": deviceName,
+		"cli_version": version,
+	}, &exchange); err != nil {
+		return cli.WithUserMessage("Could not use that setup token. Generate a new command from the Runtimes page and try again.", err)
+	}
+	if exchange.Token == "" || exchange.SetupSessionID == "" || exchange.WorkspaceID == "" {
+		return fmt.Errorf("setup server returned an incomplete response")
+	}
+
+	var me struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	}
+	if err := cli.NewAPIClient(serverURL, "", exchange.Token).GetJSON(ctx, "/api/me", &me); err != nil {
+		return cli.WithUserMessage("The server issued a setup credential that could not be verified. Generate a new command and try again.", err)
+	}
+
+	cfg, _ := cli.LoadCLIConfigForProfile(profile)
+	cfg.ServerURL = serverURL
+	cfg.AppURL = appURL
+	cfg.WorkspaceID = exchange.WorkspaceID
+	cfg.Token = exchange.Token
+	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Authenticated as %s (%s).\n", me.Name, me.Email)
+	fmt.Fprintln(os.Stderr, "Starting daemon...")
+	if err := startDaemonForSetup(cmd, exchange.SetupSessionID, exchange.WorkspaceID); err != nil {
+		return fmt.Errorf("start daemon: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "\n✓ Setup complete! This machine is connected to Multica.")
 	return nil
 }
 

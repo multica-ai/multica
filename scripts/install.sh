@@ -7,7 +7,7 @@
 # Install CLI + provision self-host server:
 #   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
 #
-# After installation, run `multica setup` to configure your environment.
+# Add `--token mst_...` to install, authenticate, and connect in one command.
 #
 set -euo pipefail
 
@@ -18,6 +18,9 @@ REPO_URL="https://github.com/multica-ai/multica.git"
 REPO_WEB_URL="https://github.com/multica-ai/multica"  # without .git, for GitHub web APIs
 INSTALL_DIR="${MULTICA_INSTALL_DIR:-$HOME/.multica/server}"
 BREW_PACKAGE="multica-ai/tap/multica"
+SETUP_TOKEN=""
+SETUP_SERVER_URL=""
+SETUP_APP_URL=""
 
 # Colors (disabled when not a terminal)
 if [ -t 1 ] || [ -t 2 ]; then
@@ -40,6 +43,27 @@ warn()  { printf "${BOLD}${YELLOW}⚠ %s${RESET}\n" "$*" >&2; }
 fail()  { printf "${BOLD}${RED}✗ %s${RESET}\n" "$*" >&2; exit 1; }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+run_setup_if_requested() {
+  if [ -z "$SETUP_TOKEN" ]; then
+    return 1
+  fi
+
+  info "Authenticating and connecting this machine..."
+  if [ -n "$SETUP_SERVER_URL" ]; then
+    if [ -z "$SETUP_APP_URL" ]; then
+      fail "--app-url is required when --server-url is used with --token."
+    fi
+    multica setup self-host \
+      --token "$SETUP_TOKEN" \
+      --server-url "$SETUP_SERVER_URL" \
+      --app-url "$SETUP_APP_URL"
+  else
+    multica setup --token "$SETUP_TOKEN"
+  fi
+  ok "Multica CLI is installed and this machine is connected"
+  return 0
+}
 
 running_in_ssh_session() {
   [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_CLIENT:-}" ] || [ -n "${SSH_TTY:-}" ]
@@ -435,6 +459,10 @@ run_default() {
   detect_os
   install_cli
 
+  if run_setup_if_requested; then
+    return
+  fi
+
   printf "\n"
   printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
   printf "${BOLD}${GREEN}  ✓ Multica CLI is ready!${RESET}\n"
@@ -464,6 +492,10 @@ run_with_server() {
   check_docker
   setup_server
   install_cli
+
+  if run_setup_if_requested; then
+    return
+  fi
 
   printf "\n"
   printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
@@ -526,10 +558,28 @@ main() {
       --with-server) mode="with-server" ;;
       --local)       mode="with-server" ;;  # backwards compat alias
       --stop)        mode="stop" ;;
+      --token)
+        [ $# -ge 2 ] || fail "--token requires a value"
+        SETUP_TOKEN="$2"
+        shift
+        ;;
+      --server-url)
+        [ $# -ge 2 ] || fail "--server-url requires a value"
+        SETUP_SERVER_URL="$2"
+        shift
+        ;;
+      --app-url)
+        [ $# -ge 2 ] || fail "--app-url requires a value"
+        SETUP_APP_URL="$2"
+        shift
+        ;;
       --help|-h)
-        echo "Usage: install.sh [--with-server | --stop]"
+        echo "Usage: install.sh [--token mst_...] [--server-url URL --app-url URL] [--with-server | --stop]"
         echo ""
         echo "  (default)       Install / upgrade the Multica CLI"
+        echo "  --token         Install and connect with a short-lived setup token"
+        echo "  --server-url    Self-host backend URL (requires --token and --app-url)"
+        echo "  --app-url       Self-host frontend URL (requires --token and --server-url)"
         echo "  --with-server   Install CLI + provision a self-host server (Docker)"
         echo "  --stop          Stop a self-hosted installation"
         echo ""
@@ -542,13 +592,23 @@ main() {
         echo "  MULTICA_SELFHOST_REF  Git ref to check out for self-host assets"
         echo "                        (default: latest release tag, falling back to main)"
         echo ""
-        echo "After installation, run 'multica setup' to configure your environment."
+        echo "Without --token, run 'multica setup' after installation."
         exit 0
         ;;
       *) warn "Unknown option: $1" ;;
     esac
     shift
   done
+
+  if [ -n "$SETUP_TOKEN" ] && [[ "$SETUP_TOKEN" != mst_* ]]; then
+    fail "Invalid setup token format. Generate a new command from the Runtimes page."
+  fi
+  if { [ -n "$SETUP_SERVER_URL" ] || [ -n "$SETUP_APP_URL" ]; } && [ -z "$SETUP_TOKEN" ]; then
+    fail "--server-url and --app-url are only valid with --token."
+  fi
+  if [ -n "$SETUP_APP_URL" ] && [ -z "$SETUP_SERVER_URL" ]; then
+    fail "--server-url is required when --app-url is used."
+  fi
 
   case "$mode" in
     default)     run_default ;;

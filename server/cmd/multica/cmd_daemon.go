@@ -92,6 +92,10 @@ func init() {
 	f.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
+	f.String("setup-session-id", "", "Internal setup progress session")
+	f.String("setup-workspace-id", "", "Internal setup progress workspace")
+	_ = f.MarkHidden("setup-session-id")
+	_ = f.MarkHidden("setup-workspace-id")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
@@ -112,6 +116,10 @@ func init() {
 	rf.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
+	rf.String("setup-session-id", "", "Internal setup progress session")
+	rf.String("setup-workspace-id", "", "Internal setup progress workspace")
+	_ = rf.MarkHidden("setup-session-id")
+	_ = rf.MarkHidden("setup-workspace-id")
 
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by task")
@@ -272,6 +280,10 @@ func runDaemonStart(cmd *cobra.Command, _ []string) error {
 }
 
 func runDaemonBackground(cmd *cobra.Command) error {
+	return runDaemonBackgroundWithSetup(cmd, "", "")
+}
+
+func runDaemonBackgroundWithSetup(cmd *cobra.Command, setupSessionID, setupWorkspaceID string) error {
 	profile := resolveProfile(cmd)
 	healthPort := healthPortForProfile(profile)
 
@@ -300,6 +312,9 @@ func runDaemonBackground(cmd *cobra.Command) error {
 
 	// Build child args: daemon start --foreground + forwarded flags.
 	args := buildDaemonStartArgs(cmd)
+	if setupSessionID != "" && setupWorkspaceID != "" {
+		args = append(args, "--setup-session-id", setupSessionID, "--setup-workspace-id", setupWorkspaceID)
+	}
 
 	// Ensure daemon directory exists.
 	dir := daemonDirForProfile(profile)
@@ -604,6 +619,12 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if d, _ := cmd.Flags().GetDuration("auto-update-interval"); d > 0 {
 		args = append(args, "--auto-update-interval", d.String())
 	}
+	if v := flagString(cmd, "setup-session-id"); v != "" {
+		args = append(args, "--setup-session-id", v)
+	}
+	if v := flagString(cmd, "setup-workspace-id"); v != "" {
+		args = append(args, "--setup-workspace-id", v)
+	}
 
 	// Forward global persistent flags.
 	if v, _ := cmd.Flags().GetString("server-url"); v != "" {
@@ -677,12 +698,14 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	)
 
 	overrides := daemon.Overrides{
-		ServerURL:   serverURL,
-		DaemonID:    flagString(cmd, "daemon-id"),
-		DeviceName:  deviceNameFlag,
-		RuntimeName: runtimeNameFlag,
-		Profile:     profile,
-		HealthPort:  healthPortForProfile(profile),
+		ServerURL:        serverURL,
+		DaemonID:         flagString(cmd, "daemon-id"),
+		DeviceName:       deviceNameFlag,
+		RuntimeName:      runtimeNameFlag,
+		Profile:          profile,
+		HealthPort:       healthPortForProfile(profile),
+		SetupSessionID:   flagString(cmd, "setup-session-id"),
+		SetupWorkspaceID: flagString(cmd, "setup-workspace-id"),
 	}
 	pollFlag, _ := cmd.Flags().GetDuration("poll-interval")
 	pollOverride, err := resolveDaemonDurationOverride(pollFlag, "MULTICA_DAEMON_POLL_INTERVAL", fileCfg.PollInterval)
