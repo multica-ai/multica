@@ -22,6 +22,7 @@ type enricherFakeClient struct {
 	// ListChatMessages canned results + recorder, keyed by chat id.
 	byChat     map[ChatID][]LarkMessage
 	errByChat  map[ChatID]error
+	errSeqChat map[ChatID][]error
 	listCalls  []ChatID
 	listParams []ListMessagesParams
 
@@ -39,6 +40,7 @@ func newEnricherFake() *enricherFakeClient {
 		errByID:    map[string]error{},
 		byChat:     map[ChatID][]LarkMessage{},
 		errByChat:  map[ChatID]error{},
+		errSeqChat: map[ChatID][]error{},
 	}
 }
 
@@ -53,6 +55,13 @@ func (f *enricherFakeClient) GetMessage(ctx context.Context, creds InstallationC
 func (f *enricherFakeClient) ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error) {
 	f.listCalls = append(f.listCalls, p.ChatID)
 	f.listParams = append(f.listParams, p)
+	if seq := f.errSeqChat[p.ChatID]; len(seq) > 0 {
+		err := seq[0]
+		f.errSeqChat[p.ChatID] = seq[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
 	if e, ok := f.errByChat[p.ChatID]; ok {
 		return nil, e
 	}

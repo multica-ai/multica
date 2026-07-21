@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
@@ -60,6 +61,19 @@ func (f *fakeStdin) Lines() []string {
 		}
 	}
 	return lines
+}
+
+type fakeStdinWithHook struct {
+	fakeStdin
+	afterWrite func()
+}
+
+func (f *fakeStdinWithHook) Write(p []byte) (int, error) {
+	n, err := f.fakeStdin.Write(p)
+	if f.afterWrite != nil {
+		f.afterWrite()
+	}
+	return n, err
 }
 
 func splitLines(s string) []string {
@@ -482,6 +496,67 @@ func TestCodexRawTurnCompleted(t *testing.T) {
 	}
 }
 
+func TestCodexTurnNotificationGateDropsResumeReplayAndOtherTurns(t *testing.T) {
+	t.Parallel()
+
+	gate := &codexTurnNotificationGate{}
+	previousCompleted := map[string]any{
+		"threadId": "thr-resumed",
+		"turn": map[string]any{
+			"id":     "turn-previous",
+			"status": "completed",
+		},
+	}
+	if gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("resume replay must stay blocked before the current turn is armed")
+	}
+
+	gate.arm()
+	if !gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("armed gate must preserve older streams that omit turn/started")
+	}
+	if !gate.accept("turn/started", map[string]any{
+		"threadId": "thr-resumed",
+		"turn":     map[string]any{"id": "turn-current"},
+	}) {
+		t.Fatal("current turn/started should open the lifecycle gate")
+	}
+	if gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("completion from another turn must not finish the current turn")
+	}
+	if !gate.accept("item/completed", map[string]any{
+		"threadId": "thr-resumed",
+		"turnId":   "turn-current",
+	}) {
+		t.Fatal("current-turn item should pass the gate")
+	}
+	if !gate.accept("turn/completed", map[string]any{
+		"threadId": "thr-resumed",
+		"turn": map[string]any{
+			"id":     "turn-current",
+			"status": "completed",
+		},
+	}) {
+		t.Fatal("current turn completion should pass the gate")
+	}
+
+	legacy := &codexTurnNotificationGate{}
+	legacyComplete := map[string]any{"msg": map[string]any{"type": "task_complete"}}
+	if legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("legacy resume replay must stay blocked before the current turn is armed")
+	}
+	legacy.arm()
+	if !legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("armed gate must preserve legacy streams that omit task_started")
+	}
+	if !legacy.accept("codex/event", map[string]any{"msg": map[string]any{"type": "task_started"}}) {
+		t.Fatal("legacy current task_started should open the lifecycle gate")
+	}
+	if !legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("legacy current task completion should pass the gate")
+	}
+}
+
 func TestCodexRawTurnCompletedSubtractsCachedInput(t *testing.T) {
 	t.Parallel()
 
@@ -702,6 +777,364 @@ func TestParseCodexSessionFileSubtractsCachedInput(t *testing.T) {
 	}
 }
 
+// The per-task CODEX_HOME must win over the ambient env / global home so usage
+// is read from the same task-local sessions Codex actually wrote to (MUL-4424).
+func TestCodexSessionRootPrefersExplicitTaskHome(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+	envHome := t.TempDir()
+	taskHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(envHome, "sessions"), 0o755); err != nil {
+		t.Fatalf("mkdir env sessions: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(taskHome, "sessions"), 0o755); err != nil {
+		t.Fatalf("mkdir task sessions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", envHome)
+
+	if got, want := codexSessionRoot(taskHome), filepath.Join(taskHome, "sessions"); got != want {
+		t.Errorf("explicit task home ignored: got %q, want %q", got, want)
+	}
+	if got, want := codexSessionRoot(""), filepath.Join(envHome, "sessions"); got != want {
+		t.Errorf("empty task home should fall back to ambient CODEX_HOME: got %q, want %q", got, want)
+	}
+}
+
+func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	threadID := "task-thread"
+	startTime := time.Now().Add(-time.Minute)
+	dateDir := filepath.Join(taskHome, "sessions",
+		fmt.Sprintf("%04d", startTime.Year()),
+		fmt.Sprintf("%02d", int(startTime.Month())),
+		fmt.Sprintf("%02d", startTime.Day()),
+	)
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		fmt.Sprintf(`{"timestamp":%q,"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`, startTime.Add(time.Second).UTC().Format(time.RFC3339Nano)),
+		fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":20},"model":"gpt-5.6-sol"}}}`, startTime.Add(2*time.Second).UTC().Format(time.RFC3339Nano)),
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, false)
+	if got == nil {
+		t.Fatal("expected usage scanned from the per-task home")
+	}
+	if got.usage.InputTokens != 500 || got.usage.OutputTokens != 20 {
+		t.Errorf("usage = %+v, want input=500 output=20", got.usage)
+	}
+	if got.model != "gpt-5.6-sol" {
+		t.Errorf("model = %q, want gpt-5.6-sol", got.model)
+	}
+}
+
+func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	threadID := "resumed-thread"
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-13T00:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`,
+		`{"timestamp":"2026-07-13T00:00:05.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":700,"output_tokens":50,"reasoning_output_tokens":10},"model":"gpt-5.6-sol"}}}`,
+		`{"timestamp":"2026-07-13T00:00:11.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1300,"cached_input_tokens":900,"output_tokens":70,"reasoning_output_tokens":15},"model":"gpt-5.6-sol"}}}`,
+		`{"timestamp":"2026-07-13T00:00:12.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":1400,"output_tokens":100,"reasoning_output_tokens":25},"model":"gpt-5.6-sol"}}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
+	if got == nil {
+		t.Fatal("expected usage")
+	}
+	// total_token_usage is cumulative for the resumed Codex session. This task
+	// should report only the delta after startTime, not the whole session total.
+	want := TokenUsage{InputTokens: 100, OutputTokens: 65, CacheReadTokens: 700}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want resumed-task delta %+v", got.usage, want)
+	}
+}
+
+func TestParseCodexSessionFileSinceResumeEdgeCases(t *testing.T) {
+	t.Parallel()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	tests := []struct {
+		name  string
+		lines []string
+		want  TokenUsage
+	}{
+		{
+			name: "final last usage wins over earlier total",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":20}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":7,"output_tokens":3}}}}`,
+			},
+			want: TokenUsage{InputTokens: 7, OutputTokens: 3},
+		},
+		{
+			name: "final total wins over earlier last usage",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":7,"output_tokens":3}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":20}}}}`,
+			},
+			want: TokenUsage{InputTokens: 60, OutputTokens: 10},
+		},
+		{
+			name: "cache alias changes from cache read to cached input",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cache_read_input_tokens":700}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":1400}}}}`,
+			},
+			want: TokenUsage{InputTokens: 100, CacheReadTokens: 700},
+		},
+		{
+			name: "cache alias changes from cached input to cache read",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":700}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cache_read_input_tokens":1400}}}}`,
+			},
+			want: TokenUsage{InputTokens: 100, CacheReadTokens: 700},
+		},
+		{
+			name: "counter reset accumulates every segment",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":50}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"output_tokens":60}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5}}}}`,
+				`{"timestamp":"2026-07-13T00:00:13Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"output_tokens":70}}}}`,
+			},
+			want: TokenUsage{InputTokens: 170, OutputTokens: 80},
+		},
+		{
+			name: "one counter reset does not reset monotonic fields",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":50}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"output_tokens":5}}}}`,
+			},
+			want: TokenUsage{InputTokens: 20, OutputTokens: 5},
+		},
+		{
+			name: "missing timestamp before boundary is baseline only",
+			lines: []string{
+				`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+			},
+			want: TokenUsage{InputTokens: 60, OutputTokens: 15},
+		},
+		{
+			name: "missing timestamp after boundary remains in delta",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+				`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":180,"output_tokens":30}}}}`,
+			},
+			want: TokenUsage{InputTokens: 80, OutputTokens: 20},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "session.jsonl")
+			content := strings.Join(append(tc.lines, ""), "\n")
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			got := parseCodexSessionFileSince(path, startTime, true)
+			if got == nil {
+				t.Fatal("expected usage")
+			}
+			if got.usage != tc.want {
+				t.Fatalf("usage = %+v, want %+v", got.usage, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseCodexSessionFileSinceAllMissingTimestamps(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+
+	if got := parseCodexSessionFileSince(path, startTime, true); got != nil {
+		t.Fatalf("ambiguous resumed usage = %+v, want nil", got.usage)
+	}
+	got := parseCodexSessionFileSince(path, startTime, false)
+	if got == nil {
+		t.Fatal("fresh rollout should retain timestamp-less usage")
+	}
+	want := TokenUsage{InputTokens: 100, OutputTokens: 10}
+	if got.usage != want {
+		t.Fatalf("fresh usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageFindsCrossDayResumeWithCacheOnlyDelta(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	threadID := "cross-day-thread"
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	previousDateDir := filepath.Join(taskHome, "sessions", "2026", "07", "12")
+	if err := os.MkdirAll(previousDateDir, 0o755); err != nil {
+		t.Fatalf("mkdir previous date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-12T23:59:59Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":100}}}}`,
+		`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":150}}}}`,
+		"",
+	}, "\n")
+	path := filepath.Join(previousDateDir, "rollout-2026-07-12T23-59-59-"+threadID+".jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+	if err := os.Chtimes(path, startTime.Add(time.Second), startTime.Add(time.Second)); err != nil {
+		t.Fatalf("set session mtime: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
+	if got == nil {
+		t.Fatal("expected cross-day cache-only usage")
+	}
+	want := TokenUsage{CacheReadTokens: 50}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageFollowsLinkedSessionsRoot(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("directory symlink setup requires Windows developer mode")
+	}
+
+	root := t.TempDir()
+	taskHome := filepath.Join(root, "task-home")
+	store := filepath.Join(root, "session-store")
+	threadID := "linked-thread"
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(store, "2026", "07", "12")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir store date dir: %v", err)
+	}
+	if err := os.MkdirAll(taskHome, 0o755); err != nil {
+		t.Fatalf("mkdir task home: %v", err)
+	}
+	if err := os.Symlink(store, filepath.Join(taskHome, "sessions")); err != nil {
+		t.Fatalf("link sessions root: %v", err)
+	}
+
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+		`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+		"",
+	}, "\n")
+	path := filepath.Join(dateDir, "rollout-2026-07-12T23-59-59-"+threadID+".jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write linked rollout: %v", err)
+	}
+	if err := os.Chtimes(path, startTime.Add(time.Second), startTime.Add(time.Second)); err != nil {
+		t.Fatalf("set rollout mtime: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
+	if got == nil {
+		t.Fatal("expected usage through linked sessions root")
+	}
+	want := TokenUsage{InputTokens: 60, OutputTokens: 15}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageSelectsCurrentThread(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+
+	writeRollout := func(threadID string, input int, modTime time.Time) {
+		t.Helper()
+		content := fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d}}}}`+"\n", input)
+		path := filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s rollout: %v", threadID, err)
+		}
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatalf("set %s rollout mtime: %v", threadID, err)
+		}
+	}
+
+	writeRollout("current-thread", 60, startTime.Add(time.Second))
+	writeRollout("newer-subagent-thread", 900, startTime.Add(2*time.Second))
+
+	got := scanCodexSessionUsage(startTime, taskHome, "current-thread", false)
+	if got == nil {
+		t.Fatal("expected current thread usage")
+	}
+	want := TokenUsage{InputTokens: 60}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want current thread %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageUsesSessionMetadataWhenFilenameDrifts(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+
+	writeRollout := func(filenameID, metadataID string, input int, modTime time.Time) {
+		t.Helper()
+		content := strings.Join([]string{
+			fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:11Z","type":"session_meta","payload":{"id":%q}}`, metadataID),
+			fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d}}}}`, input),
+			"",
+		}, "\n")
+		path := filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+filenameID+".jsonl")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s rollout: %v", filenameID, err)
+		}
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatalf("set %s rollout mtime: %v", filenameID, err)
+		}
+	}
+
+	// The apparent filename match belongs to another thread and must be rejected.
+	writeRollout("current-thread", "other-thread", 900, startTime.Add(2*time.Second))
+	// A future filename format can still be attributed by canonical session_meta.
+	writeRollout("future-filename", "current-thread", 60, startTime.Add(time.Second))
+
+	got := scanCodexSessionUsage(startTime, taskHome, "current-thread", false)
+	if got == nil {
+		t.Fatal("expected current thread usage from session metadata")
+	}
+	want := TokenUsage{InputTokens: 60}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want metadata-owned thread %+v", got.usage, want)
+	}
+}
+
 func TestCodexRawItemCommandExecution(t *testing.T) {
 	t.Parallel()
 
@@ -802,6 +1235,55 @@ func TestCodexRawTurnCompletedFromSubagentIgnored(t *testing.T) {
 	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr_main","turn":{"id":"turn-main","status":"completed"}}}`)
 	if doneCount != 1 {
 		t.Fatalf("matching threadId should trigger onTurnDone exactly once, got %d", doneCount)
+	}
+}
+
+func TestCodexTurnNotificationGateIgnoresSubagentTurnStarted(t *testing.T) {
+	t.Parallel()
+
+	gate := &codexTurnNotificationGate{}
+	gate.arm()
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thr_main"
+	c.acceptNotification = gate.accept
+
+	var (
+		gotText        string
+		doneCount      int
+		discardedCount int
+	)
+	c.onMessage = func(msg Message) {
+		if msg.Type == MessageText {
+			gotText = msg.Content
+		}
+	}
+	c.onTurnDone = func(aborted bool) {
+		doneCount++
+	}
+	c.onDiscardedNotification = func(string, map[string]any) {
+		discardedCount++
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr_main","turn":{"id":"turn-main"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr_subagent","turn":{"id":"turn-sub"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_main","turnId":"turn-main","item":{"type":"agentMessage","id":"msg-main","text":"Main answer"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr_main","turn":{"id":"turn-main","status":"completed"}}}`)
+
+	if gate.turnID != "turn-main" {
+		t.Fatalf("subagent turn/started replaced gate turnID: got %q", gate.turnID)
+	}
+	if c.turnID != "turn-main" {
+		t.Fatalf("subagent turn/started replaced client turnID: got %q", c.turnID)
+	}
+	if gotText != "Main answer" {
+		t.Fatalf("main turn text was lost after subagent start: got %q", gotText)
+	}
+	if doneCount != 1 {
+		t.Fatalf("main turn completion count = %d, want 1", doneCount)
+	}
+	if discardedCount != 0 {
+		t.Fatalf("subagent notification should be filtered before the gate, discarded callback count = %d", discardedCount)
 	}
 }
 
@@ -910,6 +1392,31 @@ func TestCodexRequestPrefersContextCancellationOverProcessExit(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("request error = %v, want context.Canceled", err)
+	}
+}
+
+func TestCodexRequestPrefersReadyResponseOverProcessExit(t *testing.T) {
+	t.Parallel()
+
+	var c *codexClient
+	fs := &fakeStdinWithHook{}
+	fs.afterWrite = func() {
+		c.handleLine(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`)
+		c.markProcessExited(errCodexProcessExited)
+	}
+	c = &codexClient{
+		cfg:         Config{Logger: slog.Default()},
+		stdin:       fs,
+		pending:     make(map[int]*pendingRPC),
+		processDone: make(chan struct{}),
+	}
+
+	result, err := c.request(context.Background(), "thread/start", map[string]any{})
+	if err != nil {
+		t.Fatalf("request error = %v, want ready response", err)
+	}
+	if string(result) != `{"ok":true}` {
+		t.Fatalf("response = %s, want {\"ok\":true}", result)
 	}
 }
 
@@ -1230,6 +1737,44 @@ func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	}
 }
 
+// codexTurnInput carries the user-visible disclosure when a resume was expected
+// but the backend landed on a fresh thread. Paired with
+// TestCodexStartOrResumeThreadFallsBackOnResumeError (which proves the live
+// thread/resume RPC returns resumed=false on a recoverable error), this proves
+// the real fallback surfaces the notice while a successful resume does not
+// (MUL-4424).
+func TestCodexTurnInput(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "do the task"
+	text := func(input []map[string]any) string {
+		if len(input) != 1 {
+			t.Fatalf("expected a single input block, got %d", len(input))
+		}
+		s, _ := input[0]["text"].(string)
+		return s
+	}
+
+	// Resume expected but the backend fell back to a fresh thread → disclose,
+	// and the original prompt must still be delivered.
+	fallback := text(codexTurnInput(prompt, true, false))
+	if !strings.Contains(fallback, "previous conversation context could not be restored") {
+		t.Errorf("expected continuity notice on resume fallback, got:\n%s", fallback)
+	}
+	if !strings.HasSuffix(fallback, prompt) {
+		t.Errorf("prompt must survive alongside the notice, got:\n%s", fallback)
+	}
+
+	// Successful resume, or an ordinary fresh start with no resume expected →
+	// no notice, prompt delivered verbatim.
+	if got := text(codexTurnInput(prompt, true, true)); got != prompt {
+		t.Errorf("successful resume must not add a notice, got:\n%s", got)
+	}
+	if got := text(codexTurnInput(prompt, false, false)); got != prompt {
+		t.Errorf("fresh start must not add a notice, got:\n%s", got)
+	}
+}
+
 func TestCodexStartOrResumeThreadDoesNotFallBackAfterProcessExit(t *testing.T) {
 	t.Parallel()
 
@@ -1410,6 +1955,56 @@ func TestStderrTailEmptyWhenNothingWritten(t *testing.T) {
 	}
 }
 
+func TestStderrTailReturnsValidUTF8(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input []byte
+		max   int
+		want  string
+	}{
+		{
+			name:  "leading rune split by tail bound",
+			input: []byte("aa界bc"),
+			max:   4,
+			want:  "bc",
+		},
+		{
+			name:  "trailing incomplete rune",
+			input: append([]byte("ok"), []byte("界")[:2]...),
+			max:   16,
+			want:  "ok",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var sink bytes.Buffer
+			s := newStderrTail(&sink, tt.max)
+			if _, err := s.Write(tt.input); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+
+			if !bytes.Equal(sink.Bytes(), tt.input) {
+				t.Errorf("inner sink: got %q, want raw bytes %q", sink.Bytes(), tt.input)
+			}
+			got := s.Tail()
+			if !utf8.ValidString(got) {
+				t.Errorf("tail is not valid UTF-8: %q", got)
+			}
+			if len(got) > tt.max {
+				t.Errorf("tail exceeds bound: got %d bytes (%q), max %d", len(got), got, tt.max)
+			}
+			if got != tt.want {
+				t.Errorf("tail: got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -1461,6 +2056,346 @@ func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Every startup RPC shares one handshake bound, so the *successful*
+	// preamble RPCs (e.g. initialize) must also round-trip within it. The fake
+	// app-server is a forked /bin/sh script; under parallel test load its
+	// startup + first read/echo can spike well past a few hundred ms, which
+	// used to make initialize spuriously time out before the subtest reached
+	// the RPC it targets. Keep this comfortably above sh startup jitter yet
+	// below the 5s semantic timeout and the 10s executeFakeCodex ceiling.
+	const handshakeTimeout = 3 * time.Second
+	tests := []struct {
+		name   string
+		method string
+		body   string
+		opts   ExecOptions
+	}{
+		{
+			name:   "initialize",
+			method: "initialize",
+			body: "" +
+				`read line` + "\n" +
+				`read line` + "\n",
+		},
+		{
+			name:   "thread start",
+			method: "thread/start",
+			body: "" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":1,"result":{}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n",
+		},
+		{
+			name:   "thread resume",
+			method: "thread/resume",
+			body: "" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":1,"result":{}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n",
+			opts: ExecOptions{ResumeSessionID: "thr-prior"},
+		},
+		{
+			name:   "turn start",
+			method: "turn/start",
+			body: "" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":1,"result":{}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-timeout"}}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			fakePath := writeFakeCodexAppServer(t, tc.body)
+			tc.opts.HandshakeTimeout = handshakeTimeout
+			tc.opts.SemanticInactivityTimeout = 5 * time.Second
+
+			started := time.Now()
+			result := executeFakeCodex(t, fakePath, tc.opts)
+			elapsed := time.Since(started)
+
+			if result.Status != "failed" {
+				t.Fatalf("expected failed, got status=%q error=%q", result.Status, result.Error)
+			}
+			for _, want := range []string{CodexHandshakeTimeoutMarker, tc.method, handshakeTimeout.String()} {
+				if !strings.Contains(result.Error, want) {
+					t.Fatalf("expected error to contain %q, got %q", want, result.Error)
+				}
+			}
+			// Proves the RPC was bounded rather than hanging to the 10s
+			// executeFakeCodex ceiling; the handshake fires at ~3s and
+			// shutdown is fast (closing stdin EOFs the fake).
+			if elapsed > 8*time.Second {
+				t.Fatalf("handshake timeout took %s, expected < 8s", elapsed)
+			}
+		})
+	}
+}
+
+func TestCodexExecuteRetriesInitializeTimeoutOnceAfterCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	countPath := filepath.Join(t.TempDir(), "launch-count")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
+		`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
+		`read line`+"\n"+
+		`if test "$count" -eq 1; then sleep 5; exit 0; fi`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-retried"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-retried","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   10 * time.Second,
+		HandshakeTimeout:          100 * time.Millisecond,
+		SemanticInactivityTimeout: time.Second,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected retry to complete, got status=%q error=%q", result.Status, result.Error)
+	}
+	data, err := os.ReadFile(countPath)
+	if err != nil {
+		t.Fatalf("read launch count: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "2" {
+		t.Fatalf("launch count = %q, want 2", got)
+	}
+}
+
+func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	t.Run("both attempts time out", func(t *testing.T) {
+		countPath := filepath.Join(t.TempDir(), "launch-count")
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
+			`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
+			`read line`+"\n"+
+			`sleep 1`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+		if result.Status != "failed" || !strings.Contains(result.Error, CodexHandshakeTimeoutMarker) {
+			t.Fatalf("expected final initialize timeout, got status=%q error=%q", result.Status, result.Error)
+		}
+		data, _ := os.ReadFile(countPath)
+		if got := strings.TrimSpace(string(data)); got != "2" {
+			t.Fatalf("launch count = %q, want 2", got)
+		}
+	})
+
+	t.Run("semantic activity suppresses retry", func(t *testing.T) {
+		countPath := filepath.Join(t.TempDir(), "launch-count")
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`echo x >> `+countPath+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"unexpected","item":{"type":"commandExecution","id":"cmd-1","command":"true"}}}'`+"\n"+
+			`sleep 1`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+		if result.Status != "failed" {
+			t.Fatalf("expected failed, got %q", result.Status)
+		}
+		data, _ := os.ReadFile(countPath)
+		if got := strings.Count(string(data), "x"); got != 1 {
+			t.Fatalf("launch count = %d, want 1", got)
+		}
+	})
+
+	t.Run("unconfirmed cleanup suppresses retry", func(t *testing.T) {
+		codexCleanupConfirmationOverride.Store(-1)
+		defer codexCleanupConfirmationOverride.Store(0)
+		countPath := filepath.Join(t.TempDir(), "launch-count")
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`echo x >> `+countPath+"\n"+
+			`read line`+"\n"+
+			`sleep 1`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+		if !strings.Contains(result.Error, "retry suppressed: process cleanup/reap not confirmed") {
+			t.Fatalf("expected cleanup reason, got %q", result.Error)
+		}
+		data, _ := os.ReadFile(countPath)
+		if got := strings.Count(string(data), "x"); got != 1 {
+			t.Fatalf("launch count = %d, want 1", got)
+		}
+	})
+}
+
+func TestCodexExecuteDoesNotSerializeConcurrentLaunches(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`sleep 0.4`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-concurrent"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-concurrent","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+
+	maxActiveCodexLaunchesObserved.Store(0)
+	results := make(chan Result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			backend, _ := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+			if err != nil {
+				results <- Result{Status: "failed", Error: err.Error()}
+				return
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+			results <- <-session.Result
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		if result := <-results; result.Status != "completed" {
+			t.Fatalf("concurrent result failed: %+v", result)
+		}
+	}
+	if got := maxActiveCodexLaunchesObserved.Load(); got < 2 {
+		t.Fatalf("launches appear serialized: max active=%d", got)
+	}
+}
+
+func TestSanitizeCodexDiagnosticRedactsSecrets(t *testing.T) {
+	got := sanitizeCodexDiagnostic("Authorization: Bearer bearer-token\n" +
+		`{"token":"json-token","auth": "json-auth", "api_key":"json-key"}` +
+		"\npassword=plain-secret\x00")
+	for _, secret := range []string{"bearer-token", "json-token", "json-auth", "json-key", "plain-secret"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("sanitized diagnostic leaked %q: %q", secret, got)
+		}
+	}
+}
+
+func TestCodexExecuteRedactsStderrFromResultAndLogs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	const (
+		bearer     = "bearer-secret-value"
+		jsonToken  = "json-secret-value"
+		standalone = "sk-abcdefghijklmnopqrstuvwxyz123456"
+	)
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`echo 'Authorization: Bearer `+bearer+`' >&2`+"\n"+
+		`echo '{"token":"`+jsonToken+`"}' >&2`+"\n"+
+		`echo '`+standalone+`' >&2`+"\n"+
+		`exit 2`+"\n")
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	combined := result.Error + "\n" + logs.String()
+	for _, secret := range []string{bearer, jsonToken, standalone} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("stderr secret leaked: %q in %q", secret, combined)
+		}
+	}
+}
+
+func TestCodexExecuteDoesNotProbeVersionBeforeInitialize(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-fast-init"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-fast-init","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+	data, err := os.ReadFile(fakePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = bytes.Replace(data, []byte(`echo "codex-cli 0.0.0-test"; exit 0`), []byte(`sleep 2; echo "codex-cli 0.0.0-test"; exit 0`), 1)
+	writeTestExecutable(t, fakePath, data)
+
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default(), CodexVersion: "cached-test-version"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("Execute blocked on version probe before initialize: %s", elapsed)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	if result := <-session.Result; result.Status != "completed" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestCodexExecuteRetriesAfterSignaledProcessIsReaped(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux signal/reap semantics regression")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	defer codexGracefulShutdownTimeoutNanos.Store(0)
+	countPath := filepath.Join(t.TempDir(), "launch-count")
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
+		`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
+		`read line`+"\n"+
+		`if test "$count" -eq 1; then exec sleep 30; fi`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-signaled"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-signaled","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
+	result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+	if result.Status != "completed" {
+		t.Fatalf("signaled/reaped first attempt should retry: %+v", result)
 	}
 }
 
@@ -1653,7 +2588,6 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 			elapsed)
 	}
 }
-
 
 func TestCodexExecuteSurfacesUnsupportedServerRequestOnInterruptedTurn(t *testing.T) {
 	t.Parallel()
@@ -1881,6 +2815,67 @@ func TestCodexExecuteSemanticInactivityDoesNotAffectNormalTurnCompletion(t *test
 	}
 }
 
+func TestCodexExecuteTurnCompletionCanPrecedeTurnStartResponse(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-reordered"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-reordered","turn":{"id":"turn-reordered"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-reordered","item":{"type":"agentMessage","id":"msg-1","text":"Done"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-reordered","turn":{"id":"turn-reordered","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Done" {
+		t.Fatalf("expected output Done, got %q", result.Output)
+	}
+}
+
+func TestCodexExecuteResumeIgnoresPreviousTurnCompletion(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-resumed","turn":{"id":"turn-previous","status":"completed"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-resumed"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-resumed","turn":{"id":"turn-current"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-resumed","turnId":"turn-current","item":{"type":"agentMessage","id":"msg-current","text":"Current answer"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-resumed","turn":{"id":"turn-current","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		ResumeSessionID:           "thr-resumed",
+		ResumeExpected:            true,
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Current answer" {
+		t.Fatalf("expected current-turn output, got %q", result.Output)
+	}
+}
+
 func writeFakeCodexAppServer(t *testing.T, body string) string {
 	t.Helper()
 	fakePath := filepath.Join(t.TempDir(), "codex")
@@ -1990,6 +2985,27 @@ func TestBuildCodexArgsDoesNotLeakMcpToArgv(t *testing.T) {
 	}
 	if !foundModel {
 		t.Fatalf("expected non-mcp -c override to be preserved, got %v", args)
+	}
+}
+
+// TestNormalizeCodexLaunchArgsStripsShellQuotes locks the normalization the
+// daemon reuses for the Windows sandbox decision (MUL-4957): a shell-quoted
+// `-c windows.sandbox=...` opt-in must come out as clean tokens, and
+// buildCodexArgs must be exactly the transport prefix followed by this result,
+// so the sandbox decision and the launch argv can never diverge.
+func TestNormalizeCodexLaunchArgsStripsShellQuotes(t *testing.T) {
+	t.Parallel()
+
+	got := NormalizeCodexLaunchArgs(nil, []string{"'-c'", "'windows.sandbox=unelevated'"}, nil, slog.Default())
+	want := []string{"-c", "windows.sandbox=unelevated"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("NormalizeCodexLaunchArgs = %v, want %v", got, want)
+	}
+
+	launch := buildCodexArgs(ExecOptions{CustomArgs: []string{"'-c'", "'windows.sandbox=unelevated'"}}, slog.Default())
+	wantLaunch := append([]string{"app-server", "--listen", "stdio://"}, want...)
+	if !reflect.DeepEqual(launch, wantLaunch) {
+		t.Fatalf("buildCodexArgs = %v, want %v", launch, wantLaunch)
 	}
 }
 
@@ -2166,6 +3182,46 @@ func TestFilterCodexCustomConfigOverridesDropsMcpServers(t *testing.T) {
 	}
 }
 
+func TestFilterCodexShellEnvConfigOverrides(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "root policy override",
+			in:   []string{"-c", `shell_environment_policy.include_only=["PATH"]`, "-c", `model="o3"`},
+			want: []string{"-c", `model="o3"`},
+		},
+		{
+			name: "profile policy override",
+			in:   []string{`--config=profiles.work.shell_environment_policy.ignore_default_excludes=false`, "--sandbox", "workspace-write"},
+			want: []string{"--sandbox", "workspace-write"},
+		},
+		{
+			name: "quoted policy key",
+			in:   []string{"--config", `profiles.work."shell_environment_policy".inherit="none"`},
+			want: []string{},
+		},
+		{
+			name: "unrelated override survives",
+			in:   []string{"-c", `model="o3"`, "-c", `profiles.work.model="gpt-5.6"`, "-c", `tools.shell_environment_policy="metadata"`},
+			want: []string{"-c", `model="o3"`, "-c", `profiles.work.model="gpt-5.6"`, "-c", `tools.shell_environment_policy="metadata"`},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := filterCodexShellEnvConfigOverrides(tc.in, slog.Default())
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("filterCodexShellEnvConfigOverrides(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEnsureCodexMcpConfigEmptyClearsBlock(t *testing.T) {
 	t.Parallel()
 
@@ -2243,6 +3299,14 @@ func TestEnsureCodexMcpConfigWritesManagedBlock(t *testing.T) {
 			t.Fatalf("expected %q in:\n%s", want, got)
 		}
 	}
+	for _, unexpected := range []string{
+		`experimental_use_rmcp_client`,
+		`http_headers`,
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("stdio servers should not get remote MCP key %q, got:\n%s", unexpected, got)
+		}
+	}
 
 	fi, err := os.Stat(tmp)
 	if err != nil {
@@ -2250,6 +3314,145 @@ func TestEnsureCodexMcpConfigWritesManagedBlock(t *testing.T) {
 	}
 	if mode := fi.Mode().Perm(); mode != 0o600 {
 		t.Fatalf("expected mode 0o600 for secret-bearing config, got %o", mode)
+	}
+}
+
+func TestEnsureCodexMcpConfigTranslatesRemoteHTTPServer(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tmp, []byte("sandbox_mode = \"workspace-write\"\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	raw := json.RawMessage(`{"mcpServers":{"composio":{"type":"http","url":"https://mcp.example.test/notion","headers":{"Authorization":"Bearer test-token","x-api-key":"secret"}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		`[mcp_servers.composio]`,
+		`url = "https://mcp.example.test/notion"`,
+		`http_headers = { Authorization = "Bearer test-token", x-api-key = "secret" }`,
+		`experimental_use_rmcp_client = true`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{
+		`type = "http"`,
+		"\nheaders = ",
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("remote HTTP server should not render %q, got:\n%s", unexpected, got)
+		}
+	}
+}
+
+func TestEnsureCodexMcpConfigDropsInternalSelectors(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"],"env":{"API_KEY":"secret"},"timeout":30,"tools":{"include":["kb_get"]},"prompts":{"include":["daily"]},"resources":{"include":["docs"]}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		`[mcp_servers.fetch]`,
+		`command = "uvx"`,
+		`args = ["mcp-server-fetch"]`,
+		`env = { API_KEY = "secret" }`,
+		`timeout = 30`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{
+		"\ntools = ",
+		"\nprompts = ",
+		"\nresources = ",
+		"kb_get",
+		"daily",
+		"docs",
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("internal MCP selector %q must not render into Codex config.toml:\n%s", unexpected, got)
+		}
+	}
+}
+
+func TestEnsureCodexMcpConfigDropsInternalSelectorsFromRemoteHTTPServer(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	raw := json.RawMessage(`{"mcpServers":{"remote":{"type":"http","url":"https://mcp.example.test/session","headers":{"Authorization":"Bearer test-token"},"timeout":45,"tools":{"include":["kb_get"]},"prompts":{"include":["daily"]},"resources":{"include":["docs"]}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		`[mcp_servers.remote]`,
+		`url = "https://mcp.example.test/session"`,
+		`http_headers = { Authorization = "Bearer test-token" }`,
+		`timeout = 45`,
+		`experimental_use_rmcp_client = true`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{
+		"\ntools = ",
+		"\nprompts = ",
+		"\nresources = ",
+		"kb_get",
+		"daily",
+		"docs",
+		`type = "http"`,
+		"\nheaders = ",
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("internal or provider-incompatible key %q must not render into Codex config.toml:\n%s", unexpected, got)
+		}
+	}
+}
+
+func TestRenderCodexMcpServersBlockTreatsURLOnlyServerAsRemote(t *testing.T) {
+	t.Parallel()
+
+	block, hasServers, err := renderCodexMcpServersBlock(json.RawMessage(`{"mcpServers":{"remote":{"url":"https://mcp.example.test/session"}}}`))
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !hasServers {
+		t.Fatal("expected server to render")
+	}
+	for _, want := range []string{
+		`[mcp_servers.remote]`,
+		`url = "https://mcp.example.test/session"`,
+		`experimental_use_rmcp_client = true`,
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("expected %q in:\n%s", want, block)
+		}
 	}
 }
 

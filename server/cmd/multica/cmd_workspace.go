@@ -24,6 +24,20 @@ var workspaceListCmd = &cobra.Command{
 	RunE:  runWorkspaceList,
 }
 
+var workspaceCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a workspace",
+	Long: "Creates a new workspace and adds you as its owner. Both --name and " +
+		"--slug are required; the slug is permanent (lowercase letters, digits, " +
+		"and hyphens) and cannot be changed after creation.\n\n" +
+		"Creating a workspace does NOT change the current default workspace for " +
+		"this profile — run 'multica workspace switch <slug>' afterward if you " +
+		"want subsequent commands to target the new workspace.",
+	Example: "  multica workspace create --name \"Support Team\" --slug support-team --issue-prefix SUP",
+	Args:    cobra.NoArgs,
+	RunE:    runWorkspaceCreate,
+}
+
 var workspaceGetCmd = &cobra.Command{
 	Use:   "get [workspace-id|slug|prefix]",
 	Short: "Get workspace details",
@@ -44,6 +58,21 @@ var workspaceMemberListCmd = &cobra.Command{
 	Short: "List workspace members",
 	Args:  cobra.MaximumNArgs(1),
 	RunE:  runWorkspaceMembers,
+}
+
+var workspaceMemberInviteCmd = &cobra.Command{
+	Use:   "invite <email> [workspace-id|slug|prefix]",
+	Short: "Invite a member to a workspace by email",
+	Long: "Sends a workspace invitation to an email address. The invitee gets a " +
+		"pending invitation they must accept before they join — this does not " +
+		"add them instantly. The optional workspace argument accepts a full " +
+		"UUID, a slug, or a short UUID prefix (≥4 hex chars) as shown in " +
+		"'workspace list'; if omitted the current default workspace is used " +
+		"(--workspace-id / MULTICA_WORKSPACE_ID / profile default).\n\n" +
+		"Role defaults to 'member'; pass '--role admin' to invite an admin. " +
+		"Owners cannot be invited.",
+	Args: cobra.RangeArgs(1, 2),
+	RunE: runWorkspaceMemberInvite,
 }
 
 var workspaceUpdateCmd = &cobra.Command{
@@ -71,16 +100,28 @@ var workspaceSwitchCmd = &cobra.Command{
 
 func init() {
 	workspaceCmd.AddCommand(workspaceListCmd)
+	workspaceCmd.AddCommand(workspaceCreateCmd)
 	workspaceCmd.AddCommand(workspaceGetCmd)
 	workspaceCmd.AddCommand(workspaceMemberCmd)
 	workspaceMemberCmd.AddCommand(workspaceMemberListCmd)
+	workspaceMemberCmd.AddCommand(workspaceMemberInviteCmd)
 	workspaceCmd.AddCommand(workspaceUpdateCmd)
 	workspaceCmd.AddCommand(workspaceSwitchCmd)
 
 	workspaceListCmd.Flags().String("output", "table", "Output format: table or json")
 	workspaceListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
+	workspaceCreateCmd.Flags().String("name", "", "Workspace name")
+	workspaceCreateCmd.Flags().String("slug", "", "Workspace slug")
+	workspaceCreateCmd.Flags().String("description", "", "Workspace description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
+	workspaceCreateCmd.Flags().Bool("description-stdin", false, "Read description from stdin (preserves multi-line content verbatim)")
+	workspaceCreateCmd.Flags().String("context", "", "Workspace context (decodes \\n, \\r, \\t, \\\\; pipe via --context-stdin to preserve literal backslashes)")
+	workspaceCreateCmd.Flags().Bool("context-stdin", false, "Read context from stdin (preserves multi-line content verbatim)")
+	workspaceCreateCmd.Flags().String("issue-prefix", "", "Issue prefix (uppercased server-side)")
+	workspaceCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	workspaceGetCmd.Flags().String("output", "json", "Output format: table or json")
 	workspaceMemberListCmd.Flags().String("output", "table", "Output format: table or json")
+	workspaceMemberInviteCmd.Flags().String("role", "member", "Member role to grant: member or admin (owner is not allowed)")
+	workspaceMemberInviteCmd.Flags().String("output", "table", "Output format: table or json")
 
 	workspaceUpdateCmd.Flags().String("name", "", "New workspace name")
 	workspaceUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
@@ -158,6 +199,76 @@ func runWorkspaceList(cmd *cobra.Command, _ []string) error {
 	}
 	fmt.Fprintln(os.Stderr, "Tip: pass the ID column, SLUG, or full UUID (--full-id) to 'workspace get/update/switch'.")
 	return nil
+}
+
+func buildWorkspaceCreateBody(cmd *cobra.Command) (map[string]any, error) {
+	name, _ := cmd.Flags().GetString("name")
+	if strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("--name is required")
+	}
+
+	// The server requires both name and slug (POST /api/workspaces returns 400
+	// without them) and the slug is immutable after creation, so it must be
+	// chosen explicitly here rather than silently omitted.
+	slug, _ := cmd.Flags().GetString("slug")
+	if strings.TrimSpace(slug) == "" {
+		return nil, fmt.Errorf("--slug is required")
+	}
+
+	// A single stdin stream cannot feed two fields: whichever field reads first
+	// drains it and the other gets EOF. Reject the ambiguous combination up
+	// front instead of surfacing a misleading "content is empty" error.
+	descStdin, _ := cmd.Flags().GetBool("description-stdin")
+	ctxStdin, _ := cmd.Flags().GetBool("context-stdin")
+	if descStdin && ctxStdin {
+		return nil, fmt.Errorf("--description-stdin and --context-stdin cannot be combined; a single stdin cannot feed both fields — pass one of them inline")
+	}
+
+	body := map[string]any{"name": name, "slug": slug}
+	if cmd.Flags().Changed("description") || cmd.Flags().Changed("description-stdin") {
+		desc, _, err := resolveTextFlag(cmd, "description")
+		if err != nil {
+			return nil, err
+		}
+		body["description"] = desc
+	}
+	if cmd.Flags().Changed("context") || cmd.Flags().Changed("context-stdin") {
+		ctxText, _, err := resolveTextFlag(cmd, "context")
+		if err != nil {
+			return nil, err
+		}
+		body["context"] = ctxText
+	}
+	if cmd.Flags().Changed("issue-prefix") {
+		v, _ := cmd.Flags().GetString("issue-prefix")
+		if strings.TrimSpace(v) == "" {
+			return nil, fmt.Errorf("--issue-prefix cannot be empty; omit it to use the server-generated prefix")
+		}
+		body["issue_prefix"] = v
+	}
+	return body, nil
+}
+
+func runWorkspaceCreate(cmd *cobra.Command, _ []string) error {
+	body, err := buildWorkspaceCreateBody(cmd)
+	if err != nil {
+		return err
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	client.WorkspaceID = ""
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var ws map[string]any
+	if err := client.PostJSON(ctx, "/api/workspaces", body, &ws); err != nil {
+		return fmt.Errorf("create workspace: %w", err)
+	}
+	return printWorkspace(cmd, ws)
 }
 
 // resolveWorkspaceByIDOrSlug looks up a workspace in the caller's accessible
@@ -309,6 +420,10 @@ func runWorkspaceGet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get workspace: %w", err)
 	}
 
+	return printWorkspace(cmd, ws)
+}
+
+func printWorkspace(cmd *cobra.Command, ws map[string]any) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		desc := strVal(ws, "description")
@@ -403,31 +518,7 @@ func runWorkspaceUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("update workspace: %w", err)
 	}
 
-	output, _ := cmd.Flags().GetString("output")
-	if output == "table" {
-		desc := strVal(ws, "description")
-		if utf8.RuneCountInString(desc) > 60 {
-			runes := []rune(desc)
-			desc = string(runes[:57]) + "..."
-		}
-		wsContext := strVal(ws, "context")
-		if utf8.RuneCountInString(wsContext) > 60 {
-			runes := []rune(wsContext)
-			wsContext = string(runes[:57]) + "..."
-		}
-		headers := []string{"ID", "NAME", "SLUG", "DESCRIPTION", "CONTEXT"}
-		rows := [][]string{{
-			strVal(ws, "id"),
-			strVal(ws, "name"),
-			strVal(ws, "slug"),
-			desc,
-			wsContext,
-		}}
-		cli.PrintTable(os.Stdout, headers, rows)
-		return nil
-	}
-
-	return cli.PrintJSON(os.Stdout, ws)
+	return printWorkspace(cmd, ws)
 }
 
 func runWorkspaceMembers(cmd *cobra.Command, args []string) error {
@@ -468,5 +559,59 @@ func runWorkspaceMembers(cmd *cobra.Command, args []string) error {
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runWorkspaceMemberInvite(cmd *cobra.Command, args []string) error {
+	email := strings.ToLower(strings.TrimSpace(args[0]))
+	if email == "" {
+		return fmt.Errorf("email is required")
+	}
+
+	// Validate the role client-side to fail fast with a clear message; the
+	// server enforces the same rule (normalizeMemberRole rejects unknown roles
+	// and CreateInvitation refuses owner). Keep the accepted set in sync.
+	role, _ := cmd.Flags().GetString("role")
+	role = strings.ToLower(strings.TrimSpace(role))
+	if role == "" {
+		role = "member"
+	}
+	switch role {
+	case "member", "admin":
+	case "owner":
+		return fmt.Errorf("cannot invite as owner; use --role member or --role admin")
+	default:
+		return fmt.Errorf("invalid --role %q; expected member or admin", role)
+	}
+
+	wsID, err := resolveWorkspaceArg(cmd, args[1:])
+	if err != nil {
+		return err
+	}
+	if wsID == "" {
+		return fmt.Errorf("workspace ID is required: pass an id/slug/prefix as argument or set MULTICA_WORKSPACE_ID")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	body := map[string]any{"email": email, "role": role}
+	var inv map[string]any
+	if err := client.PostJSON(ctx, "/api/workspaces/"+wsID+"/members", body, &inv); err != nil {
+		return fmt.Errorf("invite member: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, inv)
+	}
+
+	fmt.Fprintf(os.Stdout, "Invitation sent to %s (role: %s, status: %s)\n",
+		strVal(inv, "invitee_email"), strVal(inv, "role"), strVal(inv, "status"))
 	return nil
 }

@@ -64,6 +64,9 @@ type SkillSummaryResponse struct {
 	CreatedBy   *string `json:"created_by"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
+	// Enabled is only populated for agent-scoped skill responses. Workspace
+	// skill lists describe the skill itself, so they omit assignment state.
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 // AgentSkillSummary is the still-narrower shape used for skills embedded in
@@ -75,6 +78,7 @@ type AgentSkillSummary struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
 }
 
 type SkillFileResponse struct {
@@ -536,11 +540,26 @@ func (h *Handler) DeleteSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.DeleteSkill(r.Context(), db.DeleteSkillParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	if err := qtx.DeleteSkillLabelAssignmentsBySkill(r.Context(), skill.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove skill label assignments")
+		return
+	}
+	if err := qtx.DeleteSkill(r.Context(), db.DeleteSkillParams{
 		ID:          skill.ID,
 		WorkspaceID: skill.WorkspaceID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete skill")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit skill deletion")
 		return
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(skill.WorkspaceID))
@@ -1918,6 +1937,14 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	creatorUUID := parseUUID(creatorID)
 
+	// An uploaded skill archive (.skill / .zip) arrives as multipart/form-data;
+	// a hosted-URL import arrives as JSON. Both converge on the same create +
+	// conflict tail via finishSkillImport.
+	if isMultipartForm(r) {
+		h.importSkillFromArchive(w, r, workspaceID, workspaceUUID, creatorUUID, creatorID)
+		return
+	}
+
 	var req ImportSkillRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1955,6 +1982,15 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.finishSkillImport(w, r, workspaceID, workspaceUUID, creatorUUID, creatorID, strategy, structuredResult, imported)
+}
+
+// finishSkillImport runs the shared tail of every skill import — whether the
+// bundle came from a hosted URL or an uploaded archive (.skill / .zip). It maps
+// the extracted files onto CreateSkillFileRequest, records provenance into
+// config.origin, and creates the skill, routing same-name collisions through
+// the on_conflict strategy.
+func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID, creatorUUID pgtype.UUID, creatorID, strategy string, structuredResult bool, imported *importedSkill) {
 	files := make([]CreateSkillFileRequest, 0, len(imported.files))
 	for _, f := range imported.files {
 		if !validateFilePath(f.path) {
@@ -2125,6 +2161,7 @@ func (h *Handler) ListAgentSkills(w http.ResponseWriter, r *http.Request) {
 			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
 			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
 		)
+		resp[i].Enabled = &s.Enabled
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -2233,6 +2270,67 @@ func (h *Handler) AddAgentSkills(w http.ResponseWriter, r *http.Request) {
 	h.writeUpdatedAgentSkills(w, r, agent)
 }
 
+func (h *Handler) SetAgentSkillEnabled(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgent(w, r, agent) {
+		return
+	}
+
+	skillID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "skillId"), "skill_id")
+	if !ok {
+		return
+	}
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "enabled is required")
+		return
+	}
+	rows, err := h.Queries.SetAgentSkillEnabled(r.Context(), db.SetAgentSkillEnabledParams{
+		AgentID: agent.ID,
+		SkillID: skillID,
+		Enabled: *req.Enabled,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update agent skill")
+		return
+	}
+	if rows == 0 {
+		writeError(w, http.StatusNotFound, "agent skill not found")
+		return
+	}
+
+	h.writeUpdatedAgentSkills(w, r, agent)
+}
+
+func (h *Handler) RemoveAgentSkill(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgent(w, r, agent) {
+		return
+	}
+	skillID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "skillId"), "skill_id")
+	if !ok {
+		return
+	}
+	if err := h.Queries.RemoveAgentSkill(r.Context(), db.RemoveAgentSkillParams{
+		AgentID: agent.ID,
+		SkillID: skillID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove agent skill")
+		return
+	}
+	h.writeUpdatedAgentSkills(w, r, agent)
+}
+
 func (h *Handler) validateAgentSkillIDsInWorkspace(w http.ResponseWriter, r *http.Request, agent db.Agent, skillUUIDs []pgtype.UUID) bool {
 	seen := map[string]struct{}{}
 	for _, skillID := range skillUUIDs {
@@ -2265,6 +2363,7 @@ func (h *Handler) writeUpdatedAgentSkills(w http.ResponseWriter, r *http.Request
 			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
 			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
 		)
+		resp[i].Enabled = &s.Enabled
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(agent.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent_id": uuidToString(agent.ID), "skills": resp})

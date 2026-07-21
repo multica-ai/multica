@@ -1,5 +1,9 @@
-import { preprocessLinks, preprocessMentionShortcodes, preprocessFileCards } from "@multica/ui/markdown";
-import { configStore } from "@multica/core/config";
+import {
+  preprocessLinks,
+  preprocessMentionShortcodes,
+  preprocessFileCards,
+  preprocessIssueIdentifiers,
+} from "@multica/ui/markdown";
 
 /**
  * Preprocess a markdown string before loading into Tiptap via contentType: 'markdown'.
@@ -8,18 +12,42 @@ import { configStore } from "@multica/core/config";
  * It does NOT convert to HTML — that was the old markdownToHtml.ts pipeline which
  * was deleted in the April 2026 refactor.
  *
- * Three string→string transforms on raw Markdown:
+ * String→string transforms on raw Markdown:
  * 1. Legacy mention shortcodes [@ id="..." label="..."] → [@Label](mention://member/id)
  *    (old serialization format in database, migrated on read)
- * 2. Raw URLs → markdown links via linkify-it (so they render as clickable Link nodes)
- * 3. File card syntax (new !file[name](url) + legacy [name](cdnUrl)) → HTML div for
+ * 2. (readonly only) Bare issue identifiers MUL-123 → [MUL-123](mention://issue/MUL-123)
+ * 3. Raw URLs → markdown links via linkify-it (so they render as clickable Link nodes)
+ * 4. File card syntax (new !file[name](url) + legacy [name](cdnUrl)) → HTML div for
  *    fileCard node parsing
+ *
+ * Shared by the Tiptap editor and the read-only react-markdown renderer so both
+ * linkify identically. `autolinkIssueIdentifiers` is the one deliberate
+ * asymmetry: it is OPT-IN and MUST stay off for the editable Tiptap path, since
+ * rewriting a bare identifier there would create a mention node whose id is the
+ * identifier string (not a real UUID) and corrupt the saved markdown. Only the
+ * readonly renderer (which resolves the identifier to a UUID at render time)
+ * passes it.
+ *
+ * `cdnDomain` is an explicit parameter rather than an imperative
+ * `configStore.getState()` read inside this function. The CDN config arrives
+ * asynchronously after auth, so a one-shot read made this transform silently
+ * time-dependent: content rendered before the config landed kept its legacy CDN
+ * links as plain anchors forever, because nothing re-ran the transform. Passing
+ * the value in lets a reactive caller (RichContent, which subscribes to the
+ * store) put it in its memo dependencies, while a one-shot caller (the Tiptap
+ * editor, which preprocesses once at load) can still read the store itself.
  */
-export function preprocessMarkdown(markdown: string): string {
+export function preprocessMarkdown(
+  markdown: string,
+  opts: { cdnDomain: string; autolinkIssueIdentifiers?: boolean },
+): string {
   if (!markdown) return "";
-  const cdnDomain = configStore.getState().cdnDomain;
+  const { cdnDomain } = opts;
   const step1 = preprocessMentionShortcodes(markdown);
-  const step2 = preprocessLinks(step1);
-  const step3 = preprocessFileCards(step2, cdnDomain);
-  return step3;
+  const step2 = opts?.autolinkIssueIdentifiers
+    ? preprocessIssueIdentifiers(step1)
+    : step1;
+  const step3 = preprocessLinks(step2);
+  const step4 = preprocessFileCards(step3, cdnDomain);
+  return step4;
 }

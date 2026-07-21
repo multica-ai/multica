@@ -312,6 +312,60 @@ WHERE issue_id = @issue_id
   AND id <> @anchor_id
   AND NOT (author_type = 'agent' AND author_id = @author_id);
 
+-- name: GetLatestMemberCommentForIssueSince :one
+-- MUL-4195 completion reconciliation: the newest MEMBER-authored comment on an
+-- issue created strictly after @since (a run's started_at). Used when a task
+-- completes to detect deliberate user input that landed while the agent was
+-- busy — or that was merged into the running task after its context was
+-- already built — so a single follow-up run can be scheduled for it. Restricted
+-- to author_type = 'member' on purpose: only human input earns the guaranteed
+-- follow-up, which preserves the existing anti-loop guarantees (agent replies,
+-- acknowledgements, and self-triggers never qualify). Returns pgx.ErrNoRows
+-- when nothing newer exists, i.e. the run already covered the latest input.
+SELECT * FROM comment
+WHERE issue_id = @issue_id
+  AND author_type = 'member'
+  AND created_at > @since
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: ListReconcilableCommentsForIssueSince :many
+-- MUL-4195 / MUL-4304 completion reconciliation: every MEMBER- or AGENT-authored
+-- comment on an issue created strictly after @since (the completing run's
+-- created_at anchor), plus every id in its planned trigger/coalesced batch.
+-- Planned ids matter for retry children because their input comments predate
+-- the child's created_at; if one could not be embedded at claim time it still
+-- needs reconciliation. The handler excludes only delivered_comment_ids, then
+-- replays the remainder through the normal trigger pipeline oldest first.
+--
+-- Author-type scope (MUL-4304): originally restricted to author_type = 'member'.
+-- That left a gap — an explicit agent→agent @mention (agent A comments
+-- `@agent B`) that landed while B already had a DISPATCHED task was dropped by
+-- the create-time enqueue path (merge only folds into a QUEUED task, so a
+-- dispatched target hits the merge-miss + active-task continue) and then never
+-- compensated here, because agent-authored comments were excluded. We now also
+-- return 'agent' comments so those explicit mentions can be replayed.
+--
+-- This does NOT reopen the anti-loop guarantees the member-only filter was
+-- protecting. The reconcile pass runs each returned comment through
+-- computeCommentAgentTriggers under its OWN author_type, and for an agent author
+-- it then keeps ONLY explicit @agent/@squad mention triggers
+-- (keepExplicitMentionTriggers) — the assigned-squad-leader fallback and all
+-- other conversational routing are dropped, so a plain agent reply /
+-- acknowledgement yields nothing regardless of issue assignment. The reconcile
+-- pass further keeps only triggers routing to the agent that just completed, so
+-- an agent comment can never fan out to an unrelated agent. Ordered ASC so
+-- replaying in order lets later comments coalesce onto the follow-up created by
+-- the first.
+SELECT * FROM comment
+WHERE issue_id = @issue_id
+  AND author_type IN ('member', 'agent')
+  AND (
+      created_at > @since
+      OR id = ANY(@planned_comment_ids::uuid[])
+  )
+ORDER BY created_at ASC, id ASC;
+
 -- name: GetComment :one
 SELECT * FROM comment
 WHERE id = $1;
@@ -339,13 +393,35 @@ SELECT c.* FROM comment c
 WHERE c.id = (SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1);
 
 -- name: CreateComment :one
+-- A new comment counts as activity on its issue, so the same statement bumps
+-- the parent issue's updated_at. The touch is a leading data-modifying CTE and
+-- the INSERT selects the issue/workspace back out of it, which makes the two
+-- inseparable and gives two query-level guarantees:
+--   * atomicity — the insert and the timestamp bump commit or roll back
+--     together, so an issue is never left with a stale updated_at after a
+--     comment persists; and
+--   * tenant integrity — the comment can only be created against an issue that
+--     actually exists in the given workspace. A mismatched (issue, workspace)
+--     pair matches 0 rows in the CTE, the dependent INSERT then selects nothing,
+--     and the :one query returns pgx.ErrNoRows. A wrong workspace can therefore
+--     never leave a mis-attributed comment or a silently un-touched issue.
+-- Centralizing this here means every comment entrypoint inherits both
+-- guarantees regardless of what a caller passes. The "Updated date" sort and
+-- the daemon GC TTL both read updated_at, so this consistency is load-bearing.
+WITH touched_issue AS (
+    UPDATE issue SET updated_at = now()
+    WHERE issue.id = sqlc.arg(issue_id) AND issue.workspace_id = sqlc.arg(workspace_id)
+    RETURNING issue.id, issue.workspace_id
+)
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id)
-VALUES ($1, $2, $3, $4, $5, $6, sqlc.narg(parent_id), sqlc.narg(source_task_id))
+SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.arg(content), sqlc.arg(type), sqlc.narg(parent_id), sqlc.narg(source_task_id)
+FROM touched_issue ti
 RETURNING *;
 
 -- name: UpdateComment :one
 UPDATE comment SET
     content = $2,
+    source_task_id = sqlc.narg(source_task_id),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

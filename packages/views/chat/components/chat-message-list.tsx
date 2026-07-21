@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
-import { Virtuoso } from "react-virtuoso";
+import { Virtuoso, type Components } from "react-virtuoso";
 import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -20,13 +20,18 @@ import {
 import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Copy } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
-import { Markdown } from "@multica/views/common/markdown";
+import { RichContent } from "../../rich-content";
+import { RichContentScrollRootProvider } from "../../rich-content/scroll-root";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { AttachmentList } from "../../issues/components/comment-card";
 import type { AgentAvailability } from "@multica/core/agents";
-import type { ChatMessage, ChatPendingTask, TaskFailureReason } from "@multica/core/types";
+import type {
+  ChatMessage,
+  ChatPendingTask,
+  TaskFailureReason,
+  TaskMessagePayload,
+} from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
-import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { buildTimeline } from "../../common/task-transcript";
 import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
@@ -48,7 +53,86 @@ interface ChatMessageListProps {
   hasOlderMessages?: boolean;
   isFetchingOlderMessages?: boolean;
   onLoadOlderMessages?: () => void;
+  /** Transform assistant task text for embedded chat protocols before render/copy. */
+  transformContent?: (content: string) => string;
 }
+
+// ─── Virtuoso chrome ─────────────────────────────────────────────────────
+//
+// Header/Footer MUST be stable component references (module scope), never
+// inline arrows in the `components` prop: an inline `components={{ Footer:
+// () => … }}` creates a new component *type* every render, so React unmounts
+// and remounts the whole Header/Footer subtree each time. During task
+// streaming that tore down and rebuilt the entire live timeline — every row
+// and every Markdown parse — on every `task:message` event, freezing the
+// renderer for seconds at a time (MUL-3960). Per-render data flows through
+// Virtuoso's `context` prop instead, which reaches these components as an
+// ordinary prop (re-render, not remount).
+
+interface ChatListContext {
+  isFetchingOlderMessages: boolean;
+  showStatusPill: boolean;
+  pendingTask: ChatPendingTask | null | undefined;
+  liveTaskMessages: readonly TaskMessagePayload[] | undefined;
+  availability: AgentAvailability | undefined;
+}
+
+/**
+ * One Virtuoso row. A live (still-streaming) task and the persisted assistant
+ * message it becomes share ONE key — `task:<taskId>` — so the handoff replaces
+ * this item's data in place instead of unmounting a Footer subtree and mounting
+ * a different row (MUL-4922). That identity is what keeps an already-rendered
+ * Mermaid diagram or HTML iframe mounted across task completion.
+ */
+type ChatRenderItem =
+  | { key: string; kind: "message"; message: ChatMessage; taskId: string | null }
+  | { key: string; kind: "live"; taskId: string };
+
+/**
+ * Row key for a persisted message. Assistant turns carrying a task_id key on
+ * the task so they can inherit the live row; everything else keys on its own
+ * id.
+ */
+function messageRowKey(message: ChatMessage): string {
+  return message.role === "assistant" && message.task_id
+    ? `task:${message.task_id}`
+    : message.id;
+}
+
+function ChatListHeader({ context }: { context?: ChatListContext }) {
+  const { t } = useT("chat");
+  return (
+    <div className="mx-auto w-full max-w-4xl px-5 pt-4">
+      {context?.isFetchingOlderMessages && (
+        <div className="text-center text-xs text-muted-foreground">
+          {t(($) => $.message_list.loading_older)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The Footer now carries only the status pill — task chrome, not content. The
+// live timeline moved into a real row so it can keep its identity when the
+// task completes (see ChatRenderItem).
+function ChatListFooter({ context }: { context?: ChatListContext }) {
+  if (!context) return null;
+  if (!context.showStatusPill || !context.pendingTask) return null;
+  return (
+    <div className="mx-auto w-full max-w-4xl px-5 pb-4 space-y-4">
+      <TaskStatusPill
+        pendingTask={context.pendingTask}
+        taskMessages={context.liveTaskMessages ?? []}
+        availability={context.availability}
+      />
+    </div>
+  );
+}
+
+const LIST_COMPONENTS: Components<ChatRenderItem, ChatListContext> = {
+  Header: ChatListHeader,
+  Footer: ChatListFooter,
+};
 
 export function ChatMessageList({
   messages,
@@ -58,6 +142,7 @@ export function ChatMessageList({
   hasOlderMessages = false,
   isFetchingOlderMessages = false,
   onLoadOlderMessages,
+  transformContent,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -66,8 +151,9 @@ export function ChatMessageList({
     scrollRef.current = node;
     setScrollContainerEl(node);
   }, []);
-  const fadeStyle = useScrollFade(scrollRef);
-  const { t } = useT("chat");
+  // Soft edge fade hinting more content above/below. Kept small so it barely
+  // grazes full-bleed previews (image / HTML) at the edges.
+  const fadeStyle = useScrollFade(scrollRef, 16);
 
   const pendingTaskId = pendingTask?.task_id ?? null;
 
@@ -80,19 +166,44 @@ export function ChatMessageList({
   );
 
   // Live timeline for the in-flight task. useRealtimeSync keeps this cache
-  // current via setQueryData on task:message events.
+  // current via setQueryData on task:message events. Only used here to decide
+  // whether the live row exists and to feed the status pill — the row itself
+  // reads the same cache entry through AssistantMessage.
   const showLiveTimeline = !!pendingTaskId && !pendingAlreadyPersisted;
   const canFetchLiveTimeline = isTaskMessageTaskId(pendingTaskId) && !pendingAlreadyPersisted;
   const { data: liveTaskMessages } = useQuery({
     ...taskMessagesOptions(pendingTaskId ?? ""),
     enabled: canFetchLiveTimeline,
   });
-  const liveTimeline: ChatTimelineItem[] = buildTimeline(liveTaskMessages ?? []);
-  const hasLive = showLiveTimeline && liveTimeline.length > 0;
+  const hasLive = showLiveTimeline && (liveTaskMessages?.length ?? 0) > 0;
   const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
 
-  const totalCount = messages.length + (hasLive || showStatusPill ? 1 : 0);
-  const firstIndex = totalCount > 0 ? firstItemIndex : 0;
+  // Persisted messages plus, while a task is in flight, one synthetic trailing
+  // row for it. When the assistant message persists, `hasLive` goes false and
+  // the message takes the SAME key at the SAME position — an in-place data
+  // swap, not a remount.
+  const renderItems: ChatRenderItem[] = useMemo(() => {
+    const items: ChatRenderItem[] = messages.map((message) => ({
+      key: messageRowKey(message),
+      kind: "message" as const,
+      message,
+      taskId: message.task_id ?? null,
+    }));
+    if (hasLive && pendingTaskId) {
+      items.push({ key: `task:${pendingTaskId}`, kind: "live", taskId: pendingTaskId });
+    }
+    return items;
+  }, [messages, hasLive, pendingTaskId]);
+
+  const firstIndex = renderItems.length > 0 ? firstItemIndex : 0;
+
+  const listContext: ChatListContext = {
+    isFetchingOlderMessages,
+    showStatusPill,
+    pendingTask,
+    liveTaskMessages,
+    availability,
+  };
 
   return (
     <div
@@ -106,10 +217,24 @@ export function ChatMessageList({
           <ChatMessageSkeleton />
         </div>
       ) : (
+      // Chat scrolls inside its own element, so rich blocks must measure
+      // "near-viewport" against that element rather than the browser viewport —
+      // otherwise a diagram only starts loading once it is already on screen.
+      <RichContentScrollRootProvider scrollRoot={scrollContainerEl}>
       <Virtuoso
         customScrollParent={scrollContainerEl}
-        data={messages}
+        data={renderItems}
         firstItemIndex={firstIndex}
+        // Open pinned to the newest message. The list is remounted per session
+        // (`key={activeSessionId}` upstream), so this initial position is
+        // re-applied on every session switch. Without it a fresh Virtuoso
+        // renders from the top and the only thing that can scroll it down is
+        // `followOutput`, which reacts to post-mount data growth — leaving the
+        // landing spot racy: cached sessions resolve synchronously and stick at
+        // the top, while fetched ones sometimes catch a growth tick and land at
+        // the bottom. `align: "end"` bottom-aligns even a last message taller
+        // than the viewport, so switching sessions always shows the latest reply.
+        initialTopMostItemIndex={{ index: "LAST", align: "end" }}
         increaseViewportBy={{ top: 400, bottom: 600 }}
         atBottomThreshold={120}
         atBottomStateChange={setIsNearBottom}
@@ -119,41 +244,20 @@ export function ChatMessageList({
             onLoadOlderMessages?.();
           }
         }}
-        computeItemKey={(_, msg) => msg.id}
-        components={{
-          Header: () => (
-            <div className="mx-auto w-full max-w-4xl px-5 pt-4">
-              {isFetchingOlderMessages && (
-                <div className="text-center text-xs text-muted-foreground">{t(($) => $.message_list.loading_older)}</div>
-              )}
-            </div>
-          ),
-          Footer: () => (
-            <div className="mx-auto w-full max-w-4xl px-5 pb-4 space-y-4">
-              {hasLive && (
-                <div className="w-full space-y-1.5">
-                  <TimelineView items={liveTimeline} isStreaming />
-                </div>
-              )}
-              {showStatusPill && pendingTask && (
-                <TaskStatusPill
-                  pendingTask={pendingTask}
-                  taskMessages={liveTaskMessages ?? []}
-                  availability={availability}
-                />
-              )}
-            </div>
-          ),
-        }}
-        itemContent={(_, msg) => (
+        computeItemKey={(_, item) => item.key}
+        context={listContext}
+        components={LIST_COMPONENTS}
+        itemContent={(_, item) => (
           <div className="mx-auto w-full max-w-4xl px-5 py-2">
             <MessageBubble
-              message={msg}
-              isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
+              item={item}
+              isPending={!!pendingTaskId && item.taskId === pendingTaskId}
+              transformContent={transformContent}
             />
           </div>
         )}
       />
+      </RichContentScrollRootProvider>
       )}
     </div>
   );
@@ -188,18 +292,50 @@ export function ChatMessageSkeleton() {
 
 // ─── Message bubbles ─────────────────────────────────────────────────────
 
-function MessageBubble({ message, isPending }: { message: ChatMessage; isPending: boolean }) {
+// memo: every streamed task:message re-renders ChatMessageList, and with it
+// every VISIBLE row via itemContent. Message objects are referentially
+// stable for unchanged messages and isPending is a boolean, so a shallow
+// memo skips reconciling rows the stream didn't touch — the persisted
+// history stays inert while only the live footer updates.
+const MessageBubble = memo(function MessageBubble({
+  item,
+  isPending,
+  transformContent,
+}: {
+  item: ChatRenderItem;
+  isPending: boolean;
+  transformContent?: (content: string) => string;
+}) {
+  // The live row and the persisted assistant row both land here under one key,
+  // and both render <AssistantMessage> — same component type, same position —
+  // so React reconciles rather than remounts at task completion.
+  if (item.kind === "live") {
+    return (
+      <AssistantMessage
+        taskId={item.taskId}
+        isPending={isPending}
+        transformContent={transformContent}
+      />
+    );
+  }
+
+  const { message } = item;
+
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
         <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm max-w-[80%] break-words">
-          {/* User messages are authored as markdown in ContentEditor, so
-           * render them through the same pipeline as assistant replies.
-           * Neutralise prose's leading/trailing margin so single-line
-           * bubbles stay as compact as the plain-text version used to. */}
-          <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-            <Markdown attachments={message.attachments}>{message.content}</Markdown>
-          </div>
+          {/* User messages are authored as markdown in ContentEditor, so they
+           * render through the SAME RichContent as assistant replies and as
+           * Issue/Comment — a Mermaid fence a user pastes is a diagram here
+           * too. `compact` trims the leading/trailing block margins so a
+           * single-line bubble stays as tight as the plain-text version. */}
+          <RichContent
+            content={message.content}
+            attachments={message.attachments}
+            density="compact"
+            phase="settled"
+          />
           <AttachmentList
             attachments={message.attachments}
             content={message.content}
@@ -210,17 +346,44 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
     );
   }
 
-  return <AssistantMessage message={message} isPending={isPending} />;
-}
+  return (
+    <AssistantMessage
+      taskId={message.task_id ?? null}
+      message={message}
+      isPending={isPending}
+      transformContent={transformContent}
+    />
+  );
+});
 
+/**
+ * Assistant turn body — renders BOTH the in-flight (live) and the persisted
+ * form of one task (MUL-4922).
+ *
+ * `message` is undefined while the task streams and becomes the persisted
+ * `chat_message` when it lands. Both forms are rendered by this one component,
+ * mounted under one stable row key (`task:<taskId>`), so the live → persisted
+ * handoff is a prop change rather than an unmount: the RichContent subtree and
+ * any Mermaid diagram / HTML iframe inside it stay mounted, keep their pan-zoom
+ * state, and never re-run their expensive render. Before this, the live
+ * timeline lived in Virtuoso's Footer and the persisted row keyed on
+ * `message.id`, so every completed task tore down and rebuilt its diagrams.
+ *
+ * The timeline itself comes from `taskMessagesOptions(taskId)` in both forms —
+ * the same cache entry useRealtimeSync seeds during execution — so no refetch
+ * and no data discontinuity happens at the handoff either.
+ */
 function AssistantMessage({
+  taskId,
   message,
   isPending,
+  transformContent,
 }: {
-  message: ChatMessage;
+  taskId: string | null;
+  message?: ChatMessage;
   isPending: boolean;
+  transformContent?: (content: string) => string;
 }) {
-  const taskId = message.task_id;
   const canFetchTaskMessages = isTaskMessageTaskId(taskId);
 
   // Use the shared taskMessagesOptions so this cache entry is the same one
@@ -231,13 +394,23 @@ function AssistantMessage({
     enabled: canFetchTaskMessages,
   });
 
-  const timeline: ChatTimelineItem[] = buildTimeline(taskMessages ?? []);
+  // Memoized on the cache array identity: mergeTaskMessagesBySeq preserves the
+  // array reference when a duplicate event arrives, so this recomputes only
+  // when a genuinely new message lands.
+  const timeline: ChatTimelineItem[] = useMemo(
+    () => transformTimeline(buildTimeline(taskMessages ?? []), transformContent),
+    [taskMessages, transformContent],
+  );
+
+  // Content is settled once the persisted message exists; until then text is
+  // still arriving and a trailing fence may be half-written.
+  const phase: "streaming" | "settled" = message ? "settled" : "streaming";
 
   // Failure bubble path: when the server's FailTask wrote a failure
   // chat_message (failure_reason set), render a destructive bubble with the
   // human-readable reason label + collapsible raw errMsg + the same timeline
   // so the user can see exactly where the run broke.
-  if (message.failure_reason) {
+  if (message?.failure_reason) {
     return (
       <FailureBubble
         reason={message.failure_reason}
@@ -248,24 +421,69 @@ function AssistantMessage({
     );
   }
 
+  // no_response path (MUL-4351): the agent completed this direct-chat turn
+  // without any text. Keep whatever tool/thinking timeline the run produced and
+  // show a localized "no text reply" notice instead of an empty markdown block.
+  const isNoResponse = message?.message_kind === "no_response";
+
   return (
     <div className="w-full space-y-1.5">
-      {timeline.length > 0 ? (
-        <TimelineView items={timeline} attachments={message.attachments} />
-      ) : (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-          <Markdown attachments={message.attachments}>{message.content}</Markdown>
-        </div>
+      {timeline.length > 0 && (
+        <TimelineView
+          items={timeline}
+          attachments={message?.attachments}
+          phase={phase}
+          isStreaming={!message}
+        />
       )}
-      <AttachmentList
-        attachments={message.attachments}
-        content={message.content}
-      />
-      <MessageFooter
-        message={message}
-        timeline={timeline}
-        isPending={isPending}
-      />
+      {isNoResponse ? (
+        <NoResponseNotice />
+      ) : message && timeline.length === 0 ? (
+        <RichContent
+          content={message.content}
+          attachments={message.attachments}
+          density="compact"
+          phase="settled"
+          className="leading-relaxed"
+        />
+      ) : null}
+      {message && (
+        <>
+          <AttachmentList
+            attachments={message.attachments}
+            content={message.content}
+          />
+          <MessageFooter
+            message={message}
+            timeline={timeline}
+            isPending={isPending}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function transformTimeline(
+  timeline: ChatTimelineItem[],
+  transformContent?: (content: string) => string,
+): ChatTimelineItem[] {
+  if (!transformContent) return timeline;
+  return timeline.map((item) =>
+    item.type === "text" && item.content
+      ? { ...item, content: transformContent(item.content) }
+      : item,
+  );
+}
+
+// Muted, localized notice shown in place of assistant text when a turn
+// completed with no reply (message_kind === "no_response"). Explains the empty
+// turn instead of rendering a blank bubble (MUL-4351).
+function NoResponseNotice() {
+  const { t } = useT("chat");
+  return (
+    <div className="text-sm italic text-muted-foreground">
+      {t(($) => $.message_list.no_response)}
     </div>
   );
 }
@@ -284,12 +502,18 @@ function MessageFooter({
   timeline: ChatTimelineItem[];
   isPending: boolean;
 }) {
-  const showCopy = !isPending;
+  // A no_response turn has nothing to copy, and its caption uses a neutral
+  // "Finished in Xs" instead of "Replied in Xs" (MUL-4351).
+  const isNoResponse = message.message_kind === "no_response";
+  const showCopy = !isPending && !isNoResponse;
   if (message.elapsed_ms == null && !showCopy) return null;
   return (
     <div className="flex items-center gap-1.5">
       {message.elapsed_ms != null && (
-        <ElapsedCaption variant="replied" elapsedMs={message.elapsed_ms} />
+        <ElapsedCaption
+          variant={isNoResponse ? "finished" : "replied"}
+          elapsedMs={message.elapsed_ms}
+        />
       )}
       {showCopy && <MessageCopyButton message={message} timeline={timeline} />}
     </div>
@@ -343,15 +567,18 @@ function ElapsedCaption({
   elapsedMs,
   className,
 }: {
-  variant: "replied" | "failed";
+  variant: "replied" | "failed" | "finished";
   elapsedMs: number;
   className?: string;
 }) {
   const { t } = useT("chat");
+  const elapsed = formatElapsedMs(elapsedMs);
   const text =
     variant === "replied"
-      ? t(($) => $.message_list.replied_in, { elapsed: formatElapsedMs(elapsedMs) })
-      : t(($) => $.message_list.failed_after, { elapsed: formatElapsedMs(elapsedMs) });
+      ? t(($) => $.message_list.replied_in, { elapsed })
+      : variant === "finished"
+        ? t(($) => $.message_list.finished_in, { elapsed })
+        : t(($) => $.message_list.failed_after, { elapsed });
   return (
     <div className={cn("text-xs text-muted-foreground/80", className)}>
       {text}
@@ -372,12 +599,23 @@ function FailureBubble({
 }) {
   const { t } = useT("chat");
   const [open, setOpen] = useState(false);
-  // Map the back-end enum to copy via the shared label table; an unknown
-  // reason (e.g. a future enum value the front-end doesn't ship yet)
-  // falls back to a generic translated label.
+  // Chat gets its own friendly, reassuring copy per failure reason — plain
+  // language + a "try again" nudge — instead of the terse developer labels
+  // (`failureReasonLabel`) used on the agent-detail / execution-log surfaces.
+  // An unknown reason (a future enum value this build doesn't ship yet) falls
+  // back to a generic friendly line. The raw error stays tucked under the
+  // collapsible below for anyone who wants the technical detail.
+  const chatFailureCopy: Record<TaskFailureReason, string> = {
+    agent_error: t(($) => $.message_list.failure.agent_error),
+    timeout: t(($) => $.message_list.failure.timeout),
+    codex_semantic_inactivity: t(($) => $.message_list.failure.codex_semantic_inactivity),
+    runtime_offline: t(($) => $.message_list.failure.runtime_offline),
+    runtime_recovery: t(($) => $.message_list.failure.runtime_recovery),
+    manual: t(($) => $.message_list.failure.manual),
+  };
   const label =
-    failureReasonLabel[reason as TaskFailureReason] ??
-    t(($) => $.message_list.task_failed_fallback);
+    chatFailureCopy[reason as TaskFailureReason] ??
+    t(($) => $.message_list.failure.fallback);
 
   return (
     <div className="w-full space-y-1.5">
@@ -435,35 +673,42 @@ function TimelineView({
   items,
   isStreaming,
   attachments,
+  phase = "settled",
 }: {
   items: ChatTimelineItem[];
   isStreaming?: boolean;
   attachments?: import("@multica/core/types").Attachment[];
+  phase?: "streaming" | "settled";
 }) {
   const { preface, middle, final } = splitTimeline(items);
 
   return (
     <>
       {preface.length > 0 && (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-          <Markdown attachments={attachments}>
-            {preface.map((t) => t.content ?? "").join("")}
-          </Markdown>
-        </div>
+        <RichContent
+          content={preface.map((t) => t.content ?? "").join("")}
+          attachments={attachments}
+          density="compact"
+          phase={phase}
+          className="leading-relaxed"
+        />
       )}
       {middle.length > 0 && (
         <OuterProcessFold
           items={middle}
-          defaultOpen={!!isStreaming}
+          isStreaming={!!isStreaming}
           attachments={attachments}
+          phase={phase}
         />
       )}
       {final.length > 0 && (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-          <Markdown attachments={attachments}>
-            {final.map((t) => t.content ?? "").join("")}
-          </Markdown>
-        </div>
+        <RichContent
+          content={final.map((t) => t.content ?? "").join("")}
+          attachments={attachments}
+          density="compact"
+          phase={phase}
+          className="leading-relaxed"
+        />
       )}
     </>
   );
@@ -471,20 +716,27 @@ function TimelineView({
 
 function OuterProcessFold({
   items,
-  defaultOpen,
+  isStreaming,
   attachments,
+  phase = "settled",
 }: {
   items: ChatTimelineItem[];
-  defaultOpen?: boolean;
+  isStreaming?: boolean;
   attachments?: import("@multica/core/types").Attachment[];
+  phase?: "streaming" | "settled";
 }) {
   const { t } = useT("chat");
-  // useState seeds once at mount — subsequent renders never overwrite the
-  // user's manual toggle. The streaming → completed transition unmounts
-  // the live <TimelineView> and mounts the persisted AssistantMessage's
-  // own <TimelineView>, so the persisted instance starts closed (default)
-  // even if the live one was open. That's the desired collapsed-default.
-  const [open, setOpen] = useState(defaultOpen ?? false);
+  // Open while the task streams (so the user watches progress), collapsed once
+  // it settles. This used to fall out of a remount: the live TimelineView was
+  // torn down and the persisted one mounted closed. The row is now stable
+  // across that handoff (MUL-4922) — which is the point, it keeps Mermaid and
+  // HTML blocks alive — so the collapse has to be expressed directly.
+  const [open, setOpen] = useState(!!isStreaming);
+  const wasStreaming = useRef(!!isStreaming);
+  useEffect(() => {
+    if (wasStreaming.current && !isStreaming) setOpen(false);
+    wasStreaming.current = !!isStreaming;
+  }, [isStreaming]);
   const stepCount = items.length;
 
   return (
@@ -497,7 +749,12 @@ function OuterProcessFold({
         <div className="mt-1 rounded-lg border bg-muted/20 p-2 space-y-0.5">
           {items.map((item) =>
             item.type === "text" ? (
-              <MiddleTextRow key={item.seq} item={item} attachments={attachments} />
+              <MiddleTextRow
+                key={item.seq}
+                item={item}
+                attachments={attachments}
+                phase={phase}
+              />
             ) : (
               <ItemRow key={item.seq} item={item} />
             ),
@@ -515,13 +772,20 @@ function OuterProcessFold({
 function MiddleTextRow({
   item,
   attachments,
+  phase = "settled",
 }: {
   item: ChatTimelineItem;
   attachments?: import("@multica/core/types").Attachment[];
+  phase?: "streaming" | "settled";
 }) {
   return (
-    <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-      <Markdown attachments={attachments}>{item.content ?? ""}</Markdown>
+    <div className="py-0.5 text-xs text-muted-foreground">
+      <RichContent
+        content={item.content ?? ""}
+        attachments={attachments}
+        density="compact"
+        phase={phase}
+      />
     </div>
   );
 }

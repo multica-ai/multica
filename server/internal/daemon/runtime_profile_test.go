@@ -153,6 +153,30 @@ func newProfileRegisterFixture(t *testing.T, profiles []RuntimeProfile, profiles
 // profile_id, and that its resolved command path is recorded for runTask.
 // Uses a custom-only host (no built-in agents) to also prove that path still
 // registers.
+func TestRegisterRuntimes_IncludesBuiltInQwen(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	fx := newProfileRegisterFixture(t, nil, http.StatusOK)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"qwen": {Path: "/usr/bin/true", Command: "qwen", Model: "qwen3.8-max-preview"},
+	}
+
+	resp, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+	if len(fx.sentRuntimes) != 1 {
+		t.Fatalf("sent runtimes = %d, want 1: %+v", len(fx.sentRuntimes), fx.sentRuntimes)
+	}
+	sent := fx.sentRuntimes[0]
+	if sent["type"] != "qwen" || sent["name"] != "Qwen Code" || sent["version"] != "9.9.9" || sent["status"] != "online" {
+		t.Fatalf("registered Qwen runtime = %+v", sent)
+	}
+	if len(resp.Runtimes) != 1 || resp.Runtimes[0].Provider != "qwen" {
+		t.Fatalf("register response = %+v", resp)
+	}
+}
+
 func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	stubLookPath(t, map[string]string{"company-codex": "/opt/bin/company-codex"})
@@ -196,6 +220,9 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	got := d.profileLaunchSpecs["prof-1"]
 	if got.path != "/opt/bin/company-codex" {
 		t.Errorf("profileLaunchSpecs[prof-1].path = %q, want /opt/bin/company-codex", got.path)
+	}
+	if got.version != "9.9.9" {
+		t.Errorf("profileLaunchSpecs[prof-1].version = %q, want 9.9.9", got.version)
 	}
 	if strings.Join(got.fixedArgs, " ") != "--model composer-2.5" {
 		t.Errorf("profileLaunchSpecs[prof-1].fixedArgs = %v, want [--model composer-2.5]", got.fixedArgs)
@@ -395,13 +422,13 @@ func stubProfilePathExecutable(t *testing.T, executable map[string]bool) {
 func TestCustomCommandPathForRuntime(t *testing.T) {
 	d := freshDaemon("")
 	d.profileLaunchSpecs = map[string]profileLaunchSpec{
-		"prof-1": {path: "/opt/bin/company-codex", fixedArgs: []string{"--model", "composer-2.5"}},
+		"prof-1": {path: "/opt/bin/company-codex", version: "9.8.7", fixedArgs: []string{"--model", "composer-2.5"}},
 	}
 	// rt-custom is a custom-profile runtime; rt-builtin is a normal one.
 	d.runtimeIndex["rt-custom"] = Runtime{ID: "rt-custom", Provider: "codex", ProfileID: "prof-1"}
 	d.runtimeIndex["rt-builtin"] = Runtime{ID: "rt-builtin", Provider: "claude"}
 
-	if spec, ok := d.customProfileLaunchForRuntime("rt-custom"); !ok || spec.path != "/opt/bin/company-codex" || strings.Join(spec.fixedArgs, " ") != "--model composer-2.5" {
+	if spec, ok := d.customProfileLaunchForRuntime("rt-custom"); !ok || spec.path != "/opt/bin/company-codex" || spec.version != "9.8.7" || strings.Join(spec.fixedArgs, " ") != "--model composer-2.5" {
 		t.Errorf("custom runtime: got (%+v, %v), want profile launch spec", spec, ok)
 	}
 	if spec, ok := d.customProfileLaunchForRuntime("rt-builtin"); ok || spec.path != "" {

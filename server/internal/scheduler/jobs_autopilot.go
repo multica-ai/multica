@@ -30,6 +30,13 @@ const ScopeKindAutopilotTrigger = "autopilot_trigger"
 // service.DefaultAutopilotTriggerTimezone.
 const DefaultAutopilotScheduleTimezone = "UTC"
 
+// maxAutopilotScheduleLateness is the acceptance window for dispatching a
+// cron occurrence after its configured plan_time. Normal scheduler jitter is
+// tens of seconds; anything beyond this is a stale catch-up and should wait
+// for the next configured slot instead of firing at an arbitrary activation
+// time.
+const maxAutopilotScheduleLateness = 5 * time.Minute
+
 // AutopilotScheduleDispatcher is the narrow contract this job needs
 // from service.AutopilotService. Defined here so unit tests in this
 // package (and the cmd/server integration tests) can stub it without
@@ -211,10 +218,11 @@ func autopilotScopes(
 }
 
 // autopilotPlansForScope returns the PlansForScope hook that computes
-// every cron occurrence in (lastPlan, dbNow] and keeps only the most
-// recent one. This matches the legacy goroutine's "collapse missed
-// fires" semantics; a future per-trigger catch_up_mode column can flip
-// the policy without touching scheduler internals.
+// every cron occurrence in (lastPlan, dbNow], keeps only the most recent
+// one, and rejects it if it is outside the dispatch-lateness window.
+// The latest-only collapse prevents a long outage from replaying every
+// missed slot; the lateness guard prevents a paused / newly eligible
+// trigger from firing hours after its configured time.
 //
 // Retry-eligible state is handled specially: when the most recent
 // stored plan_time is a FAILED row with attempts remaining and
@@ -300,8 +308,16 @@ func autopilotPlansForScope(cache *autopilotScheduleCache) func(
 			return nil, nil
 		}
 		// CatchUpLatestOnly: collapse missed fires to the most recent.
-		return occs[len(occs)-1:], nil
+		latestDue := occs[len(occs)-1]
+		if isAutopilotSchedulePlanStale(now, latestDue) {
+			return nil, nil
+		}
+		return []time.Time{latestDue}, nil
 	}
+}
+
+func isAutopilotSchedulePlanStale(now, planTime time.Time) bool {
+	return now.Sub(planTime) > maxAutopilotScheduleLateness
 }
 
 // autopilotHandler dispatches one (trigger, planTime) attempt and
@@ -361,10 +377,29 @@ func autopilotHandler(
 			return HandlerResult{}, fmt.Errorf("dispatch for plan: %w", err)
 		}
 
-		// Bump the display-only last_fired_at so the trigger UI shows
-		// the most recent fire time. Errors are not fatal — the
-		// canonical record is autopilot_run.created_at.
-		_ = queries.TouchAutopilotTriggerFiredAt(ctx, trigger.ID)
+		// Advance the display-only next_run_at to the upcoming slot and
+		// bump last_fired_at in the same write, so the trigger UI stops
+		// showing a "next run" that has already fired (MUL-3749). The
+		// value stays on the app local clock — consistent with the trigger
+		// create/update display path — but is floored at the plan_time
+		// that just fired (see advancedNextRun), so a lagging app clock can
+		// never recompute the slot we just dispatched. Errors are not
+		// fatal: the canonical record is autopilot_run.created_at and the
+		// next dispatch refreshes the value regardless; on a cron/timezone
+		// parse failure we fall back to the last_fired_at-only bump so the
+		// fire is still recorded.
+		tz := DefaultAutopilotScheduleTimezone
+		if trigger.Timezone.Valid && trigger.Timezone.String != "" {
+			tz = trigger.Timezone.String
+		}
+		if next, ok := advancedNextRun(trigger.CronExpression.String, tz, in.PlanTime, time.Now()); ok {
+			_ = queries.AdvanceTriggerNextRun(ctx, db.AdvanceTriggerNextRunParams{
+				ID:        trigger.ID,
+				NextRunAt: pgtype.Timestamptz{Time: next, Valid: true},
+			})
+		} else {
+			_ = queries.TouchAutopilotTriggerFiredAt(ctx, trigger.ID)
+		}
 
 		return HandlerResult{
 			RowsAffected: 1,
@@ -374,6 +409,28 @@ func autopilotHandler(
 			},
 		}, nil
 	}
+}
+
+// advancedNextRun computes the display-only next_run_at value to write
+// after a schedule trigger fires at planTime. It evaluates the cron on the
+// app local clock (`now`, normally time.Now()) but anchors at
+// max(now, planTime), so the result is always strictly after the slot that
+// just fired — even when this app instance's clock lags the DB clock that
+// judged the plan due. Without that floor a sub-second-late local clock
+// could recompute the same slot and the next_run_at staleness bug
+// (MUL-3749) would reappear at the top-of-period boundary. Returns
+// ok=false when the cron/timezone fail to parse, signalling the caller to
+// fall back to a last_fired_at-only bump.
+func advancedNextRun(cronExpr, timezone string, planTime, now time.Time) (time.Time, bool) {
+	anchor := now
+	if planTime.After(anchor) {
+		anchor = planTime
+	}
+	next, err := service.NextOccurrenceAfterUTC(cronExpr, timezone, anchor)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return next, true
 }
 
 // parseScopeUUID converts a scope.ID string back into pgtype.UUID.

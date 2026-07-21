@@ -11,9 +11,9 @@ import {
   useSidebar,
 } from "@multica/ui/components/ui/sidebar";
 import { ModalRegistry } from "@multica/views/modals/registry";
-import { AppSidebar } from "@multica/views/layout";
+import { AppSidebar, GlobalShortcuts } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
-import { ChatFab, ChatWindow } from "@multica/views/chat";
+import { FloatingChat } from "@multica/views/chat";
 import { WorkspaceSlugProvider, paths, useCurrentWorkspace } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
@@ -122,10 +122,29 @@ function MainTopBar() {
         transition={toolbarMotion}
         style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
       />
-      <div className="relative z-10 flex h-full items-center">
+      <div className="relative z-10 flex h-full min-w-0 max-w-full items-center">
         <TabBar />
       </div>
     </motion.header>
+  );
+}
+
+// The canvas hugs the expanded sidebar with a hairline gap. When the sidebar
+// leaves the main flow, the left margin must grow to mirror the fixed mr-2 so
+// the floating canvas sits symmetrically inside the window frame.
+function MainCanvas({ children }: { children: React.ReactNode }) {
+  const { state, isMobile } = useSidebar();
+  const sidebarHidden = state === "collapsed" || isMobile;
+
+  return (
+    <motion.div
+      animate={{ marginLeft: sidebarHidden ? 8 : 2 }}
+      className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 rounded-xl bg-page-canvas ring-1 ring-surface-border shadow-[var(--surface-shadow)]"
+      initial={false}
+      transition={toolbarMotion}
+    >
+      {children}
+    </motion.div>
   );
 }
 
@@ -211,20 +230,19 @@ export function DesktopShell() {
           triggered by IndexRedirect, not a route. */}
       <WorkspaceSlugProvider slug={slug}>
         <DesktopInboxBridge />
-        <div className="flex h-screen">
-          <SidebarProvider className="flex-1">
+        <div className="flex h-screen bg-app-shell">
+          <SidebarProvider className="flex-1 bg-app-shell">
+            {slug && <GlobalShortcuts />}
             {slug && <WindowToolbar />}
             {slug && <AppSidebar topSlot={<SidebarTopSpacer />} searchSlot={<SearchTrigger />} />}
             {/* Right side: header + content container */}
-            <motion.div layout transition={toolbarMotion} className="flex flex-1 min-w-0 flex-col">
+            <div className="flex flex-1 min-w-0 flex-col">
               <MainTopBar />
-              {/* Content area with inset styling — relative so ChatWindow/ChatFab are constrained here */}
-              <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl shadow-sm bg-background">
+              <MainCanvas>
                 <TabContent />
-                {slug && <ChatWindow />}
-                {slug && <ChatFab />}
-              </div>
-            </motion.div>
+                {slug && <FloatingChat />}
+              </MainCanvas>
+            </div>
           </SidebarProvider>
         </div>
         {slug && <ModalRegistry />}

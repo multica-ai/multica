@@ -1,3 +1,10 @@
 {
-  "remove_label": "ラベル{{name}}を削除"
+  "remove_label": "ラベル{{name}}を削除",
+  "resource_picker": {
+    "empty": "ラベルなし",
+    "add": "ラベルを追加",
+    "search": "ラベルを検索...",
+    "no_labels": "先に設定でラベルを作成してください",
+    "no_results": "一致するラベルがありません"
+  }
 }

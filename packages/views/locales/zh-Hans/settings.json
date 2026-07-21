@@ -1,5 +1,12 @@
 {
+  "auto_save": {
+    "saving": "正在保存…",
+    "saved": "已保存",
+    "failed": "保存失败",
+    "toast_saved": "更改已保存"
+  },
   "preferences": {
+    "general_title": "常规",
     "theme": {
       "title": "主题",
       "light": "浅色",
@@ -19,6 +26,93 @@
       "browser_suffix": "（浏览器）",
       "hint": "用于仪表盘、图表和「今天」标签。这是个人偏好，在你的所有工作区中通用。",
       "sync_failed": "保存时区偏好失败。"
+    },
+    "sticky_comment_bar": {
+      "title": "固定评论栏",
+      "hint": "滚动 issue 页面时，评论栏始终固定在底部。"
+    },
+    "issue_link_new_tab": {
+      "title": "在新标签页打开 issue 链接",
+      "hint": "点击描述、评论或聊天中的 issue 链接时，在新标签页中打开，而不是在当前页面跳转。"
+    }
+  },
+  "shortcuts": {
+    "title": "快捷键",
+    "description": "自定义当前设备上的产品操作。点击一个快捷键，然后按下新的组合键。",
+    "search_placeholder": "搜索操作...",
+    "reset_all": "恢复默认设置",
+    "reset_confirm": {
+      "title": "恢复所有快捷键的默认设置？",
+      "description": "这会清除当前设备上的所有自定义快捷键，并恢复默认设置。",
+      "cancel": "取消",
+      "confirm": "恢复全部默认设置"
+    },
+    "reset": "重置",
+    "disable": "停用",
+    "reset_action": "重置「{{action}}」",
+    "disable_action": "停用「{{action}}」快捷键",
+    "record_aria": "修改「{{action}}」的快捷键",
+    "recording": "请按键",
+    "record_hint": "Esc 取消 · Delete 清除",
+    "unassigned": "未设置",
+    "no_results": "没有匹配的快捷键操作。",
+    "conflict_error": "已被「{{action}}」使用。",
+    "reserved_error": "该快捷键已被浏览器或桌面窗口占用。",
+    "send_error": "发送只能使用 Enter 或 Mod + Enter。",
+    "unsafe_error": "这个按键会干扰文字输入或基础键盘导航。",
+    "send_enter_hint": "Shift+Enter 可插入段落、继续列表，或在代码块中换行。",
+    "categories": {
+      "general": "常规",
+      "navigation": "导航"
+    },
+    "actions": {
+      "openSearch": { "label": "打开搜索", "description": "随时搜索内容或运行命令。" },
+      "createIssue": { "label": "新建 issue", "description": "打开你常用的 issue 创建流程。" },
+      "toggleSidebar": { "label": "显示或隐藏侧边栏", "description": "切换主侧边栏的显示状态。" },
+      "findInIssue": { "label": "在 issue 中查找", "description": "搜索当前打开的 issue 详情。" },
+      "send": { "label": "发送", "description": "发送聊天消息、评论、回复、反馈和提示词，并在创建弹窗中创建 issue。" },
+      "goInbox": { "label": "前往收件箱", "description": "打开工作区收件箱。" },
+      "goChat": { "label": "前往聊天", "description": "打开工作区聊天。" },
+      "goMyIssues": { "label": "前往我的 issue", "description": "打开分配给你的 issue。" },
+      "goIssues": { "label": "前往 Issues", "description": "打开 issue 列表。" },
+      "goProjects": { "label": "前往项目", "description": "打开项目列表。" },
+      "goAutopilots": { "label": "前往自动化", "description": "打开工作区自动化。" },
+      "goAgents": { "label": "前往智能体", "description": "打开智能体列表。" },
+      "goSquads": { "label": "前往小队", "description": "打开小队列表。" },
+      "goUsage": { "label": "前往用量", "description": "打开用量分析。" },
+      "goRuntimes": { "label": "前往运行时", "description": "打开运行时配置。" },
+      "goSkills": { "label": "前往 Skills", "description": "打开 skill 库。" },
+      "goSettings": { "label": "前往设置", "description": "打开工作区设置。" }
+    },
+    "fixed": {
+      "title": "固定的系统快捷键",
+      "description": "窗口和无障碍快捷键保持固定，确保始终可靠。缩放和标签页操作仅适用于桌面端。",
+      "close_tab": "关闭当前标签页",
+      "zoom_in": "放大",
+      "zoom_out": "缩小",
+      "reset_zoom": "重置缩放",
+      "close_dialog": "关闭对话框或菜单"
+    }
+  },
+  "chat": {
+    "floating_title": "悬浮窗",
+    "floating_label": "悬浮聊天窗",
+    "floating_hint": "在每个页面右下角显示悬浮聊天按钮。默认关闭——打开后可随处召唤聊天；关闭时，聊天只在此标签页中可用。"
+  },
+  "issue": {
+    "description": "选择各创建方式的工具栏中常驻显示的字段。隐藏的字段仍可从 ⋯ 菜单使用，有值时会自动显示。",
+    "quick_create_title": "通过智能体创建",
+    "quick_create_description": "快速创建工具栏中显示的字段。",
+    "manual_create_title": "手动创建",
+    "manual_create_description": "手动创建工具栏中显示的字段。",
+    "fields": {
+      "status": "状态",
+      "priority": "优先级",
+      "assignee": "负责人",
+      "labels": "标签",
+      "project": "项目",
+      "due_date": "截止日期",
+      "start_date": "开始日期"
     }
   },
   "page": {
@@ -28,6 +122,9 @@
     "tabs": {
       "profile": "个人资料",
       "preferences": "偏好设置",
+      "shortcuts": "快捷键",
+      "issue": "Issue",
+      "chat": "聊天",
       "notifications": "通知",
       "tokens": "API Token",
       "general": "通用",
@@ -35,11 +132,126 @@
       "github": "GitHub",
       "integrations": "集成",
       "labs": "实验室",
-      "members": "成员"
+      "members": "成员",
+      "labels": "标签",
+      "properties": "属性"
+    }
+  },
+  "properties": {
+    "title": "属性",
+    "description": "为该工作区的 Issue 定义类型化的自定义属性。属性值设置在每个 Issue 上，agent 可读写。",
+    "search_placeholder": "按名称筛选...",
+    "new_property": "新建属性",
+    "show_archived": "显示已归档",
+    "columns": {
+      "name": "名称",
+      "type": "类型",
+      "options": "选项",
+      "usage": "使用",
+      "updated": "更新时间"
+    },
+    "usage_count_other": "{{count}} 个 Issue",
+    "loading": "正在加载属性...",
+    "empty": "还没有属性",
+    "empty_hint": "创建 Severity、Environment 这类类型化字段——agent 可带校验地读写它们。",
+    "no_results": "没有匹配的属性",
+    "save_failed": "保存属性失败",
+    "limit_hint": "{{count}}/{{max}} 个启用中属性",
+    "archived_badge": "已归档",
+    "types": {
+      "text": "文本",
+      "number": "数字",
+      "select": "单选",
+      "multi_select": "多选",
+      "date": "日期",
+      "checkbox": "勾选",
+      "url": "链接"
+    },
+    "actions": {
+      "open": "{{name}} 的操作",
+      "edit": "编辑",
+      "archive": "归档",
+      "unarchive": "恢复"
+    },
+    "editor": {
+      "create_title": "新建属性",
+      "edit_title": "编辑属性",
+      "admin_hint": "仅工作区 Owner 和 Admin 可以管理属性定义。",
+      "icon": "图标",
+      "choose_icon": "选择图标",
+      "remove_icon": "移除图标",
+      "name": "名称",
+      "name_placeholder": "例如 Severity",
+      "type": "类型",
+      "type_locked_hint": "创建后类型不可修改。",
+      "description": "描述",
+      "description_placeholder": "这个属性的含义以及何时设置",
+      "options": "选项",
+      "option_name_placeholder": "选项名称",
+      "add_option": "添加选项",
+      "remove_option": "移除选项",
+      "cancel": "取消",
+      "save": "保存属性",
+      "saving": "保存中..."
+    },
+    "archive_dialog": {
+      "title": "归档属性？",
+      "description": "“{{name}}”将从选择器和筛选中隐藏，Issue 上已有的值会保留。之后可以恢复。",
+      "cancel": "取消",
+      "confirm": "归档属性",
+      "failed": "归档属性失败"
+    }
+  },
+  "labels": {
+    "title": "标签",
+    "description": "分别管理工作区中用于整理 issue、智能体和 skill 的标签。三类标签相互独立。",
+    "scopes": {
+      "issue": "Issue",
+      "agent": "智能体",
+      "skill": "Skill"
+    },
+    "search_placeholder": "按名称或描述筛选...",
+    "new_label": "新建标签",
+    "columns": {
+      "name": "名称",
+      "description": "描述",
+      "usage": "使用数量",
+      "updated": "更新时间"
+    },
+    "usage_count": "已使用 {{count}} 次",
+    "loading": "正在加载标签...",
+    "empty": "暂无 {{scope}} 标签",
+    "no_results": "没有匹配的标签",
+    "save_failed": "无法保存标签",
+    "actions": {
+      "open": "{{name}} 的操作",
+      "edit": "编辑",
+      "delete": "删除"
+    },
+    "editor": {
+      "create_title": "新建标签",
+      "edit_title": "编辑标签",
+      "scope_hint": "这个标签只属于 {{scope}} 分类。",
+      "name": "名称",
+      "name_placeholder": "例如：Bug",
+      "description": "描述",
+      "description_placeholder": "说明什么时候应使用这个标签",
+      "color": "颜色",
+      "cancel": "取消",
+      "save": "保存标签",
+      "saving": "保存中..."
+    },
+    "delete_dialog": {
+      "title": "删除标签？",
+      "description": "确认删除 \"{{name}}\"？它将从 {{count}} 个资源中移除。此操作无法撤销。",
+      "cancel": "取消",
+      "confirm": "删除标签",
+      "failed": "无法删除标签"
     }
   },
   "account": {
-    "section_profile": "个人资料",
+    "section_profile": "个人信息",
+    "avatar_label": "头像",
     "click_avatar_hint": "点击上传头像",
     "name_label": "姓名",
     "profile_description_label": "关于你",
@@ -96,7 +308,10 @@
   },
   "tokens": {
     "title": "API Token",
-    "description": "个人访问 token 让 CLI 和外部集成可以代表你的账号进行身份验证。",
+    "description": "个人访问 token 让 CLI 和外部集成可以代表你的账号进行身份验证。可通过 multica login --token 使用，或在调用 API 时作为 Bearer token 发送。",
+    "security_note": "Token 拥有你账号的完整访问权限，请像密码一样妥善保管。",
+    "empty": "还没有 API token。在上方创建一个即可开始使用。",
+    "load_failed": "无法加载 API token，请刷新页面重试。",
     "name_placeholder": "Token 名称（例如：我的 CLI）",
     "expiry": {
       "30": "30 天",
@@ -123,14 +338,20 @@
       "confirm": "吊销"
     },
     "created_dialog": {
-      "title": "Token 已创建",
-      "description": "立即复制你的个人访问 token——它不会再次显示。",
+      "title": "个人访问 token 已创建",
+      "warning_prefix": "新的个人访问 token 已创建。出于安全考虑，它",
+      "warning_emphasis": "仅显示一次",
+      "warning_suffix": "，请妥善保存且不要泄露。Token 丢失后无法找回，只能吊销后重新创建。",
+      "confirm_stored": "我已妥善保存该 token。",
       "copy_tooltip": "复制 token",
+      "cli_hint": "使用以下命令登录 CLI：",
+      "copy_command_tooltip": "复制命令",
       "done": "完成"
     }
   },
   "workspace": {
-    "section_general": "通用",
+    "section_general": "工作区信息",
+    "logo_label": "工作区标志",
     "change_logo_aria": "更换工作区图标",
     "click_logo_hint": "点击图标上传新图片",
     "toast_logo_updated": "工作区图标已更新",
@@ -300,6 +521,79 @@
     "install_error_forbidden": "你已没有在此工作区安装飞书 Bot 的权限，请联系工作区管理员。",
     "install_error_generic": "安装失败，请重试。"
   },
+  "composio": {
+    "section_title": "Composio",
+    "page_description": "连接你的 agent 可以操作的 Composio 应用。这里只展示你在 Composio 项目里已配置（启用了 auth config）的应用。",
+    "not_enabled_title": "Composio 集成未启用",
+    "not_enabled_description_prefix": "在服务器上设置",
+    "not_enabled_description_suffix": "以启用 Composio toolkit 连接。",
+    "loading": "正在加载 toolkit…",
+    "load_failed": "加载 Composio toolkit 失败。",
+    "empty_title": "还没有可连接的应用",
+    "empty_description": "你的 Composio 项目里还没有启用 auth config 的 toolkit。请在 Composio 后台启用一个 auth config，它才会出现在这里。",
+    "search_placeholder": "搜索 toolkit…",
+    "connect": "连接",
+    "connecting": "连接中…",
+    "connected": "已连接",
+    "disconnect": "断开",
+    "disconnecting": "断开中…",
+    "connect_failed": "无法发起连接，请重试。",
+    "disconnect_failed": "无法断开连接，请重试。",
+    "toast_disconnected": "已断开",
+    "disconnect_confirm_title": "断开这个应用？",
+    "disconnect_confirm_description": "你的已连接账号将在 Composio 侧被撤销，你的 agent 将失去对该 toolkit 的访问权限。你可以稍后重新连接。",
+    "disconnect_confirm_cancel": "取消",
+    "connections_load_failed": "无法加载你已有的连接，连接状态可能不完整。",
+    "toast_connected": "已连接",
+    "toast_connect_failed": "连接未能完成，请重试。",
+    "last_used": "最近使用 {{when}}",
+    "last_used_never": "从未使用",
+    "expired": "令牌已过期",
+    "reconnect": "重新连接"
+  },
+  "slack": {
+    "section_title": "Slack",
+    "page_description": "将每个 Multica 智能体连接到专属的 Slack 机器人。成员可私聊机器人、在频道中 @ 它，或输入 /issue 直接创建 Multica issue。",
+    "not_enabled_title": "Slack 集成未启用",
+    "not_enabled_description_prefix": "在服务器上设置",
+    "not_enabled_description_suffix": "以启用 Slack 机器人安装。",
+    "not_enabled_self_host_hint": "自部署用户：详见项目 README。",
+    "preview_title": "Slack 安装即将上线",
+    "preview_description": "静态加密密钥已设置，但本部署尚未配置托管 Slack 应用的 OAuth 凭据。配置后，连接按钮会出现在这里。",
+    "connected_bots": "已连接的机器人",
+    "loading": "加载中…",
+    "empty_title": "尚未连接机器人",
+    "empty_description_prefix": "在本工作区打开一个 Agent，点击",
+    "empty_description_cta": "连接 Slack",
+    "empty_description_suffix": "为其安装机器人。",
+    "revoked_badge": "已撤销",
+    "installed_at_label": "安装于 {{when}}",
+    "disconnect": "断开连接",
+    "disconnecting": "正在断开…",
+    "disconnect_confirm_title": "断开此 Slack 机器人？",
+    "disconnect_confirm_description": "该机器人将停止接收此工作区的 Slack 消息。安装记录会保留以备审计；你之后可以从同一个 Agent 重新安装。",
+    "disconnect_confirm_cancel": "取消",
+    "toast_disconnected": "已断开 Slack 机器人",
+    "toast_disconnect_failed": "断开失败",
+    "bind_button": "连接 Slack",
+    "bind_button_title": "把 {{agent}} 连接到 Slack 机器人",
+    "connecting": "正在打开 Slack…",
+    "connect_failed_toast": "无法开始 Slack 安装",
+    "agent_bot_connected_label": "已连接到 Slack",
+    "agent_bot_disconnect_tooltip": "将此 Slack 机器人从 Agent 解绑。机器人将停止接收 Slack 消息。",
+    "agent_bot_manage_link": "在 Slack 中打开",
+    "agent_bot_manage_tooltip": "打开此机器人所在的 Slack 工作区。",
+    "byo_dialog_title": "连接 Slack 机器人",
+    "byo_video_cta": "观看配置教程视频",
+    "byo_docs_link": "Step-by-step：把你的 Multica 智能体连接到 Slack",
+    "byo_bot_token_label": "Bot token（xoxb-）",
+    "byo_app_token_label": "App-level token（xapp-）",
+    "byo_submit": "连接",
+    "byo_submitting": "连接中…",
+    "byo_cancel": "取消",
+    "byo_success_toast": "Slack 机器人已连接",
+    "byo_failed_toast": "无法连接 Slack 机器人"
+  },
   "repositories": {
     "section_title": "代码仓库",
     "description": "与该工作区关联的 Git 仓库。智能体会从这里 clone 代码并完成工作。",
@@ -314,6 +608,10 @@
     "edit_aria": "编辑仓库",
     "cancel_aria": "取消编辑",
     "delete_aria": "删除仓库",
+    "delete_confirm_title": "删除代码仓库？",
+    "delete_confirm_description": "此代码仓库将立即从工作区中移除。",
+    "delete_confirm_cancel": "取消",
+    "delete_confirm_action": "删除代码仓库",
     "manage_hint": "只有管理员和所有者可以管理代码仓库。",
     "toast_saved": "已保存代码仓库",
     "toast_save_failed": "保存代码仓库失败"
@@ -324,10 +622,13 @@
     },
     "updates": {
       "title": "更新",
-      "description": "桌面端每小时以及启动后不久会自动检查新版本，并在后台下载。更新就绪后会提示你重启。",
+      "description": "控制后台自动更新，或手动检查新版本。",
       "current_version": "当前版本",
+      "automatic_updates_title": "后台自动更新",
+      "automatic_updates_description": "开启后，桌面端会在启动后和每小时检查更新，并在后台下载可用版本。",
+      "automatic_updates_save_failed": "保存自动更新设置失败",
       "check_section_title": "检查更新",
-      "check_section_description": "立即检查更新，而不是等待下一次自动轮询。可用的更新会在后台下载，就绪时弹出重启提示。",
+      "check_section_description": "无论是否开启自动更新，都立即检查新版本。可用的更新会在后台下载，就绪时弹出重启提示。",
       "up_to_date": "已是最新版本。",
       "downloading": "v{{version}} 正在后台下载——准备好安装时会通知你。",
       "check_now": "立即检查",

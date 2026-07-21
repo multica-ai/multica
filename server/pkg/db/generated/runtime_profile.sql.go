@@ -14,14 +14,19 @@ import (
 const countAgentsByProfile = `-- name: CountAgentsByProfile :one
 SELECT count(*) FROM agent a
 JOIN agent_runtime ar ON ar.id = a.runtime_id
-WHERE ar.profile_id = $1 AND a.archived_at IS NULL
+WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL
 `
+
+type CountAgentsByProfileParams struct {
+	ProfileID   pgtype.UUID `json:"profile_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
 
 // Counts active (non-archived) agents bound to any runtime instance of this
 // profile. The profile-delete path uses this to refuse deletion (409) while
 // agents still depend on it, mirroring the runtime-delete guard.
-func (q *Queries) CountAgentsByProfile(ctx context.Context, profileID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countAgentsByProfile, profileID)
+func (q *Queries) CountAgentsByProfile(ctx context.Context, arg CountAgentsByProfileParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAgentsByProfile, arg.ProfileID, arg.WorkspaceID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -90,9 +95,14 @@ func (q *Queries) CreateRuntimeProfile(ctx context.Context, arg CreateRuntimePro
 
 const deleteAgentRuntimesByProfile = `-- name: DeleteAgentRuntimesByProfile :many
 DELETE FROM agent_runtime
-WHERE profile_id = $1
+WHERE profile_id = $1 AND workspace_id = $2
 RETURNING id, workspace_id, owner_id, daemon_id, provider
 `
+
+type DeleteAgentRuntimesByProfileParams struct {
+	ProfileID   pgtype.UUID `json:"profile_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
 
 type DeleteAgentRuntimesByProfileRow struct {
 	ID          pgtype.UUID `json:"id"`
@@ -106,8 +116,8 @@ type DeleteAgentRuntimesByProfileRow struct {
 // the profile-delete path must remove the profile's registered runtime
 // instances itself. Returns the deleted rows so the caller can broadcast /
 // audit. Runs inside the same transaction as DeleteRuntimeProfile.
-func (q *Queries) DeleteAgentRuntimesByProfile(ctx context.Context, profileID pgtype.UUID) ([]DeleteAgentRuntimesByProfileRow, error) {
-	rows, err := q.db.Query(ctx, deleteAgentRuntimesByProfile, profileID)
+func (q *Queries) DeleteAgentRuntimesByProfile(ctx context.Context, arg DeleteAgentRuntimesByProfileParams) ([]DeleteAgentRuntimesByProfileRow, error) {
+	rows, err := q.db.Query(ctx, deleteAgentRuntimesByProfile, arg.ProfileID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -204,16 +214,21 @@ func (q *Queries) GetRuntimeProfileForWorkspace(ctx context.Context, arg GetRunt
 
 const listAgentRuntimeIDsByProfile = `-- name: ListAgentRuntimeIDsByProfile :many
 SELECT id FROM agent_runtime
-WHERE profile_id = $1
+WHERE profile_id = $1 AND workspace_id = $2
 `
+
+type ListAgentRuntimeIDsByProfileParams struct {
+	ProfileID   pgtype.UUID `json:"profile_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
 
 // Enumerates the runtime instance rows registered against a profile. The
 // profile-delete cascade walks these so it can run the same archived-agent /
 // archived-squad / autopilot teardown the runtime-delete path uses before
 // removing each runtime row — agent.runtime_id is ON DELETE RESTRICT, so a
 // bare delete would 500 whenever an archived agent still references the row.
-func (q *Queries) ListAgentRuntimeIDsByProfile(ctx context.Context, profileID pgtype.UUID) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listAgentRuntimeIDsByProfile, profileID)
+func (q *Queries) ListAgentRuntimeIDsByProfile(ctx context.Context, arg ListAgentRuntimeIDsByProfileParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAgentRuntimeIDsByProfile, arg.ProfileID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}

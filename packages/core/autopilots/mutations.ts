@@ -104,6 +104,30 @@ export function useTriggerAutopilot() {
   });
 }
 
+export function useGrantAutopilotAccess() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ autopilotId, userId }: { autopilotId: string; userId: string }) =>
+      api.grantAutopilotAccess(autopilotId, userId),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: autopilotKeys.detail(wsId, vars.autopilotId) });
+    },
+  });
+}
+
+export function useRevokeAutopilotAccess() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ autopilotId, userId }: { autopilotId: string; userId: string }) =>
+      api.revokeAutopilotAccess(autopilotId, userId),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: autopilotKeys.detail(wsId, vars.autopilotId) });
+    },
+  });
+}
+
 export function useCreateAutopilotTrigger() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

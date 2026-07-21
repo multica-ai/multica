@@ -1,5 +1,12 @@
 {
+  "auto_save": {
+    "saving": "저장 중…",
+    "saved": "저장됨",
+    "failed": "저장하지 못했습니다",
+    "toast_saved": "변경사항을 저장했습니다"
+  },
   "preferences": {
+    "general_title": "일반",
     "theme": {
       "title": "테마",
       "light": "라이트",
@@ -19,6 +26,90 @@
       "browser_suffix": " (브라우저)",
       "hint": "대시보드, 차트, 사용자에게 표시되는 '오늘' 레이블에 사용됩니다. 모든 워크스페이스에 적용되는 개인 설정입니다.",
       "sync_failed": "시간대 설정을 저장하지 못했습니다."
+    },
+    "sticky_comment_bar": {
+      "title": "댓글 입력창 고정",
+      "hint": "이슈 페이지를 스크롤할 때 댓글 입력창을 항상 하단에 고정합니다."
+    },
+    "issue_link_new_tab": {
+      "title": "이슈 링크를 새 탭에서 열기",
+      "hint": "설명, 댓글, 채팅의 이슈 링크를 현재 페이지에서 이동하지 않고 새 탭에서 엽니다."
+    }
+  },
+  "shortcuts": {
+    "title": "키보드 단축키",
+    "description": "이 기기에서 제품 동작의 단축키를 설정합니다. 단축키를 클릭한 다음 새 키 조합을 누르세요.",
+    "search_placeholder": "동작 검색...",
+    "reset_all": "기본값 복원",
+    "reset_confirm": {
+      "title": "모든 단축키를 기본값으로 복원할까요?",
+      "description": "이 기기의 모든 사용자 지정 단축키를 삭제하고 기본 설정으로 복원합니다.",
+      "cancel": "취소",
+      "confirm": "모두 기본값으로 복원"
+    },
+    "reset": "재설정",
+    "disable": "사용 안 함",
+    "reset_action": "{{action}} 재설정",
+    "disable_action": "{{action}} 단축키 사용 안 함",
+    "record_aria": "{{action}} 단축키 변경",
+    "recording": "키를 누르세요",
+    "record_hint": "Esc 취소 · Delete 지우기",
+    "unassigned": "지정되지 않음",
+    "no_results": "일치하는 단축키 동작이 없습니다.",
+    "conflict_error": "이미 {{action}}에서 사용 중입니다.",
+    "reserved_error": "브라우저 또는 데스크톱 창에서 예약된 단축키입니다.",
+    "send_error": "보내기는 Enter 또는 Mod+Enter만 사용할 수 있습니다.",
+    "unsafe_error": "이 키는 텍스트 입력이나 기본 키보드 탐색을 방해합니다.",
+    "send_enter_hint": "Shift+Enter로 단락을 삽입하거나 목록을 이어가고 코드 블록에서 줄을 바꿀 수 있습니다.",
+    "categories": { "general": "일반", "navigation": "탐색" },
+    "actions": {
+      "openSearch": { "label": "검색 열기", "description": "어디서나 검색하고 명령을 실행합니다." },
+      "createIssue": { "label": "Issue 만들기", "description": "선호하는 issue 만들기 흐름을 엽니다." },
+      "toggleSidebar": { "label": "사이드바 전환", "description": "기본 사이드바를 표시하거나 숨깁니다." },
+      "findInIssue": { "label": "Issue에서 찾기", "description": "열린 issue 상세 내용에서 검색합니다." },
+      "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보내고, 생성 대화상자에서 이슈를 만듭니다." },
+      "goInbox": { "label": "받은 편지함으로 이동", "description": "워크스페이스 받은 편지함을 엽니다." },
+      "goChat": { "label": "채팅으로 이동", "description": "워크스페이스 채팅을 엽니다." },
+      "goMyIssues": { "label": "내 Issues로 이동", "description": "나에게 할당된 issue를 엽니다." },
+      "goIssues": { "label": "Issues로 이동", "description": "Issue 목록을 엽니다." },
+      "goProjects": { "label": "프로젝트로 이동", "description": "프로젝트 목록을 엽니다." },
+      "goAutopilots": { "label": "자동화로 이동", "description": "워크스페이스 자동화를 엽니다." },
+      "goAgents": { "label": "에이전트로 이동", "description": "에이전트 목록을 엽니다." },
+      "goSquads": { "label": "스쿼드로 이동", "description": "스쿼드 목록을 엽니다." },
+      "goUsage": { "label": "사용량으로 이동", "description": "사용량 분석을 엽니다." },
+      "goRuntimes": { "label": "런타임으로 이동", "description": "런타임 설정을 엽니다." },
+      "goSkills": { "label": "Skills로 이동", "description": "Skill 라이브러리를 엽니다." },
+      "goSettings": { "label": "설정으로 이동", "description": "워크스페이스 설정을 엽니다." }
+    },
+    "fixed": {
+      "title": "고정 시스템 단축키",
+      "description": "창 및 접근성 단축키는 안정성을 위해 고정됩니다. 확대/축소 및 탭 제어는 데스크톱 앱에 적용됩니다.",
+      "close_tab": "활성 탭 닫기",
+      "zoom_in": "확대",
+      "zoom_out": "축소",
+      "reset_zoom": "확대/축소 재설정",
+      "close_dialog": "대화상자 또는 메뉴 닫기"
+    }
+  },
+  "chat": {
+    "floating_title": "플로팅 창",
+    "floating_label": "플로팅 채팅 창",
+    "floating_hint": "모든 페이지 모서리에 플로팅 채팅 버튼을 표시합니다. 기본값은 꺼짐 — 켜면 어디서나 채팅을 불러올 수 있고, 꺼면 채팅은 이 탭에서만 사용할 수 있습니다."
+  },
+  "issue": {
+    "description": "각 생성 방식의 툴바에 항상 표시할 필드를 선택합니다. 숨긴 필드는 ⋯ 메뉴에서 계속 사용할 수 있으며, 값이 있는 동안에는 자동으로 표시됩니다.",
+    "quick_create_title": "에이전트로 만들기",
+    "quick_create_description": "빠른 생성 툴바에 표시할 필드입니다.",
+    "manual_create_title": "직접 만들기",
+    "manual_create_description": "직접 만들기 툴바에 표시할 필드입니다.",
+    "fields": {
+      "status": "상태",
+      "priority": "우선순위",
+      "assignee": "담당자",
+      "labels": "레이블",
+      "project": "프로젝트",
+      "due_date": "마감일",
+      "start_date": "시작일"
     }
   },
   "page": {
@@ -28,6 +119,9 @@
     "tabs": {
       "profile": "프로필",
       "preferences": "환경설정",
+      "shortcuts": "단축키",
+      "issue": "이슈",
+      "chat": "채팅",
       "notifications": "알림",
       "tokens": "API 토큰",
       "general": "일반",
@@ -35,11 +129,122 @@
       "github": "GitHub",
       "integrations": "연동",
       "labs": "실험실",
-      "members": "멤버"
+      "members": "멤버",
+      "labels": "레이블",
+      "properties": "속성"
+    }
+  },
+  "properties": {
+    "title": "속성",
+    "description": "이 워크스페이스의 Issue에 타입이 있는 사용자 지정 속성을 정의합니다. 값은 각 Issue에 설정되며 에이전트가 읽고 쓸 수 있습니다.",
+    "search_placeholder": "이름으로 필터...",
+    "new_property": "새 속성",
+    "show_archived": "보관된 항목 표시",
+    "columns": {
+      "name": "이름",
+      "type": "유형",
+      "options": "옵션",
+      "usage": "사용",
+      "updated": "업데이트"
+    },
+    "usage_count_other": "{{count}}개 Issue",
+    "loading": "속성을 불러오는 중...",
+    "empty": "아직 속성이 없습니다",
+    "empty_hint": "Severity, Environment 같은 타입 필드를 만들어 보세요. 에이전트가 검증과 함께 읽고 씁니다.",
+    "no_results": "일치하는 속성이 없습니다",
+    "save_failed": "속성을 저장하지 못했습니다",
+    "limit_hint": "활성 속성 {{count}}/{{max}}",
+    "archived_badge": "보관됨",
+    "types": {
+      "text": "텍스트",
+      "number": "숫자",
+      "select": "선택",
+      "multi_select": "다중 선택",
+      "date": "날짜",
+      "checkbox": "체크박스",
+      "url": "URL"
+    },
+    "actions": {
+      "open": "{{name}} 작업",
+      "edit": "편집",
+      "archive": "보관",
+      "unarchive": "복원"
+    },
+    "editor": {
+      "create_title": "새 속성",
+      "edit_title": "속성 편집",
+      "admin_hint": "워크스페이스 소유자와 관리자만 속성 정의를 관리할 수 있습니다.",
+      "icon": "아이콘",
+      "choose_icon": "아이콘 선택",
+      "remove_icon": "아이콘 제거",
+      "name": "이름",
+      "name_placeholder": "예: Severity",
+      "type": "유형",
+      "type_locked_hint": "생성 후에는 유형을 변경할 수 없습니다.",
+      "description": "설명",
+      "description_placeholder": "이 속성의 의미와 설정 시점",
+      "options": "옵션",
+      "option_name_placeholder": "옵션 이름",
+      "add_option": "옵션 추가",
+      "remove_option": "옵션 제거",
+      "cancel": "취소",
+      "save": "속성 저장",
+      "saving": "저장 중..."
+    },
+    "archive_dialog": {
+      "title": "속성을 보관할까요?",
+      "description": "\"{{name}}\"이(가) 선택기와 필터에서 숨겨집니다. Issue의 기존 값은 유지되며 나중에 복원할 수 있습니다.",
+      "cancel": "취소",
+      "confirm": "속성 보관",
+      "failed": "속성을 보관하지 못했습니다"
+    }
+  },
+  "labels": {
+    "title": "레이블",
+    "description": "이 워크스페이스의 이슈, 에이전트, 스킬 레이블을 각각 관리합니다.",
+    "scopes": {
+      "issue": "이슈",
+      "agent": "에이전트",
+      "skill": "스킬"
+    },
+    "search_placeholder": "이름 또는 설명으로 필터링...",
+    "new_label": "새 레이블",
+    "columns": {
+      "name": "이름",
+      "description": "설명",
+      "usage": "사용 수",
+      "updated": "업데이트"
+    },
+    "usage_count": "{{count}}개에서 사용",
+    "loading": "레이블 불러오는 중...",
+    "empty": "{{scope}} 레이블이 없습니다",
+    "no_results": "일치하는 레이블이 없습니다",
+    "save_failed": "레이블을 저장하지 못했습니다",
+    "actions": { "open": "{{name}} 작업", "edit": "편집", "delete": "삭제" },
+    "editor": {
+      "create_title": "새 레이블",
+      "edit_title": "레이블 편집",
+      "scope_hint": "이 레이블은 {{scope}} 카탈로그에만 속합니다.",
+      "name": "이름",
+      "name_placeholder": "예: Bug",
+      "description": "설명",
+      "description_placeholder": "이 레이블을 사용할 때를 설명하세요",
+      "color": "색상",
+      "cancel": "취소",
+      "save": "레이블 저장",
+      "saving": "저장 중..."
+    },
+    "delete_dialog": {
+      "title": "레이블을 삭제할까요?",
+      "description": "\"{{name}}\" 레이블을 삭제할까요? {{count}}개 리소스에서 제거되며 되돌릴 수 없습니다.",
+      "cancel": "취소",
+      "confirm": "레이블 삭제",
+      "failed": "레이블을 삭제하지 못했습니다"
     }
   },
   "account": {
-    "section_profile": "프로필",
+    "section_profile": "개인 정보",
+    "avatar_label": "아바타",
     "click_avatar_hint": "클릭해서 아바타 업로드",
     "name_label": "이름",
     "profile_description_label": "내 소개",
@@ -96,7 +301,10 @@
   },
   "tokens": {
     "title": "API 토큰",
-    "description": "개인 액세스 토큰을 사용하면 CLI와 외부 연동이 내 계정으로 인증할 수 있습니다.",
+    "description": "개인 액세스 토큰을 사용하면 CLI와 외부 연동이 내 계정으로 인증할 수 있습니다. multica login --token 으로 사용하거나 API 호출 시 Bearer 토큰으로 보낼 수 있습니다.",
+    "security_note": "토큰은 계정에 대한 전체 접근 권한을 부여하므로 비밀번호처럼 안전하게 보관하세요.",
+    "empty": "아직 API 토큰이 없습니다. 위에서 만들어 시작하세요.",
+    "load_failed": "API 토큰을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도하세요.",
     "name_placeholder": "토큰 이름(예: 내 CLI)",
     "expiry": {
       "30": "30일",
@@ -123,14 +331,20 @@
       "confirm": "폐기"
     },
     "created_dialog": {
-      "title": "토큰 생성됨",
-      "description": "지금 개인 액세스 토큰을 복사하세요. 다시 볼 수 없습니다.",
+      "title": "개인 액세스 토큰이 생성되었습니다",
+      "warning_prefix": "새 개인 액세스 토큰이 생성되었습니다. 보안상의 이유로 ",
+      "warning_emphasis": "이번 한 번만 표시됩니다",
+      "warning_suffix": ". 안전하게 보관하고 공유하지 마세요. 분실한 토큰은 복구할 수 없으며 폐기 후 새로 만들어야 합니다.",
+      "confirm_stored": "이 토큰을 안전하게 보관했습니다.",
       "copy_tooltip": "토큰 복사",
+      "cli_hint": "다음 명령으로 CLI에 로그인하세요:",
+      "copy_command_tooltip": "명령 복사",
       "done": "완료"
     }
   },
   "workspace": {
-    "section_general": "일반",
+    "section_general": "워크스페이스 정보",
+    "logo_label": "워크스페이스 로고",
     "change_logo_aria": "워크스페이스 로고 변경",
     "click_logo_hint": "로고를 클릭하여 새 이미지를 업로드하세요",
     "toast_logo_updated": "워크스페이스 로고를 업데이트했습니다",
@@ -239,6 +453,10 @@
     "edit_aria": "저장소 수정",
     "cancel_aria": "수정 취소",
     "delete_aria": "저장소 삭제",
+    "delete_confirm_title": "저장소를 삭제할까요?",
+    "delete_confirm_description": "이 저장소는 워크스페이스에서 즉시 제거됩니다.",
+    "delete_confirm_cancel": "취소",
+    "delete_confirm_action": "저장소 삭제",
     "manage_hint": "관리자와 소유자만 저장소를 관리할 수 있습니다.",
     "toast_saved": "저장소를 저장했습니다",
     "toast_save_failed": "저장소를 저장하지 못했습니다"
@@ -249,10 +467,13 @@
     },
     "updates": {
       "title": "업데이트",
-      "description": "데스크톱 앱은 한 시간에 한 번, 그리고 실행 직후 새 버전을 자동으로 확인하고 백그라운드에서 다운로드합니다. 업데이트가 준비되면 다시 시작하라는 안내가 표시됩니다.",
+      "description": "자동 백그라운드 업데이트를 설정하거나 새 버전을 직접 확인합니다.",
       "current_version": "현재 버전",
+      "automatic_updates_title": "자동 백그라운드 업데이트",
+      "automatic_updates_description": "사용하면 앱 실행 직후와 한 시간마다 업데이트를 확인하고 사용 가능한 버전을 백그라운드에서 다운로드합니다.",
+      "automatic_updates_save_failed": "자동 업데이트 설정을 저장하지 못했습니다",
       "check_section_title": "업데이트 확인",
-      "check_section_description": "다음 자동 확인을 기다리지 않고 지금 확인합니다. 사용 가능한 업데이트는 백그라운드에서 다운로드되며 준비되면 다시 시작 안내가 표시됩니다.",
+      "check_section_description": "자동 업데이트 설정과 관계없이 지금 확인합니다. 사용 가능한 업데이트는 백그라운드에서 다운로드되며 준비되면 다시 시작 안내가 표시됩니다.",
       "up_to_date": "최신 버전입니다.",
       "downloading": "v{{version}}을(를) 백그라운드에서 다운로드 중입니다. 설치 준비가 끝나면 알림을 드립니다.",
       "check_now": "지금 확인",
@@ -376,5 +597,78 @@
     "install_error_session_lost": "설치 세션이 만료되었거나 유실되었어요. 다시 스캔해 처음부터 진행하세요.",
     "install_error_forbidden": "이 워크스페이스에 Lark 봇을 설치할 권한이 더 이상 없어요. 워크스페이스 관리자에게 문의하세요.",
     "install_error_generic": "설치에 실패했어요. 다시 시도하세요."
+  },
+  "composio": {
+    "section_title": "Composio",
+    "page_description": "Connect the Composio apps your agents can act on. Only apps configured with an enabled auth config in your Composio project appear here.",
+    "not_enabled_title": "Composio integration not enabled",
+    "not_enabled_description_prefix": "Set",
+    "not_enabled_description_suffix": "on the server to enable Composio toolkit connections.",
+    "loading": "Loading toolkits…",
+    "load_failed": "Failed to load Composio toolkits.",
+    "empty_title": "No connectable apps yet",
+    "empty_description": "No toolkit has an enabled auth config in your Composio project yet. Enable one in the Composio dashboard to make it available here.",
+    "search_placeholder": "Search toolkits…",
+    "connect": "Connect",
+    "connecting": "Connecting…",
+    "connected": "Connected",
+    "disconnect": "Disconnect",
+    "disconnecting": "Disconnecting…",
+    "connect_failed": "Couldn't start the connection. Please try again.",
+    "disconnect_failed": "Couldn't disconnect. Please try again.",
+    "toast_disconnected": "Disconnected",
+    "disconnect_confirm_title": "Disconnect this app?",
+    "disconnect_confirm_description": "Your connected account will be revoked at Composio and your agents will lose access to this toolkit. You can reconnect later.",
+    "disconnect_confirm_cancel": "Cancel",
+    "connections_load_failed": "Couldn't load your existing connections, so connected status may be incomplete.",
+    "toast_connected": "연결되었습니다",
+    "toast_connect_failed": "연결을 완료하지 못했습니다. 다시 시도해 주세요.",
+    "last_used": "마지막 사용 {{when}}",
+    "last_used_never": "사용한 적 없음",
+    "expired": "토큰 만료됨",
+    "reconnect": "다시 연결"
+  },
+  "slack": {
+    "section_title": "Slack",
+    "page_description": "각 Multica 에이전트를 전용 Slack 봇에 연결하세요. 멤버는 봇과 1:1로 대화하거나, 채널에서 @ 멘션하거나, /issue 를 입력해 새 Multica 이슈를 만들 수 있습니다.",
+    "not_enabled_title": "Slack 연동이 활성화되지 않았어요",
+    "not_enabled_description_prefix": "서버에서",
+    "not_enabled_description_suffix": "를 설정하면 Slack 봇 설치가 활성화됩니다.",
+    "not_enabled_self_host_hint": "셀프 호스팅: 자세한 내용은 프로젝트 README를 참고하세요.",
+    "preview_title": "Slack 설치 곧 지원 예정",
+    "preview_description": "저장용 키는 설정되어 있지만, 이 배포에는 호스팅 Slack 앱의 OAuth 자격 증명이 설정되지 않았어요. 설정하면 연결 버튼이 여기에 표시됩니다.",
+    "connected_bots": "연결된 봇",
+    "loading": "불러오는 중…",
+    "empty_title": "아직 연결된 봇이 없어요",
+    "empty_description_prefix": "이 워크스페이스의 에이전트를 열고",
+    "empty_description_cta": "Slack 연결",
+    "empty_description_suffix": "을(를) 클릭해 봇을 설치하세요.",
+    "revoked_badge": "해제됨",
+    "installed_at_label": "{{when}}에 설치됨",
+    "disconnect": "연결 해제",
+    "disconnecting": "연결 해제 중…",
+    "disconnect_confirm_title": "이 Slack 봇을 연결 해제할까요?",
+    "disconnect_confirm_description": "봇이 이 워크스페이스의 Slack 메시지를 더 이상 받지 않습니다. 설치 기록은 감사를 위해 보관되며, 같은 에이전트에서 다시 설치할 수 있어요.",
+    "disconnect_confirm_cancel": "취소",
+    "toast_disconnected": "Slack 봇을 연결 해제했어요",
+    "toast_disconnect_failed": "연결 해제에 실패했어요",
+    "bind_button": "Slack 연결",
+    "bind_button_title": "{{agent}}을(를) Slack 봇에 연결",
+    "connecting": "Slack 여는 중…",
+    "connect_failed_toast": "Slack 설치를 시작할 수 없었어요",
+    "agent_bot_connected_label": "Slack에 연결됨",
+    "agent_bot_disconnect_tooltip": "이 Slack 봇을 에이전트에서 연결 해제합니다. 봇이 Slack 메시지를 받지 않게 됩니다.",
+    "agent_bot_manage_link": "Slack에서 열기",
+    "agent_bot_manage_tooltip": "이 봇의 Slack 워크스페이스를 엽니다.",
+    "byo_dialog_title": "Slack 봇 연결",
+    "byo_video_cta": "설정 안내 영상 보기",
+    "byo_docs_link": "Step-by-step: Multica 에이전트를 Slack에 연결하기",
+    "byo_bot_token_label": "Bot 토큰(xoxb-)",
+    "byo_app_token_label": "App 레벨 토큰(xapp-)",
+    "byo_submit": "연결",
+    "byo_submitting": "연결 중…",
+    "byo_cancel": "취소",
+    "byo_success_toast": "Slack 봇을 연결했어요",
+    "byo_failed_toast": "Slack 봇을 연결하지 못했어요"
   }
 }

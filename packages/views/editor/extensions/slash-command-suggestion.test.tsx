@@ -59,6 +59,8 @@ function agent(overrides: Partial<Agent>): Agent {
     runtime_config: {},
     custom_args: [],
     visibility: "workspace",
+    permission_mode: "public_to",
+    invocation_targets: [{ target_type: "workspace", target_id: null }],
     status: "idle",
     max_concurrent_tasks: 1,
     model: "",
@@ -86,7 +88,11 @@ function fakeQc(data: {
 
 function items(qc: QueryClient, query = ""): SlashCommandItem[] {
   const config = createSlashCommandSuggestion(qc);
-  return config.items!({ query, editor: {} as never }) as SlashCommandItem[];
+  return config.items!({
+    query,
+    editor: {} as never,
+    signal: new AbortController().signal,
+  }) as SlashCommandItem[];
 }
 
 describe("slash command suggestion items", () => {
@@ -228,6 +234,8 @@ describe("slash command suggestion items", () => {
         agent({
           id: "private-agent",
           visibility: "private",
+          permission_mode: "private",
+          invocation_targets: [],
           owner_id: "u2",
           skills: [{ id: "private-skill", name: "secret", description: "" }],
         }),

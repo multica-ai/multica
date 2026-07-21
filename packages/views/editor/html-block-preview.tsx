@@ -36,6 +36,14 @@ import { HtmlPreviewBody } from "./html-preview-body";
 
 const CODE_BLOCK_IFRAME_HEIGHT = "h-[480px]";
 
+/**
+ * Pixel twin of CODE_BLOCK_IFRAME_HEIGHT. The preview iframe is a fixed height,
+ * so the near-viewport lazy shell (rich-content/lazy-rich-block.tsx) can
+ * reserve exactly the space this component will occupy and mount with zero
+ * layout shift. Keep the two in sync.
+ */
+export const HTML_BLOCK_PREVIEW_HEIGHT_PX = 480;
+
 // Label shown in the code-block header. Not a translatable string — it's a
 // language identifier (matches the `lang === "html"` token below).
 const HTML_LANGUAGE_LABEL = "html";
@@ -63,9 +71,9 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
     setView((v) => (v === "preview" ? "source" : "preview"));
 
   return (
-    <div className={cn("code-block-wrapper group/code relative my-2", className)}>
+    <div className={cn("code-block-wrapper group/code relative my-3", className)}>
       <div
-        className="absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100"
+        className="absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100 focus-within:opacity-100"
       >
         <span className="text-xs text-muted-foreground select-none">{HTML_LANGUAGE_LABEL}</span>
         <button

@@ -101,3 +101,64 @@ func TestNotifyTaskAvailable_InvalidWithoutRuntimeIsNoOp(t *testing.T) {
 		t.Fatalf("expected 0 wakeup calls when RuntimeID is invalid, got %d", got)
 	}
 }
+
+// TestNotifyTaskFinished_BumpsBeforeRuntimeWakeup pins the terminal-transition
+// half of the wakeup contract. A prior empty verdict must not hide queued work
+// that becomes claimable when another task releases agent capacity or a
+// per-(issue, agent) serialization key.
+func TestNotifyTaskFinished_BumpsBeforeRuntimeWakeup(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	cache := NewEmptyClaimCache(rdb)
+	wakeup := &stubWakeup{}
+	svc := &TaskService{EmptyClaim: cache, Wakeup: wakeup}
+
+	runtimeID := testUUID(10)
+	runtimeKey := util.UUIDToString(runtimeID)
+	ctx := context.Background()
+	version := cache.CurrentVersion(ctx, runtimeKey)
+	cache.MarkEmpty(ctx, runtimeKey, version)
+	if !cache.IsEmpty(ctx, runtimeKey) {
+		t.Fatal("precondition: cache should report empty")
+	}
+
+	svc.NotifyTaskFinished(db.AgentTaskQueue{ID: testUUID(11), RuntimeID: runtimeID})
+
+	if cache.IsEmpty(ctx, runtimeKey) {
+		t.Fatal("terminal wakeup must invalidate the prior empty verdict")
+	}
+	if got := len(wakeup.calls); got != 1 {
+		t.Fatalf("expected 1 terminal wakeup, got %d", got)
+	}
+	if wakeup.calls[0].runtimeID != runtimeKey {
+		t.Fatalf("wakeup runtime mismatch: got %q want %q", wakeup.calls[0].runtimeID, runtimeKey)
+	}
+	if wakeup.calls[0].taskID != "" {
+		t.Fatalf("terminal wakeup must omit completed task id, got %q", wakeup.calls[0].taskID)
+	}
+}
+
+func TestNotifyTasksFinished_CoalescesByRuntime(t *testing.T) {
+	wakeup := &stubWakeup{}
+	svc := &TaskService{Wakeup: wakeup}
+	runtimeA := testUUID(12)
+	runtimeB := testUUID(13)
+
+	svc.notifyTasksFinished([]db.AgentTaskQueue{
+		{ID: testUUID(14), RuntimeID: runtimeA},
+		{ID: testUUID(15), RuntimeID: runtimeA},
+		{ID: testUUID(16), RuntimeID: runtimeB},
+		{ID: testUUID(17)}, // Invalid runtime is ignored.
+	})
+
+	if got := len(wakeup.calls); got != 2 {
+		t.Fatalf("expected one wakeup per runtime, got %d", got)
+	}
+	if wakeup.calls[0].runtimeID != util.UUIDToString(runtimeA) || wakeup.calls[1].runtimeID != util.UUIDToString(runtimeB) {
+		t.Fatalf("unexpected runtime wakeups: %#v", wakeup.calls)
+	}
+	for _, call := range wakeup.calls {
+		if call.taskID != "" {
+			t.Fatalf("terminal wakeup must omit completed task id, got %q", call.taskID)
+		}
+	}
+}

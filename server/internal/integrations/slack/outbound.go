@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/slack-go/slack"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -21,11 +22,12 @@ import (
 // outboundQueries is the slice of generated queries the Slack outbound
 // subscriber needs. *db.Queries satisfies it.
 type outboundQueries interface {
+	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 }
 
-// replySender posts one reply. Satisfied by *slackChannel, so the outbound path
+// replySender posts one reply. Satisfied by *slackSender, so the outbound path
 // reuses Send's Markdown->mrkdwn conversion, chunking, and threading.
 type replySender interface {
 	Send(ctx context.Context, out channel.OutboundMessage) (channel.SendResult, error)
@@ -52,9 +54,9 @@ func NewOutbound(q outboundQueries, decrypt Decrypter, logger *slog.Logger) *Out
 	}
 	o := &Outbound{q: q, decrypt: decrypt, logger: logger}
 	o.newSender = func(c credentials) replySender {
-		// Only the bot token is needed to post; the app token is a Socket Mode
-		// (inbound) credential.
-		return newSlackChannel(c, slack.New(c.BotToken), nil, logger)
+		// Only the bot token is needed to post; inbound Socket Mode uses the
+		// installation's separate app-level token (see slack_channel.go).
+		return newSlackSender(c, slack.New(c.BotToken), logger)
 	}
 	return o
 }
@@ -95,6 +97,22 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if content == "" {
 		return nil // nothing to say (empty completion)
 	}
+	// Only bound, non-empty completions reach here, so classify the task origin
+	// before loading credentials or sending. Web/mobile direct-chat tasks can
+	// reuse a session that originated in Slack, but their replies belong only in
+	// Multica. Outbound delivery fails closed when the origin cannot be
+	// established; channel-created tasks leave chat_input_task_id NULL and send.
+	taskID, ok := chatDoneTaskID(e)
+	if !ok {
+		return nil
+	}
+	task, err := o.q.GetAgentTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load agent task: %w", err)
+	}
+	if task.ChatInputTaskID.Valid {
+		return nil
+	}
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          binding.InstallationID,
 		ChannelType: string(TypeSlack),
@@ -118,6 +136,23 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("post slack reply: %w", err)
 	}
 	return nil
+}
+
+// chatDoneTaskID extracts the task id from the event envelope or the typed/map
+// payload emitted by TaskService. Outbound delivery fails closed when the task
+// origin cannot be established.
+func chatDoneTaskID(e events.Event) (pgtype.UUID, bool) {
+	raw := e.TaskID
+	if raw == "" {
+		switch p := e.Payload.(type) {
+		case protocol.ChatDonePayload:
+			raw = p.TaskID
+		case map[string]any:
+			raw, _ = p["task_id"].(string)
+		}
+	}
+	id, err := util.ParseUUID(raw)
+	return id, err == nil && id.Valid
 }
 
 // outboundTarget recovers the real send target from the chat binding. The

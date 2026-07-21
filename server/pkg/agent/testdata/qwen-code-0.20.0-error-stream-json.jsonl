@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","uuid":"redacted","session_id":"session-error-redacted","cwd":"/redacted/workdir","model":"qwen3.8-max-preview","qwen_code_version":"0.20.0"}
+{"type":"result","subtype":"error_during_execution","uuid":"redacted","session_id":"session-error-redacted","is_error":true,"duration_ms":17,"duration_api_ms":12,"num_turns":1,"usage":{"input_tokens":42,"output_tokens":0,"cache_read_input_tokens":0,"total_tokens":42},"permission_denials":[],"error":{"type":"authentication_error","message":"Authentication failed: credential redacted"}}

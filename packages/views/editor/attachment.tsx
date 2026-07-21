@@ -14,9 +14,9 @@
  * Call sites:
  *   - extensions/file-card.tsx FileCardView (Tiptap NodeView)
  *   - extensions/image-view.tsx ImageView (Tiptap NodeView)
- *   - readonly-content.tsx (markdown img + fileCard div renderers)
+ *   - rich-content/rich-content.tsx (markdown img + fileCard div renderers,
+ *     serving Chat, Issue descriptions and Comments through one renderer)
  *   - issues/components/comment-card.tsx AttachmentList (standalone fallback)
- *   - common/markdown.tsx (chat / skill viewer Markdown wrapper)
  *
  * The component owns its own preview modal and download dispatcher — callers
  * just pass `attachment` and (for editor surfaces) optional editor chrome
@@ -237,12 +237,17 @@ function absolutizeMediaURL(rawUrl: string): string {
 //     reports `cdn_signed` — in CloudFront signed-URL mode the same
 //     domain serves PRIVATE content and a raw (unsigned) storage URL is
 //     a guaranteed 403 (MUL-3254).
-//  3. `record.markdown_url` — the durable, server-policy-aligned URL.
+//  3. Local disk `record.url` — self-host LocalStorage without
+//     LOCAL_UPLOAD_BASE_URL stores a site-relative `/uploads/...` path.
+//     It is the direct static object URL and is loadable once
+//     `absolutizeMediaURL` prefixes apiBaseUrl in split-origin clients.
+//  4. `record.markdown_url` — the durable, server-policy-aligned URL.
 //     Beats raw `record.url` because it never points at a private
-//     bucket (must-fix 2 from MUL-3192 review).
-//  4. `record.url` — legacy fallback for responses that omit
+//     bucket (must-fix 2 from MUL-3192 review), except for the explicit
+//     site-relative local upload path above.
+//  5. `record.url` — legacy fallback for responses that omit
 //     `markdown_url` (a backend old enough to predate MUL-3192).
-//  5. The input URL — when there's no record at all.
+//  6. The input URL — when there's no record at all.
 function pickInlineMediaURL(
   record: AttachmentRecord,
   fallback: string,
@@ -257,9 +262,16 @@ function pickInlineMediaURL(
     return dl;
   }
   if (!cdnSigned && storageURLMatchesCdnDomain(record.url, cdnDomain)) return record.url;
+  if (isSiteRelativeLocalUploadURL(record.url)) return record.url;
   if (record.markdown_url) return record.markdown_url;
   if (record.url) return record.url;
   return fallback;
+}
+
+function isSiteRelativeLocalUploadURL(rawURL: string): boolean {
+  if (!rawURL || !rawURL.startsWith("/")) return false;
+  const path = rawURL.split(/[?#]/, 1)[0] ?? "";
+  return path === "/uploads" || path.startsWith("/uploads/");
 }
 
 function storageURLMatchesCdnDomain(rawURL: string, cdnDomain: string): boolean {

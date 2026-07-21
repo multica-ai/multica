@@ -203,6 +203,7 @@ SELECT ask.agent_id, s.name
 FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE ask.agent_id = ANY($1::uuid[])
+  AND ask.enabled = TRUE
 ORDER BY ask.agent_id, s.name ASC
 `
 
@@ -232,7 +233,7 @@ func (q *Queries) ListAgentSkillNamesByAgentIDs(ctx context.Context, agentIds []
 }
 
 const listAgentSkillSummaries = `-- name: ListAgentSkillSummaries :many
-SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at
+SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at, ask.enabled
 FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
@@ -248,6 +249,7 @@ type ListAgentSkillSummariesRow struct {
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Enabled     bool               `json:"enabled"`
 }
 
 // Summary variant for the agent skills list endpoint — omits `content` for
@@ -270,6 +272,7 @@ func (q *Queries) ListAgentSkillSummaries(ctx context.Context, agentID pgtype.UU
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Enabled,
 		); err != nil {
 			return nil, err
 		}
@@ -285,7 +288,7 @@ const listAgentSkills = `-- name: ListAgentSkills :many
 
 SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
-WHERE ask.agent_id = $1
+WHERE ask.agent_id = $1 AND ask.enabled = TRUE
 ORDER BY s.name ASC
 `
 
@@ -321,7 +324,7 @@ func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]S
 }
 
 const listAgentSkillsByWorkspace = `-- name: ListAgentSkillsByWorkspace :many
-SELECT ask.agent_id, s.id, s.name, s.description
+SELECT ask.agent_id, s.id, s.name, s.description, ask.enabled
 FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE s.workspace_id = $1
@@ -333,6 +336,7 @@ type ListAgentSkillsByWorkspaceRow struct {
 	ID          pgtype.UUID `json:"id"`
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
+	Enabled     bool        `json:"enabled"`
 }
 
 func (q *Queries) ListAgentSkillsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListAgentSkillsByWorkspaceRow, error) {
@@ -349,6 +353,7 @@ func (q *Queries) ListAgentSkillsByWorkspace(ctx context.Context, workspaceID pg
 			&i.ID,
 			&i.Name,
 			&i.Description,
+			&i.Enabled,
 		); err != nil {
 			return nil, err
 		}
@@ -506,6 +511,26 @@ DELETE FROM agent_skill WHERE agent_id = $1
 func (q *Queries) RemoveAllAgentSkills(ctx context.Context, agentID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, removeAllAgentSkills, agentID)
 	return err
+}
+
+const setAgentSkillEnabled = `-- name: SetAgentSkillEnabled :execrows
+UPDATE agent_skill
+SET enabled = $3
+WHERE agent_id = $1 AND skill_id = $2
+`
+
+type SetAgentSkillEnabledParams struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	SkillID pgtype.UUID `json:"skill_id"`
+	Enabled bool        `json:"enabled"`
+}
+
+func (q *Queries) SetAgentSkillEnabled(ctx context.Context, arg SetAgentSkillEnabledParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAgentSkillEnabled, arg.AgentID, arg.SkillID, arg.Enabled)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateSkill = `-- name: UpdateSkill :one

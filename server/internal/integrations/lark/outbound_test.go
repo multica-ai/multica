@@ -18,6 +18,8 @@ import (
 
 type fakePatcherQueries struct {
 	mu              sync.Mutex
+	task            db.AgentTaskQueue
+	taskErr         error
 	binding         ChatSessionBinding
 	bindingErr      error
 	installation    Installation
@@ -32,7 +34,7 @@ type fakePatcherQueries struct {
 }
 
 func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
-	return db.AgentTaskQueue{}, nil
+	return f.task, f.taskErr
 }
 func (f *fakePatcherQueries) GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error) {
 	return db.ChatSession{}, nil
@@ -345,6 +347,52 @@ func TestPatcherSkipsWhenNoChatSessionBinding(t *testing.T) {
 	}
 }
 
+// TestPatcherSkipsDirectChatTaskOnBoundSession guards the channel boundary:
+// opening a Lark-bound session in the web/mobile UI must not make that direct
+// conversation's reply or failure leak back into the external chat. Direct
+// tasks own an input batch through chat_input_task_id; channel tasks leave it
+// NULL and continue through the existing outbound paths.
+func TestPatcherSkipsDirectChatTaskOnBoundSession(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		payload   any
+	}{
+		{
+			name:      "completed reply",
+			eventType: protocol.EventChatDone,
+			payload:   protocol.ChatDonePayload{Content: "web-only answer"},
+		},
+		{
+			name:      "failed run",
+			eventType: protocol.EventTaskFailed,
+			payload:   map[string]any{"error": "web-only failure"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, q, api := newTestPatcher(t)
+			taskID := uuidFromString(t, "ee999999-ee99-ee99-ee99-eeeeeeeeeeee")
+			q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
+
+			p.handleEvent(events.Event{
+				Type:          tt.eventType,
+				TaskID:        uuidString(taskID),
+				ChatSessionID: uuidString(q.binding.ChatSessionID),
+				Payload:       tt.payload,
+			})
+
+			api.mu.Lock()
+			defer api.mu.Unlock()
+			if len(api.textSent) != 0 || len(api.mdCardSent) != 0 || len(api.sent) != 0 || len(api.patched) != 0 {
+				t.Fatalf("direct task must produce no channel outbound; got text=%d markdown=%d cards=%d patches=%d",
+					len(api.textSent), len(api.mdCardSent), len(api.sent), len(api.patched))
+			}
+		})
+	}
+}
+
 // TestPatcherFailEventSendsErrorCard verifies the failure path still
 // surfaces a card. The visual distinction between a successful reply
 // (plain text bubble) and a failure (red header card) is genuinely
@@ -514,6 +562,65 @@ func TestPatcherRepliesInThreadWhenTriggerWasInThread(t *testing.T) {
 	got := api.textSent[0].ReplyTarget
 	if got.MessageID != "om_trigger" || !got.InThread {
 		t.Errorf("expected thread reply target {om_trigger, InThread:true}; got %+v", got)
+	}
+}
+
+// TestPatcherTopicSessionSendsToRealChatID pins the composite-key outbound
+// contract: a per-topic session stores "chat:thread" as channel_chat_id (the
+// isolation key), so the send target MUST come from the binding config's real
+// chat id — the raw key is not a valid Lark chat id.
+func TestPatcherTopicSessionSendsToRealChatID(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.ChannelChatID = "oc_test_chat:omt_topic1"
+	q.binding.Config = []byte(`{"chat_id":"oc_test_chat"}`)
+	q.binding.ChatType = "group"
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic1", Valid: true}
+	taskID := uuidFromString(t, "eeaaaaaa-eeaa-eeaa-eeaa-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "topic reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	got := api.textSent[0]
+	if got.ChatID != "oc_test_chat" {
+		t.Errorf("chat_id = %q, want the real chat id from binding config", got.ChatID)
+	}
+	if got.ReplyTarget.MessageID != "om_trigger" || !got.ReplyTarget.InThread {
+		t.Errorf("expected thread reply target {om_trigger, InThread:true}; got %+v", got.ReplyTarget)
+	}
+}
+
+// TestPatcherLegacyBindingFallsBackToKey pins backward compatibility: rows
+// created before topic isolation have the raw chat id as the key and "{}" as
+// config — the send target must stay the key itself.
+func TestPatcherLegacyBindingFallsBackToKey(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.Config = []byte(`{}`)
+	taskID := uuidFromString(t, "eebbbbbb-eebb-eebb-eebb-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "legacy reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	if got := api.textSent[0].ChatID; got != "oc_test_chat" {
+		t.Errorf("chat_id = %q, want the raw binding key for legacy rows", got)
 	}
 }
 

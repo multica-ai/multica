@@ -1,5 +1,12 @@
 {
+  "auto_save": {
+    "saving": "保存中…",
+    "saved": "保存済み",
+    "failed": "保存できませんでした",
+    "toast_saved": "変更を保存しました"
+  },
   "preferences": {
+    "general_title": "一般",
     "theme": {
       "title": "テーマ",
       "light": "ライト",
@@ -19,6 +26,90 @@
       "browser_suffix": " (ブラウザ)",
       "hint": "ダッシュボード、チャート、表示される「今日」ラベルに使用されます。すべてのワークスペースに適用される個人設定です。",
       "sync_failed": "タイムゾーン設定を保存できませんでした。"
+    },
+    "sticky_comment_bar": {
+      "title": "コメントバーを固定",
+      "hint": "イシューのページをスクロールしても、コメントバーを常に下部に固定します。"
+    },
+    "issue_link_new_tab": {
+      "title": "イシューリンクを新しいタブで開く",
+      "hint": "説明・コメント・チャット内のイシューリンクを、その場で移動せず新しいタブで開きます。"
+    }
+  },
+  "shortcuts": {
+    "title": "キーボードショートカット",
+    "description": "このデバイスで製品操作のショートカットをカスタマイズします。ショートカットをクリックして、新しいキーの組み合わせを押してください。",
+    "search_placeholder": "操作を検索...",
+    "reset_all": "デフォルトに戻す",
+    "reset_confirm": {
+      "title": "すべてのショートカットをデフォルトに戻しますか？",
+      "description": "このデバイスのカスタムショートカットをすべて削除し、デフォルト設定に戻します。",
+      "cancel": "キャンセル",
+      "confirm": "すべてデフォルトに戻す"
+    },
+    "reset": "リセット",
+    "disable": "無効にする",
+    "reset_action": "{{action}}をリセット",
+    "disable_action": "{{action}}のショートカットを無効にする",
+    "record_aria": "{{action}}のショートカットを変更",
+    "recording": "キーを入力",
+    "record_hint": "Esc でキャンセル · Delete でクリア",
+    "unassigned": "未設定",
+    "no_results": "一致するショートカット操作はありません。",
+    "conflict_error": "すでに{{action}}で使用されています。",
+    "reserved_error": "ブラウザまたはデスクトップウィンドウで予約されています。",
+    "send_error": "送信には Enter または Mod+Enter のみ使用できます。",
+    "unsafe_error": "このキーは文字入力や基本的なキーボード操作と競合します。",
+    "send_enter_hint": "Shift+Enterで段落の挿入、リストの継続、コードブロック内の改行ができます。",
+    "categories": { "general": "一般", "navigation": "ナビゲーション" },
+    "actions": {
+      "openSearch": { "label": "検索を開く", "description": "どこからでも検索やコマンドを実行します。" },
+      "createIssue": { "label": "Issueを作成", "description": "優先するissue作成フローを開きます。" },
+      "toggleSidebar": { "label": "サイドバーを切り替え", "description": "メインサイドバーの表示を切り替えます。" },
+      "findInIssue": { "label": "Issue内を検索", "description": "開いているissueの詳細を検索します。" },
+      "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログで issue を作成します。" },
+      "goInbox": { "label": "受信トレイへ移動", "description": "ワークスペースの受信トレイを開きます。" },
+      "goChat": { "label": "チャットへ移動", "description": "ワークスペースのチャットを開きます。" },
+      "goMyIssues": { "label": "自分のIssuesへ移動", "description": "自分に割り当てられたissueを開きます。" },
+      "goIssues": { "label": "Issuesへ移動", "description": "Issue一覧を開きます。" },
+      "goProjects": { "label": "プロジェクトへ移動", "description": "プロジェクト一覧を開きます。" },
+      "goAutopilots": { "label": "自動化へ移動", "description": "ワークスペースの自動化を開きます。" },
+      "goAgents": { "label": "エージェントへ移動", "description": "エージェント一覧を開きます。" },
+      "goSquads": { "label": "Squadsへ移動", "description": "Squad一覧を開きます。" },
+      "goUsage": { "label": "使用量へ移動", "description": "使用量分析を開きます。" },
+      "goRuntimes": { "label": "ランタイムへ移動", "description": "ランタイム設定を開きます。" },
+      "goSkills": { "label": "Skillsへ移動", "description": "Skillライブラリを開きます。" },
+      "goSettings": { "label": "設定へ移動", "description": "ワークスペース設定を開きます。" }
+    },
+    "fixed": {
+      "title": "固定のシステムショートカット",
+      "description": "ウィンドウとアクセシビリティのショートカットは信頼性のため固定されています。ズームとタブ操作はデスクトップアプリに適用されます。",
+      "close_tab": "アクティブなタブを閉じる",
+      "zoom_in": "拡大",
+      "zoom_out": "縮小",
+      "reset_zoom": "ズームをリセット",
+      "close_dialog": "ダイアログまたはメニューを閉じる"
+    }
+  },
+  "chat": {
+    "floating_title": "フローティングウィンドウ",
+    "floating_label": "フローティングチャット",
+    "floating_hint": "すべてのページの隅にフローティングチャットボタンを表示します。デフォルトはオフ——オンにするとどこからでもチャットを呼び出せます。オフのときは専用タブでのみ利用できます。"
+  },
+  "issue": {
+    "description": "各作成ダイアログのツールバーに常時表示するフィールドを選択します。非表示のフィールドは ⋯ メニューから引き続き使用でき、値がある間は自動的に表示されます。",
+    "quick_create_title": "エージェントで作成",
+    "quick_create_description": "クイック作成ツールバーに表示するフィールド。",
+    "manual_create_title": "手動で作成",
+    "manual_create_description": "手動作成ツールバーに表示するフィールド。",
+    "fields": {
+      "status": "ステータス",
+      "priority": "優先度",
+      "assignee": "担当者",
+      "labels": "ラベル",
+      "project": "プロジェクト",
+      "due_date": "期限",
+      "start_date": "開始日"
     }
   },
   "page": {
@@ -28,6 +119,9 @@
     "tabs": {
       "profile": "プロフィール",
       "preferences": "環境設定",
+      "shortcuts": "ショートカット",
+      "issue": "イシュー",
+      "chat": "チャット",
       "notifications": "通知",
       "tokens": "API トークン",
       "general": "一般",
@@ -35,11 +129,122 @@
       "github": "GitHub",
       "integrations": "連携",
       "labs": "ラボ",
-      "members": "メンバー"
+      "members": "メンバー",
+      "labels": "ラベル",
+      "properties": "プロパティ"
+    }
+  },
+  "properties": {
+    "title": "プロパティ",
+    "description": "このワークスペースの Issue に型付きカスタムプロパティを定義します。値は各 Issue に設定され、エージェントが読み書きできます。",
+    "search_placeholder": "名前で絞り込み...",
+    "new_property": "新規プロパティ",
+    "show_archived": "アーカイブ済みを表示",
+    "columns": {
+      "name": "名前",
+      "type": "タイプ",
+      "options": "オプション",
+      "usage": "使用数",
+      "updated": "更新日時"
+    },
+    "usage_count_other": "{{count}} 件の Issue",
+    "loading": "プロパティを読み込み中...",
+    "empty": "プロパティはまだありません",
+    "empty_hint": "Severity や Environment のような型付きフィールドを作成できます。エージェントはバリデーション付きで読み書きします。",
+    "no_results": "一致するプロパティがありません",
+    "save_failed": "プロパティを保存できませんでした",
+    "limit_hint": "{{count}}/{{max}} 個の有効なプロパティ",
+    "archived_badge": "アーカイブ済み",
+    "types": {
+      "text": "テキスト",
+      "number": "数値",
+      "select": "選択",
+      "multi_select": "複数選択",
+      "date": "日付",
+      "checkbox": "チェックボックス",
+      "url": "URL"
+    },
+    "actions": {
+      "open": "{{name}} の操作",
+      "edit": "編集",
+      "archive": "アーカイブ",
+      "unarchive": "復元"
+    },
+    "editor": {
+      "create_title": "新規プロパティ",
+      "edit_title": "プロパティを編集",
+      "admin_hint": "プロパティ定義を管理できるのはワークスペースのオーナーと管理者のみです。",
+      "icon": "アイコン",
+      "choose_icon": "アイコンを選択",
+      "remove_icon": "アイコンを削除",
+      "name": "名前",
+      "name_placeholder": "例: Severity",
+      "type": "タイプ",
+      "type_locked_hint": "作成後にタイプは変更できません。",
+      "description": "説明",
+      "description_placeholder": "このプロパティの意味と設定するタイミング",
+      "options": "オプション",
+      "option_name_placeholder": "オプション名",
+      "add_option": "オプションを追加",
+      "remove_option": "オプションを削除",
+      "cancel": "キャンセル",
+      "save": "プロパティを保存",
+      "saving": "保存中..."
+    },
+    "archive_dialog": {
+      "title": "プロパティをアーカイブしますか？",
+      "description": "「{{name}}」はピッカーとフィルターから非表示になります。Issue 上の既存の値は保持され、後で復元できます。",
+      "cancel": "キャンセル",
+      "confirm": "プロパティをアーカイブ",
+      "failed": "プロパティをアーカイブできませんでした"
+    }
+  },
+  "labels": {
+    "title": "ラベル",
+    "description": "このワークスペースの Issue、エージェント、Skill 用ラベルを個別に管理します。",
+    "scopes": {
+      "issue": "Issue",
+      "agent": "エージェント",
+      "skill": "Skill"
+    },
+    "search_placeholder": "名前または説明で絞り込み...",
+    "new_label": "新しいラベル",
+    "columns": {
+      "name": "名前",
+      "description": "説明",
+      "usage": "使用数",
+      "updated": "更新日"
+    },
+    "usage_count": "{{count}} 件で使用",
+    "loading": "ラベルを読み込み中...",
+    "empty": "{{scope}} ラベルはまだありません",
+    "no_results": "一致するラベルがありません",
+    "save_failed": "ラベルを保存できませんでした",
+    "actions": { "open": "{{name}} の操作", "edit": "編集", "delete": "削除" },
+    "editor": {
+      "create_title": "新しいラベル",
+      "edit_title": "ラベルを編集",
+      "scope_hint": "このラベルは {{scope}} カタログ専用です。",
+      "name": "名前",
+      "name_placeholder": "例: Bug",
+      "description": "説明",
+      "description_placeholder": "このラベルを使用する条件を説明",
+      "color": "色",
+      "cancel": "キャンセル",
+      "save": "ラベルを保存",
+      "saving": "保存中..."
+    },
+    "delete_dialog": {
+      "title": "ラベルを削除しますか？",
+      "description": "「{{name}}」を削除しますか？{{count}} 件のリソースから削除されます。この操作は元に戻せません。",
+      "cancel": "キャンセル",
+      "confirm": "ラベルを削除",
+      "failed": "ラベルを削除できませんでした"
     }
   },
   "account": {
-    "section_profile": "プロフィール",
+    "section_profile": "個人情報",
+    "avatar_label": "アバター",
     "click_avatar_hint": "クリックしてアバターをアップロード",
     "name_label": "名前",
     "profile_description_label": "自己紹介",
@@ -96,7 +301,10 @@
   },
   "tokens": {
     "title": "API トークン",
-    "description": "個人アクセストークンを使うと、CLI や外部連携があなたのアカウントで認証できます。",
+    "description": "個人アクセストークンを使うと、CLI や外部連携があなたのアカウントで認証できます。multica login --token で使用するか、API 呼び出し時に Bearer トークンとして送信します。",
+    "security_note": "トークンはアカウントへのフルアクセスを付与します。パスワードと同じように厳重に管理してください。",
+    "empty": "API トークンはまだありません。上のフォームから作成できます。",
+    "load_failed": "API トークンを読み込めませんでした。ページを再読み込みしてもう一度お試しください。",
     "name_placeholder": "トークン名（例: My CLI）",
     "expiry": {
       "30": "30 日",
@@ -123,14 +331,20 @@
       "confirm": "失効"
     },
     "created_dialog": {
-      "title": "トークンを作成しました",
-      "description": "今すぐ個人アクセストークンをコピーしてください。再表示はできません。",
+      "title": "個人アクセストークンを作成しました",
+      "warning_prefix": "新しい個人アクセストークンを作成しました。セキュリティ上の理由により、表示されるのは",
+      "warning_emphasis": "今回の一度だけ",
+      "warning_suffix": "です。安全に保管し、共有しないでください。紛失したトークンは復元できないため、失効して新しく作成してください。",
+      "confirm_stored": "このトークンを安全に保管しました。",
       "copy_tooltip": "トークンをコピー",
+      "cli_hint": "次のコマンドで CLI にログインできます:",
+      "copy_command_tooltip": "コマンドをコピー",
       "done": "完了"
     }
   },
   "workspace": {
-    "section_general": "一般",
+    "section_general": "ワークスペース情報",
+    "logo_label": "ワークスペースロゴ",
     "name_label": "名前",
     "description_label": "説明",
     "description_placeholder": "このワークスペースは何に注力していますか？",
@@ -300,6 +514,79 @@
     "install_error_forbidden": "このワークスペースに Lark ボットを設置する権限がなくなりました。ワークスペース管理者にお問い合わせください。",
     "install_error_generic": "設置に失敗しました。もう一度お試しください。"
   },
+  "composio": {
+    "section_title": "Composio",
+    "page_description": "Connect the Composio apps your agents can act on. Only apps configured with an enabled auth config in your Composio project appear here.",
+    "not_enabled_title": "Composio integration not enabled",
+    "not_enabled_description_prefix": "Set",
+    "not_enabled_description_suffix": "on the server to enable Composio toolkit connections.",
+    "loading": "Loading toolkits…",
+    "load_failed": "Failed to load Composio toolkits.",
+    "empty_title": "No connectable apps yet",
+    "empty_description": "No toolkit has an enabled auth config in your Composio project yet. Enable one in the Composio dashboard to make it available here.",
+    "search_placeholder": "Search toolkits…",
+    "connect": "Connect",
+    "connecting": "Connecting…",
+    "connected": "Connected",
+    "disconnect": "Disconnect",
+    "disconnecting": "Disconnecting…",
+    "connect_failed": "Couldn't start the connection. Please try again.",
+    "disconnect_failed": "Couldn't disconnect. Please try again.",
+    "toast_disconnected": "Disconnected",
+    "disconnect_confirm_title": "Disconnect this app?",
+    "disconnect_confirm_description": "Your connected account will be revoked at Composio and your agents will lose access to this toolkit. You can reconnect later.",
+    "disconnect_confirm_cancel": "Cancel",
+    "connections_load_failed": "Couldn't load your existing connections, so connected status may be incomplete.",
+    "toast_connected": "接続しました",
+    "toast_connect_failed": "接続を完了できませんでした。もう一度お試しください。",
+    "last_used": "最終使用 {{when}}",
+    "last_used_never": "未使用",
+    "expired": "トークンの有効期限切れ",
+    "reconnect": "再接続"
+  },
+  "slack": {
+    "section_title": "Slack",
+    "page_description": "各 Multica エージェントを専用の Slack ボットに接続します。メンバーはボットに DM したり、チャンネルで @メンションしたり、/issue と入力して新しい Multica イシューを起こすことができます。",
+    "not_enabled_title": "Slack 連携が有効になっていません",
+    "not_enabled_description_prefix": "サーバーで",
+    "not_enabled_description_suffix": "を設定すると Slack ボットのインストールが有効になります。",
+    "not_enabled_self_host_hint": "セルフホストの場合: 詳細はプロジェクトの README を参照してください。",
+    "preview_title": "Slack インストールは近日対応",
+    "preview_description": "保存用キーは設定済みですが、このデプロイではホスト型 Slack アプリの OAuth 認証情報が未設定です。設定すると接続ボタンがここに表示されます。",
+    "connected_bots": "接続済みのボット",
+    "loading": "読み込み中…",
+    "empty_title": "まだボットが接続されていません",
+    "empty_description_prefix": "このワークスペースのエージェントを開き、",
+    "empty_description_cta": "Slack を接続",
+    "empty_description_suffix": "をクリックしてボットをインストールします。",
+    "revoked_badge": "取り消し済み",
+    "installed_at_label": "{{when}} にインストール",
+    "disconnect": "切断",
+    "disconnecting": "切断中…",
+    "disconnect_confirm_title": "この Slack ボットを切断しますか？",
+    "disconnect_confirm_description": "このボットはこのワークスペースの Slack メッセージを受信しなくなります。インストール記録は監査のため保持され、同じエージェントから再インストールできます。",
+    "disconnect_confirm_cancel": "キャンセル",
+    "toast_disconnected": "Slack ボットを切断しました",
+    "toast_disconnect_failed": "切断に失敗しました",
+    "bind_button": "Slack を接続",
+    "bind_button_title": "{{agent}} を Slack ボットに接続",
+    "connecting": "Slack を開いています…",
+    "connect_failed_toast": "Slack のインストールを開始できませんでした",
+    "agent_bot_connected_label": "Slack に接続済み",
+    "agent_bot_disconnect_tooltip": "この Slack ボットをエージェントから解除します。ボットは Slack メッセージを受信しなくなります。",
+    "agent_bot_manage_link": "Slack で開く",
+    "agent_bot_manage_tooltip": "このボットの Slack ワークスペースを開きます。",
+    "byo_dialog_title": "Slack ボットを接続",
+    "byo_video_cta": "セットアップ手順の動画を見る",
+    "byo_docs_link": "Step-by-step：Multica エージェントを Slack に接続する",
+    "byo_bot_token_label": "Bot トークン（xoxb-）",
+    "byo_app_token_label": "App レベルトークン（xapp-）",
+    "byo_submit": "接続",
+    "byo_submitting": "接続中…",
+    "byo_cancel": "キャンセル",
+    "byo_success_toast": "Slack ボットを接続しました",
+    "byo_failed_toast": "Slack ボットを接続できませんでした"
+  },
   "repositories": {
     "section_title": "リポジトリ",
     "description": "このワークスペースに関連付けられた Git リポジトリです。エージェントはこれらをクローンしてコードを作業します。",
@@ -314,6 +601,10 @@
     "edit_aria": "リポジトリを編集",
     "cancel_aria": "編集をキャンセル",
     "delete_aria": "リポジトリを削除",
+    "delete_confirm_title": "リポジトリを削除しますか？",
+    "delete_confirm_description": "このリポジトリはワークスペースから直ちに削除されます。",
+    "delete_confirm_cancel": "キャンセル",
+    "delete_confirm_action": "リポジトリを削除",
     "manage_hint": "リポジトリを管理できるのは admin と owner のみです。",
     "toast_saved": "リポジトリを保存しました",
     "toast_save_failed": "リポジトリを保存できませんでした"
@@ -324,10 +615,13 @@
     },
     "updates": {
       "title": "アップデート",
-      "description": "デスクトップアプリは 1 時間に 1 回、および起動直後に新しいバージョンを自動で確認し、バックグラウンドでダウンロードします。アップデートの準備が整うと、再起動を促すメッセージが表示されます。",
+      "description": "バックグラウンドでの自動アップデートを設定するか、新しいバージョンを手動で確認します。",
       "current_version": "現在のバージョン",
+      "automatic_updates_title": "バックグラウンドで自動アップデート",
+      "automatic_updates_description": "有効にすると、起動直後と 1 時間ごとにアップデートを確認し、利用可能なバージョンをバックグラウンドでダウンロードします。",
+      "automatic_updates_save_failed": "自動アップデート設定を保存できませんでした",
       "check_section_title": "アップデートを確認",
-      "check_section_description": "次回の自動確認を待たずに、今すぐ確認します。利用可能なアップデートはバックグラウンドでダウンロードされ、準備が整うと再起動を促すメッセージが表示されます。",
+      "check_section_description": "自動アップデートの設定にかかわらず、今すぐ確認します。利用可能なアップデートはバックグラウンドでダウンロードされ、準備が整うと再起動を促すメッセージが表示されます。",
       "up_to_date": "最新バージョンを使用しています。",
       "downloading": "v{{version}} をバックグラウンドでダウンロード中です。インストールの準備が整うとお知らせします。",
       "check_now": "今すぐ確認",

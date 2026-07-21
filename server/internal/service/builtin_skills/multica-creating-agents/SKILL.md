@@ -78,7 +78,7 @@ The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 | `custom_args` | `agent.custom_args` (JSON array) | JSON shape checked CLI-side; server stores as-is | daemon (extra CLI switches); defaults to `[]` |
 | `runtime_config` | `agent.runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config; defaults to `{}` |
 | `custom_env` | `agent.custom_env` (JSON object) | — | daemon (process env); see Env & secrets |
-| `mcp_config` | `agent.mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the column | daemon → provider (MCP servers) — **runtime-consumed**; redacted on read |
+| `mcp_config` | `agent.mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the column | daemon → provider (provider-specific MCP handling); redacted on read |
 | `visibility` | `agent.visibility` | — | access control; defaults to `private`; gates who can read/route a private agent (e.g. a private squad leader) — NOT the runtime prompt |
 | `max_concurrent_tasks` | `agent.max_concurrent_tasks` | — | scheduler task cap; defaults to `6` |
 
@@ -88,20 +88,22 @@ Defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
 are typed `[]string`/`any` and marshaled as-is — the JSON-shape rejection
 happens in the CLI, not the create handler.
 
-`thinking_level` is validated only at the provider level: an unrecognized
-literal returns 400, but a value that is valid for the provider yet
-unsupported for the chosen model is NOT rejected here — that gap surfaces as a
-daemon-side task error at execution time.
+`thinking_level` is validated only at the provider level: fixed-catalog
+providers reject an unrecognized literal, while dynamic-catalog providers such
+as Codex/OpenCode accept a syntactically safe token. A value unsupported for
+the chosen model is NOT rejected here — the daemon checks its local model
+catalog at execution time, logs a warning, and omits the incompatible override.
 
 Set it from the CLI with `--thinking-level` on `agent create` and `agent
 update`, mirroring `--model`: the flag is a thin pass-through to the top-level
 `thinking_level` field, and on update an empty string (`--thinking-level ""`)
 clears it back to the runtime default. The CLI deliberately does not enumerate
-the valid levels — they are runtime/model-specific (Claude
-`low|medium|high|xhigh|max`, Codex `none|minimal|low|medium|high|xhigh`, and
-others), so it forwards whatever you pass and lets the server's provider
-catalog accept or reject it. A runtime whose provider has no thinking concept
-rejects any non-empty value with a 400.
+the valid levels — they are runtime/model-specific (Claude currently uses
+`low|medium|high|xhigh|max`; Codex values are discovered from the runtime's
+model catalog). It forwards the token, the server applies the provider's
+fixed-enum or safe-token gate, and the daemon performs the exact model/level
+check. A runtime whose provider has no thinking concept rejects any non-empty
+value with a 400.
 
 ### model vs custom_args
 
@@ -169,6 +171,8 @@ Two ways `mcp_config` differs from `custom_env`:
   `mcp_config` only to callers allowed to view agent secrets; otherwise the
   field is `null` and `mcp_config_redacted` is `true`. Agent actors never see
   it, and a workspace may force redaction for everyone.
+
+Provider support is not uniform: Qwen Code accepts a managed `mcp_config` through a daemon-owned 0600 temporary JSON file passed with `--mcp-config`; it is removed when the run exits. Leave the field unset (`null`) to inherit Qwen Code native settings.
 
 ## Skill binding
 

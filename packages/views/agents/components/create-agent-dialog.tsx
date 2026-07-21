@@ -1,18 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { Globe, Lock } from "lucide-react";
+import { Globe, Lock, Users } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { InstructionsEditor } from "./instructions-editor";
 import { SkillMultiSelect } from "./skill-multi-select";
-import { AvatarPicker } from "./avatar-picker";
+import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useFeatureEnabled } from "@multica/core/config";
+import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type {
   Agent,
+  AgentInvocationTargetInput,
+  AgentPermissionMode,
   AgentVisibility,
   RuntimeDevice,
   MemberWithUser,
@@ -27,6 +31,7 @@ import {
   DialogDescription,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { toast } from "sonner";
@@ -35,6 +40,7 @@ import {
   VISIBILITY_DESCRIPTION,
   VISIBILITY_LABEL,
 } from "@multica/core/agents";
+import { ActorAvatar } from "../../common/actor-avatar";
 import { CharCounter } from "./char-counter";
 import { useT } from "../../i18n";
 
@@ -77,15 +83,62 @@ export function CreateAgentDialog({
   const isDuplicate = !!template;
   const queryClient = useQueryClient();
   const wsId = useWorkspaceId();
+  // MUL-4010: rolls out the private / public_to access model in the create
+  // flow to match the AccessPicker on the agent detail page. Shares the
+  // `composio_mcp_apps` switch with the Composio rollout — the MUL-3963
+  // permission model exists to gate Composio sharing, so both surfaces flip
+  // together. Defaults OFF so production stays on the legacy Workspace /
+  // Personal toggle until Composio is greenlit.
+  const accessPickerEnabled = useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false);
 
   // Name defaults: duplicate uses "<original> copy". Manual-create starts blank.
   const [name, setName] = useState(
     template ? `${template.name}${t(($) => $.create_dialog.duplicate_copy_suffix)}` : "",
   );
   const [description, setDescription] = useState(template?.description ?? "");
+  // Legacy visibility state. Kept as the source of truth when
+  // `accessPickerEnabled` is false; only used to seed the new access state
+  // when the flag flips on for a duplicate.
   const [visibility, setVisibility] = useState<AgentVisibility>(
     template?.visibility ?? "workspace",
   );
+
+  // New access state (MUL-3963 aligned). When duplicating, seed from the
+  // template so the clone lands with the source agent's grants; otherwise
+  // default to public_to + workspace, matching the legacy "Workspace" default
+  // so a plain "click Create" produces the same result as before.
+  const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>(
+    template?.permission_mode ?? "public_to",
+  );
+  const [workspaceTargetOn, setWorkspaceTargetOn] = useState<boolean>(() => {
+    if (template) {
+      return (template.invocation_targets ?? []).some(
+        (tgt) => tgt.target_type === "workspace",
+      );
+    }
+    return true;
+  });
+  const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(
+    () =>
+      new Set(
+        (template?.invocation_targets ?? [])
+          .filter((tgt) => tgt.target_type === "member" && tgt.target_id)
+          .map((tgt) => tgt.target_id as string),
+      ),
+  );
+
+  // Team targets on the template are preserved across the create so we don't
+  // silently drop a grant type the picker doesn't expose yet (mirrors
+  // AccessPicker's `teamIds` pass-through).
+  const templateTeamTargets: AgentInvocationTargetInput[] = (
+    template?.invocation_targets ?? []
+  )
+    .filter((tgt) => tgt.target_type === "team" && tgt.target_id)
+    .map((tgt) => ({
+      target_type: "team" as const,
+      target_id: tgt.target_id as string,
+    }));
+
   const [model, setModel] = useState(template?.model ?? "");
   const [instructions, setInstructions] = useState(template?.instructions ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(template?.avatar_url ?? null);
@@ -117,6 +170,12 @@ export function CreateAgentDialog({
   const selectedRuntimeLocked =
     selectedRuntime != null &&
     !isRuntimeUsableForUser(selectedRuntime, currentUserId);
+  const accessSelectionInvalid =
+    accessPickerEnabled &&
+    permissionMode === "public_to" &&
+    !workspaceTargetOn &&
+    selectedMemberIds.size === 0 &&
+    templateTeamTargets.length === 0;
 
   // Shared squad-join follow-up. Returns nothing — the caller has
   // already shown its create-success toast; we only need to surface a
@@ -149,7 +208,14 @@ export function CreateAgentDialog({
   };
 
   const handleSubmit = async () => {
-    if (!name.trim() || !selectedRuntime || selectedRuntimeLocked) return;
+    if (
+      !name.trim() ||
+      !selectedRuntime ||
+      selectedRuntimeLocked ||
+      accessSelectionInvalid
+    ) {
+      return;
+    }
     setCreating(true);
 
     try {
@@ -158,11 +224,39 @@ export function CreateAgentDialog({
         name: name.trim(),
         description: description.trim(),
         runtime_id: selectedRuntime.id,
-        visibility,
         model: model.trim() || undefined,
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
+        skill_ids: [...selectedSkillIds],
       };
+      if (accessPickerEnabled) {
+        // New MUL-3963 shape: send the authoritative permission fields and
+        // let the backend derive the legacy `visibility` field. Mirror the
+        // AccessPicker `emit` normalisation — a public_to with zero targets
+        // collapses to private as defense in depth so the backend never sees
+        // an "empty public" request. Team targets from the template survive.
+        const invocationTargets: AgentInvocationTargetInput[] = [];
+        if (permissionMode === "public_to") {
+          if (workspaceTargetOn) {
+            invocationTargets.push({ target_type: "workspace" });
+          } else {
+            for (const id of selectedMemberIds) {
+              invocationTargets.push({ target_type: "member", target_id: id });
+            }
+            for (const tgt of templateTeamTargets) {
+              invocationTargets.push(tgt);
+            }
+          }
+        }
+        const collapseToPrivate =
+          permissionMode === "public_to" && invocationTargets.length === 0;
+        data.permission_mode = collapseToPrivate ? "private" : permissionMode;
+        data.invocation_targets = collapseToPrivate ? [] : invocationTargets;
+      } else {
+        // Legacy path: send the visibility toggle unchanged. The backend
+        // maps this to permission_mode + invocation_targets server-side.
+        data.visibility = visibility;
+      }
       if (template) {
         // Duplicate path: forward the hidden config fields the source
         // agent had so the clone is functional out of the box (args /
@@ -179,29 +273,6 @@ export function CreateAgentDialog({
         }
       }
       const createdAgent = await onCreate(data);
-      // Follow-up: attach selected skills to the newly created agent.
-      // onCreate returns the created Agent for this path; if the caller
-      // doesn't return it we fall back to skipping (preserves
-      // backward compatibility with non-skill-aware callers).
-      if (createdAgent && selectedSkillIds.size > 0) {
-        try {
-          await api.setAgentSkills(createdAgent.id, {
-            skill_ids: [...selectedSkillIds],
-          });
-          if (wsId) {
-            queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-          }
-        } catch (skillErr) {
-          // Non-fatal: agent exists, skills can be added on the detail
-          // page. Surface as a warning toast so the user knows.
-          toast.warning(
-            t(($) => $.create_dialog.skill_attach_failed_toast, {
-              error:
-                skillErr instanceof Error ? skillErr.message : "unknown error",
-            }),
-          );
-        }
-      }
       // Squad context: attach the agent after skills land so the
       // squad's Members tab shows the agent with its skills already
       // in place. Atomicity is best-effort by design (see plan in
@@ -247,7 +318,14 @@ export function CreateAgentDialog({
                 same shape as detail-page header so the affordance is
                 instantly familiar. */}
             <div className="flex items-start gap-4">
-              <AvatarPicker value={avatarUrl} onChange={setAvatarUrl} size={64} />
+              <AvatarUploadControl
+                variant="agent"
+                value={avatarUrl}
+                name={name}
+                size={64}
+                onUploaded={setAvatarUrl}
+                onClear={() => setAvatarUrl(null)}
+              />
               <div className="flex-1 min-w-0 space-y-3">
                 <div>
                   <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.name_label)}</Label>
@@ -285,45 +363,58 @@ export function CreateAgentDialog({
               </div>
             </div>
 
-            <div>
-              <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.visibility_label)}</Label>
-              <div className="mt-1.5 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setVisibility("workspace")}
-                  className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                    visibility === "workspace"
-                      ? "border-primary bg-primary/5"
-                      : "border-border hover:bg-muted"
-                  }`}
-                >
-                  <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <div className="text-left">
-                    <div className="font-medium">{VISIBILITY_LABEL.workspace}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {VISIBILITY_DESCRIPTION.workspace}
+            {accessPickerEnabled ? (
+              <AccessSection
+                permissionMode={permissionMode}
+                onPermissionModeChange={setPermissionMode}
+                workspaceTargetOn={workspaceTargetOn}
+                onWorkspaceTargetChange={setWorkspaceTargetOn}
+                selectedMemberIds={selectedMemberIds}
+                onSelectedMemberIdsChange={setSelectedMemberIds}
+                members={members}
+                currentUserId={currentUserId}
+              />
+            ) : (
+              <div>
+                <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.visibility_label)}</Label>
+                <div className="mt-1.5 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setVisibility("workspace")}
+                    className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                      visibility === "workspace"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:bg-muted"
+                    }`}
+                  >
+                    <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="text-left">
+                      <div className="font-medium">{VISIBILITY_LABEL.workspace}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {VISIBILITY_DESCRIPTION.workspace}
+                      </div>
                     </div>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setVisibility("private")}
-                  className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                    visibility === "private"
-                      ? "border-primary bg-primary/5"
-                      : "border-border hover:bg-muted"
-                  }`}
-                >
-                  <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <div className="text-left">
-                    <div className="font-medium">{VISIBILITY_LABEL.private}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {VISIBILITY_DESCRIPTION.private}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVisibility("private")}
+                    className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                      visibility === "private"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:bg-muted"
+                    }`}
+                  >
+                    <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="text-left">
+                      <div className="font-medium">{VISIBILITY_LABEL.private}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {VISIBILITY_DESCRIPTION.private}
+                      </div>
                     </div>
-                  </div>
-                </button>
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             <RuntimePicker
               runtimes={runtimes}
@@ -331,7 +422,12 @@ export function CreateAgentDialog({
               members={members}
               currentUserId={currentUserId}
               selectedRuntimeId={selectedRuntimeId}
-              onSelect={setSelectedRuntimeId}
+              onSelect={(id) => {
+                // Models are per-runtime; a value picked for the old runtime
+                // may not exist on the new one, so drop it on runtime change.
+                if (id !== selectedRuntimeId) setModel("");
+                setSelectedRuntimeId(id);
+              }}
             />
 
             <ModelDropdown
@@ -388,5 +484,183 @@ export function CreateAgentDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+/**
+ * AccessSection — inline access editor for the create/duplicate flow, gated
+ * on `COMPOSIO_MCP_APPS_FLAG`. Mirrors the semantics of
+ * `AccessPicker` on the agent detail page: the underlying model is
+ * `permission_mode` + `invocation_targets` (MUL-3963), not the legacy
+ * `visibility`.
+ *
+ * The three mutually exclusive scopes mirror AccessPicker on the detail page.
+ * Specific people reveals a member allow-list; an entire-workspace grant never
+ * stacks redundant member targets underneath it.
+ *
+ * The current viewer is intentionally excluded from the member list: an
+ * owner is always allowed to invoke their own agent, so listing them again
+ * would be misleading.
+ */
+function AccessSection({
+  permissionMode,
+  onPermissionModeChange,
+  workspaceTargetOn,
+  onWorkspaceTargetChange,
+  selectedMemberIds,
+  onSelectedMemberIdsChange,
+  members,
+  currentUserId,
+}: {
+  permissionMode: AgentPermissionMode;
+  onPermissionModeChange: (next: AgentPermissionMode) => void;
+  workspaceTargetOn: boolean;
+  onWorkspaceTargetChange: (next: boolean) => void;
+  selectedMemberIds: Set<string>;
+  onSelectedMemberIdsChange: (next: Set<string>) => void;
+  members: MemberWithUser[];
+  currentUserId: string | null;
+}) {
+  const { t } = useT("agents");
+  const isPrivate = permissionMode === "private";
+  const isWorkspace = !isPrivate && workspaceTargetOn;
+  const isMembers = !isPrivate && !workspaceTargetOn;
+
+  const otherMembers = members.filter((m) => m.user_id !== currentUserId);
+
+  const toggleMember = (userId: string, checked: boolean) => {
+    const next = new Set(selectedMemberIds);
+    if (checked) next.add(userId);
+    else next.delete(userId);
+    onSelectedMemberIdsChange(next);
+  };
+
+  return (
+    <div>
+      <Label className="text-xs text-muted-foreground">
+        {t(($) => $.create_dialog.access.label)}
+      </Label>
+      <fieldset className="mt-1.5 grid gap-2 sm:grid-cols-3">
+        <legend className="sr-only">{t(($) => $.access.tooltip)}</legend>
+        <CompactAccessChoice
+          value="private"
+          icon={Lock}
+          title={t(($) => $.access.private_title)}
+          description={t(($) => $.access.private_desc)}
+          selected={isPrivate}
+          onSelect={() => onPermissionModeChange("private")}
+        />
+        <CompactAccessChoice
+          value="workspace"
+          icon={Globe}
+          title={t(($) => $.access.workspace_title)}
+          description={t(($) => $.access.workspace_desc)}
+          selected={isWorkspace}
+          onSelect={() => {
+            onPermissionModeChange("public_to");
+            onWorkspaceTargetChange(true);
+          }}
+        />
+        <CompactAccessChoice
+          value="members"
+          icon={Users}
+          title={t(($) => $.access.members_title)}
+          description={t(($) => $.access.members_desc)}
+          selected={isMembers}
+          onSelect={() => {
+            onPermissionModeChange("public_to");
+            onWorkspaceTargetChange(false);
+          }}
+        />
+      </fieldset>
+
+      {isMembers && (
+        <div className="mt-2 rounded-lg border bg-muted/30 px-3 py-2">
+          <div>
+            {otherMembers.length === 0 ? (
+              <div className="py-1 text-xs text-muted-foreground">
+                {t(($) => $.create_dialog.access.public_members_empty)}
+              </div>
+            ) : (
+              <div className="max-h-40 overflow-y-auto">
+                {otherMembers.map((m) => {
+                  const checked = selectedMemberIds.has(m.user_id);
+                  return (
+                    <label
+                      key={m.user_id}
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-sm hover:bg-background/60"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={(v) =>
+                          toggleMember(m.user_id, v === true)
+                        }
+                        aria-label={m.name}
+                      />
+                      <ActorAvatar
+                        actorType="member"
+                        actorId={m.user_id}
+                        size="sm"
+                      />
+                      <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {selectedMemberIds.size === 0 && (
+            <div className="mt-2 text-xs text-destructive" role="alert">
+              {t(($) => $.access.shared_target_required)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompactAccessChoice({
+  value,
+  icon: Icon,
+  title,
+  description,
+  selected,
+  onSelect,
+}: {
+  value: string;
+  icon: typeof Lock;
+  title: string;
+  description: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <label
+      className={`flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors hover:bg-muted ${
+        selected ? "border-primary bg-primary/5" : "border-border"
+      }`}
+    >
+      <input
+        type="radio"
+        name="create-agent-access-scope"
+        value={value}
+        checked={selected}
+        onChange={onSelect}
+        className="mt-0.5 size-4 shrink-0 accent-foreground"
+      />
+      <Icon
+        className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+        aria-hidden="true"
+      />
+      <span className="min-w-0">
+        <span className="block font-medium">{title}</span>
+        <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
+          {description}
+        </span>
+      </span>
+    </label>
   );
 }

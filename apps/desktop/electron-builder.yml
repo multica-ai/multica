@@ -8,6 +8,20 @@ files:
   - "!electron.vite.config.*"
   - "!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
   - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
+  # Never repack the electron-builder output directory into the app.
+  # Multi-arch release builds (scripts/package.mjs) run each target in the
+  # same apps/desktop dir with per-arch output at dist/<platform>-<arch>.
+  # electron-builder only auto-excludes the *current* target's output dir,
+  # so the earlier arch's dist/ (its full .app + DMG + ZIP) would otherwise
+  # be pulled into the next arch's app.asar. That inflated v0.4.3/v0.4.4's
+  # Intel (x64) DMG until the HFS volume was full and the real
+  # `Electron Framework/Versions/A/Electron Framework` binary was dropped,
+  # so Intel Macs crashed on launch with a dyld missing-library error
+  # (github.com/multica-ai/multica/issues/5595). Excluding all of dist/**
+  # fixes it regardless of build order; a pre-build clean alone does not,
+  # because the first arch writes into dist/ mid-run before the second is
+  # packaged.
+  - "!dist/**"
 protocols:
   - name: Multica
     schemes:
@@ -43,9 +57,21 @@ linux:
   # violates the freedesktop desktop-entry naming guidance, so GNOME /
   # Ubuntu fail to associate the running window with the `.desktop` entry
   # and fall back to the theme's default app icon (the Settings gear on
-  # Yaru). Forcing `multica` makes every Linux identity slot agree and
-  # matches `StartupWMClass=Multica` (productName-derived).
-  executableName: multica
+  # Yaru).
+  #
+  # `multica-desktop` (not `multica`) so the deb/rpm/AppImage package never
+  # installs this Electron binary as `/usr/bin/multica`. The Go CLI is a
+  # separate artifact (see CLI_INSTALL.md) that agents and scripts expect
+  # to find at `multica` on PATH; when both packages are installed on the
+  # same box, a plain electron-builder default collides the two under one
+  # name. Whichever installs later — or wins the PATH lookup order — silently
+  # shadows the other. Hitting the Electron binary from a CLI call is the
+  # worst failure mode: it exits 0 with empty stdout (its own Chromium flags
+  # eat CLI args like `--output json`), which looks like a healthy CLI that
+  # returned nothing rather than "wrong binary" (github.com/multica-ai/multica/issues/5481).
+  # `StartupWMClass=Multica` (productName-derived) is unaffected by this
+  # rename — it comes from `app.getName()`, not `executableName`.
+  executableName: multica-desktop
   # Pin StartupWMClass to the WM_CLASS Electron emits on X11. Electron
   # derives WM_CLASS from `app.getName()`, which reads the *packaged*
   # ASAR's `package.json` — `productName` if present, otherwise `name`.

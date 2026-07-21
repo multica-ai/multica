@@ -52,7 +52,6 @@
   },
   "members_tab": {
     "section_title": "멤버",
-    "section_count_one": "이 스쿼드의 멤버 {{count}}명",
     "section_count_other": "이 스쿼드의 멤버 {{count}}명",
     "add_member_button": "멤버 추가",
     "create_agent_button": "에이전트 만들기",
@@ -73,10 +72,8 @@
     "unavailable": "스쿼드를 사용할 수 없습니다",
     "detail_link": "자세히 →",
     "archived": "보관됨",
-    "member_count_one": "멤버 {{count}}명",
     "member_count_other": "멤버 {{count}}명",
     "members_section": "멤버",
-    "more_members_one": "+{{count}}명 더 보기",
     "more_members_other": "+{{count}}명 더 보기"
   },
   "instructions_tab": {
@@ -96,7 +93,6 @@
     "section_columns": "열",
     "result_count_title": "일치하는 스쿼드 / 전체 스쿼드",
     "filter_label": "필터",
-    "filter_active_count_one": "필터 {{count}}개",
     "filter_active_count_other": "필터 {{count}}개",
     "clear_filters": "필터 지우기"
   }

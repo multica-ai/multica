@@ -9,6 +9,7 @@ import {
   collectUnmappedModels,
   computeCostInWindow,
   estimateCost,
+  estimateCostBreakdown,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
@@ -141,6 +142,18 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(10 + 50 + 1 + 12.5, 5);
   });
 
+  it("prices Claude Sonnet 5 at Anthropic's intro $2 / $10 tier", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-sonnet-5",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(2 + 10 + 0.2 + 2.5, 5);
+  });
+
   it("prices the provider-prefixed Anthropic form (anthropic/claude-sonnet-4.6)", () => {
     // openclaw / opencode emit `<provider>/<model>`. Same SKU as the
     // bare form, must hit the same rate.
@@ -224,6 +237,43 @@ describe("estimateCost", () => {
     ).toBeCloseTo(1.75 + 14, 5);
   });
 
+  it("prices the gpt-5.6 series per OpenAI's official cache-aware rates", () => {
+    // Official announcement rates. 5.6 is the first OpenAI generation to bill
+    // cache writes separately: cacheRead = 0.1x input, cacheWrite = 1.25x
+    // input. Cover every model x every token category so a wrong cache rate
+    // can't hide behind an input-only assertion. `total` is 1M of each of the
+    // four categories priced at its own rate.
+    const cases = [
+      { model: "gpt-5.6-sol", input: 5, cacheRead: 0.5, cacheWrite: 6.25, output: 30, total: 41.75 },
+      { model: "gpt-5.6-terra", input: 2.5, cacheRead: 0.25, cacheWrite: 3.125, output: 15, total: 20.875 },
+      { model: "gpt-5.6-luna", input: 1, cacheRead: 0.1, cacheWrite: 1.25, output: 6, total: 8.35 },
+    ];
+    for (const c of cases) {
+      const breakdown = estimateCostBreakdown({
+        ...zeroUsage,
+        model: c.model,
+        input_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      });
+      expect(breakdown.input).toBeCloseTo(c.input, 5);
+      expect(breakdown.cacheRead).toBeCloseTo(c.cacheRead, 5);
+      expect(breakdown.cacheWrite).toBeCloseTo(c.cacheWrite, 5);
+      expect(breakdown.output).toBeCloseTo(c.output, 5);
+      expect(
+        estimateCost({
+          ...zeroUsage,
+          model: c.model,
+          input_tokens: 1_000_000,
+          cache_read_tokens: 1_000_000,
+          cache_write_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+        }),
+      ).toBeCloseTo(c.total, 5);
+    }
+  });
+
   it("flags catalog SKUs without a published price (gpt-5.5-mini) as unmapped", () => {
     // `gpt-5.5-mini` is in the Codex catalog but OpenAI hasn't published a
     // public rate. We refuse to absorb it into `gpt-5.5` — the diagnostic
@@ -244,6 +294,12 @@ describe("estimateCost", () => {
     // silently inherit `gpt-5` pricing.
     expect(isModelPriced("gpt-5.99-codex")).toBe(false);
     expect(isModelPriced("gpt-5-foo")).toBe(false);
+    // Dash-normalized 5.6 ids must also miss: the real Codex slug is dotted
+    // (`gpt-5.6-luna`) and this resolver does NOT dash-normalize non-claude
+    // ids, so a dashed variant surfaces as unmapped — matching the backend's
+    // literal-dot alias in server/internal/metrics/pricing.go (MUL-4347).
+    expect(isModelPriced("gpt-5-6-luna")).toBe(false);
+    expect(isModelPriced("gpt-5-6-sol")).toBe(false);
     expect(
       estimateCost({
         ...zeroUsage,
@@ -419,6 +475,7 @@ describe("estimateCost", () => {
 
 describe("isModelPriced", () => {
   it("recognises both Claude and Codex/GPT families", () => {
+    expect(isModelPriced("claude-sonnet-5")).toBe(true);
     expect(isModelPriced("claude-fable-5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4-6")).toBe(true);
     expect(isModelPriced("gpt-5-codex")).toBe(true);
@@ -432,6 +489,7 @@ describe("isModelPriced", () => {
     // while Anthropic's own CLIs use dashes (`claude-opus-4-7`). Both must
     // hit the same catalog row, otherwise Copilot-routed usage gets bucketed
     // as "unmapped" and the user has to type the price in by hand.
+    expect(isModelPriced("claude-sonnet-5")).toBe(true);
     expect(isModelPriced("claude-haiku-4.5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4.5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4.6")).toBe(true);
@@ -443,6 +501,7 @@ describe("isModelPriced", () => {
   it("recognises provider-prefixed Anthropic IDs (openclaw / opencode form)", () => {
     // openclaw / opencode emit `<provider>/<model>` in `meta.agentMeta.model`.
     // The provider prefix is routing metadata, not part of the SKU.
+    expect(isModelPriced("anthropic/claude-sonnet-5")).toBe(true);
     expect(isModelPriced("anthropic/claude-fable-5")).toBe(true);
     expect(isModelPriced("anthropic/claude-opus-4.7")).toBe(true);
     expect(isModelPriced("anthropic/claude-sonnet-4-6")).toBe(true);

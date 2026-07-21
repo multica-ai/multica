@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -33,7 +35,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	args := buildCursorArgs(prompt, opts, b.cfg.Logger)
+	args := buildCursorArgs(opts, b.cfg.Logger)
 	argv0, cmdArgs := chooseCursorInvocation(execName, lookedUp, args, b.cfg.Logger)
 
 	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
@@ -50,9 +52,18 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("cursor stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[cursor:stderr] ")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("cursor stdin pipe: %w", err)
+	}
+	var closeStdinOnce sync.Once
+	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[cursor:stderr] "), agentStderrTailBytes)
+	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
+		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start cursor-agent: %w", err)
 	}
@@ -62,14 +73,30 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
+	// The prompt is delivered on stdin (see buildCursorArgs). Write it from its
+	// own goroutine so it cannot deadlock against the stdout reader below: a
+	// prompt larger than the OS pipe buffer (~64 KiB) blocks mid-write until the
+	// child drains it, and the child cannot drain while we are not reading its
+	// stdout. Closing stdin is what signals end-of-prompt — cursor-agent reads
+	// to EOF — so we always close, on both the success and error paths.
+	writeErrCh := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(stdin, prompt)
+		closeStdin()
+		writeErrCh <- err
+	}()
+
 	go func() {
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
+		// Closing stdin too releases a prompt write still blocked on a full pipe
+		// (e.g. the child died before draining it), so that goroutine cannot leak.
 		go func() {
 			<-runCtx.Done()
+			closeStdin()
 			_ = stdout.Close()
 		}()
 
@@ -79,7 +106,15 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		finalStatus := "completed"
 		var finalError string
+		var protocolError string
 		resultSeen := false
+		resultIsError := false
+		resultBytes := 0
+		eventCount := 0
+		invalidEventCount := 0
+		assistantEventCount := 0
+		toolUseCount := 0
+		lastEventType := "none"
 		// stepUsage accumulates per-step token counts from "step_finish" events.
 		// resultUsage holds authoritative session totals from "result" events.
 		// If the result event includes usage, we use resultUsage exclusively;
@@ -100,8 +135,11 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			var evt cursorStreamEvent
 			if err := json.Unmarshal([]byte(line), &evt); err != nil {
+				invalidEventCount++
 				continue
 			}
+			eventCount++
+			lastEventType = observedCursorEventType(evt.Type)
 
 			if sid := evt.readSessionID(); sid != "" {
 				sessionID = sid
@@ -115,14 +153,17 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if evt.Subtype == "error" {
 					errMsg := cursorErrorText(&evt)
 					if errMsg != "" {
+						protocolError = errMsg
 						trySend(msgCh, Message{Type: MessageError, Content: errMsg})
 					}
 				}
 
 			case "assistant":
+				assistantEventCount++
 				b.handleCursorAssistant(&evt, msgCh, &output)
 
 			case "tool_use":
+				toolUseCount++
 				var params map[string]any
 				if evt.Parameters != nil {
 					_ = json.Unmarshal(evt.Parameters, &params)
@@ -146,9 +187,12 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if evt.IsError || evt.Subtype == "error" {
 					finalStatus = "failed"
 					finalError = cursorErrorText(&evt)
+					resultIsError = true
 				}
+				resultBytes = len(evt.ResultText)
 				if evt.ResultText != "" && output.Len() == 0 {
 					output.WriteString(evt.ResultText)
+					trySend(msgCh, Message{Type: MessageText, Content: evt.ResultText})
 				}
 				b.accumulateResultUsage(resultUsage, &evt, configuredModel)
 				if evt.hasResultUsage() {
@@ -162,7 +206,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case "error":
 				errMsg := cursorErrorText(&evt)
 				if errMsg != "" {
-					finalError = errMsg
+					protocolError = errMsg
 				}
 				trySend(msgCh, Message{Type: MessageError, Content: errMsg})
 
@@ -189,6 +233,13 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 			}
 		}
+		scanErr := scanner.Err()
+		if scanErr != nil {
+			// Scanner stopped consuming stdout. Close the pipe before Wait so a
+			// child writing a malformed or oversized event cannot deadlock on a
+			// full OS pipe; the scanner error remains the primary failure.
+			_ = stdout.Close()
+		}
 
 		// Use result usage if available (session totals); otherwise fall back
 		// to accumulated step_finish usage.
@@ -199,22 +250,91 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)
 
-		if runCtx.Err() == context.DeadlineExceeded {
-			finalStatus = "timeout"
-			finalError = fmt.Sprintf("cursor-agent timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled && !resultSeen {
-			finalStatus = "aborted"
-			finalError = "execution cancelled"
-		} else if exitErr != nil && finalStatus == "completed" && !resultSeen {
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("cursor-agent exited with error: %v", exitErr)
+		// Wait has already closed the stdin pipe, so a prompt write still blocked
+		// on a full pipe has returned by now; the writer sends exactly once.
+		writeErr := <-writeErrCh
+
+		if resultSeen {
+			// A parsed result is the protocol boundary. Ignore the cancellation and
+			// exit error caused by stopping a Cursor worker that lingers afterward.
+			if finalStatus == "failed" && finalError == "" {
+				finalError = "cursor-agent returned an error result without details"
+			}
+		} else {
+			switch {
+			case runCtx.Err() == context.DeadlineExceeded:
+				finalStatus = "timeout"
+				finalError = fmt.Sprintf("cursor-agent timed out after %s", timeout)
+			case runCtx.Err() == context.Canceled:
+				finalStatus = "aborted"
+				finalError = "execution cancelled"
+			case scanErr != nil:
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("cursor-agent stdout read error: %v", scanErr)
+			case protocolError != "":
+				finalStatus = "failed"
+				finalError = protocolError
+			case writeErr != nil:
+				// Ranked below explicit agent errors because a child that exits
+				// early for its own reason (bad auth, bad flag) makes our write
+				// fail with EPIPE as a side effect. The stderr tail is appended
+				// to every !resultSeen failure below, so the real cause still
+				// surfaces either way.
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("cursor-agent prompt write failed: %v", writeErr)
+			case exitErr != nil:
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("cursor-agent exited with error: %v", exitErr)
+			default:
+				finalStatus = "failed"
+				finalError = "cursor-agent stream ended without terminal result"
+			}
 		}
+
+		if finalError != "" {
+			finalError = sanitizeAgentDiagnostic(finalError)
+		}
+		if finalStatus == "failed" && !resultSeen {
+			finalError = cursorFailureDiagnostic(
+				finalError,
+				exitErr,
+				scanErr,
+				eventCount,
+				invalidEventCount,
+				lastEventType,
+			)
+			finalError = withAgentStderr(finalError, "cursor", sanitizeAgentDiagnostic(stderrBuf.Tail()))
+		}
+
+		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
+			provider:            "cursor-agent",
+			cliVersion:          b.cfg.CLIVersion,
+			model:               opts.Model,
+			exitCode:            streamProcessExitCode(exitErr),
+			eventCount:          eventCount,
+			invalidEventCount:   invalidEventCount,
+			assistantEventCount: assistantEventCount,
+			toolUseCount:        toolUseCount,
+			sawResult:           resultSeen,
+			resultIsError:       resultIsError,
+			resultBytes:         resultBytes,
+			lastAssistantBytes:  output.Len(),
+			scannerError:        scanErr != nil && !resultSeen,
+			lastEventType:       lastEventType,
+		})
 
 		b.cfg.Logger.Info("cursor-agent finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
+		finalOutput := output.String()
+		if finalStatus != "completed" {
+			// A partial transcript is not a final answer. Keep it in Messages for
+			// observability, but never expose it as Result.Output on failure.
+			finalOutput = ""
+		}
+
 		resCh <- Result{
 			Status:     finalStatus,
-			Output:     output.String(),
+			Output:     finalOutput,
 			Error:      finalError,
 			DurationMs: duration.Milliseconds(),
 			SessionID:  sessionID,
@@ -223,6 +343,41 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+const cursorIncompleteFinalizationWarning = "actions completed before finalization may already have taken effect"
+
+func cursorFailureDiagnostic(message string, exitErr, scanErr error, eventCount, invalidEventCount int, lastEventType string) string {
+	return fmt.Sprintf(
+		"%s (result_seen=false, exit_code=%d, scanner_error=%t, event_count=%d, invalid_event_count=%d, last_event_type=%s); %s",
+		message,
+		streamProcessExitCode(exitErr),
+		scanErr != nil,
+		eventCount,
+		invalidEventCount,
+		lastEventType,
+		cursorIncompleteFinalizationWarning,
+	)
+}
+
+// observedCursorEventType keeps protocol diagnostics bounded and content-free.
+// Event types are identifiers; arbitrary values are collapsed instead of being
+// copied into daemon logs or task errors.
+func observedCursorEventType(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+	if len(value) > 64 {
+		return "invalid"
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return "invalid"
+	}
+	return value
 }
 
 func (b *cursorBackend) handleCursorAssistant(evt *cursorStreamEvent, ch chan<- Message, output *strings.Builder) {
@@ -470,12 +625,27 @@ var cursorBlockedArgs = map[string]blockedArgMode{
 
 // buildCursorArgs assembles the argv for a one-shot cursor-agent invocation.
 //
-// Usage: cursor-agent -p <prompt> --output-format stream-json
+// Usage: cursor-agent -p --output-format stream-json
 //
 //	--workspace <cwd> --yolo [--model <m>] [--resume <id>]
-func buildCursorArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
+//
+// The prompt is deliberately NOT part of argv. cursor-agent's -p is a boolean
+// print-mode switch and the prompt is a positional argument; when no positional
+// prompt is present and stdin is not a TTY, the CLI reads stdin to EOF and uses
+// that as the prompt. We rely on that path because putting user-controlled text
+// on the command line is not safe on Windows: the official cursor-agent.cmd/.ps1
+// launcher ends in `& node.exe index.js $args`, and PowerShell re-serialises
+// $args onto node's command line. Under Windows PowerShell 5.1 (and pwsh
+// <= 7.2, which default to Legacy native argument passing) an argument holding
+// embedded double quotes is not re-escaped, so a prompt containing e.g.
+// `go build -ldflags "-X main.version=foo"` gets re-tokenised and `-X` reaches
+// commander.js as a standalone flag: "error: unknown option '-X'" (#5649).
+// Routing the prompt through stdin keeps it off every command line, so no shell
+// or launcher on any platform can re-tokenise it. Only fixed, content-free
+// flags remain in argv.
+func buildCursorArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
-		"-p", prompt,
+		"-p",
 		"--output-format", "stream-json",
 		"--yolo",
 	}

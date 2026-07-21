@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
 // freshAgentEnvSetCmd returns a standalone cobra.Command with the three
@@ -30,6 +31,122 @@ func freshAgentEnvSetCmd() *cobra.Command {
 	c.Flags().Bool("custom-env-stdin", false, "")
 	c.Flags().String("custom-env-file", "", "")
 	return c
+}
+
+func chdirWithDaemonTaskMarker(t *testing.T) {
+	t.Helper()
+
+	workDir := t.TempDir()
+	markerPath := filepath.Join(workDir, execenv.TaskContextMarkerRelPath)
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
+		t.Fatalf("create marker dir: %v", err)
+	}
+	data := []byte(`{"managed_by":"` + execenv.TaskContextMarkerManagedBy + `"}`)
+	if err := os.WriteFile(markerPath, data, 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	nested := filepath.Join(workDir, "repo", "pkg")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("create nested cwd: %v", err)
+	}
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	if err := os.Chdir(nested); err != nil {
+		t.Fatalf("chdir nested: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(prev); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+}
+
+// TestNewAPIClient_WorkdirParentEscapeFailsClosed reproduces the confirmed
+// impersonation escape: a sandbox fault strips every MULTICA_* env var from
+// an agent subprocess, which then runs `multica` from the *parent* directory
+// of its workdir. The per-workdir marker sits below cwd, so the upward walk
+// used to find no daemon signal and silently fell back to the user's config
+// PAT, posting agent writes as the workspace owner (author_type=member).
+//
+// The daemon now writes a persistent marker at the workspaces root
+// (execenv.EnsureWorkspacesRootMarker), so every cwd inside the
+// daemon-owned tree — task dir, workspace dir, sibling task dirs, the root
+// itself — carries the fail-closed signal. This test builds that tree shape
+// and asserts the CLI refuses the config-PAT fallback from the escaped cwd.
+func TestNewAPIClient_WorkdirParentEscapeFailsClosed(t *testing.T) {
+	// Seed a user config with a mul_ PAT that must never be picked up.
+	t.Setenv("HOME", t.TempDir())
+	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_owner_pat"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	// Daemon-owned tree: {root}/.multica marker + {root}/{ws}/{task}/workdir
+	// with its own per-workdir marker, exactly as the daemon lays it out.
+	root := t.TempDir()
+	if err := execenv.EnsureWorkspacesRootMarker(root); err != nil {
+		t.Fatalf("write root marker: %v", err)
+	}
+	taskDir := filepath.Join(root, "ws-1", "task-1")
+	workDir := filepath.Join(taskDir, "workdir")
+	workdirMarker := filepath.Join(workDir, execenv.TaskContextMarkerRelPath)
+	if err := os.MkdirAll(filepath.Dir(workdirMarker), 0o755); err != nil {
+		t.Fatalf("create workdir marker dir: %v", err)
+	}
+	data := []byte(`{"managed_by":"` + execenv.TaskContextMarkerManagedBy + `"}`)
+	if err := os.WriteFile(workdirMarker, data, 0o644); err != nil {
+		t.Fatalf("write workdir marker: %v", err)
+	}
+
+	// The escape: cwd is the workdir's parent, all daemon env vars gone.
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	if err := os.Chdir(taskDir); err != nil {
+		t.Fatalf("chdir task dir: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(prev); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_DAEMON_PORT", "")
+	t.Setenv("MULTICA_TOKEN", "")
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+
+	if got := resolveToken(testCmd()); got != "" {
+		t.Fatalf("resolveToken() = %q, want empty (config PAT must not leak into an escaped daemon subprocess)", got)
+	}
+	if _, err := newAPIClient(testCmd()); err == nil {
+		t.Fatal("newAPIClient(): expected fail-closed error from workdir-parent escape, got nil")
+	} else if !strings.Contains(err.Error(), "mat_") {
+		t.Fatalf("error should demand a task-scoped mat_ token; got %q", err.Error())
+	}
+}
+
+// TestNewAPIClient_LeftoverMarkerActionableError verifies that a stale
+// daemon-task marker with no daemon env (the local_directory crash-leftover
+// case) fails closed with an actionable message that names the marker file,
+// rather than an opaque "requires mat_ token" error.
+func TestNewAPIClient_LeftoverMarkerActionableError(t *testing.T) {
+	chdirWithDaemonTaskMarker(t)
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_DAEMON_PORT", "")
+	t.Setenv("MULTICA_TOKEN", "")
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+
+	if _, err := newAPIClient(testCmd()); err == nil {
+		t.Fatal("newAPIClient(): expected error for leftover daemon-task marker, got nil")
+	} else if !strings.Contains(err.Error(), execenv.TaskContextMarkerRelPath) {
+		t.Fatalf("error should name the marker path; got %q", err.Error())
+	} else if !strings.Contains(err.Error(), "leftover") {
+		t.Fatalf("error should hint it may be a leftover; got %q", err.Error())
+	}
 }
 
 // TestResolveWorkspaceID_AgentContextSkipsConfig is a regression test for
@@ -53,6 +170,7 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 	t.Run("outside agent context falls back to config", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "")
 		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_WORKSPACE_ID", "")
 
 		got := resolveWorkspaceID(testCmd())
@@ -64,6 +182,7 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 	t.Run("agent context with explicit env uses env", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "agent-123")
 		t.Setenv("MULTICA_TASK_ID", "task-456")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_WORKSPACE_ID", "env-ws")
 
 		got := resolveWorkspaceID(testCmd())
@@ -75,6 +194,7 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 	t.Run("agent context without env returns empty, never config", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "agent-123")
 		t.Setenv("MULTICA_TASK_ID", "task-456")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_WORKSPACE_ID", "")
 
 		got := resolveWorkspaceID(testCmd())
@@ -86,6 +206,30 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 	t.Run("task marker alone also counts as agent context", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "")
 		t.Setenv("MULTICA_TASK_ID", "task-456")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
+		t.Setenv("MULTICA_WORKSPACE_ID", "")
+
+		if got := resolveWorkspaceID(testCmd()); got != "" {
+			t.Fatalf("resolveWorkspaceID() = %q, want empty", got)
+		}
+	})
+
+	t.Run("daemon port marker also skips config", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "27182")
+		t.Setenv("MULTICA_WORKSPACE_ID", "")
+
+		if got := resolveWorkspaceID(testCmd()); got != "" {
+			t.Fatalf("resolveWorkspaceID() = %q, want empty", got)
+		}
+	})
+
+	t.Run("workdir marker also skips config when env is stripped", func(t *testing.T) {
+		chdirWithDaemonTaskMarker(t)
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_WORKSPACE_ID", "")
 
 		if got := resolveWorkspaceID(testCmd()); got != "" {
@@ -96,6 +240,7 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 	t.Run("requireWorkspaceID surfaces agent-context error", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "agent-123")
 		t.Setenv("MULTICA_TASK_ID", "task-456")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_WORKSPACE_ID", "")
 
 		_, err := requireWorkspaceID(testCmd())
@@ -118,6 +263,19 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 	t.Run("outside agent context falls back to config", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "")
 		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
+		t.Setenv("MULTICA_TOKEN", "")
+
+		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+			t.Fatalf("resolveToken() = %q, want profile token", got)
+		}
+	})
+
+	t.Run("explicit server URL alone still allows normal config token fallback", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
+		t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 		t.Setenv("MULTICA_TOKEN", "")
 		t.Setenv("MULTICA_DAEMON_PORT", "")
 
@@ -129,6 +287,7 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 	t.Run("agent context without env never reads config", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "agent-123")
 		t.Setenv("MULTICA_TASK_ID", "task-456")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_TOKEN", "")
 
 		if got := resolveToken(testCmd()); got != "" {
@@ -136,9 +295,73 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("daemon port marker without env never reads config", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "27182")
+		t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+		t.Setenv("MULTICA_TOKEN", "")
+
+		if got := resolveToken(testCmd()); got != "" {
+			t.Fatalf("resolveToken() = %q, want empty in daemon-managed context without MULTICA_TOKEN", got)
+		}
+	})
+
+	t.Run("workdir marker without env never reads config", func(t *testing.T) {
+		chdirWithDaemonTaskMarker(t)
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
+		t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+		t.Setenv("MULTICA_TOKEN", "")
+
+		if got := resolveToken(testCmd()); got != "" {
+			t.Fatalf("resolveToken() = %q, want empty in daemon-managed context without MULTICA_TOKEN", got)
+		}
+	})
+
+	// A non-regular file at the marker path (here a directory) makes
+	// os.ReadFile fail with a non-IsNotExist error. That must NOT be read as a
+	// daemon-task signal: a normal user whose ancestor tree happens to contain
+	// such a path (or any unreadable one) must still reach their config token,
+	// rather than be locked out by a fail-closed guard on an unrelated error.
+	t.Run("unreadable marker path does not fail closed", func(t *testing.T) {
+		workDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(workDir, execenv.TaskContextMarkerRelPath), 0o755); err != nil {
+			t.Fatalf("create marker-as-dir: %v", err)
+		}
+		nested := filepath.Join(workDir, "repo")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatalf("create nested cwd: %v", err)
+		}
+		prev, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("get cwd: %v", err)
+		}
+		if err := os.Chdir(nested); err != nil {
+			t.Fatalf("chdir nested: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := os.Chdir(prev); err != nil {
+				t.Fatalf("restore cwd: %v", err)
+			}
+		})
+
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
+		t.Setenv("MULTICA_SERVER_URL", "")
+		t.Setenv("MULTICA_TOKEN", "")
+
+		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+			t.Fatalf("resolveToken() = %q, want profile token (unreadable marker path must not fail closed)", got)
+		}
+	})
+
 	t.Run("agent context uses explicit task token env", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "agent-123")
 		t.Setenv("MULTICA_TASK_ID", "task-456")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
 		t.Setenv("MULTICA_TOKEN", "mat_task_token")
 
 		if got := resolveToken(testCmd()); got != "mat_task_token" {
@@ -241,6 +464,50 @@ func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
 			t.Fatalf("client token = %q, want task token", client.Token)
 		}
 	})
+}
+
+func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_DAEMON_PORT", "27182")
+	t.Setenv("MULTICA_TOKEN", "")
+
+	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_profile_token", WorkspaceID: "config-file-ws"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	_, err := newAPIClient(testCmd())
+	if err == nil {
+		t.Fatal("newAPIClient(): expected error without task token")
+	}
+	if !strings.Contains(err.Error(), "mat_ token") {
+		t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+	}
+}
+
+func TestNewAPIClient_WorkdirMarkerRequiresTaskToken(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_DAEMON_PORT", "")
+	t.Setenv("MULTICA_TOKEN", "")
+	chdirWithDaemonTaskMarker(t)
+
+	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_profile_token", WorkspaceID: "config-file-ws"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	_, err := newAPIClient(testCmd())
+	if err == nil {
+		t.Fatal("newAPIClient(): expected error without task token")
+	}
+	if !strings.Contains(err.Error(), "mat_ token") {
+		t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+	}
 }
 
 // TestParseCustomEnv covers the --custom-env flag parser used by

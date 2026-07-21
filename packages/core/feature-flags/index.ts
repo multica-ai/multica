@@ -18,6 +18,10 @@ export { FeatureFlagService } from "./service";
 export { StaticProvider } from "./static-provider";
 export { ChainProvider } from "./chain-provider";
 export {
+  COMPOSIO_MCP_APPS_FLAG,
+  RESOURCE_LABELS_FLAG,
+} from "./keys";
+export {
   FeatureFlagsProvider,
   useFeatureFlagService,
   useFlag,

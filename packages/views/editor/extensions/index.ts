@@ -22,7 +22,6 @@
 import type { RefObject } from "react";
 import StarterKit from "@tiptap/starter-kit";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
-import { common, createLowlight } from "lowlight";
 import Placeholder from "@tiptap/extension-placeholder";
 import Link from "@tiptap/extension-link";
 import Typography from "@tiptap/extension-typography";
@@ -36,31 +35,35 @@ import { Markdown } from "@tiptap/markdown";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { shouldAutoLink } from "@multica/ui/markdown";
 import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 import { BaseMentionExtension } from "./mention-extension";
 import { createMentionSuggestion, type MentionItem } from "./mention-suggestion";
+import {
+  createIssueIdentifierAutolinkExtension,
+  type IssueIdentifierResolver,
+} from "./issue-identifier-autolink";
 import { SlashCommandExtension } from "./slash-command-extension";
 import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
 import { CodeBlockView } from "./code-block-view";
 import { PatchedListItem, PatchedTaskItem } from "./list-item";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createMarkdownCopyExtension } from "./markdown-copy";
-import { createSubmitExtension } from "./submit-shortcut";
 import { createBlurShortcutExtension } from "./blur-shortcut";
+import { createSubmitShortcutExtension } from "./submit-shortcut";
 import { createFileUploadExtension } from "./file-upload";
 import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
 import { BlockMathExtension, InlineMathExtension } from "./math";
 import { HighlightExtension } from "./highlight";
-import { AutolinkEmailRepairExtension } from "./autolink-email-repair";
-
-const lowlight = createLowlight(common);
+import { codeLowlight } from "../syntax-highlight";
 
 const LinkExtension = Link.extend({ inclusive: false }).configure({
   openOnClick: false,
   autolink: true,
   linkOnPaste: true,
   defaultProtocol: "https",
+  shouldAutoLink,
 });
 
 export const ImageExtension = Image.extend({
@@ -117,14 +120,19 @@ export const ImageExtension = Image.extend({
 });
 
 export interface EditorExtensionsOptions {
-  placeholder?: string;
+  /**
+   * Placeholder text, or a getter for it. Prefer a getter when the value can
+   * change over the editor's lifetime: Tiptap's Placeholder snapshots a string
+   * option at mount, but re-invokes a function every time it recomputes its
+   * decorations — so a getter (paired with an empty-transaction nudge) lets the
+   * placeholder update live without remounting the editor. See ContentEditor.
+   */
+  placeholder?: string | (() => string);
   queryClient?: import("@tanstack/react-query").QueryClient;
   onSubmitRef?: RefObject<(() => void) | undefined>;
   onUploadFileRef?: RefObject<
     ((file: File) => Promise<UploadResult | null>) | undefined
   >;
-  /** When true, bare Enter also submits (chat-style). Default false. */
-  submitOnEnter?: boolean;
   /**
    * When true, the `@` suggestion picker is not attached. The mention node
    * type is still registered in the schema so any mention pasted in from
@@ -145,6 +153,14 @@ export interface EditorExtensionsOptions {
    * - "command" — the fixed built-in command menu (issue comments), e.g. /note.
    */
   slashCommandMode?: "skill" | "command";
+  /**
+   * Resolver for Linear-style bare issue-identifier autolinking. When present
+   * (and mentions are enabled), typing a boundary after `MUL-123` or pasting
+   * text with identifiers resolves them and swaps in real issue mentions. A
+   * ref so the editor is created once while the resolver reads live workspace
+   * context; the setup layer owns React Query + workspace access.
+   */
+  resolveIssueIdentifierRef?: RefObject<IssueIdentifierResolver | undefined>;
 }
 
 export function createEditorExtensions(
@@ -157,6 +173,13 @@ export function createEditorExtensions(
       heading: { levels: [1, 2, 3] },
       link: false,
       codeBlock: false,
+      // Underline has no Markdown representation. Tiptap's extension serializes
+      // the mark as `++text++`, which is not CommonMark or GFM, so ReadonlyContent
+      // (react-markdown + remark-gfm) renders the delimiters literally. Disabling
+      // the extension drops the mark at parse time instead: pasted `<u>` /
+      // `text-decoration: underline` keep their text, and Cmd+U becomes a no-op
+      // rather than a way to produce content the display layer cannot render.
+      underline: false,
       // Disable StarterKit's stock ListItem — its Enter keybind binds only
       // `splitListItem`, which leaves the user stuck inside an empty top-level
       // list item (see list-item.ts). PatchedListItem below restores the
@@ -175,12 +198,11 @@ export function createEditorExtensions(
       addNodeView() {
         return ReactNodeViewRenderer(CodeBlockView);
       },
-    }).configure({ lowlight }),
+    }).configure({ lowlight: codeLowlight }),
     // ⚠️ Link MUST appear before markdownPaste in this array.
     // linkOnPaste relies on Link's handlePaste plugin firing first;
     // markdownPaste's handlePaste is a catch-all that returns true.
     LinkExtension,
-    AutolinkEmailRepairExtension,
     ImageExtension,
     // renderWrapper wraps the table in `<div class="tableWrapper">` (the same
     // wrapper the resizable NodeView emits), which prose.css styles with
@@ -208,6 +230,16 @@ export function createEditorExtensions(
           ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems }) }
           : {}),
     }),
+    // Linear-style bare identifier → issue mention. Attached only when a
+    // resolver is provided AND mention creation is enabled (an editor that
+    // suppresses new mentions should not synthesise them from identifiers).
+    ...(!options.disableMentions && options.resolveIssueIdentifierRef
+      ? [
+          createIssueIdentifierAutolinkExtension({
+            resolveRef: options.resolveIssueIdentifierRef,
+          }),
+        ]
+      : []),
     SlashCommandExtension.configure({
       HTMLAttributes: { class: "slash-command" },
       suggestion: !options.enableSlashCommands
@@ -221,15 +253,12 @@ export function createEditorExtensions(
     Typography,
     Placeholder.configure({ placeholder: placeholderText }),
     createMarkdownPasteExtension(),
-    createSubmitExtension(
-      () => {
-        const fn = options.onSubmitRef?.current;
-        if (!fn) return false; // no submit wired — let default Enter insert newline
-        fn();
-        return true;
-      },
-      { submitOnEnter: options.submitOnEnter ?? false },
-    ),
+    createSubmitShortcutExtension(() => {
+      const fn = options.onSubmitRef?.current;
+      if (!fn) return false;
+      fn();
+      return true;
+    }),
     createBlurShortcutExtension(),
     createFileUploadExtension(options.onUploadFileRef!),
   ];

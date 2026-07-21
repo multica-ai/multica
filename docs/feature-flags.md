@@ -59,58 +59,6 @@ if err != nil {
 
 The provider chain is `EnvProvider → YAML StaticProvider`. The server can boot with zero flag config — every `IsEnabled` call falls back to the caller's default until someone authors a rule.
 
-### Daemon-bound flags
-
-Daemon-bound flags are evaluated by the server and delivered to local daemons
-over the daemon heartbeat ack. This is for process-level daemon behavior where
-operators need one rollout and kill-switch path across cloud runtimes, Desktop
-embedded daemons, and user-run CLI daemons.
-
-Only flags listed in `server/internal/featureflagdispatch/registry.go` are sent
-to daemons. The registry is intentionally short:
-
-```go
-var DaemonBoundFlags = []string{
-    "runtime_brief_slim",
-}
-```
-
-On each HTTP or WebSocket heartbeat, the server evaluates every registered key
-as a daemon/process-level decision. The snapshot EvalContext exposes
-`daemon_id` only; workspace/runtime/task/user scoped rollout is intentionally
-not part of this channel because the daemon stores one process-global snapshot.
-The heartbeat ack carries a full snapshot:
-
-```json
-{
-  "feature_flags": {
-    "version": 1,
-    "flags": {
-      "runtime_brief_slim": "on"
-    }
-  }
-}
-```
-
-The daemon installs that snapshot into its process-level feature flag service.
-The daemon provider order is:
-
-1. `EnvProvider` (`FF_*`) for local emergency overrides.
-2. `ServerSnapshotProvider` from the latest heartbeat ack.
-3. local YAML `StaticProvider` as a fallback for old servers or self-hosted rescue.
-4. the toggle point's caller-supplied default.
-
-That means `FF_RUNTIME_BRIEF_SLIM=false` always suppresses a server snapshot
-that enables `runtime_brief_slim`. New daemons talking to old servers receive no
-`feature_flags` field and automatically fall back to local env/YAML behavior.
-Old daemons talking to new servers ignore the unknown JSON field.
-
-To add another daemon-bound process-level flag, add its key to the registry and
-use the existing daemon feature flag service at the toggle point. Do not add
-workspace percent rollout, task payload fields, or task-scoped readers for
-daemon-bound flags unless a separate design explicitly introduces scoped daemon
-flag evaluation.
-
 ### YAML schema
 
 ```yaml
@@ -230,6 +178,39 @@ function Checkout() {
 ```
 
 Outside a `FeatureFlagsProvider` (Storybook, unit tests, error pages) `useFlag` / `useVariant` return the supplied default. You never have to mount the provider just to render a component in isolation.
+
+### v0.3.44 compatibility rollout
+
+The following release flag defaults to `false` so the schema can ship before
+the new persisted state is visible to older server pods or a rollback:
+
+```yaml
+# Enable only after every v0.3.43 server pod has drained and rollback reads
+# have been validated against the migrated database.
+settings_resource_labels:
+  default: true
+```
+
+Keep it off for v0.3.44: it is a schema-only deployment for resource labels. A
+later rollout may enable it only after it ships and verifies a rollback
+normalizer for resource-label rows. Do not rely on turning the flag off to make
+a database safe for an older binary; it prevents new writes but cannot remove
+states that already exist. Until that normalizer exists, rollbacks must target
+a version that understands these states or happen before the flag is enabled.
+
+Agent Builder has completed this rollout and is now always available. Current
+clients always render the AI creation entry, and the backend no longer gates the
+session endpoint. `/api/config` still reports `agents_agent_builder: true` so
+installed desktop clients that still gate the entry on this config decision
+also receive the permanently enabled behavior; this is a client-compatibility
+decision, not an operator-controlled flag.
+
+Agent skill toggles have completed this rollout and are now always available.
+Current clients render the switch without a release flag, and the backend no
+longer gates the write endpoint. `/api/config` still reports
+`agents_skill_toggles: true` so installed v0.4.0 desktop clients also expose the
+switch; this is a client-compatibility decision, not an operator-controlled
+flag.
 
 ### Security note: never rely on the frontend alone
 

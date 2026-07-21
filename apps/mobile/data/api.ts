@@ -211,7 +211,7 @@ class ApiClient {
     // Backend middleware (server/internal/middleware/workspace.go) resolves
     // slug → ws UUID and gates membership. Mirrors packages/core/api/client.ts.
     const slug = getCurrentSlug();
-    if (slug) {
+    if (slug && !headers["X-Workspace-Slug"]) {
       headers["X-Workspace-Slug"] = slug;
     }
 
@@ -411,12 +411,19 @@ class ApiClient {
 
   async updateNotificationPreferences(
     preferences: NotificationPreferences,
+    workspaceSlug?: string,
   ): Promise<NotificationPreferenceResponse> {
     return this.fetchValidatedWith(
       "/api/notification-preferences",
       NotificationPreferenceResponseSchema,
       EMPTY_NOTIFICATION_PREFERENCES,
-      { method: "PUT", body: JSON.stringify({ preferences }) },
+      {
+        method: "PATCH",
+        headers: workspaceSlug
+          ? { "X-Workspace-Slug": workspaceSlug }
+          : undefined,
+        body: JSON.stringify({ preferences }),
+      },
       { endpoint: "updateNotificationPreferences" },
     );
   }

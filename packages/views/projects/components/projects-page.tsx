@@ -27,6 +27,7 @@ import {
   type ProjectColumnKey,
   type ProjectListFilters,
   type ProjectSortField,
+  type ProjectViewMode,
 } from "@multica/core/projects";
 import {
   pinListOptions,
@@ -58,7 +59,9 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -94,7 +97,11 @@ import type {
   ProjectStatus,
   UpdateProjectRequest,
 } from "@multica/core/types";
-import { PageHeader } from "../../layout/page-header";
+import {
+  CollectionPageHeader,
+  CollectionPageHeaderAction,
+  CollectionPageState,
+} from "../../layout/collection-page";
 import { ProjectIcon } from "./project-icon";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -408,7 +415,7 @@ function ProjectTableRow({
                 className="flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 transition-colors hover:bg-accent/60"
               >
                 {project.lead_type && project.lead_id ? (
-                  <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={18} enableHoverCard />
+                  <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard />
                 ) : (
                   <span className="inline-flex h-[18px] w-[18px] rounded-full border border-dashed border-muted-foreground/30" />
                 )}
@@ -623,7 +630,7 @@ function ProjectCard({
           renderTrigger={(leadName) => (
             <button type="button" className="-mx-1.5 flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors hover:bg-accent/60">
               {project.lead_type && project.lead_id ? (
-                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={20} enableHoverCard />
+                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard />
               ) : (
                 <span className="inline-flex h-5 w-5 rounded-full border border-dashed border-muted-foreground/30" />
               )}
@@ -913,36 +920,29 @@ export function ProjectsPage() {
   return (
     // relative: positioning anchor for the page-centered batch toolbar.
     <div className="relative flex flex-1 min-h-0 flex-col">
-      <PageHeader className="justify-between px-5">
-        <div className="flex items-center gap-2">
-          <FolderKanban className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
-          {projects.length > 0 && (
-            <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-              {projects.length}
-            </span>
-          )}
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-          aria-label={t(($) => $.page.new_project)}
-          onClick={openCreateProject}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">{t(($) => $.page.new_project)}</span>
-        </Button>
-      </PageHeader>
+      <CollectionPageHeader
+        icon={FolderKanban}
+        title={t(($) => $.page.title)}
+        count={projects.length}
+        actions={
+          <CollectionPageHeaderAction
+            icon={Plus}
+            label={t(($) => $.page.new_project)}
+            onClick={openCreateProject}
+          />
+        }
+      />
 
       {showEmpty ? (
-        <div className="flex flex-1 flex-col items-center justify-center py-24 text-muted-foreground">
-          <FolderKanban className="mb-3 h-10 w-10 opacity-30" />
-          <p className="text-sm">{t(($) => $.page.empty)}</p>
-          <Button size="sm" variant="outline" className="mt-3" onClick={openCreateProject}>
-            {t(($) => $.page.create_first)}
-          </Button>
-        </div>
+        <CollectionPageState
+          icon={FolderKanban}
+          title={t(($) => $.page.empty)}
+          actions={
+            <Button size="sm" variant="outline" onClick={openCreateProject}>
+              {t(($) => $.page.create_first)}
+            </Button>
+          }
+        />
       ) : (
         <>
           {/* Toolbar */}
@@ -953,6 +953,7 @@ export function ProjectsPage() {
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
+                  aria-label={t(($) => $.page.search_placeholder)}
                   placeholder={t(($) => $.page.search_placeholder)}
                   className="h-8 w-56 pl-8 text-sm"
                 />
@@ -1070,7 +1071,7 @@ export function ProjectsPage() {
                           className={FILTER_ITEM_CLASS}
                         >
                           <HoverCheck checked={filters.leads.includes(value)} />
-                          <ActorAvatar actorType={type} actorId={id} size={16} />
+                          <ActorAvatar actorType={type} actorId={id} size="sm" />
                           <span className="min-w-0 truncate">{getActorName(type, id)}</span>
                           {countBadge(count)}
                         </DropdownMenuCheckboxItem>
@@ -1152,32 +1153,55 @@ export function ProjectsPage() {
                   </PopoverContent>
                 </Popover>
 
-              {/* View toggle — a single button that flips table ⇄ cards.
-                  Pure presentation; coupled to nothing else. */}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
-                      onClick={() => setViewMode(isCompact ? "comfortable" : "compact")}
-                    >
-                      {isCompact ? (
-                        <Rows3 className="size-3.5" />
-                      ) : (
-                        <LayoutGrid className="size-3.5" />
-                      )}
-                      <span className="hidden md:inline">
-                        {isCompact ? t(($) => $.page.view_table) : t(($) => $.page.view_cards)}
-                      </span>
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom">
-                  {isCompact ? t(($) => $.page.view_cards) : t(($) => $.page.view_table)}
-                </TooltipContent>
-              </Tooltip>
+              {/* View selector — a dropdown menu to pick the list view,
+                  aligned with the issue list's view menu. The trigger shows
+                  the active view; the menu carries every mode so new views
+                  can be added as menu items. Pure presentation. */}
+              <DropdownMenu>
+                <Tooltip>
+                  <DropdownMenuTrigger
+                    render={
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
+                          >
+                            {isCompact ? (
+                              <Rows3 className="size-3.5" />
+                            ) : (
+                              <LayoutGrid className="size-3.5" />
+                            )}
+                            <span className="hidden md:inline">
+                              {isCompact ? t(($) => $.page.view_table) : t(($) => $.page.view_cards)}
+                            </span>
+                          </Button>
+                        }
+                      />
+                    }
+                  />
+                  <TooltipContent side="bottom">{t(($) => $.toolbar.view)}</TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="end" className="w-auto">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>{t(($) => $.toolbar.view)}</DropdownMenuLabel>
+                  </DropdownMenuGroup>
+                  <DropdownMenuRadioGroup
+                    value={viewMode}
+                    onValueChange={(v) => setViewMode(v as ProjectViewMode)}
+                  >
+                    <DropdownMenuRadioItem value="compact">
+                      <Rows3 />
+                      {t(($) => $.page.view_table)}
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="comfortable">
+                      <LayoutGrid />
+                      {t(($) => $.page.view_cards)}
+                    </DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
 

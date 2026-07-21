@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -28,6 +29,33 @@ func NextOccurrenceAfterUTC(cronExpr, timezone string, after time.Time) (time.Ti
 		return time.Time{}, err
 	}
 	return sched.Next(after.In(loc)).UTC(), nil
+}
+
+// NextOccurrencesAfterUTC parses cronExpr in `timezone` once and returns the
+// next `count` activations strictly after `after`, ascending, in UTC. It stops
+// early — returning a shorter slice — when the expression has no further
+// occurrence within robfig's five-year search horizon (e.g. "0 0 30 2 *"), which
+// robfig reports as the zero time.
+//
+// Unlike calling NextOccurrenceAfterUTC in a loop, the expression is parsed and
+// the location loaded exactly once. The schedule editor's preview endpoint asks
+// for this on every debounced keystroke, so the difference is not academic.
+func NextOccurrencesAfterUTC(cronExpr, timezone string, after time.Time, count int) ([]time.Time, error) {
+	sched, loc, err := parseCronSchedule(cronExpr, timezone)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]time.Time, 0, count)
+	cursor := after.In(loc)
+	for i := 0; i < count; i++ {
+		next := sched.Next(cursor)
+		if next.IsZero() {
+			break
+		}
+		out = append(out, next.UTC())
+		cursor = next
+	}
+	return out, nil
 }
 
 // NextOccurrencesUTC parses cronExpr in `timezone` and returns every
@@ -60,15 +88,22 @@ func NextOccurrencesUTC(cronExpr, timezone string, after, until time.Time) ([]ti
 	return out, nil
 }
 
-// ComputeNextRun is the legacy wrapper used by the trigger create/update
-// handlers and the failure monitor. It evaluates the cron at the app's
-// local now() — kept for the display-only autopilot_trigger.next_run_at
-// column so we do not have to thread DB time through every UI write
-// path in this same change. Scheduling decisions MUST go through
-// NextOccurrencesUTC against DB time instead.
+// ComputeNextRun evaluates the cron at the app's local now() and backs
+// the display-only autopilot_trigger.next_run_at column for the trigger
+// create/update handlers and the failure monitor. Using the local clock
+// for this display value is deliberate: app/DB clock skew under NTP is far
+// below the column's minute-level granularity, so threading DB time
+// through these UI write paths would buy no user-visible accuracy.
 //
-// MUL-3551: this function is on its way out; new callers should use
-// NextOccurrenceAfterUTC with a db_now() input instead.
+// The scheduler's post-dispatch advance keeps next_run_at on the same
+// local clock but calls NextOccurrenceAfterUTC anchored at
+// max(now, plan_time) rather than this helper, so a lagging app clock can
+// never re-point the column at the slot that just fired (see
+// scheduler.advancedNextRun / autopilotHandler, MUL-3749).
+//
+// Scheduling decisions are a separate concern and MUST go through
+// NextOccurrencesUTC / NextOccurrenceAfterUTC against DB time instead:
+// dispatch correctness across clock-skewed app instances depends on it.
 func ComputeNextRun(cronExpr, timezone string) (time.Time, error) {
 	return NextOccurrenceAfterUTC(cronExpr, timezone, time.Now())
 }
@@ -83,6 +118,14 @@ func ValidateTimezone(timezone string) error {
 }
 
 func parseCronSchedule(cronExpr, timezone string) (cron.Schedule, *time.Location, error) {
+	// robfig v3.0.1 reads an optional "TZ="/"CRON_TZ=" prefix up to the first
+	// space and panics (parser.go:99, slice[:-1]) when that space is missing.
+	// The preview endpoint feeds raw user text here, so reject the shape the
+	// parser cannot survive instead of turning a typo into a 500.
+	if (strings.HasPrefix(cronExpr, "TZ=") || strings.HasPrefix(cronExpr, "CRON_TZ=")) &&
+		!strings.Contains(cronExpr, " ") {
+		return nil, nil, fmt.Errorf("parse cron: missing schedule after timezone prefix %q", cronExpr)
+	}
 	sched, err := cronParser.Parse(cronExpr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse cron: %w", err)
