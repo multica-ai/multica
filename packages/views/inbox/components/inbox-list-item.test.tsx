@@ -4,7 +4,24 @@ import type { InboxItem } from "@multica/core/types";
 import { InboxListItem } from "./inbox-list-item";
 
 vi.mock("../../issues/components", () => ({ StatusIcon: () => null }));
-vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
+vi.mock("../../common/actor-avatar", () => ({
+  ActorAvatar: ({
+    actorType,
+    actorId,
+    showStatusDot,
+  }: {
+    actorType: string;
+    actorId: string;
+    showStatusDot?: boolean;
+  }) => (
+    <span
+      data-testid="actor-avatar"
+      data-actor-type={actorType}
+      data-actor-id={actorId}
+      data-show-status-dot={showStatusDot === true ? "true" : "false"}
+    />
+  ),
+}));
 vi.mock("./inbox-detail-label", () => ({ InboxDetailLabel: () => null }));
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "label" }) }));
 
@@ -70,5 +87,26 @@ describe("InboxListItem unread affordance", () => {
 
     expect(unreadDot(container)).toBeNull();
     expect(title(container)?.className).not.toContain("font-medium");
+  });
+});
+
+describe("InboxListItem agent presence", () => {
+  it("shows the agent status indicator on the row avatar", () => {
+    const { getByTestId } = renderRow({ item: item(), view: "inbox" });
+
+    expect(getByTestId("actor-avatar").getAttribute("data-show-status-dot")).toBe(
+      "true",
+    );
+  });
+
+  it("leaves member avatars without an agent status indicator", () => {
+    const { getByTestId } = renderRow({
+      item: item({ actor_type: "member", actor_id: "member-2" }),
+      view: "inbox",
+    });
+
+    expect(getByTestId("actor-avatar").getAttribute("data-show-status-dot")).toBe(
+      "false",
+    );
   });
 });

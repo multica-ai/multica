@@ -53,6 +53,7 @@ export function InboxListItem({
   const actionLabel = isArchivedView
     ? t(($) => $.list.unarchive_tooltip)
     : t(($) => $.list.archive_tooltip);
+  const actorType = item.actor_type ?? item.recipient_type;
 
   return (
     <button
@@ -63,10 +64,11 @@ export function InboxListItem({
       }`}
     >
       <ActorAvatar
-        actorType={item.actor_type ?? item.recipient_type}
+        actorType={actorType}
         actorId={item.actor_id ?? item.recipient_id}
         size="lg"
         enableHoverCard
+        showStatusDot={actorType === "agent"}
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
