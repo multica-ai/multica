@@ -30,7 +30,7 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	output, tools, _ := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
 
 	if output != "Hello world" {
 		t.Fatalf("expected output 'Hello world', got %q", output)
@@ -69,7 +69,7 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 		}),
 	}
 
-	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	output, tools, _ := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
 
 	if output != "" {
 		t.Fatalf("tool_use should not add to output, got %q", output)
@@ -110,7 +110,7 @@ func TestClaudeHandleUserToolResult(t *testing.T) {
 		}),
 	}
 
-	if b.handleUser(msg, ch) {
+	if launched, _ := b.handleUser(msg, ch); launched {
 		t.Fatal("did not expect async launch in ordinary tool result")
 	}
 
@@ -235,7 +235,7 @@ func TestClaudeHandleUserDetectsAsyncLaunchedToolResult(t *testing.T) {
 		}),
 	}
 
-	if !b.handleUser(msg, ch) {
+	if launched, _ := b.handleUser(msg, ch); !launched {
 		t.Fatal("expected async launch to be detected")
 	}
 }
@@ -262,7 +262,7 @@ func TestClaudeHandleUserIgnoresAsyncLaunchedTextOutput(t *testing.T) {
 		}),
 	}
 
-	if b.handleUser(msg, ch) {
+	if launched, _ := b.handleUser(msg, ch); launched {
 		t.Fatal("did not expect async launch to be detected in ordinary text output")
 	}
 }
@@ -279,7 +279,7 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	}
 
 	// Should not panic
-	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	output, tools, _ := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
 
 	if output != "" {
 		t.Fatalf("expected empty output for invalid JSON, got %q", output)

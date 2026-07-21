@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"log/slog"
 	"testing"
 	"time"
 )
@@ -140,22 +141,167 @@ func TestStreamEventCadence_BlankTypeIsLabelled(t *testing.T) {
 	}
 }
 
-func TestClaudeEventIsProgress(t *testing.T) {
+// The progress signal now comes from what the handlers actually delivered, not
+// from the raw event type. These cases are the ones where the two disagree —
+// each would otherwise reset the progress gap without any work having happened,
+// biasing max_progress_gap downward and, with it, any threshold derived from it
+// (MUL-5042).
+
+func TestHandleAssistant_EmptyTurnIsNotProgress(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]bool{
-		"assistant": true,
-		"user":      true,
-		"result":    true,
-		// A backend blocked on a dead provider stream keeps emitting these.
-		"system":          false,
-		"log":             false,
-		"control_request": false,
-		"":                false,
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+
+	// An assistant event whose content carries no renderable block: the daemon
+	// receives nothing, so the run did not advance.
+	msg := claudeSDKMessage{
+		Type: "assistant",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role:    "assistant",
+			Content: []claudeContentBlock{},
+		}),
 	}
-	for eventType, want := range cases {
-		if got := claudeEventIsProgress(eventType); got != want {
-			t.Errorf("claudeEventIsProgress(%q) = %v, want %v", eventType, got, want)
-		}
+
+	_, _, progressed := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	if progressed {
+		t.Fatal("empty assistant turn must not count as progress")
+	}
+	if len(ch) != 0 {
+		t.Fatalf("expected no messages emitted, got %d", len(ch))
+	}
+}
+
+func TestHandleAssistant_BlankTextIsNotProgress(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+
+	// Text and thinking blocks that are present but empty are skipped by the
+	// handler, so they emit nothing either.
+	msg := claudeSDKMessage{
+		Type: "assistant",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role: "assistant",
+			Content: []claudeContentBlock{
+				{Type: "text", Text: ""},
+				{Type: "thinking", Text: ""},
+			},
+		}),
+	}
+
+	_, _, progressed := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	if progressed {
+		t.Fatal("blank text/thinking blocks must not count as progress")
+	}
+}
+
+func TestHandleAssistant_DeliveredContentIsProgress(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+
+	msg := claudeSDKMessage{
+		Type: "assistant",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role:    "assistant",
+			Content: []claudeContentBlock{{Type: "text", Text: "working on it"}},
+		}),
+	}
+
+	_, _, progressed := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	if !progressed {
+		t.Fatal("delivered assistant text must count as progress")
+	}
+}
+
+func TestHandleAssistant_DroppedSendIsNotProgress(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	// Unbuffered with no reader: trySend drops, so nothing reaches the daemon
+	// and the watchdog sees no activity. Counting this as progress would let a
+	// backpressured run look busy to the cadence while the watchdog disagrees.
+	ch := make(chan Message)
+
+	msg := claudeSDKMessage{
+		Type: "assistant",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role:    "assistant",
+			Content: []claudeContentBlock{{Type: "text", Text: "dropped"}},
+		}),
+	}
+
+	_, _, progressed := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	if progressed {
+		t.Fatal("a dropped send never reaches the daemon, so it is not progress")
+	}
+}
+
+func TestHandleUser_WithoutToolResultIsNotProgress(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+
+	// A `user` event carrying only text emits no tool result.
+	msg := claudeSDKMessage{
+		Type: "user",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role:    "user",
+			Content: []claudeContentBlock{{Type: "text", Text: "plain text, no tool result"}},
+		}),
+	}
+
+	_, progressed := b.handleUser(msg, ch)
+	if progressed {
+		t.Fatal("user event without a tool_result must not count as progress")
+	}
+	if len(ch) != 0 {
+		t.Fatalf("expected no messages emitted, got %d", len(ch))
+	}
+}
+
+func TestHandleUser_ToolResultIsProgress(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+
+	msg := claudeSDKMessage{
+		Type: "user",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role: "user",
+			Content: []claudeContentBlock{
+				{Type: "tool_result", ToolUseID: "call-1", Content: mustMarshal(t, "ok")},
+			},
+		}),
+	}
+
+	_, progressed := b.handleUser(msg, ch)
+	if !progressed {
+		t.Fatal("a delivered tool_result must count as progress")
+	}
+}
+
+// TestStreamEventCadence_ResultDoesNotResetProgressGap covers the result-only
+// case: the terminal event produces no progress message, so it must not close
+// the stall that preceded it. Letting it do so would shrink max_progress_gap on
+// exactly the runs the threshold is meant to be derived from.
+func TestStreamEventCadence_ResultDoesNotResetProgressGap(t *testing.T) {
+	t.Parallel()
+
+	start := time.Unix(0, 0)
+	c := newStreamEventCadence(start)
+	c.observe(start.Add(1*time.Second), "assistant", true)
+	// Long stall, then the run finally terminates with a result event.
+	c.observe(start.Add(10*time.Minute), "result", false)
+
+	s := c.snapshot(start.Add(10 * time.Minute))
+
+	if got, want := s.maxProgressGap, 10*time.Minute-time.Second; got != want {
+		t.Errorf("maxProgressGap = %s, want %s (result must not close the stall)", got, want)
 	}
 }
