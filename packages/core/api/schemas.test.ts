@@ -23,6 +23,7 @@ import {
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
   SearchProjectsResponseSchema,
+  SeedOnboardingNoRuntimeResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -145,6 +146,41 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     };
     const parsed = ListIssuesResponseSchema.parse(payload);
     expect(parsed.issues[0]?.properties).toEqual({ "def-2": "opt-a" });
+  });
+});
+
+describe("SeedOnboardingNoRuntimeResponseSchema", () => {
+  const seedResponse = {
+    workspace_id: "ws-1",
+    install_issue: { ...baseIssue, creator_type: "system", creator_id: "00000000-0000-0000-0000-000000000000" },
+    agent_guide_issue: { ...baseIssue, id: "22222222-2222-2222-2222-222222222222", creator_type: "system" },
+  };
+
+  it("accepts the seeded bundle with system-attributed issues", () => {
+    const parsed = SeedOnboardingNoRuntimeResponseSchema.parse(seedResponse);
+    expect(parsed.install_issue.id).toBe(baseIssue.id);
+    expect(parsed.install_issue.creator_type).toBe("system");
+    expect(parsed.agent_guide_issue.id).toBe("22222222-2222-2222-2222-222222222222");
+  });
+
+  it("rejects a bundle whose install issue has no usable id (malformed response)", () => {
+    const malformed = {
+      ...seedResponse,
+      install_issue: { ...seedResponse.install_issue, id: "" },
+    };
+    expect(SeedOnboardingNoRuntimeResponseSchema.safeParse(malformed).success).toBe(false);
+    // parseWithFallback degrades to the caller's fallback (null) — the
+    // client method turns that into a rejection instead of navigating
+    // into an issue that does not exist.
+    const parsed = parseWithFallback(malformed, SeedOnboardingNoRuntimeResponseSchema, null, {
+      endpoint: "POST /api/me/onboarding/no-runtime-seed",
+    });
+    expect(parsed).toBeNull();
+  });
+
+  it("rejects a body missing the agent_guide_issue entirely", () => {
+    const { agent_guide_issue: _omit, ...malformed } = seedResponse;
+    expect(SeedOnboardingNoRuntimeResponseSchema.safeParse(malformed).success).toBe(false);
   });
 });
 

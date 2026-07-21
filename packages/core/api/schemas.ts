@@ -495,6 +495,16 @@ export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   total: 0,
 };
 
+// Response schema for POST /api/me/onboarding/no-runtime-seed. Both issues
+// must carry real ids: the welcome hook navigates to install_issue and
+// treats a schema failure as a failed seed (silent dismiss), so an id-less
+// body must reject rather than fabricate a success.
+export const SeedOnboardingNoRuntimeResponseSchema = z.object({
+  workspace_id: z.string(),
+  install_issue: IssueSchema.extend({ id: z.string().min(1) }),
+  agent_guide_issue: IssueSchema.extend({ id: z.string().min(1) }),
+}).loose();
+
 const SearchIssueResultSchema = IssueSchema.extend({
   match_source: z.string(),
   matched_snippet: z.string().optional(),

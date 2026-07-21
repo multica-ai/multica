@@ -147,7 +147,11 @@ import type {
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
 } from "../types";
-import type { OnboardingCompletionPath } from "../onboarding/types";
+import type {
+  OnboardingCompletionPath,
+  SeedOnboardingNoRuntimeRequest,
+  SeedOnboardingNoRuntimeResult,
+} from "../onboarding/types";
 import type { CreateFeedbackResponse, FeedbackKind } from "../feedback/types";
 import type {
   CloudRuntimeNode,
@@ -256,6 +260,7 @@ import {
   EMPTY_LIST_PROPERTIES_RESPONSE,
   EMPTY_ISSUE_PROPERTIES_RESPONSE,
   ResourceLabelsResponseSchema,
+  SeedOnboardingNoRuntimeResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_RESOURCE_LABELS_RESPONSE,
@@ -532,6 +537,37 @@ export class ApiClient {
     return parseWithFallback(raw, UserSchema, EMPTY_USER, {
       endpoint: "POST /api/me/onboarding/cloud-waitlist",
     });
+  }
+
+  /**
+   * Seed the skip-path onboarding bundle (two starter issues + follow-up
+   * comment) with platform attribution — the server stamps
+   * creator/author "system" so the timeline reads "Multica created this
+   * issue" instead of naming the onboarding member (MUL-5118). The
+   * localized copy travels in the payload; cross-reference chips use the
+   * placeholder tokens from ../onboarding/types.
+   *
+   * Throws on a malformed response body: the welcome hook navigates into
+   * install_issue.id, so a body without usable ids is a failed seed, not
+   * a fallback-able read.
+   */
+  async seedOnboardingNoRuntime(
+    payload: SeedOnboardingNoRuntimeRequest,
+  ): Promise<SeedOnboardingNoRuntimeResult> {
+    const raw = await this.fetch<unknown>("/api/me/onboarding/no-runtime-seed", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    const bundle = parseWithFallback<SeedOnboardingNoRuntimeResult | null>(
+      raw,
+      SeedOnboardingNoRuntimeResponseSchema,
+      null,
+      { endpoint: "POST /api/me/onboarding/no-runtime-seed" },
+    );
+    if (!bundle) {
+      throw new Error();
+    }
+    return bundle;
   }
 
   async patchOnboarding(payload: {

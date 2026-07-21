@@ -2,9 +2,15 @@ export type {
   OnboardingStep,
   OnboardingCompletionPath,
   QuestionnaireAnswers,
+  SeedOnboardingNoRuntimeRequest,
+  SeedOnboardingNoRuntimeResult,
   Source,
   Role,
   UseCase,
+} from "./types";
+export {
+  INSTALL_ISSUE_REF_TOKEN,
+  AGENT_GUIDE_REF_TOKEN,
 } from "./types";
 export {
   saveQuestionnaire,

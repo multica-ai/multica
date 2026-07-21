@@ -7,13 +7,14 @@ const HELPER_AGENT_NAME = "Multica Helper";
  *
  * Companion to install-runtime-issue.ts. The body is a FUNCTION (not a
  * static const) because it needs to embed:
- *   - A mention chip pointing at the install-runtime issue (so the user
- *     can jump to it from this issue) — requires the install-runtime
- *     issue's identifier + uuid, only known after that issue is created.
+ *   - A reference to the install-runtime issue (so the user can jump to
+ *     it from this issue). The welcome hook passes the seed endpoint's
+ *     placeholder token (INSTALL_ISSUE_REF_TOKEN from
+ *     `@multica/core/onboarding`); the server substitutes the real
+ *     `[IDENT](mention://issue/<uuid>)` chip mid-transaction, once the
+ *     install issue's identifier and uuid exist.
  *   - The full Helper markdown block in the user's language (so the
  *     embedded ```md fence matches the surrounding body language).
- *
- * Caller MUST create install-runtime first, then call this with its ids.
  */
 
 /**
@@ -28,12 +29,13 @@ export const CREATE_AGENT_GUIDE_ISSUE_TITLE = {
 
 interface BodyOpts {
   lang: "en" | "zh" | "ko" | "ja";
-  installRuntimeIdentifier: string;
-  installRuntimeId: string;
+  /** Inline markdown for "the install-runtime issue" — either a real
+   *  mention chip or the seed endpoint's placeholder token. */
+  installRuntimeMention: string;
 }
 
 export function getCreateAgentGuideBody(opts: BodyOpts): string {
-  const mention = `[${opts.installRuntimeIdentifier}](mention://issue/${opts.installRuntimeId})`;
+  const mention = opts.installRuntimeMention;
   if (opts.lang === "zh") {
     return zhBody(mention);
   }

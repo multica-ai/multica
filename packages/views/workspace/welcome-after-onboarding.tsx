@@ -5,12 +5,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
-import { useWelcomeStore } from "@multica/core/onboarding";
+import {
+  AGENT_GUIDE_REF_TOKEN,
+  INSTALL_ISSUE_REF_TOKEN,
+  useWelcomeStore,
+  type SeedOnboardingNoRuntimeRequest,
+  type SeedOnboardingNoRuntimeResult,
+} from "@multica/core/onboarding";
 import { paths, useCurrentWorkspace } from "@multica/core/paths";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import type { Agent, CreateIssueRequest, Issue } from "@multica/core/types";
+import type { Agent } from "@multica/core/types";
 import {
   Dialog,
   DialogContent,
@@ -60,21 +66,22 @@ import {
  *     5. Failure surfaces a Retry UI; the modal stays put.
  *
  *   "skip":
- *     1. Dialog opens immediately (closable).
- *     2. Background: `createIssue × 2` with the install-runtime and
- *        create-agent-guide bodies, assigned to the user themselves.
- *     3. Cards render with their static titles + subtitles; per-card
- *        spinner switches to "Open issue" once the issue id arrives.
- *     4. Click a card → `dismiss()` → navigate. Close the modal →
+ *     1. Full-screen loading veil while one `seedOnboardingNoRuntime`
+ *        call provisions the whole bundle server-side (install-runtime
+ *        issue + create-agent-guide issue + follow-up comment), assigned
+ *        to the user but attributed to the platform (MUL-5118).
+ *     2. Celebration Dialog once the bundle exists; cards are pure
+ *        display.
+ *     3. Got it → `dismiss()` → navigate to the install issue. Close →
  *        `dismiss()` → stay on issues list; seeded issues remain.
- *     5. Per-card failure surfaces a Retry button on that card only.
+ *     4. Failure dismisses silently — the user is already onboarded.
  *
  * Why subscribe-not-consume: React 18+ StrictMode dev mounts components
  * twice. A consume-on-init pattern would empty the store on the first
  * mount, then render null on the second. Subscribing + recording
  * dismissal in the store sidesteps both mounts seeing the same state.
- * Async work (Helper agent setup, skip-path seed issues) is deduped at
- * module level via `findOrCreateHelper` / `seedIssueDeduped` so the
+ * Async work (Helper agent setup, skip-path seed bundle) is deduped at
+ * module level via `findOrCreateHelper` / `seedBundleDeduped` so the
  * double-mount can't race two API calls for the same workspace.
  */
 export function WelcomeAfterOnboarding() {
@@ -197,61 +204,34 @@ async function findOrCreateHelper(
 }
 
 /**
- * Module-level dedupe for skip-path seed issues. Same StrictMode rationale
- * as `findOrCreateHelper`: each mount has its own useRef, so without a
- * cross-mount cache the dev double-mount would race two CreateIssue calls
- * for the same title — the server-side LockAndFindActiveDuplicate gate
- * returns 409 on the second one, but a 409 in the catch block populates
- * the per-card error state with a misleading message ("an issue with this
- * title already exists") even though the issue WAS created.
- *
- * Keyed on `${workspaceId}:${title}` because the seed identity is the
- * issue title (server's duplicate dedupe also keys on title).
+ * Module-level dedupe for the skip-path seed call. Same StrictMode
+ * rationale as `findOrCreateHelper`: each mount has its own useRef, so
+ * without a cross-mount cache the dev double-mount would race two seed
+ * requests. The server is idempotent per title anyway (re-entries reuse
+ * the existing issues and skip the follow-up comment), so this cache only
+ * exists to share one in-flight round-trip between the two mounts.
  */
-const pendingIssueSeed = new Map<string, Promise<Issue>>();
+const pendingBundleSeed = new Map<
+  string,
+  Promise<SeedOnboardingNoRuntimeResult>
+>();
 
-function seedIssueDeduped(
-  cacheKey: string,
-  body: CreateIssueRequest,
-): Promise<Issue> {
-  const existing = pendingIssueSeed.get(cacheKey);
+function seedBundleDeduped(
+  workspaceId: string,
+  body: SeedOnboardingNoRuntimeRequest,
+): Promise<SeedOnboardingNoRuntimeResult> {
+  const existing = pendingBundleSeed.get(workspaceId);
   if (existing) return existing;
-  const promise = api.createIssue(body);
-  pendingIssueSeed.set(cacheKey, promise);
+  const promise = api.seedOnboardingNoRuntime(body);
+  pendingBundleSeed.set(workspaceId, promise);
   // .finally() returns a NEW promise that mirrors the rejection of the
   // original. Silence it with .catch so the cleanup chain never surfaces
   // as an unhandled rejection — the original `promise` we return still
   // carries the rejection to the caller's await.
   promise
     .finally(() => {
-      if (pendingIssueSeed.get(cacheKey) === promise) {
-        pendingIssueSeed.delete(cacheKey);
-      }
-    })
-    .catch(() => {});
-  return promise;
-}
-
-/**
- * Same module-level dedup pattern for the follow-up comment on the
- * skip-path install-runtime issue (linking to the create-agent-guide
- * issue). Keeps the two StrictMode mounts from posting the comment twice.
- */
-const pendingCommentSeed = new Map<string, Promise<unknown>>();
-
-function postCommentDeduped(
-  cacheKey: string,
-  issueId: string,
-  content: string,
-): Promise<unknown> {
-  const existing = pendingCommentSeed.get(cacheKey);
-  if (existing) return existing;
-  const promise = api.createComment(issueId, content);
-  pendingCommentSeed.set(cacheKey, promise);
-  promise
-    .finally(() => {
-      if (pendingCommentSeed.get(cacheKey) === promise) {
-        pendingCommentSeed.delete(cacheKey);
+      if (pendingBundleSeed.get(workspaceId) === promise) {
+        pendingBundleSeed.delete(workspaceId);
       }
     })
     .catch(() => {});
@@ -675,16 +655,21 @@ interface SkipWelcomeProps {
 /**
  * Skip-path welcome. v3 product decision (see /Users/qingnaiyuan/.claude/plans):
  *
- *   1. Full-screen loading veil while we provision EVERYTHING in a fixed
- *      sequence — install-runtime issue → create-agent-guide issue →
- *      follow-up comment on the install-runtime issue linking to the
- *      create-agent-guide identifier.
- *   2. Only after the whole chain succeeds do we mount the celebration
- *      Modal. Cards inside the Modal are pure display — no interactive
- *      per-card state, no spinners, no error boundaries.
- *   3. If ANY step fails we silently dismiss; the user lands on the
- *      issues list and finds whatever subset of issues did get created.
- *      Onboarded_at is already set by Step 3, so this isn't blocking.
+ *   1. Full-screen loading veil while ONE seedOnboardingNoRuntime request
+ *      provisions everything server-side, in a single transaction —
+ *      install-runtime issue, create-agent-guide issue, and the follow-up
+ *      comment on the install-runtime issue linking to the guide. The
+ *      server stamps platform attribution (creator/author "system" →
+ *      "Multica" on the timeline) instead of the onboarding member
+ *      (MUL-5118); the localized copy still lives here, in
+ *      onboarding/templates.
+ *   2. Only after the seed succeeds do we mount the celebration Modal.
+ *      Cards inside the Modal are pure display — no interactive per-card
+ *      state, no spinners, no error boundaries.
+ *   3. If the seed fails we silently dismiss; the user lands on the
+ *      issues list. Onboarded_at is already set by Step 3, so this isn't
+ *      blocking, and the transaction means no partial bundle is left
+ *      behind.
  *   4. The Modal has a single primary action [Got it] which dismisses and
  *      navigates to the install-runtime issue. Closing via X or outside
  *      click dismisses but doesn't navigate.
@@ -707,9 +692,15 @@ function SkipWelcome({ workspaceId, onDismiss }: SkipWelcomeProps) {
   const [bundle, setBundle] = useState<SkipBundle | null>(null);
   const [failed, setFailed] = useState(false);
 
-  // Provision sequence — runs once on mount. StrictMode double-mount is
-  // safe because each step uses module-level dedup (seedIssueDeduped /
-  // postCommentDeduped) keyed on `${workspaceId}:<purpose>`.
+  // Provision — runs once on mount. One request seeds the whole bundle
+  // (install-runtime issue → create-agent-guide issue → follow-up
+  // comment) in a single server transaction, attributed to the platform
+  // (creator/author "system" → "Multica" on the timeline) instead of the
+  // member who happened to finish onboarding (MUL-5118). Cross-reference
+  // chips travel as placeholder tokens: the server substitutes the real
+  // `[IDENT](mention://issue/<uuid>)` once each referenced issue exists.
+  // StrictMode double-mount shares one in-flight request via
+  // seedBundleDeduped; the endpoint itself is also idempotent per title.
   useEffect(() => {
     if (!me) return;
     if (bundle || failed) return;
@@ -717,63 +708,31 @@ function SkipWelcome({ workspaceId, onDismiss }: SkipWelcomeProps) {
     (async () => {
       try {
         const lang = pickContentLang(i18n.language);
-        // Order matters — each step's input depends on the previous step's
-        // output (issue identifier / uuid for cross-reference mention
-        // chips). Module-level dedupes (seedIssueDeduped /
-        // postCommentDeduped) make StrictMode double-mounts share the same
-        // in-flight promise per step.
-        //
-        // 1. install-runtime first (body is a static const, no deps).
-        //    Step 1 of the bundle, in_progress so the user sees it's the
-        //    active next step.
-        const installRuntime = await seedIssueDeduped(
-          `${workspaceId}:install-runtime`,
-          {
+        // Copy is composed from TS consts — anything that gets persisted
+        // to DB must not depend on the i18n bundle (a stale bundle would
+        // write raw key text into issue/comment content permanently).
+        const seeded = await seedBundleDeduped(workspaceId, {
+          workspace_id: workspaceId,
+          install_issue: {
             title: INSTALL_RUNTIME_ISSUE_TITLE[lang],
             description: INSTALL_RUNTIME_ISSUE_BODY[lang],
-            status: "in_progress",
-            priority: "high",
-            assignee_type: "member",
-            assignee_id: me.id,
           },
-        );
-        // 2. agent-guide. Body is composed at call-time so it can embed
-        //    a mention chip pointing back at install-runtime — the user
-        //    reads agent-guide and can jump to its prerequisite with one
-        //    click.
-        const agentGuide = await seedIssueDeduped(
-          `${workspaceId}:create-agent-guide`,
-          {
+          agent_guide_issue: {
             title: CREATE_AGENT_GUIDE_ISSUE_TITLE[lang],
             description: getCreateAgentGuideBody({
               lang,
-              installRuntimeIdentifier: installRuntime.identifier,
-              installRuntimeId: installRuntime.id,
+              installRuntimeMention: INSTALL_ISSUE_REF_TOKEN,
             }),
-            status: "todo",
-            priority: "medium",
-            assignee_type: "member",
-            assignee_id: me.id,
           },
-        );
-        // 3. follow-up comment on install-runtime pointing at agent-guide
-        //    via the same mention-chip protocol (renders as the styled
-        //    IssueChip pill). Prefix is a TS const — anything that gets
-        //    persisted to DB must not depend on the i18n bundle (stale
-        //    bundle would write raw key text into comment.content
-        //    permanently).
-        const prefix = FOLLOWUP_COMMENT_PREFIX[lang];
-        const commentText = `${prefix} [${agentGuide.identifier}](mention://issue/${agentGuide.id})`;
-        await postCommentDeduped(
-          `${workspaceId}:install-runtime-followup`,
-          installRuntime.id,
-          commentText,
-        );
+          followup_comment: {
+            content: `${FOLLOWUP_COMMENT_PREFIX[lang]} ${AGENT_GUIDE_REF_TOKEN}`,
+          },
+        });
         qc.invalidateQueries({ queryKey: issueKeys.all(workspaceId) });
         if (!cancelled) {
           setBundle({
-            installIssueId: installRuntime.id,
-            agentGuideId: agentGuide.id,
+            installIssueId: seeded.install_issue.id,
+            agentGuideId: seeded.agent_guide_issue.id,
           });
         }
       } catch {

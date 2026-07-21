@@ -1,3 +1,5 @@
+import type { Issue } from "../types";
+
 export type OnboardingStep =
   | "welcome"
   | "source"
@@ -20,6 +22,35 @@ export type OnboardingCompletionPath =
   | "cloud_waitlist"
   | "skip_existing"
   | "invite_accept";
+
+/**
+ * Placeholder tokens for POST /api/me/onboarding/no-runtime-seed. The
+ * skip-path bundle's cross-references (agent-guide body → install issue,
+ * follow-up comment → agent-guide issue) need each target's identifier +
+ * uuid, which only exist once the server has created the rows — so the
+ * client embeds these literal tokens and the server substitutes the real
+ * `[IDENT](mention://issue/<uuid>)` chips mid-transaction. Must match the
+ * constants in server/internal/handler/onboarding_seed.go.
+ */
+export const INSTALL_ISSUE_REF_TOKEN = "{{install_issue_ref}}";
+export const AGENT_GUIDE_REF_TOKEN = "{{agent_guide_ref}}";
+
+export interface SeedOnboardingNoRuntimeRequest {
+  workspace_id: string;
+  install_issue: { title: string; description: string };
+  agent_guide_issue: { title: string; description: string };
+  followup_comment: { content: string };
+}
+
+/**
+ * The seeded bundle. Issues come back system-attributed
+ * (creator_type "system") and assigned to the calling member.
+ */
+export interface SeedOnboardingNoRuntimeResult {
+  workspace_id: string;
+  install_issue: Issue;
+  agent_guide_issue: Issue;
+}
 
 export type Source =
   | "friends_colleagues"
