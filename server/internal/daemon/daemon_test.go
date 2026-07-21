@@ -1443,7 +1443,7 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 
 	fb := &fakeBackend{
 		results: []agent.Result{
-			{Status: "failed", Error: "session not found", Usage: map[string]agent.TokenUsage{
+			{Status: "failed", Error: "no conversation found", ResumeRejected: true, Usage: map[string]agent.TokenUsage{
 				"m1": {InputTokens: 5},
 			}},
 			{Status: "completed", Output: "done", SessionID: "new-sess", Usage: map[string]agent.TokenUsage{
@@ -1692,6 +1692,46 @@ func TestExecuteAndDrain_NoRetryAfterToolsExecuted(t *testing.T) {
 	}
 }
 
+// A mid-stream provider disconnect on a resumed run must leave the session
+// pointer alone: internal/service/task.go treats provider_network as
+// resume-safe and expects its retry to continue the truncated conversation.
+// If the daemon reset the session first, that contract would be unsatisfiable.
+func TestExecuteAndDrain_NetworkFailureKeepsResumeSession(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+
+	fb := &fakeBackend{
+		results: []agent.Result{
+			{
+				Status:    "failed",
+				Error:     "API Error: Connection closed mid-response",
+				SessionID: "live-sess",
+			},
+		},
+	}
+
+	opts := agent.ExecOptions{ResumeSessionID: "live-sess"}
+	result, tools, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t", new(atomic.Int32))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.ResumeRejected {
+		t.Fatal("a network drop must not be reported as a rejected resume")
+	}
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools) {
+		t.Fatal("network failure must not trigger a fresh-session retry")
+	}
+	if int(fb.idx.Load()) != 1 {
+		t.Fatalf("expected exactly 1 call, got %d", fb.idx.Load())
+	}
+	// The pointer the platform retry needs is still intact.
+	if result.SessionID != "live-sess" {
+		t.Fatalf("expected session to survive, got %q", result.SessionID)
+	}
+}
+
 func TestShouldRetryWithFreshSession(t *testing.T) {
 	t.Parallel()
 
@@ -1703,27 +1743,29 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 		want           bool
 	}{
 		{
-			name:           "resume rejected before any tool retries",
-			result:         agent.Result{Status: "failed", Error: "session not found"},
+			name:           "rejected resume before any tool retries",
+			result:         agent.Result{Status: "failed", Error: "no conversation found", ResumeRejected: true},
 			priorSessionID: "stale-id",
 			want:           true,
 		},
 		{
-			// The reported bug: the session belongs to a different provider
-			// account, and the backend echoes the requested id back on the
-			// rejection. The old SessionID == "" gate never fired here.
-			name: "account-ownership rejection echoing session id retries",
+			// The reported bug: the session belongs to another provider
+			// account and the backend echoes the requested id back on the
+			// rejection, so SessionID stays non-empty. The backend still
+			// reports ResumeRejected, which is what the gate reads now.
+			name: "account rejection echoing session id retries",
 			result: agent.Result{
-				Status:    "failed",
-				Error:     "API Error: 400 invalid_request_error: session not owned by this account",
-				SessionID: "stale-id",
+				Status:         "failed",
+				Error:          "400 此 session 已绑定另外的ai账号，请执行 /new 开启新 session",
+				SessionID:      "stale-id",
+				ResumeRejected: true,
 			},
 			priorSessionID: "stale-id",
 			want:           true,
 		},
 		{
 			name:           "no resume requested never retries",
-			result:         agent.Result{Status: "failed", Error: "boom"},
+			result:         agent.Result{Status: "failed", Error: "boom", ResumeRejected: true},
 			priorSessionID: "",
 			want:           false,
 		},
@@ -1735,23 +1777,71 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 		},
 		{
 			name:           "failure after a tool ran never retries",
-			result:         agent.Result{Status: "failed", Error: "session not found"},
+			result:         agent.Result{Status: "failed", Error: "no conversation found", ResumeRejected: true},
 			priorSessionID: "stale-id",
 			tools:          1,
 			want:           false,
 		},
+
+		// Failures a fresh session cannot cure. Each of these previously
+		// slipped through the exclusion-based gate and cost a wasted run plus
+		// a destroyed session pointer. provider_network is the sharpest case:
+		// internal/service/task.go marks it resume-safe precisely so the
+		// platform retry can continue the truncated conversation.
 		{
-			// Bad credentials cannot succeed on a second attempt; retrying
-			// only burns a full run. Previously a 401 before the first stream
-			// message left SessionID empty and did trigger the fallback.
+			name:           "provider network drop keeps the session",
+			result:         agent.Result{Status: "failed", Error: "API Error: Connection closed mid-response"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "dns failure keeps the session",
+			result:         agent.Result{Status: "failed", Error: "dial tcp: lookup api.anthropic.com: no such host"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "rate limit keeps the session",
+			result:         agent.Result{Status: "failed", Error: "API Error: 429 rate limit exceeded"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "overloaded keeps the session",
+			result:         agent.Result{Status: "failed", Error: "API Error: 529 overloaded_error"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "quota exhaustion keeps the session",
+			result:         agent.Result{Status: "failed", Error: "API Error: 402 credit balance is too low"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "provider 5xx keeps the session",
+			result:         agent.Result{Status: "failed", Error: "API Error: 500 internal_server_error"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "unrecognised startup failure keeps the session",
+			result:         agent.Result{Status: "failed", Error: "exit status 1"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			// Bad credentials cannot succeed on a second attempt. A 401
+			// before the first stream message leaves SessionID empty, which
+			// is exactly why an empty id never meant "resume was rejected".
 			name:           "provider auth failure does not retry",
 			result:         agent.Result{Status: "failed", Error: "API Error: 401 Unauthorized"},
 			priorSessionID: "stale-id",
 			want:           false,
 		},
 		{
-			name:           "not logged in does not retry",
-			result:         agent.Result{Status: "failed", Error: "Not logged in · Please run /login"},
+			name:           "revoked oauth token does not retry",
+			result:         agent.Result{Status: "failed", Error: "OAuth access token has been revoked"},
 			priorSessionID: "stale-id",
 			want:           false,
 		},
@@ -1759,7 +1849,7 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			// Mid-execution terminals carry their own status and must never
 			// reach the fallback.
 			name:           "idle watchdog terminal does not retry",
-			result:         agent.Result{Status: "idle_watchdog", Error: "no activity"},
+			result:         agent.Result{Status: "idle_watchdog", Error: "no activity", ResumeRejected: true},
 			priorSessionID: "stale-id",
 			want:           false,
 		},

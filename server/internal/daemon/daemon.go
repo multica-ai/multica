@@ -4835,30 +4835,35 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 // shouldRetryWithFreshSession reports whether a failed run that requested
 // --resume should be retried once from a fresh session.
 //
-// The gate is tools == 0, not SessionID == "". A session id is not a lifecycle
-// fact: resolveSessionID (pkg/agent/claude.go) blanks it post-hoc on late
-// failures, and a backend that echoes the requested id back when it rejects a
-// resume keeps it non-empty. That made the old SessionID == "" check both too
-// broad — a provider 401 before the first message is indistinguishable from a
-// rejected resume, so the task re-ran for nothing — and too narrow: a session
-// rejected because it belongs to another provider account (the reported bug)
-// echoes the id back and never retried at all.
+// Two independent questions have to both answer yes, and conflating them is
+// how this went wrong before:
 //
-// tools == 0 states the property that actually makes a retry safe: the agent
-// executed no tool, so it mutated nothing, so re-running cannot double-post a
-// comment (comment creation has no idempotency key, and a duplicate re-fires
-// its @mention triggers), reopen a PR, or re-plan on top of its own
-// half-finished work — the retry reuses the same workdir, which is never reset
-// between attempts.
+//  1. Would a fresh session even fix this? Only if the resume itself was
+//     refused — the transcript is gone, or it belongs to another provider
+//     account. result.ResumeRejected is the backend's positive evidence of
+//     that. Answering by exclusion instead ("it wasn't an auth error") is
+//     wrong: the failures a new session cures are a small enumerable set,
+//     while the ones it cannot are open-ended. A network drop, a 429, a
+//     quota trip or a provider 5xx has nothing to do with the session, so
+//     resetting it discards the one recoverable thing — the conversation
+//     pointer — and re-runs the task for nothing. provider_network in
+//     particular is documented resume-safe in internal/service/task.go
+//     (retryableReasons, MUL-4910): the platform's own retry is supposed to
+//     inherit the session and continue the truncated conversation.
 //
-// Auth failures are excluded: bad credentials cannot succeed on retry, so a
-// second full run only burns quota. This mirrors retryableReasons in
-// internal/service/task.go, which likewise refuses provider_auth_or_access.
+//  2. Is re-running safe? Only if the agent executed no tool. tools == 0 does
+//     not prove the run mutated nothing — it proves we observed no tool use,
+//     which is the strongest signal available here — but it is what stands
+//     between a retry and a duplicated side effect. Comment creation has no
+//     idempotency key and a duplicate re-fires its @mention triggers; the
+//     retry also reuses the same workdir, which is never reset between
+//     attempts, so a retry after real work re-plans on top of its own
+//     half-finished commits.
 func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, tools int32) bool {
-	if result.Status != "failed" || priorSessionID == "" || tools > 0 {
-		return false
-	}
-	return taskfailure.Classify(result.Error) != taskfailure.ReasonAgentProviderAuthOrAccess
+	return result.Status == "failed" &&
+		priorSessionID != "" &&
+		result.ResumeRejected &&
+		tools == 0
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
