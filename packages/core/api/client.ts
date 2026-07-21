@@ -149,8 +149,8 @@ import type {
 } from "../types";
 import type {
   OnboardingCompletionPath,
-  SeedOnboardingNoRuntimeRequest,
-  SeedOnboardingNoRuntimeResult,
+  CompleteOnboardingNoRuntimeRequest,
+  CompleteOnboardingNoRuntimeResult,
 } from "../onboarding/types";
 import type { CreateFeedbackResponse, FeedbackKind } from "../feedback/types";
 import type {
@@ -260,7 +260,7 @@ import {
   EMPTY_LIST_PROPERTIES_RESPONSE,
   EMPTY_ISSUE_PROPERTIES_RESPONSE,
   ResourceLabelsResponseSchema,
-  SeedOnboardingNoRuntimeResponseSchema,
+  CompleteOnboardingNoRuntimeResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_RESOURCE_LABELS_RESPONSE,
@@ -540,29 +540,25 @@ export class ApiClient {
   }
 
   /**
-   * Seed the skip-path onboarding bundle (two starter issues + follow-up
-   * comment) with platform attribution — the server stamps
-   * creator/author "system" so the timeline reads "Multica created this
-   * issue" instead of naming the onboarding member (MUL-5118). The
-   * localized copy travels in the payload; cross-reference chips use the
-   * placeholder tokens from ../onboarding/types.
-   *
-   * Throws on a malformed response body: the welcome hook navigates into
-   * install_issue.id, so a body without usable ids is a failed seed, not
-   * a fallback-able read.
+   * Atomically finish the skip-runtime path and create the server-owned,
+   * platform-attributed starter bundle. Throws on a malformed response because
+   * the caller synchronizes auth state and navigates using the returned ids.
    */
-  async seedOnboardingNoRuntime(
-    payload: SeedOnboardingNoRuntimeRequest,
-  ): Promise<SeedOnboardingNoRuntimeResult> {
-    const raw = await this.fetch<unknown>("/api/me/onboarding/no-runtime-seed", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-    const bundle = parseWithFallback<SeedOnboardingNoRuntimeResult | null>(
+  async completeOnboardingNoRuntime(
+    payload: CompleteOnboardingNoRuntimeRequest,
+  ): Promise<CompleteOnboardingNoRuntimeResult> {
+    const raw = await this.fetch<unknown>(
+      "/api/me/onboarding/no-runtime-complete",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+    const bundle = parseWithFallback<CompleteOnboardingNoRuntimeResult | null>(
       raw,
-      SeedOnboardingNoRuntimeResponseSchema,
+      CompleteOnboardingNoRuntimeResponseSchema,
       null,
-      { endpoint: "POST /api/me/onboarding/no-runtime-seed" },
+      { endpoint: "POST /api/me/onboarding/no-runtime-complete" },
     );
     if (!bundle) {
       throw new Error();

@@ -820,14 +820,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
-		// Skip-path starter content, attributed to the platform instead of
-		// the onboarding member (MUL-5118). The welcome hook sends the
-		// localized copy; the server stamps system attribution.
-		r.Post("/api/me/onboarding/no-runtime-seed", h.SeedOnboardingNoRuntime)
+		// Atomically complete the no-runtime path and install server-owned
+		// starter content with platform attribution (MUL-5118).
+		r.Post("/api/me/onboarding/no-runtime-complete", h.CompleteOnboardingNoRuntime)
 		// DEPRECATED — shim routes for desktop < v3 during the rollout
 		// window. v3 frontend creates the Helper agent + starter issues
 		// via generic CreateAgent / CreateIssue (runtime path) or the
-		// no-runtime-seed endpoint above (skip path), plus /complete.
+		// no-runtime-complete endpoint above (skip path), plus /complete.
 		// Remove once X-Client-Version telemetry confirms zero
 		// pre-v3 desktops are still calling these. Handlers live in
 		// server/internal/handler/onboarding_shim.go.

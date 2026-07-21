@@ -1,20 +1,18 @@
 export type {
   OnboardingStep,
   OnboardingCompletionPath,
+  OnboardingContentLocale,
   QuestionnaireAnswers,
-  SeedOnboardingNoRuntimeRequest,
-  SeedOnboardingNoRuntimeResult,
+  CompleteOnboardingNoRuntimeRequest,
+  CompleteOnboardingNoRuntimeResult,
   Source,
   Role,
   UseCase,
 } from "./types";
 export {
-  INSTALL_ISSUE_REF_TOKEN,
-  AGENT_GUIDE_REF_TOKEN,
-} from "./types";
-export {
   saveQuestionnaire,
   completeOnboarding,
+  completeOnboardingNoRuntime,
   joinCloudWaitlist,
 } from "./store";
 export { ONBOARDING_STEP_ORDER } from "./step-order";

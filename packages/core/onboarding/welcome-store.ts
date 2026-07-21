@@ -17,15 +17,18 @@ import { create } from "zustand";
  *   - "runtime": user picked a runtime in Step 3. `runtimeId` is set. The
  *     workspace welcome hook creates a Multica Helper agent on that runtime
  *     and presents starter cards.
- *   - "skip": user explicitly skipped. `runtimeId` is undefined. The hook
- *     seeds two issues (install-runtime guide + create-agent guide) and
- *     shows them in a Modal.
+ *   - "skip": user explicitly skipped. The atomic completion response has
+ *     already created both issues; their ids let the hook show the Modal and
+ *     navigate without another privileged write after onboarding.
  */
-export interface WelcomeSignal {
-  workspaceId: string;
-  choice: "runtime" | "skip";
-  runtimeId?: string;
-}
+export type WelcomeSignal =
+  | { workspaceId: string; choice: "runtime"; runtimeId: string }
+  | {
+      workspaceId: string;
+      choice: "skip";
+      installIssueId: string;
+      agentGuideIssueId: string;
+    };
 
 interface WelcomeStoreState {
   signal: WelcomeSignal | null;

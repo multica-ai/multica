@@ -9,15 +9,6 @@ export {
   type HelperInstructionsLang,
 } from "./helper-instructions";
 export {
-  INSTALL_RUNTIME_ISSUE_TITLE,
-  INSTALL_RUNTIME_ISSUE_BODY,
-  FOLLOWUP_COMMENT_PREFIX,
-} from "./install-runtime-issue";
-export {
-  CREATE_AGENT_GUIDE_ISSUE_TITLE,
-  getCreateAgentGuideBody,
-} from "./create-agent-guide-issue";
-export {
   HELPER_STARTER_PROMPTS,
   STARTER_CARD_IDS,
   type StarterCardId,

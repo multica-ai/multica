@@ -7,6 +7,7 @@ import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import {
   completeOnboarding,
+  completeOnboardingNoRuntime,
   ONBOARDING_STEP_ORDER,
   saveQuestionnaire,
   useWelcomeStore,
@@ -23,6 +24,7 @@ import { StepWorkspace } from "./steps/step-workspace";
 import { StepRuntimeConnect } from "./steps/step-runtime-connect";
 import { StepPlatformFork } from "./steps/step-platform-fork";
 import { useT } from "../i18n";
+import { pickContentLang } from "./templates";
 
 const EMPTY_QUESTIONNAIRE: QuestionnaireAnswers = {
   source: [],
@@ -89,18 +91,18 @@ function mergeQuestionnaire(
  * Three exit shapes feed onComplete:
  *   - Skip-existing (Welcome): completeOnboarding marks onboarded; navigate
  *     to the existing workspace's issue list.
- *   - Runtime-skipped (no runtime on Step 3): completeOnboarding marks
- *     onboarded; we push a {choice:"skip"} welcome signal and navigate
- *     to the workspace. The welcome hook in the workspace shell creates
- *     the install-runtime / create-agent guide issues on landing.
+ *   - Runtime-skipped (no runtime on Step 3): one atomic server request marks
+ *     onboarded and creates the platform-authored starter bundle. Its ids are
+ *     parked in a {choice:"skip"} welcome signal before navigation.
  *   - Runtime-connected (runtime picked on Step 3): completeOnboarding
  *     marks onboarded; we push a {choice:"runtime", runtimeId} welcome
  *     signal and navigate. The welcome hook creates the Multica Helper
  *     agent on the picked runtime and shows the starter-card Modal.
  *
- * V3 contract: this file never touches createAgent / createIssue. The
- * "what runs in the workspace shell after onboarding" decision is in
- * `packages/views/workspace/welcome-after-onboarding.tsx`.
+ * This file never touches generic createAgent / createIssue APIs. Runtime
+ * setup remains in the workspace welcome hook; the privileged no-runtime
+ * bundle is completed before navigation so it cannot be invoked later with
+ * client-authored system content.
  */
 export function OnboardingFlow({
   onComplete,
@@ -115,7 +117,7 @@ export function OnboardingFlow({
    *  the embedded picker reacts to daemon:register events. */
   onRuntimeRefresh?: () => void | Promise<void>;
 }) {
-  const { t } = useT("onboarding");
+  const { t, i18n } = useT("onboarding");
   const user = useAuthStore((s) => s.user);
   if (!user) {
     throw new Error("OnboardingFlow requires an authenticated user");
@@ -223,33 +225,35 @@ export function OnboardingFlow({
   const handleRuntimeNext = useCallback(
     async (rt: AgentRuntime | null) => {
       if (!workspace) return;
-      // Step 3 in v3 does exactly two things:
-      //   1. Mark onboarded server-side (the workspace layout hard gate
-      //      will redirect us back to /onboarding without this).
-      //   2. Park a transient welcome signal for the workspace shell to
-      //      consume on the next render, telling it what the user chose.
-      // Helper-agent creation and starter-issue creation happen in the
-      // workspace shell's welcome hook, AFTER navigation, via the generic
-      // createAgent / createIssue endpoints.
       try {
-        await completeOnboarding(
-          rt ? "full" : "runtime_skipped",
-          workspace.id,
-        );
+        if (rt) {
+          await completeOnboarding("full", workspace.id);
+          useWelcomeStore.getState().set({
+            workspaceId: workspace.id,
+            choice: "runtime",
+            runtimeId: rt.id,
+          });
+        } else {
+          const bundle = await completeOnboardingNoRuntime(
+            workspace.id,
+            pickContentLang(i18n.language),
+          );
+          useWelcomeStore.getState().set({
+            workspaceId: workspace.id,
+            choice: "skip",
+            installIssueId: bundle.install_issue.id,
+            agentGuideIssueId: bundle.agent_guide_issue.id,
+          });
+        }
       } catch (err) {
         toast.error(
           err instanceof Error ? err.message : t(($) => $.errors.skip_failed),
         );
         return;
       }
-      useWelcomeStore.getState().set({
-        workspaceId: workspace.id,
-        choice: rt ? "runtime" : "skip",
-        ...(rt ? { runtimeId: rt.id } : {}),
-      });
       onComplete(workspace, undefined);
     },
-    [workspace, onComplete, t],
+    [workspace, onComplete, t, i18n.language],
   );
 
   const handleBack = useCallback((from: OnboardingStep) => {

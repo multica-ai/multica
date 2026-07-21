@@ -52,8 +52,6 @@ vi.mock("@multica/core/auth", () => ({
 const mockListAgents = vi.fn();
 const mockCreateAgent = vi.fn();
 const mockCreateIssue = vi.fn();
-const mockCreateComment = vi.fn();
-const mockSeedOnboardingNoRuntime = vi.fn();
 const mockGetWorkspace = vi.fn();
 
 // `useCurrentWorkspace` is gated by `WorkspaceSlugProvider`; in tests
@@ -79,9 +77,6 @@ vi.mock("@multica/core/api", () => ({
     listAgents: (...args: unknown[]) => mockListAgents(...args),
     createAgent: (...args: unknown[]) => mockCreateAgent(...args),
     createIssue: (...args: unknown[]) => mockCreateIssue(...args),
-    createComment: (...args: unknown[]) => mockCreateComment(...args),
-    seedOnboardingNoRuntime: (...args: unknown[]) =>
-      mockSeedOnboardingNoRuntime(...args),
     getWorkspace: (...args: unknown[]) => mockGetWorkspace(...args),
   },
 }));
@@ -130,8 +125,6 @@ beforeEach(() => {
   mockListAgents.mockReset();
   mockCreateAgent.mockReset();
   mockCreateIssue.mockReset();
-  mockCreateComment.mockReset();
-  mockSeedOnboardingNoRuntime.mockReset();
   mockGetWorkspace.mockReset();
   mockPush.mockReset();
   useWelcomeStore.getState().reset();
@@ -152,10 +145,12 @@ describe("WelcomeAfterOnboarding", () => {
     useWelcomeStore.getState().set({
       workspaceId: "ws-2",
       choice: "skip",
+      installIssueId: "issue-install",
+      agentGuideIssueId: "issue-guide",
     });
     const { container } = renderWelcome();
     expect(container.firstChild).toBeNull();
-    expect(mockSeedOnboardingNoRuntime).not.toHaveBeenCalled();
+    expect(mockCreateIssue).not.toHaveBeenCalled();
   });
 
   describe("runtime path", () => {
@@ -400,153 +395,42 @@ describe("WelcomeAfterOnboarding", () => {
   });
 
   describe("skip path", () => {
-    const seededBundle = {
-      workspace_id: "ws-1",
-      install_issue: {
-        id: "issue-install",
-        identifier: "MUL-1",
-        workspace_id: "ws-1",
-        creator_type: "system",
-      },
-      agent_guide_issue: {
-        id: "issue-agent",
-        identifier: "MUL-2",
-        workspace_id: "ws-1",
-        creator_type: "system",
-      },
-    };
-
-    it("seeds the bundle through the system-attributed endpoint, then opens the celebration Modal", async () => {
-      mockSeedOnboardingNoRuntime.mockResolvedValueOnce(seededBundle);
-
+    function setSkipSignal() {
       useWelcomeStore.getState().set({
         workspaceId: "ws-1",
         choice: "skip",
+        installIssueId: "issue-install",
+        agentGuideIssueId: "issue-agent",
       });
+    }
 
+    it("opens the celebration Modal from the already-created bundle", () => {
+      setSkipSignal();
       renderWelcome();
 
-      // Loading veil shows first.
-      expect(screen.getByText(/Setting up your workspace/i)).toBeInTheDocument();
-
-      // Modal appears once the seed call succeeds.
-      await waitFor(() => {
-        expect(screen.getByText(/Welcome to Multica/i)).toBeInTheDocument();
-      });
-
-      // One request seeds everything; the generic per-row endpoints (which
-      // would attribute the rows to the member) are not used.
-      expect(mockSeedOnboardingNoRuntime).toHaveBeenCalledTimes(1);
+      expect(screen.getByText(/Welcome to Multica/i)).toBeInTheDocument();
       expect(mockCreateIssue).not.toHaveBeenCalled();
-      expect(mockCreateComment).not.toHaveBeenCalled();
-
-      const [payload] = mockSeedOnboardingNoRuntime.mock.calls[0]!;
-      expect(payload.workspace_id).toBe("ws-1");
-      expect(payload.install_issue.title).toBe(
-        "Step 1 — Connect a runtime to start using agents",
-      );
-      // Cross-references travel as placeholder tokens — the server
-      // substitutes the real mention chips once the issues exist.
-      expect(payload.agent_guide_issue.title).toBe(
-        "Step 2 — Create your first Multica Agent",
-      );
-      expect(payload.agent_guide_issue.description).toContain(
-        "{{install_issue_ref}}",
-      );
-      expect(payload.followup_comment.content).toContain(
-        "{{agent_guide_ref}}",
-      );
     });
 
-    it("silently dismisses without showing the Modal when provisioning fails", async () => {
-      mockSeedOnboardingNoRuntime.mockRejectedValueOnce(
-        new Error("network down"),
-      );
-      useWelcomeStore.getState().set({
-        workspaceId: "ws-1",
-        choice: "skip",
-      });
-
+    it("navigates to the install issue from the completion response", async () => {
+      setSkipSignal();
       renderWelcome();
 
-      // Failure path: loading veil shows, then unmounts as the store is
-      // dismissed. No celebration Modal ever appears.
-      await waitFor(() =>
-        expect(useWelcomeStore.getState().dismissed).toBe(true),
-      );
-      expect(screen.queryByText(/Welcome to Multica/i)).not.toBeInTheDocument();
-    });
-
-    it("uses Korean persisted skip-path issue and comment artifacts under ko locale", async () => {
-      mockSeedOnboardingNoRuntime.mockResolvedValueOnce(seededBundle);
-
-      useWelcomeStore.getState().set({
-        workspaceId: "ws-1",
-        choice: "skip",
-      });
-
-      renderWelcome({ locale: "ko" });
-
+      fireEvent.click(screen.getByRole("button", { name: /got it/i }));
       await waitFor(() => {
-        expect(screen.getByText(/Multica에 오신 것을 환영합니다/i)).toBeInTheDocument();
+        expect(mockPush).toHaveBeenCalledWith(
+          expect.stringContaining("issue-install"),
+        );
       });
-
-      const [payload] = mockSeedOnboardingNoRuntime.mock.calls[0]!;
-      expect(payload.install_issue.title).toBe(
-        "1단계 — agent를 사용하려면 runtime 연결하기",
-      );
-      expect(payload.install_issue.description).toContain(
-        "Multica에 오신 것을 환영합니다.",
-      );
-      expect(payload.agent_guide_issue.title).toBe(
-        "2단계 — 첫 Multica Agent 만들기",
-      );
-      expect(payload.agent_guide_issue.description).toContain(
-        "runtime이 online 상태가 되면",
-      );
-      expect(payload.agent_guide_issue.description).toContain(
-        "{{install_issue_ref}}",
-      );
-      expect(payload.followup_comment.content).toContain("다음 단계:");
-      expect(payload.followup_comment.content).toContain(
-        "{{agent_guide_ref}}",
-      );
+      expect(useWelcomeStore.getState().dismissed).toBe(true);
     });
 
-    it("uses Japanese persisted skip-path issue and comment artifacts under ja locale", async () => {
-      mockSeedOnboardingNoRuntime.mockResolvedValueOnce(seededBundle);
-
-      useWelcomeStore.getState().set({
-        workspaceId: "ws-1",
-        choice: "skip",
-      });
-
+    it("renders localized celebration copy without performing persistence", () => {
+      setSkipSignal();
       renderWelcome({ locale: "ja" });
 
-      await waitFor(() => {
-        expect(
-          screen.getByText(/Multica へようこそ/),
-        ).toBeInTheDocument();
-      });
-
-      const [payload] = mockSeedOnboardingNoRuntime.mock.calls[0]!;
-      expect(payload.install_issue.title).toBe(
-        "ステップ1 — agent を使うために runtime を接続する",
-      );
-      expect(payload.install_issue.description).toContain("Multica へようこそ。");
-      expect(payload.agent_guide_issue.title).toBe(
-        "ステップ2 — 最初の Multica Agent を作成する",
-      );
-      expect(payload.agent_guide_issue.description).toContain(
-        "runtime が online になったら",
-      );
-      expect(payload.agent_guide_issue.description).toContain(
-        "{{install_issue_ref}}",
-      );
-      expect(payload.followup_comment.content).toContain("次のステップ:");
-      expect(payload.followup_comment.content).toContain(
-        "{{agent_guide_ref}}",
-      );
+      expect(screen.getByText(/Multica へようこそ/)).toBeInTheDocument();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
     });
   });
 });

@@ -42,10 +42,14 @@ describe("welcome-store", () => {
     expect(useWelcomeStore.getState().dismissed).toBe(false);
   });
 
-  it("skip-path signals omit runtimeId", () => {
-    const skip: WelcomeSignal = { workspaceId: "ws-2", choice: "skip" };
+  it("skip-path signals carry the server-created issue ids", () => {
+    const skip: WelcomeSignal = {
+      workspaceId: "ws-2",
+      choice: "skip",
+      installIssueId: "issue-install",
+      agentGuideIssueId: "issue-guide",
+    };
     useWelcomeStore.getState().set(skip);
     expect(useWelcomeStore.getState().signal).toEqual(skip);
-    expect(useWelcomeStore.getState().signal?.runtimeId).toBeUndefined();
   });
 });
