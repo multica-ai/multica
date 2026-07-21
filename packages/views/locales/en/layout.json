@@ -33,6 +33,7 @@
     "invitation_workspace_fallback": "Workspace",
     "invitation_join": "Join",
     "invitation_decline": "Decline",
+    "appearance": "Appearance",
     "log_out": "Log out",
     "new_issue": "New Issue",
     "new_issue_shortcut": "C",

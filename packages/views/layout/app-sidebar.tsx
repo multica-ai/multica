@@ -25,6 +25,7 @@ import {
   ChevronDown,
   ChevronRight,
   Settings,
+  SunMoon,
   LogOut,
   Plus,
   Check,
@@ -39,6 +40,7 @@ import {
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
@@ -64,7 +66,12 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useAuthStore } from "@multica/core/auth";
@@ -341,6 +348,48 @@ function PinSkeleton() {
         <div className="h-3 w-24 rounded bg-sidebar-accent/40" />
       </div>
     </SidebarMenuItem>
+  );
+}
+
+// Quick theme switcher surfaced in the workspace-switcher user menu. Reuses
+// the same next-themes `useTheme` as the Settings > Preferences tab, so the
+// two surfaces stay in sync without a shared store. Theme options borrow the
+// Settings namespace labels (preferences.theme.*) instead of duplicating
+// them here; only the group trigger label is local to layout.
+function AppearanceSubmenu() {
+  const { t } = useT("layout");
+  const { t: tSettings } = useT("settings");
+  const { theme, setTheme } = useTheme();
+
+  const themeOptions = [
+    { value: "light" as const, label: tSettings(($) => $.preferences.theme.light) },
+    { value: "dark" as const, label: tSettings(($) => $.preferences.theme.dark) },
+    { value: "system" as const, label: tSettings(($) => $.preferences.theme.system) },
+  ];
+
+  return (
+    <DropdownMenuGroup>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <SunMoon className="h-3.5 w-3.5" />
+          <span>{t(($) => $.sidebar.appearance)}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          <DropdownMenuRadioGroup
+            value={theme}
+            onValueChange={(next) => {
+              if (next && next !== theme) setTheme(next);
+            }}
+          >
+            {themeOptions.map((option) => (
+              <DropdownMenuRadioItem key={option.value} value={option.value}>
+                {option.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    </DropdownMenuGroup>
   );
 }
 
@@ -628,6 +677,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       </DropdownMenuGroup>
                     </>
                   )}
+                  <DropdownMenuSeparator />
+                  <AppearanceSubmenu />
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
                     <DropdownMenuItem variant="destructive" onClick={logout}>
