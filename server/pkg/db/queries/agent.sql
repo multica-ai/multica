@@ -1,11 +1,24 @@
 -- name: ListAgents :many
+-- User-authored agents plus GitLab identity personas (kind=system,
+-- system_key gitlab:*) so comment author name/avatar resolution works
+-- via the same list path. Personas are non-runnable (max_concurrent_tasks=0)
+-- and filtered out of assign/work surfaces by the app layer.
 SELECT * FROM agent
-WHERE workspace_id = $1 AND archived_at IS NULL AND kind = 'user'
+WHERE workspace_id = $1
+  AND archived_at IS NULL
+  AND (
+    kind = 'user'
+    OR (kind = 'system' AND system_key LIKE 'gitlab:%')
+  )
 ORDER BY created_at ASC;
 
 -- name: ListAllAgents :many
 SELECT * FROM agent
-WHERE workspace_id = $1 AND kind = 'user'
+WHERE workspace_id = $1
+  AND (
+    kind = 'user'
+    OR (kind = 'system' AND system_key LIKE 'gitlab:%')
+  )
 ORDER BY created_at ASC;
 
 -- name: GetAgent :one
@@ -44,6 +57,34 @@ INSERT INTO agent (
     @workspace_id, @name, '', @runtime_mode, '{}'::jsonb, @runtime_id,
     'private', 'private', 1, @owner_id, @instructions,
     '{}'::jsonb, '[]'::jsonb, sqlc.narg('model'), 'system', @system_key
+)
+RETURNING *;
+
+-- name: GetAgentBySystemKey :one
+-- Stable lookup for integration personas (e.g. GitLab comment authors keyed as
+-- gitlab:{id}). system_key is unique per (workspace, owner, runtime) via
+-- agent_system_identity_unique; this query is the app-level identity resolve
+-- by workspace + key only.
+SELECT * FROM agent
+WHERE workspace_id = $1 AND system_key = $2
+LIMIT 1;
+
+-- name: CreateGitLabPersonaAgent :one
+-- Identity agent for a GitLab user so comments can use author_type=agent with
+-- the real name/avatar. kind=system keeps GetAgentInWorkspace / assign / edit
+-- surfaces on kind=user only (personas are not real workers). ListAgents still
+-- returns gitlab:% system agents for avatar/name resolution. public_to +
+-- max_concurrent_tasks=0: claim never dispatches. system_key holds gitlab:{id}.
+INSERT INTO agent (
+    workspace_id, name, description, avatar_url, runtime_mode,
+    runtime_config, runtime_id, visibility, permission_mode,
+    max_concurrent_tasks, owner_id, instructions, custom_env, custom_args,
+    kind, system_key
+) VALUES (
+    @workspace_id, @name, @description, sqlc.narg('avatar_url'), @runtime_mode,
+    '{}'::jsonb, @runtime_id, 'workspace', 'public_to',
+    0, @owner_id, '', '{}'::jsonb, '[]'::jsonb,
+    'system', @system_key
 )
 RETURNING *;
 

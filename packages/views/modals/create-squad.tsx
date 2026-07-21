@@ -12,7 +12,7 @@ import {
   memberListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
-import { AGENT_DESCRIPTION_MAX_LENGTH } from "@multica/core/agents";
+import { AGENT_DESCRIPTION_MAX_LENGTH, isGitLabPersonaAgent } from "@multica/core/agents";
 import { isImeComposing } from "@multica/core/utils";
 import type { Agent, MemberWithUser } from "@multica/core/types";
 import {
@@ -66,7 +66,10 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
 
   const activeAgents = useMemo(
-    () => agents.filter((a: Agent) => !a.archived_at && a.runtime_id),
+    () =>
+      agents.filter(
+        (a: Agent) => !a.archived_at && a.runtime_id && !isGitLabPersonaAgent(a),
+      ),
     [agents],
   );
 

@@ -14,6 +14,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Agent, SkillSummary } from "@multica/core/types";
+import { isGitLabPersonaAgent } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -71,7 +72,7 @@ export interface SkillActionsContext {
 // checked-out and disabled; partial overlap stays selectable because the
 // endpoint is additive ("ensure these skills") and idempotent.
 function partitionAgents(ctx: SkillActionsContext) {
-  const active = ctx.agents.filter((a) => !a.archived_at);
+  const active = ctx.agents.filter((a) => !a.archived_at && !isGitLabPersonaAgent(a));
   const mine = active.filter(
     (a) => a.owner_id !== null && a.owner_id === ctx.currentUserId,
   );

@@ -449,6 +449,12 @@ export interface Agent {
   updated_at: string;
   archived_at: string | null;
   archived_by: string | null;
+  /**
+   * Set for integration identity shells (e.g. GitLab comment personas keyed
+   * `gitlab:{id}`). Omitted/null for normal agents. Treat a `gitlab:` prefix
+   * as non-runnable: name/avatar for comments only, never assign or dispatch.
+   */
+  system_key?: string | null;
 }
 
 /**

@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./derive-presence";
 export * from "./effective-access";
+export * from "./identity";
 export * from "./queries";
 export * from "./use-agent-presence";
 export * from "./use-update-agent-allowlist";

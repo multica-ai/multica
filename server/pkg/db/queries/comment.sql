@@ -512,3 +512,24 @@ UPDATE comment SET
     updated_at = CASE WHEN resolved_at IS NOT NULL THEN now() ELSE updated_at END
 WHERE id = $1
 RETURNING *;
+
+-- name: GetCommentByGitLabNoteID :one
+SELECT * FROM comment WHERE gitlab_note_id = $1;
+
+-- name: SetCommentGitLabNoteID :exec
+UPDATE comment SET gitlab_note_id = $2 WHERE id = $1;
+
+-- name: FindUnlinkedCommentByIssueAndContent :one
+-- Dual-write echo prevention: when an agent (or tool) posts the same body to
+-- Multica and then GitLab, the Note Hook should attach the GitLab note id to
+-- the existing Multica comment instead of creating a duplicate. Exact body
+-- match within a short window; content is the Multica-stored form (no GitLab
+-- HTML, no Multica relay sentinel).
+SELECT * FROM comment
+WHERE issue_id = $1
+  AND content = $2
+  AND gitlab_note_id IS NULL
+  AND type = 'comment'
+  AND created_at > now() - interval '30 minutes'
+ORDER BY created_at DESC
+LIMIT 1;

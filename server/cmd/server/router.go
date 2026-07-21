@@ -551,6 +551,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
 	}
 
+	// GitLab integration token encryption. Nil when GITLAB_SECRET_KEY is unset;
+	// the GitLab OAuth handlers return a clear error in that case.
+	if gitlabKey, err := secretbox.LoadKey("GITLAB_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(gitlabKey)
+		if err != nil {
+			slog.Error("gitlab: secretbox.New failed; GitLab OAuth disabled", "error", err)
+		} else {
+			h.GitLabBox = box
+			slog.Info("gitlab integration enabled")
+		}
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -740,6 +752,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
 	r.Get("/api/github/setup", h.GitHubSetupCallback)
+	// GitLab webhook (no Multica auth — authenticated via X-Gitlab-Token
+	// shared secret) and OAuth callback.
+	r.Post("/api/webhooks/gitlab", h.HandleGitLabWebhook)
+	r.Post("/api/webhooks/gitlab/{workspaceId}", h.HandleGitLabWebhookForWorkspace)
+	r.Get("/api/gitlab/setup", h.GitLabSetupCallback)
 	// Slack OAuth callback (no Multica auth in the path — it is hit by Slack's
 	// browser redirect; the workspace/agent/initiator are recovered from the
 	// sealed state). It exchanges the code, upserts the install, then bounces
@@ -901,6 +918,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
+				})
+
+				// GitLab integration — listing is member-visible; connect/disconnect
+				// require admin.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/gitlab/connections", h.ListGitLabConnections)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Get("/gitlab/connect", h.GitLabConnect)
+					r.Delete("/gitlab/connections/{connectionId}", h.DeleteGitLabConnection)
+					r.Post("/gitlab/connections/{connectionId}/rotate-webhook-secret", h.RotateGitLabConnectionWebhookSecret)
 				})
 
 				// Lark integration. Every endpoint here only requires
@@ -1075,6 +1105,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/properties/{propertyId}", h.SetIssueProperty)
 					r.Delete("/properties/{propertyId}", h.DeleteIssueProperty)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
+					r.Get("/merge-requests", h.ListMergeRequestsForIssue)
+					r.Get("/gitlab-issue", h.GetGitLabIssueForIssue)
+					r.Put("/gitlab-issue", h.LinkGitLabIssueForIssue)
+					r.Delete("/gitlab-issue", h.UnlinkGitLabIssueForIssue)
 				})
 			})
 

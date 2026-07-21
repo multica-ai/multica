@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { isGitLabPersonaAgent } from "@multica/core/agents";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -29,7 +30,12 @@ export function ProjectLeadPicker({ project, handleUpdate, renderTrigger, align 
   const leadQuery = leadFilter.toLowerCase();
 
   const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
-  const filteredAgents = agents.filter((a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)));
+  const filteredAgents = agents.filter(
+    (a) =>
+      !a.archived_at &&
+      !isGitLabPersonaAgent(a) &&
+      (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)),
+  );
 
   const leadId = project.lead_id;
   const leadType = project.lead_type;

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
+import { isGitLabPersonaAgent } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import type { AutopilotAssigneeType } from "@multica/core/types";
@@ -41,7 +42,10 @@ export function AgentPicker({
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
 
-  const activeAgents = useMemo(() => agents.filter((a) => !a.archived_at), [agents]);
+  const activeAgents = useMemo(
+    () => agents.filter((a) => !a.archived_at && !isGitLabPersonaAgent(a)),
+    [agents],
+  );
   const activeSquads = useMemo(() => squads.filter((s) => !s.archived_at), [squads]);
 
   const selectedAgent =

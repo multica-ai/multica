@@ -1673,6 +1673,80 @@ func (q *Queries) CreateDeferredAgentTask(ctx context.Context, arg CreateDeferre
 	return i, err
 }
 
+const createGitLabPersonaAgent = `-- name: CreateGitLabPersonaAgent :one
+INSERT INTO agent (
+    workspace_id, name, description, avatar_url, runtime_mode,
+    runtime_config, runtime_id, visibility, permission_mode,
+    max_concurrent_tasks, owner_id, instructions, custom_env, custom_args,
+    kind, system_key
+) VALUES (
+    $1, $2, $3, $4, $5,
+    '{}'::jsonb, $6, 'workspace', 'public_to',
+    0, $7, '', '{}'::jsonb, '[]'::jsonb,
+    'system', $8
+)
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+`
+
+type CreateGitLabPersonaAgentParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	AvatarUrl   pgtype.Text `json:"avatar_url"`
+	RuntimeMode string      `json:"runtime_mode"`
+	RuntimeID   pgtype.UUID `json:"runtime_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+	SystemKey   pgtype.Text `json:"system_key"`
+}
+
+// Identity agent for a GitLab user so comments can use author_type=agent with
+// the real name/avatar. kind=system keeps GetAgentInWorkspace / assign / edit
+// surfaces on kind=user only (personas are not real workers). ListAgents still
+// returns gitlab:% system agents for avatar/name resolution. public_to +
+// max_concurrent_tasks=0: claim never dispatches. system_key holds gitlab:{id}.
+func (q *Queries) CreateGitLabPersonaAgent(ctx context.Context, arg CreateGitLabPersonaAgentParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, createGitLabPersonaAgent,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Description,
+		arg.AvatarUrl,
+		arg.RuntimeMode,
+		arg.RuntimeID,
+		arg.OwnerID,
+		arg.SystemKey,
+	)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.ComposioToolkitAllowlist,
+		&i.PermissionMode,
+		&i.Kind,
+		&i.SystemKey,
+	)
+	return i, err
+}
+
 const createQuickCreateTask = `-- name: CreateQuickCreateTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
@@ -2372,6 +2446,55 @@ WHERE id = $1
 
 func (q *Queries) GetAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
 	row := q.db.QueryRow(ctx, getAgent, id)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.ComposioToolkitAllowlist,
+		&i.PermissionMode,
+		&i.Kind,
+		&i.SystemKey,
+	)
+	return i, err
+}
+
+const getAgentBySystemKey = `-- name: GetAgentBySystemKey :one
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key FROM agent
+WHERE workspace_id = $1 AND system_key = $2
+LIMIT 1
+`
+
+type GetAgentBySystemKeyParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SystemKey   pgtype.Text `json:"system_key"`
+}
+
+// Stable lookup for integration personas (e.g. GitLab comment authors keyed as
+// gitlab:{id}). system_key is unique per (workspace, owner, runtime) via
+// agent_system_identity_unique; this query is the app-level identity resolve
+// by workspace + key only.
+func (q *Queries) GetAgentBySystemKey(ctx context.Context, arg GetAgentBySystemKeyParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, getAgentBySystemKey, arg.WorkspaceID, arg.SystemKey)
 	var i Agent
 	err := row.Scan(
 		&i.ID,
@@ -3269,10 +3392,19 @@ func (q *Queries) ListAgentTasks(ctx context.Context, agentID pgtype.UUID) ([]Ag
 
 const listAgents = `-- name: ListAgents :many
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key FROM agent
-WHERE workspace_id = $1 AND archived_at IS NULL AND kind = 'user'
+WHERE workspace_id = $1
+  AND archived_at IS NULL
+  AND (
+    kind = 'user'
+    OR (kind = 'system' AND system_key LIKE 'gitlab:%')
+  )
 ORDER BY created_at ASC
 `
 
+// User-authored agents plus GitLab identity personas (kind=system,
+// system_key gitlab:*) so comment author name/avatar resolution works
+// via the same list path. Personas are non-runnable (max_concurrent_tasks=0)
+// and filtered out of assign/work surfaces by the app layer.
 func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Agent, error) {
 	rows, err := q.db.Query(ctx, listAgents, workspaceID)
 	if err != nil {
@@ -3322,7 +3454,11 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 
 const listAllAgents = `-- name: ListAllAgents :many
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key FROM agent
-WHERE workspace_id = $1 AND kind = 'user'
+WHERE workspace_id = $1
+  AND (
+    kind = 'user'
+    OR (kind = 'system' AND system_key LIKE 'gitlab:%')
+  )
 ORDER BY created_at ASC
 `
 

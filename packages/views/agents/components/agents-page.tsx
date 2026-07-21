@@ -18,6 +18,7 @@ import {
   type AgentActivity,
   agentRunCounts30dOptions,
   effectiveAccessScope,
+  isGitLabPersonaAgent,
   useWorkspaceActivityMap,
   useWorkspacePresenceMap,
   VISIBILITY_TOOLTIP,
@@ -818,11 +819,18 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
   // Scope counts come from the FULL set (filters never affect them).
   // Archived ignores the ownership lens (see the view store comment).
+  // Identity shells (GitLab comment personas) stay in the agent list for
+  // comment avatar/name resolution only — never on the Agents management UI.
+  const managedAgents = useMemo(
+    () => agents.filter((a) => !isGitLabPersonaAgent(a)),
+    [agents],
+  );
+
   const scopeCounts = useMemo<Record<AgentsScope, number>>(() => {
     let mine = 0;
     let all = 0;
     let archived = 0;
-    for (const a of agents) {
+    for (const a of managedAgents) {
       if (a.archived_at) {
         archived++;
         continue;
@@ -831,13 +839,13 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       if (currentUser && a.owner_id === currentUser.id) mine++;
     }
     return { mine, all, archived };
-  }, [agents, currentUser]);
+  }, [managedAgents, currentUser]);
 
   // Rows within the current scope, unfiltered, fully assembled — the
   // toolbar's option lists and the "n / total" denominator derive from
   // this; cells never pull their own queries.
   const scopeRows = useMemo<AgentListRow[]>(() => {
-    const inScope = agents.filter((a) => {
+    const inScope = managedAgents.filter((a) => {
       if (scope === "archived") return !!a.archived_at;
       if (a.archived_at) return false;
       if (scope === "mine") {
@@ -861,7 +869,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       };
     });
   }, [
-    agents,
+    managedAgents,
     scope,
     currentUser,
     runtimesById,
@@ -972,8 +980,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     );
   }
 
-  const totalCount = agents.filter((a) => !a.archived_at).length;
-  const showEmpty = !isLoading && agents.length === 0;
+  const totalCount = managedAgents.filter((a) => !a.archived_at).length;
+  const showEmpty = !isLoading && managedAgents.length === 0;
 
   // The active sort field / availability filter reads columns that arrive in
   // separate queries from the main agent list (activity → lastActiveDays,

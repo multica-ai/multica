@@ -8,6 +8,14 @@ SELECT * FROM project_resource
 WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
 ORDER BY project_id, position ASC, created_at ASC;
 
+-- name: ListGithubRepoProjectResourcesByWorkspace :many
+-- Used by GitLab issue webhooks to map a GitLab project (repo URL / path)
+-- onto a Multica project via its attached github_repo resource.
+SELECT * FROM project_resource
+WHERE workspace_id = $1
+  AND resource_type = 'github_repo'
+ORDER BY created_at ASC, id ASC;
+
 -- name: GetProjectResource :one
 SELECT * FROM project_resource
 WHERE id = $1;

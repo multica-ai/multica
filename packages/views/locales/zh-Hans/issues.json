@@ -590,5 +590,24 @@
     "row_backlog_hint": "智能体保持暂停",
     "row_todo_label": "Todo",
     "row_todo_hint": "启动智能体"
+  },
+  "merge_requests": {
+    "title": "合并请求",
+    "show_more": "再显示 {{count}} 条",
+    "show_less": "收起",
+    "state": {
+      "open": "开放",
+      "merged": "已合并",
+      "closed": "已关闭",
+      "locked": "已锁定"
+    }
+  },
+  "gitlab_issue": {
+    "title": "GitLab Issue",
+    "assignee_label": "GitLab",
+    "link_placeholder": "组/项目#123",
+    "link_button": "关联",
+    "unlink_button": "取消关联",
+    "link_error": "关联 GitLab Issue 失败"
   }
 }

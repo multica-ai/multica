@@ -123,6 +123,10 @@ import type {
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
+  GitLabConnection,
+  GitLabMergeRequest,
+  GitLabIssue,
+  ListGitLabConnectionsResponse,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
@@ -2656,6 +2660,50 @@ export class ApiClient {
 
   async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
     return this.fetch(`/api/issues/${issueId}/pull-requests`);
+  }
+
+  // GitLab integration
+  async listGitLabConnections(workspaceId: string): Promise<ListGitLabConnectionsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/gitlab/connections`);
+  }
+
+  async deleteGitLabConnection(workspaceId: string, connectionId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/gitlab/connections/${connectionId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async rotateGitLabConnectionWebhookSecret(
+    workspaceId: string,
+    connectionId: string,
+  ): Promise<GitLabConnection> {
+    return this.fetch(
+      `/api/workspaces/${workspaceId}/gitlab/connections/${connectionId}/rotate-webhook-secret`,
+      { method: "POST" },
+    );
+  }
+
+  async listIssueMergeRequests(issueId: string): Promise<{ merge_requests: GitLabMergeRequest[] }> {
+    return this.fetch(`/api/issues/${issueId}/merge-requests`);
+  }
+
+  async getGitLabIssue(issueId: string): Promise<GitLabIssue> {
+    return this.fetch(`/api/issues/${issueId}/gitlab-issue`);
+  }
+
+  async linkGitLabIssue(
+    issueId: string,
+    projectPath: string,
+    glIssueIid: number,
+  ): Promise<GitLabIssue> {
+    return this.fetch(`/api/issues/${issueId}/gitlab-issue`, {
+      method: "PUT",
+      body: JSON.stringify({ project_path: projectPath, gl_issue_iid: glIssueIid }),
+    });
+  }
+
+  async unlinkGitLabIssue(issueId: string): Promise<void> {
+    return this.fetch(`/api/issues/${issueId}/gitlab-issue`, { method: "DELETE" });
   }
 
   // Lark integration
