@@ -27,7 +27,7 @@ import { IssueSurface } from "./issue-surface";
 // does not remount its children on switch, so the surface must handle the
 // wsId change itself.
 const mockWsId = vi.hoisted(() => ({ current: "ws-1" }));
-const mockTranslate = vi.hoisted(() => () => "translated");
+const mockTranslate = vi.hoisted(() => vi.fn(() => "translated"));
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => mockWsId.current,
 }));
@@ -277,6 +277,7 @@ describe("IssueSurface — table pagination ownership", () => {
   beforeEach(() => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     listIssues = vi.fn(() => never<ListIssuesResponse>());
+    mockTranslate.mockClear();
     pruneIssueSurfaceViewStates([]);
     mockWsId.current = "ws-1";
     // jsdom has no IntersectionObserver; the table footer sentinel constructs
@@ -362,6 +363,79 @@ describe("IssueSurface — table pagination ownership", () => {
       }),
     );
     expect(listIssues).not.toHaveBeenCalled();
+  });
+
+  it("keeps the root total when a continuation page reports zero", async () => {
+    const { getIssueSurfaceViewStore } = await import(
+      "@multica/core/issues/stores/surface-view-store"
+    );
+    const store = getIssueSurfaceViewStore("project:pt-pages");
+    store.getState().setViewMode("table");
+    const first = makeIssue("page-1", "First cursor row", "pt-pages");
+    const second = makeIssue("page-2", "Second cursor row", "pt-pages");
+    const listIssueTableRows = vi.fn((request: IssueTableRowsRequest) =>
+      Promise.resolve(
+        request.page?.cursor == null
+          ? {
+              query_fingerprint: "sha256:pages",
+              group_key: null,
+              parent_id: null,
+              total: 2,
+              rows: [{ issue: first, direct_child_count: 0 }],
+              branch_total: 1,
+              next_cursor: "cursor-2",
+            }
+          : {
+              query_fingerprint: "sha256:pages",
+              group_key: null,
+              parent_id: null,
+              total: 0,
+              rows: [{ issue: second, direct_child_count: 0 }],
+              branch_total: 1,
+              next_cursor: null,
+            },
+      ),
+    );
+    setApiInstance({
+      listIssues,
+      listIssueTableRows,
+      listIssueTableFacets: vi.fn(() => never()),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => Promise.resolve([])),
+      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
+      listMembers: vi.fn(() => Promise.resolve([])),
+      listAgents: vi.fn(() => Promise.resolve([])),
+      listSquads: vi.fn(() => Promise.resolve([])),
+    } as unknown as ApiClient);
+
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "pt-pages" }}
+          modes={["table"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("First cursor row");
+    const loadMoreButton = document.querySelector<HTMLButtonElement>(
+      "tbody button.sticky",
+    );
+    expect(loadMoreButton).not.toBeNull();
+    fireEvent.click(loadMoreButton!);
+
+    await screen.findByText("Second cursor row");
+    expect(listIssueTableRows).toHaveBeenCalledWith(
+      expect.objectContaining({ page: { limit: 50, cursor: "cursor-2" } }),
+    );
+    expect(mockTranslate).toHaveBeenCalledWith(expect.any(Function), {
+      count: 2,
+      total: 2,
+    });
   });
 
   it("feeds loaded Table rows to the shared batch toolbar", async () => {

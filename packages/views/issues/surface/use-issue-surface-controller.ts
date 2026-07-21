@@ -477,10 +477,9 @@ export function useIssueSurfaceController({
       // CSV that looks successful.
       if (!page.query_fingerprint) throw new IssueTableExportIntegrityError();
       fingerprint ??= page.query_fingerprint;
-      expectedTotal ??= page.total;
+      if (cursor === null) expectedTotal = page.total;
       if (
         page.query_fingerprint !== fingerprint ||
-        page.total !== expectedTotal ||
         page.group_key !== null ||
         page.parent_id !== null
       ) {

@@ -13,7 +13,7 @@ execution: code
 
 > 本文定义 Table View 的目标产品语义、前后端边界和分阶段实施方案。核心目标不是提高当前的 `1000` 上限，而是移除“前端必须拥有完整结果集才能 Group/Hierarchy”的架构前提。
 
-> **Implementation status (2026-07-21):** 新 Table 路径的 canonical compiler、U2–U3、U5–U7，以及 U8 的 exact facets / cache invalidation 已落地；标准字段所需 concurrent indexes 已加入。Legacy GET handlers 尚未迁入同一 compiler。Table 采用 hard cutover，新旧客户端仍可分别使用 additive table endpoints 与 legacy endpoints，不维护两套前端 Table truth。当前显式导出由浏览器遍历同一 rows Query Spec，并在 fingerprint、total、cursor 或 schema 不一致时 fail closed；server-stream / async export job、observability、100k/1m staging SLO 与 browser network smoke 属于后续收口项。
+> **Implementation status (2026-07-21):** 新 Table 路径的 canonical compiler、U2–U3、U5–U7，以及 U8 的 exact facets / cache invalidation 已落地；标准字段所需 concurrent indexes 已加入。Legacy GET handlers 尚未迁入同一 compiler。Table 采用 hard cutover，新旧客户端仍可分别使用 additive table endpoints 与 legacy endpoints，不维护两套前端 Table truth。当前显式导出由浏览器遍历同一 rows Query Spec，并在 schema fallback、fingerprint/cursor 漂移、重复行或最终数量不等于首屏 total 时 fail closed；server-stream / async export job、observability、100k/1m staging SLO 与 browser network smoke 属于后续收口项。
 
 ## Goal Capsule
 
@@ -61,7 +61,7 @@ View state
 | Group membership / order / count | Backend | 必须对完整结果集求真 |
 | Hierarchy membership / child count | Backend | 父项可能不在当前客户端 window |
 | Facet count / aggregate | Backend | loaded rows 不能代表全集 |
-| Export | Backend membership + frontend orchestration（当前） | 显式导出逐页读取同一 rows query；fingerprint/total/cursor/schema 漂移时拒绝生成部分 CSV。server stream/job 为后续优化 |
+| Export | Backend membership + frontend orchestration（当前） | 显式导出逐页读取同一 rows query；fingerprint/cursor/schema 漂移或最终数量不等于首屏 total 时拒绝生成部分 CSV。server stream/job 为后续优化 |
 | View mode / columns / width / density | Frontend | 只改变呈现，不改变 membership |
 | Group / parent collapse | Frontend | 个人交互状态，决定哪些 branch 需要请求 |
 | Selection | Frontend | 当前交互 session 状态；membership 变化时清理 |
@@ -449,19 +449,19 @@ Response：
   "query_fingerprint": "sha256:...",
   "group_key": "status:todo",
   "parent_id": null,
-  "total": 18342,
+  "total": 0,
   "rows": [
     {
       "issue": { "id": "...", "title": "..." },
       "direct_child_count": 3
     }
   ],
-  "branch_total": 120,
+  "branch_total": 1,
   "next_cursor": "opaque-cursor"
 }
 ```
 
-`total` 是整个 Query membership，保证 ungrouped Table 不依赖 Group Header endpoint；`branch_total` 是当前 root/sibling branch 的数量，不是 group total。前端 grouped header 继续使用 groups response 的 `count`。
+`total` 只在 `group.kind=none`、`parent_id=null` 的首页返回整个 Query membership；续页、grouped branch 和 child branch 返回 `0`，grouped header 使用 groups response 的 `total`/`count`。`branch_total` 为兼容响应结构保留，值等于当前页 `rows.length`，不是权威 branch count；这两个约束避免 rows endpoint 为每个 branch/page 额外执行全量 COUNT。
 
 ### 4.4 Cursor Design
 
@@ -514,8 +514,8 @@ Response 返回 query fingerprint、query total，以及每个 facet 的 kind、
 V1 不新增独立 export endpoint。显式导出在浏览器中使用与 Table 相同的 Query Spec，逐页调用 `POST /api/issues/table/rows`：
 
 - 导出固定使用 `group=none`、`hierarchy=false`，因此只输出 query membership 中的真实 issue 行，不受 viewport、collapsed state 或 loaded branches 影响。
-- 每一页必须保持相同的非空 `query_fingerprint` 和 `total`，cursor 必须前进，issue ID 不得重复；结束时唯一 issue 数必须等于首屏 `total`。
-- Response schema fallback、fingerprint/total 漂移、cursor loop、重复 issue 或最终数量不一致时 fail closed，不生成可能截断或混合 snapshot 的 CSV。
+- 每一页必须保持相同的非空 `query_fingerprint`，cursor 必须前进，issue ID 不得重复；结束时唯一 issue 数必须等于首屏 `total`（续页 `total=0`）。
+- Response schema fallback、fingerprint 漂移、cursor loop、重复 issue 或最终数量不一致时 fail closed，不生成可能截断或混合 snapshot 的 CSV。
 - CSV formula injection protection沿用 `escapeCsvCell`。
 - Server-stream / async export job 是大规模导出的后续优化；迁移时仍须复用同一 Query Spec 和上述一致性语义。
 
@@ -886,7 +886,7 @@ issueKeys.tableQueryAll(wsId)
   - `server/internal/handler/issue_table_query.go`
   - `server/internal/handler/issue_table_cursor.go`（new）
   - `server/internal/handler/issue_table_query_test.go`
-- **Approach:** 实现 typed cursor、query fingerprint、stable keyset、same-query same-group hierarchy、branch totals/direct child counts。
+- **Approach:** 实现 typed cursor、query fingerprint、stable keyset、same-query same-group hierarchy、page row counts/direct child counts。
 - **Critical test scenarios:** title/date/property/position asc+desc；NULLS LAST；created_at ties；cursor mismatch；same-group child；cross-group child；filtered-out parent；deep tree branch loading；parent moved between groups。
 - **Verification:** 反复分页结果与一次性 SQL baseline ID set 相同；race/update scenario 通过 invalidation contract 测试。
 
@@ -963,7 +963,7 @@ issueKeys.tableQueryAll(wsId)
   - `packages/views/issues/surface/use-issue-table-data.ts`
   - analytics/observability touchpoints
 - **Approach:** exact disjunctive facets；rows-based fail-closed export；table query prefix invalidation；row optimistic patch；additive endpoint compatibility。
-- **Critical test scenarios:** group/facet/export membership parity；export cursor/fingerprint/total/schema drift；create/delete/update invalidation；property edit regroup；offline/5xx retry；old desktop client继续使用旧 endpoints。
+- **Critical test scenarios:** group/facet/export membership parity；export cursor/fingerprint/schema drift 与 final-total mismatch；create/delete/update invalidation；property edit regroup；offline/5xx retry；old desktop client继续使用旧 endpoints。
 - **Verification:** core WS/cache tests、integration tests、staging rollout dashboards。
 
 ### Sequencing

@@ -26,7 +26,7 @@ type issueTableRowsResponse struct {
 	ParentID         *string                 `json:"parent_id"`
 	Total            int64                   `json:"total"`
 	Rows             []issueTableRowResponse `json:"rows"`
-	BranchTotal      int64                   `json:"branch_total"`
+	BranchTotal      int64                   `json:"branch_total"` // Current page size; retained for response compatibility.
 	NextCursor       *string                 `json:"next_cursor"`
 }
 
@@ -281,7 +281,6 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 			branchPredicate = fmt.Sprintf("i.parent_issue_id = %s::uuid AND EXISTS (SELECT 1 FROM filtered_group parent WHERE parent.id = %s::uuid)", parentRef, parentRef)
 		}
 	}
-	cteArgsLen := len(args)
 	cursorPredicate, ok := resolvedSort.cursorPredicate(w, cursor, addArg)
 	if !ok {
 		return
@@ -367,18 +366,16 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 	}
 	rows.Close()
 
-	countArgs := args[:cteArgsLen]
-	var branchTotal int64
-	if err := h.DB.QueryRow(r.Context(), cte+" SELECT COUNT(*)::bigint FROM branch", countArgs...).Scan(&branchTotal); err != nil {
-		slog.Warn("ListIssueTableRows branch count failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeIssueTableQueryFailure(w, r, "failed to count table rows")
-		return
-	}
+	// Only the ungrouped root head consumes a query-wide total. Group headers
+	// get their exact totals from /groups; child branches and continuation pages
+	// must not pay for a full-membership COUNT.
 	var total int64
-	if err := h.DB.QueryRow(r.Context(), fmt.Sprintf("SELECT COUNT(*)::bigint FROM issue i WHERE %s", compiled.where), compiled.args...).Scan(&total); err != nil {
-		slog.Warn("ListIssueTableRows total count failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeIssueTableQueryFailure(w, r, "failed to count table rows")
-		return
+	if cursor == nil && request.Group.Kind == "none" && request.ParentID == nil {
+		if err := h.DB.QueryRow(r.Context(), fmt.Sprintf("SELECT COUNT(*)::bigint FROM issue i WHERE %s", compiled.where), compiled.args...).Scan(&total); err != nil {
+			slog.Warn("ListIssueTableRows total count failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeIssueTableQueryFailure(w, r, "failed to count table rows")
+			return
+		}
 	}
 
 	var nextCursor *string
@@ -403,7 +400,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		})
 	}
 
-	// The row window, counts and cursor are the authoritative snapshot. Commit
+	// The row window, optional root total and cursor are the authoritative snapshot. Commit
 	// it before the best-effort display enrichment below: PostgreSQL aborts a
 	// transaction after any statement error, so running getIssuePrefix or
 	// labelsByIssue inside the snapshot would turn their intentionally tolerated
@@ -441,7 +438,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		ParentID:         request.ParentID,
 		Total:            total,
 		Rows:             responseRows,
-		BranchTotal:      branchTotal,
+		BranchTotal:      int64(len(responseRows)),
 		NextCursor:       nextCursor,
 	}
 	writeJSON(w, http.StatusOK, response)

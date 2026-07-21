@@ -32,9 +32,9 @@ describe("ApiClient server Table query", () => {
             query_fingerprint: "sha256:query",
             group_key: "status:todo",
             parent_id: null,
-            total: 1001,
+            total: 0,
             rows: [],
-            branch_total: 1001,
+            branch_total: 0,
             next_cursor: "next-page",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -83,7 +83,7 @@ describe("ApiClient server Table query", () => {
         parent_id: null,
         page: { limit: 50, cursor: null },
       }),
-    ).resolves.toMatchObject({ branch_total: 1001, next_cursor: "next-page" });
+    ).resolves.toMatchObject({ branch_total: 0, next_cursor: "next-page" });
     await expect(
       client.listIssueTableFacets({
         query,

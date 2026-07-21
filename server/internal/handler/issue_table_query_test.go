@@ -14,8 +14,9 @@ import (
 )
 
 type issueTableEnrichmentFailTxStarter struct {
-	inner      txStarter
-	labelCalls *int
+	inner           txStarter
+	labelCalls      *int
+	tableQueryCalls *int
 }
 
 func (s issueTableEnrichmentFailTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
@@ -23,15 +24,31 @@ func (s issueTableEnrichmentFailTxStarter) Begin(ctx context.Context) (pgx.Tx, e
 	if err != nil {
 		return nil, err
 	}
-	return &issueTableEnrichmentFailTx{Tx: tx, labelCalls: s.labelCalls}, nil
+	return &issueTableEnrichmentFailTx{
+		Tx:              tx,
+		labelCalls:      s.labelCalls,
+		tableQueryCalls: s.tableQueryCalls,
+	}, nil
 }
 
 type issueTableEnrichmentFailTx struct {
 	pgx.Tx
-	labelCalls *int
+	labelCalls      *int
+	tableQueryCalls *int
+}
+
+func (tx *issueTableEnrichmentFailTx) recordTableQuery(sql string) {
+	if tx.tableQueryCalls == nil {
+		return
+	}
+	if strings.Contains(sql, "WITH filtered_group AS (") ||
+		strings.Contains(sql, "SELECT COUNT(*)::bigint FROM issue i WHERE") {
+		*tx.tableQueryCalls = *tx.tableQueryCalls + 1
+	}
 }
 
 func (tx *issueTableEnrichmentFailTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	tx.recordTableQuery(sql)
 	if strings.Contains(sql, "ListLabelsForIssues") {
 		*tx.labelCalls = *tx.labelCalls + 1
 		// A real PostgreSQL statement error poisons the transaction until
@@ -41,6 +58,11 @@ func (tx *issueTableEnrichmentFailTx) Query(ctx context.Context, sql string, arg
 		return nil, err
 	}
 	return tx.Tx.Query(ctx, sql, args...)
+}
+
+func (tx *issueTableEnrichmentFailTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	tx.recordTableQuery(sql)
+	return tx.Tx.QueryRow(ctx, sql, args...)
 }
 
 func TestCanonicalIssueTableFingerprintNormalizesSetLikeArrays(t *testing.T) {
@@ -146,10 +168,12 @@ func TestIssueTableRowsCommitsBeforeBestEffortEnrichment(t *testing.T) {
 	}
 
 	labelCalls := 0
+	tableQueryCalls := 0
 	handler := *testHandler
 	handler.TxStarter = issueTableEnrichmentFailTxStarter{
-		inner:      testHandler.TxStarter,
-		labelCalls: &labelCalls,
+		inner:           testHandler.TxStarter,
+		labelCalls:      &labelCalls,
+		tableQueryCalls: &tableQueryCalls,
 	}
 	recorder := httptest.NewRecorder()
 	handler.ListIssueTableRows(recorder, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
@@ -174,6 +198,12 @@ func TestIssueTableRowsCommitsBeforeBestEffortEnrichment(t *testing.T) {
 	}
 	if len(response.Rows) != 1 {
 		t.Fatalf("rows = %d, want 1", len(response.Rows))
+	}
+	if response.Total != 1 || response.BranchTotal != 1 {
+		t.Fatalf("unexpected root counts: total=%d branch_total=%d", response.Total, response.BranchTotal)
+	}
+	if tableQueryCalls != 2 {
+		t.Fatalf("ungrouped root head executed %d table queries, want 2", tableQueryCalls)
 	}
 }
 
@@ -282,8 +312,16 @@ func TestIssueTableStatusGroupingOverOneThousandRows(t *testing.T) {
 	}
 
 	groupKey := "status:todo"
+	labelCalls := 0
+	tableQueryCalls := 0
+	rowsHandler := *testHandler
+	rowsHandler.TxStarter = issueTableEnrichmentFailTxStarter{
+		inner:           testHandler.TxStarter,
+		labelCalls:      &labelCalls,
+		tableQueryCalls: &tableQueryCalls,
+	}
 	rowsRecorder := httptest.NewRecorder()
-	testHandler.ListIssueTableRows(rowsRecorder, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
+	rowsHandler.ListIssueTableRows(rowsRecorder, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
 		Query:     query,
 		Group:     issueTableGroupSpec{Kind: "status"},
 		GroupKey:  &groupKey,
@@ -297,15 +335,18 @@ func TestIssueTableStatusGroupingOverOneThousandRows(t *testing.T) {
 	if err := json.NewDecoder(rowsRecorder.Body).Decode(&rows); err != nil {
 		t.Fatalf("decode rows: %v", err)
 	}
-	if rows.Total != 1001 || rows.BranchTotal != 501 || len(rows.Rows) != 50 || rows.NextCursor == nil {
+	if rows.Total != 0 || rows.BranchTotal != 50 || len(rows.Rows) != 50 || rows.NextCursor == nil {
 		t.Fatalf("unexpected rows page: total=%d branch_total=%d rows=%d cursor=%v", rows.Total, rows.BranchTotal, len(rows.Rows), rows.NextCursor)
+	}
+	if tableQueryCalls != 1 {
+		t.Fatalf("grouped root head executed %d table queries, want 1", tableQueryCalls)
 	}
 	firstPageIDs := make(map[string]struct{}, len(rows.Rows))
 	for _, row := range rows.Rows {
 		firstPageIDs[row.Issue.ID] = struct{}{}
 	}
 	secondRowsRecorder := httptest.NewRecorder()
-	testHandler.ListIssueTableRows(secondRowsRecorder, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
+	rowsHandler.ListIssueTableRows(secondRowsRecorder, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
 		Query:     query,
 		Group:     issueTableGroupSpec{Kind: "status"},
 		GroupKey:  &groupKey,
@@ -319,13 +360,58 @@ func TestIssueTableStatusGroupingOverOneThousandRows(t *testing.T) {
 	if err := json.NewDecoder(secondRowsRecorder.Body).Decode(&secondRows); err != nil {
 		t.Fatalf("decode second rows: %v", err)
 	}
-	if len(secondRows.Rows) != 50 {
-		t.Fatalf("second rows length = %d, want 50", len(secondRows.Rows))
+	if secondRows.Total != 0 || secondRows.BranchTotal != 50 || len(secondRows.Rows) != 50 {
+		t.Fatalf("unexpected grouped continuation: total=%d branch_total=%d rows=%d", secondRows.Total, secondRows.BranchTotal, len(secondRows.Rows))
+	}
+	if tableQueryCalls != 2 {
+		t.Fatalf("grouped continuation executed %d cumulative table queries, want 2", tableQueryCalls)
 	}
 	for _, row := range secondRows.Rows {
 		if _, duplicate := firstPageIDs[row.Issue.ID]; duplicate {
 			t.Fatalf("keyset cursor repeated issue %s across pages", row.Issue.ID)
 		}
+	}
+
+	ungroupedRecorder := httptest.NewRecorder()
+	rowsHandler.ListIssueTableRows(ungroupedRecorder, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
+		Query:     query,
+		Group:     issueTableGroupSpec{Kind: "none"},
+		Hierarchy: issueTableHierarchyRequest{Enabled: false},
+		Page:      issueTablePageRequest{Limit: 50},
+	}))
+	if ungroupedRecorder.Code != http.StatusOK {
+		t.Fatalf("ungrouped rows status = %d: %s", ungroupedRecorder.Code, ungroupedRecorder.Body.String())
+	}
+	var ungroupedRows issueTableRowsResponse
+	if err := json.NewDecoder(ungroupedRecorder.Body).Decode(&ungroupedRows); err != nil {
+		t.Fatalf("decode ungrouped rows: %v", err)
+	}
+	if ungroupedRows.Total != 1001 || ungroupedRows.BranchTotal != 50 || len(ungroupedRows.Rows) != 50 || ungroupedRows.NextCursor == nil {
+		t.Fatalf("unexpected ungrouped root head: total=%d branch_total=%d rows=%d cursor=%v", ungroupedRows.Total, ungroupedRows.BranchTotal, len(ungroupedRows.Rows), ungroupedRows.NextCursor)
+	}
+	if tableQueryCalls != 4 {
+		t.Fatalf("ungrouped root head executed %d cumulative table queries, want 4", tableQueryCalls)
+	}
+
+	ungroupedNextRecorder := httptest.NewRecorder()
+	rowsHandler.ListIssueTableRows(ungroupedNextRecorder, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
+		Query:     query,
+		Group:     issueTableGroupSpec{Kind: "none"},
+		Hierarchy: issueTableHierarchyRequest{Enabled: false},
+		Page:      issueTablePageRequest{Limit: 50, Cursor: ungroupedRows.NextCursor},
+	}))
+	if ungroupedNextRecorder.Code != http.StatusOK {
+		t.Fatalf("ungrouped continuation status = %d: %s", ungroupedNextRecorder.Code, ungroupedNextRecorder.Body.String())
+	}
+	var ungroupedNext issueTableRowsResponse
+	if err := json.NewDecoder(ungroupedNextRecorder.Body).Decode(&ungroupedNext); err != nil {
+		t.Fatalf("decode ungrouped continuation: %v", err)
+	}
+	if ungroupedNext.Total != 0 || ungroupedNext.BranchTotal != 50 || len(ungroupedNext.Rows) != 50 {
+		t.Fatalf("unexpected ungrouped continuation: total=%d branch_total=%d rows=%d", ungroupedNext.Total, ungroupedNext.BranchTotal, len(ungroupedNext.Rows))
+	}
+	if tableQueryCalls != 5 {
+		t.Fatalf("ungrouped continuation executed %d cumulative table queries, want 5", tableQueryCalls)
 	}
 
 	for _, sortCase := range []issueTableSortRequest{

@@ -576,9 +576,9 @@ describe("useIssueSurfaceController", () => {
         query_fingerprint: "sha256:export",
         group_key: null,
         parent_id: null,
-        total: 2,
+        total: 0,
         rows: [{ issue: second, direct_child_count: 0 }],
-        branch_total: 2,
+        branch_total: 1,
         next_cursor: null,
       });
     setApiInstance({

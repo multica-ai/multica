@@ -1004,7 +1004,7 @@ export function TableView({
         const page = result.data;
         if (page) {
           current.rows.push(...page.rows);
-          current.total = page.total;
+          if (target.cursor === null) current.total = page.total;
           current.nextCursor = page.next_cursor;
         }
         if (target.cursor === null) {
