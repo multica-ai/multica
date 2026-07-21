@@ -8,8 +8,8 @@ import { OrgChartPage } from "./org-chart-page";
 
 const state = vi.hoisted(() => ({
   seats: [] as OrgChartSeat[],
-  members: [{ id: "member-1", name: "Jesper" }],
-  agents: [{ id: "agent-1", name: "Sara" }],
+  members: [{ id: "member-1", name: "Jesper" }] as { id: string; name: string; avatar_url?: string | null }[],
+  agents: [{ id: "agent-1", name: "Sara" }] as { id: string; name: string; avatar_url?: string | null }[],
   loading: false,
   error: false,
   create: vi.fn(),
@@ -128,6 +128,43 @@ describe("OrgChartPage", () => {
     expect(state.create).toHaveBeenCalledWith(
       expect.objectContaining({ name: "Finance", responsibilities: [] }),
       expect.any(Object),
+    );
+  });
+
+  it("shows the owner's avatar picture when the member has one", () => {
+    state.members = [{ id: "member-1", name: "Jesper", avatar_url: "https://pics/jesper.png" }];
+    state.seats = [seat({ owner_type: "member", owner_id: "member-1", owner_name: "Jesper", vacant: false })];
+
+    render(<OrgChartPage />);
+
+    expect(screen.getByRole("img", { name: "Jesper" })).toHaveAttribute("src", "https://pics/jesper.png");
+    state.members = [{ id: "member-1", name: "Jesper" }];
+  });
+
+  it("inserts a report below a seat with the parent preset", () => {
+    render(<OrgChartPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Add a role near Operations" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add role below Operations" }));
+    fireEvent.change(screen.getByLabelText("Seat name"), { target: { value: "Finance" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save seat" }));
+
+    expect(state.create).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Finance", parent_id: "seat-1" }),
+      expect.any(Object),
+    );
+  });
+
+  it("re-parents the target under a new seat inserted above it", () => {
+    state.create.mockImplementation((_input: { name: string }, opts?: { onSuccess?: (created: { id: string }) => void }) => opts?.onSuccess?.({ id: "new-seat" }));
+
+    render(<OrgChartPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Add a role near Operations" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add role above Operations" }));
+    fireEvent.change(screen.getByLabelText("Seat name"), { target: { value: "Leadership" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save seat" }));
+
+    expect(state.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "seat-1", input: expect.objectContaining({ parent_id: "new-seat" }) }),
     );
   });
 });

@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { OrgChartSeat } from "../core/types";
 import { RolesChart } from "./roles-chart";
@@ -24,5 +24,22 @@ describe("RolesChart", () => {
     expect(screen.getByText("Unassigned roles")).toBeInTheDocument();
     expect(screen.getByText("Orphan")).toBeInTheDocument();
     expect(screen.getAllByText("Reporting cycle needs correction.").length).toBeGreaterThan(0);
+  });
+
+  it("shows the owner's picture when the actor resolves an avatar url", () => {
+    render(<RolesChart onEdit={vi.fn()}
+      resolveActor={() => ({ name: "Ava", initials: "AV", avatarUrl: "https://pics/ava.png" })}
+      seats={[seat("lead", "Leadership", { owner_type: "member", owner_id: "m1", owner_name: "Ava", vacant: false })]} />);
+    expect(screen.getByRole("img", { name: "Ava" })).toHaveAttribute("src", "https://pics/ava.png");
+  });
+
+  it("offers above, beside, and below inserts and reports the chosen direction", () => {
+    const onInsert = vi.fn();
+    render(<RolesChart onEdit={vi.fn()} onInsert={onInsert} seats={[seat("lead", "Leadership")]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add a role near Leadership" }));
+    expect(screen.getByRole("button", { name: "Add role above Leadership" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add role beside Leadership" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add role below Leadership" }));
+    expect(onInsert).toHaveBeenCalledWith("lead", "below");
   });
 });
