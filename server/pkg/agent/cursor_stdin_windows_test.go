@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,13 +23,39 @@ import (
 //     nothing user-controlled left to re-tokenise; and
 //   - the prompt still arrives byte-for-byte on stdin.
 //
-// Unlike the unix tests this one needs a real powershell.exe/pwsh.exe, so it
-// only runs on Windows. It deliberately does NOT stub powerShellLookup — the
-// point is to exercise the actual host.
+// It runs against every PowerShell host present, not just the one
+// defaultPowerShellLookup would pick. That matters because the two hosts differ
+// on exactly the mechanism behind this bug: windows powershell.exe (5.1) and
+// pwsh <= 7.2 default to Legacy native argument passing, while pwsh >= 7.3
+// defaults to Standard. A fix that only held on the newer host would be no fix
+// at all for the reporter.
 func TestCursorExecutePromptSurvivesPowerShellShim(t *testing.T) {
-	if _, ok := defaultPowerShellLookup(); !ok {
+	hosts := availablePowerShellHosts()
+	if len(hosts) == 0 {
 		t.Skip("no PowerShell host available")
 	}
+	for _, host := range hosts {
+		t.Run(filepath.Base(host), func(t *testing.T) {
+			stubPowerShell(t, host, true)
+			assertPromptSurvivesShim(t)
+		})
+	}
+}
+
+// availablePowerShellHosts resolves every PowerShell host on PATH so the
+// regression can be proven on each independently.
+func availablePowerShellHosts() []string {
+	var found []string
+	for _, name := range []string{"powershell.exe", "pwsh.exe"} {
+		if p, err := exec.LookPath(name); err == nil {
+			found = append(found, p)
+		}
+	}
+	return found
+}
+
+func assertPromptSurvivesShim(t *testing.T) {
+	t.Helper()
 
 	dir := t.TempDir()
 	argvPath := filepath.Join(dir, "argv.txt")
