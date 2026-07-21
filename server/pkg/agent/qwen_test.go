@@ -31,16 +31,21 @@ func TestBuildQwenArgsKeepsProtocolManaged(t *testing.T) {
 		ExtraArgs:       []string{"--output-format", "text", "--sandbox"},
 		CustomArgs: []string{
 			"--prompt=replace", "-o", "json", "--model", "other", "--resume", "other-session",
-			"--safe-mode", "--chat-recording", "false", "--mcp-config", "injected-mcp.json", "--mcp-config=inline-mcp.json", "--debug",
+			"--safe-mode", "--chat-recording", "false", "--mcp-config", "injected-mcp.json", "--mcp-config=inline-mcp.json",
+			"--approval-mode", "auto", "--approval-mode=yolo", "--allowed-tools", "web_fetch", "--allowed-tools=agent", "--yolo", "-y",
+			"--exclude-tools", "run_shell_command", "--debug",
 		},
 	}, slog.Default())
 	joined := strings.Join(args, " ")
-	for _, forbidden := range []string{"text", "replace", "other-session", "other", "--safe-mode", "--chat-recording", "injected-mcp.json", "inline-mcp.json"} {
+	for _, forbidden := range []string{"text", "replace", "other-session", "other", "--safe-mode", "--chat-recording", "injected-mcp.json", "inline-mcp.json", "auto", "web_fetch", "--allowed-tools"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("managed argument %q leaked into %v", forbidden, args)
 		}
 	}
-	wantPrefix := []string{"-p", "task prompt", "--output-format", "stream-json", "--model", "qwen3.8-max-preview", "--resume", "session-1"}
+	wantPrefix := []string{
+		"-p", "task prompt", "--output-format", "stream-json", "--yolo",
+		"--model", "qwen3.8-max-preview", "--resume", "session-1",
+	}
 	if len(args) < len(wantPrefix) {
 		t.Fatalf("args too short: %v", args)
 	}
@@ -51,6 +56,25 @@ func TestBuildQwenArgsKeepsProtocolManaged(t *testing.T) {
 	}
 	if !strings.Contains(joined, "--sandbox") || !strings.Contains(joined, "--debug") {
 		t.Fatalf("non-managed custom args missing from %v", args)
+	}
+	excludeToolsPreserved := false
+	yoloCount := 0
+	for i, arg := range args {
+		if arg == "--yolo" {
+			yoloCount++
+		}
+		if arg == "--exclude-tools" && i+1 < len(args) && args[i+1] == "run_shell_command" {
+			excludeToolsPreserved = true
+		}
+		if arg == "-y" || arg == "--approval-mode" || strings.HasPrefix(arg, "--approval-mode=") {
+			t.Fatalf("custom permission argument %q leaked into %v", arg, args)
+		}
+	}
+	if !excludeToolsPreserved {
+		t.Fatalf("user-controlled --exclude-tools missing from %v", args)
+	}
+	if yoloCount != 1 {
+		t.Fatalf("daemon --yolo count = %d, want 1; args=%v", yoloCount, args)
 	}
 }
 

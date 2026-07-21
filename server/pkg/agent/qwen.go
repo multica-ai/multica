@@ -12,15 +12,17 @@ import (
 )
 
 // qwenBackend drives Qwen Code's native non-interactive JSONL protocol:
-// qwen -p <prompt> --output-format stream-json. The event schema is based on
-// Qwen Code 0.20.0 captures in testdata/qwen-code-0.20.0-stream-json.jsonl.
+// qwen -p <prompt> --output-format stream-json --yolo. The event schema is
+// based on Qwen Code 0.20.0 captures in
+// testdata/qwen-code-0.20.0-stream-json.jsonl.
 type qwenBackend struct {
 	cfg Config
 }
 
 // qwenBlockedArgs are owned by Multica. Qwen accepts the task prompt and stream
 // protocol as flags, so custom args must not replace either. Model/session are
-// also selected by Multica, and safe mode disables the QWEN.md context file.
+// also selected by Multica, safe mode disables the QWEN.md context file, and
+// permission flags must not override the daemon's unattended execution policy.
 var qwenBlockedArgs = map[string]blockedArgMode{
 	"-p":                   blockedWithValue,
 	"--prompt":             blockedWithValue,
@@ -37,10 +39,14 @@ var qwenBlockedArgs = map[string]blockedArgMode{
 	"--chat-recording":     blockedWithValue,
 	"--mcp-config":         blockedWithValue,
 	"--safe-mode":          blockedStandalone,
+	"--approval-mode":      blockedWithValue,
+	"--allowed-tools":      blockedWithValue,
+	"--yolo":               blockedStandalone,
+	"-y":                   blockedStandalone,
 }
 
 func buildQwenArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{"-p", prompt, "--output-format", "stream-json"}
+	args := []string{"-p", prompt, "--output-format", "stream-json", "--yolo"}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
