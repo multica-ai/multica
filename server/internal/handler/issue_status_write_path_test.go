@@ -259,3 +259,85 @@ func TestCreateIssueRejectsBadStatusInput(t *testing.T) {
 		t.Fatalf("unknown status: expected 400, got %d %s", code, body)
 	}
 }
+
+// listIssueIDsWithQuery runs ListIssues with a raw query string and returns ids.
+func listIssueIDsWithQuery(t *testing.T, query string) []string {
+	t.Helper()
+	w := httptest.NewRecorder()
+	testHandler.ListIssues(w, newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&"+query, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues %q: %d %s", query, w.Code, w.Body.String())
+	}
+	var resp struct {
+		Issues []IssueResponse `json:"issues"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode issues: %v", err)
+	}
+	ids := make([]string, 0, len(resp.Issues))
+	for _, i := range resp.Issues {
+		ids = append(ids, i.ID)
+	}
+	return ids
+}
+
+// status_ids is the multi-select facet the board columns and filter chips need:
+// one query returning issues across several specific catalog statuses (MUL-4809).
+func TestListIssuesFiltersByStatusIDs(t *testing.T) {
+	ensureTestWorkspaceStatuses(t)
+	alpha, code, body := createStatus(t, map[string]any{
+		"name": "Facet Alpha", "category": "in_progress", "icon": "in_progress", "color": "warning",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create alpha: %d %s", code, body)
+	}
+	t.Cleanup(func() { deleteStatus(t, alpha.ID, "") })
+	beta, code, body := createStatus(t, map[string]any{
+		"name": "Facet Beta", "category": "in_progress", "icon": "in_review", "color": "info",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create beta: %d %s", code, body)
+	}
+	t.Cleanup(func() { deleteStatus(t, beta.ID, "") })
+
+	inAlpha, _, _ := createIssueWithStatusFields(t, map[string]any{"title": "facet a", "status_id": alpha.ID})
+	inBeta, _, _ := createIssueWithStatusFields(t, map[string]any{"title": "facet b", "status_id": beta.ID})
+	elsewhere, _, _ := createIssueWithStatusFields(t, map[string]any{"title": "facet c", "status": "backlog"})
+	t.Cleanup(func() {
+		deleteTestIssue(t, inAlpha.ID)
+		deleteTestIssue(t, inBeta.ID)
+		deleteTestIssue(t, elsewhere.ID)
+	})
+
+	got := listIssueIDsWithQuery(t, "status_ids="+alpha.ID+","+beta.ID+"&limit=200")
+	has := func(id string) bool {
+		for _, g := range got {
+			if g == id {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(inAlpha.ID) || !has(inBeta.ID) {
+		t.Fatalf("status_ids must OR across the selected statuses; got %v", got)
+	}
+	if has(elsewhere.ID) {
+		t.Fatalf("status_ids must exclude other statuses; got %v", got)
+	}
+
+	// Single-value selection still narrows to exactly that status.
+	only := listIssueIDsWithQuery(t, "status_ids="+alpha.ID+"&limit=200")
+	for _, id := range only {
+		if id == inBeta.ID {
+			t.Fatalf("single status_ids leaked another status: %v", only)
+		}
+	}
+
+	if _, code, body := func() (IssueResponse, int, string) {
+		w := httptest.NewRecorder()
+		testHandler.ListIssues(w, newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&status_ids=not-a-uuid", nil))
+		return IssueResponse{}, w.Code, w.Body.String()
+	}(); code != http.StatusBadRequest {
+		t.Fatalf("malformed status_ids: expected 400, got %d %s", code, body)
+	}
+}

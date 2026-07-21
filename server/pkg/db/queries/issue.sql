@@ -198,6 +198,9 @@ FROM issue i
 WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
   AND (sqlc.narg('status_id')::uuid IS NULL OR i.status_id = sqlc.narg('status_id'))
+  -- status_ids (MUL-4809): multi-select by catalog id — one board column per
+  -- status, and multi-select filter chips. OR within the field.
+  AND (sqlc.narg('status_ids')::uuid[] IS NULL OR i.status_id = ANY(sqlc.narg('status_ids')::uuid[]))
   -- status_category (MUL-4809): match issues whose status_id resolves to the
   -- given Category, scoped to the same workspace (no FK). Mirrors the EXISTS
   -- predicate the dynamic ListIssues/ListGroupedIssues paths build.

@@ -358,34 +358,61 @@ func (h *Handler) hydrateStatusDetails(ctx context.Context, wsUUID pgtype.UUID, 
 // filters (MUL-4809 read side) and validates them: status_id must be a UUID,
 // status_category one of the 5 Categories. On a malformed value it writes a 400
 // and returns ok=false. Empty params mean "no filter".
-func parseStatusCatalogFilters(w http.ResponseWriter, r *http.Request) (statusID pgtype.UUID, category string, ok bool) {
+// statusCatalogFilters carries the catalog-aware status filters a list request
+// may send (MUL-4809). They are additive to the legacy `statuses` token filter,
+// which older clients still use.
+type statusCatalogFilters struct {
+	// StatusID pins one exact catalog row.
+	StatusID pgtype.UUID
+	// StatusIDs is the multi-select form: the board renders one column per
+	// status, and the filter chips let several be selected at once. OR within
+	// the field, like every other multi-value facet.
+	StatusIDs []pgtype.UUID
+	// Category narrows to one of the 5 machine Categories.
+	Category string
+}
+
+func parseStatusCatalogFilters(w http.ResponseWriter, r *http.Request) (statusCatalogFilters, bool) {
+	var f statusCatalogFilters
 	if s := strings.TrimSpace(r.URL.Query().Get("status_id")); s != "" {
 		u, err := util.ParseUUID(s)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "status_id must be a uuid")
-			return pgtype.UUID{}, "", false
+			return statusCatalogFilters{}, false
 		}
-		statusID = u
+		f.StatusID = u
+	}
+	for _, raw := range splitCommaParam(r.URL.Query().Get("status_ids")) {
+		u, err := util.ParseUUID(strings.TrimSpace(raw))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "status_ids must be a comma-separated list of uuids")
+			return statusCatalogFilters{}, false
+		}
+		f.StatusIDs = append(f.StatusIDs, u)
 	}
 	if c := strings.TrimSpace(r.URL.Query().Get("status_category")); c != "" {
 		validated, err := validateIssueStatusCategory(c)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
-			return pgtype.UUID{}, "", false
+			return statusCatalogFilters{}, false
 		}
-		category = validated
+		f.Category = validated
 	}
-	return statusID, category, true
+	return f, true
 }
 
 // appendStatusCatalogFilters adds the status_id / status_category predicates to a
 // dynamic issue-list WHERE builder (MUL-4809). status_category joins the catalog
 // via an EXISTS subquery scoped to the same workspace (no FK). alias is the issue
 // table alias in the surrounding query (e.g. "i").
-func appendStatusCatalogFilters(where []string, alias string, statusID pgtype.UUID, category string, addArg func(any) string) []string {
-	if statusID.Valid {
-		where = append(where, fmt.Sprintf("%s.status_id = %s", alias, addArg(statusID)))
+func appendStatusCatalogFilters(where []string, alias string, f statusCatalogFilters, addArg func(any) string) []string {
+	if f.StatusID.Valid {
+		where = append(where, fmt.Sprintf("%s.status_id = %s", alias, addArg(f.StatusID)))
 	}
+	if len(f.StatusIDs) > 0 {
+		where = append(where, fmt.Sprintf("%s.status_id = ANY(%s::uuid[])", alias, addArg(f.StatusIDs)))
+	}
+	category := f.Category
 	if category != "" {
 		where = append(where, fmt.Sprintf(
 			"EXISTS (SELECT 1 FROM issue_status ist WHERE ist.id = %s.status_id AND ist.workspace_id = %s.workspace_id AND ist.category = %s)",
@@ -1087,7 +1114,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// Custom-status catalog filters (MUL-4809). Parsed BEFORE the open_only
 	// branch so validation (400 on a bad UUID / unknown Category) and the two
 	// predicates apply to BOTH the open_only fast path and the general list.
-	statusIDFilter, statusCategoryFilter, statusFiltersOK := parseStatusCatalogFilters(w, r)
+	statusFilters, statusFiltersOK := parseStatusCatalogFilters(w, r)
 	if !statusFiltersOK {
 		return
 	}
@@ -1107,8 +1134,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
 			WorkspaceID:      wsUUID,
-			StatusID:         statusIDFilter,
-			StatusCategory:   pgtype.Text{String: statusCategoryFilter, Valid: statusCategoryFilter != ""},
+			StatusID:         statusFilters.StatusID,
+			StatusCategory:   pgtype.Text{String: statusFilters.Category, Valid: statusFilters.Category != ""},
+			StatusIds:        statusFilters.StatusIDs,
 			Priority:         priorityFilter,
 			AssigneeID:       assigneeFilter,
 			AssigneeIds:      assigneeIdsFilter,
@@ -1263,7 +1291,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if len(statusesFilter) > 0 {
 		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(statusesFilter)))
 	}
-	where = appendStatusCatalogFilters(where, "i", statusIDFilter, statusCategoryFilter, addArg)
+	where = appendStatusCatalogFilters(where, "i", statusFilters, addArg)
 	if len(prioritiesFilter) > 0 {
 		where = append(where, fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(prioritiesFilter)))
 	}
@@ -1726,11 +1754,11 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	if len(statuses) > 0 {
 		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(statuses)))
 	}
-	statusIDFilter, statusCategoryFilter, statusFiltersOK := parseStatusCatalogFilters(w, r)
+	statusFilters, statusFiltersOK := parseStatusCatalogFilters(w, r)
 	if !statusFiltersOK {
 		return
 	}
-	where = appendStatusCatalogFilters(where, "i", statusIDFilter, statusCategoryFilter, addArg)
+	where = appendStatusCatalogFilters(where, "i", statusFilters, addArg)
 
 	priorities := splitCommaParam(r.URL.Query().Get("priorities"))
 	if len(priorities) == 0 {

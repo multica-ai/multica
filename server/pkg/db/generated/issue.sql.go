@@ -1082,29 +1082,32 @@ FROM issue i
 WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
   AND ($2::uuid IS NULL OR i.status_id = $2)
+  -- status_ids (MUL-4809): multi-select by catalog id — one board column per
+  -- status, and multi-select filter chips. OR within the field.
+  AND ($3::uuid[] IS NULL OR i.status_id = ANY($3::uuid[]))
   -- status_category (MUL-4809): match issues whose status_id resolves to the
   -- given Category, scoped to the same workspace (no FK). Mirrors the EXISTS
   -- predicate the dynamic ListIssues/ListGroupedIssues paths build.
-  AND ($3::text IS NULL OR EXISTS (
+  AND ($4::text IS NULL OR EXISTS (
         SELECT 1 FROM issue_status s
          WHERE s.id = i.status_id AND s.workspace_id = i.workspace_id
-           AND s.category = $3::text))
-  AND ($4::text IS NULL OR i.priority = $4)
-  AND ($5::uuid IS NULL OR i.assignee_id = $5)
-  AND ($6::uuid[] IS NULL OR i.assignee_id = ANY($6::uuid[]))
-  AND ($7::uuid IS NULL OR i.creator_id = $7)
-  AND ($8::uuid IS NULL OR i.project_id = $8)
-  AND ($9::jsonb IS NULL OR i.metadata @> $9::jsonb)
+           AND s.category = $4::text))
+  AND ($5::text IS NULL OR i.priority = $5)
+  AND ($6::uuid IS NULL OR i.assignee_id = $6)
+  AND ($7::uuid[] IS NULL OR i.assignee_id = ANY($7::uuid[]))
+  AND ($8::uuid IS NULL OR i.creator_id = $8)
+  AND ($9::uuid IS NULL OR i.project_id = $9)
+  AND ($10::jsonb IS NULL OR i.metadata @> $10::jsonb)
   -- properties_filter is a jsonb array of groups, each group an array of
   -- containment patterns (built by parsePropertiesFilterParam): the issue
   -- must match at least one pattern from EVERY group (AND of ORs). The
   -- correlated form skips the GIN index, which is fine here: open_only is
   -- an unpaginated workspace scan already narrowed by status.
   AND (
-    $10::jsonb IS NULL
+    $11::jsonb IS NULL
     OR NOT EXISTS (
       SELECT 1
-      FROM jsonb_array_elements($10::jsonb) AS pf(alternatives)
+      FROM jsonb_array_elements($11::jsonb) AS pf(alternatives)
       WHERE NOT EXISTS (
         SELECT 1
         FROM jsonb_array_elements(pf.alternatives) AS alt(pattern)
@@ -1113,11 +1116,11 @@ WHERE i.workspace_id = $1
     )
   )
   AND (
-    $11::uuid IS NULL
+    $12::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $11::uuid
+             AND a.owner_id     = $12::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
@@ -1125,14 +1128,14 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $11::uuid
+             AND sm.member_id   = $12::uuid
           UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $11::uuid
+             AND a.owner_id     = $12::uuid
           UNION
           SELECT sm.squad_id
             FROM squad_member sm
@@ -1141,7 +1144,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $11::uuid
+             AND a.owner_id     = $12::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
@@ -1150,6 +1153,7 @@ ORDER BY i.position ASC, i.created_at DESC
 type ListOpenIssuesParams struct {
 	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
 	StatusID         pgtype.UUID   `json:"status_id"`
+	StatusIds        []pgtype.UUID `json:"status_ids"`
 	StatusCategory   pgtype.Text   `json:"status_category"`
 	Priority         pgtype.Text   `json:"priority"`
 	AssigneeID       pgtype.UUID   `json:"assignee_id"`
@@ -1191,6 +1195,7 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 	rows, err := q.db.Query(ctx, listOpenIssues,
 		arg.WorkspaceID,
 		arg.StatusID,
+		arg.StatusIds,
 		arg.StatusCategory,
 		arg.Priority,
 		arg.AssigneeID,
