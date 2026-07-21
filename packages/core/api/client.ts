@@ -90,6 +90,10 @@ import type {
   IssueProperty,
   IssuePropertyValue,
   CreatePropertyRequest,
+  CreateIssueStatusRequest,
+  UpdateIssueStatusRequest,
+  IssueStatusDefinition,
+  IssueStatusCatalog,
   UpdatePropertyRequest,
   ListPropertiesResponse,
   IssuePropertiesResponse,
@@ -250,9 +254,13 @@ import {
   LabelSchema,
   ListLabelsResponseSchema,
   IssuePropertySchema,
+  IssueStatusDefinitionSchema,
+  IssueStatusCatalogSchema,
   ListPropertiesResponseSchema,
   IssuePropertiesResponseSchema,
   EMPTY_ISSUE_PROPERTY,
+  EMPTY_ISSUE_STATUS_DEFINITION,
+  EMPTY_ISSUE_STATUS_CATALOG,
   EMPTY_LIST_PROPERTIES_RESPONSE,
   EMPTY_ISSUE_PROPERTIES_RESPONSE,
   ResourceLabelsResponseSchema,
@@ -2292,6 +2300,66 @@ export class ApiClient {
     return parseWithFallback(raw, IssuePropertySchema, EMPTY_ISSUE_PROPERTY, {
       endpoint: "POST /api/properties",
     });
+  }
+
+  // ── Issue status catalog (MUL-4809 §5) ────────────────────────────────────
+
+  /**
+   * The workspace status catalog plus its alias table. Readable by any member;
+   * `include_archived` is admin-only and 403s otherwise.
+   *
+   * A backend predating custom statuses 404s here (installed desktop clients can
+   * outrun the server). That degrades to an empty catalog, which every surface
+   * reads as "not loaded" and falls back to the legacy 7 status tokens — so an
+   * old server never breaks the issue UI.
+   */
+  async listIssueStatuses(includeArchived = false): Promise<IssueStatusCatalog> {
+    const suffix = includeArchived ? "?include_archived=true" : "";
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>(`/api/issue-statuses${suffix}`);
+    } catch (error) {
+      if (error instanceof Error && "status" in error && (error as { status?: number }).status === 404) {
+        return EMPTY_ISSUE_STATUS_CATALOG;
+      }
+      throw error;
+    }
+    return parseWithFallback(raw, IssueStatusCatalogSchema, EMPTY_ISSUE_STATUS_CATALOG, {
+      endpoint: "GET /api/issue-statuses",
+    });
+  }
+
+  async createIssueStatus(data: CreateIssueStatusRequest): Promise<IssueStatusDefinition> {
+    const raw = await this.fetch<unknown>(`/api/issue-statuses`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueStatusDefinitionSchema, EMPTY_ISSUE_STATUS_DEFINITION, {
+      endpoint: "POST /api/issue-statuses",
+    });
+  }
+
+  async updateIssueStatus(id: string, data: UpdateIssueStatusRequest): Promise<IssueStatusDefinition> {
+    const raw = await this.fetch<unknown>(`/api/issue-statuses/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueStatusDefinitionSchema, EMPTY_ISSUE_STATUS_DEFINITION, {
+      endpoint: "PATCH /api/issue-statuses/{id}",
+    });
+  }
+
+  /**
+   * Archives (soft-deletes) a custom status. When the status still has issues,
+   * the server requires `migrateToStatusId` — a non-archived status in the SAME
+   * Category — and moves those issues over in the same transaction. System
+   * statuses cannot be archived.
+   */
+  async archiveIssueStatus(id: string, migrateToStatusId?: string): Promise<void> {
+    const suffix = migrateToStatusId
+      ? `?migrate_to_status_id=${encodeURIComponent(migrateToStatusId)}`
+      : "";
+    await this.fetch<unknown>(`/api/issue-statuses/${id}${suffix}`, { method: "DELETE" });
   }
 
   async updateProperty(id: string, data: UpdatePropertyRequest): Promise<IssueProperty> {
