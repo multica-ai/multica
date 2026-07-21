@@ -36,14 +36,13 @@ func TestBuildQwenArgsKeepsProtocolManaged(t *testing.T) {
 		},
 	}, slog.Default())
 	joined := strings.Join(args, " ")
-	for _, forbidden := range []string{"text", "replace", "other-session", "other", "--safe-mode", "--chat-recording", "injected-mcp.json", "inline-mcp.json", "auto", "yolo", "web_fetch"} {
+	for _, forbidden := range []string{"text", "replace", "other-session", "other", "--safe-mode", "--chat-recording", "injected-mcp.json", "inline-mcp.json", "auto", "web_fetch", "--allowed-tools"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("managed argument %q leaked into %v", forbidden, args)
 		}
 	}
 	wantPrefix := []string{
-		"-p", "task prompt", "--output-format", "stream-json",
-		"--approval-mode", "default", "--allowed-tools", qwenHeadlessAllowedTools,
+		"-p", "task prompt", "--output-format", "stream-json", "--yolo",
 		"--model", "qwen3.8-max-preview", "--resume", "session-1",
 	}
 	if len(args) < len(wantPrefix) {
@@ -56,6 +55,18 @@ func TestBuildQwenArgsKeepsProtocolManaged(t *testing.T) {
 	}
 	if !strings.Contains(joined, "--sandbox") || !strings.Contains(joined, "--debug") {
 		t.Fatalf("non-managed custom args missing from %v", args)
+	}
+	yoloCount := 0
+	for _, arg := range args {
+		if arg == "--yolo" {
+			yoloCount++
+		}
+		if arg == "-y" || arg == "--approval-mode" || strings.HasPrefix(arg, "--approval-mode=") {
+			t.Fatalf("custom permission argument %q leaked into %v", arg, args)
+		}
+	}
+	if yoloCount != 1 {
+		t.Fatalf("daemon --yolo count = %d, want 1; args=%v", yoloCount, args)
 	}
 }
 
