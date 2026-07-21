@@ -1273,6 +1273,10 @@
       "gate": "platform_action:create_issue (agents) + workspace_member (members)"
     },
     {
+      "id": "POST /api/issues/query",
+      "exempt": "read-only — body-transport twin of GET /api/issues/, delegates to ListIssues and inherits its workspace-membership access controls without mutating data"
+    },
+    {
       "id": "POST /api/issues/batch-delete",
       "gate": "workspace_member"
     },
