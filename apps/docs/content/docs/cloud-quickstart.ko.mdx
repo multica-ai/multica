@@ -7,13 +7,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 이 페이지는 Multica Cloud를 처음부터 끝까지 안내합니다 — **가입 → [CLI](/cli) 설치 → [데몬](/daemon-runtimes) 시작 → [에이전트](/agents) 생성 → 첫 [작업](/tasks) 할당**. 약 5분이 걸립니다.
 
-전제 조건은 하나뿐입니다: 로컬에 [AI 코딩 도구](/providers)([Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [CodeBuddy](/providers#codebuddy), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi), [Qoder](/providers#qoder), [Trae CLI](/providers#trae), [DevEco Code](/providers#deveco-code) 중 하나)를 이미 최소 하나는 설치해 두어야 합니다. 데몬은 시작할 때 이들을 자동으로 감지하며, 하나도 없으면 시작을 거부합니다.
+전제 조건은 하나뿐입니다: 로컬에 [AI 코딩 도구](/providers)([Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [CodeBuddy](/providers#codebuddy), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Grok](/providers#grok), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi), [Qoder](/providers#qoder), [Trae CLI](/providers#trae), [DevEco Code](/providers#deveco-code) 중 하나)를 이미 최소 하나는 설치해 두어야 합니다. 데몬은 시작할 때 이들을 자동으로 감지하며, 하나도 없으면 시작을 거부합니다.
 
 ## 1. 계정 만들기
 
 [multica.ai](https://multica.ai)에서 가입하세요. 이메일(6자리 인증 코드) 또는 Google로 로그인할 수 있습니다.
 
-가입 후에는 (계정 이름으로 생성된) 기본 워크스페이스에 자동으로 배치됩니다. 나중에 이름을 변경하거나 새 워크스페이스를 만들 수 있습니다.
+처음 로그인하면 Multica가 짧은 온보딩 마법사를 안내합니다: 몇 가지 선택 질문에 답한 다음, **워크스페이스 생성**, 그다음 **런타임 연결**로 이어집니다. 런타임 단계에서는 세 가지 경로를 제시합니다 — 데스크톱 앱으로 이 컴퓨터 사용(권장), CLI로 터미널에서 연결(아래 단계), 또는 지금은 건너뛰고 나중에 연결. 온보딩 중에 런타임을 연결하면 Multica가 시작용 에이전트(**Multica Helper**)도 설정하고 그에게 할당할 첫 작업 몇 가지를 제안합니다 — 따라서 2~5단계를 직접 하지 않고도 6단계에 도달할 수 있습니다.
+
+이 페이지의 나머지는 CLI 경로이며, 온보딩 이후 언제든 사용할 수 있습니다.
 
 ## 2. Multica CLI 설치하기
 
@@ -54,7 +56,7 @@ multica setup
 1. CLI가 Multica Cloud에 연결하도록 구성합니다
 2. 로그인을 위해 브라우저를 엽니다(웹과 동일한 이메일 인증 코드 / Google OAuth)
 3. 생성된 PAT를 `~/.multica/config.json`에 저장합니다
-4. **데몬을 자동으로 시작합니다** — 3초마다 작업을 폴링하고 15초마다 하트비트를 전송하기 시작합니다
+4. **데몬을 자동으로 시작합니다** — 서버와 WebSocket 연결을 유지하며, 새 작업을 실시간으로 푸시받고(30초 폴링 폴백 포함), 15초마다 하트비트를 전송합니다
 
 <Callout type="info">
 **데스크톱 앱을 사용 중이신가요?** 데스크톱 앱은 실행 시 **데몬을 자동으로 시작합니다** — `multica setup`을 직접 실행할 필요가 없습니다. [데스크톱 앱](/desktop-app)을 참고하세요.
@@ -70,20 +72,20 @@ multica daemon status
 
 ## 4. 런타임이 온라인인지 확인하기
 
-웹 UI에서 **설정 → 런타임**으로 이동하세요. 방금 시작한 데몬이 하나 이상의 활성 런타임으로 표시되어야 합니다 — 로컬에 설치된 AI 코딩 도구당 하나씩입니다.
+웹 UI에서 사이드바의 **런타임**(**Configure** 그룹 아래)을 여세요. 방금 시작한 데몬이 하나 이상의 활성 런타임으로 표시되어야 합니다 — 로컬에 설치된 AI 코딩 도구당 하나씩입니다. 그 페이지의 **컴퓨터 추가(Add a computer)** 버튼은 다른 기기를 추가할 때 필요한 동일한 연결 명령을 보여줍니다.
 
 오프라인으로 표시되더라도 당황하지 마세요 — [문제 해결 → 데몬이 서버에 연결할 수 없음](/troubleshooting#daemon-cant-connect-to-the-server)을 참고하세요.
 
 ## 5. 에이전트 생성하기
 
-웹 UI에서 **설정 → 에이전트**로 이동하여 **새 에이전트**를 클릭하세요:
+온보딩에서 이미 **Multica Helper**를 만들어 두었다면 이 단계는 건너뛰어도 됩니다.
 
-- **이름** — 보드와 댓글에서 이 에이전트에 표시되는 이름입니다. 원하는 이름을 고르세요
-- **제공자** — 로컬에 설치한 AI 코딩 도구를 선택하세요(드롭다운에는 런타임에서 감지된 도구만 나열됩니다)
-- **모델**(선택) — 해당 도구 내부의 모델 선택(제공자에 따라 정적 목록 또는 동적 발견)
-- **지침**(선택) — 이 에이전트를 위한 시스템 프롬프트
+그렇지 않다면, 사이드바에서 **에이전트**를 열고 **+ New**를 클릭하세요. 그러면 두 가지 시작 방법을 제공하는 에이전트 생성 스튜디오가 열립니다:
 
-생성되면 에이전트는 워크스페이스 멤버 목록에 나타나며, 사람 멤버처럼 작업을 할당할 수 있습니다.
+- **비워두고 시작(Start blank)** — 폼을 직접 채웁니다. 필수 필드는 두 개뿐입니다: **이름**과 **런타임**(어떤 AI 코딩 도구가 실행할지). 설명, 지침, 스킬, 모델, 접근은 모두 선택입니다.
+- **AI로 만들기(Build with AI)**(권장) — 원하는 에이전트를 설명하면, 에이전트 빌더가 핵심 질문을 던지며 생성 전에 편집할 수 있는 실시간 초안을 준비합니다.
+
+생성되면 에이전트는 워크스페이스에 나타나며, 사람 멤버처럼 작업을 할당할 수 있습니다. 각 필드의 자세한 내용은 [에이전트 생성 및 구성](/agents-create)을 참고하세요.
 
 ## 6. 첫 작업 할당하기
 
@@ -103,7 +105,7 @@ multica issue assign MUL-1 --to my-agent-name
 
 **다음으로 데몬에서 일어나는 일**:
 
-1. 3초 이내에 작업을 가져갑니다(상태가 `queued`에서 `dispatched`로 바뀝니다)
+1. 서버가 작업을 실시간으로 데몬에 푸시합니다, 보통 몇 초 이내(상태가 `queued`에서 `dispatched`로 바뀝니다)
 2. 일치하는 AI 코딩 도구를 호출하여 작업을 시작합니다(상태가 `running`이 됩니다)
 3. AI가 로컬에서 작업합니다 — 코드 디렉터리를 읽고, 명령을 실행하고, 파일을 편집할 수 있습니다
 4. 완료되면 결과를 Multica로 다시 보고합니다(자동 재시도 동작 여부에 따라 상태가 `completed` 또는 `failed`가 됩니다)

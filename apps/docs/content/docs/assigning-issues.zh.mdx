@@ -22,9 +22,11 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 几条规则：
 
-- **工作区智能体**任何成员都能分配；**私人智能体**只有它的 owner 或工作区 admin 能分配
-- 只能分配给**有在线运行时**的智能体——没人在跑的智能体，picker 会提示不可选
-- Issue 状态是 **Backlog** 时，分配**不会立刻触发**智能体——Backlog 是停泊场，切到 Todo / In Progress 才会真正入队
+- 能不能分配某个智能体取决于它的 **Access** 设置：**Entire workspace** 的智能体任何成员都能分配；**Only me** 的只有它的 owner 能分配（admin 没有旁路）；**Specific people** 的只有被选中的成员能分配。见 [智能体 → 谁能运行智能体](/agents#谁能运行智能体)。
+- 智能体需要**绑定一个运行时**，但分配时运行时**不必**在线——允许分配一个离线的智能体，这次 run 会在队列里等到它的运行时上线。picker 会标出当前哪些智能体离线。（一个始终没被领走的排队 run 会在 **2 小时**后过期。）
+- Issue 状态是 **Backlog** 时，分配**不会触发**智能体——Backlog 是停泊场，切到 Todo / In Progress 才会真正入队。
+
+唯一**确实要求智能体在线**的地方是 **quick-create** 入口（在输入框里直接把 issue 创建到某个智能体身上）：它为即时反馈而设计，所以会当场拒绝离线智能体，而不是排队。
 
 ## 用 CLI 分配
 
@@ -48,11 +50,11 @@ multica issue assign MUL-42 --unassign
 非 Backlog 的 issue 分配给智能体之后，Multica 会立刻在后台做以下事情：
 
 1. 入队一个 `queued` 状态的 `task`，优先级继承自 issue，路由到该智能体所在的运行时
-2. 该智能体的守护进程下次轮询时把 `task` 领走，状态变成 `dispatched`
+2. 服务器实时给智能体的守护进程推送一个唤醒信号（每 30 秒轮询兜底）；守护进程领走 `task`，状态变成 `dispatched`
 3. 智能体开始执行，`task` 转成 `running`；完成后转成 `completed` / `failed`
 4. 执行过程中智能体可以改 issue 状态、发评论、改字段——这些动作以智能体的身份出现
 
-**如果智能体离线**，`task` 会在队列里等——**5 分钟没被领走就超时失败**，失败原因 `runtime_offline`。对可重试的来源（分配、@ 提及、对话），Multica 会自动重新排队；完整重试规则见 [**执行任务**](/tasks)。
+**如果智能体的运行时离线**，`task` 就在 `queued` 里等着，直到运行时上线——不失败，也不需要重试。只有当始终没人领走它时，它才会在 **2 小时**后过期（原因 `queued_expired`，不自动重试）。run 一旦跑起来就是另一回事：如果运行时在 run **进行中**离线，任务会以 `runtime_offline` 失败，Multica 会自动重新入队。完整重试规则见 [**执行任务**](/tasks)。
 
 分配还会自动把这个智能体加进 issue 的订阅列表——但 Multica 里**智能体不接收 inbox 通知**（只有成员收）。这个订阅只是内部 bookkeeping，用户侧没有可见的副作用。
 
@@ -60,14 +62,14 @@ multica issue assign MUL-42 --unassign
 
 把 assignee 从 Agent A 换成 Agent B 时：
 
-1. **A 这边在跑的一切都被取消**——所有 `queued` / `dispatched` / `running` 状态的 `task` 都被标记 `cancelled`
-2. **B 立刻被入队一个新 `task`**（如果 issue 不是 Backlog 且 B 有在线运行时）
+1. **A 这边在跑的活继续跑**——换分配人刻意**不**取消 issue 上任何已有的 `task`。已经跑起来的 run 会跑完并汇报结果。
+2. **B 立刻被入队一个新 `task`**（如果 issue 不是 Backlog 且 B 有绑定运行时）
 
 <Callout type="warning">
-**换分配人会 cancel 掉这个 issue 上所有活跃的 `task`——不只是旧 assignee 的**。如果另一个智能体因为 @ 提及也正在这个 issue 上干活，它的 `task` 也会被一并取消。目前没有只 cancel 单个智能体 `task` 的 UI 操作。
+**换分配人、取消分配、改状态（哪怕改成 `cancelled`）都不会停掉在途的 run。** 要停掉某个智能体的 run，用 issue 的 **Execution log** 里那一行的 **Stop task** 按钮。唯一能取消一个 issue 上所有任务的操作是**删除这个 issue**。
 </Callout>
 
-取消分配（`--unassign` 或 picker 里选"无"）把所有活跃 `task` 标记 `cancelled`，**不入队新的**。已有的订阅关系不会自动清除——旧 assignee 仍留在订阅名单里（但同样收不到 inbox 通知）。
+取消分配（`--unassign` 或 picker 里选"无"）会移除 assignee，**不入队新的 `task`**——但如上所述，它不会动任何在途的 run。已有的订阅关系不会自动清除——旧 assignee 仍留在订阅名单里（但同样收不到 inbox 通知）。
 
 ## 为什么同一 issue 同时只能一个活跃 `task`
 

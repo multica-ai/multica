@@ -22,9 +22,11 @@ On the issue detail page, click the **Assignee** picker. It lists every member i
 
 A few rules:
 
-- **Workspace agents** can be assigned by any member; **private agents** can only be assigned by their owner or a workspace admin.
-- You can only assign to agents that have **an online runtime** — agents with no one running them show as unavailable in the picker.
+- Whether you can assign a given agent depends on its **Access** setting: **Entire workspace** agents can be assigned by any member; **Only me** agents only by their owner (admins have no bypass); **Specific people** agents only by the selected members. See [Agents → Who can run an agent](/agents#who-can-run-an-agent).
+- The agent needs **a runtime binding**, but the runtime does **not** have to be online at assignment time — assigning an offline agent is allowed, and the run waits in the queue until its runtime comes online. The picker shows which agents are currently offline. (A queued run that never gets picked up expires after **2 hours**.)
 - When the issue status is **Backlog**, assigning **does not trigger the agent** — Backlog is a parking lot; the agent only gets enqueued once you move the issue to Todo or In Progress.
+
+The one place that *does* require an online agent is the **quick-create** entry (creating an issue directly onto an agent from the composer): it's built for instant feedback, so it rejects offline agents up front instead of queueing.
 
 ## Assign from the CLI
 
@@ -48,11 +50,11 @@ multica issue assign MUL-42 --unassign
 When a non-Backlog issue is assigned to an agent, Multica immediately does the following in the background:
 
 1. Enqueues a `queued` `task` with priority inherited from the issue, routed to the runtime where the agent lives.
-2. The agent's daemon picks up the `task` on its next poll and transitions it to `dispatched`.
+2. The server pushes a wake-up to the agent's daemon in real time (with a 30-second polling fallback); the daemon claims the `task` and transitions it to `dispatched`.
 3. The agent starts working and the `task` moves to `running`; on completion it becomes `completed` or `failed`.
 4. During execution the agent can change the issue's status, post comments, and edit fields — these actions appear under the agent's identity.
 
-**If the agent is offline**, the `task` waits in the queue — **it times out and fails after 5 minutes** with reason `runtime_offline`. For retryable sources (assign, @-mention, chat), Multica automatically re-enqueues it. See [**Tasks**](/tasks) for the full retry rules.
+**If the agent's runtime is offline**, the `task` simply waits in `queued` until the runtime comes online — no failure, no retry needed. Only if nothing ever claims it does it expire, after **2 hours** (reason `queued_expired`, not retried automatically). Different story once a run is underway: if the runtime goes offline *mid-run*, the task fails with `runtime_offline` and Multica automatically re-enqueues it. See [**Tasks**](/tasks) for the full retry rules.
 
 Assigning also auto-subscribes the agent to the issue — but in Multica **agents do not receive inbox notifications** (only members do). This subscription is internal bookkeeping with no user-visible side effect.
 
@@ -60,14 +62,14 @@ Assigning also auto-subscribes the agent to the issue — but in Multica **agent
 
 When you change the assignee from Agent A to Agent B:
 
-1. **Everything A has in flight is cancelled** — every `task` in `queued`, `dispatched`, or `running` state is marked `cancelled`.
-2. **B is enqueued a new `task` immediately** (if the issue is not in Backlog and B has an online runtime).
+1. **A's in-flight work keeps running** — reassignment deliberately does **not** cancel any existing `task` on the issue. A run that's already underway finishes and reports its result.
+2. **B is enqueued a new `task` immediately** (if the issue is not in Backlog and B has a runtime binding).
 
 <Callout type="warning">
-**Reassignment cancels every active `task` on this issue — not just the old assignee's.** If another agent is working on this issue because of an @-mention, its `task` is cancelled too. There is currently no UI action to cancel a single agent's `task` in isolation.
+**Neither reassigning, unassigning, nor changing status (even to `cancelled`) stops in-flight runs.** To stop a specific agent's run, use the **Stop task** button on that row in the issue's **Execution log**. The one operation that cancels every task on an issue is **deleting the issue**.
 </Callout>
 
-Unassigning (`--unassign` or picking "none" in the picker) marks all active `task` entries as `cancelled` and **does not enqueue a new one**. Existing subscriptions are not cleared automatically — the old assignee stays on the subscription list (but still receives no inbox notifications).
+Unassigning (`--unassign` or picking "none" in the picker) removes the assignee and **does not enqueue a new `task`** — but, as above, it leaves any in-flight run untouched. Existing subscriptions are not cleared automatically — the old assignee stays on the subscription list (but still receives no inbox notifications).
 
 ## Why only one active `task` per agent per issue
 

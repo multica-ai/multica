@@ -7,13 +7,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 这一页带你走一遍 Multica Cloud 的端到端流程——**注册 → 装 [命令行工具](/cli) → 启动 [守护进程](/daemon-runtimes) → 创建 [智能体](/agents) → 分配第一个 [任务](/tasks)**，约 5 分钟完成。
 
-前置只有一个：你本地已经装了至少一款 [AI 编程工具](/providers)（[Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[CodeBuddy](/providers#codebuddy)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)、[Qoder](/providers#qoder) 或 [Trae CLI](/providers#trae), [DevEco Code](/providers#deveco-code)）中的一款。守护进程启动时会自动探测它们，没装任何一个的话守护进程会直接拒绝启动。
+前置只有一个：你本地已经装了至少一款 [AI 编程工具](/providers)（[Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[CodeBuddy](/providers#codebuddy)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Grok](/providers#grok)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)、[Qoder](/providers#qoder)、[Trae CLI](/providers#trae) 或 [DevEco Code](/providers#deveco-code)）中的一款。守护进程启动时会自动探测它们，没装任何一个的话守护进程会直接拒绝启动。
 
 ## 1. 注册账号
 
 到 [multica.ai](https://multica.ai) 注册账号。可以用邮箱（6 位验证码）或 Google 登录。
 
-注册完成后你会被自动分到一个默认工作区（以你的账号名生成）。之后可以改名字，也可以创建新的工作区。
+首次登录时，Multica 会带你走一段简短的上手引导（onboarding wizard）：几个可选问题，然后**创建你的工作区**，再**连接一个运行时**。运行时这一步提供三条路径——通过桌面应用使用这台电脑（推荐）、用 CLI 从终端连接（下面的步骤）、或先跳过稍后再连。如果你在引导过程中连接了运行时，Multica 还会顺带建好一个入门智能体（**Multica Helper**）并给你几个可以派给它的初始任务——所以你可能不用手动做第 2–5 步就直接到了第 6 步。
+
+本页剩下的部分是 CLI 路径，它在引导之后任何时候也都适用。
 
 ## 2. 装 Multica 命令行工具
 
@@ -54,7 +56,7 @@ multica setup
 1. 把命令行工具配置成连接 Multica Cloud
 2. 打开浏览器让你登录（和 Web 登录一样的邮箱验证码 / Google OAuth）
 3. 把生成的 PAT 存到 `~/.multica/config.json`
-4. **自动启动守护进程**——开始每 3 秒轮询任务、每 15 秒发心跳
+4. **自动启动守护进程**——它与服务器保持一条 WebSocket 长连接，新任务实时推送过来（每 30 秒轮询作为兜底），心跳每 15 秒发一次
 
 <Callout type="info">
 **用的是桌面应用？** 桌面应用启动时**自动拉起守护进程**，不需要手动跑 `multica setup`。见 [桌面应用](/desktop-app)。
@@ -70,20 +72,20 @@ multica daemon status
 
 ## 4. 验证 Runtime 在线
 
-到 Web 界面的 **Settings → Runtimes**，你应该能看到你刚启动的守护进程作为一个或多个活跃 Runtime 列出——每款你本地装好的 AI 编程工具对应一个。
+在 Web 界面的侧边栏打开 **Runtimes**（在 **Configure** 分组下），你应该能看到你刚启动的守护进程作为一个或多个活跃 Runtime 列出——每款你本地装好的 AI 编程工具对应一个。这个页面上的 **Add a computer** 按钮会给出同样的连接命令，可用于任何额外的机器。
 
 看到"离线"不要慌，先看 [故障排查 → 守护进程连不上服务器](/troubleshooting#守护进程连不上服务器)。
 
 ## 5. 创建智能体
 
-到 Web 界面的 **Settings → Agents**，点 **New Agent**：
+如果上手引导已经帮你建好了 **Multica Helper**，这一步可以跳过。
 
-- **名字**——智能体在看板上、评论里显示的名字，自己起一个
-- **Provider**——选一款你本地装好的 AI 编程工具（下拉里只会出现运行时里检测到的那些）
-- **Model**（可选）——这款工具内部的模型选择（静态列表或动态发现，取决于 provider）
-- **Instructions**（可选）——给这个智能体的系统提示词
+否则，在侧边栏打开 **Agents**，点 **+ New**。这会打开智能体创建工作室（studio），提供两种起步方式：
 
-创建完成后智能体就进入你的工作区成员列表，可以像人类成员一样被分配任务。
+- **Start blank**——自己填表单。只有两项必填：**名字**和**运行时**（用哪款 AI 编程工具来跑）。描述、系统指令、skill、模型、访问权限都可选。
+- **Build with AI**（推荐）——描述你想要的智能体；一个 Agent Builder 会问几个聚焦的问题，并准备一份可在创建前编辑的实时草稿。
+
+创建完成后，智能体就进入你的工作区，可以像人类成员一样被分配任务。每个字段的详细说明见 [创建和配置智能体](/agents-create)。
 
 ## 6. 分配第一个任务
 
@@ -103,7 +105,7 @@ multica issue assign MUL-1 --to my-agent-name
 
 **接下来守护进程会**：
 
-1. 3 秒内领走这条任务（任务状态从 `queued` 变 `dispatched`）
+1. 服务器实时把任务推送给它，通常几秒内（任务状态从 `queued` 变 `dispatched`）
 2. 调用对应的 AI 编程工具开始执行（状态变 `running`）
 3. AI 在本地工作——可能会读你的代码目录、执行命令、编辑文件
 4. 结束后把结果发回 Multica（状态变 `completed` 或 `failed`，根据是否自动重试）

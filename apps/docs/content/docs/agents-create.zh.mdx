@@ -17,7 +17,12 @@ import { Callout } from "fumadocs-ui/components/callout";
 multica agent create
 ```
 
-表单里只有两项必填：**名字**（工作区内唯一）和 **运行时**（= 选一款 AI 编程工具）。其他字段下面一节一节讲。
+**+ 新建** 会打开智能体创建工作室（studio），先问你想怎么起步：
+
+- **Start blank**——在一个表单里自己配置每个字段：名字、描述、头像、系统指令、skill、运行时、模型、访问权限。
+- **Build with AI**（推荐）——描述你想要的结果；一个 **Agent Builder** 在左侧的对话里问几个聚焦的问题，同时在右侧填出一份实时草稿。创建前你可以手动改任何字段。
+
+两种方式都只有两项必填：**名字**（工作区内唯一）和 **运行时**（= 选一款 AI 编程工具）。每个可配置字段下面一节一节讲——注意其中一些（环境变量、命令行参数、MCP、并发）是创建**之后**在智能体详情页里配置的，不在创建表单里。
 
 ## 选一款 AI 编程工具
 
@@ -31,7 +36,7 @@ multica agent create
 | **Copilot** | 用 GitHub 账号权益的团队 |
 | **CodeBuddy** | 使用 Tencent Claude Code 兼容 CLI 的团队 |
 
-另外 9 款（Antigravity、Hermes、Kimi、Kiro CLI、OpenCode、Pi、OpenClaw、Qoder、Trae CLI）以及每款工具的完整能力差别（会话恢复、MCP、skill 注入路径、模型选择）见 [AI 编程工具对照](/providers)。
+另外 11 款（Antigravity、DevEco Code、Grok、Hermes、Kimi、Kiro CLI、OpenCode、Pi、OpenClaw、Qoder、Trae CLI）以及每款工具的完整能力差别（会话恢复、MCP、skill 注入路径、模型选择）见 [AI 编程工具对照](/providers)。
 
 ## 写系统指令
 
@@ -54,7 +59,7 @@ multica agent create
 
 ## 自定义环境变量（custom_env）
 
-**自定义环境变量**（`custom_env`）让你在任务执行时注入额外的 env var——典型用途是 API key 或切换上游 endpoint：
+**自定义环境变量**（`custom_env`）让你在任务执行时注入额外的 env var——典型用途是 API key 或切换上游 endpoint。它们不属于创建表单：创建后在智能体详情页（Env 标签）设置，或通过 CLI 设置。刻意地：复制（duplicate）一个智能体时**不会**复制它的 env 值。
 
 ```
 ANTHROPIC_API_KEY = sk-...
@@ -71,7 +76,7 @@ ANTHROPIC_BASE_URL = https://my-proxy.example.com
 
 ## 自定义命令行参数（custom_args）
 
-**自定义命令行参数**（`custom_args`）是一串字符串数组，会被逐个追加到 AI 编程工具的命令行尾部：
+**自定义命令行参数**（`custom_args`）是一串字符串数组，会被逐个追加到 AI 编程工具的命令行尾部。和 `custom_env` 一样，它也在创建后于智能体详情页里配置：
 
 ```json
 ["--max-turns", "100", "--append-system-prompt", "always respond in Chinese"]
@@ -89,18 +94,21 @@ claude --model <model> --max-turns 100 --append-system-prompt "always respond in
 `custom_env` 和 `custom_args` 没有硬限制，但**实际使用建议控制在 10 条以内**。太多会让命令行变长、启动变慢，也更难维护。
 </Callout>
 
-## 可见性
+## 访问权限——谁能运行这个智能体
 
-- **工作区可见**（`workspace`）—— 工作区里任何成员都能分配
-- **私有**（`private`）—— 只有工作区的 owner、admin，或智能体的创建者能分配
+**Access**（访问权限）一栏控制谁能运行这个智能体（分配它、`@` 提及它、和它对话）：
 
-新建默认 `private`。
+- **Only me**——只有你，也就是智能体的 owner，能运行它。admin 没有旁路。
+- **Entire workspace**——工作区里每个成员都能运行它。
+- **Specific people**——只有你选中的成员能运行它（至少选一个）。
 
-**私有不等于隐藏**——列表里所有成员都能看到私有智能体的名字和描述，只是看不到敏感配置（env 值从不会出现在 agent list/get 响应里；MCP 配置对非 owner 会被打码）。完整含义见 [智能体 → 谁能把智能体分配出去](/agents#谁能把智能体分配出去)。
+新建默认 **Only me**。Access 之后可以改，但**只有智能体的 owner 能改**——工作区 admin 能改其余配置，唯独不能改 access。
+
+**限制访问不等于隐藏**——列表里所有成员都能看到智能体的名字和描述，只是看不到敏感配置（env 值从不会出现在 agent list/get 响应里；MCP 配置对非 owner 会被打码）。完整含义见 [智能体 → 谁能运行智能体](/agents#谁能运行智能体)。
 
 ## 并发上限
 
-**并发上限**（`max_concurrent_tasks`）决定这个智能体同一时间最多同时跑几个任务，默认 **6**。达到上限的新任务留在队列排队，不会被拒绝。
+**并发上限**（`max_concurrent_tasks`）决定这个智能体同一时间最多同时跑几个任务，默认 **6**，创建后可在智能体详情页调整。达到上限的新任务留在队列排队，不会被拒绝。
 
 这只是两层限额里的"智能体层"——守护进程本身还有一层更粗的限额（默认 20），两层中更紧的那层生效。详见 [守护进程与运行时 → 一次能并发跑多少任务](/daemon-runtimes#一次能并发跑多少任务)。
 

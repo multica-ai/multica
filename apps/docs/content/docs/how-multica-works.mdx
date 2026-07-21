@@ -11,22 +11,33 @@ Multica is a **distributed** platform. The web interface you see is just the fro
 
 <ArchitectureDiagram />
 
-- **Multica server** — the workspaces, issue lists, and comment threads you see all live in its database. It's also a WebSocket hub that pushes real-time updates between you and your teammates. It does **not** execute any agent tasks.
-- **Daemon** — part of the Multica CLI, running on your own machine. On start it detects which AI coding tools are installed locally, registers with the server, and begins polling for tasks every 3 seconds and sending heartbeats every 15 seconds.
+- **Multica server** — the workspaces, issue lists, and comment threads you see all live in its database. It also owns the **persistent task queue** and acts as a WebSocket hub that pushes real-time updates between you and your teammates. It does **not** execute any agent tasks.
+- **Daemon** — part of the Multica CLI, running on your own machine. On start it detects which AI coding tools are installed locally, registers with the server, and holds a WebSocket connection to it. New work is **pushed to the daemon in real time** over that connection; a polling loop (every 30 seconds) acts as the fallback when the push is missed, and heartbeats go out every 15 seconds.
 - **AI coding tools** — one of the sixteen (or several in parallel): [Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [CodeBuddy](/providers#codebuddy), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi), [Qoder](/providers#qoder), [Trae CLI](/providers#trae), [DevEco Code](/providers#deveco-code), [Grok](/providers#grok). Once the daemon has picked up a task, it uses these tools to actually do the work.
 
 Because the toolchain stays local, **your API keys, code directories, and authorized tools** are only ever used on your machine — the Multica server never sees any of them. This holds whether you self-host or use Cloud.
 
-## The lifecycle of a task
+## The four objects, and how they relate
+
+Four words carry most of Multica's model — worth 30 seconds to pin down:
+
+- **Issue** — the work you want done. It persists: description, comments, status, history.
+- **Agent** — a reusable identity and configuration (instructions, model, skills, access rules). An agent is *not* a process; it's who does the work.
+- **Run (task)** — **one execution**. Every trigger — an assignment, an `@`-mention, a chat message, an Autopilot firing, a manual retry — produces a *new* task. **One issue accumulates many runs over its life (`1 issue : N runs`)**, and several agents can each have their own run on the same issue in parallel. The issue detail page lists them all under **Execution log**.
+- **Runtime** — where a run executes: the pairing of a daemon and one AI coding tool.
+
+## The lifecycle of a run
 
 Take the most common scenario — you assign an issue to an agent:
 
 1. You click assign in the web UI. The browser sends an HTTP request to the Multica server.
-2. The server sets the assignee on that issue to the agent and, at the same time, creates an execution task in the task queue with status `queued`.
-3. The daemon on your machine picks up the task on its next poll (within 3 seconds). Task status becomes `dispatched`.
+2. The server sets the assignee on that issue to the agent and, at the same time, creates an execution task in the **persistent queue** with status `queued`. If the agent's runtime is offline at that moment, the task simply waits in the queue.
+3. The server pushes a wake-up to the daemon over WebSocket; the daemon claims the task — usually within seconds. (If the push is missed, the daemon's 30-second polling loop picks it up.) Task status becomes `dispatched`.
 4. The daemon creates an isolated working directory locally and invokes the corresponding AI coding tool. Task status becomes `running`.
 5. The AI writes code locally, runs tests, and posts comments back to the server.
-6. Execution ends. The daemon reports the result (success / failure) to the server, and task status becomes `completed` or `failed`. You see the progress update in real time in the web UI (via WebSocket).
+6. Execution ends. The daemon reports the result to the server, and task status becomes `completed` or `failed`. You see the progress update in real time in the web UI (via WebSocket).
+
+One thing the platform does **not** do: it never force-marks your issue finished. Issue status changes (`in_progress`, `in_review`, `done`) are made by the agent itself as it works — a completed run means "this execution ended," not "the issue is done." See [Issues](/issues) for the lifecycle conventions.
 
 For the detailed mechanics, see [Daemon and runtimes](/daemon-runtimes) and [Tasks](/tasks).
 

@@ -37,23 +37,46 @@ The rule of thumb is simple: **use assignment when you want the agent to "own th
 
 ## What happens when you @ multiple agents
 
-If one comment @-mentions several agents, each one is enqueued an independent `task` on its own runtime — **they run in parallel** without blocking each other.
+If one comment @-mentions several **different** agents, each one is enqueued an independent `task` on its own runtime — **they run in parallel** without blocking each other. Mentions that resolve to the same executing agent (say, `@AgentA` plus `@Squad` whose leader is A) collapse into a single `task`.
 
-If an agent already has a `queued` or `dispatched` `task` on the same issue (for example, it was just mentioned and has not started yet), the new mention is **deduplicated** and no duplicate `task` is enqueued. Deduplication is **scoped to a single comment** — two different comments seconds apart that both @ the same agent will both enqueue a `task`.
+**Consecutive comments to the same agent merge instead of piling up.** Each agent has at most one waiting `task` per issue, and Multica folds follow-up comments into it:
 
-<Callout type="warning">
-**Adding an @ by editing a comment does not re-trigger.** If you remember to add `@agent` only after posting, editing in the `@` only changes what is displayed — it **does not** deliver a new `task` to that agent. To trigger it, post a new comment or assign the issue to it.
+- If the agent's previous `task` on this issue is still **`queued`** (not yet picked up), your new comment is **merged into that same task** — one run covers both comments. The Execution log shows this as "Includes N comments."
+- If the agent is already **running**, the new comment is **deferred**: no second parallel run starts. When the current run finishes, Multica checks for comments that arrived mid-run and enqueues **one** follow-up run covering all of them.
+
+So you can keep typing follow-up instructions without worrying about spawning a run per comment — nothing is dropped, and nothing runs twice.
+
+<Callout type="info">
+**Editing a comment re-triggers.** If your edit changes the content, Multica cancels the unfinished runs the old version triggered and re-routes based on the new text — so editing in a forgotten `@agent` **does** wake it. The trigger preview (below) is shown while editing too.
 </Callout>
+
+## Which agent does a plain comment wake?
+
+You don't have to `@` anyone. A regular comment (from a member, with no explicit `@agent` / `@squad`) is routed automatically, in this priority order:
+
+1. **Replying to an agent's comment** → that agent is triggered. A conversation with an agent keeps flowing without re-`@`ing it every time.
+2. **Replying inside a thread** → the thread's established owner — the agent the thread root was routed to (or the first agent explicitly `@`ed in the root).
+3. **Otherwise** → the issue's **assignee** as the fallback: an assigned agent is triggered directly; an assigned [squad](/squads) wakes its leader.
+
+Three things never auto-route: a comment containing `@all` (it suppresses agent routing entirely), a comment that only `@`s members, and a comment starting with `/note` (a note-to-self that triggers no one).
+
+## The trigger preview in the composer
+
+Before you hit Send, the composer shows **trigger chips** — exactly which agents this comment will start ("Will start when sent") and why (assignee / @mention / squad). Untick a chip to hold that agent back this time ("Won't start this time") without changing what you wrote.
+
+The chip's tooltip also shows presence: "Starts right away" for an online agent, or "Offline now — starts once online" — an offline agent still gets the task; it just waits in the queue. A red chip means the trigger is blocked outright: you don't have permission to run that agent, it's archived or unavailable, or it has no runtime at all.
 
 ## `@all` does not trigger any agent
 
 When you call everyone with `@all`, **only workspace members land in the inbox — agents are not included in the `@all` expansion.** This is by design: agents do not receive inbox notifications, so `@all` has no meaning for them. To put an agent to work, mention it by name.
 
-## Agents @-mentioning themselves does not loop
+`@all` goes further than "doesn't reach agents": it also **switches off the automatic routing** described above for that comment — the issue's assigned agent is *not* woken. Use it when you want to address the humans without starting any runs.
 
-Agents can post comments while executing, and those comments may contain `@mention`s. Multica has a hardcoded guard: **if the comment author is the same as the agent targeted by an `@` mention, that mention is skipped** — there is no "agent A @ agent A → new task → @ agent A again" infinite loop.
+## Why agent-to-agent mentions don't run away
 
-This guard **only blocks direct self-references.** Agent A @-mentioning agent B works normally; if B then @-mentions A in its reply, A is triggered again — in other words, **indirect recursion is not blocked**. When writing agent instructions, be careful not to let a group of agents @-mention each other in a cycle.
+Agents can post comments while executing, and those comments may contain `@mention`s — including of themselves. There is no blanket "self-mention is ignored" rule; what keeps loops in check is the **merge behavior above**: an agent that already has a waiting or running `task` on the issue doesn't get a second parallel one — follow-ups coalesce into a single next run.
+
+That's a damper, not a hard stop. Agent A @-mentioning agent B works normally; if B then @-mentions A in its reply, A runs again — **a cycle of agents mentioning each other will keep going**. When writing agent instructions, tell them to end conversations without a trailing `@` (silence is a valid reply), and be careful not to set up mutual-mention loops.
 
 ## Next
 

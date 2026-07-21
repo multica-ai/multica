@@ -28,17 +28,18 @@ A few key differences only surface once you actually start using agents:
 - **It's bound to one AI coding tool** — every agent is tied to a runtime (runtime = daemon × one AI coding tool; see [Daemon and runtimes](/daemon-runtimes)). If the tool is offline, the agent can't work; new tasks wait until the runtime comes back.
 - **It can be archived** — archive an agent you don't use anymore and it disappears from everyday views; restore it whenever you want. Archiving cancels any tasks currently running.
 
-## Who can assign an agent
+## Who can run an agent
 
-When you create an agent, you pick a **visibility** that controls who can assign it to an issue or set it as project lead:
+Every agent has an **Access** setting — "Who can run this agent" — with three options. It controls who can assign the agent to an issue, `@`-mention it, chat with it, or set it as a project lead:
 
-- **Workspace** — any member of the workspace can assign it
-- **Private** — only workspace owners, admins, or the agent's creator can assign it
+- **Only me** — only the agent's owner can run it. Workspace owners and admins have **no bypass** — an admin cannot run someone else's "Only me" agent.
+- **Entire workspace** — every member of the workspace can run it.
+- **Specific people** — only the members you pick can run it.
 
-New agents default to **private**. To make one available to the whole workspace, set visibility to `workspace` at creation time, or change it later in the agent's config. For the full role-permission matrix, see [Members and roles](/members-roles).
+New agents default to **Only me**. You can change access at any time in the agent's settings — but **only the agent's owner can change access**; even workspace admins cannot. (Admins *can* edit the rest of an agent's configuration — instructions, model, skills — just not who may run it.)
 
 <Callout type="info">
-**Private means "restricted who can assign," not "hidden from everyone else."** Every member of the workspace sees a private agent's name and description in the agents list — they just can't see its config details (custom environment variables, MCP config, and other sensitive fields are masked). If you need "visible to only one person," that's not currently possible.
+**Access restricts who can run the agent, not who can see it.** Every member of the workspace sees the agent's name and description in the agents list — they just can't see its sensitive config (custom environment variables and MCP config are masked for non-owners). To make an agent usable by exactly one other person, use **Specific people** and pick them.
 </Callout>
 
 ## Next steps

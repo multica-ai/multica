@@ -16,6 +16,8 @@ import { Mermaid } from "@/components/mermaid";
 graph LR
     Q["排队中<br/>queued"] -->|daemon 领取| D["已派发<br/>dispatched"]
     D -->|agent 开始| R["运行中<br/>running"]
+    D -->|需要本地目录| W["等待中<br/>waiting_local_directory"]
+    W --> R
     R -->|成功| C["完成<br/>completed"]
     R -->|出错或超时| F["失败<br/>failed"]
     Q -->|用户取消| X["取消<br/>cancelled"]
@@ -24,23 +26,27 @@ graph LR
     F -.可重试原因.-> Q
 `} />
 
-- **排队中（queued）**——任务刚创建，等待某个守护进程来领
+- **排队中（queued）**——任务在持久化队列里，等待它所属运行时的守护进程来领。运行时离线不会让任务失败——它就在这儿等着（最长 2 小时；见下文）
 - **已派发（dispatched）**——守护进程领走了，正在启动对应的 AI 编程工具
+- **等待中**（`waiting_local_directory`）——任务需要一个本地项目目录，但领取它的机器上还没有；它会一直挂着，直到目录就绪
 - **运行中（running）**——AI 编程工具在真正干活
 - **完成（completed）**——成功结束，产出（评论、代码提交、状态变化等）写回服务器
 - **失败（failed）**——出错或超时终止；如果失败原因可重试，会自动回到 `queued` 再来一次
 - **取消（cancelled）**——用户主动取消
 
+还有一个你可能在内部看到的状态：**`deferred`**——一条评论到达时，对应的智能体已经在 run 中，于是 Multica 不启动并行 run，而是先把它按住，等当前 run 结束时折叠成单独的一个跟进 run。见 [在评论里 @ 智能体](/mentioning-agents)。
+
 ## 任务超时会怎样
 
-Multica 服务器每 30 秒扫描一次，有两种超时会触发失败：
+Multica 服务器每 30 秒扫描一次，有三种超时会触发失败：
 
-| 什么情况 | 超时阈值 |
-|---|---|
-| 派发后迟迟不开始（守护进程领走但没启动 AI 工具）| **5 分钟** |
-| 正在运行但跑得太久 | **2.5 小时** |
+| 什么情况 | 超时阈值 | 失败原因 |
+|---|---|---|
+| 排队后始终没被领走（比如运行时一直离线）| **2 小时** | `queued_expired`——不重试 |
+| 派发后迟迟不开始（守护进程领走但没启动 AI 工具）| **5 分钟** | `timeout`——重试 |
+| 正在运行但跑得太久 | **2.5 小时** | `timeout`——重试 |
 
-两种超时的失败原因都是 `timeout`，**会自动重试**（下一节）。关联的运行时失联判定见 [守护进程与运行时 → 运行时什么时候被判定为离线](/daemon-runtimes#运行时什么时候被判定为离线)。
+关联的运行时失联判定见 [守护进程与运行时 → 运行时什么时候被判定为离线](/daemon-runtimes#运行时什么时候被判定为离线)。
 
 上面这层是**服务端的粗粒度兜底**——按任务启动时间算，不看任务是否还在活动。真正区分「卡死」和「正常的长任务」的是**本地守护进程**：它不再用固定墙钟时长砍任务（`MULTICA_AGENT_TIMEOUT` 默认 `0` = 不设上限），而是看活动——只要 agent 还在持续产出事件（消息、工具调用），守护进程就不会因为跑得久判它超时（服务端那条 2.5h 仍是外层上限）。只有真正静默卡死时才会被**空闲看门狗**（`MULTICA_AGENT_IDLE_WATCHDOG`，默认 30 分钟）终止；OpenCode 还会用更短的 `MULTICA_OPENCODE_IDLE_WATCHDOG`（默认 10 分钟）识别首 token 未到或流式回复中断。如果是某个工具调用发出后长时间无任何输出（疑似卡死的子进程），则由更大的**工具看门狗**预算（`MULTICA_AGENT_TOOL_WATCHDOG`，默认 2 小时）兜底。这类被看门狗终止的任务失败原因是 `idle_watchdog`，和墙钟 `timeout` 区分开。各参数见 [环境变量 → 守护进程的调节参数](/environment-variables#守护进程的调节参数)。
 
@@ -53,14 +59,17 @@ Multica 服务器每 30 秒扫描一次，有两种超时会触发失败：
 - `runtime_offline`——任务派发后，守护进程失联了
 - `runtime_recovery`——守护进程崩溃重启，回收上次没跑完的任务
 - `timeout`——运行超时或派发超时
+- `codex_semantic_inactivity`——Codex 会话在 run 中途沉默了
+- `provider_network`——AI 工具与其 provider 通信时遇到临时网络错误
 
 **不可重试**（任务停在失败状态）：
 
-- `agent_error`——AI 编程工具自己报错（API 错误、超额度、内部 bug）。底层问题不重试，避免无限循环。
+- `agent_error`——AI 编程工具自己报错（API 错误、超额度、内部 bug）。底层问题不重试，避免无限循环。（上面的 `provider_network` 是这一族里唯一的例外。）
+- `queued_expired`——2 小时内始终没有任何东西领走任务；重试进同一个缺席的运行时没有意义。修好运行时，再手动重跑。
 
 自动重试有两个额外条件：
 
-1. **最多 2 次**——1 次原任务 + 1 次重试。重试也失败就不再重试，即使原因可重试。
+1. **最多 2 次**——1 次原任务 + 1 次重试。例外是 `provider_network`，它最多 **3 次**（一次立即重试，再加一次短延迟后的），因为临时网络抖动往往下一次就恢复。最后一次允许的尝试也失败，就不再重试。
 2. **只对 issue 和聊天触发的任务生效**——Autopilots 触发的任务**不自动重试**。
 
 <Callout type="warning">
@@ -92,15 +101,25 @@ multica issue rerun <issue-id>
 | 维度 | 自动重试 | 手动重跑 |
 |---|---|---|
 | 触发 | 系统基于失败原因自动执行 | 你主动发起 |
-| 上限 | 2 次 | 无上限 |
+| 上限 | 2 次（`provider_network` 3 次） | 无上限 |
 | 适用来源 | issue、聊天 | 有智能体分配人的 issue |
 | 跑哪个 agent | 失败任务原本的 agent | UI 单行 retry：那一行任务的 agent；CLI / 不带 task_id：issue 当前的分配人 |
 | 工作目录 | 复用（接着上次的文件继续） | 单行 retry：原目录还在就复用；CLI / 不带 task_id：全新 |
 | 会话继承 | 是（接着上次会话） | 单行 retry：除非失败污染了对话，否则续接；CLI / 不带 task_id：全新 |
 
+## 盯着一次 run：执行日志
+
+每条 issue 的详情页都有一个 **Execution log**（执行日志）——这条 issue 上每一次 run 的列表，实时的和过往的都在。每一行显示谁在跑（智能体）、由什么触发（触发评论的文本、"Autopilot run"、"Retry #N"……）、当前状态，以及——对运行中的行——一个实时的耗时计时器。一个覆盖多条评论的合并 run 会显示 "Includes N comments"。过往失败的行会显示失败原因。
+
+从一行里你可以：
+
+- **View transcript**——打开智能体的执行记录（transcript），run 进行中时实时流式显示。transcript 弹窗还会显示归属（"on behalf of …"——这次 run 对谁负责的那个成员）。
+- **Stop task**——取消一个 queued 或 running 的任务（这就是停掉单个智能体 run 的方式，改 assignee 或 status 都不行）。
+- **Retry task**——在失败或取消的行上，用**跑过这一行的那个智能体**开一个新 run（语义见上面的 [手动重跑和自动重试的区别](#手动重跑和自动重试的区别)）。
+
 ## 失败的任务对 issue 状态有什么影响
 
-如果一个 issue 因为分配给智能体而触发的任务失败了（且没有自动重试成功），**issue 的状态会自动从 `in_progress` 退回 `todo`**——这样你打开看板时能立刻看到「这条需要再看看」。详见 [Issue 与 project](/issues)。
+当一次 run 失败、没有待重试，且 issue 正停在 `in_progress`、上面也没有其它 run 还在活跃时，**issue 的状态会自动退回 `todo`**——这样你打开看板时能立刻看到「这条需要再看看」。（如果还有另一个智能体在这条 issue 上有活跃的 run，状态就不动。）详见 [Issue 与 project](/issues)。
 
 ## 任务能接着上次的上下文继续吗
 
@@ -108,12 +127,7 @@ multica issue rerun <issue-id>
 
 Multica 在任务过程中**两次**保存会话 ID——任务一开始（AI 工具返回第一条系统消息时）pin 一次，任务结束（完成或失败）时再 pin 一次。前者让守护进程中途崩溃时也能恢复，后者会被下一次**自动重试**以及**执行日志里的单行 retry**复用——把这个 ID 传回去，智能体就能接着上次的对话和文件状态继续；只有当这次失败污染了对话时，才只复用工作目录、另开全新会话。**不带 task ID 的 CLI / API rerun** 则从全新会话 + 全新工作目录开始——见 [手动重跑和自动重试的区别](#手动重跑和自动重试的区别)。
 
-但**哪些 AI 编程工具真的支持**差别很大：
-
-- ✅ **真支持**——Antigravity、Claude Code、Codex、Copilot、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi
-- ❌ **不支持**——Gemini
-
-详见 [Providers Matrix → 会话恢复](/providers#会话恢复谁真的支持)。
+但**哪些 AI 编程工具真的支持**差别很大——每款工具的具体状态见 [Providers Matrix → 会话恢复](/providers#会话恢复谁真的支持)。
 
 ## 下一步
 

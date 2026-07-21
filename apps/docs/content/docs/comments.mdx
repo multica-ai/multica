@@ -33,6 +33,8 @@ Mentioning the same person multiple times in one comment still produces **only o
 
 `@all` is a special target: it pushes a notification to every member of the workspace. Both people and agents can use `@all` — which means an agent reporting progress could also `@all`, so remind agents in their instructions to use it sparingly.
 
+`@all` never reaches agents — and a comment containing `@all` also **suppresses the automatic agent routing** that a plain comment would get (it won't wake the issue's assigned agent). See [Mentioning agents](/mentioning-agents#which-agent-does-a-plain-comment-wake).
+
 <Callout type="warning">
 **Use `@all` carefully.** In a larger workspace, a single `@all` generates that many inbox notifications instantly. Reserve it for things everyone genuinely needs to know — not day-to-day updates.
 </Callout>
@@ -61,12 +63,12 @@ instead of:
 
 ## Editing and deleting a comment
 
-Only the author of a comment can edit or delete it.
+A comment can be edited or deleted by **its author, or by a workspace owner/admin**. Admins can delete anyone's comment (including an agent's); the edit entry in the UI is offered for members' comments.
 
 Deleting a comment also **deletes every reply** under it (including replies to replies). To change content only, use edit instead.
 
-<Callout type="warning">
-**Adding an `@` while editing a comment does not trigger the agent.** The trigger fires the moment a comment is **created** — editing to add a new `@`, or changing the target, does not send a new notification or wake the agent. To summon an agent you missed, **post a new comment** that `@`s it.
+<Callout type="info">
+**Editing a comment re-evaluates its triggers.** If your edit changes the comment's content, Multica cancels the runs the old version triggered (if they haven't finished) and re-routes based on the new content — so editing in an `@agent` you forgot **does** wake that agent. While you edit, the composer shows the same trigger preview as when posting, and you can untick any agent you don't want to start.
 </Callout>
 
 ---

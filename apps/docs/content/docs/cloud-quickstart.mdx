@@ -7,13 +7,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 This page walks you end-to-end through Multica Cloud — **sign up → install the [CLI](/cli) → start the [daemon](/daemon-runtimes) → create an [agent](/agents) → assign your first [task](/tasks)**. Takes about 5 minutes.
 
-One prerequisite: you already have at least one [AI coding tool](/providers) installed locally ([Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [CodeBuddy](/providers#codebuddy), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi), [Qoder](/providers#qoder), or [Trae CLI](/providers#trae), [DevEco Code](/providers#deveco-code)). The daemon auto-detects them on startup and refuses to start if none are present.
+One prerequisite: you already have at least one [AI coding tool](/providers) installed locally ([Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [CodeBuddy](/providers#codebuddy), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Grok](/providers#grok), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi), [Qoder](/providers#qoder), [Trae CLI](/providers#trae), or [DevEco Code](/providers#deveco-code)). The daemon auto-detects them on startup and refuses to start if none are present.
 
 ## 1. Create an account
 
 Sign up at [multica.ai](https://multica.ai). You can log in with email (6-digit verification code) or Google.
 
-After sign-up you're automatically placed in a default workspace (generated from your account name). You can rename it later, or create new workspaces.
+On first sign-in Multica walks you through a short onboarding wizard: a few optional questions, then **creating your workspace**, then **connecting a runtime**. The runtime step offers three paths — use this computer via the desktop app (recommended), connect from the terminal with the CLI (the steps below), or skip for now and connect later. If you connect a runtime during onboarding, Multica also sets up a starter agent (**Multica Helper**) and offers a few first tasks to assign to it — so you may reach step 6 without doing steps 2–5 by hand.
+
+The rest of this page is the CLI path, which also works any time after onboarding.
 
 ## 2. Install the Multica CLI
 
@@ -54,7 +56,7 @@ multica setup
 1. Configure the CLI to connect to Multica Cloud
 2. Open your browser for login (same email verification code / Google OAuth as the web)
 3. Store the generated PAT in `~/.multica/config.json`
-4. **Start the daemon automatically** — it begins polling for tasks every 3 seconds and sending heartbeats every 15 seconds
+4. **Start the daemon automatically** — it holds a WebSocket connection to the server, gets new tasks pushed in real time (with a 30-second polling fallback), and sends heartbeats every 15 seconds
 
 <Callout type="info">
 **Using the desktop app?** The desktop app **starts the daemon automatically** on launch — no need to run `multica setup` by hand. See [Desktop app](/desktop-app).
@@ -70,20 +72,20 @@ multica daemon status
 
 ## 4. Verify the runtime is online
 
-In the web UI, go to **Settings → Runtimes**. The daemon you just started should appear as one or more active runtimes — one per AI coding tool installed locally.
+In the web UI, open **Runtimes** in the sidebar (under the **Configure** group). The daemon you just started should appear as one or more active runtimes — one per AI coding tool installed locally. The **Add a computer** button on that page shows the same connection commands for any additional machine.
 
 If it shows as offline, don't panic — see [Troubleshooting → Daemon can't connect to the server](/troubleshooting#daemon-cant-connect-to-the-server).
 
 ## 5. Create an agent
 
-In the web UI, go to **Settings → Agents** and click **New Agent**:
+If onboarding already created **Multica Helper** for you, you can skip this step.
 
-- **Name** — the name shown for this agent on boards and in comments. Pick something you like
-- **Provider** — choose an AI coding tool you have installed locally (the dropdown only lists tools detected by your runtimes)
-- **Model** (optional) — the model selection inside that tool (a static list or dynamic discovery, depending on the provider)
-- **Instructions** (optional) — system prompt for this agent
+Otherwise, open **Agents** in the sidebar and click **+ New**. This opens the agent creation studio with two ways to start:
 
-Once created, the agent shows up in your workspace member list and can be assigned work like a human member.
+- **Start blank** — fill in the form yourself. Only two fields are required: a **name** and a **runtime** (which AI coding tool runs it). Description, instructions, skills, model, and access are optional.
+- **Build with AI** (recommended) — describe the agent you want; an Agent Builder asks focused questions and prepares a live draft you can edit before creating.
+
+Once created, the agent shows up in your workspace and can be assigned work like a human member. For every field in depth, see [Create and configure an agent](/agents-create).
 
 ## 6. Assign your first task
 
@@ -103,7 +105,7 @@ multica issue assign MUL-1 --to my-agent-name
 
 **What happens next from the daemon**:
 
-1. It picks up the task within 3 seconds (status goes from `queued` to `dispatched`)
+1. The server pushes the task to it in real time, usually within seconds (status goes from `queued` to `dispatched`)
 2. It invokes the matching AI coding tool to start work (status becomes `running`)
 3. The AI works locally — it may read your code directory, run commands, edit files
 4. When done, it reports the result back to Multica (status becomes `completed` or `failed`, depending on whether auto-retry kicks in)

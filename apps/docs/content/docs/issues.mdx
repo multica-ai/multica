@@ -11,13 +11,13 @@ An issue is a self-contained unit of work in Multica — a bug, a new feature, a
 
 ## Assigning an issue to an agent
 
-[Assigning](/assigning-issues) an issue to an agent hands that work over to it. The agent **starts automatically** — executing within seconds, reporting progress in comments, and flipping the status to done when finished. The only difference from handing work to a teammate is that an agent doesn't go offline, doesn't need reminders, and is available 24/7.
+[Assigning](/assigning-issues) an issue to an agent hands that work over to it. The agent **starts automatically** — executing within seconds and reporting progress in comments. When it finishes a delivery, the convention is to move the issue to `in_review` and let a human close it out — one finished run doesn't mean the issue is done (details below under [Status](#status)).
 
 <Callout type="info">
 For agent identity, configuration, and where they run, see [Agents](/agents).
 </Callout>
 
-Private agents can only be assigned to issues by workspace owners and admins. For role permissions, see [Members and roles](/members-roles).
+Whether you can assign a given agent depends on its **Access** setting (Only me / Entire workspace / Specific people) — see [Agents → Who can run an agent](/agents#who-can-run-an-agent). For role permissions, see [Members and roles](/members-roles).
 
 ## Status
 
@@ -25,15 +25,20 @@ Multica has seven statuses. **Any status can move directly to any other** — Mu
 
 | Status | Meaning |
 |---|---|
-| `backlog` | Not scheduled yet |
-| `todo` | Scheduled, ready to start |
+| `backlog` | Parked. Assigning an agent while in `backlog` does **not** start it — the run only enqueues when the issue leaves `backlog` (e.g. to `todo`) |
+| `todo` | Scheduled, ready to start — assigning an agent here triggers it immediately |
 | `in_progress` | Being worked on |
-| `in_review` | Awaiting review |
+| `in_review` | A delivery is waiting for human review |
 | `done` | Completed |
 | `blocked` | Stuck on an external factor |
 | `cancelled` | Cancelled |
 
-Once an issue is assigned to an agent, the agent automatically moves the status from `backlog` / `todo` to `in_progress`, then to `done` on completion. You can also change it manually at any time.
+**How status moves when an agent works an issue.** These transitions are made by the agent itself as it works (following its instructions), not enforced by the platform — the typical flow is: the agent moves the issue to `in_progress` when it starts, then to `in_review` when it has delivered something for you to look at. **A finished run does not automatically mean `done`** — closing out `in_review` → `done` is your call after review. You can change the status manually at any time.
+
+The platform itself auto-changes status in exactly two cases:
+
+- If an agent's run **fails** (with no retry pending and nothing else running on the issue), a stuck `in_progress` rolls back to `todo` so you can see it needs another look.
+- If a linked GitHub PR with close intent (`Closes MUL-123`) is **merged**, the issue moves to `done`.
 
 ## Priority
 

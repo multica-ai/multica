@@ -17,7 +17,12 @@ Once that's in place, go to the **Agents** page in your workspace and click **+ 
 multica agent create
 ```
 
-The form has only two required fields: **name** (unique within the workspace) and **runtime** (= pick an AI coding tool). Every other field is covered section by section below.
+**+ New** opens the agent creation studio, which asks how you'd like to start:
+
+- **Start blank** — configure every field yourself on a single form: name, description, avatar, instructions, skills, runtime, model, and access.
+- **Build with AI** (recommended) — describe the outcome you want; an **Agent Builder** asks focused questions in a chat on the left and fills in a live draft on the right. You can hand-edit any field before creating.
+
+Either way, only two fields are required: **name** (unique within the workspace) and **runtime** (= pick an AI coding tool). Every configurable field is covered section by section below — note that some of them (environment variables, CLI arguments, MCP, concurrency) are edited on the agent's detail page **after** creation rather than in the creation form.
 
 ## Pick an AI coding tool
 
@@ -31,7 +36,7 @@ Each runtime is backed by a specific AI coding tool. Multica supports 16 of them
 | **Copilot** | Teams leveraging their GitHub account entitlements |
 | **CodeBuddy** | Teams using Tencent's Claude Code-compatible CLI |
 
-The other nine (Antigravity, Hermes, Kimi, Kiro CLI, OpenCode, Pi, OpenClaw, Qoder, Trae CLI), along with each tool's full capability matrix (session resume, MCP, skill injection path, model selection), are covered in [AI coding tools comparison](/providers).
+The other eleven (Antigravity, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, OpenCode, Pi, OpenClaw, Qoder, Trae CLI), along with each tool's full capability matrix (session resume, MCP, skill injection path, model selection), are covered in [AI coding tools comparison](/providers).
 
 ## Writing system instructions
 
@@ -54,7 +59,7 @@ Changing the model **only applies to new tasks**. Already-dispatched tasks conti
 
 ## Custom environment variables (custom_env)
 
-**Custom environment variables** (`custom_env`) let you inject extra env vars at task execution time — typical uses are API keys or switching the upstream endpoint:
+**Custom environment variables** (`custom_env`) let you inject extra env vars at task execution time — typical uses are API keys or switching the upstream endpoint. They are not part of the creation form: set them on the agent's detail page (Env tab) after creation, or via the CLI. Duplicating an agent deliberately does **not** copy its env values.
 
 ```
 ANTHROPIC_API_KEY = sk-...
@@ -71,7 +76,7 @@ System-critical variables cannot be overridden: `PATH`, `HOME`, `USER`, `SHELL`,
 
 ## Custom CLI arguments (custom_args)
 
-**Custom CLI arguments** (`custom_args`) is a string array appended one-by-one to the AI coding tool's command line:
+**Custom CLI arguments** (`custom_args`) is a string array appended one-by-one to the AI coding tool's command line. Like `custom_env`, it lives on the agent's detail page after creation:
 
 ```json
 ["--max-turns", "100", "--append-system-prompt", "always respond in Chinese"]
@@ -89,18 +94,21 @@ Arguments are passed as-is, not through a shell (no injection risk), but whether
 `custom_env` and `custom_args` have no hard caps, but in practice **keep each under 10 entries**. Too many makes the command line long, slows startup, and gets harder to maintain.
 </Callout>
 
-## Visibility
+## Access — who can run this agent
 
-- **Workspace** (`workspace`) — any member of the workspace can assign it
-- **Private** (`private`) — only workspace owners, admins, or the agent's creator can assign it
+The **Access** section controls who can run the agent (assign it, `@`-mention it, chat with it):
 
-New agents default to `private`.
+- **Only me** — only you, the agent's owner, can run it. Admins have no bypass.
+- **Entire workspace** — every workspace member can run it.
+- **Specific people** — only the members you select can run it (at least one).
 
-**Private does not mean hidden** — every member sees a private agent's name and description in the list, they just can't read sensitive config (env values never appear in agent list/get responses; MCP config is masked for non-owners). Full meaning in [Agents → Who can assign an agent](/agents#who-can-assign-an-agent).
+New agents default to **Only me**. Access can be changed later, but **only by the agent's owner** — workspace admins can edit the rest of the configuration, not access.
+
+**Restricted access does not mean hidden** — every member sees the agent's name and description in the list, they just can't read sensitive config (env values never appear in agent list/get responses; MCP config is masked for non-owners). Full meaning in [Agents → Who can run an agent](/agents#who-can-run-an-agent).
 
 ## Concurrency limit
 
-**Concurrency limit** (`max_concurrent_tasks`) controls how many tasks this agent can run in parallel at once. The default is **6**. New tasks that hit the cap queue up — they aren't rejected.
+**Concurrency limit** (`max_concurrent_tasks`) controls how many tasks this agent can run in parallel at once. The default is **6**, adjustable on the agent's detail page after creation. New tasks that hit the cap queue up — they aren't rejected.
 
 This is only the "agent layer" of a two-tier limit — the daemon itself enforces a broader cap (default 20), and whichever is tighter wins. Details in [Daemon and runtimes → How many tasks can run in parallel](/daemon-runtimes#how-many-tasks-can-run-in-parallel).
 
