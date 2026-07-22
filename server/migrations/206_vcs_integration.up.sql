@@ -10,28 +10,35 @@
 --
 -- Mirrored pull requests and commit statuses are stored in vcs_pull_request
 -- and vcs_commit_status tables, separate from GitHub tables.
+--
+-- Per the project migration rules these tables carry NO foreign keys or
+-- cascades: relationships and dependent cleanup are resolved in application
+-- code (DeleteVCSConnection, DeleteWorkspace, and DeleteIssue each sweep the
+-- rows below in a single atomic statement). The inline UNIQUE / PRIMARY KEY
+-- constraints stay — they back the ON CONFLICT upsert targets in vcs.sql.
+-- Secondary indexes live in follow-up single-statement CREATE INDEX
+-- CONCURRENTLY migrations (207-211), which cannot share a file with these
+-- CREATE TABLEs.
 
 CREATE TABLE IF NOT EXISTS vcs_connection (
     id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id             UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+    workspace_id             UUID NOT NULL,
     provider                 TEXT NOT NULL DEFAULT 'forgejo'
         CHECK (provider IN ('forgejo', 'gitea', 'gitlab')),
     instance_url             TEXT NOT NULL,
     account_login            TEXT NOT NULL,
     access_token_encrypted   TEXT NOT NULL,
     webhook_secret_encrypted TEXT NOT NULL,
-    connected_by_id          UUID REFERENCES "user"(id) ON DELETE SET NULL,
+    connected_by_id          UUID,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (workspace_id, instance_url)
 );
 
-CREATE INDEX IF NOT EXISTS idx_vcs_connection_workspace ON vcs_connection(workspace_id);
-
 CREATE TABLE IF NOT EXISTS vcs_pull_request (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id      UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-    connection_id     UUID NOT NULL REFERENCES vcs_connection(id) ON DELETE CASCADE,
+    workspace_id      UUID NOT NULL,
+    connection_id     UUID NOT NULL,
     provider          TEXT NOT NULL DEFAULT 'forgejo'
         CHECK (provider IN ('forgejo', 'gitea', 'gitlab')),
     repo_owner        TEXT NOT NULL,
@@ -57,12 +64,9 @@ CREATE TABLE IF NOT EXISTS vcs_pull_request (
     UNIQUE (connection_id, repo_owner, repo_name, pr_number)
 );
 
-CREATE INDEX IF NOT EXISTS idx_vcs_pull_request_workspace ON vcs_pull_request(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_vcs_pull_request_connection ON vcs_pull_request(connection_id);
-
 CREATE TABLE IF NOT EXISTS issue_vcs_pull_request (
-    issue_id        UUID NOT NULL REFERENCES issue(id) ON DELETE CASCADE,
-    pull_request_id UUID NOT NULL REFERENCES vcs_pull_request(id) ON DELETE CASCADE,
+    issue_id        UUID NOT NULL,
+    pull_request_id UUID NOT NULL,
     close_intent    BOOLEAN NOT NULL DEFAULT FALSE,
     linked_by_type  TEXT,
     linked_by_id    UUID,
@@ -70,10 +74,8 @@ CREATE TABLE IF NOT EXISTS issue_vcs_pull_request (
     PRIMARY KEY (issue_id, pull_request_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_issue_vcs_pull_request_pr ON issue_vcs_pull_request(pull_request_id);
-
 CREATE TABLE IF NOT EXISTS vcs_commit_status (
-    connection_id UUID NOT NULL REFERENCES vcs_connection(id) ON DELETE CASCADE,
+    connection_id UUID NOT NULL,
     sha           TEXT NOT NULL,
     context       TEXT NOT NULL,
     state         TEXT NOT NULL,
@@ -82,6 +84,3 @@ CREATE TABLE IF NOT EXISTS vcs_commit_status (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (connection_id, sha, context)
 );
-
-CREATE INDEX IF NOT EXISTS idx_vcs_commit_status_lookup
-    ON vcs_commit_status(connection_id, sha);

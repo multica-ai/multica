@@ -30,7 +30,29 @@ ON CONFLICT (workspace_id, instance_url) DO UPDATE SET
 RETURNING *;
 
 -- name: DeleteVCSConnection :exec
-DELETE FROM vcs_connection WHERE id = $1 AND workspace_id = $2;
+-- These tables carry no FKs, so the cascade that once removed the connection's
+-- mirrored PRs, their issue links, and CI statuses is gone (migration 206). Do
+-- that cleanup explicitly here, in one statement so it commits or rolls back
+-- atomically with the connection row. The target CTE also scopes every child
+-- delete to a connection that actually belongs to the workspace, so a wrong
+-- workspace_id is a no-op rather than deleting another tenant's child rows.
+WITH target AS (
+    SELECT vcs_connection.id FROM vcs_connection WHERE vcs_connection.id = $1 AND vcs_connection.workspace_id = $2
+),
+cleared_links AS (
+    DELETE FROM issue_vcs_pull_request
+    WHERE pull_request_id IN (
+        SELECT vcs_pull_request.id FROM vcs_pull_request
+        WHERE vcs_pull_request.connection_id IN (SELECT target.id FROM target)
+    )
+),
+cleared_statuses AS (
+    DELETE FROM vcs_commit_status WHERE connection_id IN (SELECT target.id FROM target)
+),
+cleared_prs AS (
+    DELETE FROM vcs_pull_request WHERE connection_id IN (SELECT target.id FROM target)
+)
+DELETE FROM vcs_connection WHERE vcs_connection.id = $1 AND vcs_connection.workspace_id = $2;
 
 -- name: RotateVCSConnectionWebhookSecret :one
 UPDATE vcs_connection

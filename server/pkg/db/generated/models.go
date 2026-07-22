@@ -1009,6 +1009,7 @@ type VcsCommitStatus struct {
 type VcsConnection struct {
 	ID                     pgtype.UUID        `json:"id"`
 	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	Provider               string             `json:"provider"`
 	InstanceUrl            string             `json:"instance_url"`
 	AccountLogin           string             `json:"account_login"`
 	AccessTokenEncrypted   string             `json:"access_token_encrypted"`
@@ -1016,13 +1017,13 @@ type VcsConnection struct {
 	ConnectedByID          pgtype.UUID        `json:"connected_by_id"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
-	Provider               string             `json:"provider"`
 }
 
 type VcsPullRequest struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
 	ConnectionID    pgtype.UUID        `json:"connection_id"`
+	Provider        string             `json:"provider"`
 	RepoOwner       string             `json:"repo_owner"`
 	RepoName        string             `json:"repo_name"`
 	PrNumber        int32              `json:"pr_number"`
@@ -1030,6 +1031,7 @@ type VcsPullRequest struct {
 	State           string             `json:"state"`
 	HtmlUrl         string             `json:"html_url"`
 	Branch          pgtype.Text        `json:"branch"`
+	HeadSha         string             `json:"head_sha"`
 	AuthorLogin     pgtype.Text        `json:"author_login"`
 	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
 	MergedAt        pgtype.Timestamptz `json:"merged_at"`
@@ -1041,8 +1043,6 @@ type VcsPullRequest struct {
 	ChangedFiles    int32              `json:"changed_files"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	HeadSha         string             `json:"head_sha"`
-	Provider        string             `json:"provider"`
 }
 
 type VerificationCode struct {

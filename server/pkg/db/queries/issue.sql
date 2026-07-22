@@ -170,6 +170,14 @@ LIMIT 1;
 -- (loadIssueForUser / GetIssueInWorkspace) already enforce membership today,
 -- but a future loader bypass or a new caller skipping the loader would be
 -- silently catastrophic without this guard. See incident #1661.
+--
+-- issue_vcs_pull_request (migration 206) has no FK to issue, so the link rows
+-- are not cascaded away. Sweep them here so they go atomically with the issue.
+-- The mirrored PR rows themselves belong to the connection, not the issue, so
+-- they persist (matching the GitHub link behaviour).
+WITH cleared_vcs_pr_links AS (
+    DELETE FROM issue_vcs_pull_request WHERE issue_id = $1
+)
 DELETE FROM issue WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListOpenIssues :many

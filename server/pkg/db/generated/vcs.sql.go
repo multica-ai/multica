@@ -12,7 +12,23 @@ import (
 )
 
 const deleteVCSConnection = `-- name: DeleteVCSConnection :exec
-DELETE FROM vcs_connection WHERE id = $1 AND workspace_id = $2
+WITH target AS (
+    SELECT vcs_connection.id FROM vcs_connection WHERE vcs_connection.id = $1 AND vcs_connection.workspace_id = $2
+),
+cleared_links AS (
+    DELETE FROM issue_vcs_pull_request
+    WHERE pull_request_id IN (
+        SELECT vcs_pull_request.id FROM vcs_pull_request
+        WHERE vcs_pull_request.connection_id IN (SELECT target.id FROM target)
+    )
+),
+cleared_statuses AS (
+    DELETE FROM vcs_commit_status WHERE connection_id IN (SELECT target.id FROM target)
+),
+cleared_prs AS (
+    DELETE FROM vcs_pull_request WHERE connection_id IN (SELECT target.id FROM target)
+)
+DELETE FROM vcs_connection WHERE vcs_connection.id = $1 AND vcs_connection.workspace_id = $2
 `
 
 type DeleteVCSConnectionParams struct {
@@ -20,45 +36,19 @@ type DeleteVCSConnectionParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+// These tables carry no FKs, so the cascade that once removed the connection's
+// mirrored PRs, their issue links, and CI statuses is gone (migration 206). Do
+// that cleanup explicitly here, in one statement so it commits or rolls back
+// atomically with the connection row. The target CTE also scopes every child
+// delete to a connection that actually belongs to the workspace, so a wrong
+// workspace_id is a no-op rather than deleting another tenant's child rows.
 func (q *Queries) DeleteVCSConnection(ctx context.Context, arg DeleteVCSConnectionParams) error {
 	_, err := q.db.Exec(ctx, deleteVCSConnection, arg.ID, arg.WorkspaceID)
 	return err
 }
 
-const rotateVCSConnectionWebhookSecret = `-- name: RotateVCSConnectionWebhookSecret :one
-UPDATE vcs_connection
-SET webhook_secret_encrypted = $3,
-    updated_at = now()
-WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, provider
-`
-
-type RotateVCSConnectionWebhookSecretParams struct {
-	ID                     pgtype.UUID `json:"id"`
-	WorkspaceID            pgtype.UUID `json:"workspace_id"`
-	WebhookSecretEncrypted string      `json:"webhook_secret_encrypted"`
-}
-
-func (q *Queries) RotateVCSConnectionWebhookSecret(ctx context.Context, arg RotateVCSConnectionWebhookSecretParams) (VcsConnection, error) {
-	row := q.db.QueryRow(ctx, rotateVCSConnectionWebhookSecret, arg.ID, arg.WorkspaceID, arg.WebhookSecretEncrypted)
-	var i VcsConnection
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.InstanceUrl,
-		&i.AccountLogin,
-		&i.AccessTokenEncrypted,
-		&i.WebhookSecretEncrypted,
-		&i.ConnectedByID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Provider,
-	)
-	return i, err
-}
-
 const getVCSConnectionByID = `-- name: GetVCSConnectionByID :one
-SELECT id, workspace_id, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, provider FROM vcs_connection
+SELECT id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at FROM vcs_connection
 WHERE id = $1
 `
 
@@ -68,6 +58,7 @@ func (q *Queries) GetVCSConnectionByID(ctx context.Context, id pgtype.UUID) (Vcs
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
+		&i.Provider,
 		&i.InstanceUrl,
 		&i.AccountLogin,
 		&i.AccessTokenEncrypted,
@@ -75,7 +66,6 @@ func (q *Queries) GetVCSConnectionByID(ctx context.Context, id pgtype.UUID) (Vcs
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Provider,
 	)
 	return i, err
 }
@@ -178,7 +168,7 @@ func (q *Queries) ListIssueIDsForVCSPRHead(ctx context.Context, arg ListIssueIDs
 
 const listVCSConnectionsByWorkspace = `-- name: ListVCSConnectionsByWorkspace :many
 
-SELECT id, workspace_id, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, provider FROM vcs_connection
+SELECT id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at FROM vcs_connection
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -198,6 +188,7 @@ func (q *Queries) ListVCSConnectionsByWorkspace(ctx context.Context, workspaceID
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
+			&i.Provider,
 			&i.InstanceUrl,
 			&i.AccountLogin,
 			&i.AccessTokenEncrypted,
@@ -205,7 +196,6 @@ func (q *Queries) ListVCSConnectionsByWorkspace(ctx context.Context, workspaceID
 			&i.ConnectedByID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Provider,
 		); err != nil {
 			return nil, err
 		}
@@ -235,7 +225,7 @@ WITH checks AS (
     GROUP BY pr.id
 )
 SELECT
-    pr.id, pr.workspace_id, pr.connection_id, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title, pr.state, pr.html_url, pr.branch, pr.author_login, pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at, pr.pr_updated_at, pr.additions, pr.deletions, pr.changed_files, pr.created_at, pr.updated_at, pr.head_sha, pr.provider,
+    pr.id, pr.workspace_id, pr.connection_id, pr.provider, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title, pr.state, pr.html_url, pr.branch, pr.head_sha, pr.author_login, pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at, pr.pr_updated_at, pr.additions, pr.deletions, pr.changed_files, pr.created_at, pr.updated_at,
     COALESCE(c.total, 0)::bigint   AS checks_total,
     COALESCE(c.passed, 0)::bigint  AS checks_passed,
     COALESCE(c.failed, 0)::bigint  AS checks_failed,
@@ -251,6 +241,7 @@ type ListVCSPullRequestsByIssueRow struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
 	ConnectionID    pgtype.UUID        `json:"connection_id"`
+	Provider        string             `json:"provider"`
 	RepoOwner       string             `json:"repo_owner"`
 	RepoName        string             `json:"repo_name"`
 	PrNumber        int32              `json:"pr_number"`
@@ -258,6 +249,7 @@ type ListVCSPullRequestsByIssueRow struct {
 	State           string             `json:"state"`
 	HtmlUrl         string             `json:"html_url"`
 	Branch          pgtype.Text        `json:"branch"`
+	HeadSha         string             `json:"head_sha"`
 	AuthorLogin     pgtype.Text        `json:"author_login"`
 	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
 	MergedAt        pgtype.Timestamptz `json:"merged_at"`
@@ -269,8 +261,6 @@ type ListVCSPullRequestsByIssueRow struct {
 	ChangedFiles    int32              `json:"changed_files"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	HeadSha         string             `json:"head_sha"`
-	Provider        string             `json:"provider"`
 	ChecksTotal     int64              `json:"checks_total"`
 	ChecksPassed    int64              `json:"checks_passed"`
 	ChecksFailed    int64              `json:"checks_failed"`
@@ -295,6 +285,7 @@ func (q *Queries) ListVCSPullRequestsByIssue(ctx context.Context, issueID pgtype
 			&i.ID,
 			&i.WorkspaceID,
 			&i.ConnectionID,
+			&i.Provider,
 			&i.RepoOwner,
 			&i.RepoName,
 			&i.PrNumber,
@@ -302,6 +293,7 @@ func (q *Queries) ListVCSPullRequestsByIssue(ctx context.Context, issueID pgtype
 			&i.State,
 			&i.HtmlUrl,
 			&i.Branch,
+			&i.HeadSha,
 			&i.AuthorLogin,
 			&i.AuthorAvatarUrl,
 			&i.MergedAt,
@@ -313,8 +305,6 @@ func (q *Queries) ListVCSPullRequestsByIssue(ctx context.Context, issueID pgtype
 			&i.ChangedFiles,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.HeadSha,
-			&i.Provider,
 			&i.ChecksTotal,
 			&i.ChecksPassed,
 			&i.ChecksFailed,
@@ -328,6 +318,38 @@ func (q *Queries) ListVCSPullRequestsByIssue(ctx context.Context, issueID pgtype
 		return nil, err
 	}
 	return items, nil
+}
+
+const rotateVCSConnectionWebhookSecret = `-- name: RotateVCSConnectionWebhookSecret :one
+UPDATE vcs_connection
+SET webhook_secret_encrypted = $3,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at
+`
+
+type RotateVCSConnectionWebhookSecretParams struct {
+	ID                     pgtype.UUID `json:"id"`
+	WorkspaceID            pgtype.UUID `json:"workspace_id"`
+	WebhookSecretEncrypted string      `json:"webhook_secret_encrypted"`
+}
+
+func (q *Queries) RotateVCSConnectionWebhookSecret(ctx context.Context, arg RotateVCSConnectionWebhookSecretParams) (VcsConnection, error) {
+	row := q.db.QueryRow(ctx, rotateVCSConnectionWebhookSecret, arg.ID, arg.WorkspaceID, arg.WebhookSecretEncrypted)
+	var i VcsConnection
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.InstanceUrl,
+		&i.AccountLogin,
+		&i.AccessTokenEncrypted,
+		&i.WebhookSecretEncrypted,
+		&i.ConnectedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertVCSCommitStatus = `-- name: UpsertVCSCommitStatus :exec
@@ -388,7 +410,7 @@ ON CONFLICT (workspace_id, instance_url) DO UPDATE SET
     webhook_secret_encrypted = EXCLUDED.webhook_secret_encrypted,
     connected_by_id          = EXCLUDED.connected_by_id,
     updated_at               = now()
-RETURNING id, workspace_id, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, provider
+RETURNING id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at
 `
 
 type UpsertVCSConnectionParams struct {
@@ -417,6 +439,7 @@ func (q *Queries) UpsertVCSConnection(ctx context.Context, arg UpsertVCSConnecti
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
+		&i.Provider,
 		&i.InstanceUrl,
 		&i.AccountLogin,
 		&i.AccessTokenEncrypted,
@@ -424,7 +447,6 @@ func (q *Queries) UpsertVCSConnection(ctx context.Context, arg UpsertVCSConnecti
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Provider,
 	)
 	return i, err
 }
@@ -459,7 +481,7 @@ ON CONFLICT (connection_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     changed_files     = EXCLUDED.changed_files,
     head_sha          = EXCLUDED.head_sha,
     updated_at        = now()
-RETURNING id, workspace_id, connection_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at, head_sha, provider
+RETURNING id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state, html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at
 `
 
 type UpsertVCSPullRequestParams struct {
@@ -516,6 +538,7 @@ func (q *Queries) UpsertVCSPullRequest(ctx context.Context, arg UpsertVCSPullReq
 		&i.ID,
 		&i.WorkspaceID,
 		&i.ConnectionID,
+		&i.Provider,
 		&i.RepoOwner,
 		&i.RepoName,
 		&i.PrNumber,
@@ -523,6 +546,7 @@ func (q *Queries) UpsertVCSPullRequest(ctx context.Context, arg UpsertVCSPullReq
 		&i.State,
 		&i.HtmlUrl,
 		&i.Branch,
+		&i.HeadSha,
 		&i.AuthorLogin,
 		&i.AuthorAvatarUrl,
 		&i.MergedAt,
@@ -534,8 +558,6 @@ func (q *Queries) UpsertVCSPullRequest(ctx context.Context, arg UpsertVCSPullReq
 		&i.ChangedFiles,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.HeadSha,
-		&i.Provider,
 	)
 	return i, err
 }
