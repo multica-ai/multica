@@ -30,6 +30,13 @@ spec:
     - host: agentfarm.g2.com
       http:
         paths:
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: agentfarm-backend
+                port:
+                  name: http
           - path: /
             pathType: Prefix
             backend:
