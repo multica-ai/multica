@@ -31,7 +31,7 @@ test.describe("FIR-3496 Evals v2 connections", () => {
     await page.goto("/e2e-workspace/workflows/evals");
     await expect(page.getByRole("heading", { name: "Evals" })).toBeVisible();
 
-    await page.getByLabel("Eval").selectOption(EVAL_ID);
+    await page.getByLabel("Eval", { exact: true }).selectOption(EVAL_ID);
     await page.getByLabel("Issue workflow").selectOption(WORKFLOW_ID);
     await page.getByLabel("Phase").selectOption("monitor");
     await page.getByLabel("Enforcement").selectOption("warn");
