@@ -95,6 +95,8 @@ pnpm test || { EXIT_CODE=1; exit 1; }
 # --------------------------------------------------------------------------
 echo ""
 echo "==> [3/5] Go tests..."
+echo "==> Verifying Go test wrapper..."
+bash scripts/test-go.test.sh || { EXIT_CODE=1; exit 1; }
 echo "==> Running database migrations..."
 (cd server && go run ./cmd/migrate up) || { EXIT_CODE=1; exit 1; }
 bash scripts/test-go.sh || { EXIT_CODE=1; exit 1; }
