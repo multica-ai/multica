@@ -37,10 +37,7 @@ import {
   traceEventSummary,
   type TraceEventKind,
 } from "./trace-event-presenter";
-
-// TODO(i18n) MUL-5122: these are the only new user-facing strings; localize when
-// the Execution Log copy is finalized. Kept as plain English literals for now so
-// the terminal-path rewrite does not block on adding a translation namespace.
+import { useT } from "../../i18n";
 
 const TOOL_KEY_PREFIX = "tool:";
 const OUTPUT_DETAIL_CAP = 4000;
@@ -89,17 +86,18 @@ interface LogListContext {
 }
 
 function LogListHeader({ context }: { context?: LogListContext }) {
+  const { t } = useT("issues");
   if (!context) return null;
   if (context.earlierError) {
     return (
       <div className="flex items-center justify-center gap-2 px-4 py-2 text-xs text-muted-foreground">
-        <span>Couldn&apos;t load earlier events.</span>
+        <span>{t(($) => $.execution_log.earlier_error)}</span>
         <button
           type="button"
           onClick={context.onRetryEarlier}
           className="rounded px-1.5 py-0.5 text-foreground underline underline-offset-2 hover:bg-accent"
         >
-          Retry
+          {t(($) => $.execution_log.retry)}
         </button>
       </div>
     );
@@ -108,7 +106,7 @@ function LogListHeader({ context }: { context?: LogListContext }) {
     return (
       <div className="flex items-center justify-center gap-2 px-4 py-2 text-xs text-muted-foreground">
         <Loader2 className="h-3 w-3 animate-spin" />
-        Loading earlier events…
+        {t(($) => $.execution_log.loading_earlier)}
       </div>
     );
   }
@@ -128,6 +126,7 @@ export function ExecutionLogDialog({
   agentName,
   headerSlot,
 }: ExecutionLogDialogProps) {
+  const { t } = useT("issues");
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
@@ -172,25 +171,23 @@ export function ExecutionLogDialog({
   const first = pages[0];
   const rawTotal = first?.raw_total ?? 0;
   const matchedTotal = first?.matched_total ?? 0;
-  const typeFacets = first?.type_facets ?? [];
-  const toolFacets = first?.tool_facets ?? [];
 
   const filterActive = selectedKeys.length > 0;
 
   const chips = useMemo(
     () => [
-      ...typeFacets.map((f) => ({
+      ...(first?.type_facets ?? []).map((f) => ({
         key: f.key,
         label: typeFacetLabel(f.key),
         count: f.count,
       })),
-      ...toolFacets.map((f) => ({
+      ...(first?.tool_facets ?? []).map((f) => ({
         key: `${TOOL_KEY_PREFIX}${f.key}`,
         label: f.key,
         count: f.count,
       })),
     ],
-    [typeFacets, toolFacets],
+    [first],
   );
 
   const toggleKey = useCallback((key: string) => {
@@ -228,22 +225,22 @@ export function ExecutionLogDialog({
   } else if (isError) {
     body = (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center text-sm text-muted-foreground">
-        <span>Failed to load the execution log.</span>
+        <span>{t(($) => $.execution_log.load_error)}</span>
         <Button variant="outline" size="sm" onClick={() => void refetch()}>
-          Retry
+          {t(($) => $.execution_log.retry)}
         </Button>
       </div>
     );
   } else if (rawTotal === 0) {
     body = (
       <div className="flex h-full items-center justify-center px-4 text-sm text-muted-foreground">
-        No execution events
+        {t(($) => $.execution_log.empty)}
       </div>
     );
   } else if (messages.length === 0) {
     body = (
       <div className="flex h-full items-center justify-center px-4 text-sm text-muted-foreground">
-        No events match the selected filters
+        {t(($) => $.execution_log.no_match)}
       </div>
     );
   } else if (scrollEl) {
@@ -271,13 +268,13 @@ export function ExecutionLogDialog({
         className="!max-w-4xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
         showCloseButton={false}
       >
-        <DialogTitle className="sr-only">Execution Log</DialogTitle>
+        <DialogTitle className="sr-only">{t(($) => $.execution_log.dialog_title)}</DialogTitle>
 
         {/* ── Header ─────────────────────────────────────────────── */}
         <div className="border-b px-4 py-3 shrink-0 space-y-2">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="font-medium text-sm">Execution Log</span>
+              <span className="font-medium text-sm">{t(($) => $.execution_log.dialog_title)}</span>
               <span className="truncate text-sm text-muted-foreground">{agentName}</span>
             </div>
 
@@ -285,18 +282,18 @@ export function ExecutionLogDialog({
               <button
                 type="button"
                 onClick={handleCopyLoaded}
-                aria-label="Copy loaded"
+                aria-label={t(($) => $.execution_log.copy_loaded)}
                 className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                 <span className="hidden sm:inline">
-                  {copied ? "Copied" : "Copy loaded"}
+                  {copied ? t(($) => $.execution_log.copied) : t(($) => $.execution_log.copy_loaded)}
                 </span>
               </button>
               <button
                 type="button"
                 onClick={() => onOpenChange(false)}
-                aria-label="Close"
+                aria-label={t(($) => $.execution_log.close)}
                 className="flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 <X className="h-4 w-4" />
@@ -306,8 +303,16 @@ export function ExecutionLogDialog({
 
           {/* Counts */}
           <div className="text-xs text-muted-foreground">
-            <span data-testid="execution-log-total">{rawTotal}</span> events
-            {filterActive && <> · {matchedTotal} matched</>} · {messages.length} loaded
+            <span data-testid="execution-log-total">{rawTotal}</span>{" "}
+            {t(($) => $.execution_log.events_label)}
+            {filterActive && (
+              <>
+                {" · "}
+                {t(($) => $.execution_log.matched_count, { n: matchedTotal })}
+              </>
+            )}
+            {" · "}
+            {t(($) => $.execution_log.loaded_count, { n: messages.length })}
           </div>
 
           {/* Filter chips (OR semantics; a tool chip covers tool_use + tool_result) */}

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
+import { renderWithI18n } from "../../test/i18n";
 import { api } from "@multica/core/api";
 import type { AgentTask } from "@multica/core/types/agent";
 import type { ExecutionLogPage } from "@multica/core/types/events";
@@ -73,7 +74,7 @@ const listTaskMessagesPage = vi.mocked(api.listTaskMessagesPage);
 
 function renderDialog() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  return renderWithI18n(
     <QueryClientProvider client={qc}>
       <ExecutionLogDialog
         open
