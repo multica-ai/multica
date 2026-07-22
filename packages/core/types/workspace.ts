@@ -1,8 +1,22 @@
 export type MemberRole = "owner" | "admin" | "member";
 
+/**
+ * How much of a repository the daemon downloads when it first builds the
+ * workspace's shared bare cache.
+ *
+ * - `full`: download everything, including every historical file version.
+ * - `on-demand`: download the whole commit history but fetch file contents
+ *   lazily, the first time a checkout actually needs them. Much lighter on
+ *   first use for repositories with large binary history.
+ *
+ * Repos registered before this field existed omit it and behave as `full`.
+ */
+export type WorkspaceRepoCloneMode = "full" | "on-demand";
+
 export interface WorkspaceRepo {
   url: string;
   description?: string;
+  clone_mode?: WorkspaceRepoCloneMode;
 }
 
 export interface Workspace {

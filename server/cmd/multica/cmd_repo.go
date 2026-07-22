@@ -61,6 +61,11 @@ func init() {
 
 	repoAddCmd.Flags().StringArray("url", nil, "Repository URL to add (may be repeated)")
 	repoAddCmd.Flags().String("description", "", "Optional description; only valid when adding one URL")
+	repoAddCmd.Flags().String("clone-mode", cloneModeFull,
+		"Download strategy for the shared cache: full (default) or on-demand. "+
+			"on-demand keeps the whole commit history but downloads file contents lazily, "+
+			"which is much lighter on first use for repos with large binary history. "+
+			"Only applies when the cache is first created.")
 	repoAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	repoRemoveCmd.Flags().StringArray("url", nil, "Repository URL to remove (may be repeated)")
@@ -77,6 +82,41 @@ func init() {
 type workspaceRepo struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
+	CloneMode   string `json:"clone_mode,omitempty"`
+}
+
+// Clone modes accepted by `repo add --clone-mode`. "full" downloads the whole
+// repository up front; "on-demand" creates a blobless partial clone that keeps
+// the full commit history but fetches file contents only when a checkout needs
+// them. The empty string means the caller did not express a preference and the
+// server keeps whatever the entry already had (full, in practice).
+const (
+	cloneModeFull     = "full"
+	cloneModeOnDemand = "on-demand"
+)
+
+// cloneModeLabel renders a stored clone mode for humans. Entries created
+// before the feature existed carry no value and behave as full clones.
+func cloneModeLabel(mode string) string {
+	if mode == "" {
+		return cloneModeFull
+	}
+	return mode
+}
+
+func parseCloneModeFlag(cmd *cobra.Command) (string, error) {
+	if !cmd.Flags().Changed("clone-mode") {
+		return "", nil
+	}
+	raw, _ := cmd.Flags().GetString("clone-mode")
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case cloneModeFull:
+		return cloneModeFull, nil
+	case cloneModeOnDemand:
+		return cloneModeOnDemand, nil
+	default:
+		return "", fmt.Errorf("--clone-mode must be %q or %q", cloneModeFull, cloneModeOnDemand)
+	}
 }
 
 type repoWorkspaceResponse struct {
@@ -176,9 +216,9 @@ func runRepoList(cmd *cobra.Command, _ []string) error {
 	}
 	rows := make([][]string, 0, len(ws.Repos))
 	for _, repo := range ws.Repos {
-		rows = append(rows, []string{repo.URL, repo.Description})
+		rows = append(rows, []string{repo.URL, cloneModeLabel(repo.CloneMode), repo.Description})
 	}
-	cli.PrintTable(os.Stdout, []string{"URL", "DESCRIPTION"}, rows)
+	cli.PrintTable(os.Stdout, []string{"URL", "CLONE MODE", "DESCRIPTION"}, rows)
 	return nil
 }
 
@@ -191,6 +231,10 @@ func runRepoAdd(cmd *cobra.Command, args []string) error {
 	descriptionChanged := cmd.Flags().Changed("description")
 	if descriptionChanged && len(urls) > 1 {
 		return fmt.Errorf("--description can only be used when adding one repository URL")
+	}
+	cloneMode, err := parseCloneModeFlag(cmd)
+	if err != nil {
+		return err
 	}
 
 	client, workspaceID, err := repoCommandClient(cmd)
@@ -213,16 +257,26 @@ func runRepoAdd(cmd *cobra.Command, args []string) error {
 
 	added := []workspaceRepo{}
 	updated := []workspaceRepo{}
+	remodeled := []string{}
 	repos := append([]workspaceRepo{}, ws.Repos...)
 	for _, u := range urls {
 		if idx, ok := indexByURL[u]; ok {
+			changed := false
 			if descriptionChanged && repos[idx].Description != description {
 				repos[idx].Description = description
+				changed = true
+			}
+			if cloneMode != "" && cloneModeLabel(repos[idx].CloneMode) != cloneMode {
+				repos[idx].CloneMode = cloneMode
+				remodeled = append(remodeled, u)
+				changed = true
+			}
+			if changed {
 				updated = append(updated, repos[idx])
 			}
 			continue
 		}
-		repo := workspaceRepo{URL: u}
+		repo := workspaceRepo{URL: u, CloneMode: cloneMode}
 		if descriptionChanged {
 			repo.Description = description
 		}
@@ -238,6 +292,14 @@ func runRepoAdd(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		ws.Repos = repos
+	}
+
+	// The clone mode only decides how the daemon builds the bare cache the
+	// first time. Once that cache exists nothing re-reads the flag, so say so
+	// instead of letting the user believe the switch took effect.
+	for _, u := range remodeled {
+		fmt.Fprintf(os.Stderr,
+			"Warning: %s was already registered; the new clone mode applies only where its cache has not been created yet.\n", u)
 	}
 
 	result := repoMutationResult{
@@ -256,12 +318,12 @@ func runRepoAdd(cmd *cobra.Command, args []string) error {
 	}
 	rows := make([][]string, 0, len(added)+len(updated))
 	for _, repo := range added {
-		rows = append(rows, []string{"added", repo.URL, repo.Description})
+		rows = append(rows, []string{"added", repo.URL, cloneModeLabel(repo.CloneMode), repo.Description})
 	}
 	for _, repo := range updated {
-		rows = append(rows, []string{"updated", repo.URL, repo.Description})
+		rows = append(rows, []string{"updated", repo.URL, cloneModeLabel(repo.CloneMode), repo.Description})
 	}
-	cli.PrintTable(os.Stdout, []string{"ACTION", "URL", "DESCRIPTION"}, rows)
+	cli.PrintTable(os.Stdout, []string{"ACTION", "URL", "CLONE MODE", "DESCRIPTION"}, rows)
 	return nil
 }
 

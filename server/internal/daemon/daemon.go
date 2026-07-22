@@ -5364,7 +5364,10 @@ func mergeUsage(a, b map[string]agent.TokenUsage) map[string]agent.TokenUsage {
 func repoDataToInfo(repos []RepoData) []repocache.RepoInfo {
 	info := make([]repocache.RepoInfo, len(repos))
 	for i, r := range repos {
-		info[i] = repocache.RepoInfo{URL: r.URL}
+		info[i] = repocache.RepoInfo{
+			URL:       r.URL,
+			CloneMode: repocache.NormalizeCloneMode(r.CloneMode),
+		}
 	}
 	return info
 }

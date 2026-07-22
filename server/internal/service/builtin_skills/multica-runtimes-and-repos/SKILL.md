@@ -43,11 +43,33 @@ multica runtime update <runtime-id> --target-version <version> --output json
 multica runtime delete <runtime-id>
 multica repo checkout <url>
 multica repo checkout <url> --ref <branch-or-sha>
+multica repo list --output json
+multica repo add <url> --clone-mode on-demand
 ```
 
 `runtime update` and `runtime delete` are writes. Starting a runtime update is limited to its owner or a workspace owner/admin; the original initiator may keep polling that specific in-flight request if their admin role changes. `runtime delete` removes a runtime registration; if active agents are still bound, it refuses unless the user explicitly passes `--cascade`, which archives those agents and cancels their queued/running tasks before deleting the runtime. `repo checkout` creates a dedicated branch in the task working directory. Most runtimes use a linked worktree; Linux Codex uses task-local Git metadata so its `workspace-write` sandbox can stage and commit without making the shared `.repos` cache writable.
 
 `repo checkout` requires `MULTICA_DAEMON_PORT`; it is intended to run inside a daemon task. If absent, you are not in the normal agent checkout path. When a project `github_repo` resource has `resource_ref.ref`, `repo checkout <url>` uses that ref by default for the current task; an explicit `repo checkout <url> --ref <branch-or-sha>` overrides it.
+
+### Clone mode
+
+A workspace repo entry carries `clone_mode`: `full` (the default, and what an
+absent value means) or `on-demand`. `on-demand` builds the shared bare cache as
+a blobless partial clone (`--filter=blob:none`): the full commit history is
+present, so arbitrary SHAs, tags, PR refs, and merge-bases all still resolve,
+but file contents are fetched from the remote the first time a checkout needs
+them. It is the right answer for repositories whose size is dominated by large
+binaries in history; `--depth` shallow clones are deliberately not supported,
+because the cache is shared by every task in the workspace and truncated
+history would break later tasks.
+
+`repo add --clone-mode` and the Repositories settings tab set it; `repo
+checkout` only consumes it. The mode applies when the bare cache is first
+created — an existing cache is never rebuilt or discarded when the value
+changes, and the daemon logs a `clone mode differs from existing cache`
+warning in that case. If an on-demand repo fails a checkout with missing
+objects, the daemon lost network or credentials for the remote; that is the one
+failure mode a full clone does not have.
 
 ## Debugging an agent that did not run
 

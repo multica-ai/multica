@@ -17,6 +17,7 @@ func newRepoRegistryTestCmd(serverURL string) *cobra.Command {
 	cmd.Flags().String("profile", "", "")
 	cmd.Flags().StringArray("url", nil, "")
 	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("clone-mode", cloneModeFull, "")
 	cmd.Flags().String("output", "json", "")
 	_ = cmd.Flags().Set("server-url", serverURL)
 	_ = cmd.Flags().Set("workspace-id", "ws-1")

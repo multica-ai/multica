@@ -39,6 +39,10 @@ type RepoData struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
 	Ref         string `json:"ref,omitempty"`
+	// CloneMode selects the download strategy for the workspace's bare cache
+	// of this repo ("full" or "on-demand"). Empty means full — every repo
+	// registered before this field existed serializes that way.
+	CloneMode string `json:"clone_mode,omitempty"`
 }
 
 // ProjectResourceData mirrors handler.ProjectResourceData — a single project
