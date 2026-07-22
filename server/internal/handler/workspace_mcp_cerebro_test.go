@@ -312,7 +312,9 @@ func exerciseWorkspaceMCPAsAgent(t *testing.T, payload map[string]any) *httptest
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", taskID)
-	ctx, cancel := context.WithTimeout(req.Context(), 50*time.Millisecond)
+	// Give a loaded CI database enough time to persist the pending approval
+	// before the request timeout exercises the MCP pending response.
+	ctx, cancel := context.WithTimeout(req.Context(), 500*time.Millisecond)
 	defer cancel()
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
