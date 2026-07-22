@@ -66,6 +66,21 @@ const FlagSubIssueNoSplitSession = "cerebro_sub_issue_no_split_session"
 // The sub-issue checks (TECH-3099) are unaffected by this exemption.
 const FlagCommentTargetGuardWakeupExempt = "cerebro_comment_target_guard_wakeup_exempt"
 
+// FlagNoUnbackedPromise (FIR-3308) rejects an agent comment that promises the
+// agent itself will carry on with the next step while no wakeup is scheduled to
+// make that happen. It is an independent check: it does not require the base
+// target guard, and it is default OFF like every other cerebro extension.
+//
+// The rule encodes the standing instruction that a known next step is taken and
+// scheduled, not announced. A promise with no scheduled continuation is the one
+// failure mode a reader cannot detect from the comment itself — it reads like
+// progress and silently stops.
+const FlagNoUnbackedPromise = "cerebro_comment_no_unbacked_promise"
+
+// UnbackedPromiseMessage is returned to the agent when its comment promises a
+// continuation that nothing is scheduled to deliver.
+const UnbackedPromiseMessage = "comment promises that you will continue, but no wakeup is scheduled on this issue — schedule the wakeup first, or rewrite the comment to state a delivered result instead of an intention (FIR-3308)."
+
 // flagReader is the subset of the cerebro Queries the guard needs to resolve
 // its feature flags. Satisfied by *cerebrodb.Queries; the interface keeps the
 // guard unit-testable without a database.
@@ -118,6 +133,14 @@ func (s *Service) RejectComment(
 
 	flags := s.loadFlags(ctx, workspaceID)
 
+	// FIR-3308: an agent may not announce that it will continue while nothing is
+	// scheduled to make that happen. Checked before the base guard's early
+	// return because it stands on its own flag and does not depend on the
+	// recipient rule.
+	if flags[FlagNoUnbackedPromise] && !agentHasActiveWakeup && promisesContinuation(content) {
+		return UnbackedPromiseMessage, false
+	}
+
 	// Off unless the workspace has the feature flag turned on.
 	if !flags[FlagCommentTargetGuard] {
 		return "", true
@@ -154,6 +177,53 @@ func (s *Service) RejectComment(
 	}
 
 	return "", true
+}
+
+// continuationPromises are the phrases that mean "I, the agent, will carry this
+// on myself". They are deliberately first-person or explicitly automatic: a next
+// step that belongs to the reader ("the next step is for you to approve") must
+// not trip the guard, so no bare "next step" phrase is listed. The list is
+// conservative on purpose — this check blocks a comment, so a false positive
+// costs the agent a rewrite.
+var continuationPromises = []string{
+	// Danish — first person.
+	"jeg fortsætter",
+	"jeg kører videre",
+	"jeg går i gang",
+	"jeg vender tilbage",
+	"jeg melder tilbage",
+	"jeg følger op",
+	"derefter lægger jeg",
+	"jeg lægger den live",
+	// Danish — explicitly automatic continuation.
+	"fortsætter automatisk",
+	"fortsættelsen er planlagt",
+	"arbejdet fortsætter",
+	"starter automatisk",
+	"næste kørsel",
+	// English equivalents.
+	"i will continue",
+	"i'll continue",
+	"i will follow up",
+	"i'll follow up",
+	"i will report back",
+	"work continues automatically",
+	"continues automatically",
+	"next run will",
+}
+
+// promisesContinuation reports whether the comment states that the authoring
+// agent itself will carry on with the work. It is a plain phrase match on the
+// lowercased content: the guard runs inside the comment write path, so it must
+// be deterministic and fast — no model call and no network.
+func promisesContinuation(content string) bool {
+	lowered := strings.ToLower(content)
+	for _, phrase := range continuationPromises {
+		if strings.Contains(lowered, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // hasRecipient reports whether content addresses at least one recipient — a
