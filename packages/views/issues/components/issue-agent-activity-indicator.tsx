@@ -102,7 +102,10 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
         />
         <span
           className={cn(
-            "text-[10px] leading-none",
+            // leading-none + background-clip:text (shimmer) clips descenders
+            // on "Working" / "Queued" (the g/y tails). leading-tight keeps the
+            // dense 10px cue but leaves room for the font metrics.
+            "text-[10px] leading-tight",
             isRunning
               ? "animate-chat-text-shimmer"
               : "text-muted-foreground",
