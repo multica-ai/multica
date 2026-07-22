@@ -29,6 +29,26 @@ export function blockMeta(type: LoopBlockType): BlockTypeMeta {
   return BLOCK_TYPES.find((item) => item.value === type) ?? BLOCK_TYPES[0]!;
 }
 
+// The issue statuses a chain may move an issue through, in board order. This
+// mirrors loops.IssueStatuses on the server, which rejects anything else at
+// save time — a status can no longer be typed by hand and silently park an
+// issue in a status the board does not have.
+export const ISSUE_STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "backlog", label: "Backlog" },
+  { value: "todo", label: "Todo" },
+  { value: "in_progress", label: "In progress" },
+  { value: "in_review", label: "In review" },
+  { value: "blocked", label: "Blocked" },
+  { value: "done", label: "Done" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
+// A saved status the list does not know is shown as-is rather than dropped, so
+// opening an older recipe never rewrites what it already stores.
+export function issueStatusLabel(status: string): string {
+  return ISSUE_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
+}
+
 // One-line summary shown under a collapsed step card, so the user reads the
 // chain without opening each step. Kept in plain language, never raw keys.
 export function blockSummary(block: LoopChainBlock): string {

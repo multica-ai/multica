@@ -13,6 +13,7 @@ import type { LoopChainSpec, WorkflowEvalBinding } from "../core/types";
 import {
   ChainRail,
   EvalGateFields,
+  StepStatusFields,
   applyGateSelection,
   gateOptionValue,
 } from "./workflow-issue-loop-form";
@@ -105,11 +106,18 @@ describe("Issue workflow editor — phase row", () => {
     renderRail();
     // Without the md: twin these render 14px on desktop no matter what the
     // base class says — class merging does not drop a responsive variant.
-    for (const label of ["Phase name", "Done status"]) {
-      const field = screen.getByLabelText(label);
-      expect(field.className).toContain("text-xs");
-      expect(field.className).toContain("md:text-xs");
-    }
+    const field = screen.getByLabelText("Phase name");
+    expect(field.className).toContain("text-xs");
+    expect(field.className).toContain("md:text-xs");
+  });
+
+  it("picks the finish status from the board's statuses instead of taking typed text", () => {
+    renderRail();
+    const control = screen.getByLabelText("Done status");
+    // A typed status used to save fine and then park the issue in a status the
+    // board does not have. The control is now a picker, so that cannot happen.
+    expect(control.tagName).not.toBe("INPUT");
+    expect(control).toHaveTextContent("Done");
   });
 
   it("offers a drag handle on the phase row, not only on steps", () => {
@@ -258,5 +266,37 @@ describe("gate option encoding", () => {
   it("ignores an empty selection rather than clearing the gate", () => {
     const block = { id: "e", type: "eval" as const, eval_key: "keep", eval_phase: "plan" as const };
     expect(applyGateSelection(block, "")).toBe(block);
+  });
+});
+
+describe("per-step status control", () => {
+  it("offers a status before and after the step, both optional", () => {
+    render(
+      withNavigation(
+        <StepStatusFields
+          block={{ id: "build", type: "session", status_on_start: "in_progress" }}
+          onChange={vi.fn()}
+        />,
+      ),
+    );
+
+    // Before this change the only status a chain could set was the phase's and
+    // the chain's final one, so a run could not show "In review" while a review
+    // step waited.
+    expect(screen.getByLabelText("Status before this step")).toHaveTextContent("In progress");
+    expect(screen.getByLabelText("Status after this step")).toHaveTextContent("Leave unchanged");
+  });
+
+  it("keeps a status a newer board added rather than rewriting it on open", () => {
+    render(
+      withNavigation(
+        <StepStatusFields
+          block={{ id: "build", type: "session", status_on_done: "waiting_on_customer" }}
+          onChange={vi.fn()}
+        />,
+      ),
+    );
+
+    expect(screen.getByLabelText("Status after this step")).toHaveTextContent("waiting_on_customer");
   });
 });

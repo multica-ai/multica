@@ -105,9 +105,6 @@ func (d *ChainDriver) Advance(ctx context.Context, chain *Chain, run ChainRun) (
 			return ChainDecision{}, err
 		}
 
-		if phase.Status != "" && phase.Status != run.IssueStatus {
-			return ChainDecision{Kind: ChainSetStatus, Status: phase.Status}, nil
-		}
 		decision, complete, err := d.advancePhase(ctx, run, phase)
 		if err != nil {
 			return ChainDecision{}, err
@@ -138,7 +135,13 @@ func (d *ChainDriver) advancePhase(ctx context.Context, run ChainRun, phase Phas
 		byBlock[step.BlockID] = append(byBlock[step.BlockID], step)
 	}
 
-	for _, block := range phase.Blocks {
+	// pendingDone carries the finished block's StatusOnDone forward to the
+	// next block boundary. Statuses are only ever applied where no step is
+	// open, which is what makes them idempotent: re-entering Advance walks the
+	// same boundary and skips the change once the issue already holds it.
+	pendingDone := ""
+
+	for index, block := range phase.Blocks {
 		var step ChainStep
 		exists := false
 		for _, candidate := range byBlock[block.ID] {
@@ -151,6 +154,9 @@ func (d *ChainDriver) advancePhase(ctx context.Context, run ChainRun, phase Phas
 		if !exists && len(byBlock[block.ID]) > 0 {
 			// Every opened instance of this block completed. Only then may the
 			// driver advance to the next block in the phase.
+			if block.StatusOnDone != "" {
+				pendingDone = block.StatusOnDone
+			}
 			continue
 		}
 		if exists {
@@ -165,6 +171,23 @@ func (d *ChainDriver) advancePhase(ctx context.Context, run ChainRun, phase Phas
 				return ChainDecision{Kind: ChainWait, Step: step}, false, nil
 			}
 		} else {
+			// No step of this block is open yet, so this is the boundary where
+			// the previous block's exit status and this block's entry status
+			// are applied — one status change per Advance, in that order.
+			if pendingDone != "" && pendingDone != run.IssueStatus {
+				return ChainDecision{Kind: ChainSetStatus, Status: pendingDone}, false, nil
+			}
+			// The phase status is the first block's entry status when that block
+			// does not name one of its own. Keeping it to one decision is what
+			// makes it terminate: two competing entry statuses at the same
+			// boundary would each undo the other on every Advance.
+			entry := block.StatusOnStart
+			if entry == "" && index == 0 {
+				entry = phase.Status
+			}
+			if entry != "" && entry != run.IssueStatus {
+				return ChainDecision{Kind: ChainSetStatus, Status: entry}, false, nil
+			}
 			step, _, err = d.store.OpenStep(ctx, StepRef{PhaseRunKey: key, BlockID: block.ID, Number: 1}, phase.Limits)
 			if err != nil {
 				if errors.Is(err, ErrPhaseLimitReached) {
@@ -216,6 +239,12 @@ func (d *ChainDriver) advancePhase(ctx context.Context, run ChainRun, phase Phas
 		default:
 			return ChainDecision{}, false, fmt.Errorf("dispatch block %s returned invalid status %q", block.ID, result.Status)
 		}
+	}
+
+	// The last block's exit status still has to land before the phase counts as
+	// complete, otherwise it would be swallowed by the next phase's own status.
+	if pendingDone != "" && pendingDone != run.IssueStatus {
+		return ChainDecision{Kind: ChainSetStatus, Status: pendingDone}, false, nil
 	}
 
 	return ChainDecision{}, true, nil

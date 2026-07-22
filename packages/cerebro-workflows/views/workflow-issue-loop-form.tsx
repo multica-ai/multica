@@ -28,6 +28,8 @@ import { SkillNamePicker } from "./loop-pickers";
 import { MachineControlNotice } from "./workflow-issue-loop-chain";
 import {
   BLOCK_TYPES,
+  ISSUE_STATUS_OPTIONS,
+  issueStatusLabel,
   blockMeta,
   blockSummary,
   nudgeBlock,
@@ -492,11 +494,12 @@ export function ChainRail(props: RailProps) {
         <span className="absolute -top-5 h-[calc(50%+1.25rem)] rounded bg-[var(--wf-rail)]" style={railLineStyle()} aria-hidden="true" />
         <span className="absolute top-1/2 size-2.5 -translate-y-1/2 rounded-full bg-foreground" style={railDotStyle(10)} aria-hidden="true" />
         <span>When the chain finishes → issue becomes</span>
-        <Input
+        <IssueStatusSelect
           value={props.doneStatus}
-          onChange={(event) => props.onDoneStatusChange(event.target.value)}
-          aria-label="Done status"
-          className={cn("ml-1 w-28 px-2", CONTROL_HEIGHT, CONTROL_RADIUS, INPUT_TEXT_XS)}
+          onChange={(status) => props.onDoneStatusChange(status ?? "done")}
+          ariaLabel="Done status"
+          clearable={false}
+          className="ml-1 w-36 text-xs"
         />
       </div>
     </div>
@@ -608,8 +611,12 @@ function PhaseGroup({
               <NumberField label="No-progress rounds" hint="How many rounds without progress before the phase stops." value={phase.limits.no_progress_stalls} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, no_progress_stalls: value } }))} />
               <NumberField label="Max wait (seconds)" hint="How long to wait for a free agent before giving up." value={phase.limits.max_wait_seconds ?? 0} min={0} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, max_wait_seconds: value || undefined } }))} />
             </div>
-            <Field label="Starts when issue status is (optional)">
-              <Input value={phase.status ?? ""} onChange={(event) => onChange((current) => ({ ...current, status: event.target.value || undefined }))} placeholder="in_progress" className={cn(CONTROL_HEIGHT, CONTROL_RADIUS, INPUT_TEXT_SM)} />
+            <Field label="Issue status while this phase runs" hint="Set before the phase opens its first step. Leave unchanged to keep the status the previous phase left behind.">
+              <IssueStatusSelect
+                value={phase.status}
+                onChange={(status) => onChange((current) => ({ ...current, status }))}
+                ariaLabel="Phase status"
+              />
             </Field>
           </div>
         )}
@@ -740,7 +747,15 @@ function StepCard({
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => onChange((current) => ({ ...newBlock(option.value), id: current.id, name: current.name || blockMeta(option.value).label }))}
+                      onClick={() => onChange((current) => ({
+                        ...newBlock(option.value),
+                        id: current.id,
+                        name: current.name || blockMeta(option.value).label,
+                        // Statuses belong to the step's place in the chain, not
+                        // to what it does, so they survive a type change.
+                        status_on_start: current.status_on_start,
+                        status_on_done: current.status_on_done,
+                      }))}
                       className={cn(
                         "inline-flex items-center gap-1.5 border px-3 text-sm",
                         CONTROL_HEIGHT,
@@ -762,6 +777,8 @@ function StepCard({
 
             <BlockFields block={block} onChange={onChange} />
 
+            <StepStatusFields block={block} onChange={onChange} />
+
             <div className="flex items-center border-t pt-3">
               <Button
                 type="button"
@@ -777,6 +794,33 @@ function StepCard({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Per-step status control. Until now the only status a chain could set was the
+ * phase's and the chain's final one, so a run could not show "in review" while
+ * a review step waited. The engine applies these at the step boundary — never
+ * while the step runs — so the board follows the run without flapping.
+ */
+export function StepStatusFields({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
+  return (
+    <div className={cn("grid gap-3 border bg-muted/20 p-3 sm:grid-cols-2", PANEL_RADIUS)}>
+      <Field label="Before this step → issue becomes">
+        <IssueStatusSelect
+          value={block.status_on_start}
+          onChange={(status) => onChange((current) => ({ ...current, status_on_start: status }))}
+          ariaLabel="Status before this step"
+        />
+      </Field>
+      <Field label="After this step → issue becomes">
+        <IssueStatusSelect
+          value={block.status_on_done}
+          onChange={(status) => onChange((current) => ({ ...current, status_on_done: status }))}
+          ariaLabel="Status after this step"
+        />
+      </Field>
     </div>
   );
 }
@@ -1010,6 +1054,56 @@ function NumberField({ label, hint, value, min = 1, onChange }: { label: string;
         onChange={(event) => onChange(min === 0 ? Math.max(0, Number.parseInt(event.target.value, 10) || 0) : positive(event.target.value))}
       />
     </Field>
+  );
+}
+
+// "Leave it alone" needs a value of its own: an empty string is not a
+// selectable option value, so the sentinel carries it and is translated back
+// to undefined on the way into the spec.
+const STATUS_UNCHANGED = "__unchanged__";
+
+/**
+ * The one control that decides an issue status anywhere in this editor. Every
+ * status the chain can set is picked from the board's own statuses — typing
+ * one by hand used to be possible and produced a status the board does not
+ * have, which the run then parked the issue in.
+ */
+export function IssueStatusSelect({
+  value,
+  onChange,
+  ariaLabel,
+  clearable = true,
+  placeholder = "Leave unchanged",
+  className,
+}: {
+  value: string | undefined;
+  onChange: (status: string | undefined) => void;
+  ariaLabel: string;
+  clearable?: boolean;
+  placeholder?: string;
+  className?: string;
+}) {
+  const current = value || (clearable ? STATUS_UNCHANGED : "");
+  const known = ISSUE_STATUS_OPTIONS.some((option) => option.value === value);
+  return (
+    <Select value={current} onValueChange={(next: string | null | undefined) => onChange(!next || next === STATUS_UNCHANGED ? undefined : next)}>
+      <SelectTrigger aria-label={ariaLabel} className={cn(CONTROL_HEIGHT, CONTROL_RADIUS, "w-full text-sm", className)}>
+        {/* The trigger shows the board's own wording ("In progress"), not the
+            stored key — Base UI renders the raw value unless it is mapped. */}
+        <SelectValue placeholder={placeholder}>
+          {(selected: string) => (!selected || selected === STATUS_UNCHANGED ? placeholder : issueStatusLabel(selected))}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {clearable && <SelectItem value={STATUS_UNCHANGED}>{placeholder}</SelectItem>}
+        {/* A status saved by an older recipe stays selectable instead of being
+            silently rewritten the first time the recipe is opened. */}
+        {value && !known && <SelectItem value={value}>{issueStatusLabel(value)}</SelectItem>}
+        {ISSUE_STATUS_OPTIONS.map((option) => (
+          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

@@ -368,3 +368,33 @@ func TestChainValidateAggregatesErrors(t *testing.T) {
 		assertErrContains(t, err, want)
 	}
 }
+
+// Statuses used to be free text everywhere in the editor, so a typo saved
+// fine and parked the issue in a status the board does not have. Every status
+// a chain can set is now checked against the board's own vocabulary.
+func TestChainValidateRejectsUnknownStatuses(t *testing.T) {
+	c := chainWith(Block{ID: "build", Type: BlockSession, Skill: "build", StatusOnStart: "in progress"})
+	c.DoneStatus = "finished"
+	c.Phases[0].Status = "wip"
+	err := c.Validate()
+	assertErrContains(t, err, `done_status "finished" is not an issue status`)
+	assertErrContains(t, err, `status "wip" is not an issue status`)
+	assertErrContains(t, err, `status_on_start "in progress" is not an issue status`)
+}
+
+func TestChainValidateRejectsUnknownStatusOnDone(t *testing.T) {
+	c := chainWith(Block{ID: "build", Type: BlockSession, Skill: "build", StatusOnDone: "reviewing"})
+	assertErrContains(t, c.Validate(), `status_on_done "reviewing" is not an issue status`)
+}
+
+func TestChainValidateAcceptsPerStepStatuses(t *testing.T) {
+	c := chainWith(
+		Block{ID: "build", Type: BlockSession, Skill: "build", StatusOnStart: "in_progress", StatusOnDone: "in_review"},
+		Block{ID: "review", Type: BlockReview, Rubric: "is it good", StatusOnDone: "done"},
+	)
+	c.DoneStatus = "done"
+	c.Phases[0].Status = "todo"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("expected per-step statuses to be valid, got: %v", err)
+	}
+}

@@ -31,6 +31,8 @@ const loopBlockSchema = z
     agents: z.array(loopAgentRefSchema).optional(),
     on_all_busy: z.enum(["wait", "pause", "wakeup", "ping_member"]).optional(),
     steps: z.object({ allowed: z.boolean(), max: z.number().int().positive().optional() }).passthrough().optional(),
+    status_on_start: z.string().optional(),
+    status_on_done: z.string().optional(),
     skill: z.string().optional(),
     goal: z.string().optional(),
     check: z.array(z.string()).optional(),

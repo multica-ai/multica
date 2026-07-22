@@ -120,6 +120,10 @@ export interface LoopChainBlock {
   agents?: LoopAgentRef[];
   on_all_busy?: LoopBusyPolicy;
   steps?: { allowed: boolean; max?: number };
+  // The issue status the engine sets before this step opens, and the one it
+  // sets once the step is done. Both optional — empty leaves the status alone.
+  status_on_start?: string;
+  status_on_done?: string;
   skill?: string;
   goal?: string;
   check?: string[];
