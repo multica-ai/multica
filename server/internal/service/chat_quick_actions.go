@@ -39,6 +39,14 @@ func splitChatQuickActions(output string) (string, []protocol.ChatQuickAction) {
 	default:
 		return output, nil
 	}
+	// A quick-actions fence that closes before the end of the reply is ordinary
+	// visible markdown, even when a later, unrelated code fence happens to end
+	// the whole message. Without this guard the final closing fence above can be
+	// paired with a mid-response opener and silently truncate everything after
+	// that example.
+	if strings.Contains(raw, "\n```") {
+		return output, nil
+	}
 
 	visible = strings.TrimRight(visible, " \t\n")
 	var candidates []protocol.ChatQuickAction

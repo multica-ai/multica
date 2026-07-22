@@ -60,6 +60,20 @@ func TestSplitChatQuickActionsLeavesMidResponseFenceVisible(t *testing.T) {
 	}
 }
 
+func TestSplitChatQuickActionsLeavesMidResponseFenceWhenLaterFenceEndsReply(t *testing.T) {
+	t.Parallel()
+	input := "Here is the quick-actions format:\n" +
+		"```quick-actions\n" +
+		`[{"label":"Go","prompt":"Go now"}]` +
+		"\n```\n" +
+		"And here is a bash example:\n" +
+		"```bash\nls -la\n```"
+	visible, actions := splitChatQuickActions(input)
+	if visible != input || actions != nil {
+		t.Fatalf("mid-response quick-actions example changed: visible=%q actions=%+v", visible, actions)
+	}
+}
+
 func TestSplitChatQuickActionsTruncatesByRune(t *testing.T) {
 	t.Parallel()
 	label := strings.Repeat("深", chatQuickActionLabelMax+5)
