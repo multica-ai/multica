@@ -142,6 +142,54 @@ func (q *Queries) CanUserEditNote(ctx context.Context, arg CanUserEditNoteParams
 	return allowed, err
 }
 
+const canUserReadArtifactAsNote = `-- name: CanUserReadArtifactAsNote :one
+SELECT EXISTS (
+    SELECT 1 FROM artifact a
+    LEFT JOIN cerebro_note n ON n.artifact_id = a.id
+    WHERE a.id = $1
+      AND (
+        (
+          cerebro_artifact_folder_visible(a.folder_id, $2)
+          AND (
+            n.artifact_id IS NULL
+            OR n.owner_id = $2
+            OR n.visibility = 'workspace'
+            OR (n.visibility = 'shared' AND EXISTS (
+                SELECT 1 FROM cerebro_note_share s
+                WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+          )
+        )
+        OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
+      )
+) AS allowed
+`
+
+type CanUserReadArtifactAsNoteParams struct {
+	ID    pgtype.UUID `json:"id"`
+	PUser pgtype.UUID `json:"p_user"`
+}
+
+// FIR-3628: READ access for ANY artifact through the note API. CanUserSeeNote
+// starts FROM cerebro_note, so a document created through the artifact API
+// (multica artifact create / document create) has no row and the read 404s even
+// though the same id opens fine in the web app and resolves via the artifact
+// API. Agents are told artifact/document/note are one object, so that dead end
+// is a bug, not a boundary.
+// Same unified shape as CanUserCommentOnArtifact:
+//   - a note (has a cerebro_note row) applies its owner/visibility/share rule
+//     AND its folder chain (identical to CanUserSeeNote);
+//   - a document (no cerebro_note row) is governed purely by folder access —
+//     workspace membership is already enforced by the workspace middleware.
+//
+// A Collections folder grant on the folder/ancestor additively grants read on
+// its own (FIR-2595), same as everywhere else.
+func (q *Queries) CanUserReadArtifactAsNote(ctx context.Context, arg CanUserReadArtifactAsNoteParams) (bool, error) {
+	row := q.db.QueryRow(ctx, canUserReadArtifactAsNote, arg.ID, arg.PUser)
+	var allowed bool
+	err := row.Scan(&allowed)
+	return allowed, err
+}
+
 const canUserSeeNote = `-- name: CanUserSeeNote :one
 SELECT EXISTS (
     SELECT 1 FROM cerebro_note n

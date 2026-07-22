@@ -569,7 +569,15 @@ func (h *Handler) ListRecentNotes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rows)
 }
 
-// GetNote returns a single note when the caller is allowed to see it.
+// GetNote returns a single note — or a plain document — when the caller is
+// allowed to see it. FIR-3628: this endpoint used to gate on CanUserSeeNote and
+// then require a cerebro_note row, so every document created through the
+// artifact API (multica artifact create / document create) 404'd here while the
+// very same id opened fine in the web app and resolved through the artifact
+// API. Agents are told artifact/document/note are one object, so the read path
+// now uses the same unified shape the comment path has always used
+// (CanUserReadArtifactAsNote) and falls back to a default note state when there
+// is no cerebro_note row.
 func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -583,9 +591,9 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	allowed, err := h.Cerebro.CanUserSeeNote(r.Context(), cerebrodb.CanUserSeeNoteParams{
-		ArtifactID: noteID,
-		OwnerID:    ownerUUID,
+	allowed, err := h.Cerebro.CanUserReadArtifactAsNote(r.Context(), cerebrodb.CanUserReadArtifactAsNoteParams{
+		ID:    noteID,
+		PUser: ownerUUID,
 	})
 	if err != nil || !allowed {
 		writeError(w, http.StatusNotFound, "note not found")
@@ -597,17 +605,38 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	noteRow, err := h.Cerebro.GetNote(r.Context(), noteID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "note not found")
+	isNote := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to load note")
 		return
+	}
+	if !isNote {
+		// Plain document: no owner/visibility/pin state exists. Report the
+		// artifact's member author as owner (empty for an agent-authored doc)
+		// and workspace visibility — folder access is the only gate, and the
+		// caller already passed it above.
+		noteRow = cerebrodb.GetNoteRow{ArtifactID: noteID, Visibility: "workspace"}
+		if artifact.AuthorType == "member" {
+			noteRow.OwnerID = artifact.AuthorID
+		}
 	}
 	// FIR-2595: tell the editor whether this caller may edit and save, so a
 	// viewer gets a read-only editor instead of a field that silently fails on
 	// save. Owner or an 'editor'/'full_access' folder grant → true.
-	canEdit, err := h.Cerebro.CanUserEditNote(r.Context(), cerebrodb.CanUserEditNoteParams{
-		ArtifactID: noteID,
-		OwnerID:    ownerUUID,
-	})
+	// FIR-3628: a document has no cerebro_note row, so its write gate is the
+	// document rule (folder grant or the member author), matching save/restore.
+	var canEdit bool
+	if isNote {
+		canEdit, err = h.Cerebro.CanUserEditNote(r.Context(), cerebrodb.CanUserEditNoteParams{
+			ArtifactID: noteID,
+			OwnerID:    ownerUUID,
+		})
+	} else {
+		canEdit, err = h.Cerebro.CanUserEditArtifact(r.Context(), cerebrodb.CanUserEditArtifactParams{
+			ID:    noteID,
+			PUser: ownerUUID,
+		})
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load note")
 		return
