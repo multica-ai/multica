@@ -34,6 +34,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/cerebro/ai-impact/metrics", h.ListMetrics)
 	r.Post("/api/cerebro/ai-impact/metrics", h.CreateMetric)
 	r.Get("/api/cerebro/ai-impact/evidence", h.ListWorkspaceEvidence)
+	r.Get("/api/cerebro/ai-impact/functions/summary", h.ListFunctionSummaries)
 	r.Get("/api/cerebro/ai-impact/quality-risk/decisions", h.ListQualityRiskDecisions)
 	r.Get("/api/cerebro/ai-impact/functions/{functionId}/evidence", h.ListFunctionEvidence)
 	r.Get("/api/cerebro/ai-impact/operating-loops/{operatingLoopId}/evidence", h.ListOperatingLoopEvidence)
@@ -42,6 +43,48 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/latest-observations", h.ListLatestObservations)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
 	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
+}
+
+type functionSummaryLoopResponse struct {
+	ID       uuid.UUID `json:"id"`
+	Name     string    `json:"name"`
+	Decision Decision  `json:"decision"`
+}
+
+type functionSummaryResponse struct {
+	ID             uuid.UUID                     `json:"id"`
+	Name           string                        `json:"name"`
+	OperatingLoops []functionSummaryLoopResponse `json:"operating_loops"`
+}
+
+// ListFunctionSummaries returns active Functions with their Operating Loop decisions.
+func (h *Handler) ListFunctionSummaries(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, _, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+	summaries, err := h.service.ListFunctionSummaries(r.Context(), workspaceID)
+	if err != nil {
+		writeObservationError(w, http.StatusInternalServerError, "failed to list function summaries")
+		return
+	}
+	response := make([]functionSummaryResponse, 0, len(summaries))
+	for _, summary := range summaries {
+		loops := make([]functionSummaryLoopResponse, 0, len(summary.OperatingLoops))
+		for _, loop := range summary.OperatingLoops {
+			loops = append(loops, functionSummaryLoopResponse{
+				ID:       loop.OperatingLoop.ID,
+				Name:     loop.OperatingLoop.Name,
+				Decision: loop.Decision,
+			})
+		}
+		response = append(response, functionSummaryResponse{
+			ID:             summary.Function.ID,
+			Name:           summary.Function.Name,
+			OperatingLoops: loops,
+		})
+	}
+	writeObservationJSON(w, http.StatusOK, map[string]any{"functions": response})
 }
 
 type qualityRiskDecisionResponse struct {

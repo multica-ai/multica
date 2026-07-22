@@ -1056,6 +1056,78 @@ func TestQualityRiskDecisionsUseLatestMeasuredOutcomesAndGuardrails(t *testing.T
 	}
 }
 
+func TestFunctionsSummaryReturnsActiveFunctionsWithTheirLoopDecisions(t *testing.T) {
+	workspaceID := uuid.New()
+	activeFunctionID := uuid.MustParse("00000000-0000-4000-8000-000000000001")
+	inactiveFunctionID := uuid.MustParse("00000000-0000-4000-8000-000000000002")
+	scaleLoopID := uuid.MustParse("00000000-0000-4000-8000-000000000003")
+	observeLoopID := uuid.MustParse("00000000-0000-4000-8000-000000000004")
+	inactiveLoopID := uuid.MustParse("00000000-0000-4000-8000-000000000005")
+	outcomeMetricID := uuid.New()
+	guardrailMetricID := uuid.New()
+	target := 10.0
+	guardrailTarget := 0.05
+	periodStart := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.Add(24 * time.Hour)
+	store := &recordingObservationStore{
+		functions: []Function{
+			{ID: inactiveFunctionID, WorkspaceID: workspaceID, Name: "Inactive Function", Active: false},
+			{ID: activeFunctionID, WorkspaceID: workspaceID, Name: "Customer Service", Active: true},
+		},
+		operatingLoops: []OperatingLoop{
+			{ID: observeLoopID, WorkspaceID: workspaceID, FunctionID: activeFunctionID, Name: "Route customer needs", Active: true},
+			{ID: inactiveLoopID, WorkspaceID: workspaceID, FunctionID: activeFunctionID, Name: "Inactive loop", Active: false},
+			{ID: scaleLoopID, WorkspaceID: workspaceID, FunctionID: activeFunctionID, Name: "Resolve customer needs", Active: true},
+		},
+		metrics: []Metric{
+			{ID: outcomeMetricID, WorkspaceID: workspaceID, OperatingLoopID: scaleLoopID, Name: "Resolved needs", Family: FamilyOutcome, Direction: DirectionIncrease, TargetValue: &target, Active: true},
+			{ID: guardrailMetricID, WorkspaceID: workspaceID, OperatingLoopID: scaleLoopID, Name: "Reopen rate", Family: FamilyQuality, Direction: DirectionDecrease, TargetValue: &guardrailTarget, Guardrail: true, Active: true},
+		},
+		workspaceObservations: []Observation{
+			{ID: uuid.New(), MetricID: outcomeMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 12, EvidenceStatus: EvidenceMeasured, CreatedAt: periodEnd},
+			{ID: uuid.New(), MetricID: guardrailMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 0.04, EvidenceStatus: EvidenceMeasured, CreatedAt: periodEnd},
+		},
+	}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cerebro/ai-impact/functions/summary", nil)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("functions summary status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Functions []struct {
+			ID             uuid.UUID `json:"id"`
+			Name           string    `json:"name"`
+			OperatingLoops []struct {
+				ID       uuid.UUID `json:"id"`
+				Name     string    `json:"name"`
+				Decision Decision  `json:"decision"`
+			} `json:"operating_loops"`
+		} `json:"functions"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode functions summary: %v", err)
+	}
+	if len(response.Functions) != 1 || response.Functions[0].ID != activeFunctionID || response.Functions[0].Name != "Customer Service" {
+		t.Fatalf("functions summary = %+v, want only Customer Service", response.Functions)
+	}
+	loops := response.Functions[0].OperatingLoops
+	if len(loops) != 2 ||
+		loops[0].ID != scaleLoopID || loops[0].Name != "Resolve customer needs" || loops[0].Decision != DecisionScale ||
+		loops[1].ID != observeLoopID || loops[1].Name != "Route customer needs" || loops[1].Decision != DecisionObserve {
+		t.Fatalf("functions summary loops = %+v, want Resolve/Scale then Route/Observe", loops)
+	}
+}
+
 func TestFunctionEvidenceReadModelReturnsOnlyLatestEvidenceForRequestedFunction(t *testing.T) {
 	workspaceID := uuid.New()
 	requestedFunctionID := uuid.New()

@@ -236,6 +236,17 @@ type QualityRiskDecisionReadModel struct {
 	Decision      Decision
 }
 
+type FunctionSummaryLoopReadModel struct {
+	OperatingLoop OperatingLoop
+	Decision      Decision
+}
+
+// FunctionSummaryReadModel groups active Operating Loops and their decisions by Function.
+type FunctionSummaryReadModel struct {
+	Function       Function
+	OperatingLoops []FunctionSummaryLoopReadModel
+}
+
 // ListQualityRiskDecisions evaluates the latest targeted Outcome and guardrail evidence.
 func (s *Service) ListQualityRiskDecisions(
 	ctx context.Context,
@@ -324,6 +335,51 @@ func (s *Service) ListQualityRiskDecisions(
 			return result[i].OperatingLoop.ID.String() < result[j].OperatingLoop.ID.String()
 		}
 		return result[i].OperatingLoop.Name < result[j].OperatingLoop.Name
+	})
+	return result, nil
+}
+
+// ListFunctionSummaries returns active Functions with their active Operating Loop decisions.
+func (s *Service) ListFunctionSummaries(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+) ([]FunctionSummaryReadModel, error) {
+	functions, err := s.store.ListFunctions(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	decisions, err := s.ListQualityRiskDecisions(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	byFunction := make(map[uuid.UUID][]FunctionSummaryLoopReadModel, len(functions))
+	for _, item := range decisions {
+		byFunction[item.Function.ID] = append(byFunction[item.Function.ID], FunctionSummaryLoopReadModel{
+			OperatingLoop: item.OperatingLoop,
+			Decision:      item.Decision,
+		})
+	}
+
+	result := make([]FunctionSummaryReadModel, 0, len(functions))
+	for _, function := range functions {
+		if !function.Active {
+			continue
+		}
+		loops := byFunction[function.ID]
+		if loops == nil {
+			loops = []FunctionSummaryLoopReadModel{}
+		}
+		result = append(result, FunctionSummaryReadModel{
+			Function:       function,
+			OperatingLoops: loops,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Function.Name == result[j].Function.Name {
+			return result[i].Function.ID.String() < result[j].Function.ID.String()
+		}
+		return result[i].Function.Name < result[j].Function.Name
 	})
 	return result, nil
 }
