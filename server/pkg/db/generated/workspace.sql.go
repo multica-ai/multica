@@ -115,6 +115,9 @@ cleared_issue_properties AS (
 ),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
+),
+cleared_client_usage_workspace AS (
+    UPDATE client_usage_daily SET workspace_id = NULL WHERE workspace_id = $1
 )
 DELETE FROM workspace WHERE workspace.id = $1
 `

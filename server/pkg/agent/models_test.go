@@ -30,6 +30,16 @@ func TestListModelsStaticProviders(t *testing.T) {
 	}
 }
 
+func TestListModelsQwenUsesRuntimeDefaultAndManualEntry(t *testing.T) {
+	got, err := ListModels(context.Background(), "qwen", "")
+	if err != nil {
+		t.Fatalf("ListModels(qwen) error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ListModels(qwen) = %+v, want no account-specific static catalog", got)
+	}
+}
+
 func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 	// Copilot uses dynamic ACP discovery, but with no `copilot`
 	// binary on PATH (the discovery LookPath fails) it must fall

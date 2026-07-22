@@ -2,9 +2,24 @@
 
 import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import type { Agent, MemberWithUser, Squad } from "../types";
 import { useWorkspaceId } from "../hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "./queries";
 import { resolvePublicFileUrl } from "./avatar-url";
+
+// Stable empties for the still-loading directory queries. A fresh `= []`
+// default allocates a new array on every render while `data` is undefined,
+// which makes `useMemo(..., [members, agents, squads])` recompute
+// `getActorName` on every render during cold load. Consumers that list
+// `getActorName` in their own memo deps (BoardView's `groups`, SwimLaneView's
+// `laneGroups`) then churn a fresh value each render, and the board/list
+// column resync `useEffect(setColumns, [groups])` re-fires without end — an
+// infinite re-render that react-virtuoso turns into "Maximum update depth
+// exceeded" on the Issues route (MUL-4985). Sharing one reference keeps the
+// loading snapshot referentially stable.
+const EMPTY_MEMBERS: MemberWithUser[] = [];
+const EMPTY_AGENTS: Agent[] = [];
+const EMPTY_SQUADS: Squad[] = [];
 
 /**
  * Pure actor-name resolution over explicit directory snapshots. Async flows
@@ -32,9 +47,9 @@ export function buildActorNameResolver(directories: {
 
 export function useActorName() {
   const wsId = useWorkspaceId();
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: members = EMPTY_MEMBERS } = useQuery(memberListOptions(wsId));
+  const { data: agents = EMPTY_AGENTS } = useQuery(agentListOptions(wsId));
+  const { data: squads = EMPTY_SQUADS } = useQuery(squadListOptions(wsId));
 
   const getMemberName = useCallback((userId: string) => {
     const m = members.find((m) => m.user_id === userId);

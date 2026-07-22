@@ -293,21 +293,23 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 		b.cfg.Logger.Info("codebuddy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed")
-		if reportedSessionID != sessionID {
-			b.cfg.Logger.Info("codebuddy resume did not land; clearing fresh session id for daemon fallback",
+		resumeRejected := resumeWasRejected(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError)
+		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError)
+		if resumeRejected {
+			b.cfg.Logger.Info("codebuddy resume was rejected; dropping session id and signalling fresh-session retry",
 				"requested_resume", opts.ResumeSessionID,
 				"emitted_session", sessionID,
 			)
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  reportedSessionID,
-			Usage:      usage,
+			Status:         finalStatus,
+			Output:         finalOutput,
+			Error:          finalError,
+			DurationMs:     duration.Milliseconds(),
+			SessionID:      reportedSessionID,
+			Usage:          usage,
+			ResumeRejected: resumeRejected,
 		}
 	}()
 

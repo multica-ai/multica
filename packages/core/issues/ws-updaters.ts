@@ -6,6 +6,7 @@ import {
   applyIssueChange,
   invalidateIssueDerivatives,
   invalidateStaleListKeys,
+  invalidateUpdatedAtSortedIssueLists,
   type IssueFlatCache,
 } from "./cache-coordinator";
 import {
@@ -14,7 +15,14 @@ import {
   patchIssueInBuckets,
 } from "./cache-helpers";
 import { cleanupDeletedIssueCaches } from "./delete-cache";
-import type { Issue, IssueLabelsResponse, IssueMetadata, IssuePropertyValues, Label } from "../types";
+import type {
+  Issue,
+  IssueLabelsResponse,
+  IssueMetadata,
+  IssuePropertyValues,
+  IssueTableRowsResponse,
+  Label,
+} from "../types";
 import type { ListIssuesCache } from "../types";
 
 function patchIssueInFlatCaches(
@@ -35,6 +43,35 @@ function patchIssueInFlatCaches(
           issue.id === issueId ? { ...issue, ...patch } : issue,
         ),
       })),
+    });
+  }
+}
+
+function patchIssueInTableCaches(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  patch: Partial<Issue>,
+) {
+  for (const [key, data] of qc.getQueriesData<unknown>({
+    queryKey: issueKeys.tableAll(wsId),
+  })) {
+    if (
+      !data ||
+      typeof data !== "object" ||
+      !Array.isArray((data as IssueTableRowsResponse).rows)
+    ) {
+      continue;
+    }
+    const page = data as IssueTableRowsResponse;
+    if (!page.rows.some((row) => row.issue.id === issueId)) continue;
+    qc.setQueryData<IssueTableRowsResponse>(key, {
+      ...page,
+      rows: page.rows.map((row) =>
+        row.issue.id === issueId
+          ? { ...row, issue: { ...row.issue, ...patch } }
+          : row,
+      ),
     });
   }
 }
@@ -65,6 +102,7 @@ export function onIssueCreated(
   }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   if (issue.project_id) {
@@ -154,6 +192,9 @@ export function onIssueUpdated(
     statusOrProjectChanged:
       issue.status !== undefined || issue.project_id !== undefined,
   });
+  // Group counts, branch membership and hierarchy are server-owned. Never
+  // guess deltas from a partial branch; refetch the active Table queries.
+  qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
 
   // Invalidate old parent's children (issue was removed from it)
   if (oldParentId) {
@@ -209,6 +250,7 @@ export function patchIssueLabels(
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { labels }));
   }
   patchIssueInFlatCaches(qc, wsId, issueId, { labels });
+  patchIssueInTableCaches(qc, wsId, issueId, { labels });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
   );
@@ -236,6 +278,7 @@ export function invalidateIssueLabelDerivatives(qc: QueryClient, wsId: string) {
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
   qc.invalidateQueries({
     queryKey: issueKeys.flatAll(wsId),
     predicate: (query) =>
@@ -266,10 +309,19 @@ export function onIssueMetadataChanged(
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { metadata }));
   }
   patchIssueInFlatCaches(qc, wsId, issueId, { metadata });
+  patchIssueInTableCaches(qc, wsId, issueId, { metadata });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, metadata } : old,
   );
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  // A metadata write bumps issue.updated_at server-side (SetIssueMetadataKey /
+  // DeleteIssueMetadataKey), but the patches above keep each card's slot, so a
+  // board/table sorted by "Updated date" would stay in the old order. This
+  // event is server-committed, so refetch those keys to re-sort (MUL-5016).
+  invalidateUpdatedAtSortedIssueLists(qc, wsId);
+  // Server-backed Table counts, membership and cursor boundaries may also
+  // depend on metadata-driven timestamps, so refresh its query graph too.
+  qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
 }
 
 /**
@@ -291,7 +343,15 @@ export function onIssuePropertiesChanged(
   // staleTime:Infinity (clean-room review F2).
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
   invalidatePropertyWindowQueries(qc, wsId);
+  // A property write also bumps issue.updated_at server-side
+  // (SetIssuePropertyValue / DeleteIssuePropertyValue). invalidatePropertyWindow
+  // Queries only refetches property-filtered/-sorted windows, so a status board
+  // or flat table sorted by "Updated date" (no property param) would keep the
+  // old order. Refetch those too. Only committed callers reach here (WS event +
+  // mutation onSuccess); the optimistic leg uses patchIssueProperties (MUL-5016).
+  invalidateUpdatedAtSortedIssueLists(qc, wsId);
 }
 
 /** Patch only deterministic entity snapshots. Optimistic mutation legs use
@@ -307,6 +367,7 @@ export function patchIssueProperties(
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { properties }));
   }
   patchIssueInFlatCaches(qc, wsId, issueId, { properties });
+  patchIssueInTableCaches(qc, wsId, issueId, { properties });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, properties } : old,
   );

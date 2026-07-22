@@ -148,29 +148,42 @@ vi.mock("../../editor", async () => ({
     <div data-testid="readonly-content">{content}</div>
   ),
   ContentEditor: forwardRef(function MockContentEditor(
-    { defaultValue, onUpdate, placeholder, flushPendingOnUnmount, onReady }: any,
+    {
+      defaultValue,
+      value: syncedValue,
+      onUpdate,
+      placeholder,
+      flushPendingOnUnmount,
+      onReady,
+    }: any,
     ref: any,
   ) {
-    const valueRef = useRef(defaultValue || "");
-    const [value, setValue] = useState(defaultValue || "");
+    const initialValue = syncedValue ?? defaultValue ?? "";
+    const valueRef = useRef(initialValue);
+    const [editorValue, setEditorValue] = useState(initialValue);
     useEffect(() => {
       contentEditorMounts.count += 1;
       onReady?.();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+    useEffect(() => {
+      if (syncedValue === undefined) return;
+      valueRef.current = syncedValue;
+      setEditorValue(syncedValue);
+    }, [syncedValue]);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
-      clearContent: () => { valueRef.current = ""; setValue(""); },
+      clearContent: () => { valueRef.current = ""; setEditorValue(""); },
       focus: () => {},
       focusAtCoords: () => {},
       uploadFile: () => {},
     }));
     return (
       <textarea
-        value={value}
+        value={editorValue}
         onChange={(e) => {
           valueRef.current = e.target.value;
-          setValue(e.target.value);
+          setEditorValue(e.target.value);
           onUpdate?.(e.target.value);
         }}
         placeholder={placeholder}

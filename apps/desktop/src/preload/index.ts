@@ -20,6 +20,10 @@ import {
   type IssueWindowRequest,
 } from "../shared/issue-window";
 import { AUTH_SESSION_STATE_CHANNEL } from "../shared/auth-session";
+import type {
+  DaemonStatus,
+  LocalRuntimeProbe,
+} from "../shared/daemon-types";
 import {
   MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
   type MainRendererMessageChannel,
@@ -217,25 +221,6 @@ const desktopAPI = {
     ipcRenderer.invoke("window:open-issue", request),
 };
 
-interface DaemonStatus {
-  state:
-    | "running"
-    | "stopped"
-    | "starting"
-    | "stopping"
-    | "installing_cli"
-    | "cli_not_found"
-    | "auth_expired";
-  pid?: number;
-  uptime?: string;
-  daemonId?: string;
-  deviceName?: string;
-  agents?: string[];
-  workspaceCount?: number;
-  profile?: string;
-  serverUrl?: string;
-}
-
 type DaemonReauthResult =
   | { ok: true }
   | { ok: false; reason: "session_invalid" }
@@ -250,6 +235,8 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:restart"),
   getStatus: (): Promise<DaemonStatus> =>
     ipcRenderer.invoke("daemon:get-status"),
+  probeRuntimes: (): Promise<LocalRuntimeProbe> =>
+    ipcRenderer.invoke("daemon:probe-runtimes"),
   getHostName: (): Promise<string> =>
     ipcRenderer.invoke("daemon:get-host-name"),
   onStatusChange: (callback: (status: DaemonStatus) => void) => {

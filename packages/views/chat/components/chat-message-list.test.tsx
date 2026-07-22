@@ -1,10 +1,45 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
 import type { TaskMessagePayload } from "@multica/core/types";
+import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
+
+// The live timeline is a real list row rather than Virtuoso chrome (MUL-4922),
+// so it shares one identity with the persisted assistant row and keeps its
+// Mermaid/HTML blocks mounted across task completion. Real react-virtuoso
+// renders its Footer but NO data rows under jsdom's zero-height viewport, so
+// these tests must stub it to see rows at all. computeItemKey is still applied
+// here — it is what expresses the live -> persisted identity.
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: ({
+    data,
+    itemContent,
+    computeItemKey,
+    components,
+    context,
+  }: {
+    data: unknown[];
+    itemContent: (i: number, item: unknown) => ReactElement;
+    computeItemKey: (i: number, item: unknown) => string;
+    components?: { Footer?: (p: { context?: unknown }) => ReactElement | null };
+    context?: unknown;
+  }) => {
+    const Footer = components?.Footer;
+    return (
+      <div>
+        {data.map((item, i) => (
+          <div key={computeItemKey(i, item)} data-row-key={computeItemKey(i, item)}>
+            {itemContent(i, item)}
+          </div>
+        ))}
+        {Footer ? <Footer context={context} /> : null}
+      </div>
+    );
+  },
+}));
 
 import { ChatMessageList } from "./chat-message-list";
 

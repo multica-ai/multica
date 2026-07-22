@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -53,10 +52,6 @@ type CreateAgentBuilderSessionResponse struct {
 // chat/task pipeline is intentionally agent-backed; it never appears in normal
 // agent lists and cannot be selected as an assignee.
 func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Request) {
-	if !featureflags.AgentBuilderEnabled(r.Context(), h.FeatureFlags) {
-		writeError(w, http.StatusNotFound, "agent builder is not enabled")
-		return
-	}
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {

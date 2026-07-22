@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -862,6 +863,131 @@ func TestHermesClientAcceptNotificationGate(t *testing.T) {
 	}
 }
 
+func TestHermesBackendDrainsLateFinalNotificationAfterPromptResponse(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_resumed"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      sleep 0.05
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_resumed","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Current answer"}}}}\n'
+      ;;
+  esac
+done
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{
+		ResumeSessionID: "ses_resumed",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+		}
+		if result.Output != "Current answer" {
+			t.Fatalf("expected late current-turn output, got %q", result.Output)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestHermesBackendCancelsBeforeWaitingForLingeringProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_lingering"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exec 1>&-
+      exec 2>&-
+      while :; do :; done
+      ;;
+  esac
+done
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	select {
+	case _, ok := <-session.Result:
+		if ok {
+			t.Fatal("result channel produced an unexpected second value")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("result channel did not close; cmd.Wait likely ran before cancel")
+	}
+}
+
 func TestHermesClientHandleAgentThought(t *testing.T) {
 	t.Parallel()
 
@@ -1341,6 +1467,152 @@ func TestHermesClientExtractPromptResultNoUsage(t *testing.T) {
 	}
 	if got.usage.InputTokens != 0 {
 		t.Errorf("inputTokens: got %d, want 0", got.usage.InputTokens)
+	}
+}
+
+// TestHermesClientExtractPromptResultMetaUsage covers the Grok Build ACP
+// shape: session/prompt returns only stopReason at the top level, with token
+// counters under `_meta.usage` (and mirrored flat fields on `_meta`).
+// Captured from grok 0.2.106 against a live `grok agent stdio` session.
+func TestHermesClientExtractPromptResultMetaUsage(t *testing.T) {
+	t.Parallel()
+
+	var got hermesPromptResult
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onPromptDone: func(result hermesPromptResult) {
+			got = result
+		},
+	}
+
+	// Minimal real-world payload (ids truncated). Nested usage is the
+	// authoritative block; flat _meta counters mirror it.
+	data := json.RawMessage(`{
+		"stopReason": "end_turn",
+		"_meta": {
+			"sessionId": "019f8516-4fee-7c23-9766-ec748929e01a",
+			"modelId": "grok-4.5",
+			"inputTokens": 12929,
+			"outputTokens": 29,
+			"cachedReadTokens": 10880,
+			"reasoningTokens": 24,
+			"usage": {
+				"inputTokens": 12929,
+				"outputTokens": 29,
+				"totalTokens": 12958,
+				"cachedReadTokens": 10880,
+				"reasoningTokens": 24,
+				"modelCalls": 1,
+				"costUsdTicks": 75360000
+			}
+		}
+	}`)
+	c.extractPromptResult(data)
+
+	if got.stopReason != "end_turn" {
+		t.Errorf("stopReason: got %q, want %q", got.stopReason, "end_turn")
+	}
+	if got.usage.InputTokens != 12929 {
+		t.Errorf("inputTokens: got %d, want 12929", got.usage.InputTokens)
+	}
+	if got.usage.OutputTokens != 29 {
+		t.Errorf("outputTokens: got %d, want 29", got.usage.OutputTokens)
+	}
+	if got.usage.CacheReadTokens != 10880 {
+		t.Errorf("cacheReadTokens: got %d, want 10880", got.usage.CacheReadTokens)
+	}
+}
+
+// TestHermesClientExtractPromptResultMetaFlatOnly covers agents that put
+// counters on `_meta` without a nested `usage` object.
+func TestHermesClientExtractPromptResultMetaFlatOnly(t *testing.T) {
+	t.Parallel()
+
+	var got hermesPromptResult
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onPromptDone: func(result hermesPromptResult) {
+			got = result
+		},
+	}
+
+	data := json.RawMessage(`{
+		"stopReason": "end_turn",
+		"_meta": {
+			"inputTokens": 50,
+			"outputTokens": 10,
+			"cachedReadTokens": 5
+		}
+	}`)
+	c.extractPromptResult(data)
+
+	if got.usage.InputTokens != 50 || got.usage.OutputTokens != 10 || got.usage.CacheReadTokens != 5 {
+		t.Fatalf("unexpected usage from flat _meta: %+v", got.usage)
+	}
+}
+
+// TestHermesClientExtractPromptResultTopLevelBeatsMeta ensures the standard
+// ACP top-level `usage` field still wins when both shapes are present.
+func TestHermesClientExtractPromptResultTopLevelBeatsMeta(t *testing.T) {
+	t.Parallel()
+
+	var got hermesPromptResult
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onPromptDone: func(result hermesPromptResult) {
+			got = result
+		},
+	}
+
+	data := json.RawMessage(`{
+		"stopReason": "end_turn",
+		"usage": {"inputTokens": 1, "outputTokens": 2},
+		"_meta": {"usage": {"inputTokens": 999, "outputTokens": 999}}
+	}`)
+	c.extractPromptResult(data)
+
+	if got.usage.InputTokens != 1 || got.usage.OutputTokens != 2 {
+		t.Fatalf("top-level usage should win: %+v", got.usage)
+	}
+}
+
+// TestHermesClientExtractPromptResultTopLevelZeroFallsBackToMeta pins the
+// semantic-empty behavior: an explicit top-level usage object with no
+// effective counters must not hide usable metering supplied by the agent in
+// _meta.
+func TestHermesClientExtractPromptResultTopLevelZeroFallsBackToMeta(t *testing.T) {
+	t.Parallel()
+
+	var got hermesPromptResult
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onPromptDone: func(result hermesPromptResult) {
+			got = result
+		},
+	}
+
+	data := json.RawMessage(`{
+		"stopReason": "end_turn",
+		"usage": {
+			"inputTokens": 0,
+			"outputTokens": 0,
+			"cacheReadTokens": 0,
+			"cacheWriteTokens": 0
+		},
+		"_meta": {
+			"usage": {
+				"inputTokens": 100,
+				"outputTokens": 20,
+				"cachedReadTokens": 5,
+				"cachedWriteTokens": 2
+			}
+		}
+	}`)
+	c.extractPromptResult(data)
+
+	want := TokenUsage{InputTokens: 100, OutputTokens: 20, CacheReadTokens: 5, CacheWriteTokens: 2}
+	if got.usage != want {
+		t.Fatalf("zero top-level usage should fall back to _meta: got %+v, want %+v", got.usage, want)
 	}
 }
 
@@ -2149,6 +2421,58 @@ done
 `
 }
 
+// fakeACPRecordingScriptWithCurrentModel is like fakeACPRecordingScript but
+// makes session/new and session/resume advertise a `models.currentModelId`,
+// so tests can drive the "session is already on this model" branch of the
+// set_model gate.
+func fakeACPRecordingScriptWithCurrentModel(recordPath, sessionID, currentModelID string) string {
+	return `#!/bin/sh
+RECORD_PATH=` + recordPath + `
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$RECORD_PATH"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*|*'"method":"session/resume"'*|*'"method":"session/load"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"` + sessionID + `","models":{"currentModelId":"` + currentModelID + `"}}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// assertNoRecordedFrame fails if any recorded JSON-RPC frame used the given
+// method. The mirror of findRecordedFrame, for asserting a call was skipped.
+func assertNoRecordedFrame(t *testing.T, recordPath, method string) {
+	t.Helper()
+	data, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read record file: %v", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			continue
+		}
+		if frame["method"] == method {
+			t.Fatalf("unexpected recorded frame for method %q in %s", method, string(data))
+		}
+	}
+}
+
 // findRecordedFrame returns the first recorded JSON-RPC frame whose
 // `method` matches the requested one. Used by the resume / capability
 // tests below to inspect what we actually sent on the wire.
@@ -2219,6 +2543,97 @@ func TestHermesSetModelPreservesCustomModelIDWithColon(t *testing.T) {
 	}
 	if params["modelId"] != "custom:lfm2.5:8b" {
 		t.Errorf("session/set_model.modelId must be passed verbatim, got %v", params["modelId"])
+	}
+}
+
+// TestHermesSkipsRedundantSetModelWhenAlreadyCurrent pins the MUL-5029 fix:
+// when session/new already reports the requested model as current, we must
+// NOT replay session/set_model. Hermes' set_model re-runs provider
+// auto-detection and can mis-route a `provider:model` id (e.g.
+// custom:deepseek-v4-pro) to OpenRouter, failing with an auth error on the
+// first turn. Re-selecting the model the session is already on is pure
+// downside, so the call is skipped.
+func TestHermesSkipsRedundantSetModelWhenAlreadyCurrent(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScriptWithCurrentModel(recordPath, "ses_new", "custom:deepseek-v4-pro")))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+		Model:   "custom:deepseek-v4-pro",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	assertNoRecordedFrame(t, recordPath, "session/set_model")
+}
+
+// TestHermesSendsSetModelWhenModelDiffersFromCurrent is the counterpart to the
+// skip test: when the requested model differs from the session's current one,
+// the explicit switch must still be sent verbatim.
+func TestHermesSendsSetModelWhenModelDiffersFromCurrent(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScriptWithCurrentModel(recordPath, "ses_new", "custom:some-default-model")))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+		Model:   "custom:deepseek-v4-pro",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/set_model")
+	params, ok := frame["params"].(map[string]any)
+	if !ok {
+		t.Fatalf("session/set_model params: got %T, want map", frame["params"])
+	}
+	if params["modelId"] != "custom:deepseek-v4-pro" {
+		t.Errorf("session/set_model.modelId = %v, want custom:deepseek-v4-pro", params["modelId"])
 	}
 }
 

@@ -30,11 +30,9 @@ interface WorkspaceAgentWorkingChipProps {
   // from the render pipeline instead of re-deriving it from the task snapshot
   // is what keeps that judgement in step with the list (MUL-4884).
   //
-  // `undefined` means the scope is UNKNOWN — the table's ids-facet window is
-  // still resolving, failed, or is too large to materialize. The chip then
-  // shows an indeterminate "—" instead of a number: publishing a count from
-  // some other, incomplete window would be a precise-looking wrong answer
-  // (round-5 review P2). The toggle keeps working in that state.
+  // `undefined` means the scope is UNKNOWN. Table deliberately does not
+  // materialize all cursor branches just to derive this decoration, so the
+  // chip shows an indeterminate "—" while the toggle remains available.
   workingIssues: readonly Issue[] | undefined;
 }
 
