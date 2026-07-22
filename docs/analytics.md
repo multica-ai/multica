@@ -723,7 +723,7 @@ PostHog event.
 ## Daily client usage and local runtime state
 
 `client_usage_daily` is the operational source of truth for Web/Desktop usage
-and Desktop local-runtime conversion. Its primary key is
+and Desktop built-in-provider conversion. Its primary key is
 `(user_id, client_type, install_id, activity_date)`, where `activity_date` is
 derived by the server in UTC. `install_id` is a random UUID stored in the Web
 origin or Electron app profile and reused across restarts, upgrades, logout,
@@ -748,15 +748,20 @@ until a later focus/resume without assigning activity to the wrong server day.
 
 Desktop runtime availability is deliberately a daemon-level approximation in
 this MVP, not a connection test for each provider. The probe counts locally
-detected providers; if the managed daemon is running, all detected providers
-are reported online, and otherwise they are reported offline. Use
-`probe_result = 'error'` as unknown rather than treating a failed probe as zero
-runtimes.
+detected **built-in provider CLIs**; workspace custom runtime profiles are not
+included. Consequently, treat `runtime_count = 0` as "no built-in provider CLI
+detected", not proof that the user has no custom profile. If the managed daemon
+is running, all detected built-in providers are reported online, and otherwise
+they are reported offline. Use `probe_result = 'error'` as unknown rather than
+treating a failed probe as zero runtimes. Covering custom profiles requires a
+separate inventory contract that remains available after the daemon stops; do
+not infer it from this snapshot.
 
-Use this query for a 30-day client split and user-level Desktop runtime state.
-It first selects the latest non-null probe for each installation, then rolls
-installations up to the user so multi-device users are not double counted and
-missing probes remain `unknown` rather than being classified as no-runtime:
+Use this query for a 30-day client split and user-level Desktop built-in-provider
+state. It first selects the latest non-null probe for each installation, then
+rolls installations up to the user so multi-device users are not double counted
+and missing probes remain `unknown` rather than being classified as having no
+built-in runtime:
 
 ```sql
 WITH window_rows AS (
@@ -790,24 +795,27 @@ desktop_state AS (
     SELECT user_id,
         CASE
             WHEN successful_probe_count < installation_count THEN 'unknown'
-            WHEN runtime_count = 0 THEN 'no_runtime'
-            WHEN online_count = 0 THEN 'all_offline'
-            ELSE 'runtime_available'
+            WHEN runtime_count = 0 THEN 'no_builtin_runtime'
+            WHEN online_count = 0 THEN 'all_builtin_runtimes_offline'
+            ELSE 'builtin_runtime_available'
         END AS runtime_state
     FROM desktop_by_user
 )
 SELECT
     (SELECT count(DISTINCT user_id) FROM active_clients WHERE client_type = 'web') AS active_web_users,
     (SELECT count(DISTINCT user_id) FROM active_clients WHERE client_type = 'desktop') AS active_desktop_users,
-    count(*) FILTER (WHERE runtime_state = 'runtime_available') AS desktop_users_with_runtime,
-    count(*) FILTER (WHERE runtime_state = 'no_runtime') AS desktop_users_without_runtime,
-    round(100.0 * count(*) FILTER (WHERE runtime_state = 'no_runtime')
+    count(*) FILTER (WHERE runtime_state = 'builtin_runtime_available')
+        AS desktop_users_with_builtin_runtime,
+    count(*) FILTER (WHERE runtime_state = 'no_builtin_runtime')
+        AS desktop_users_without_builtin_runtime,
+    round(100.0 * count(*) FILTER (WHERE runtime_state = 'no_builtin_runtime')
         / nullif((SELECT count(DISTINCT user_id) FROM active_clients WHERE client_type = 'desktop'), 0), 2)
-        AS desktop_users_without_runtime_pct,
-    count(*) FILTER (WHERE runtime_state = 'all_offline') AS desktop_users_all_offline,
-    round(100.0 * count(*) FILTER (WHERE runtime_state = 'all_offline')
+        AS desktop_users_without_builtin_runtime_pct,
+    count(*) FILTER (WHERE runtime_state = 'all_builtin_runtimes_offline')
+        AS desktop_users_all_builtin_runtimes_offline,
+    round(100.0 * count(*) FILTER (WHERE runtime_state = 'all_builtin_runtimes_offline')
         / nullif((SELECT count(DISTINCT user_id) FROM active_clients WHERE client_type = 'desktop'), 0), 2)
-        AS desktop_users_all_offline_pct,
+        AS desktop_users_all_builtin_runtimes_offline_pct,
     count(*) FILTER (WHERE runtime_state = 'unknown') AS desktop_users_unknown
 FROM desktop_state;
 ```
