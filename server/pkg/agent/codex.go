@@ -59,6 +59,7 @@ const (
 // instead of burning two full grace windows per cleanup phase. Mirrors
 // the opencodeTerminateGraceNanos hook.
 var codexGracefulShutdownTimeoutNanos atomic.Int64
+var codexProcessWaitDelayNanos atomic.Int64
 var activeCodexLaunches atomic.Int64
 var maxActiveCodexLaunchesObserved atomic.Int64
 var codexCleanupConfirmationOverride atomic.Int32
@@ -79,6 +80,13 @@ func codexGracefulShutdown() time.Duration {
 		return time.Duration(n)
 	}
 	return codexGracefulShutdownTimeout
+}
+
+func codexProcessWaitDelay() time.Duration {
+	if n := codexProcessWaitDelayNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return 10 * time.Second
 }
 
 type codexStderrClassification struct {
@@ -835,7 +843,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// Bound the wait after the context is cancelled so a stuck child (or an
 	// open pipe held by a grandchild) can't hang cmd.Wait() forever. Matches
 	// the other long-lived backends (claude, copilot, cursor, …).
-	cmd.WaitDelay = 10 * time.Second
+	cmd.WaitDelay = codexProcessWaitDelay()
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", codexArgs)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -1003,6 +1011,16 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			stdin.Close()
 
 			grace := codexGracefulShutdown()
+			waitCh := make(chan struct{})
+			var startWait sync.Once
+			startProcessWait := func() {
+				startWait.Do(func() {
+					go func() {
+						cleanupWaitErr = cmd.Wait()
+						close(waitCh)
+					}()
+				})
+			}
 
 			// Phase 1: let the reader finish before invoking cmd.Wait().
 			select {
@@ -1020,17 +1038,26 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					"grace", grace.String(),
 				)
 				cancel()
-				<-readerDone
+				// On Windows, Cancel terminates only the direct child. A
+				// descendant may keep inherited stdout open indefinitely. Start
+				// Wait now so os/exec's WaitDelay closes the pipe after its
+				// bounded deadline and lets the reader finish.
+				startProcessWait()
+				<-waitCh
+				select {
+				case <-readerDone:
+				case <-time.After(grace):
+					b.cfg.Logger.Warn("codex stdout reader remained open after bounded process wait",
+						"pid", cmd.Process.Pid,
+						"grace", grace.String(),
+					)
+				}
 			}
 
 			// Phase 2: bound cmd.Wait() in case the process is still alive
 			// (scanner-overflow case: reader exited early on its own while
 			// codex stayed blocked writing into a full stdout pipe).
-			waitCh := make(chan struct{})
-			go func() {
-				cleanupWaitErr = cmd.Wait()
-				close(waitCh)
-			}()
+			startProcessWait()
 			select {
 			case <-waitCh:
 				waitReturned = true
