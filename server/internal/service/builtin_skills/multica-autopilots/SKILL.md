@@ -31,6 +31,16 @@ Execution modes:
 - `run_only` creates an agent task directly. No issue is created; any durable
   report location has to come from other task context or instructions.
 
+Scheduled `run_only` occurrences for one autopilot never overlap. Admission is
+serialized in the database across server replicas. If an earlier run is still
+`running`, the later occurrence records a terminal `skipped` run with an
+`already_active` outcome and creates no task. Admission repairs an unlinked
+partial receipt after five minutes and ignores linked work that is no longer
+active, so a crashed dispatch or missed terminal event cannot suppress the
+schedule forever. Manual and webhook triggers remain explicit actions: they are
+never rejected by this scheduled-only gate, but their live runs do block a
+scheduled occurrence until that work is terminal.
+
 `issue-title-template` only supports `{{date}}`. Do not invent `{{trigger_id}}`, `{{branch}}`, or other variables.
 
 ## CLI
@@ -61,6 +71,7 @@ For "why didn't it run":
 4. Inspect the target agent/runtime: `multica agent get <agent-id> --output json` and `multica runtime list --output json`.
 5. For webhooks, inspect delivery status: `queued` means the worker has not completed dispatch; `failed` carries the worker error. A provider retry with the same `X-GitHub-Delivery` / `Idempotency-Key` reuses the original delivery.
 6. For `create_issue`, inspect the created issue if the run records one.
+7. For a skipped scheduled `run_only` run, inspect `failure_reason`; `active autopilot run: <id>` means non-overlap admission declined that occurrence because the named run was still active.
 
 ## Side effects
 

@@ -203,7 +203,6 @@ func (q *Queries) CreateAutopilotRuleVersion(ctx context.Context, arg CreateAuto
 }
 
 const createAutopilotRun = `-- name: CreateAutopilotRun :one
-
 INSERT INTO autopilot_run (
     autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at,
     webhook_delivery_id
@@ -225,9 +224,6 @@ type CreateAutopilotRunParams struct {
 	WebhookDeliveryID pgtype.UUID        `json:"webhook_delivery_id"`
 }
 
-// =====================
-// Autopilot Run Management
-// =====================
 // squad_id is an attribution hook: set to the assignee squad when the
 // parent autopilot has assignee_type='squad', NULL otherwise. The executing
 // agent_id on agent_task_queue still records who actually ran the work
@@ -837,6 +833,71 @@ func (q *Queries) GetAutopilotTrigger(ctx context.Context, id pgtype.UUID) (Auto
 	return i, err
 }
 
+const getLiveAutopilotRun = `-- name: GetLiveAutopilotRun :one
+SELECT ar.id, ar.autopilot_id, ar.trigger_id, ar.source, ar.status, ar.issue_id, ar.task_id, ar.triggered_at, ar.completed_at, ar.failure_reason, ar.trigger_payload, ar.result, ar.created_at, ar.squad_id, ar.planned_at, ar.webhook_delivery_id FROM autopilot_run ar
+WHERE ar.autopilot_id = $1
+  AND (
+    (
+      ar.status = 'running'
+      AND (
+        (ar.task_id IS NULL AND ar.triggered_at >= now() - make_interval(secs => $2::double precision))
+        OR EXISTS (
+          SELECT 1 FROM agent_task_queue task
+          WHERE task.id = ar.task_id
+            AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+        )
+      )
+    )
+    OR (
+      ar.status = 'issue_created'
+      AND (
+        (ar.issue_id IS NULL AND ar.triggered_at >= now() - make_interval(secs => $2::double precision))
+        OR EXISTS (
+          SELECT 1 FROM issue i
+          WHERE i.id = ar.issue_id
+            AND i.status IN ('backlog', 'todo', 'in_progress')
+        )
+      )
+    )
+  )
+ORDER BY triggered_at DESC
+LIMIT 1
+`
+
+type GetLiveAutopilotRunParams struct {
+	AutopilotID      pgtype.UUID `json:"autopilot_id"`
+	PartialGraceSecs float64     `json:"partial_grace_secs"`
+}
+
+// Treat a recent unlinked receipt as a dispatch in progress. Older partials
+// are repaired above. Linked work is live only while its downstream issue or
+// task is live, so a missed terminal listener cannot suppress every future
+// scheduled occurrence. Issue states match SyncRunFromIssue: in_review is
+// completed and blocked is failed, so neither is live admission work.
+func (q *Queries) GetLiveAutopilotRun(ctx context.Context, arg GetLiveAutopilotRunParams) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, getLiveAutopilotRun, arg.AutopilotID, arg.PartialGraceSecs)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+		&i.PlannedAt,
+		&i.WebhookDeliveryID,
+	)
+	return i, err
+}
+
 const getWebhookTriggerByToken = `-- name: GetWebhookTriggerByToken :one
 SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, t.published_by_type, t.published_by_id, a.workspace_id AS autopilot_workspace_id
 FROM autopilot_trigger t
@@ -1275,6 +1336,26 @@ func (q *Queries) ListSchedulableAutopilotTriggers(ctx context.Context) ([]ListS
 	return items, nil
 }
 
+const lockAutopilotRunAdmission = `-- name: LockAutopilotRunAdmission :one
+
+SELECT id FROM autopilot
+WHERE id = $1
+FOR UPDATE
+`
+
+// =====================
+// Autopilot Run Management
+// =====================
+// Serializes scheduled run_only admission per autopilot. The lock is held by
+// the caller's transaction until it inserts either the active run or the
+// durable skipped receipt. Different autopilots remain independent.
+func (q *Queries) LockAutopilotRunAdmission(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockAutopilotRunAdmission, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const recoverPartialAutopilotRun = `-- name: RecoverPartialAutopilotRun :exec
 UPDATE autopilot_run
 SET status = 'failed',
@@ -1297,6 +1378,66 @@ WHERE id = $1
 func (q *Queries) RecoverPartialAutopilotRun(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, recoverPartialAutopilotRun, id)
 	return err
+}
+
+const recoverStalePartialAutopilotRunsForAdmission = `-- name: RecoverStalePartialAutopilotRunsForAdmission :many
+UPDATE autopilot_run
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = 'recovered stale partial dispatch before scheduled admission',
+    planned_at = NULL
+WHERE autopilot_id = $1
+  AND status IN ('issue_created', 'running')
+  AND issue_id IS NULL
+  AND task_id IS NULL
+  AND triggered_at < now() - make_interval(secs => $2::double precision)
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id
+`
+
+type RecoverStalePartialAutopilotRunsForAdmissionParams struct {
+	AutopilotID      pgtype.UUID `json:"autopilot_id"`
+	PartialGraceSecs float64     `json:"partial_grace_secs"`
+}
+
+// A process can die after creating the run receipt but before linking the
+// downstream issue/task. Keep recent partials live long enough for the
+// dispatch path to finish, then fail them so they cannot poison admission
+// forever. The caller serializes this repair with the autopilot row lock.
+func (q *Queries) RecoverStalePartialAutopilotRunsForAdmission(ctx context.Context, arg RecoverStalePartialAutopilotRunsForAdmissionParams) ([]AutopilotRun, error) {
+	rows, err := q.db.Query(ctx, recoverStalePartialAutopilotRunsForAdmission, arg.AutopilotID, arg.PartialGraceSecs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AutopilotRun{}
+	for rows.Next() {
+		var i AutopilotRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.AutopilotID,
+			&i.TriggerID,
+			&i.Source,
+			&i.Status,
+			&i.IssueID,
+			&i.TaskID,
+			&i.TriggeredAt,
+			&i.CompletedAt,
+			&i.FailureReason,
+			&i.TriggerPayload,
+			&i.Result,
+			&i.CreatedAt,
+			&i.SquadID,
+			&i.PlannedAt,
+			&i.WebhookDeliveryID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const rotateAutopilotTriggerWebhookToken = `-- name: RotateAutopilotTriggerWebhookToken :one
