@@ -209,6 +209,20 @@ func TestBridge_WorkflowHookToolsAreAvailableToGatewayRegistry(t *testing.T) {
 	}
 }
 
+func TestBridge_CommandToolsAreAvailableToGatewayRegistry(t *testing.T) {
+	srv := mcp.NewServer("multica", "test")
+	client := InProcessAPIClient(http.NotFoundHandler(), "ws-1", "agent-1", "task-token", "task-1")
+	var session clitools.SessionState
+	clitools.RegisterTools(srv, client, &session, "ws-1", "", "")
+	reg := NewRegistry(nil)
+	RegisterBridgedMCPTools(reg, srv, DefaultInAppAdminDenylist(), true)
+	for _, name := range []string{"list_commands", "get_command", "create_command", "update_command", "delete_command"} {
+		if !reg.hasTool(name) {
+			t.Errorf("%s was not bridged into the gateway registry", name)
+		}
+	}
+}
+
 // TestBridge_AdminDenylistShape guards the product boundary: read tools stay
 // allowed, write/admin tools stay denied.
 func TestBridge_AdminDenylistShape(t *testing.T) {

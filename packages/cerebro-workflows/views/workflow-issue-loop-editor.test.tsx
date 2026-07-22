@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -9,14 +10,20 @@ afterEach(cleanup);
 import { NavigationProvider } from "@multica/views/navigation";
 import type { NavigationAdapter } from "@multica/views/navigation";
 
-import type { LoopChainSpec, WorkflowEvalBinding } from "../core/types";
+import type { LoopChainBlock, LoopChainSpec, WorkflowEvalBinding } from "../core/types";
 import {
   ChainRail,
+  AgentCandidates,
+  ApprovalTemplateField,
   EvalGateFields,
   StepStatusFields,
   applyGateSelection,
   gateOptionValue,
 } from "./workflow-issue-loop-form";
+
+vi.mock("@multica/views/autopilots/components/pickers/agent-picker", () => ({
+  AgentPicker: () => <button type="button">Select agent</button>,
+}));
 
 const navigation: NavigationAdapter = {
   push: vi.fn(),
@@ -175,6 +182,34 @@ describe("Issue workflow editor — step card", () => {
     // a running workflow made the engine lose track of the step.
     expect(screen.queryByText("Stable block ID")).not.toBeInTheDocument();
     expect(screen.queryByText(/Advanced/)).not.toBeInTheDocument();
+  });
+
+  it("places a newly added agent selector where the clicked button was", () => {
+    function AgentCandidateHarness() {
+      const [block, setBlock] = useState<LoopChainBlock>({
+        id: "session",
+        type: "session",
+        name: "Session",
+        agents: [],
+      });
+
+      return <AgentCandidates block={block} onChange={setBlock} />;
+    }
+
+    render(<AgentCandidateHarness />);
+    const addButton = screen.getByRole("button", { name: "Add agent" });
+    fireEvent.click(addButton);
+
+    const selector = screen.getByRole("button", { name: "Select agent" });
+    expect(selector.compareDocumentPosition(addButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("Human approval template", () => {
+  it("explains that the preceding agent fills the delivered work and evidence", () => {
+    render(<ApprovalTemplateField block={{ id: "approve", type: "human", prompt: "{{previous.output}}" }} onChange={vi.fn()} />);
+    expect(screen.getByText(/fills \{\{previous.output\}\} and \{\{previous.evidence\}\}/i)).toBeVisible();
+    expect(screen.getByDisplayValue("{{previous.output}}")).toBeVisible();
   });
 });
 

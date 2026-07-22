@@ -1723,6 +1723,13 @@ Approved by Jesper Hvejsel on FIR-3539 ("Fix det" + "find en måde hvor det ikke
 |---|---|---|
 | `eval-actor-resolver` | `server/internal/handler/handler.go`; wiring in `server/cmd/server/router.go` | Reuse the server-validated task/member actor identity in the fork-owned eval handler, so a client-supplied `X-Agent-ID` cannot impersonate an eval owner. |
 
+## FIR-3493 — Workflow command catalog
+
+| Patch | Location | Reason |
+|---|---|---|
+| `cerebro-commands-route` | `server/cmd/server/router.go` | Mount the fork-owned reusable command catalog beside the existing workflow and eval APIs; all behavior remains under `server/internal/cerebro/commands`. |
+| `cerebro-command-mcp` | `server/internal/cerebro/clitools/`, `server/internal/cerebro/runtime/tools_registry.go` | Expose the reusable command catalog through the shared local MCP and Firtal Gateway bridge contract, with the canonical permission inventory covering read and mutation operations. |
+
 ## FIR-3565 — Handoff brief flags take prose verbatim
 
 | Patch | Location | Reason |

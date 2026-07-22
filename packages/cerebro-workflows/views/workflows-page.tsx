@@ -76,7 +76,15 @@ export function WorkflowsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="hidden items-center gap-2 md:flex">{evalsEnabled && (
+          <div className="hidden items-center gap-2 md:flex">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => navigation.push(`/${workspace.slug}/workflows/commands`)}
+          >
+            Command library
+          </Button>
+          {evalsEnabled && (
             <Button
               size="sm"
               variant="outline"
@@ -103,6 +111,7 @@ export function WorkflowsPage() {
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button className="md:hidden" size="sm" variant="outline" aria-label="Workflow menu" />}><Menu className="size-4" />Menu</DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => navigation.push(`/${workspace.slug}/workflows/commands`)}>Command library</DropdownMenuItem>
               {evalsEnabled && <DropdownMenuItem onClick={() => navigation.push(`/${workspace.slug}/workflows/evals`)}>Eval catalog</DropdownMenuItem>}
               {hooksEnabled && <DropdownMenuItem onClick={() => navigation.push(`/${workspace.slug}/workflows/hooks`)}>Hook library</DropdownMenuItem>}
               <DropdownMenuItem onClick={() => navigation.push(`/${workspace.slug}/workflows/runs`)}>Workflow log</DropdownMenuItem>

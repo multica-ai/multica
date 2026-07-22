@@ -25,6 +25,7 @@
     ,"./views/workflow-hook-editor-page": "./views/hooks/workflow-hook-editor-page.tsx"
   },
   "dependencies": {
+    "@multica/cerebro-commands": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
