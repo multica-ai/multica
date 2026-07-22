@@ -27,7 +27,6 @@ import type {
   Issue,
   IssueReaction,
   IssueLabelsResponse,
-  IssueTableRowsResponse,
   IssueSubscriber,
   IssueUsageSummary,
   Label,
@@ -106,35 +105,6 @@ function makeListCache(...issues: Issue[]): ListIssuesCache {
   };
 }
 
-const tableRowKey = [
-  ...issueKeys.tableRows(
-    WS_ID,
-    {
-      scope: { kind: "workspace" },
-      filters: {},
-      sort: { field: "position", direction: "asc" },
-    },
-    { kind: "none" },
-    null,
-    false,
-    null,
-  ),
-  "page",
-  null,
-] as const;
-
-function seedTableRow(qc: QueryClient, issue = baseIssue) {
-  qc.setQueryData<IssueTableRowsResponse>(tableRowKey, {
-    query_fingerprint: "sha256:table",
-    group_key: null,
-    parent_id: null,
-    total: 1,
-    rows: [{ issue, direct_child_count: 0 }],
-    branch_total: 1,
-    next_cursor: null,
-  });
-}
-
 function makeTask(issueId = ISSUE_ID): AgentTask {
   return {
     id: `task-${issueId}`,
@@ -181,12 +151,11 @@ describe("onIssueLabelsChanged", () => {
     expect(qc.getQueryData(labelKeys.byIssue(WS_ID, ISSUE_ID))).toBeUndefined();
   });
 
-  it("still patches the list, Table row, and detail caches", () => {
+  it("still patches the list and detail caches", () => {
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
       byStatus: { todo: { issues: [baseIssue], total: 1 } },
     });
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), baseIssue);
-    seedTableRow(qc);
 
     onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
 
@@ -195,10 +164,6 @@ describe("onIssueLabelsChanged", () => {
 
     const detail = qc.getQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID));
     expect(detail?.labels).toEqual([labelB]);
-    expect(
-      qc.getQueryData<IssueTableRowsResponse>(tableRowKey)?.rows[0]?.issue
-        .labels,
-    ).toEqual([labelB]);
   });
 
   it("patches the Project Gantt cache so label filters react in place", () => {
@@ -260,10 +225,6 @@ describe("onIssueMetadataChanged", () => {
         },
       },
     });
-    seedTableRow(qc, {
-      ...baseIssue,
-      metadata: { pr_number: 1, stale: "yes" },
-    });
 
     onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { pr_number: 2 });
 
@@ -271,10 +232,6 @@ describe("onIssueMetadataChanged", () => {
     expect(detail?.metadata).toEqual({ pr_number: 2 });
     const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
     expect(list?.byStatus.todo?.issues[0]?.metadata).toEqual({ pr_number: 2 });
-    expect(
-      qc.getQueryData<IssueTableRowsResponse>(tableRowKey)?.rows[0]?.issue
-        .metadata,
-    ).toEqual({ pr_number: 2 });
   });
 
   it("leaves untouched caches as undefined (no spurious writes)", () => {
@@ -315,7 +272,6 @@ describe("issue property snapshots", () => {
       pages: [{ issues: [baseIssue], total: 1 }],
       pageParams: [0],
     });
-    seedTableRow(qc);
 
     patchIssueProperties(qc, WS_ID, ISSUE_ID, { estimate: 3 });
 
@@ -323,10 +279,6 @@ describe("issue property snapshots", () => {
     expect(
       qc.getQueryData<{ pages: { issues: Issue[] }[] }>(flatKey)?.pages[0]
         ?.issues[0]?.properties,
-    ).toEqual({ estimate: 3 });
-    expect(
-      qc.getQueryData<IssueTableRowsResponse>(tableRowKey)?.rows[0]?.issue
-        .properties,
     ).toEqual({ estimate: 3 });
 
     onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, { estimate: 4 });

@@ -12,12 +12,6 @@ import type {
   UpdateMemberRequest,
   ListIssuesParams,
   ListGroupedIssuesParams,
-  IssueTableFacetsRequest,
-  IssueTableFacetsResponse,
-  IssueTableGroupsRequest,
-  IssueTableGroupsResponse,
-  IssueTableRowsRequest,
-  IssueTableRowsResponse,
   Agent,
   CreateAgentRequest,
   AgentTemplate,
@@ -193,9 +187,6 @@ import {
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_AGENT_BUILDER_SESSION,
   EMPTY_GROUPED_ISSUES_RESPONSE,
-  EMPTY_ISSUE_TABLE_FACETS_RESPONSE,
-  EMPTY_ISSUE_TABLE_GROUPS_RESPONSE,
-  EMPTY_ISSUE_TABLE_ROWS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SEARCH_ISSUES_RESPONSE,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
@@ -209,9 +200,6 @@ import {
   AppConfigSchema,
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
-  IssueTableFacetsResponseSchema,
-  IssueTableGroupsResponseSchema,
-  IssueTableRowsResponseSchema,
   ListAutopilotsResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   AutopilotRunSchema,
@@ -687,45 +675,6 @@ export class ApiClient {
     return parseWithFallback(raw, GroupedIssuesResponseSchema, EMPTY_GROUPED_ISSUES_RESPONSE, {
       endpoint: "GET /api/issues/grouped",
     });
-  }
-
-  async listIssueTableGroups(params: IssueTableGroupsRequest): Promise<IssueTableGroupsResponse> {
-    const raw = await this.fetch<unknown>("/api/issues/table/groups", {
-      method: "POST",
-      body: JSON.stringify(params),
-    });
-    return parseWithFallback(
-      raw,
-      IssueTableGroupsResponseSchema,
-      EMPTY_ISSUE_TABLE_GROUPS_RESPONSE,
-      { endpoint: "POST /api/issues/table/groups" },
-    );
-  }
-
-  async listIssueTableRows(params: IssueTableRowsRequest): Promise<IssueTableRowsResponse> {
-    const raw = await this.fetch<unknown>("/api/issues/table/rows", {
-      method: "POST",
-      body: JSON.stringify(params),
-    });
-    return parseWithFallback(
-      raw,
-      IssueTableRowsResponseSchema,
-      EMPTY_ISSUE_TABLE_ROWS_RESPONSE,
-      { endpoint: "POST /api/issues/table/rows" },
-    );
-  }
-
-  async listIssueTableFacets(params: IssueTableFacetsRequest): Promise<IssueTableFacetsResponse> {
-    const raw = await this.fetch<unknown>("/api/issues/table/facets", {
-      method: "POST",
-      body: JSON.stringify(params),
-    });
-    return parseWithFallback(
-      raw,
-      IssueTableFacetsResponseSchema,
-      EMPTY_ISSUE_TABLE_FACETS_RESPONSE,
-      { endpoint: "POST /api/issues/table/facets" },
-    );
   }
 
   async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchIssuesResponse> {

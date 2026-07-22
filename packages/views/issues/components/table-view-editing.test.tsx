@@ -9,26 +9,14 @@
  * TYPES, so React remounted every cell and the just-opened picker closed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  act,
-  cleanup,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
-import { issueKeys } from "@multica/core/issues/queries";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { getIssueSurfaceViewStore } from "@multica/core/issues/stores/surface-view-store";
-import type {
-  Issue,
-  IssueTableQuerySpec,
-  IssueTableRowsResponse,
-} from "@multica/core/types";
+import type { Issue } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { IssueSurfaceSelectionProvider } from "../surface/selection-context";
 import type { IssueSurfaceSelection } from "../surface/selection-context";
@@ -154,19 +142,13 @@ const selection: IssueSurfaceSelection = {
   clear: () => {},
 };
 
-const serverQuery: IssueTableQuerySpec = {
-  scope: { kind: "workspace" },
-  filters: {},
-  sort: { field: "position", direction: "asc" },
-};
-
-let serverIssues: Issue[] = [];
-
 function Harness({
+  issues,
   childProgressMap,
   surfaceKey,
   onCreateIssue = () => {},
 }: {
+  issues: Issue[];
   childProgressMap: Map<string, ChildProgress>;
   surfaceKey: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
@@ -175,13 +157,17 @@ function Harness({
     <ViewStoreProvider store={getIssueSurfaceViewStore(surfaceKey)}>
       <IssueSurfaceSelectionProvider selection={selection}>
         <TableView
-          serverQuery={serverQuery}
+          issues={issues}
           childProgressMap={childProgressMap}
+          fetchNextPage={() => Promise.resolve()}
+          hasNextPage={false}
+          isFetchingNextPage={false}
+          windowError={false}
+          total={issues.length}
           search=""
           onSearchChange={() => {}}
-          onLoadedIssuesChange={() => {}}
           onCreateIssue={onCreateIssue}
-          exportIssues={() => Promise.resolve(serverIssues)}
+          exportIssues={() => Promise.resolve(issues)}
           resolveExportLookups={() =>
             Promise.resolve({
               projectMap: new Map(),
@@ -216,18 +202,6 @@ describe("TableView cell editors under data refresh", () => {
       listAgents: async () => [],
       listSquads: async () => [],
       getAssigneeFrequency: async () => [],
-      listIssueTableRows: async () => ({
-        query_fingerprint: "test",
-        group_key: null,
-        parent_id: null,
-        total: serverIssues.length,
-        rows: serverIssues.map((issue) => ({
-          issue,
-          direct_child_count: 0,
-        })),
-        branch_total: serverIssues.length,
-        next_cursor: null,
-      }),
     } as unknown as ApiClient);
   });
 
@@ -245,13 +219,13 @@ describe("TableView cell editors under data refresh", () => {
     const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
     const issueA = makeIssue("a", "Alpha task", "todo");
     const issueB = makeIssue("b", "Beta task", "in_progress");
-    serverIssues = [issueA, issueB];
     const progress1 = new Map<string, ChildProgress>();
     const surfaceKey = `test-surface-${Math.floor(Math.random() * 1e9)}`;
 
     const view = renderWithI18n(
       <QueryClientProvider client={queryClient}>
         <Harness
+          issues={[issueA, issueB]}
           childProgressMap={progress1}
           surfaceKey={surfaceKey}
         />
@@ -260,7 +234,6 @@ describe("TableView cell editors under data refresh", () => {
 
     const identifiers = () =>
       screen.getAllByText(/^MUL-/).map((node) => node.textContent);
-    await screen.findByText("MUL-a");
     expect(identifiers()).toEqual(["MUL-a", "MUL-b"]);
 
     // Open the status picker on row A: its cell trigger shows "Todo".
@@ -273,39 +246,20 @@ describe("TableView cell editors under data refresh", () => {
     // childProgressMap. The popup must stay open and the structure must hold
     // (frozen order) so the anchor row cannot move away mid-interaction.
     const refreshedA = { ...issueA, title: "Alpha task (updated)" };
-    serverIssues = [issueB, refreshedA];
     view.rerender(
       <QueryClientProvider client={queryClient}>
         <Harness
+          issues={[issueB, refreshedA]}
           childProgressMap={new Map<string, ChildProgress>()}
           surfaceKey={surfaceKey}
         />
       </QueryClientProvider>,
     );
-    act(() => {
-      queryClient.setQueriesData<IssueTableRowsResponse>(
-        { queryKey: issueKeys.tableAll("ws-1") },
-        (previous) =>
-          previous
-            ? {
-                ...previous,
-                total: serverIssues.length,
-                branch_total: serverIssues.length,
-                rows: serverIssues.map((issue) => ({
-                  issue,
-                  direct_child_count: 0,
-                })),
-              }
-            : previous,
-      );
-    });
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Backlog/ })).toBeTruthy();
-      expect(identifiers()).toEqual(["MUL-a", "MUL-b"]);
-      // …while the VALUES inside the frozen rows keep tracking live data.
-      expect(screen.getByText("Alpha task (updated)")).toBeTruthy();
-    });
+    expect(screen.getByRole("button", { name: /Backlog/ })).toBeTruthy();
+    expect(identifiers()).toEqual(["MUL-a", "MUL-b"]);
+    // …while the VALUES inside the frozen rows keep tracking the live data.
+    expect(screen.getByText("Alpha task (updated)")).toBeTruthy();
 
     // Selecting a value closes the editor; the deferred live order applies.
     await user.click(screen.getByRole("button", { name: /Backlog/ }));
@@ -320,11 +274,11 @@ describe("TableView cell editors under data refresh", () => {
       ...makeIssue("a", "Alpha task", "todo"),
       project_id: "project-1",
     };
-    serverIssues = [issue];
 
     renderWithI18n(
       <QueryClientProvider client={queryClient}>
         <Harness
+          issues={[issue]}
           childProgressMap={new Map()}
           surfaceKey={`test-create-sub-issue-${Math.floor(Math.random() * 1e9)}`}
           onCreateIssue={onCreateIssue}
@@ -332,7 +286,7 @@ describe("TableView cell editors under data refresh", () => {
       </QueryClientProvider>,
     );
 
-    const row = (await screen.findByText("MUL-a")).closest("tr")!;
+    const row = screen.getByText("MUL-a").closest("tr")!;
     await user.click(
       within(row).getByRole("button", { name: "Create sub-issue" }),
     );

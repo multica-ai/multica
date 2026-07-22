@@ -7,7 +7,6 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { WSClient } from "../api/ws-client";
 import { defaultStorage } from "../platform/storage";
-import { issueKeys } from "../issues/queries";
 import { workspaceKeys } from "../workspace/queries";
 import {
   markWorkspaceDeletePending,
@@ -193,56 +192,6 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(calls).toContainEqual(["chat", "messages-page"]);
     expect(calls).toContainEqual(["chat", "pending-task"]);
     expect(calls).toContainEqual(["task-messages"]);
-  });
-});
-
-describe("useRealtimeSync — Table server membership invalidation", () => {
-  let qc: QueryClient;
-  let stores: RealtimeSyncStores;
-
-  beforeEach(() => {
-    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    stores = createStores();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("invalidates Table queries after a task lifecycle event", () => {
-    vi.useFakeTimers();
-    const ws = createMockWs();
-    const invalidate = vi.spyOn(qc, "invalidateQueries");
-    renderHook(() => useRealtimeSync(ws, stores), {
-      wrapper: createWrapper(qc),
-    });
-    const onAny = vi.mocked(ws.onAny).mock.calls[0]?.[0];
-    expect(onAny).toBeDefined();
-
-    onAny!({ type: "task:completed", payload: {} } as never);
-    vi.advanceTimersByTime(100);
-
-    expect(invalidate).toHaveBeenCalledWith({
-      queryKey: issueKeys.tableAll("ws-1"),
-    });
-  });
-
-  it("invalidates Table queries after a property definition changes", () => {
-    const ws = createMockWs();
-    const invalidate = vi.spyOn(qc, "invalidateQueries");
-    renderHook(() => useRealtimeSync(ws, stores), {
-      wrapper: createWrapper(qc),
-    });
-    const propertyUpdated = vi
-      .mocked(ws.on)
-      .mock.calls.find(([event]) => event === "property:updated")?.[1];
-    expect(propertyUpdated).toBeDefined();
-
-    (propertyUpdated as (payload: unknown) => void)({});
-
-    expect(invalidate).toHaveBeenCalledWith({
-      queryKey: issueKeys.tableAll("ws-1"),
-    });
   });
 });
 

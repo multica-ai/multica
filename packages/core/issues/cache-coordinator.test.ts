@@ -9,12 +9,7 @@ import {
 import { issueChangedDims } from "./surface/membership";
 import { issueKeys, type IssueSortParam } from "./queries";
 import { inboxKeys } from "../inbox/queries";
-import type {
-  InboxItem,
-  Issue,
-  IssueTableRowsResponse,
-  ListIssuesCache,
-} from "../types";
+import type { InboxItem, Issue, ListIssuesCache } from "../types";
 
 const WS_ID = "ws-1";
 const sort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
@@ -62,22 +57,6 @@ const flatSearchKey = issueKeys.flat(
   { q: "Issue 1" },
   sort,
 );
-const tableRowKey = [
-  ...issueKeys.tableRows(
-    WS_ID,
-    {
-      scope: { kind: "workspace" },
-      filters: {},
-      sort: { field: "position", direction: "asc" },
-    },
-    { kind: "none" },
-    null,
-    false,
-    null,
-  ),
-  "page",
-  null,
-] as const;
 const updatedSort: IssueSortParam = {
   sort_by: "updated_at",
   sort_direction: "desc",
@@ -210,33 +189,6 @@ describe("applyIssueChange", () => {
     expect(
       qc.getQueryData<IssueFlatCache>(flatKey)?.pages[0]?.issues[0]?.title,
     ).toBe("Issue 1");
-  });
-
-  it("patches and rolls back loaded server Table rows", () => {
-    const snapshot: IssueTableRowsResponse = {
-      query_fingerprint: "sha256:table",
-      group_key: null,
-      parent_id: null,
-      total: 1,
-      rows: [{ issue: issue(), direct_child_count: 0 }],
-      branch_total: 1,
-      next_cursor: null,
-    };
-    qc.setQueryData(tableRowKey, snapshot);
-
-    const patch = { title: "optimistic table title" };
-    const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
-      changed: issueChangedDims(patch, issue()),
-      baseIssue: issue(),
-    });
-
-    expect(
-      qc.getQueryData<IssueTableRowsResponse>(tableRowKey)?.rows[0]?.issue.title,
-    ).toBe("optimistic table title");
-    expect(result.prevTableRows).toEqual([[tableRowKey, snapshot]]);
-
-    rollbackIssueChange(qc, WS_ID, "issue-1", result);
-    expect(qc.getQueryData(tableRowKey)).toEqual(snapshot);
   });
 
   it("marks only flat windows whose sort or facet depends on the changed field", () => {

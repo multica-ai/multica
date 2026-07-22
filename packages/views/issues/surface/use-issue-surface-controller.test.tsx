@@ -22,7 +22,6 @@ import type {
   ListIssuesResponse,
 } from "@multica/core/types";
 import { useIssueSurfaceController } from "./use-issue-surface-controller";
-import { IssueTableExportIntegrityError } from "../components/table-view-model";
 
 function makeIssue(
   overrides: Partial<Issue> & Pick<Issue, "id" | "status">,
@@ -490,7 +489,7 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(result.current.isRefreshing).toBe(false));
   });
 
-  it("debounces table search into the canonical server query without fetching the legacy flat window", async () => {
+  it("debounces table search and sends it with the server-side flat window", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     listIssues.mockResolvedValue({ issues: [], total: 0 });
@@ -504,158 +503,30 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
     listIssues.mockClear();
 
     act(() => result.current.setTableSearch("  Release train  "));
 
     expect(result.current.tableSearch).toBe("  Release train  ");
-    expect(result.current.tableQuerySpec.search).toBeUndefined();
-    await waitFor(() =>
-      expect(result.current.tableQuerySpec.search).toBe("Release train"),
+    expect(listIssues).not.toHaveBeenCalledWith(
+      expect.objectContaining({ q: "Release train" }),
     );
-    expect(listIssues).not.toHaveBeenCalled();
+
+    await waitFor(() =>
+      expect(listIssues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          project_id: "p1",
+          q: "Release train",
+          limit: 100,
+          offset: 0,
+        }),
+      ),
+    );
     expect(result.current.isEmpty).toBe(false);
   });
 
-  it("loads only the Table facet whose filter submenu is active", async () => {
-    const store = getIssueSurfaceViewStore("project:p1");
-    store.getState().setViewMode("table");
-    const listIssueTableFacets = vi.fn().mockResolvedValue({
-      query_fingerprint: "sha256:facets",
-      total: 0,
-      facets: [{ kind: "status", values: [{ key: "todo", count: 2 }] }],
-    });
-    setApiInstance({
-      listIssues,
-      listIssueTableFacets,
-      listGroupedIssues: vi.fn(() => never()),
-      listProjects: vi.fn(() => never()),
-      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
-      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
-      getChildIssueProgress: vi.fn(() => Promise.resolve([])),
-    } as unknown as ApiClient);
-
-    const { result } = renderHook(
-      () =>
-        useIssueSurfaceController({
-          scope: { type: "project", projectId: "p1" },
-          modes: ["table"],
-        }),
-      { wrapper: makeWrapper(qc, "project:p1") },
-    );
-
-    expect(listIssueTableFacets).not.toHaveBeenCalled();
-    act(() => result.current.setActiveTableFacet({ kind: "status" }));
-    await waitFor(() => expect(listIssueTableFacets).toHaveBeenCalledTimes(1));
-    expect(listIssueTableFacets).toHaveBeenCalledWith(
-      expect.objectContaining({
-        facets: [{ kind: "status" }],
-        include_total: false,
-      }),
-    );
-    await waitFor(() =>
-      expect(result.current.tableFacetCounts?.facets[0]?.kind).toBe("status"),
-    );
-
-    act(() => result.current.setActiveTableFacet(null));
-    expect(result.current.tableFacetCounts).toBeUndefined();
-  });
-
-  it("fails Table export closed when schema fallback would truncate the CSV", async () => {
-    const store = getIssueSurfaceViewStore("project:p1");
-    store.getState().setViewMode("table");
-    const listIssueTableRows = vi.fn(() =>
-      Promise.resolve({
-        query_fingerprint: "",
-        group_key: null,
-        parent_id: null,
-        total: 0,
-        rows: [],
-        branch_total: 0,
-        next_cursor: null,
-      }),
-    );
-    setApiInstance({
-      listIssues,
-      listIssueTableRows,
-      listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
-      listProjects: vi.fn(() => never()),
-      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
-      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
-      getChildIssueProgress: vi.fn(() => Promise.resolve([])),
-    } as unknown as ApiClient);
-
-    const { result } = renderHook(
-      () =>
-        useIssueSurfaceController({
-          scope: { type: "project", projectId: "p1" },
-          modes: ["table"],
-        }),
-      { wrapper: makeWrapper(qc, "project:p1") },
-    );
-
-    await expect(result.current.exportTableIssues()).rejects.toBeInstanceOf(
-      IssueTableExportIntegrityError,
-    );
-  });
-
-  it("exports every stable cursor page exactly once", async () => {
-    const store = getIssueSurfaceViewStore("project:p1");
-    store.getState().setViewMode("table");
-    const first = makeIssue({ id: "issue-1", status: "todo" });
-    const second = makeIssue({ id: "issue-2", status: "done" });
-    const listIssueTableRows = vi
-      .fn()
-      .mockResolvedValueOnce({
-        query_fingerprint: "sha256:export",
-        group_key: null,
-        parent_id: null,
-        total: 2,
-        rows: [{ issue: first, direct_child_count: 0 }],
-        branch_total: 2,
-        next_cursor: "cursor-2",
-      })
-      .mockResolvedValueOnce({
-        query_fingerprint: "sha256:export",
-        group_key: null,
-        parent_id: null,
-        total: 0,
-        rows: [{ issue: second, direct_child_count: 0 }],
-        branch_total: 1,
-        next_cursor: null,
-      });
-    setApiInstance({
-      listIssues,
-      listIssueTableRows,
-      listIssueTableFacets: vi.fn(() => never()),
-      listGroupedIssues: vi.fn(() => never()),
-      listProjects: vi.fn(() => never()),
-      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
-      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
-      getChildIssueProgress: vi.fn(() => Promise.resolve([])),
-    } as unknown as ApiClient);
-
-    const { result } = renderHook(
-      () =>
-        useIssueSurfaceController({
-          scope: { type: "project", projectId: "p1" },
-          modes: ["table"],
-        }),
-      { wrapper: makeWrapper(qc, "project:p1") },
-    );
-
-    await expect(result.current.exportTableIssues()).resolves.toEqual([
-      first,
-      second,
-    ]);
-    expect(listIssueTableRows).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ page: { limit: 100, cursor: "cursor-2" } }),
-    );
-  });
-
-  it("sends the agents-working filter as a backend predicate without sending running ids", async () => {
+  it("sends the agents-working filter as a server ids facet so later pages can match", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     store.getState().toggleAgentRunningFilter();
@@ -672,7 +543,7 @@ describe("useIssueSurfaceController", () => {
       getChildIssueProgress: vi.fn(() => never()),
     } as unknown as ApiClient);
 
-    const { result } = renderHook(
+    renderHook(
       () =>
         useIssueSurfaceController({
           scope: { type: "project", projectId: "p1" },
@@ -681,16 +552,29 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    expect(result.current.tableQuerySpec.filters.working_only).toBe(true);
-    expect(listIssues).not.toHaveBeenCalled();
+    // Before the task snapshot lands the running set is empty — the facet
+    // must still be PRESENT (ids: []) so the server returns an empty window
+    // instead of every issue.
+    await waitFor(() =>
+      expect(listIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: "p1", ids: [] }),
+      ),
+    );
+    // Once the snapshot resolves, the window re-keys to the running set.
+    await waitFor(() =>
+      expect(listIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ project_id: "p1", ids: ["issue-running"] }),
+      ),
+    );
   });
 
-  it("keeps the table working-chip scope unknown without materializing a second issue window", async () => {
+  it("resolves the working-chip scope from the ids window even while the filter is off", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     const running = makeIssue({ id: "issue-running", status: "in_progress" });
-    // A running issue may live in an unopened cursor branch. The header must
-    // stay unknown instead of deriving a false zero from visible rows.
+    // The running issue lives beyond the loaded page (main window returns
+    // nothing); only the ids-facet query can see it. A chip scoped to loaded
+    // rows would report 0 here while the filter itself would find the issue.
     listIssues.mockImplementation((params?: ListIssuesParams) =>
       Promise.resolve(
         params?.ids
@@ -719,11 +603,18 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    await waitFor(() => expect(result.current.workingScopeIssues).toBeUndefined());
-    expect(listIssues).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(
+        result.current.workingScopeIssues?.map((issue) => issue.id),
+      ).toEqual(["issue-running"]);
+    });
+    // The main table window itself stayed unrestricted — the filter is off.
+    expect(listIssues).toHaveBeenCalledWith(
+      expect.objectContaining({ project_id: "p1", limit: 100, offset: 0 }),
+    );
   });
 
-  it("does not subscribe Table to the legacy offset window", async () => {
+  it("reports the LATEST page's total so a stale first page cannot re-open the structure ceiling", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     // page 1 claims a small window (under the ceiling); by page 2 the real
@@ -752,12 +643,14 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    expect(result.current.isLoading).toBe(false);
-    expect(result.current.isEmpty).toBe(false);
-    expect(listIssues).not.toHaveBeenCalled();
+    await waitFor(() => expect(result.current.flatTotal).toBe(900));
+    await act(async () => {
+      await result.current.fetchNextFlatPage();
+    });
+    await waitFor(() => expect(result.current.flatTotal).toBe(50_000));
   });
 
-  it("does not materialize a multi-page working window for Table chrome", async () => {
+  it("materializes the working window past page one so the chip scope is complete", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     // 101 running issues spread over two pages: presenting page 1 alone as
@@ -802,11 +695,12 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    await waitFor(() => expect(result.current.workingScopeIssues).toBeUndefined());
-    expect(listIssues).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(result.current.workingScopeIssues).toHaveLength(101);
+    });
   });
 
-  it("never starts a legacy working-window request, regardless of result size", async () => {
+  it("never materializes an over-ceiling working window and presents its scope as unknown", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     // The working window shares the MAIN table cache key while the filter is
@@ -850,17 +744,16 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    // Give any accidental auto-loop a chance to fire before asserting.
+    await waitFor(() => expect(idsCalls.length).toBeGreaterThan(0));
+    // Give any (buggy) auto-loop a chance to fire before asserting.
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    expect(idsCalls).toEqual([]);
-    await waitFor(() =>
-      expect(result.current.workingScopeIssues).toBeUndefined(),
-    );
+    expect(idsCalls).toEqual([0]);
+    expect(result.current.workingScopeIssues).toBeUndefined();
   });
 
-  it("keeps the Table activity scope unknown across task-snapshot rekeys", async () => {
+  it("presents the scope as unknown while a re-keyed working window is still resolving", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     // Running set A resolves to a complete window; then the set changes to B
@@ -902,10 +795,11 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    await waitFor(() =>
-      expect(result.current.workingScopeIssues).toBeUndefined(),
-    );
-    expect(listIssues).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
+        "run-A",
+      ]);
+    });
 
     // The running set moves to B; B's ids window never resolves in this test.
     snapshotIssueId = "run-B";
@@ -920,7 +814,7 @@ describe("useIssueSurfaceController", () => {
     });
   });
 
-  it("leaves Table empty/error ownership to the server-backed renderer", async () => {
+  it("treats a cold-load failure as an error state, not an empty workspace", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     listIssues.mockRejectedValue(new Error("boom"));
@@ -934,9 +828,12 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    // The legacy list endpoint is not part of Table rendering anymore.
-    expect(listIssues).not.toHaveBeenCalled();
+    await waitFor(() => expect(result.current.flatWindowColdError).toBe(true));
+    // A failed fetch proves nothing about the window: claiming empty here
+    // swaps a 5xx/offline for a "create your first issue" screen (round-5
+    // review P2).
     expect(result.current.isEmpty).toBe(false);
+    expect(result.current.flatWindowError).toBe(true);
   });
 
   it("clears surface selection when the membership window changes (filters, search)", async () => {
