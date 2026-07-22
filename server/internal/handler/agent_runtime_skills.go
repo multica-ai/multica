@@ -2,12 +2,15 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 const maxRuntimeSkillKeyLength = 512
@@ -179,5 +182,29 @@ func (h *Handler) SetAgentRuntimeSkillEnabled(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
 	}
+
+	// Broadcast the updated agent so every other open web/desktop/mobile client
+	// invalidates its cached agent and picks up the new disabled_runtime_skills
+	// state. The workspace-skill toggle does the same through
+	// writeUpdatedAgentSkills (skill.go); the realtime layer keys off the
+	// "agent:status" event to invalidate workspaceKeys.agents. Without this only
+	// the initiating tab refreshes and other clients keep showing stale toggles.
+	locked.DisabledRuntimeSkills = payload
+	resp := agentToResponse(locked)
+	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, locked.ID); err != nil {
+		slog.Warn("runtime skill toggle: load invocation targets for broadcast failed",
+			append(logger.RequestAttrs(r), "error", err, "agent_id", agentID)...)
+	}
+	// agentToResponse initialises Skills as []; reload the junction-table
+	// bindings so the broadcast mirrors reality instead of signalling other
+	// clients that this agent's skills were cleared (#3459).
+	if err := h.attachAgentSkills(r.Context(), &resp, locked.ID); err != nil {
+		slog.Warn("runtime skill toggle: load agent skills for broadcast failed",
+			append(logger.RequestAttrs(r), "error", err, "agent_id", agentID)...)
+	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(locked.WorkspaceID))
+	h.publish(protocol.EventAgentStatus, uuidToString(locked.WorkspaceID), actorType, actorID,
+		map[string]any{"agent": broadcastAgentResponse(resp)})
+
 	w.WriteHeader(http.StatusNoContent)
 }
