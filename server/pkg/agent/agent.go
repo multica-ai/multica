@@ -76,6 +76,10 @@ type ExecOptions struct {
 	// ignore this field, mirroring ThinkingLevel's renderer-side fall-through
 	// pattern. See issue #3260.
 	OpenclawMode string
+	// ClaudeSettingsPath is a daemon-owned, task-local settings file passed
+	// through Claude Code's --settings flag. It currently carries restrictive
+	// runtime-skill overrides only; other providers ignore it.
+	ClaudeSettingsPath string
 }
 
 // runContext derives the execution context for an agent subprocess from the
@@ -142,11 +146,32 @@ type Result struct {
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	// ResumeRejected is positive evidence that this run's requested resume
+	// was itself refused — the transcript is gone, or the session belongs to
+	// another provider account. Only a refused resume can be cured by starting
+	// over, so it is what the daemon's fresh-session fallback looks for first.
+	//
+	// false is NOT evidence of the opposite. For a backend listed in
+	// ResumeRejectionUndetectable it means "could not tell"; for every other
+	// backend it means "checked, and this was not a rejection". The daemon
+	// needs the provider name to tell those apart — see
+	// shouldRetryWithFreshSession in internal/daemon.
+	//
+	// Backends must NOT set it for failures a new session cannot cure:
+	// network drops, rate limits, quota, provider 5xx, or auth errors. Those
+	// keep the session pointer so the platform's own retry can resume the
+	// truncated conversation (see retryableReasons in internal/service/task.go).
+	ResumeRejected bool
 	// codexInitializeRetrySafe is provider-internal evidence that an
 	// initialize timeout happened before semantic activity and after the
 	// process tree was reaped. It is intentionally not part of the public
 	// result contract.
 	codexInitializeRetrySafe bool
+	// codexStartupRefreshRetrySafe is provider-internal evidence that the
+	// first turn produced no semantic progress because Codex could not load
+	// its model catalog, and that the process tree was reaped afterwards.
+	// Like codexInitializeRetrySafe it is not part of the public contract.
+	codexStartupRefreshRetrySafe bool
 }
 
 // Config configures a Backend instance.
@@ -208,6 +233,33 @@ func IsSupportedType(agentType string) bool {
 		}
 	}
 	return false
+}
+
+// resumeRejectionUndetectable lists the backends that cannot produce
+// Result.ResumeRejected at all. They scrape SessionID out of stream output and
+// have no rejection detection: no phrase match, no structured error code, no
+// internal restart. copilot's own comment documents the hole (a session.error
+// arriving before session.start leaves SessionID empty), and antigravity's
+// conversation-id reader returns "" whenever the CLI exits before dispatching.
+//
+// Membership is deliberately opt-in. A backend absent from this map is treated
+// as capable, so a new backend fails closed — it reports no rejection and gets
+// no fallback — rather than silently inheriting a guess-based retry. Remove an
+// entry as soon as its backend learns to report rejections.
+var resumeRejectionUndetectable = map[string]bool{
+	"antigravity": true,
+	"copilot":     true,
+	"cursor":      true,
+	"deveco":      true,
+	"opencode":    true,
+}
+
+// ResumeRejectionUndetectable reports whether agentType is a backend that
+// cannot tell a refused resume from any other startup failure. Callers use it
+// to read a false Result.ResumeRejected correctly: "could not tell" for these,
+// "checked, not a rejection" for everything else.
+func ResumeRejectionUndetectable(agentType string) bool {
+	return resumeRejectionUndetectable[agentType]
 }
 
 func New(agentType string, cfg Config) (Backend, error) {

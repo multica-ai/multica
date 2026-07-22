@@ -32,10 +32,12 @@ func TestBuildQwenArgsKeepsProtocolManaged(t *testing.T) {
 		CustomArgs: []string{
 			"--prompt=replace", "-o", "json", "--model", "other", "--resume", "other-session",
 			"--safe-mode", "--chat-recording", "false", "--mcp-config", "injected-mcp.json", "--mcp-config=inline-mcp.json", "--debug",
+			"--yolo", "-y", "--approval-mode", "default", "--core-tools", "write_file", "--core-tools=run_shell_command",
+			"--allowed-tools", "read_file", "--exclude-tools", "monitor",
 		},
 	}, slog.Default())
 	joined := strings.Join(args, " ")
-	for _, forbidden := range []string{"text", "replace", "other-session", "other", "--safe-mode", "--chat-recording", "injected-mcp.json", "inline-mcp.json"} {
+	for _, forbidden := range []string{"text", "replace", "other-session", "other", "--safe-mode", "--chat-recording", "injected-mcp.json", "inline-mcp.json", "default", "write_file", "run_shell_command"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("managed argument %q leaked into %v", forbidden, args)
 		}
@@ -49,8 +51,24 @@ func TestBuildQwenArgsKeepsProtocolManaged(t *testing.T) {
 			t.Fatalf("args[%d] = %q, want %q; all=%v", i, args[i], want, args)
 		}
 	}
-	if !strings.Contains(joined, "--sandbox") || !strings.Contains(joined, "--debug") {
+	if !strings.Contains(joined, "--sandbox") || !strings.Contains(joined, "--debug") ||
+		!strings.Contains(joined, "--allowed-tools read_file") || !strings.Contains(joined, "--exclude-tools monitor") {
 		t.Fatalf("non-managed custom args missing from %v", args)
+	}
+	// daemon-owned --yolo must be present; user's --yolo/-y must be stripped so
+	// it appears exactly once regardless of what custom_args contain.
+	if count := strings.Count(joined, "--yolo"); count != 1 {
+		t.Fatalf("--yolo count = %d in %v, want exactly 1 (daemon-owned)", count, args)
+	}
+}
+
+func TestBuildQwenArgsYoloAlwaysPresent(t *testing.T) {
+	t.Parallel()
+	// --yolo must be injected even when custom_args is empty: Qwen's
+	// non-interactive mode otherwise filters out shell, edit, and write tools.
+	args := buildQwenArgs("task", ExecOptions{}, slog.Default())
+	if !strings.Contains(strings.Join(args, " "), "--yolo") {
+		t.Fatalf("--yolo missing from base args %v", args)
 	}
 }
 
@@ -185,12 +203,17 @@ func TestQwenBackendFailureTimeoutAndCancellation(t *testing.T) {
 		status      string
 		needle      string
 		wantSession string
+		// wantResumeRejected asserts the daemon gets positive evidence that
+		// the resume itself was refused. Without it the fresh-session
+		// fallback never fires and the user is back to a terminal failure
+		// they have to clear by hand.
+		wantResumeRejected bool
 	}{
-		{"result error", map[string]string{"QWEN_MODE": "error"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic Qwen authentication failure", "sess-error"},
-		{"process error", map[string]string{"QWEN_MODE": "exit"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic qwen stderr", ""},
-		{"missing resume", map[string]string{"QWEN_MODE": "resume-missing", "QWEN_STDERR_FIXTURE": resumeFixture}, newQwenTestContext, ExecOptions{ResumeSessionID: "session-redacted"}, "failed", "No saved session found", ""},
-		{"timeout", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{Timeout: 20 * time.Millisecond}, "timeout", "timed out", ""},
-		{"cancel", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{}, "aborted", "cancelled", ""},
+		{"result error", map[string]string{"QWEN_MODE": "error"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic Qwen authentication failure", "sess-error", false},
+		{"process error", map[string]string{"QWEN_MODE": "exit"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic qwen stderr", "", false},
+		{"missing resume", map[string]string{"QWEN_MODE": "resume-missing", "QWEN_STDERR_FIXTURE": resumeFixture}, newQwenTestContext, ExecOptions{ResumeSessionID: "session-redacted"}, "failed", "No saved session found", "", true},
+		{"timeout", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{Timeout: 20 * time.Millisecond}, "timeout", "timed out", "", false},
+		{"cancel", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{}, "aborted", "cancelled", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := tc.ctx()
@@ -206,6 +229,9 @@ func TestQwenBackendFailureTimeoutAndCancellation(t *testing.T) {
 			_, result := awaitQwenResult(t, session)
 			if result.Status != tc.status || !strings.Contains(result.Error, tc.needle) || result.SessionID != tc.wantSession {
 				t.Fatalf("result = %+v, want status=%q error containing %q session=%q", result, tc.status, tc.needle, tc.wantSession)
+			}
+			if result.ResumeRejected != tc.wantResumeRejected {
+				t.Fatalf("ResumeRejected = %v, want %v (error=%q)", result.ResumeRejected, tc.wantResumeRejected, result.Error)
 			}
 		})
 	}

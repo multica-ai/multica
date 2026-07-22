@@ -2,7 +2,14 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
@@ -10,6 +17,7 @@ import { pruneIssueSurfaceViewStates } from "@multica/core/issues/stores/surface
 import type {
   AgentTask,
   Issue,
+  IssueTableRowsRequest,
   ListIssuesParams,
   ListIssuesResponse,
 } from "@multica/core/types";
@@ -19,6 +27,7 @@ import { IssueSurface } from "./issue-surface";
 // does not remount its children on switch, so the surface must handle the
 // wsId change itself.
 const mockWsId = vi.hoisted(() => ({ current: "ws-1" }));
+const mockTranslate = vi.hoisted(() => vi.fn(() => "translated"));
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => mockWsId.current,
 }));
@@ -38,6 +47,18 @@ vi.mock("react-virtuoso", () => ({
   ),
 }));
 
+vi.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count, estimateSize }: any) => ({
+    getVirtualItems: () =>
+      Array.from({ length: count }, (_, index) => ({
+        index,
+        start: index * estimateSize(),
+        end: (index + 1) * estimateSize(),
+      })),
+    getTotalSize: () => count * estimateSize(),
+  }),
+}));
+
 const mockAuthUser = { id: "user-1", email: "test@test.com", name: "Test User" };
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
@@ -53,7 +74,7 @@ vi.mock("@multica/core/auth", () => ({
 
 vi.mock("../../i18n", () => ({
   // TableView also reads `i18n.language` for its date formatting.
-  useT: () => ({ t: () => "translated", i18n: { language: "en" } }),
+  useT: () => ({ t: mockTranslate, i18n: { language: "en" } }),
   useTimeAgo: () => () => "now",
 }));
 
@@ -256,6 +277,7 @@ describe("IssueSurface — table pagination ownership", () => {
   beforeEach(() => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     listIssues = vi.fn(() => never<ListIssuesResponse>());
+    mockTranslate.mockClear();
     pruneIssueSurfaceViewStates([]);
     mockWsId.current = "ws-1";
     // jsdom has no IntersectionObserver; the table footer sentinel constructs
@@ -279,13 +301,7 @@ describe("IssueSurface — table pagination ownership", () => {
     vi.restoreAllMocks();
   });
 
-  it("requests each offset exactly once while the agents-working filter is on", async () => {
-    // With the filter on, the working window IS the main table window (same
-    // query key). The data hook's chip loop and TableView's structure loop
-    // used to both answer the same render snapshot with fetchNextPage(),
-    // and the default cancel/restart semantics doubled every offset's HTTP
-    // request (round-6 review R1). Ownership now belongs to the structure
-    // loop alone, and all auto callers use cancelRefetch: false.
+  it("does not materialize the legacy offset window and starts one cursor root branch", async () => {
     const { getIssueSurfaceViewStore } = await import(
       "@multica/core/issues/stores/surface-view-store"
     );
@@ -299,23 +315,11 @@ describe("IssueSurface — table pagination ownership", () => {
       ...makeIssue(`run-${index}`, `Running ${index}`, "pt"),
       status: "in_progress" as const,
     }));
-    const idsOffsets: number[] = [];
-    listIssues.mockImplementation((params?: ListIssuesParams) => {
-      // A PRESENT-but-empty ids facet is the pre-snapshot state and returns
-      // an empty window (server semantics) — only the real running-set key's
-      // offsets count toward the uniqueness assertion.
-      if (params?.ids && params.ids.length > 0) {
-        const offset = params.offset ?? 0;
-        idsOffsets.push(offset);
-        return Promise.resolve({
-          issues: runningIssues.slice(offset, offset + 100),
-          total: runningIssues.length,
-        });
-      }
-      return Promise.resolve({ issues: [], total: 0 });
-    });
+    const listIssueTableRows = vi.fn(() => never());
     setApiInstance({
       listIssues,
+      listIssueTableRows,
+      listIssueTableFacets: vi.fn(() => never()),
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() =>
@@ -347,12 +351,296 @@ describe("IssueSurface — table pagination ownership", () => {
       </QueryClientProvider>,
     );
 
-    // The structure loop (hierarchy is on by default, 250 ≤ ceiling)
-    // materializes the window without user interaction.
-    await waitFor(() => expect(idsOffsets).toContain(200), { timeout: 5000 });
-    // Let any straggling (buggy) second responder fire before asserting.
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalledTimes(1));
+    expect(listIssueTableRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        group: { kind: "none" },
+        group_key: null,
+        parent_id: null,
+        query: expect.objectContaining({
+          filters: expect.objectContaining({ working_only: true }),
+        }),
+      }),
+    );
+    expect(listIssues).not.toHaveBeenCalled();
+  });
 
-    expect([...idsOffsets].sort((a, b) => a - b)).toEqual([0, 100, 200]);
+  it("keeps the root total when a continuation page reports zero", async () => {
+    const { getIssueSurfaceViewStore } = await import(
+      "@multica/core/issues/stores/surface-view-store"
+    );
+    const store = getIssueSurfaceViewStore("project:pt-pages");
+    store.getState().setViewMode("table");
+    const first = makeIssue("page-1", "First cursor row", "pt-pages");
+    const second = makeIssue("page-2", "Second cursor row", "pt-pages");
+    const listIssueTableRows = vi.fn((request: IssueTableRowsRequest) =>
+      Promise.resolve(
+        request.page?.cursor == null
+          ? {
+              query_fingerprint: "sha256:pages",
+              group_key: null,
+              parent_id: null,
+              total: 2,
+              rows: [{ issue: first, direct_child_count: 0 }],
+              branch_total: 1,
+              next_cursor: "cursor-2",
+            }
+          : {
+              query_fingerprint: "sha256:pages",
+              group_key: null,
+              parent_id: null,
+              total: 0,
+              rows: [{ issue: second, direct_child_count: 0 }],
+              branch_total: 1,
+              next_cursor: null,
+            },
+      ),
+    );
+    setApiInstance({
+      listIssues,
+      listIssueTableRows,
+      listIssueTableFacets: vi.fn(() => never()),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => Promise.resolve([])),
+      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
+      listMembers: vi.fn(() => Promise.resolve([])),
+      listAgents: vi.fn(() => Promise.resolve([])),
+      listSquads: vi.fn(() => Promise.resolve([])),
+    } as unknown as ApiClient);
+
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "pt-pages" }}
+          modes={["table"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("First cursor row");
+    const loadMoreButton = document.querySelector<HTMLButtonElement>(
+      "tbody button.sticky",
+    );
+    expect(loadMoreButton).not.toBeNull();
+    fireEvent.click(loadMoreButton!);
+
+    await screen.findByText("Second cursor row");
+    expect(listIssueTableRows).toHaveBeenCalledWith(
+      expect.objectContaining({ page: { limit: 50, cursor: "cursor-2" } }),
+    );
+    expect(mockTranslate).toHaveBeenCalledWith(expect.any(Function), {
+      count: 2,
+      total: 2,
+    });
+  });
+
+  it("feeds loaded Table rows to the shared batch toolbar", async () => {
+    const { getIssueSurfaceViewStore } = await import(
+      "@multica/core/issues/stores/surface-view-store"
+    );
+    const store = getIssueSurfaceViewStore("project:pt-batch");
+    store.getState().setViewMode("table");
+    const issue = makeIssue("table-selected", "Loaded Table issue", "pt-batch");
+
+    setApiInstance({
+      listIssues,
+      listIssueTableRows: vi.fn(() =>
+        Promise.resolve({
+          query_fingerprint: "sha256:table-batch",
+          group_key: null,
+          parent_id: null,
+          total: 1,
+          rows: [{ issue, direct_child_count: 0 }],
+          branch_total: 1,
+          next_cursor: null,
+        }),
+      ),
+      listIssueTableFacets: vi.fn(() => never()),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => Promise.resolve([])),
+      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
+      listMembers: vi.fn(() => Promise.resolve([])),
+      listAgents: vi.fn(() => Promise.resolve([])),
+      listSquads: vi.fn(() => Promise.resolve([])),
+    } as unknown as ApiClient);
+
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "pt-batch" }}
+          modes={["table"]}
+          renderHeader={() => null}
+          batchToolbar="always"
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Loaded Table issue");
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[1]!);
+
+    await waitFor(() => {
+      expect(container.querySelector(".fixed.bottom-6")).not.toBeNull();
+    });
+  });
+
+  it("keeps the previous Table rows painted while a new sort is loading", async () => {
+    const { getIssueSurfaceViewStore } = await import(
+      "@multica/core/issues/stores/surface-view-store"
+    );
+    const store = getIssueSurfaceViewStore("project:pt-sort-transition");
+    store.getState().setViewMode("table");
+    const issue = makeIssue(
+      "table-sort-placeholder",
+      "Table row kept during sort",
+      "pt-sort-transition",
+    );
+    const listIssueTableRows = vi.fn((request: IssueTableRowsRequest) =>
+      request.query.sort.field === "position"
+        ? Promise.resolve({
+            query_fingerprint: "sha256:initial-sort",
+            group_key: null,
+            parent_id: null,
+            total: 1,
+            rows: [{ issue, direct_child_count: 0 }],
+            branch_total: 1,
+            next_cursor: null,
+          })
+        : never(),
+    );
+    setApiInstance({
+      listIssues,
+      listIssueTableRows,
+      listIssueTableFacets: vi.fn(() => never()),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => Promise.resolve([])),
+      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
+      listMembers: vi.fn(() => Promise.resolve([])),
+      listAgents: vi.fn(() => Promise.resolve([])),
+      listSquads: vi.fn(() => Promise.resolve([])),
+    } as unknown as ApiClient);
+
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "pt-sort-transition" }}
+          modes={["table"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Table row kept during sort");
+    act(() => store.getState().setSortBy("title"));
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Table row kept during sort")).toBeInTheDocument();
+  });
+
+  it("keeps selected Table rows in the batch universe after their group collapses", async () => {
+    const { getIssueSurfaceViewStore } = await import(
+      "@multica/core/issues/stores/surface-view-store"
+    );
+    const store = getIssueSurfaceViewStore("project:pt-collapsed-batch");
+    store.getState().setViewMode("table");
+    store.getState().setTableGrouping("status");
+    const issue = makeIssue(
+      "table-collapsed-selected",
+      "Selected issue in collapsed group",
+      "pt-collapsed-batch",
+    );
+
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        private readonly callback: IntersectionObserverCallback;
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback;
+        }
+        observe(target: Element) {
+          this.callback(
+            [{ isIntersecting: true, target } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver,
+          );
+        }
+        unobserve() {}
+        disconnect() {}
+        takeRecords() {
+          return [];
+        }
+        root = null;
+        rootMargin = "0px";
+        thresholds = [0];
+      },
+    );
+
+    setApiInstance({
+      listIssues,
+      listIssueTableGroups: vi.fn(() =>
+        Promise.resolve({
+          query_fingerprint: "sha256:collapsed-groups",
+          total: 1,
+          groups: [
+            {
+              key: "status:todo",
+              value: { kind: "status", status: "todo" },
+              count: 1,
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+      listIssueTableRows: vi.fn(() =>
+        Promise.resolve({
+          query_fingerprint: "sha256:collapsed-rows",
+          group_key: "status:todo",
+          parent_id: null,
+          total: 1,
+          rows: [{ issue, direct_child_count: 0 }],
+          branch_total: 1,
+          next_cursor: null,
+        }),
+      ),
+      listIssueTableFacets: vi.fn(() => never()),
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => Promise.resolve([])),
+      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
+      listMembers: vi.fn(() => Promise.resolve([])),
+      listAgents: vi.fn(() => Promise.resolve([])),
+      listSquads: vi.fn(() => Promise.resolve([])),
+    } as unknown as ApiClient);
+
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "project", projectId: "pt-collapsed-batch" }}
+          modes={["table"]}
+          renderHeader={() => null}
+          batchToolbar="always"
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Selected issue in collapsed group");
+    fireEvent.click(screen.getAllByRole("checkbox")[1]!);
+    await waitFor(() => {
+      expect(container.querySelector(".fixed.bottom-6")).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "translated1" }));
+    await waitFor(() => {
+      expect(screen.queryByText("Selected issue in collapsed group")).toBeNull();
+    });
+    expect(container.querySelector(".fixed.bottom-6")).not.toBeNull();
   });
 });

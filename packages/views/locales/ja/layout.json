@@ -13,6 +13,20 @@
     "skills": "スキル",
     "settings": "設定"
   },
+  "tab": {
+    "issue": "イシュー",
+    "project": "プロジェクト",
+    "autopilot": "オートパイロット",
+    "agent": "エージェント",
+    "member": "メンバー",
+    "squad": "スクワッド",
+    "skill": "スキル",
+    "machine": "マシン",
+    "runtime": "ランタイム",
+    "attachment": "添付ファイル",
+    "create_agent": "エージェントを作成",
+    "unknown": "不明なページ"
+  },
   "help": {
     "trigger": "ヘルプ",
     "docs": "ドキュメント",

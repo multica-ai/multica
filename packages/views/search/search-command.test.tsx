@@ -160,7 +160,10 @@ vi.mock("@multica/core", () => ({
   useWorkspaceId: () => "ws-test",
 }));
 
-vi.mock("@multica/core/paths", () => ({
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  // Spread the real module so pure helpers (resolveRouteIconName, used to
+  // derive each nav page's icon from its href) stay intact.
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
   useWorkspacePaths: () => ({
     inbox: () => "/ws-test/inbox",
     myIssues: () => "/ws-test/my-issues",

@@ -93,7 +93,13 @@ const CodexFirstTurnNoProgressMarker = "codex app-server no progress timeout"
 // did not answer within the bounded handshake window.
 const CodexHandshakeTimeoutMarker = "codex app-server handshake timeout"
 
-const codexModelCatalogRefreshTimeoutSignal = "failed to refresh available models: timeout waiting for child process to exit"
+// codexModelCatalogRefreshFailureSignal matches the Codex models-manager error
+// emitted when the model catalog could not be refreshed. Codex reports several
+// distinct causes under this prefix ("timeout waiting for child process to
+// exit", "stream disconnected before completion", ...), so match the shared
+// prefix rather than one variant: they are all the same startup-blocking
+// failure from the daemon's point of view.
+const codexModelCatalogRefreshFailureSignal = "failed to refresh available models"
 
 var errCodexProcessExited = errors.New("codex process exited")
 
@@ -631,31 +637,84 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		defer close(msgCh)
 		defer close(resCh)
 		session := firstSession
+		attemptOpts := opts
 		for attempt := 1; attempt <= 2; attempt++ {
 			if attempt > 1 {
 				var err error
-				session, err = b.executeOnce(ctx, prompt, opts, attempt)
+				session, err = b.executeOnce(ctx, prompt, attemptOpts, attempt)
 				if err != nil {
 					resCh <- Result{Status: "failed", Error: err.Error()}
 					return
 				}
 			}
+			// Hold back the leading session-pin status messages until this
+			// attempt proves it made real progress. A retry never continues the
+			// discarded attempt's thread (initialize retries fail before any
+			// thread exists; catalog retries clear ResumeSessionID below), so
+			// forwarding its pin would leave the resume pointer aimed at a
+			// thread that never produced a turn (MUL-5110). The first non-pin
+			// message means the attempt is live: flush and stream from then on.
+			var heldPins []Message
+			holdingPins := true
+			flushHeldPins := func() {
+				for _, held := range heldPins {
+					msgCh <- held
+				}
+				heldPins = nil
+				holdingPins = false
+			}
 			for msg := range session.Messages {
+				if holdingPins && msg.Type == MessageStatus && msg.Status == "running" {
+					heldPins = append(heldPins, msg)
+					continue
+				}
+				if holdingPins {
+					flushHeldPins()
+				}
 				msgCh <- msg
 			}
 			result, ok := <-session.Result
 			if !ok {
+				flushHeldPins()
 				resCh <- Result{Status: "failed", Error: "codex attempt closed without result"}
 				return
 			}
-			if !result.codexInitializeRetrySafe || attempt == 2 {
+			retryReason := ""
+			switch {
+			case result.codexInitializeRetrySafe:
+				retryReason = "initialize"
+			case result.codexStartupRefreshRetrySafe:
+				retryReason = "model_catalog_refresh"
+			}
+			if retryReason == "" || attempt == 2 {
+				flushHeldPins()
 				resCh <- result
 				return
 			}
+			// The model catalog refresh reaches the network, so give the
+			// transient failure a little more room than the local initialize
+			// handshake gets. Both stay well inside the task timeout, and
+			// ctx.Done() below keeps the retry from extending it.
 			backoff := 75*time.Millisecond + time.Duration(time.Now().UnixNano()%50)*time.Millisecond
-			b.cfg.Logger.Warn("codex initialize retry scheduled", "attempt", attempt, "next_attempt", attempt+1, "backoff", backoff.String())
+			if retryReason == "model_catalog_refresh" {
+				backoff = 500*time.Millisecond + time.Duration(time.Now().UnixNano()%1000)*time.Millisecond
+				// The stalled attempt already reached turn/started, so the prior
+				// thread may hold the submitted input or an unfinished turn.
+				// Resuming it again could duplicate that input; start a fresh
+				// thread instead and keep ResumeExpected so codexTurnInput
+				// prepends the continuity notice about the lost context.
+				if attemptOpts.ResumeSessionID != "" {
+					b.cfg.Logger.Warn("codex retry dropping resume pointer after model catalog refresh failure",
+						"prior_thread_id", attemptOpts.ResumeSessionID,
+					)
+					attemptOpts.ResumeSessionID = ""
+					attemptOpts.ResumeExpected = true
+				}
+			}
+			b.cfg.Logger.Warn("codex retry scheduled", "reason", retryReason, "attempt", attempt, "next_attempt", attempt+1, "backoff", backoff.String())
 			select {
 			case <-ctx.Done():
+				flushHeldPins()
 				resCh <- result
 				return
 			case <-time.After(backoff):
@@ -1218,9 +1277,29 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		if processExitErr != nil {
 			finalError = withAgentStderr(processExitErr.Error(), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
 		}
+		stderrTail := sanitizeCodexDiagnostic(stderrBuf.Tail())
 		if timeoutDiagnostic.Kind != codexTimeoutNone {
 			timeoutDiagnostic.CodexVersion = detectCodexVersionForDiagnostics(context.Background(), execPath, cmd.Env, b.cfg.Logger)
-			finalError = buildCodexTimeoutDiagnosticError(timeoutDiagnostic, sanitizeCodexDiagnostic(stderrBuf.Tail()))
+			finalError = buildCodexTimeoutDiagnosticError(timeoutDiagnostic, stderrTail)
+		}
+
+		// A first turn that produced no semantic progress because Codex could
+		// not load its model catalog is a startup-only failure: no tool ran and
+		// no content reached the user, so replaying the prompt cannot duplicate
+		// side effects. Reuse the same process-tree evidence initialize retries
+		// require (cleanupConfirmed plus platform support) rather than a bare
+		// ProcessState check: on Windows the daemon cannot prove the whole tree
+		// is gone, and a surviving app-server would race the retry.
+		startupRefreshRetrySafe := timeoutDiagnostic.Kind == codexTimeoutFirstTurnNoProgress &&
+			!firstTurnProgressObserved &&
+			strings.Contains(stderrTail, codexModelCatalogRefreshFailureSignal) &&
+			cleanupConfirmed && codexInitializeRetrySupported()
+		if startupRefreshRetrySafe {
+			b.cfg.Logger.Warn("codex startup model catalog refresh failure is retry safe",
+				"pid", cmd.Process.Pid,
+				"thread_id", threadID,
+				"attempt", attempt,
+			)
 		}
 
 		outputMu.Lock()
@@ -1257,12 +1336,13 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			SessionID:  threadID,
-			DurationMs: duration.Milliseconds(),
-			Usage:      usageMap,
+			Status:                       finalStatus,
+			Output:                       finalOutput,
+			Error:                        finalError,
+			SessionID:                    threadID,
+			DurationMs:                   duration.Milliseconds(),
+			Usage:                        usageMap,
+			codexStartupRefreshRetrySafe: startupRefreshRetrySafe,
 		}
 	}()
 
@@ -1494,8 +1574,8 @@ func formatCodexDiagnosticModel(model string) string {
 }
 
 func appendCodexKnownStderrHint(msg, stderrTail string) string {
-	if strings.Contains(stderrTail, codexModelCatalogRefreshTimeoutSignal) {
-		return msg + "; diagnosis: Codex stderr shows the model catalog refresh timed out. Try setting an explicit model, switching Codex CLI versions, or using another runtime while Codex app-server recovers"
+	if strings.Contains(stderrTail, codexModelCatalogRefreshFailureSignal) {
+		return msg + "; diagnosis: Codex could not load its model catalog, which blocks the first turn. This is usually a transient network failure reaching the Codex service. Check network/proxy connectivity and retry the task, or switch to another runtime while the Codex service is unreachable"
 	}
 	return msg
 }
