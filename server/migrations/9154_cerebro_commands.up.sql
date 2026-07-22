@@ -1,4 +1,4 @@
-CREATE TABLE cerebro_command (
+CREATE TABLE IF NOT EXISTS cerebro_command (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     command_key text NOT NULL,
@@ -15,5 +15,5 @@ CREATE TABLE cerebro_command (
     CONSTRAINT cerebro_command_argv_nonempty CHECK (cardinality(argv) > 0)
 );
 
-CREATE INDEX cerebro_command_workspace_updated_idx
+CREATE INDEX IF NOT EXISTS cerebro_command_workspace_updated_idx
     ON cerebro_command (workspace_id, updated_at DESC);

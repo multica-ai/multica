@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { SliplaneProvider, serviceNameForVersion } from "./sliplane-provider.mjs";
+import { SliplaneProvider, serviceNameForVersion, workerCommitFromEnvironment } from "./sliplane-provider.mjs";
 
 const deployment = {
   appId: "f1540000-0000-4154-8154-000000000001",
@@ -12,6 +12,15 @@ const deployment = {
   invokeKey: "worker-invoke-key",
 };
 const workerCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+test("uses Sliplane's actual deployment commit before the legacy configured commit", () => {
+  assert.equal(workerCommitFromEnvironment({
+    SLIPLANE_COMMIT_HASH: workerCommit,
+    CEREBRO_APPS_WORKER_COMMIT: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  }), workerCommit);
+  assert.equal(workerCommitFromEnvironment({ WORKER_COMMIT: workerCommit }), workerCommit);
+  assert.equal(workerCommitFromEnvironment({ CEREBRO_APPS_WORKER_COMMIT: workerCommit }), workerCommit);
+});
 
 test("requires an explicit worker branch and exact worker commit before creating a service", async () => {
   let requests = 0;
@@ -163,8 +172,10 @@ test("refreshes a created service before using its canonical internal domain", a
   assert.deepEqual(healthUrls, ["http://canonical.internal:4311/healthz"]);
 });
 
-test("reuses an existing deployment before creating another Sliplane service", async () => {
+test("reuses an existing deployment when its legacy worker commit is stale", async () => {
   let creates = 0;
+  let patches = 0;
+  let deploys = 0;
   const provider = new SliplaneProvider({
     apiKey: "key",
     projectId: "project-1",
@@ -173,18 +184,27 @@ test("reuses an existing deployment before creating another Sliplane service", a
     workerCommit,
     fetch: async (url, init = {}) => {
       if (String(url).endsWith("/services") && (!init.method || init.method === "GET")) {
-        return Response.json([{ id: "existing", name: serviceNameForVersion(deployment.appName, deployment.appId, deployment.version), serverId: "server-1", network: { internalDomain: "existing.internal" }, env: [
+        return Response.json([{ id: "existing", name: serviceNameForVersion(deployment.appName, deployment.appId, deployment.version), serverId: "server-1", network: { internalDomain: "existing.internal" }, deployment: { url: "https://github.com/firtal-group/firtal-cerebro", branch: "main" }, env: [
           { key: "APP_ID", value: deployment.appId },
           { key: "APP_VERSION", value: deployment.version },
           { key: "BUNDLE_SHA256", value: "" },
-          { key: "WORKER_COMMIT", value: workerCommit },
+          { key: "WORKER_COMMIT", value: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
         ] }]);
       }
       if (String(url).endsWith("/services") && init.method === "POST") {
         creates++;
         return Response.json({}, { status: 201 });
       }
-      if (String(url).endsWith("/services/existing/deploy")) return new Response(null, { status: 204 });
+      if (String(url).endsWith("/services/existing") && init.method === "PATCH") {
+        patches++;
+        const body = JSON.parse(init.body);
+        assert.equal(body.env.find((entry) => entry.key === "WORKER_COMMIT").value, workerCommit);
+        return Response.json({ id: "existing", name: serviceNameForVersion(deployment.appName, deployment.appId, deployment.version), serverId: "server-1", status: "live", network: { internalDomain: "existing.internal" }, deployment: body.deployment, env: body.env });
+      }
+      if (String(url).endsWith("/services/existing/deploy")) {
+        deploys++;
+        return new Response(null, { status: 204 });
+      }
       if (String(url) === "http://existing.internal:4311/healthz") return Response.json({ status: "ok", commit: workerCommit });
       throw new Error(`unexpected request ${init.method} ${url}`);
     },
@@ -192,6 +212,8 @@ test("reuses an existing deployment before creating another Sliplane service", a
 
   assert.deepEqual(await provider.createOrDeploy(deployment), { serviceId: "existing", internalDomain: "existing.internal" });
   assert.equal(creates, 0);
+  assert.equal(patches, 1);
+  assert.equal(deploys, 0);
 });
 
 test("reuses a deterministic service after a create conflict", async () => {

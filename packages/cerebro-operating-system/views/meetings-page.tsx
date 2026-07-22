@@ -52,6 +52,13 @@ export function MeetingsPage({ renderCurrentNote }: { renderCurrentNote?: (noteI
   const noteTypeOptions = availableNoteTypes.map((noteType) => ({ value: noteType.id, label: noteType.name, hint: cadenceSummary(noteType.cadence_unit, noteType.cadence_count) }));
   const cadenceUnit = selectedNoteType?.cadence_unit ?? (config.note_type_id ? config.cadence_unit : "manual");
   const cadenceCount = selectedNoteType?.cadence_count ?? (config.note_type_id ? config.cadence_count : 1);
+  // Cycles is a timeline-first page. When no Note type has been picked yet, project the timeline
+  // from the workspace's own cadence and then from the first available recurring Note type, so the
+  // page still shows a timeline instead of only the setup card. Display-only: `submit` keeps saving
+  // the cadence the user actually selected, so a preview cadence is never persisted.
+  const timelineSource = cadenceUnit !== "manual" ? { cadence_unit: cadenceUnit, cadence_count: cadenceCount } : config.cadence_unit !== "manual" ? config : availableNoteTypes[0];
+  const timelineUnit = timelineSource?.cadence_unit ?? "manual";
+  const timelineCount = timelineSource?.cadence_count ?? 1;
   const timingSourceName = selectedNoteType?.name ?? config.note_type_name;
   const currentNoteId = selectedNoteType?.current_note_id ?? config.current_note_id;
   const cyclesLabel = settings.data?.terminology?.meetings ?? "Cycles";
@@ -88,7 +95,7 @@ export function MeetingsPage({ renderCurrentNote }: { renderCurrentNote?: (noteI
   return (
     <div className="mx-auto grid h-full max-w-5xl gap-6 overflow-y-auto p-4 sm:p-6">
       <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Operating cadence</p><h1 className="mt-1 text-2xl font-semibold">{cyclesLabel}</h1><p className="mt-1 text-sm text-muted-foreground">Run the current recurring review Note with its issues, comments, mentions, and agent work in context.</p></div><button type="button" aria-expanded={showSetup} onClick={() => setShowSetup((value) => !value)} className="flex min-h-11 items-center gap-2 rounded-md border bg-background px-4 text-sm font-medium"><Settings2 aria-hidden className="size-4" />{showSetup ? "Close setup" : "Cycle setup"}</button></div>
-      {!showSetup && cadenceUnit !== "manual" && <CycleTimeline cadenceUnit={cadenceUnit} cadenceCount={cadenceCount} label={cyclesLabel} />}
+      {!showSetup && timelineUnit !== "manual" && <CycleTimeline cadenceUnit={timelineUnit} cadenceCount={timelineCount} label={cyclesLabel} />}
       {!showSetup && currentNoteId && renderCurrentNote?.(currentNoteId, () => setShowSetup(true))}
       {!showSetup && currentNoteId && !renderCurrentNote && <div role="alert" className="rounded-xl border border-destructive/30 p-8 text-center text-sm text-destructive">The current review Note is unavailable. Cycle setup is still available.</div>}
       {!showSetup && !currentNoteId && <div className="rounded-xl border border-dashed bg-card p-8 text-center"><h2 className="font-semibold">No current review Note</h2><p className="mt-1 text-sm text-muted-foreground">Choose a recurring Note type in Cycle setup. The Note remains the single source of truth and is never created implicitly here.</p><button type="button" onClick={() => setShowSetup(true)} className="mt-4 min-h-11 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Open Cycle setup</button></div>}

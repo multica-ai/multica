@@ -44,12 +44,18 @@ export type EmittedNotificationType = Extract<
   | "agent_comment_agent_tag"
 >;
 
-// Two types route differently depending on whether the recipient is the
+// These types route differently depending on whether the recipient is the
 // assignee on the issue ("mine") or just a subscriber ("following").
-// Keep this in sync with `splitTypes` in server/cmd/server/notification_routing.go.
+// Keep this in sync with the server split sets in notification_routing.go and
+// cerebro_notification_audience_split.go.
 export const SPLIT_TYPES: ReadonlySet<EmittedNotificationType> = new Set([
   "due_date_changed",
   "priority_changed",
+  "new_comment",
+  "status_changed",
+  "agent_comment_no_tag",
+  "agent_comment_member_tag",
+  "agent_comment_agent_tag",
 ]);
 
 // Routing key used inside `user.preferences.notifications`. Keep in sync with
@@ -62,11 +68,15 @@ export type RoutingKey =
   | "unassigned"
   | "reaction_added"
   | "new_comment"
+  | "new_comment.assignee"
+  | "new_comment.follower"
   // FIR-308: direct messages route under their own key so DM push can be
   // controlled independently of issue-comment traffic.
   | "dm_message"
   | "assignee_changed"
   | "status_changed"
+  | "status_changed.assignee"
+  | "status_changed.follower"
   | "due_date_changed.assignee"
   | "due_date_changed.follower"
   | "priority_changed.assignee"
@@ -78,8 +88,14 @@ export type RoutingKey =
   // monologues, member-tag escalations and agent-to-agent hand-offs can be
   // controlled independently of one another and of human comment traffic.
   | "agent_comment_no_tag"
+  | "agent_comment_no_tag.assignee"
+  | "agent_comment_no_tag.follower"
   | "agent_comment_member_tag"
+  | "agent_comment_member_tag.assignee"
+  | "agent_comment_member_tag.follower"
   | "agent_comment_agent_tag"
+  | "agent_comment_agent_tag.assignee"
+  | "agent_comment_agent_tag.follower"
   | "system_notification"
   // FIR-1587: skill notifications (change request created/reviewed, fork,
   // agent-assigned) route through the channel matrix like everything else.
@@ -93,11 +109,23 @@ export type RoutingKey =
   // server/cmd/server/notification_routing.go.
   | "agent_context_change_request";
 
+type DerivedAudienceRoutingKey = `${
+  | "new_comment"
+  | "status_changed"
+  | "agent_comment_no_tag"
+  | "agent_comment_member_tag"
+  | "agent_comment_agent_tag"}.${"assignee" | "follower"}`;
+
+type StoredDefaultRoutingKey = Exclude<
+  RoutingKey,
+  DerivedAudienceRoutingKey
+>;
+
 // Per-channel default when the user has no override for a given key. Mirrors
 // `defaultChannelChoices` on the server — keep in sync.
 export const DEFAULT_CHANNEL_CHOICES: Record<
   Channel,
-  Record<RoutingKey, ChannelChoice>
+  Record<StoredDefaultRoutingKey, ChannelChoice>
 > = {
   inbox: {
     issue_assigned: "on",
@@ -296,11 +324,45 @@ export function getChannelChoice(
 ): ChannelChoice {
   const notif = (prefs?.notifications ?? {}) as Record<string, unknown>;
   const block = (notif[channel] ?? {}) as Record<string, unknown>;
-  const value = block[key];
+  let value = block[key];
+  if (value !== "on" && value !== "off") {
+    const [base, audience] = key.split(".") as [
+      EmittedNotificationType,
+      "assignee" | "follower" | undefined,
+    ];
+    if (audience && SPLIT_TYPES.has(base)) value = block[base];
+  }
   if (value === "on" || value === "off") {
     return value;
   }
-  return DEFAULT_CHANNEL_CHOICES[channel][key];
+  return getDefaultChannelChoice(channel, key);
+}
+
+function getDefaultChannelChoice(
+  channel: Channel,
+  key: RoutingKey,
+): ChannelChoice {
+  const exact = (
+    DEFAULT_CHANNEL_CHOICES[channel] as Partial<
+      Record<string, ChannelChoice>
+    >
+  )[key];
+  if (exact) return exact;
+
+  const [base, audience] = key.split(".") as [
+    EmittedNotificationType,
+    "assignee" | "follower" | undefined,
+  ];
+  if (!audience || !SPLIT_TYPES.has(base)) return "off";
+
+  const legacyDefault =
+    (DEFAULT_CHANNEL_CHOICES[channel] as Partial<Record<string, ChannelChoice>>)[
+      base
+    ] ?? "off";
+  if (audience === "assignee") return legacyDefault;
+  if (channel === "inbox") return "on";
+  if (channel === "mobile" || channel === "desktop") return "off";
+  return legacyDefault;
 }
 
 // Pull the channel-level transport settings (badge/sound/banner/digest),

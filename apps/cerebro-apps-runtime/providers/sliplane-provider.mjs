@@ -5,6 +5,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$/;
 const COMMIT_SHA = /^[0-9a-f]{40}$/i;
 
+export function workerCommitFromEnvironment(env = process.env) {
+  return env.SLIPLANE_COMMIT_HASH || env.WORKER_COMMIT || env.CEREBRO_APPS_WORKER_COMMIT || "";
+}
+
 export function serviceNameForVersion(appName, appId, version) {
   const humanName = String(appName ?? "").replace(/\s+/g, " ").trim();
   if (!humanName || /[\u0000-\u001f\u007f]/.test(humanName) || !UUID.test(appId) || !SEMVER.test(version)) {
@@ -21,7 +25,7 @@ export class SliplaneProvider extends AppProvider {
     this.projectId = options.projectId ?? process.env.CEREBRO_APPS_SLIPLANE_PROJECT_ID ?? "";
     this.serverId = options.serverId ?? process.env.CEREBRO_APPS_SLIPLANE_SERVER_ID ?? "";
     this.workerBranch = options.workerBranch ?? process.env.CEREBRO_APPS_WORKER_BRANCH ?? "";
-    this.workerCommit = options.workerCommit ?? process.env.CEREBRO_APPS_WORKER_COMMIT ?? "";
+    this.workerCommit = options.workerCommit ?? workerCommitFromEnvironment(options.env);
     this.baseUrl = (options.baseUrl ?? "https://ctrl.sliplane.io/v0").replace(/\/$/, "");
     this.fetch = options.fetch ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? 10_000;
@@ -46,7 +50,13 @@ export class SliplaneProvider extends AppProvider {
         }
       }
       if (!service?.id || service.serverId && service.serverId !== this.serverId) throw new Error("invalid Sliplane service");
-      await this.#request(`/projects/${this.projectId}/services/${service.id}/deploy`, { method: "POST", body: "{}" }, [200, 202, 204]);
+      let redeployStarted = false;
+      if (!created) {
+        ({ service, updated: redeployStarted } = await this.#alignWorkerCommit(service));
+      }
+      if (!redeployStarted) {
+        await this.#request(`/projects/${this.projectId}/services/${service.id}/deploy`, { method: "POST", body: "{}" }, [200, 202, 204]);
+      }
       const internalDomain = await this.#waitUntilHealthy(service.id, created ? null : service);
       return { serviceId: service.id, internalDomain };
     } catch (error) {
@@ -153,8 +163,25 @@ export class SliplaneProvider extends AppProvider {
     const env = new Map((service.env ?? []).map((entry) => [entry.key, String(entry.value ?? "")]));
     return env.get("APP_ID") === deployment.appId
       && env.get("APP_VERSION") === deployment.version
-      && env.get("BUNDLE_SHA256") === (deployment.bundleSha256 ?? "")
-      && env.get("WORKER_COMMIT") === this.workerCommit;
+      && env.get("BUNDLE_SHA256") === (deployment.bundleSha256 ?? "");
+  }
+
+  async #alignWorkerCommit(service) {
+    const env = (service.env ?? []).map((entry) => ({
+      key: entry.key,
+      value: String(entry.value ?? ""),
+      secret: Boolean(entry.secret),
+    }));
+    const current = env.find((entry) => entry.key === "WORKER_COMMIT");
+    if (current?.value === this.workerCommit) return { service, updated: false };
+    if (!service.deployment) throw new Error("missing Sliplane deployment configuration");
+    if (current) current.value = this.workerCommit;
+    else env.push({ key: "WORKER_COMMIT", value: this.workerCommit, secret: false });
+    const response = await this.#request(`/projects/${this.projectId}/services/${service.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ deployment: service.deployment, env }),
+    }, [200], true);
+    return { service: await response.json(), updated: true };
   }
 
   async #waitUntilHealthy(serviceId, initialService = null) {

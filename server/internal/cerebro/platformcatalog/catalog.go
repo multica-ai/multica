@@ -1071,6 +1071,9 @@ var catalog = []Capability{
 		Description:   "Create, edit, delete, or toggle workflows and their eval gates, or regenerate workflow tokens and signing secrets.",
 		DescriptionZh: "创建、编辑、删除、启停工作流，或重新生成其令牌和签名密钥。",
 		Ops: []string{
+			"POST /api/cerebro/commands/",
+			"PUT /api/cerebro/commands/{id}",
+			"DELETE /api/cerebro/commands/{id}",
 			"POST /api/cerebro/workflows/",
 			"PUT /api/cerebro/workflows/{id}",
 			"DELETE /api/cerebro/workflows/{id}",
@@ -1310,15 +1313,6 @@ var excluded = map[string]string{
 	"POST /api/chat/sessions/{sessionId}/convert-to-issue":          "personal-chat — reached through the caller's own chat; the resulting create is gated by create_issue. PHASE-2 REQUIREMENT: enforcement must verify convert-to-issue actually routes through the create_issue gate, else it is an ungated create-bypass",
 	"POST /api/cerebro/embedded-chat/sessions":                      "personal-chat — verified embedded member creates their own API chat; application PAT and OIDC user assertion are both enforced",
 	"POST /api/cerebro/embedded-chat/sessions/{sessionId}/messages": "personal-chat — verified embedded member sends to their own API chat; session ownership and original_user_id are enforced",
-
-	// Workflow Command definitions are ordinary workspace-member content. Agent
-	// calls are already governed per concrete list_commands/get_command/create_command/
-	// update_command/delete_command tool by the shared list/call policy gate; the
-	// HTTP routes add workspace membership and row scoping, not a second platform
-	// capability.
-	"POST /api/cerebro/commands/":       "workspace-member content — creates a reusable Workflow Command; agent tool list/call authorization is enforced separately for create_command (FIR-3493)",
-	"PUT /api/cerebro/commands/{id}":    "workspace-member content — updates a workspace-scoped Workflow Command; agent tool list/call authorization is enforced separately for update_command (FIR-3493)",
-	"DELETE /api/cerebro/commands/{id}": "workspace-member content — deletes a workspace-scoped Workflow Command; agent tool list/call authorization is enforced separately for delete_command (FIR-3493)",
 
 	// daemon-token — runtime daemon callbacks; the daemon token binds the call to
 	// a runtime, which is the authorisation. Represented by daemon_runtime_callback.

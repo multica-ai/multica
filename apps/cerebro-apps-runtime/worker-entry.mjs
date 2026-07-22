@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 
 import { createWorkerRuntime } from "./worker-server.mjs";
 import { createHostClient } from "./host-client.mjs";
+import { workerCommitFromEnvironment } from "./providers/sliplane-provider.mjs";
 
 const runtime = await createWorkerRuntime({
   appId: process.env.APP_ID,
@@ -9,7 +10,7 @@ const runtime = await createWorkerRuntime({
   bundleUrl: process.env.BUNDLE_URL,
   bundleToken: process.env.BUNDLE_TOKEN,
   expectedBundleSha256: process.env.BUNDLE_SHA256,
-  workerCommit: process.env.SLIPLANE_COMMIT_HASH,
+  workerCommit: workerCommitFromEnvironment(),
   invokeKey: process.env.INVOKE_KEY,
   hostFactory: (grantToken) => createHostClient({ baseUrl: process.env.BACKEND_URL, grantToken }),
 });

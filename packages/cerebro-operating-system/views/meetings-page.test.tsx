@@ -75,4 +75,29 @@ describe("MeetingsPage", () => {
     render(<MeetingsPage renderCurrentNote={(noteId) => <div>Canonical Note {noteId}</div>} />);
     expect(screen.getByRole("region", { name: "Cycles timeline" })).toBeInTheDocument();
   });
+
+  it("still shows the timeline when no recurring note type has been selected yet", () => {
+    const previous = state.meeting;
+    state.meeting = { ...previous, note_type_id: undefined, note_type_name: undefined, current_note_id: undefined, cadence_unit: "manual", cadence_count: 1 };
+    try {
+      render(<MeetingsPage />);
+      expect(screen.getByRole("region", { name: "Cycles timeline" })).toBeInTheDocument();
+    } finally {
+      state.meeting = previous;
+    }
+  });
+
+  it("never persists the previewed fallback cadence when nothing was selected", () => {
+    const previous = state.meeting;
+    state.meeting = { ...previous, note_type_id: undefined, note_type_name: undefined, current_note_id: undefined, cadence_unit: "manual", cadence_count: 1 };
+    try {
+      render(<MeetingsPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Cycle setup" }));
+      fireEvent.click(screen.getByRole("button", { name: "Save Cycle setup" }));
+
+      expect(state.save).toHaveBeenCalledWith(expect.objectContaining({ cadence_unit: "manual" }));
+    } finally {
+      state.meeting = previous;
+    }
+  });
 });
