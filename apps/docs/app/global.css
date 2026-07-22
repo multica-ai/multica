@@ -316,7 +316,10 @@ article > p.text-lg {
  * change) — the link "arrives" as a single color shift.
  * ------------------------------------------------------------------------- */
 
-.prose a:not([data-card]):not(.not-prose) {
+.prose
+  a:not([data-card]):not(.not-prose):not(
+    :where([class~="not-prose"] *)
+  ) {
   color: var(--foreground);
   font-weight: 500;
   text-decoration: underline;
@@ -325,7 +328,10 @@ article > p.text-lg {
   text-underline-offset: 3px;
   transition: text-decoration-color 150ms, color 150ms;
 }
-.prose a:not([data-card]):not(.not-prose):hover {
+.prose
+  a:not([data-card]):not(.not-prose):not(
+    :where([class~="not-prose"] *)
+  ):hover {
   color: var(--primary);
   text-decoration-color: var(--primary);
 }
@@ -334,8 +340,16 @@ article > p.text-lg {
  * bg, uppercase NOTE label, body). Another decoration over-loads it — so
  * links inside a callout drop the underline entirely. Color shift on
  * hover is the full affordance. */
-.prose div.shadow-md:has(> [role="none"]) a:not([data-card]):not(.not-prose),
-.prose div.shadow-md:has(> [role="none"]) a:not([data-card]):not(.not-prose):hover {
+.prose
+  div.shadow-md:has(> [role="none"])
+  a:not([data-card]):not(.not-prose):not(
+    :where([class~="not-prose"] *)
+  ),
+.prose
+  div.shadow-md:has(> [role="none"])
+  a:not([data-card]):not(.not-prose):not(
+    :where([class~="not-prose"] *)
+  ):hover {
   text-decoration: none;
 }
 

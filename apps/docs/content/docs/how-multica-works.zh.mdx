@@ -1,65 +1,62 @@
 ---
 title: Multica 是怎么工作的
-description: 三个核心组件（server / 守护进程 / AI 编程工具）怎么协同完成一次智能体工作。
+description: Multica 记录并协调工作，连接的电脑负责执行。
 ---
 
-import { ArchitectureDiagram } from "@/components/architecture-diagram";
+import { Callout } from "fumadocs-ui/components/callout";
+import { AgentWorkFlowDiagram } from "@/components/agent-work-flow-diagram";
 
-Multica 是一个**分布式**平台。你看到的 Web 界面只是前台——真正干活的有三个组件：**Multica 服务器**管数据（[工作区](/workspaces)、[issue](/issues)、[成员](/members-roles)、[任务](/tasks) 队列等）；**[守护进程](/daemon-runtimes)** 跑在你自己机器上，领任务、调用 AI 编程工具；**[AI 编程工具](/providers)**（Claude Code、Codex 等本地 CLI）是真正写代码的那一环。这个结构是 Multica 和 Linear / Jira 最大的差别——**[智能体](/agents) 不跑在我们的服务器上，而是在你自己的机器上**。
+在[快速上手](/cloud-quickstart)中，你把一个 issue 分配给了 Multica Helper。Multica 随后创建一条执行任务，由连接电脑上的运行时领取。运行时调用本地 AI 编程工具，并把进度和结果写回原来的 issue。
 
-## 系统的三个核心组件
+## 一次执行如何完成
 
-<ArchitectureDiagram />
+<AgentWorkFlowDiagram />
 
-- **Multica 服务器**——你看到的工作区、issue 列表、评论线都存在它的数据库里。它还掌管**持久化的任务队列**，同时是 WebSocket hub，把你和同事之间的实时更新推送过去。它**不**执行任何智能体任务。
-- **守护进程**（daemon）——Multica CLI 的一部分，跑在你自己的机器上。启动后它探测本地装了哪些 AI 编程工具，注册到 server，并与它保持一条 WebSocket 长连接。新任务通过这条连接**实时推送**给守护进程；一个轮询循环（每 30 秒）在推送丢失时作为兜底，心跳每 15 秒发一次。
-- **AI 编程工具**——[Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[CodeBuddy](/providers#codebuddy)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)、[Qoder](/providers#qoder)、[Trae CLI](/providers#trae)、[DevEco Code](/providers#deveco-code)、[Grok](/providers#grok) 16 款之一（或多款并存）。守护进程领到任务后，用这些工具真正去写代码。
+1. **Issue 提供上下文。** Issue 保存工作说明、讨论和负责人。分配给智能体后，系统会使用该智能体的指令、模型、skill 和运行时配置。
+2. **Multica 创建执行任务。** 执行任务进入队列；没有在线运行时时，它会在队列中等待。
+3. **运行时领取任务。** 连接电脑上的在线运行时领取任务，并调用智能体配置的 AI 编程工具。
+4. **AI 编程工具在本地执行。** 工具读取工作目录、运行命令并生成结果。
+5. **结果写回 issue。** 进度、评论和结果显示在 issue 的时间线与执行日志中。
 
-工具链在本地的结果：**AI 工具自己的凭据、你的代码目录、以及工具本身**都只在本地使用；Multica 服务器都看不到，无论自部署还是用 Cloud。一个刻意的例外：你选择存进 Multica 本身的 secret——某个智能体的 [自定义环境变量](/agents-create#自定义环境变量custom_env)——会存在服务器上，好让它把这些值交给运行时；把它们当作服务器侧的 secret 来对待，相应地控制权限范围。
+## 五个核心概念
 
-## 四个对象，以及它们的关系
+| 概念 | 它是什么 |
+|---|---|
+| **工作区** | 团队共同工作的范围。Issue、智能体、项目、skill 和执行记录都属于某个工作区。 |
+| **Issue** | 一项要完成的工作，以及围绕它积累的描述、讨论、状态和历史。 |
+| **智能体** | 可复用的身份和配置，包括名称、指令、模型、skill、访问范围和运行时。智能体本身不是一个正在运行的进程。 |
+| **执行任务（task）** | 智能体的一次具体执行。一个 issue 可以先后产生多条执行任务，每次都会单独记录。 |
+| **运行时** | 执行任务实际在哪里完成。当前由连接到 Multica 的电脑和其中一款 AI 编程工具组成。 |
 
-有四个词撑起了 Multica 模型的大部分——值得花 30 秒理清：
+## 什么留在 Multica，什么留在电脑
 
-- **Issue**——你想完成的那件工作。它是持久的：描述、评论、状态、历史。
-- **智能体（agent）**——一份可复用的身份和配置（系统指令、模型、skill、访问规则）。智能体*不是*一个进程；它是"谁在干活"。
-- **Run（执行任务 / task）**——**一次执行**。每一次触发——一次分配、一次 `@` 提及、一条聊天消息、一次 Autopilot 触发、一次手动重跑——都产生一个*新的*执行任务。**一个 issue 在其一生中会累积很多次 run（`1 issue : N runs`）**，而且多个智能体可以在同一条 issue 上各自并行地跑自己的 run。issue 详情页会把它们全部列在 **Execution log**（执行日志）里。
-- **运行时（runtime）**——一次 run 在哪里执行：一个守护进程和一款 AI 编程工具的配对。
+| Multica | 连接的电脑 |
+|---|---|
+| 工作区、issue、评论和状态 | AI 编程工具及其凭据 |
+| 智能体配置与 skill | 代码目录和本地文件 |
+| 执行任务的状态、执行记录和结果 | 实际的文件修改与命令执行 |
 
-## 一个任务从创建到完成会经历什么
+无论使用 Multica Cloud 还是自托管，AI 编程工具都在连接的电脑上运行。Multica 保存团队协作所需的上下文和执行记录，但服务器不运行这些工具。
 
-以"你把一个 issue 分配给某个智能体"这个最常见的场景为例：
+<Callout type="warning">
+有一个例外：如果你主动把 secret 保存到智能体的 `custom_env`，它会存放在 Multica 服务器端，再在运行时执行时传给智能体。请按服务器侧凭据管理它，并限制访问范围。
+</Callout>
 
-1. 你在 Web 上点击分配。浏览器发 HTTP 请求到 Multica 服务器。
-2. 服务器把这条 issue 的 assignee 改成那个智能体，**同时**在**持久化队列**里创建一条执行任务，状态 `queued`。如果此刻智能体的运行时离线，这条任务就静静留在队列里等着。
-3. 服务器通过 WebSocket 给守护进程推送一个唤醒信号，守护进程领走这条任务——通常在几秒内。（如果推送丢失，守护进程每 30 秒的轮询循环会兜底领取。）任务状态变 `dispatched`。
-4. 守护进程在本地创建隔离工作目录、调用对应 AI 编程工具开始执行。任务状态变 `running`。
-5. AI 在本地写代码、跑测试、发评论回服务器。
-6. 执行结束。守护进程把结果汇报给服务器，任务状态变 `completed` 或 `failed`。你在 Web 上看到进度实时更新（WebSocket 推送）。
+## 怎么让智能体开始工作
 
-有一件事平台**基本上**不做：它不会强行把你的 issue 标记成完成。issue 状态的变化（`in_progress`、`in_review`、`done`）由智能体在工作过程中自己完成——一次 run 完成只代表"这次执行结束了"，不代表"issue 做完了"。唯一的例外：当一个带 close 意图（`Closes MUL-123`）的关联 GitHub PR 被合并时，issue 会自动转到 `done`。生命周期惯例见 [Issues](/issues)。
+| 方式 | 适合什么情况 |
+|---|---|
+| **分配 issue** | 把智能体设为负责人，让它接手这项工作。 |
+| **在评论中 @智能体** | 请智能体处理一条具体评论，不改变 issue 的负责人。 |
+| **直接对话** | 开始一段不依附于 issue 的独立对话。 |
+| **自动化** | 按时间、webhook 或手动触发预先设置的工作。 |
 
-详细机制见 [守护进程与运行时](/daemon-runtimes) 和 [执行任务](/tasks)。
+## 一次执行结束，不代表 issue 已完成
 
-## 让智能体开工的四种方式
+执行日志显示"已完成"，只表示这一次执行已经结束。Issue 仍然可以继续讨论、补充要求或再次触发智能体。Issue 是否完成，以实际工作进展和它的状态为准。
 
-不只是"分配 issue"——Multica 有 4 种触发方式，对应不同协作场景：
+## 接下来
 
-| 方式 | 典型场景 | 文档 |
-|---|---|---|
-| **分配 issue** | 最常见。把一条 issue 指派给智能体，它自动开工 | [分配 issue](/assigning-issues) |
-| **在评论里 @智能体** | "这条你帮我看一下"——不改 assignee、不改状态，用一条评论触发 | [在评论里 @智能体](/mentioning-agents) |
-| **直接聊天** | 独立对话，不绑 issue——问问题、让它帮起草任务 | [聊天](/chat) |
-| **Autopilots（定时）** | 长期指令——每周一早上做 standup 总结之类 | [Autopilots](/autopilots) |
-
-## 运行时：在哪里跑，跑几家工具
-
-**运行时**（runtime）是"守护进程 × 一款 AI 编程工具"的组合。同一台机器上的守护进程装了 Claude Code 和 Codex，两个工作区都加入了，那么 Multica 会注册 4 个独立运行时（2 工作区 × 2 工具）。
-
-目前只支持**本地守护进程**这一种运行模式。云端运行时（不需要你自己开机）**即将开放**，当前处于等待名单阶段——在 [下载页面](https://multica.ai/download) 登记邮箱。
-
-## 下一步
-
-- [Cloud Quickstart](/cloud-quickstart) —— 5 分钟接入 Multica Cloud
-- [Self-Host Quickstart](/self-host-quickstart) —— 在自己的服务器上跑一套
-- [守护进程与运行时](/daemon-runtimes) —— 架构的灵魂组件深度讲解
+- [守护进程与运行时](/daemon-runtimes) — 了解电脑如何连接 Multica，以及运行时上线、离线时会发生什么。
+- [执行任务](/tasks) — 查看执行任务的状态、重试和取消规则。
+- [分配 issue 给智能体](/assigning-issues) — 了解最常用的协作方式。

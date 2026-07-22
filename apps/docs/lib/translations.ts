@@ -61,9 +61,9 @@ export const homeCopy = {
   },
   zh: {
     eyebrow: "Multica 文档",
-    titleLead: "人与智能体，",
-    titleAccent: "共处一方。",
-    byline: ["开始使用", "2026 年 4 月更新", "阅读约 6 分钟"],
+    titleLead: "Multica 是人类与 AI 智能体",
+    titleAccent: "共同工作的地方。",
+    byline: ["开始使用", "2026 年 7 月更新", "阅读约 3 分钟"],
   },
   ko: {
     eyebrow: "Multica 문서",

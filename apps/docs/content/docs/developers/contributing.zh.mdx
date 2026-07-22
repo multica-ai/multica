@@ -1,175 +1,180 @@
 ---
-title: Contributing
-description: Local development workflow for contributors working on the Multica codebase.
+title: 参与开发
+description: 配置 Multica 本地开发环境，运行测试，并按仓库约定提交改动。
 ---
 
-## Development Model
+import { Callout } from "fumadocs-ui/components/callout";
 
-Local development uses one shared PostgreSQL container and one database per checkout.
+Multica 是 Go backend 与 pnpm monorepo。最简单的本地启动方式是 `make dev`；它会为当前 checkout 准备环境、数据库和 migration，再启动 Web 与 API。
 
-- The main checkout usually uses `.env` and `POSTGRES_DB=multica`
-- Each Git worktree uses its own `.env.worktree`
-- Every checkout connects to the same PostgreSQL host: `localhost:5432`
-- Isolation happens at the database level, not by starting a separate Docker Compose project
-- Backend and frontend ports are still unique per worktree
+## 环境要求
 
-## Prerequisites
+- Node.js 22；
+- pnpm 10.28.2；
+- Go 1.26.1；
+- Docker Engine 或 Docker Desktop；
+- Git 和 Make。
 
-- Node.js `v20+`
-- `pnpm` `v10.28+`
-- Go `v1.26+`
-- Docker
+版本以根目录 `package.json`、`server/go.mod` 和 CI workflow 为准。
 
-## First-Time Setup
-
-### Main Checkout
+## 第一次启动
 
 ```bash
-cp .env.example .env
-make setup-main
+git clone https://github.com/multica-ai/multica.git
+cd multica
+make dev
 ```
 
-What `make setup-main` does:
+主 checkout 会使用 `.env`。文件不存在时，`make dev` 会从 `.env.example` 创建；然后启动共享 PostgreSQL、安装依赖、执行 migration，并运行 API 与 Web。
 
-- Installs JavaScript dependencies with `pnpm install`
-- Ensures the shared PostgreSQL container is running
-- Creates the application database if it does not exist
-- Runs all migrations against that database
+默认地址：
 
-Start the app:
-
-```bash
-make start-main
+```text
+Web: http://localhost:3000
+API: http://localhost:8080
 ```
 
-### Worktree
+本地固定验证码来自开发环境配置。不要把本地 `.env` 用到公网部署。
 
-From the worktree directory:
+## 在 worktree 中开发
 
-```bash
-make worktree-env
-make setup-worktree
-```
-
-Start the worktree app:
-
-```bash
-make start-worktree
-```
-
-## Daily Workflow
-
-### Main Checkout
-
-```bash
-make start-main
-make stop-main
-make check-main
-```
-
-### Feature Worktree
+仓库支持主 checkout 和多个 worktree 同时运行。它们共用一个 PostgreSQL 容器，但使用不同数据库和端口。
 
 ```bash
 git worktree add ../multica-feature -b feat/my-change main
 cd ../multica-feature
-make worktree-env
 make setup-worktree
 make start-worktree
 ```
 
-Day-to-day:
+`make setup-worktree` 会生成 `.env.worktree`，数据库名和端口根据路径确定。再次启动：
 
 ```bash
 make start-worktree
-make stop-worktree
-make check-worktree
 ```
 
-## Running Main and Worktree Simultaneously
-
-This is a first-class workflow. Both checkouts use the same PostgreSQL container but different databases and ports:
-
-| | Main | Worktree |
-|---|---|---|
-| Database | `multica` | `multica_my_feature_702` |
-| Backend port | `8080` | generated (e.g. `18782`) |
-| Frontend port | `3000` | generated (e.g. `13702`) |
-
-## Commands
+停止当前 worktree 的 Web 与 API：
 
 ```bash
-# Frontend (all commands go through Turborepo)
-pnpm install
-pnpm dev:web          # Next.js dev server (port 3000)
-pnpm dev:desktop      # Electron dev (electron-vite, HMR)
-pnpm build            # Build all frontend apps
-pnpm typecheck        # TypeScript check
-pnpm lint             # ESLint
-pnpm test             # TS tests (Vitest)
-
-# Backend (Go)
-make dev              # Run Go server (port 8080)
-make daemon           # Run local daemon
-make build            # Build server + CLI binaries
-make test             # Go tests
-make sqlc             # Regenerate sqlc code
-make migrate-up       # Run database migrations
-make migrate-down     # Rollback migrations
+make stop-worktree
 ```
 
-## Testing
+也可以直接运行 `make dev`，脚本会通过 `.git` 文件识别 worktree 并选择 `.env.worktree`。
 
-Run all local checks:
+<Callout type="info">
+不同 worktree 共用 PostgreSQL 容器，不共用数据库。不要为每个 worktree 启动新的 Compose project；先检查 `.env.worktree` 中的 `POSTGRES_DB`、`PORT` 和 `FRONTEND_PORT`。
+</Callout>
+
+## 常用命令
+
+### 整体流程
+
+```bash
+make dev              # 准备并启动当前 checkout
+make start            # 使用已有环境启动 API 与 Web
+make stop             # 停止当前 checkout 的进程
+make check            # 完整本地验证流程
+make build            # 构建 server、CLI 和 migrate 二进制
+```
+
+### 前端
+
+```bash
+pnpm install
+pnpm dev:web
+pnpm dev:desktop
+pnpm build
+pnpm typecheck
+pnpm lint
+pnpm test
+```
+
+根命令默认排除 Mobile。移动端有独立脚本和 CI，修改前先阅读 `apps/mobile/CLAUDE.md`。
+
+### Backend
+
+```bash
+make server
+make daemon
+make test
+make migrate-up
+make migrate-down
+make sqlc
+```
+
+从源码运行某条 CLI 命令：
+
+```bash
+make cli ARGS="issue list"
+```
+
+## 修改前端功能
+
+Web 与 Desktop 都需要的功能按职责放置：
+
+1. API 类型、query、mutation 和平台无关逻辑放在 `packages/core/`；
+2. 基础 UI 放在 `packages/ui/`，不能依赖业务代码；
+3. 业务页面和组件放在 `packages/views/`；
+4. Next.js、Electron 和路由适配留在对应 app；
+5. 共享页面需要同时接入 Web 与 Desktop。
+
+服务端数据由 TanStack Query 管理，筛选、草稿和布局等客户端状态由 Zustand 管理。具体边界见[项目架构](/developers/architecture)和根目录 `CLAUDE.md`。
+
+新增或修改 API 时，要同步更新 `packages/core/api/` 中的 zod schema，并为缺失字段、未知枚举或格式错误增加解析测试。
+
+## 修改数据库
+
+Migration 位于 `server/migrations/`，查询位于 `server/pkg/db/queries/`。
+
+1. 使用下一个未占用的数字前缀，同时创建 `.up.sql` 和 `.down.sql`；
+2. 不添加数据库 foreign key、级联删除或级联更新；关系检查和清理由应用层完成；
+3. 每个新索引都使用 `CREATE INDEX CONCURRENTLY` 或 `CREATE UNIQUE INDEX CONCURRENTLY`；
+4. 一个 concurrent index 单独放在只包含这一条语句的 migration 文件中；
+5. 修改查询后运行 `make sqlc`，提交生成的 `server/pkg/db/generated/` 变化；
+6. 不直接编辑 sqlc 生成文件。
+
+需要让多项写操作一起成功或回滚时，在 service 层使用应用事务。
+
+## 测试放在哪里
+
+| 改动 | 测试位置 |
+| --- | --- |
+| 共享业务逻辑、query、store | `packages/core/*.test.ts` |
+| 共享页面和组件 | `packages/views/*.test.tsx` |
+| Web 或 Desktop 平台 wiring | 对应 `apps/*` 目录 |
+| 端到端流程 | `e2e/*.spec.ts` |
+| Backend | 相关 Go package 的 `*_test.go` |
+
+先运行与改动最接近的检查，再扩大范围。例如只改 Docs：
+
+```bash
+pnpm --filter @multica/docs typecheck
+```
+
+共享前端改动：
+
+```bash
+pnpm typecheck
+pnpm test
+```
+
+Backend 改动：
+
+```bash
+make test
+```
+
+提交前运行：
 
 ```bash
 make check
 ```
 
-This runs:
+`make check` 会执行 TypeScript typecheck 与单元测试、Go 测试和 Playwright E2E。CI 还会按改动范围构建、lint，并运行平台或安装器专项测试。
 
-1. TypeScript typecheck
-2. TypeScript unit tests
-3. Go tests
-4. Playwright E2E tests
+## 重置当前开发数据库
 
-## Troubleshooting
-
-### Missing Env File
-
-Create the expected env file:
-
-```bash
-# Main checkout
-cp .env.example .env
-
-# Worktree
-make worktree-env
-```
-
-### Check Which Database a Checkout Uses
-
-```bash
-cat .env           # or .env.worktree
-```
-
-Look for `POSTGRES_DB`, `DATABASE_URL`, `PORT`, `FRONTEND_PORT`.
-
-### List All Local Databases
-
-```bash
-docker compose exec -T postgres psql -U multica -d postgres \
-  -At -c "select datname from pg_database order by datname;"
-```
-
-### Destructive Reset
-
-Stop PostgreSQL and keep local databases:
-
-```bash
-make db-down
-```
-
-Reset only the current checkout's database (drops `POSTGRES_DB`, recreates it, re-runs all migrations). Other worktree databases are untouched.
+需要干净数据时，可以重置**当前 checkout 在环境文件中指定的数据库**：
 
 ```bash
 make stop
@@ -177,12 +182,15 @@ make db-reset
 make start
 ```
 
-> `make db-reset` refuses to run if `DATABASE_URL` points at a remote host.
+`make db-reset` 会删除并重建当前 `POSTGRES_DB`，且会拒绝连接远程数据库。操作前仍应检查 `.env` 或 `.env.worktree`，确认目标数据库正确。
 
-Wipe all local PostgreSQL data:
+## 提交前检查
 
-```bash
-docker compose down -v
-```
+- 阅读根目录 `CLAUDE.md` 和相关子目录说明；
+- 只修改当前任务需要的范围；
+- 代码注释使用英文；
+- 不提交 `.env`、令牌、构建产物或本机路径；
+- 使用 `feat(scope)`、`fix(scope)`、`docs` 等 conventional commit；
+- 在 PR 中写清行为变化和实际运行的验证命令。
 
-> **Warning:** This deletes the shared Docker volume and all databases. After that you must run `make setup-main` or `make setup-worktree` again.
+继续阅读：[开发规范](/developers/conventions) · [项目架构](/developers/architecture)

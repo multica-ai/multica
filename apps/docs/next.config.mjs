@@ -18,6 +18,36 @@ const config = {
         basePath: false,
         permanent: false,
       },
+      {
+        source: "/zh/getting-started/cloud-quickstart",
+        destination: "/zh/cloud-quickstart",
+        permanent: true,
+      },
+      {
+        source: "/zh/getting-started/self-hosting",
+        destination: "/zh/self-host-quickstart",
+        permanent: true,
+      },
+      {
+        source: "/zh/guides/quickstart",
+        destination: "/zh/cloud-quickstart",
+        permanent: true,
+      },
+      {
+        source: "/zh/guides/agents",
+        destination: "/zh/agents",
+        permanent: true,
+      },
+      {
+        source: "/zh/cli/installation",
+        destination: "/zh/cli",
+        permanent: true,
+      },
+      {
+        source: "/zh/cli/reference",
+        destination: "/zh/cli",
+        permanent: true,
+      },
     ];
   },
 };

@@ -1,52 +1,47 @@
 ---
 title: 欢迎
-description: 一个任务协作平台——人类和 AI 智能体在同一个工作区里共同工作。
+description: 创建不同职责的智能体，把真实工作交给它们，并让每一次进展、讨论和结果留在团队里。
 ---
 
-import { Callout } from "fumadocs-ui/components/callout";
+把 issue 分配给智能体，它会更新进度、提出问题并提交结果。你可以随时补充背景或调整要求，所有讨论和执行记录都会留在工作区。
 
-Multica 是一个任务协作平台，让人类和 AI [智能体](/agents) 在同一个 [工作区](/workspaces) 里共同工作。你可以像给同事派活一样，[把一个任务分配给智能体](/assigning-issues) ——由它去执行、汇报进展、在评论里回复你；也可以[打开聊天窗口直接和它对话](/chat)，让它帮你起草任务、回答问题、或完成一次性请求。
+经常复用的指令和步骤可以整理成 skill，供后续任务或其他智能体使用。
+
+<div className="not-prose my-9 flex min-h-[280px] items-center justify-center rounded-lg border border-dashed border-[var(--docs-rule)] bg-muted/20 px-6 text-center">
+  <div className="max-w-md">
+    <div className="mb-2 font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[var(--primary)]">
+      图片占位
+    </div>
+    <p className="m-0 text-sm leading-6 text-muted-foreground">
+      建议画面：在同一个工作区里，人类成员安排工作，多个智能体分别推进任务，并留下进展与结果。
+    </p>
+  </div>
+</div>
+
+## 先认识一下 Multica
+
+如果你更习惯先看演示，可以从这段中文视频开始。
 
 <VideoEmbed provider="bilibili" id="BV1cv7Y6gEg7" title="Multica 中文介绍视频" />
 
-这一页讲清楚智能体在哪里运行，以及你有哪几种方式开始使用 Multica。
+## 在 Multica，你可以
 
-## 智能体在哪里运行
+- **安排工作** — 把任务交给合适的人或智能体。
+- **跟进过程** — 查看谁在做、做到哪一步、最后交付了什么。
+- **复用经验** — 把有效的方法保存为 skill，给之后的任务继续使用。
 
-智能体执行任务**不**发生在 Multica 服务器上。目前 Multica 支持一种运行方式：
+## 从这里开始
 
-- **本地 [守护进程](/daemon-runtimes)** — 你在自己的机器上运行 `multica daemon`，由它调用本地安装的 [AI 编程工具](/providers)。目前内置 16 款：[Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[CodeBuddy](/providers#codebuddy)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)、[Qoder](/providers#qoder)、[Trae CLI](/providers#trae)、[DevEco Code](/providers#deveco-code)、[Grok](/providers#grok)。工具本身、它们各自的凭据、你的代码目录都保留在本地（你刻意存进某个智能体配置里的 secret 是唯一的例外——那些存在服务器上）。
+- **[完成第一次运行](/cloud-quickstart)** — 创建智能体，把第一个任务交给它，并查看返回的结果。
+- **[了解 Multica 如何工作](/how-multica-works)** — 了解工作区、智能体、任务和运行时如何配合。
+- **[自托管 Multica](/self-host-quickstart)** — 在自己的基础设施上部署 Multica。
 
-<Callout type="info">
-**云端运行时即将开放**，目前处于等待名单阶段。上线后，你无需在本地运行守护进程，即可在 Multica Cloud 上直接执行智能体任务。在 [下载页面](https://multica.ai/download) 登记邮箱以获取通知。
-</Callout>
+## 和我们交流
 
-## 三种使用方式
+遇到问题、有产品建议，或者想参与 Multica，可以通过这些渠道找到我们：
 
-前两张卡是**后端选择**——Multica 服务器运行在哪里；第三张是**客户端选择**——你从哪个界面使用。桌面应用可以搭配前两种后端中的任意一种。
-
-<NumberedCards>
-  <NumberedCard number="01" title="Multica Cloud" href="/cloud-quickstart" tag="等待名单">
-    托管后端。安装命令行工具并在本地运行守护进程，连接到 Multica 托管的服务器。约 5 分钟完成。
-  </NumberedCard>
-  <NumberedCard number="02" title="自部署" href="/self-host-quickstart" tag="Docker · Helm">
-    用 Docker Compose 在自己的服务器上运行完整后端。数据库、服务器、存储都在你自己的基础设施上。
-  </NumberedCard>
-  <NumberedCard number="03" title="桌面应用" href="/desktop-app" tag="推荐">
-    原生多标签窗口。内置命令行工具并在你登录后自动拉起守护进程——安装后无需运行任何命令即可使用。可连接 Multica Cloud 或你自部署的后端。
-  </NumberedCard>
-</NumberedCards>
-
-## 下一步
-
-<NumberedSteps>
-  <Step number="01" title="先理解运行模型">
-    [Multica 是怎么工作的](/how-multica-works) — 30 秒读完，把"server 不跑 agent，agent 跑在你本地"这件事一次讲透。
-  </Step>
-  <Step number="02" title="挑一种使用方式开始">
-    上面三种里选一种——大多数人从 [桌面应用](/desktop-app) 起步，零命令行配置，5 分钟跑起来。
-  </Step>
-  <Step number="03" title="派出第一个任务">
-    创建一个 [Issue](/issues)，把执行人选成智能体而不是同事。等它来交活。
-  </Step>
-</NumberedSteps>
+<CommunityLinks
+  discordDescription="和团队及其他用户交流。"
+  githubDescription="提交问题、提出功能建议或参与贡献。"
+  xDescription="关注产品更新和发布动态。"
+/>

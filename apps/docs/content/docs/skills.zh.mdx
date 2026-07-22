@@ -1,73 +1,94 @@
 ---
 title: Skills
-description: 给智能体挂上"专业知识包"——兼容 Anthropic Agent Skills 开放标准。
+description: 把常用的指令、步骤和资料整理成可供多个智能体复用的 skill。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Skill 是给 [智能体](/agents) 的**专业知识包**——一个 `SKILL.md` 加上可选的支持文件（脚本、配置、参考模板等），告诉智能体"遇到某类任务时该怎么想、怎么做"。Multica 采用 [Anthropic Agent Skills](https://agentskills.io) 开放标准，所有符合规范的 Skill（Anthropic 官方仓库、ClawHub、skills.sh 上的包）都能直接导入。
+Skill 是工作区中可以复用的一组工作方法。它以 `SKILL.md` 为主文件，也可以附带脚本、模板和参考资料。
 
-## 工作区 Skill 和本机 Skill
+把 skill 添加到[智能体](/agents)后，智能体会在执行相关任务时使用其中的说明。相同的方法不必分别复制到每个智能体的指令中，修改时也只需要维护一份。
 
-Multica 支持两种 Skill 来源：
+## Skill 和智能体指令有什么区别
 
-- **工作区 Skill（workspace skill）** —— 存在 Multica 云端。挂到智能体后，任务执行时自动同步到你本机的守护进程。这是**团队共享 Skill 的标准方式**。
-- **本机 Skill（local skill）** —— 直接存在你本机的某个目录里。[守护进程](/daemon-runtimes) 按你的请求扫描本机，发现后由你手动选入工作区。守护进程会**按优先级扫描两个根目录**：先扫该运行时自己的 skill 目录（每款 AI 编程工具有约定的默认路径，比如 Claude Code 的 `~/.claude/skills/`），再扫跨工具通用目录 `~/.agents/skills/`——这是 Codex、Gemini CLI 等生态共用的位置。当同名 skill 在两处都存在时，**provider 专用目录优先**，所以通用根目录只会*额外*带出新的 skill，绝不会改变已有 skill 的解析结果。
+| | 智能体指令 | Skill |
+|---|---|---|
+| **适合保存** | 这名智能体长期不变的职责、边界和交付要求 | 某类工作可复用的步骤、资料和工具 |
+| **使用范围** | 只属于一名智能体，每次执行都会提供 | 可以添加给多名智能体，并单独启用或停用 |
+| **例子** | "只审查前端代码，不直接修改" | 一套无障碍检查清单和报告模板 |
 
-大多数情况用**工作区 Skill**：导入一次，团队所有成员的智能体都能用。本机 Skill 适合先在本地测试、或涉及敏感本地内容的场景。
+简单判断：内容是在定义"这名智能体是谁"，写进指令；内容是在说明"这类工作怎么做"，整理成 skill。
 
-## 仓库级 Skill
+## 创建或导入 skill
 
-仓库级 Skill 是预期行为。有些 AI 编程工具会发现**提交在仓库里的项目级 Skill**，例如 `.claude/skills/`、`.cursor/skills/`、`.opencode/skills/` 或 `.agents/skills/`。当 Multica 任务检出这个仓库时，这些文件会留在工作目录里，底层工具可以按自己的原生发现规则加载它们。你不需要为了在这个仓库里使用这些 repo skills 而先把它们导入 Multica；Multica 也不会自动把它们导入工作区 Skill 注册表。
+在工作区的 **Skills** 页面选择"新建 skill"，可以使用三种方式：
 
-对支持项目级发现的工具，工作区 Skill 也会同步到同一个 provider 原生位置。如果某个工作区 Skill 会和已有的仓库 Skill 目录冲突，Multica 会把工作区副本写到类似 `review-helper-multica` 的 sibling 名称下，而不是覆盖仓库文件。工具随后可能会同时看到两个 Skill，其中工作区副本使用调整后的名称。
+| 方式 | 适合什么情况 |
+|---|---|
+| **手动创建** | 从空白的 `SKILL.md` 开始编写。 |
+| **从 URL 导入** | 从 GitHub、ClawHub 或 Skills.sh 导入已经发布的 skill。 |
+| **从运行时复制** | 扫描连接电脑上的 skill，并把选中的内容复制到工作区。 |
 
-## 导入 Skill
+从运行时复制的是当时的文件快照。之后本地文件发生变化，不会自动更新工作区中的版本；需要重新导入或在 Multica 中编辑。
 
-工作区 Skill 有四种来源：
+使用 CLI 时，也可以从 `.skill` 或 `.zip` 文件导入：
 
-- **新建** —— 在 UI 里直接写 `SKILL.md` 和相关文件
-- **从 GitHub** —— 贴一个仓库 URL（例如 `https://github.com/owner/repo/tree/main/skills/my-skill`），Multica 自动拉取目录下的 `SKILL.md` 和所有文件
-- **从 ClawHub** —— 从 [ClawHub](https://clawhub.io) 公开市场搜索并导入，支持选版本
-- **从本机** —— 守护进程扫描你本机的 skill 目录，你选要用的导入到工作区
+```bash
+multica skill import --file ./review-helper.skill
+```
 
-单个文件和整个 Skill 包都有容量上限（从 GitHub 导入时单文件上限约 1 MB）。精确规则会在导入界面里提示——超过时会报错。
+导入时如果工作区已经存在同名 skill，可以停止导入、覆盖原内容、使用新名称保存，或跳过。覆盖只适用于你有权编辑的原 skill。
 
-## 挂到智能体
+## Skill 中可以放什么
 
-Skill 导入后需要**挂载到具体的智能体**才会生效。一个智能体能挂多个 Skill，一个 Skill 也能挂到多个智能体。
+每个 skill 都包含一个主文件 `SKILL.md`。在这里写清：
 
-挂上之后，智能体下次开工时会自动拿到挂着的 Skill——不同 AI 编程工具有各自的 Skill 发现路径（Claude Code 是 `.claude/skills/`、Cursor 是 `.cursor/skills/`、Antigravity 是 `.agents/skills/` 等），Multica 会自动放到对的位置。**但有 3 款工具（Gemini / Hermes / OpenClaw）当前走的是通用 fallback 路径 `.agent_context/skills/`——这些工具能否真的从这里读到 skill，取决于工具本身是否支持**。完整路径对照和原生发现 vs fallback 的区分见 [AI 编程工具对照 → skill 文件该放哪儿](/providers#skill-文件该放哪儿)。
+- 什么时候应该使用这个 skill；
+- 开始前需要检查什么；
+- 建议按照哪些步骤执行；
+- 结果应以什么形式提交；
+- 哪些情况需要停止并向成员确认。
 
-修改 Skill 的内容后，**只有之后新创建的任务会拿到新版本**——正在跑的任务继续用旧版 Skill。
+还可以添加支持文件，例如：
 
-## 第三方 Skill 的安全
+```text
+SKILL.md
+references/api-conventions.md
+templates/review-report.md
+scripts/check.sh
+```
 
-从 GitHub 或 ClawHub 导入的 Skill 可能包含脚本和可执行内容。Multica 本身**不做签名验证、不做代码审查、不做沙盒隔离**——Skill 里的内容原封不动交给对应的 AI 编程工具，工具怎么用这些文件（是否当脚本执行）由工具本身决定。
+`SKILL.md` 是保留路径，不能再创建同名支持文件。支持文件会和主文件一起提供给智能体。
+
+## 添加到智能体
+
+创建或导入 skill 后，还需要把它添加到具体的智能体。你可以在 skill 页面选择智能体，也可以打开智能体的 **Skills** 标签页进行管理。
+
+- 一名智能体可以使用多个 skill；
+- 同一个 skill 可以供多名智能体使用；
+- 暂时不需要时，可以停用绑定，而不必删除 skill；
+- 修改后的内容从后续执行开始生效，不会改变已经运行中的任务。
+
+只有有权修改该智能体的人，才能为它添加、移除或停用 skill。
+
+## 工作区 skill 和仓库中的 skill
+
+工作区 skill 保存在 Multica 中，适合由团队共同维护，并添加给不同智能体。
+
+部分 AI 编程工具也会直接读取代码仓库中的项目级 skill，例如 `.claude/skills/` 或 `.agents/skills/`。这些文件仍由仓库管理，Multica 不会自动把它们登记为工作区 skill。具体支持方式取决于使用的工具，见 [AI 编程工具对照](/providers)。
+
+## 谁可以修改 skill
+
+任何工作区成员都可以创建或导入 skill。创建者和工作区 `owner`、`admin` 可以修改或删除它；其他成员可以查看和使用，但不能覆盖内容。
+
+删除是永久操作，同时会从所有智能体上移除该 skill。
 
 <Callout type="warning">
-**导入第三方 Skill 前，审查 `SKILL.md` 和它附带的所有文件。**
-
-2026 年 2 月发生过 "ClawHavoc" 事件——有人在热门 Skill 包里植入恶意指令，受害用户的 API key 被窃取。ClawHub 之后加了 VirusTotal 扫描，但**自动扫描不能替代你自己的审查**。
-
-**只从你信任的来源导入**。涉及敏感数据的项目，考虑只用你自己写的本机 Skill。
+从外部导入的 skill 可能包含脚本、命令或不安全的指令。Multica 不会替你审查、签名或隔离这些内容。导入前请检查 `SKILL.md` 和所有支持文件，只使用可信来源。
 </Callout>
 
-## Skill 和 MCP 的区别
+## 接下来
 
-两者都是给智能体"增强能力"的机制，方向不同：
-
-- **Skill** = 结构化的**知识包**（静态内容 + 指令）。智能体读 Skill 来学"遇到 X 类问题该怎么想、怎么做"。
-- **MCP**（Model Context Protocol）= **工具通道**。智能体通过 MCP 连外部服务（数据库、文件系统、第三方 API）并**调用**它们。
-
-两者可以同时用。目前 Multica 的 MCP 支持是**按工具实现**的：Claude Code、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw 会消费 `mcp_config`；其他工具会接收到这个字段但不会实际用。MCP 的专题会在后续版本展开。
-
----
-
-到这里你已经知道智能体是什么、怎么创建、怎么挂 Skill。下一个问题：**它具体在哪跑？为什么我的智能体有时候会卡住不动？** 下一章讲执行架构——守护进程、运行时、任务怎么协作。
-
-## 下一步
-
-- [守护进程与运行时](/daemon-runtimes) —— 智能体到底跑在哪、怎么判断在线 / 离线
-- [执行任务](/tasks) —— 一次"智能体工作"的完整生命周期
-- [AI 编程工具对照](/providers) —— 16 款工具的完整对比（含每款的 Skill 注入路径）
+- [小队](/squads) — 让 leader 根据工作内容选择合适的成员。
+- [守护进程与运行时](/daemon-runtimes) — 了解 skill 如何进入实际执行环境。
+- [AI 编程工具对照](/providers) — 查看不同工具对 skill 的支持方式。

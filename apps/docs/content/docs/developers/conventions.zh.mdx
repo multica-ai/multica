@@ -1,5 +1,5 @@
 ---
-title: 规范
+title: 开发规范
 description: 代码命名规范、i18n 翻译术语表、中文风格指南的唯一权威来源。
 ---
 
@@ -35,8 +35,9 @@ monorepo 的包边界是硬约束：
 | `packages/views` | `core/`、`ui/` | `next/*`、`react-router-dom`、stores |
 | `apps/web/platform/` | `next/*` | 其他 app |
 | `apps/desktop/.../platform/` | `react-router-dom`、electron | 其他 app |
+| `apps/mobile/` | `@multica/core` 的类型和纯函数 | Web/Desktop 的 React 页面、store 和平台实现 |
 
-两个 app 都有的逻辑，**必须**抽到共享包。"小段重复"也不算例外。
+Web 和 Desktop 都有的逻辑，**必须**抽到共享包。"小段重复"也不算例外。Mobile 拥有独立的 UI、数据层和发布流程，只共享类型与纯函数。
 
 ### 文件与组件
 
@@ -50,9 +51,11 @@ monorepo 的包边界是硬约束：
 
 - 表名：`snake_case` 单数（`user`、`workspace`、`agent_runtime`）
 - 字段：`snake_case`（`workspace_id`、`created_at`、`last_seen_at`）
-- 外键：`<table>_id`
+- 关联字段：`<table>_id`
 - 布尔：`is_<state>` 或者 `<state>_at`（状态变化优先用时间戳形式）
 - 迁移文件：`NNN_descriptive_name.up.sql` + `.down.sql`，**永远写双向**
+- 不创建数据库 foreign key，也不使用级联删除或级联更新；关系校验和清理由应用层完成
+- 所有索引都使用 `CREATE INDEX CONCURRENTLY` 或 `CREATE UNIQUE INDEX CONCURRENTLY`，每条 concurrent index 单独占一个 migration 文件
 
 ### Go
 
@@ -68,9 +71,16 @@ monorepo 的包边界是硬约束：
 - 枚举：优先用 string literal union，需要 runtime 迭代时才用 `enum`
 - TanStack Query key：用 `<feature>/queries.ts` 里的工厂函数，例如 `issueKeys.detail(id)`
 
+### API 边界
+
+- 网络响应必须用 `packages/core/api/schema.ts` 中的 `parseWithFallback` 和 zod schema 解析，不能直接 `as T`
+- 新增或修改 endpoint 时，同步更新 schema，并覆盖字段缺失或格式错误的测试
+- 下游 UI 对可选字段提供默认值；服务端枚举的 `switch` 必须有 `default` 分支
+- 已安装的 Desktop 可能连接更新的 backend，不能假设前后端永远同版本
+
 ### Issue 编号
 
-每个 issue 有人类可读的编号，比如 `MUL-123`：工作区 `issue_prefix`（大写字母和数字，通常 3 个字符，最长 10 个）+ 流水号。工作区管理员可以在 Settings → General 中修改前缀；修改会让所有现有 issue 重新编号，外部引用——PR 标题、分支名、文档与聊天里的链接——里的旧前缀会失效。
+每个 issue 有人类可读的编号，比如 `MUL-123`：工作区 `issue_prefix`（大写字母和数字，通常 3 个字符，最长 10 个）+ 流水号。工作区管理员可以在**设置 → 通用**中修改前缀；修改会让所有现有 issue 重新编号，外部引用——PR 标题、分支名、文档与聊天里的链接——里的旧前缀会失效。
 
 ### 代码注释
 
@@ -102,13 +112,13 @@ Multica 的产品名词分两类：
 | 场景 | 写法 | 例 |
 | --- | --- | --- |
 | **UI 短句 / 状态名 / 代码上下文** | 小写英文 | "排队中的 task"、"创建子 issue"、"为智能体注入 skill" |
-| **doc 标题 / 章节标题** | 首字母大写英文，**或**对应中文术语 | "Issue 与 project"、"Skills"、"执行任务" |
+| **doc 标题 / 章节标题** | 首字母大写英文，**或**对应中文术语 | "Issue 与项目"、"Skills"、"执行任务" |
 | **doc 正文长篇讨论中作为主语** | 中文术语，首次出现配括号英文 | "**执行任务**（task）是智能体每一次工作的单位" |
 | **API / DB 字段** | 永远 `task` / `issue` / `skill` | `task_id`、`issue_status`、`skill_uuid` |
 
 中文术语对照：
 
-- `task` ↔ `执行任务`（上下文清楚后可简写为「任务」）
+- `task` ↔ `执行任务`（上下文清楚后可简写为"任务"）
 - `issue` 没有公认中文译法 —— 保留英文；标题可大写为 `Issue`
 - `skill` 没有公认中文译法 —— 保留英文；标题可大写为 `Skills`
 
@@ -116,8 +126,8 @@ Multica 的产品名词分两类：
 
 - **`issue` / `task`**：dev 团队习惯说英文，"任务"在中文里和"工作"几乎同义太空泛，"工单"是 IT 工单语义，"议题"是 GitHub 风格但用户场景不匹配 —— 三个候选都不如 `issue` 准确。**但**在长篇 doc 正文里，重复 50 次 `task` 节奏不顺，所以正文允许用 `执行任务`，UI 短句、状态名仍保持小写英文。
 - **`skill`**：Multica 特有概念，没有公认中文译法。
-- **`project` 翻成「项目」**：中文里早就稳定的日常词。飞书 / Tower / Teambition / PingCode / GitHub Projects 中文版 0 例外都翻译成「项目」，没有产品保留 `project`。
-- **`autopilot` 翻成「自动化」**：autopilot 在中文里联想到特斯拉的「自动驾驶」，跟产品功能（按周期跑 task）对应不上。Notion / 飞书都用「自动化」，是行业共识。
+- **`project` 翻成"项目"**：中文里早就稳定的日常词。飞书 / Tower / Teambition / PingCode / GitHub Projects 中文版 0 例外都翻译成"项目"，没有产品保留 `project`。
+- **`autopilot` 翻成"自动化"**：autopilot 在中文里联想到特斯拉的"自动驾驶"，跟产品功能（按周期跑 task）对应不上。Notion / 飞书都用"自动化"，是行业共识。
 
 ### 完整翻译 —— 概念词
 

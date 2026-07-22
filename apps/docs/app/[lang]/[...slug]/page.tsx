@@ -12,6 +12,7 @@ import { docsAlternates } from "@/lib/site";
 import { i18n, type Lang } from "@/lib/i18n";
 import { DocsLocaleProvider, LocaleLink } from "@/components/locale-link";
 import { VideoEmbed } from "@/components/video-embed";
+import { ScreenshotPlaceholder } from "@/components/screenshot-placeholder";
 import { docsSlugStaticParams } from "@/lib/static-params";
 
 function asLang(lang: string): Lang {
@@ -37,7 +38,12 @@ export default async function Page(props: {
       <DocsBody>
         <DocsLocaleProvider lang={lang}>
           <MDX
-            components={{ ...defaultMdxComponents, a: LocaleLink, VideoEmbed }}
+            components={{
+              ...defaultMdxComponents,
+              a: LocaleLink,
+              VideoEmbed,
+              ScreenshotPlaceholder,
+            }}
           />
         </DocsLocaleProvider>
       </DocsBody>
