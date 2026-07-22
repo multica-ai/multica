@@ -191,7 +191,7 @@ The daemon runs on the user's local machine, and its config is read from local e
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex `app-server` startup RPC timeout |
 | `MULTICA_DAEMON_AUTO_UPDATE` | cloud: `true`, self-host: `false` | Set to `false`/`0`/`no`/`off` to turn off the daemon's periodic CLI self-update; `true`/`1`/`yes`/`on` opts a self-host daemon into upstream updates |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | How often the daemon polls GitHub for a newer CLI release |
-| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | Global no-message watchdog for runs with no tool in flight. `0` disables the whole watchdog, including provider-specific overrides |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | Global no-progress watchdog for runs with no tool in flight. Only messages that carry work (assistant content, tool calls, tool results, errors) count as activity; status pings and log lines do not, because a backend hung on a dead provider stream keeps emitting those. `0` disables the whole watchdog, including provider-specific overrides |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode-specific no-message window for missing first tokens or stalled streams. `0` falls back to `MULTICA_AGENT_IDLE_WATCHDOG`; larger values cannot extend that global bound |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | Silence budget while a tool call is in flight. `0` disables the stuck-tool backstop |
 | `MULTICA_<PROVIDER>_PATH` | matches the CLI name | Path to each AI coding tool's executable (for example `MULTICA_CLAUDE_PATH`) |

@@ -3121,11 +3121,26 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // the platform retry it directly (MUL-4910). It is resume-safe (not in
 // resumeUnsafeFailureReason), so the retry child inherits the session and
 // continues the truncated conversation rather than restarting from scratch.
+// idle_watchdog is the same shape as provider_network, one layer out: the run
+// stopped making progress because the provider stream died silently, and no
+// error ever surfaced to end it. A retry is the recovery, because the hang
+// lives in the CLI process's connection — killing it and resuming the pinned
+// session gets a new process and therefore a new connection. It is resume-safe
+// (not in resumeUnsafeFailureReason), so the child continues the conversation
+// instead of redoing the work: one observed hang discarded 13 minutes of
+// completed edits (MUL-5042, MUL-5063).
+//
+// No bespoke schedule. Each attempt already pays the full idle window (30m by
+// default) before failing, which is its own backoff, so the generic ceiling
+// (max_attempts default 2 = first run + one retry) applies. That bounds a
+// conversation that reliably stalls the provider to two attempts rather than
+// letting it become a kill-resume loop.
 var retryableReasons = map[string]bool{
 	"runtime_offline":           true,
 	"runtime_recovery":          true,
 	"timeout":                   true,
 	"codex_semantic_inactivity": true,
+	"idle_watchdog":             true,
 	string(taskfailure.ReasonAgentProviderNetwork): true,
 }
 

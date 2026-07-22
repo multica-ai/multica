@@ -102,6 +102,13 @@ type streamProtocolObservation struct {
 	scannerError               bool
 	lastEventType              string
 	anthropicBaseURLConfigured bool
+
+	// Cadence fields are optional; backends that do not track them leave
+	// eventTypeCounts empty and the attributes are omitted from the log line.
+	eventTypeCounts    string
+	maxEventGap        time.Duration
+	maxEventGapEndedBy string
+	maxProgressGap     time.Duration
 }
 
 // logStreamProtocolObservation records only protocol metadata. It deliberately
@@ -109,7 +116,7 @@ type streamProtocolObservation struct {
 // and environment values so diagnosing a missing terminal event cannot leak the
 // task transcript or provider credentials into daemon logs.
 func logStreamProtocolObservation(logger *slog.Logger, obs streamProtocolObservation) {
-	logger.Info("agent stream protocol summary",
+	attrs := []any{
 		"provider", obs.provider,
 		"cli_version", obs.cliVersion,
 		"model", obs.model,
@@ -125,7 +132,19 @@ func logStreamProtocolObservation(logger *slog.Logger, obs streamProtocolObserva
 		"scanner_error", obs.scannerError,
 		"last_event_type", obs.lastEventType,
 		"anthropic_base_url_configured", obs.anthropicBaseURLConfigured,
-	)
+	}
+	// event_types distinguishes a run that produced work from one that only
+	// produced liveness chatter; max_progress_gap is the number the idle
+	// watchdog threshold has to clear (MUL-5042).
+	if obs.eventTypeCounts != "" {
+		attrs = append(attrs,
+			"event_types", obs.eventTypeCounts,
+			"max_event_gap", obs.maxEventGap.Round(time.Millisecond).String(),
+			"max_event_gap_ended_by", obs.maxEventGapEndedBy,
+			"max_progress_gap", obs.maxProgressGap.Round(time.Millisecond).String(),
+		)
+	}
+	logger.Info("agent stream protocol summary", attrs...)
 }
 
 func streamProcessExitCode(err error) int {

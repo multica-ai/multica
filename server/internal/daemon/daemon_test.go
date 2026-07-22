@@ -2329,6 +2329,148 @@ func TestExecuteAndDrain_IdleWatchdog_HappyPathDoesNotFire(t *testing.T) {
 	}
 }
 
+// statusPingBackend models the MUL-5042 hang: the backend stays connected and
+// emits liveness pings on a fixed cadence forever while producing nothing that
+// carries work. Two production runs looked exactly like this — the claude CLI
+// sustained roughly 35 content-free events/min for 17 and 22 minutes with zero
+// assistant output — and because every ping refreshed lastActivityAt, the idle
+// watchdog could never fire. Both runs had to be killed by hand.
+type statusPingBackend struct {
+	interval time.Duration
+}
+
+func (b statusPingBackend) Execute(ctx context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message)
+	resCh := make(chan agent.Result, 1)
+
+	go func() {
+		defer close(msgCh)
+		ticker := time.NewTicker(b.interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				// Watchdog (or caller) cancelled us — propagate so the
+				// caller sees the run end rather than hanging.
+				resCh <- agent.Result{Status: "aborted", Error: ctx.Err().Error()}
+				close(resCh)
+				return
+			case <-ticker.C:
+				select {
+				case msgCh <- agent.Message{Type: agent.MessageStatus, Status: "running", SessionID: "sess-ping"}:
+				case <-ctx.Done():
+				}
+			}
+		}
+	}()
+
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_IdleWatchdog_FiresWhileBackendOnlyEmitsStatusPings(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 100 * time.Millisecond
+
+	// The outer deadline is a test-hang guard, not the mechanism under test:
+	// it is 50× the idle window, so a working watchdog always wins the race.
+	// If activity accounting regresses, this expires and the status assertion
+	// below fails loudly instead of blocking until the package timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	// Ping an order of magnitude faster than the idle window, the way a real
+	// hung run does.
+	result, _, err := d.executeAndDrain(ctx, statusPingBackend{interval: 10 * time.Millisecond}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-status-ping", new(atomic.Int32))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected status=idle_watchdog when the backend only emits status pings, got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
+// progressPingBackend emits real assistant content on a cadence inside the idle
+// window, then completes. It guards the other side of the narrowed activity
+// predicate: content-bearing messages must still count as activity, so a run
+// that keeps talking is never force-stopped even when it runs well past one
+// idle window.
+type progressPingBackend struct {
+	interval time.Duration
+	count    int
+}
+
+func (b progressPingBackend) Execute(ctx context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message)
+	resCh := make(chan agent.Result, 1)
+
+	go func() {
+		defer close(msgCh)
+		for i := 0; i < b.count; i++ {
+			select {
+			case <-time.After(b.interval):
+			case <-ctx.Done():
+				resCh <- agent.Result{Status: "aborted", Error: ctx.Err().Error()}
+				close(resCh)
+				return
+			}
+			select {
+			case msgCh <- agent.Message{Type: agent.MessageText, Content: "still working"}:
+			case <-ctx.Done():
+				resCh <- agent.Result{Status: "aborted", Error: ctx.Err().Error()}
+				close(resCh)
+				return
+			}
+		}
+		resCh <- agent.Result{Status: "completed", Output: "done"}
+		close(resCh)
+	}()
+
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_IdleWatchdog_DoesNotFireWhileContentKeepsArriving(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 100 * time.Millisecond
+
+	// 15 × 20ms = ~300ms of work, three idle windows long. Each individual
+	// gap stays inside the window, so narrowing the activity predicate must
+	// not turn this into a kill.
+	result, _, err := d.executeAndDrain(context.Background(), progressPingBackend{interval: 20 * time.Millisecond, count: 15}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-progress-ping", new(atomic.Int32))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed while content keeps arriving, got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
+func TestIsProgressMessage(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		msgType agent.MessageType
+		want    bool
+	}{
+		{agent.MessageText, true},
+		{agent.MessageThinking, true},
+		{agent.MessageToolUse, true},
+		{agent.MessageToolResult, true},
+		{agent.MessageError, true},
+		// Liveness-only: a hung backend keeps producing these (MUL-5042).
+		{agent.MessageStatus, false},
+		{agent.MessageLog, false},
+	}
+	for _, tc := range cases {
+		if got := isProgressMessage(tc.msgType); got != tc.want {
+			t.Errorf("isProgressMessage(%q) = %v, want %v", tc.msgType, got, tc.want)
+		}
+	}
+}
+
 // longToolCallBackend simulates a legitimate long-running tool call (e.g.
 // `npm install`, `docker build`, full test suite). The backend emits a
 // tool_use, stays silent past the idle window while the tool runs, then emits
@@ -2458,8 +2600,14 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnStuckInFlightTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Status != "idle_watchdog" {
-		t.Fatalf("expected status=idle_watchdog for a hung in-flight tool, got %q (err=%q)", result.Status, result.Error)
+	// A hung in-flight tool reports tool_watchdog, NOT idle_watchdog: the tool
+	// may already have taken effect outside the process, so this disposition is
+	// deliberately kept out of the server's auto-retry allowlist (MUL-5063).
+	if result.Status != "tool_watchdog" {
+		t.Fatalf("expected status=tool_watchdog for a hung in-flight tool, got %q (err=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "tool watchdog") {
+		t.Fatalf("expected error to mention tool watchdog, got %q", result.Error)
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("tool watchdog took too long to fire: %s (window=%s)", elapsed, d.cfg.AgentToolWatchdog)
@@ -4163,5 +4311,129 @@ func TestHandleTask_AcksCancelOnPostRunStatusCheck(t *testing.T) {
 
 	if got := ackCalls.Load(); got != 1 {
 		t.Fatalf("cancel-ack calls = %d, want 1", got)
+	}
+}
+
+// sessionPinBackend emits status messages carrying a SessionID on a cadence,
+// then completes. It drives the resume-pointer pin path without involving the
+// watchdog.
+type sessionPinBackend struct {
+	interval time.Duration
+	pings    int
+}
+
+func (b sessionPinBackend) Execute(ctx context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message)
+	resCh := make(chan agent.Result, 1)
+
+	go func() {
+		defer close(msgCh)
+		for i := 0; i < b.pings; i++ {
+			select {
+			case <-time.After(b.interval):
+			case <-ctx.Done():
+				resCh <- agent.Result{Status: "aborted", Error: ctx.Err().Error()}
+				close(resCh)
+				return
+			}
+			select {
+			case msgCh <- agent.Message{Type: agent.MessageStatus, Status: "running", SessionID: "sess-pin"}:
+			case <-ctx.Done():
+			}
+		}
+		resCh <- agent.Result{Status: "completed", Output: "done"}
+		close(resCh)
+	}()
+
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// newPinCountingDaemon returns a daemon whose server fails the first failCount
+// session-pin calls, plus the live attempt counter.
+func newPinCountingDaemon(t *testing.T, failCount int32) (*Daemon, *atomic.Int32) {
+	t.Helper()
+	var pinAttempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/session") {
+			if pinAttempts.Add(1) <= failCount {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return &Daemon{client: NewClient(srv.URL), logger: slog.Default()}, &pinAttempts
+}
+
+// waitForAtLeast polls a counter, since pins are fired asynchronously and may
+// still be in flight when executeAndDrain returns.
+func waitForAtLeast(counter *atomic.Int32, want int32, timeout time.Duration) int32 {
+	deadline := time.Now().Add(timeout)
+	for {
+		if got := counter.Load(); got >= want || time.Now().After(deadline) {
+			return got
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestExecuteAndDrain_SessionPinRetriesUntilConfirmed guards the resume pointer
+// against a transient pin failure (MUL-5063). The pin used to be marked done
+// before the HTTP call returned, so a single blip permanently lost the pointer
+// — and since the watchdog's synthetic result carries no SessionID of its own,
+// the retry child would restart from scratch instead of resuming.
+func TestExecuteAndDrain_SessionPinRetriesUntilConfirmed(t *testing.T) {
+	t.Parallel()
+
+	d, pinAttempts := newPinCountingDaemon(t, 2) // first two pins fail
+
+	result, _, err := d.executeAndDrain(
+		context.Background(),
+		sessionPinBackend{interval: 10 * time.Millisecond, pings: 12},
+		"p",
+		agent.ExecOptions{Cwd: "/tmp/pin-workdir"},
+		slog.Default(),
+		"t-session-pin",
+		new(atomic.Int32),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed, got %q (err=%q)", result.Status, result.Error)
+	}
+
+	// Three attempts means the two failures were retried and the third
+	// succeeded. Exactly one attempt is the pre-fix behavior.
+	if got := waitForAtLeast(pinAttempts, 3, 2*time.Second); got < 3 {
+		t.Fatalf("expected the pin to be retried past its failures, got %d attempts", got)
+	}
+}
+
+// TestExecuteAndDrain_SessionPinRetriesAreBounded is the other half: a pin
+// endpoint that never recovers must not fire one request per status message for
+// the life of the run.
+func TestExecuteAndDrain_SessionPinRetriesAreBounded(t *testing.T) {
+	t.Parallel()
+
+	d, pinAttempts := newPinCountingDaemon(t, 1000) // always fails
+
+	if _, _, err := d.executeAndDrain(
+		context.Background(),
+		sessionPinBackend{interval: 5 * time.Millisecond, pings: 40},
+		"p",
+		agent.ExecOptions{Cwd: "/tmp/pin-workdir"},
+		slog.Default(),
+		"t-session-pin-bounded",
+		new(atomic.Int32),
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Let any in-flight pin land before sampling.
+	time.Sleep(100 * time.Millisecond)
+	if got := pinAttempts.Load(); got > maxSessionPinAttempts {
+		t.Fatalf("pin attempts = %d, want at most %d — a failing endpoint must not be hammered", got, maxSessionPinAttempts)
 	}
 }

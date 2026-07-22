@@ -187,6 +187,7 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 		{provNet, 5, 5},                          // higher configured budget → kept (widen-only)
 		{"timeout", 2, 2},                        // unrelated reason → column value untouched
 		{"timeout", 1, 1},                        // unrelated + disabled → untouched
+		{"idle_watchdog", 2, 2},                  // generic budget, not widened to 3
 	}
 	for _, tc := range ceilingCases {
 		if got := retryAttemptCeiling(tc.reason, tc.max); got != tc.want {
@@ -234,6 +235,15 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 		{"timeout keeps single immediate retry", "timeout", 1, 2, true},
 		{"timeout exhausts at attempt 2", "timeout", 2, 2, false},
 		{"non-retryable reason never retries", "agent_error.unknown", 1, 2, false},
+		// idle_watchdog gets the generic budget, not provider_network's
+		// widened one: each attempt already burns a full idle window, so two
+		// attempts bounds a conversation that reliably stalls the provider
+		// instead of letting it become a kill-resume loop (MUL-5063).
+		{"idle_watchdog retries once", "idle_watchdog", 1, 2, true},
+		{"idle_watchdog exhausts at attempt 2", "idle_watchdog", 2, 2, false},
+		{"idle_watchdog with retry disabled never retries", "idle_watchdog", 1, 1, false},
+		// Side-effect risk outranks budget: never retried even on attempt 1.
+		{"tool_watchdog never retries even with budget left", "tool_watchdog", 1, 2, false},
 	}
 	for _, tc := range eligCases {
 		if got := retryEligible(tc.reason, mkTask(tc.attempt, tc.max)); got != tc.want {
@@ -254,6 +264,15 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		// Transient mid-stream provider disconnect (MUL-4910): retryable, and
 		// resume-safe so the retry continues the truncated conversation.
 		{reason: "agent_error.provider_network", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
+		// Idle watchdog force-stop (MUL-5063): retryable, and resume-safe so
+		// the retry resumes the pinned session on a fresh process — and
+		// therefore a fresh connection — rather than redoing the work.
+		{reason: "idle_watchdog", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
+		// Tool watchdog force-stop: a tool call never returned and may already
+		// have taken effect outside the process (a deploy that shipped, an
+		// upload that landed). Resuming would re-run it, so this one stays out
+		// of the auto-retry allowlist and waits for a human (MUL-5063).
+		{reason: "tool_watchdog", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
 		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
