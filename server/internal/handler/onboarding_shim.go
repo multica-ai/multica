@@ -262,14 +262,20 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		assistantCreated = true
 	}
 
-	// Take the status-write lock BEFORE the duplicate guard so this create shares
-	// the unified `workspace/status → duplicate → issue` lock order with
-	// IssueService.Create (MUL-4809 §5.5); otherwise an onboarding create and a
-	// normal create racing on the same workspace + title could take the status and
-	// duplicate advisory locks in opposite orders and deadlock. It is also the
-	// workspace-row existence gate + lock-order anchor for IncrementIssueCounter.
+	// Take the status-write lock and resolve the status BEFORE the duplicate guard,
+	// so this create shares the unified `workspace/status → duplicate → issue` lock
+	// order with IssueService.Create (MUL-4809 §5.5); otherwise an onboarding create
+	// and a normal create racing on the same workspace + title could take the status
+	// and duplicate advisory locks in opposite orders and deadlock. The lock is also
+	// the workspace-row existence gate + lock-order anchor for IncrementIssueCounter.
 	if err := issuestatus.LockWorkspaceForStatusWrite(r.Context(), tx, wsUUID); err != nil {
 		slog.Warn("bootstrap onboarding (shim): lock workspace for status write failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+		return
+	}
+	onboardingStatus, onboardingStatusID, err := resolveOnboardingStatus(r.Context(), qtx, wsUUID)
+	if err != nil {
+		slog.Warn("bootstrap onboarding (shim): resolve status failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
 		return
 	}
@@ -293,12 +299,6 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		description := onboardingIssueDescription
 		if req.StarterPrompt != "" {
 			description = req.StarterPrompt
-		}
-		onboardingStatus, onboardingStatusID, err := resolveOnboardingStatus(r.Context(), qtx, wsUUID)
-		if err != nil {
-			slog.Warn("bootstrap onboarding (shim): resolve status failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
-			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
-			return
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
 			WorkspaceID:   wsUUID,
@@ -439,14 +439,20 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Take the status-write lock BEFORE the duplicate guard so this create shares
-	// the unified `workspace/status → duplicate → issue` lock order with
-	// IssueService.Create (MUL-4809 §5.5); otherwise an onboarding create and a
-	// normal create racing on the same workspace + title could take the status and
-	// duplicate advisory locks in opposite orders and deadlock. It is also the
-	// workspace-row existence gate + lock-order anchor for IncrementIssueCounter.
+	// Take the status-write lock and resolve the status BEFORE the duplicate guard,
+	// so this create shares the unified `workspace/status → duplicate → issue` lock
+	// order with IssueService.Create (MUL-4809 §5.5); otherwise an onboarding create
+	// and a normal create racing on the same workspace + title could take the status
+	// and duplicate advisory locks in opposite orders and deadlock. The lock is also
+	// the workspace-row existence gate + lock-order anchor for IncrementIssueCounter.
 	if err := issuestatus.LockWorkspaceForStatusWrite(r.Context(), tx, wsUUID); err != nil {
 		slog.Warn("bootstrap no-runtime onboarding (shim): lock workspace for status write failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+		return
+	}
+	onboardingStatus, onboardingStatusID, err := resolveOnboardingStatus(r.Context(), qtx, wsUUID)
+	if err != nil {
+		slog.Warn("bootstrap no-runtime onboarding (shim): resolve status failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
 		return
 	}
@@ -469,12 +475,6 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 		issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
-			return
-		}
-		onboardingStatus, onboardingStatusID, err := resolveOnboardingStatus(r.Context(), qtx, wsUUID)
-		if err != nil {
-			slog.Warn("bootstrap no-runtime onboarding (shim): resolve status failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
-			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
 			return
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
