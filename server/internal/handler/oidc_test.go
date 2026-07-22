@@ -125,6 +125,30 @@ func TestReadOIDCClaimsAndGroupAllowlist(t *testing.T) {
 	}
 }
 
+// TestReadOIDCClaimsAcceptsScalarGroups guards the string-or-array groups
+// contract: some IdPs emit `groups` as a single JSON string rather than an
+// array. The scalar must be normalized to a one-element slice instead of
+// failing the whole claim decode (which previously 502'd the login when the
+// scalar landed in the ID token).
+func TestReadOIDCClaimsAcceptsScalarGroups(t *testing.T) {
+	read := func(target any) error {
+		return json.Unmarshal([]byte(`{"email":"user@example.com","email_verified":true,"groups":"platform"}`), target)
+	}
+	claims := oidcClaims{}
+	if err := readOIDCClaims(read, &claims, "groups"); err != nil {
+		t.Fatalf("readOIDCClaims: %v", err)
+	}
+	if got := strings.Join(claims.Groups, ","); got != "platform" {
+		t.Fatalf("scalar groups: got %q, want %q", got, "platform")
+	}
+	if !claims.EmailVerified {
+		t.Fatal("email_verified should survive alongside a scalar groups claim")
+	}
+	if !oidcGroupAllowed(claims.Groups, []string{"platform"}) {
+		t.Fatal("expected scalar group to satisfy the allowlist")
+	}
+}
+
 func TestOIDCLoginRejectsStateMismatchBeforeTokenExchange(t *testing.T) {
 	t.Setenv("OIDC_ISSUER_URL", "https://auth.example.com")
 	t.Setenv("OIDC_CLIENT_ID", "client")

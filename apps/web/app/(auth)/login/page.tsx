@@ -168,7 +168,10 @@ function LoginPageContent() {
       : platform === "mobile"
         ? "platform:mobile"
         : "",
-    nextUrl ? `next:${nextUrl}` : "",
+    // Encode every value: the parts are joined with "," and the callback
+    // splits on it, so a raw comma in `next` (e.g. /board?f=a,b) would
+    // otherwise truncate the redirect target. Matches the cli_* parts below.
+    nextUrl ? `next:${encodeURIComponent(nextUrl)}` : "",
     cliCallbackRaw && validateCliCallback(cliCallbackRaw)
       ? `cli_callback:${encodeURIComponent(cliCallbackRaw)}`
       : "",

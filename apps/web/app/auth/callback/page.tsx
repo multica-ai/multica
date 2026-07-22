@@ -53,6 +53,16 @@ function CallbackContent() {
       const cliStatePart = stateParts.find((part) =>
         part.startsWith("cli_state:"),
       );
+      // `next` is encodeURIComponent'd by the login page (same as the cli_*
+      // parts) so a comma in the URL survives the comma-joined app_state.
+      // Guard the decode independently: a malformed `next` must not void the
+      // CLI redirect, and vice versa.
+      let nextRaw: string | null = null;
+      try {
+        nextRaw = nextPart ? decodeURIComponent(nextPart.slice(5)) : null;
+      } catch {
+        nextRaw = null;
+      }
       let cliCallbackRaw: string | null = null;
       let cliState = "";
       try {
@@ -69,7 +79,7 @@ function CallbackContent() {
         isAppHandoff:
           stateParts.includes("platform:desktop") ||
           stateParts.includes("platform:mobile"),
-        nextUrl: sanitizeNextUrl(nextPart ? nextPart.slice(5) : null),
+        nextUrl: sanitizeNextUrl(nextRaw),
         cliCallback:
           cliCallbackRaw && validateCliCallback(cliCallbackRaw)
             ? cliCallbackRaw

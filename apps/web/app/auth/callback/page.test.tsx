@@ -147,6 +147,24 @@ describe("CallbackPage", () => {
     expect(mockLoginWithGoogle).not.toHaveBeenCalled();
   });
 
+  it("decodes a comma-bearing next= from the OIDC app state", async () => {
+    mockSearchParams.set("state", "oidc.server-generated-state");
+    mockLoginWithOIDC.mockResolvedValue({
+      user: makeUser(),
+      token: "oidc-token",
+      // The login page encodeURIComponent's `next` before comma-joining the
+      // app_state; without a matching decode here a raw comma in the URL
+      // would split the redirect target and drop everything after it.
+      appState: `next:${encodeURIComponent("/board?filter=a,b")}`,
+    });
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/board?filter=a,b");
+    });
+  });
+
   it("hands an OIDC token back to the mobile app", async () => {
     mockSearchParams.set("state", "oidc.server-generated-state");
     mockLoginWithOIDC.mockResolvedValue({

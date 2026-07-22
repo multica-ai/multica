@@ -60,7 +60,11 @@ type oidcClaims struct {
 	EmailVerified bool   `json:"email_verified"`
 	Name          string `json:"name"`
 	Picture       string `json:"picture"`
-	Groups        []string
+	// Groups is populated exclusively from the raw-claims pass in
+	// readOIDCClaims, which accepts both a string and an array of strings.
+	// Excluded from the struct unmarshal (`json:"-"`) so a scalar `groups`
+	// claim can't fail the whole decode before that pass runs.
+	Groups []string `json:"-"`
 }
 
 var oidcProviders sync.Map
