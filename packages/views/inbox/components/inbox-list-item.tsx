@@ -1,6 +1,9 @@
 "use client";
 
 import { StatusIcon } from "../../issues/components";
+import {
+  IssueAgentActivityIndicator,
+} from "../../issues/components/issue-agent-activity-indicator";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Archive, ArchiveRestore } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
@@ -68,7 +71,6 @@ export function InboxListItem({
         actorId={item.actor_id ?? item.recipient_id}
         size="lg"
         enableHoverCard
-        showStatusDot={actorType === "agent"}
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
@@ -111,9 +113,14 @@ export function InboxListItem({
           <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
             <InboxDetailLabel item={item} />
           </p>
-          <span className={`shrink-0 text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
-            {timeAgo(item.created_at)}
-          </span>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {item.issue_id && (
+              <IssueAgentActivityIndicator issueId={item.issue_id} />
+            )}
+            <span className={`text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+              {timeAgo(item.created_at)}
+            </span>
+          </div>
         </div>
       </div>
     </button>

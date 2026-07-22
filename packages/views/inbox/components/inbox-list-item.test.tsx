@@ -4,6 +4,11 @@ import type { InboxItem } from "@multica/core/types";
 import { InboxListItem } from "./inbox-list-item";
 
 vi.mock("../../issues/components", () => ({ StatusIcon: () => null }));
+vi.mock("../../issues/components/issue-agent-activity-indicator", () => ({
+  IssueAgentActivityIndicator: ({ issueId }: { issueId: string }) => (
+    <span data-testid="issue-agent-activity" data-issue-id={issueId} />
+  ),
+}));
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: ({
     actorType,
@@ -90,23 +95,24 @@ describe("InboxListItem unread affordance", () => {
   });
 });
 
-describe("InboxListItem agent presence", () => {
-  it("shows the agent status indicator on the row avatar", () => {
+describe("InboxListItem issue activity", () => {
+  it("shows issue-specific agent activity without an availability dot", () => {
     const { getByTestId } = renderRow({ item: item(), view: "inbox" });
-
-    expect(getByTestId("actor-avatar").getAttribute("data-show-status-dot")).toBe(
-      "true",
-    );
-  });
-
-  it("leaves member avatars without an agent status indicator", () => {
-    const { getByTestId } = renderRow({
-      item: item({ actor_type: "member", actor_id: "member-2" }),
-      view: "inbox",
-    });
 
     expect(getByTestId("actor-avatar").getAttribute("data-show-status-dot")).toBe(
       "false",
     );
+    expect(
+      getByTestId("issue-agent-activity").getAttribute("data-issue-id"),
+    ).toBe("issue-1");
+  });
+
+  it("omits issue activity for a notification without an issue", () => {
+    const { queryByTestId } = renderRow({
+      item: item({ issue_id: null }),
+      view: "inbox",
+    });
+
+    expect(queryByTestId("issue-agent-activity")).toBeNull();
   });
 });
