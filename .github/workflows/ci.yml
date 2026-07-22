@@ -209,6 +209,13 @@ jobs:
         # that stops matching) is visible in the log instead of passing as "ok".
         run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation)' -count=1 -timeout=5m
 
+      - name: Test bounded Codex cleanup with inherited stdout descendant
+        working-directory: server
+        # Windows cannot prove whole-tree termination without a Job Object,
+        # but a descendant holding inherited stdout must never keep Result
+        # blocked forever. -v makes RUN/PASS evidence explicit in CI logs.
+        run: go test ./pkg/agent -v -run '^TestCodexWindowsInheritedStdoutDescendantCleanupIsBounded$' -count=1 -timeout=5m
+
       - name: Build Windows CLI helper entrypoint
         working-directory: server
         run: go build ./cmd/multica
