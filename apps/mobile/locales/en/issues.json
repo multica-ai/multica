@@ -1,0 +1,293 @@
+{
+  "error": {
+    "load_prefix": "Failed to load issues:",
+    "unknown": "unknown error",
+    "retry": "Retry"
+  },
+  "my_issues": {
+    "tab_title": "My Issues",
+    "scope": {
+      "assigned": "Assigned",
+      "created": "Created",
+      "agents": "Agents"
+    },
+    "empty": {
+      "no_active_filters": "No issues match the current filters.",
+      "assigned": "No issues assigned to you.",
+      "created": "You haven't created any issues.",
+      "agents": "No issues assigned to your agents or squads yet."
+    }
+  },
+  "all_issues": {
+    "header_title": "Issues",
+    "scope": {
+      "all": "All",
+      "members": "Members",
+      "agents": "Agents"
+    },
+    "empty": {
+      "no_active_filters": "No issues match the current filters.",
+      "all": "No issues in this workspace.",
+      "members": "No issues assigned to a member.",
+      "agents": "No issues assigned to agents or squads."
+    }
+  },
+  "filter_button": {
+    "accessibility_label": "Filter"
+  },
+  "filter": {
+    "title": "Filter",
+    "reset": "Reset",
+    "status_section": "Status",
+    "priority_section": "Priority"
+  },
+  "detail": {
+    "header_default_title": "Issue",
+    "header_back_title": "Back",
+    "actions_accessibility_label": "Issue actions",
+    "error": {
+      "load_prefix": "Failed to load issue:",
+      "not_found": "not found",
+      "retry": "Retry"
+    },
+    "menu": {
+      "cancel": "Cancel",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "edit_details": "Edit details",
+      "copy_link": "Copy link",
+      "open_on_web": "Open on web",
+      "delete_issue": "Delete issue"
+    },
+    "delete_confirm": {
+      "title": "Delete issue?",
+      "message": "{{identifier}} and its comments, reactions, and attachments will be permanently deleted. This cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    }
+  },
+  "edit": {
+    "header_title": "Edit Issue",
+    "loading": "Loading...",
+    "title_field": {
+      "label": "Title",
+      "placeholder": "Issue title"
+    },
+    "description_field": {
+      "label": "Description"
+    },
+    "saving": "Saving...",
+    "discard_confirm": {
+      "title": "Discard changes?",
+      "message": "Your edits to this issue will be lost.",
+      "keep_editing": "Keep editing",
+      "discard": "Discard"
+    },
+    "save_error": {
+      "title": "Failed to save",
+      "unknown": "Unknown error"
+    }
+  },
+  "runs": {
+    "header_title": "Agent Runs",
+    "section_active": "Active",
+    "section_past": "Past"
+  },
+  "picker": {
+    "emoji": {
+      "title": "Add Reaction"
+    },
+    "assignee": {
+      "title": "Assignee",
+      "search_placeholder": "Search people"
+    },
+    "due_date": {
+      "title": "Due date",
+      "clear": "Clear",
+      "done": "Done"
+    },
+    "label": {
+      "search_placeholder": "Search labels"
+    },
+    "project": {
+      "search_placeholder": "Search projects"
+    }
+  },
+  "picker_body": {
+    "assignee": {
+      "unassigned": "Unassigned",
+      "agent_tag": "Agent",
+      "squad_tag": "Squad",
+      "no_matches": "No matches."
+    },
+    "label": {
+      "create": "Create “{{name}}”",
+      "no_matches": "No matches.",
+      "empty": "No labels in this workspace yet."
+    },
+    "mention": {
+      "section_people": "People",
+      "section_agents": "Agents",
+      "section_squads": "Squads",
+      "section_issues": "Issues",
+      "everyone": "Everyone (@all)",
+      "agent_tag": "Agent",
+      "squad_tag": "Squad",
+      "no_matches": "No matches."
+    },
+    "priority": {
+      "title": "Priority"
+    },
+    "project": {
+      "no_project": "No project",
+      "no_matches": "No matches.",
+      "empty": "No projects in this workspace yet.\nCreate them on web."
+    },
+    "status": {
+      "title": "Status"
+    }
+  },
+  "new_issue": {
+    "header_title": "New Issue",
+    "title_placeholder": "Issue title",
+    "submit_accessibility_label": "Create issue",
+    "create_error": {
+      "title": "Failed to create issue",
+      "unknown": "Unknown error"
+    },
+    "picker": {
+      "assignee": {
+        "title": "Assignee",
+        "search_placeholder": "Search people"
+      },
+      "due_date": {
+        "title": "Due date",
+        "clear": "Clear",
+        "done": "Done"
+      },
+      "project": {
+        "search_placeholder": "Search projects"
+      }
+    }
+  },
+  "activity": {
+    "section_title": "Activity",
+    "agent_row": {
+      "working": "Working",
+      "runs_count": "Runs · {{count}}",
+      "header_badge_accessibility_label": "Agent working — open runs"
+    },
+    "run_row": {
+      "status": {
+        "queued": "Queued",
+        "dispatched": "Starting",
+        "waiting_local_directory": "Waiting for directory",
+        "running": "Running",
+        "completed": "Done",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      },
+      "failure_reason": {
+        "agent_error": "Agent error",
+        "timeout": "Timeout",
+        "codex_semantic_inactivity": "Codex inactivity",
+        "runtime_offline": "Runtime offline",
+        "runtime_recovery": "Runtime recovery",
+        "manual": "Manual"
+      },
+      "fallback_summary": {
+        "comment": "Comment task",
+        "autopilot": "Autopilot run",
+        "chat": "Chat task",
+        "quick_create": "Quick create",
+        "default": "Task"
+      },
+      "cancel_button": "Cancel",
+      "cancel_confirm": {
+        "title": "Cancel task?",
+        "message": "The agent will stop after the current step.",
+        "keep_running": "Keep running",
+        "confirm": "Cancel task"
+      }
+    },
+    "new_chip": {
+      "label": "{{count}} new",
+      "accessibility_label_message": "Jump to {{count}} new message",
+      "accessibility_label_messages": "Jump to {{count}} new messages"
+    },
+    "unread_divider": "New"
+  },
+  "attribute": {
+    "assignee_placeholder": "Assignee",
+    "assignee_unknown": "Unknown",
+    "priority_placeholder": "Priority",
+    "label_placeholder": "Label",
+    "project_placeholder": "Project",
+    "due_date_placeholder": "Due date"
+  },
+  "description": {
+    "placeholder": "Description… (type @ to mention)",
+    "empty": "No description."
+  },
+  "composer_attachment": {
+    "remove_mention_accessibility_label": "Remove mention {{name}}",
+    "retry_upload_accessibility_label": "Retry upload of {{filename}}",
+    "open_accessibility_label": "Open {{filename}}",
+    "remove_attachment_accessibility_label": "Remove {{filename}}"
+  },
+  "comment": {
+    "card": {
+      "edited_suffix": "(edited)",
+      "resolved_bar_message": "Resolved · {{count}} message by {{authors}}",
+      "resolved_bar_messages": "Resolved · {{count}} messages by {{authors}}",
+      "resolved_bar_accessibility_message": "Resolved thread by {{authors}}, {{count}} message. Tap to expand.",
+      "resolved_bar_accessibility_messages": "Resolved thread by {{authors}}, {{count}} messages. Tap to expand.",
+      "resolved_by": "Resolved by",
+      "collapse": "Collapse",
+      "collapse_accessibility_label": "Collapse resolved thread",
+      "send_failed": "Couldn't send",
+      "retry": "Retry",
+      "retry_accessibility_label": "Retry sending comment",
+      "discard": "Discard",
+      "discard_accessibility_label": "Discard failed comment"
+    },
+    "menu": {
+      "reply": "Reply",
+      "react": "React…",
+      "copy": "Copy",
+      "select_text": "Select Text",
+      "copy_link": "Copy Link",
+      "resolve_thread": "Resolve Thread",
+      "unresolve_thread": "Unresolve Thread",
+      "delete": "Delete",
+      "delete_confirm": {
+        "title": "Delete comment?",
+        "message": "This comment will be permanently deleted. Replies in the thread will also be removed. This cannot be undone.",
+        "cancel": "Cancel",
+        "confirm": "Delete"
+      }
+    },
+    "reaction": {
+      "more_reactions": "More reactions…"
+    },
+    "attachment": {
+      "open_accessibility_label": "Open {{filename}}"
+    },
+    "composer": {
+      "placeholder": "Add a comment…",
+      "pill_label": "Add a comment, @ to mention…"
+    },
+    "mention": {
+      "everyone": "Everyone",
+      "no_matches": "No matches.",
+      "section_recent": "Recent",
+      "section_my_issues": "My issues",
+      "badge": {
+        "all": "All",
+        "member": "Member",
+        "agent": "Agent",
+        "squad": "Squad"
+      }
+    }
+  }
+}

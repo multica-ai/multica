@@ -12,6 +12,7 @@
  */
 import { useState } from "react";
 import { View } from "react-native";
+import { useTranslation } from "react-i18next";
 import { AutosizeTextArea } from "@/components/ui/autosize-textarea";
 import { MIN_BODY_INPUT_HEIGHT_PX } from "@/components/ui/input-tokens";
 import { cn } from "@/lib/utils";
@@ -20,12 +21,13 @@ import type { UseMentionInputReturn } from "@/lib/use-mention-input";
 export function DescriptionField({
   description,
   disabled,
-  placeholder = "Description… (type @ to mention)",
+  placeholder,
 }: {
   description: UseMentionInputReturn;
   disabled: boolean;
   placeholder?: string;
 }) {
+  const { t } = useTranslation("issues");
   const [focused, setFocused] = useState(false);
   return (
     <View
@@ -43,7 +45,7 @@ export function DescriptionField({
         onSelectionChange={description.handlers.onSelectionChange}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t("description.placeholder")}
         className="py-2"
         minHeight={MIN_BODY_INPUT_HEIGHT_PX}
         editable={!disabled}

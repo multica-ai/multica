@@ -13,12 +13,14 @@
  * with chat-mode props.
  */
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useCreateComment } from "@/data/mutations/issues";
 import { useReplyTargetStore } from "@/data/stores/reply-target-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { MessageComposer } from "@/components/composer/message-composer";
 
 export function InlineCommentComposer({ issueId }: { issueId: string }) {
+  const { t } = useTranslation("issues");
   const createComment = useCreateComment(issueId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const replyTarget = useReplyTargetStore((s) => s.target);
@@ -56,8 +58,8 @@ export function InlineCommentComposer({ issueId }: { issueId: string }) {
         params: { workspace: wsSlug ?? "", mode: "comment" },
       }}
       uploadContext={{ issueId }}
-      placeholder="Add a comment…"
-      pillLabel="Add a comment, @ to mention…"
+      placeholder={t("comment.composer.placeholder")}
+      pillLabel={t("comment.composer.pill_label")}
       pillIcon="chatbubble-ellipses-outline"
       replyTarget={
         replyTarget

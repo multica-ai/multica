@@ -22,6 +22,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { Stack, router } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -32,6 +33,7 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 export default function ProjectsPage() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  const { t } = useTranslation("projects");
 
   const { data, isLoading, error, refetch, isRefetching } = useQuery(
     projectListOptions(wsId),
@@ -50,8 +52,13 @@ export default function ProjectsPage() {
   }, [wsSlug]);
 
   const headerRight = useCallback(() => {
-    return <PlusButton onPress={goCreate} />;
-  }, [goCreate]);
+    return (
+      <PlusButton
+        onPress={goCreate}
+        accessibilityLabel={t("list.new_project_accessibility_label")}
+      />
+    );
+  }, [goCreate, t]);
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={[]}>
@@ -64,15 +71,15 @@ export default function ProjectsPage() {
       ) : error ? (
         <View className="px-4 gap-3 pt-4">
           <Text className="text-sm text-destructive">
-            Failed to load projects:{" "}
-            {error instanceof Error ? error.message : "unknown error"}
+            {t("list.error.load_prefix")}{" "}
+            {error instanceof Error ? error.message : t("list.error.unknown")}
           </Text>
           <Button variant="outline" onPress={() => refetch()}>
-            <Text>Retry</Text>
+            <Text>{t("list.error.retry")}</Text>
           </Button>
         </View>
       ) : sorted.length === 0 ? (
-        <EmptyState onCreate={goCreate} />
+        <EmptyState onCreate={goCreate} t={t} />
       ) : (
         <FlatList
           data={sorted}
@@ -98,28 +105,39 @@ export default function ProjectsPage() {
   );
 }
 
-function PlusButton({ onPress }: { onPress: () => void }) {
+function PlusButton({
+  onPress,
+  accessibilityLabel,
+}: {
+  onPress: () => void;
+  accessibilityLabel: string;
+}) {
   return (
     <IconButton
       name="add"
       onPress={onPress}
-      accessibilityLabel="New project"
+      accessibilityLabel={accessibilityLabel}
     />
   );
 }
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function EmptyState({
+  onCreate,
+  t,
+}: {
+  onCreate: () => void;
+  t: (key: string) => string;
+}) {
   return (
     <View className="flex-1 items-center justify-center px-6 gap-4">
       <Text className="text-base font-medium text-foreground">
-        No projects yet
+        {t("list.empty.title")}
       </Text>
       <Text className="text-sm text-muted-foreground text-center">
-        Group related issues into a project to track progress and assign a
-        lead.
+        {t("list.empty.message")}
       </Text>
       <Button variant="default" onPress={onCreate}>
-        <Text>Create project</Text>
+        <Text>{t("list.empty.create")}</Text>
       </Button>
     </View>
   );

@@ -6,6 +6,7 @@
  */
 import { useLocalSearchParams, router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { AssigneePickerBody } from "@/components/issue/pickers/assignee-picker-body";
 import { issueDetailOptions } from "@/data/queries/issues";
 import { useUpdateIssue } from "@/data/mutations/issues";
@@ -17,7 +18,10 @@ export default function IssueAssigneePickerRoute() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data: issue } = useQuery(issueDetailOptions(wsId, id));
   const updateIssue = useUpdateIssue(id);
-  const query = useNativeSearchBar("Search people", { autoFocus: true });
+  const { t } = useTranslation("issues");
+  const query = useNativeSearchBar(t("picker.assignee.search_placeholder"), {
+    autoFocus: true,
+  });
 
   const value =
     issue?.assignee_type && issue?.assignee_id

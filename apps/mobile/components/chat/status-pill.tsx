@@ -32,6 +32,8 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from "react-native-reanimated";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type {
   ChatPendingTask,
   TaskMessagePayload,
@@ -57,39 +59,48 @@ interface Stage {
   static?: boolean;
 }
 
-const TOOL_LABELS: Record<string, string> = {
-  bash: "Running command",
-  exec: "Running command",
-  read: "Reading files",
-  glob: "Reading files",
-  grep: "Searching code",
-  write: "Making edits",
-  edit: "Making edits",
-  multi_edit: "Making edits",
-  multiedit: "Making edits",
-  web_search: "Searching web",
-  websearch: "Searching web",
+// Maps a tool slug to its translation key (not the label itself — the
+// label is resolved via `t()` at call time). Kept at module scope since
+// it's a static lookup table, not user-facing text.
+const TOOL_LABEL_KEYS: Record<string, string> = {
+  bash: "status_pill.tool.running_command",
+  exec: "status_pill.tool.running_command",
+  read: "status_pill.tool.reading_files",
+  glob: "status_pill.tool.reading_files",
+  grep: "status_pill.tool.searching_code",
+  write: "status_pill.tool.making_edits",
+  edit: "status_pill.tool.making_edits",
+  multi_edit: "status_pill.tool.making_edits",
+  multiedit: "status_pill.tool.making_edits",
+  web_search: "status_pill.tool.searching_web",
+  websearch: "status_pill.tool.searching_web",
 };
 
+// `pickStage` is a plain helper — not a hook, not a component — invoked
+// from inside `StatusPill`'s render body. It cannot call `useTranslation`
+// itself (Rules of Hooks), so the caller passes its own `t` through,
+// mirroring the `presentReactSheet(..., t, tCommon)` pattern in
+// `components/issue/comment-context-menu.tsx`.
 function pickStage(
   status: string | undefined,
   taskMessages: readonly TaskMessagePayload[],
   availability: AgentAvailability | undefined,
+  t: TFunction,
 ): Stage {
   if (
     (status === "queued" || status === "dispatched") &&
     availability === "offline"
   ) {
-    return { label: "Offline", static: true };
+    return { label: t("status_pill.offline"), static: true };
   }
   if (
     (status === "queued" || status === "dispatched") &&
     availability === "unstable"
   ) {
-    return { label: "Reconnecting" };
+    return { label: t("status_pill.reconnecting") };
   }
-  if (status === "queued") return { label: "Queued" };
-  if (status === "dispatched") return { label: "Starting up" };
+  if (status === "queued") return { label: t("status_pill.queued") };
+  if (status === "dispatched") return { label: t("status_pill.starting_up") };
 
   let latest: TaskMessagePayload | null = null;
   for (let i = taskMessages.length - 1; i >= 0; i--) {
@@ -99,14 +110,15 @@ function pickStage(
       break;
     }
   }
-  if (!latest) return { label: "Thinking" };
-  if (latest.type === "thinking") return { label: "Thinking" };
-  if (latest.type === "text") return { label: "Typing" };
+  if (!latest) return { label: t("status_pill.thinking") };
+  if (latest.type === "thinking") return { label: t("status_pill.thinking") };
+  if (latest.type === "text") return { label: t("status_pill.typing") };
   if (latest.type === "tool_use") {
     const slug = (latest.tool ?? "").toLowerCase();
-    return { label: TOOL_LABELS[slug] ?? "Working" };
+    const key = TOOL_LABEL_KEYS[slug];
+    return { label: key ? t(key) : t("status_pill.working") };
   }
-  return { label: "Thinking" };
+  return { label: t("status_pill.thinking") };
 }
 
 export function StatusPill({
@@ -114,6 +126,7 @@ export function StatusPill({
   taskMessages = [],
   availability,
 }: Props) {
+  const { t } = useTranslation("chat");
   const taskId = pendingTask?.task_id;
   const createdAt = pendingTask?.created_at;
 
@@ -135,7 +148,7 @@ export function StatusPill({
   const status =
     taskMessages.length > 0 ? "running" : pendingTask?.status;
   const elapsedSec = Math.max(0, Math.floor((Date.now() - anchorMs) / 1000));
-  const stage = pickStage(status, taskMessages, availability);
+  const stage = pickStage(status, taskMessages, availability, t);
 
   return (
     <View

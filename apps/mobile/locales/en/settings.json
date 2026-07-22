@@ -1,0 +1,104 @@
+{
+  "header_title": "Settings",
+  "account": {
+    "title": "Account",
+    "user_avatar_alt": "User avatar",
+    "notifications_row": {
+      "title": "Notifications",
+      "subtitle": "Inbox and system alerts"
+    }
+  },
+  "workspaces": {
+    "title": "Workspaces",
+    "error": "Failed to load workspaces"
+  },
+  "appearance": {
+    "title": "Appearance",
+    "theme": {
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    }
+  },
+  "language": {
+    "title": "Language",
+    "options": {
+      "english": "English",
+      "chinese": "中文",
+      "system": "System"
+    }
+  },
+  "sign_out_message": "You'll need to sign in again to use Multica on this device.",
+  "profile": {
+    "header_title": "Profile",
+    "your_avatar_alt": "Your avatar",
+    "tap_to_change_photo": "Tap to change photo",
+    "name_label": "Name",
+    "name_placeholder": "Your name",
+    "email_label": "Email",
+    "email_hint": "Email is set at sign-up and can't be changed here.",
+    "saving": "Saving…",
+    "avatar_actions": {
+      "take_photo": "Take Photo",
+      "choose_library": "Choose from Library",
+      "remove_photo": "Remove Photo"
+    },
+    "camera_permission": {
+      "title": "Permission needed",
+      "message": "Camera access is required to take a photo."
+    },
+    "image_too_large": {
+      "title": "Image too large",
+      "message": "Pick an image under 5 MB."
+    },
+    "upload_failed": {
+      "title": "Upload failed",
+      "message": "Could not upload avatar."
+    },
+    "remove_failed": {
+      "title": "Remove failed",
+      "message": "Could not remove avatar."
+    },
+    "save_failed": {
+      "title": "Save failed",
+      "message": "Could not update profile."
+    }
+  },
+  "notifications": {
+    "error": "Failed to load notification preferences.",
+    "inbox_section": {
+      "title": "Inbox notifications",
+      "description": "Which events show up in your inbox."
+    },
+    "groups": {
+      "assignments": {
+        "label": "Assignments",
+        "description": "When you're assigned an issue or removed as assignee."
+      },
+      "status_changes": {
+        "label": "Status changes",
+        "description": "When an issue's status changes."
+      },
+      "comments": {
+        "label": "Comments",
+        "description": "New comments on issues you're subscribed to."
+      },
+      "updates": {
+        "label": "Issue updates",
+        "description": "Edits to title, description, labels, priority, or due date."
+      },
+      "agent_activity": {
+        "label": "Agent activity",
+        "description": "When an agent picks up, runs, or completes a task."
+      }
+    },
+    "system_section": {
+      "title": "System",
+      "description": "Multica-wide announcements and important account events."
+    },
+    "system_notifications": {
+      "label": "System notifications",
+      "description": "Account changes, security alerts, product updates."
+    }
+  }
+}

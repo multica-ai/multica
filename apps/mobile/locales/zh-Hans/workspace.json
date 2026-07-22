@@ -1,0 +1,65 @@
+{
+  "agents_placeholder": {
+    "header_title": "智能体",
+    "message": "智能体功能即将上线。"
+  },
+  "pins": {
+    "header_title": "固定",
+    "error": {
+      "load_prefix": "加载固定项失败：",
+      "unknown": "未知错误",
+      "retry": "重试"
+    },
+    "empty": {
+      "message": "暂无固定项。可在 issue 或项目的操作菜单中固定，将其显示在这里。"
+    },
+    "missing": {
+      "item_type": {
+        "issue": "issue",
+        "project": "项目"
+      },
+      "a11y": "无法访问的{{itemType}}，点按取消固定",
+      "label": "无法访问的{{itemType}} — 点按取消固定"
+    }
+  },
+  "search": {
+    "header_title": "搜索",
+    "placeholder": "搜索 issue 和项目",
+    "section": {
+      "recent": "最近",
+      "projects": "项目",
+      "issues": "issue"
+    },
+    "no_results": "未找到与“{{query}}”匹配的结果",
+    "empty_prompt": "输入关键词搜索 issue 和项目。"
+  },
+  "more_page": {
+    "section_title": "工作区",
+    "nav": {
+      "pinned": "固定",
+      "issues": "issue",
+      "projects": "项目",
+      "skills": "skill",
+      "runtimes": "运行时",
+      "usage": "用量"
+    },
+    "account_settings_a11y": "账号设置",
+    "switch_workspace_a11y": "切换工作区",
+    "workspace_fallback": "工作区"
+  },
+  "markdown_toolbar": {
+    "mention_a11y": "提及某人",
+    "bullet_list_a11y": "项目符号列表",
+    "checklist_a11y": "清单",
+    "code_block_a11y": "代码块",
+    "quote_a11y": "引用",
+    "attach_image_a11y": "添加图片",
+    "attach_file_a11y": "添加文件"
+  },
+  "use_file_attach": {
+    "file_too_large_title": "文件过大",
+    "file_too_large_message": "文件大小需小于 100 MB。",
+    "upload_failed_title": "上传失败",
+    "unknown_error": "未知错误"
+  }
+}

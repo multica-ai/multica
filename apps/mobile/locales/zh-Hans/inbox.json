@@ -1,0 +1,72 @@
+{
+  "tab_title": "收件箱",
+  "actions_a11y": "收件箱操作",
+  "error": {
+    "load_prefix": "加载收件箱失败：",
+    "unknown": "未知错误",
+    "retry": "重试"
+  },
+  "empty": {
+    "title": "收件箱已清空",
+    "subtitle": "当有人 @提及你、给你分配 issue，或智能体完成任务时，会显示在这里。"
+  },
+  "menu": {
+    "title": "收件箱",
+    "mark_all_read": "全部标为已读",
+    "archive_all_read": "归档所有已读",
+    "archive_completed": "归档已完成",
+    "archive_all": "归档全部",
+    "archive_all_confirm_title": "归档全部？",
+    "archive_all_confirm_message": "这会归档收件箱中的所有内容，无论是否已读。你仍可以在对应 issue 页面中找到它们。"
+  },
+  "swipe": {
+    "archive": "归档"
+  },
+  "status_label": {
+    "backlog": "Backlog",
+    "todo": "Todo",
+    "in_progress": "In Progress",
+    "in_review": "In Review",
+    "done": "Done",
+    "blocked": "Blocked",
+    "cancelled": "Cancelled"
+  },
+  "priority_label": {
+    "urgent": "Urgent",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+    "none": "No priority"
+  },
+  "type_label": {
+    "issue_assigned": "已分配",
+    "issue_subscribed": "已订阅",
+    "unassigned": "已取消分配",
+    "assignee_changed": "已重新分配",
+    "status_changed": "状态已变更",
+    "priority_changed": "优先级已变更",
+    "start_date_changed": "开始日期已变更",
+    "due_date_changed": "截止日期已变更",
+    "new_comment": "新评论",
+    "mentioned": "被提及",
+    "review_requested": "已请求审查",
+    "task_completed": "任务已完成",
+    "task_failed": "任务失败",
+    "agent_blocked": "智能体已阻塞",
+    "agent_completed": "智能体已完成",
+    "reaction_added": "已添加表情回应",
+    "quick_create_done": "快速创建已完成",
+    "quick_create_failed": "快速创建失败"
+  },
+  "detail": {
+    "set_status_to": "状态设为",
+    "set_priority_to": "优先级设为",
+    "assigned_to": "已分配给 {{name}}",
+    "removed_assignee": "已移除负责人",
+    "set_due_date_to": "截止日期设为 {{date}}",
+    "removed_due_date": "已移除截止日期",
+    "reacted_with": "回应了 {{emoji}}",
+    "created_with_agent": "由智能体创建：{{identifier}}",
+    "failed_with_detail": "失败：{{detail}}"
+  }
+}

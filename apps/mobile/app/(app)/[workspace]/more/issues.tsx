@@ -25,6 +25,7 @@ import { Pressable, SectionList, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import type { Issue, IssuePriority, IssueStatus } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
@@ -53,20 +54,21 @@ import { THEME } from "@/lib/theme";
 
 type IssueSection = { status: IssueStatus; data: Issue[] };
 
-// Scope tab definitions. Mirrors web `issuesScopeStore`. Counts are NOT
-// rendered on the pill labels — web's `IssuesHeader` doesn't show them
-// either, and on SE3 (375pt) "(123)" appended to each label pushes the
-// row past the safe width when filter icon shares the row. Per-status
-// counts still appear on the SectionList headers below.
-const SCOPES: { value: IssuesScope; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "members", label: "Members" },
-  { value: "agents", label: "Agents" },
-];
-
 export default function IssuesPage() {
+  const { t } = useTranslation("issues");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+
+  // Scope tab definitions. Mirrors web `issuesScopeStore`. Counts are NOT
+  // rendered on the pill labels — web's `IssuesHeader` doesn't show them
+  // either, and on SE3 (375pt) "(123)" appended to each label pushes the
+  // row past the safe width when filter icon shares the row. Per-status
+  // counts still appear on the SectionList headers below.
+  const SCOPES: { value: IssuesScope; label: string }[] = [
+    { value: "all", label: t("all_issues.scope.all") },
+    { value: "members", label: t("all_issues.scope.members") },
+    { value: "agents", label: t("all_issues.scope.agents") },
+  ];
 
   const scope = useIssuesViewStore((s) => s.scope);
   const setScope = useIssuesViewStore((s) => s.setScope);
@@ -161,19 +163,19 @@ export default function IssuesPage() {
       ) : error ? (
         <View className="px-4 gap-3 pt-4">
           <Text className="text-sm text-destructive">
-            Failed to load issues:{" "}
-            {error instanceof Error ? error.message : "unknown error"}
+            {t("error.load_prefix")}{" "}
+            {error instanceof Error ? error.message : t("error.unknown")}
           </Text>
           <Button variant="outline" onPress={() => refetch()}>
-            <Text>Retry</Text>
+            <Text>{t("error.retry")}</Text>
           </Button>
         </View>
       ) : showEmptyState ? (
         <EmptyState
           message={
             hasActiveFilters
-              ? "No issues match the current filters."
-              : emptyMessageForScope(scope)
+              ? t("all_issues.empty.no_active_filters")
+              : emptyMessageForScope(t, scope)
           }
         />
       ) : (
@@ -217,13 +219,14 @@ function FilterButton({
   hasActiveFilters: boolean;
 }) {
   const { colorScheme } = useColorScheme();
+  const { t } = useTranslation("issues");
   return (
     <View style={{ position: "relative" }} className="ml-2">
       <Button
         variant="outline"
         size="sm"
         onPress={onPress}
-        accessibilityLabel="Filter"
+        accessibilityLabel={t("filter_button.accessibility_label")}
         className="w-9 px-0"
       >
         <Ionicons
@@ -371,13 +374,16 @@ function EmptyState({ message }: { message: string }) {
   );
 }
 
-function emptyMessageForScope(scope: IssuesScope): string {
+function emptyMessageForScope(
+  t: (key: string) => string,
+  scope: IssuesScope,
+): string {
   switch (scope) {
     case "all":
-      return "No issues in this workspace.";
+      return t("all_issues.empty.all");
     case "members":
-      return "No issues assigned to a member.";
+      return t("all_issues.empty.members");
     case "agents":
-      return "No issues assigned to agents or squads.";
+      return t("all_issues.empty.agents");
   }
 }

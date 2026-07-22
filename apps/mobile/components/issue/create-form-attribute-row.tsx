@@ -13,6 +13,7 @@
 import { View } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import { AttributeChip } from "@/components/issue/attribute-chip";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { PriorityIcon } from "@/components/ui/priority-icon";
@@ -45,6 +46,7 @@ const NEW_ISSUE_PICKER_PATHNAMES = {
 } as const satisfies Record<NewIssuePickerField, string>;
 
 export function CreateFormAttributeRow() {
+  const { t } = useTranslation("issues");
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const status = useNewIssueDraftStore((s) => s.status);
   const priority = useNewIssueDraftStore((s) => s.priority);
@@ -55,9 +57,11 @@ export function CreateFormAttributeRow() {
   const { getName } = useActorLookup();
   const assigneeLabel = assignee
     ? getName(assignee.type, assignee.id)
-    : "Assignee";
+    : t("attribute.assignee_placeholder");
   const priorityLabel =
-    priority === "none" ? "Priority" : PRIORITY_LABEL[priority];
+    priority === "none"
+      ? t("attribute.priority_placeholder")
+      : PRIORITY_LABEL[priority];
 
   const open = (field: NewIssuePickerField) => {
     if (!wsSlug) return;
@@ -111,7 +115,11 @@ export function CreateFormAttributeRow() {
               color={dueDate ? undefined : "#a1a1aa"}
             />
           }
-          label={dueDate ? formatDueDate(dueDate) : "Due date"}
+          label={
+            dueDate
+              ? formatDueDate(dueDate, t("attribute.due_date_placeholder"))
+              : t("attribute.due_date_placeholder")
+          }
           variant={dueDate ? "filled" : "dimmed"}
           onPress={() => open("due-date")}
         />
@@ -123,7 +131,7 @@ export function CreateFormAttributeRow() {
               <Ionicons name="folder-outline" size={14} color="#a1a1aa" />
             )
           }
-          label={project?.title ?? "Project"}
+          label={project?.title ?? t("attribute.project_placeholder")}
           variant={project ? "filled" : "dimmed"}
           onPress={() => open("project")}
         />
@@ -133,6 +141,6 @@ export function CreateFormAttributeRow() {
 }
 
 // due_date is a calendar day — format timezone-safely (no offset day shift).
-function formatDueDate(iso: string): string {
-  return formatDateOnly(iso, { month: "short", day: "numeric" }) || "Due date";
+function formatDueDate(iso: string, fallback: string): string {
+  return formatDateOnly(iso, { month: "short", day: "numeric" }) || fallback;
 }

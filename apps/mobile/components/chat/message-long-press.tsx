@@ -1,11 +1,12 @@
 /**
  * Long-press handler for a chat message bubble. Exposes `onLongPress`
- * (drives a native iOS ActionSheetIOS) and `isPressed` (drives the
+ * (drives a cross-platform action sheet) and `isPressed` (drives the
  * caller's highlight ring while the sheet is on screen).
  *
- * iOS-native first per apps/mobile/CLAUDE.md §UI components → waterfall
- * step 1: `ActionSheetIOS.showActionSheetWithOptions`. Zero custom
- * layout, zero animation, zero overflow math, zero new deps.
+ * Uses `@expo/react-native-action-sheet` per apps/mobile/CLAUDE.md
+ * §Tech-stack baseline — native-styled sheet on iOS, Material bottom
+ * drawer on Android. Zero custom layout, zero animation, zero overflow
+ * math.
  *
  * Item set (v1, conditional):
  *   Copy · Select Text · Cancel
@@ -16,9 +17,10 @@
  * native alternative" threshold in apps/mobile/CLAUDE.md.
  */
 import { useCallback, useState } from "react";
-import { ActionSheetIOS } from "react-native";
+import { useActionSheet } from "@expo/react-native-action-sheet";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
+import { useTranslation } from "react-i18next";
 import type { ChatMessage } from "@multica/core/types";
 import { useChatSelectStore } from "@/data/chat-select-store";
 
@@ -26,6 +28,14 @@ export function useChatMessageLongPress(
   message: ChatMessage,
 ): { onLongPress: () => void; isPressed: boolean } {
   const [isPressed, setIsPressed] = useState(false);
+  const { showActionSheetWithOptions } = useActionSheet();
+  // Everything below runs inside this hook's own top-level scope (no
+  // nested plain-function helper the way `presentReactSheet` works in
+  // `components/issue/comment-context-menu.tsx`), so `t`/`tCommon` can be
+  // called directly here and simply closed over by the `useCallback`
+  // below — no need to thread them through as explicit parameters.
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
 
   const onLongPress = useCallback(() => {
     const hasContent = !!message.content;
@@ -46,17 +56,18 @@ export function useChatMessageLongPress(
     };
 
     if (hasContent) {
-      push("Copy", { kind: "copy" });
-      push("Select Text", { kind: "select" });
+      push(t("long_press.copy"), { kind: "copy" });
+      push(t("long_press.select_text"), { kind: "select" });
     }
-    push("Cancel", { kind: "cancel" });
+    push(tCommon("cancel"), { kind: "cancel" });
 
     const cancelButtonIndex = options.length - 1;
 
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       { options, cancelButtonIndex },
       (i) => {
         setIsPressed(false);
+        if (i === undefined) return;
         const action = actions[i];
         if (!action || action.kind === "cancel") return;
 
@@ -75,7 +86,7 @@ export function useChatMessageLongPress(
         }
       },
     );
-  }, [message]);
+  }, [message, showActionSheetWithOptions, t, tCommon]);
 
   return { onLongPress, isPressed };
 }

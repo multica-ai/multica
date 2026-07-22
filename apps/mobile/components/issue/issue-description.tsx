@@ -14,6 +14,7 @@
  */
 import { View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Text } from "@/components/ui/text";
 import { Markdown } from "@/lib/markdown";
 import { issueAttachmentsOptions } from "@/data/queries/issues";
@@ -26,6 +27,7 @@ export function IssueDescription({
   issueId: string;
   description: string | null;
 }) {
+  const { t } = useTranslation("issues");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data: attachments } = useQuery(
     issueAttachmentsOptions(wsId, issueId),
@@ -35,7 +37,7 @@ export function IssueDescription({
     return (
       <View className="px-4 pb-4">
         <Text className="text-sm text-muted-foreground italic">
-          No description.
+          {t("description.empty")}
         </Text>
       </View>
     );

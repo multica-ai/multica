@@ -1,0 +1,46 @@
+{
+  "list": {
+    "header_title": "Runtimes",
+    "error": {
+      "load_prefix": "Failed to load runtimes:",
+      "unknown": "unknown error",
+      "retry": "Retry"
+    },
+    "empty": {
+      "title": "No runtimes yet",
+      "message": "Runtimes connected on desktop will show up here."
+    }
+  },
+  "health": {
+    "online": { "label": "Online" },
+    "recently_lost": { "label": "Recently lost" },
+    "offline": { "label": "Offline" },
+    "about_to_gc": { "label": "About to GC" }
+  },
+  "detail": {
+    "header_default_title": "Runtime",
+    "error": {
+      "load_prefix": "Failed to load runtime:",
+      "unknown": "unknown error",
+      "retry": "Retry"
+    },
+    "owner_label": "Owner",
+    "mode_label": "Mode",
+    "mode": {
+      "local": "Local",
+      "cloud": "Cloud"
+    },
+    "visibility_label": "Visibility",
+    "visibility": {
+      "private": "Private",
+      "public": "Public"
+    },
+    "device_label": "Device",
+    "created_label": "Created",
+    "updated_label": "Updated",
+    "cli_version_label": "CLI Version",
+    "update_available": "Update available ({{version}})",
+    "agents_title": "Agents on this runtime",
+    "agents_empty": "No agents configured on this runtime yet"
+  }
+}

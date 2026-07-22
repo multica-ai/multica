@@ -12,6 +12,7 @@ import { useRef } from "react";
 import { Pressable, View } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Text } from "@/components/ui/text";
 import {
   DueDatePickerBody,
@@ -27,6 +28,7 @@ export default function IssueDueDatePickerRoute() {
   const { data: issue } = useQuery(issueDetailOptions(wsId, id));
   const updateIssue = useUpdateIssue(id);
   const ref = useRef<DueDatePickerBodyHandle>(null);
+  const { t } = useTranslation("issues");
 
   const value = issue?.due_date ?? null;
 
@@ -34,6 +36,9 @@ export default function IssueDueDatePickerRoute() {
     <View className="flex-1">
       <DueDateHeader
         hasValue={!!value}
+        title={t("picker.due_date.title")}
+        clearLabel={t("picker.due_date.clear")}
+        doneLabel={t("picker.due_date.done")}
         onDone={() => {
           const iso = ref.current?.getIso();
           if (iso) updateIssue.mutate({ due_date: iso });
@@ -51,16 +56,22 @@ export default function IssueDueDatePickerRoute() {
 
 function DueDateHeader({
   hasValue,
+  title,
+  clearLabel,
+  doneLabel,
   onDone,
   onClear,
 }: {
   hasValue: boolean;
+  title: string;
+  clearLabel: string;
+  doneLabel: string;
   onDone: () => void;
   onClear: () => void;
 }) {
   return (
     <View className="flex-row items-center justify-between px-4 pt-4 pb-2">
-      <Text className="text-base font-semibold text-foreground">Due date</Text>
+      <Text className="text-base font-semibold text-foreground">{title}</Text>
       <View className="flex-row items-center gap-1">
         {hasValue ? (
           <Pressable
@@ -68,7 +79,7 @@ function DueDateHeader({
             hitSlop={6}
             className="px-2 py-1 rounded-md active:bg-secondary"
           >
-            <Text className="text-sm text-destructive">Clear</Text>
+            <Text className="text-sm text-destructive">{clearLabel}</Text>
           </Pressable>
         ) : null}
         <Pressable
@@ -76,7 +87,7 @@ function DueDateHeader({
           hitSlop={6}
           className="px-2 py-1 rounded-md active:bg-secondary"
         >
-          <Text className="text-sm font-medium text-primary">Done</Text>
+          <Text className="text-sm font-medium text-primary">{doneLabel}</Text>
         </Pressable>
       </View>
     </View>

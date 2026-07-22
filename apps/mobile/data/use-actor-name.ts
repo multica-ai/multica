@@ -51,12 +51,26 @@ export function useActorLookup() {
   return { getName, getAvatarUrl };
 }
 
+// Multi-word names (e.g. "John Doe") keep the standard word-initial
+// convention, sliced to 2 letters. Single-word names (common for agent
+// names, e.g. "Codex" or "客服助手") have too little material for that
+// convention, so we take more characters straight from the word: 2 for
+// CJK scripts (each character carries more visual weight), 4 for Latin
+// scripts (individual letters are narrower).
+const CJK_PATTERN = /[一-鿿㐀-䶿]/;
+
 export function getInitials(name: string): string {
-  return name
-    .split(" ")
-    .map((w) => w[0])
-    .filter(Boolean)
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "";
+  if (words.length > 1) {
+    return words
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  }
+  const [word] = words;
+  return CJK_PATTERN.test(word)
+    ? word.slice(0, 2)
+    : word.toUpperCase().slice(0, 4);
 }

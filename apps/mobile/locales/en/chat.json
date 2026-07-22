@@ -1,0 +1,112 @@
+{
+  "untitled_chat": "Untitled chat",
+  "delete_chat": {
+    "title": "Delete this chat?",
+    "confirm": "Delete"
+  },
+  "disabled_reason": {
+    "no_agent": "No agent selected",
+    "no_agents_workspace": "No agents in this workspace",
+    "archived": "This chat is archived"
+  },
+  "sessions": {
+    "title": "Chats",
+    "empty": "No chats yet.",
+    "archived_label": "archived"
+  },
+  "mention_picker": {
+    "title": "Mention",
+    "placeholder_chat": "Reference an issue",
+    "placeholder_comment": "Search people or issues"
+  },
+  "agent_picker": {
+    "title": "Choose an agent",
+    "empty": "No agents available."
+  },
+  "composer": {
+    "placeholder_default": "Type a message…",
+    "pill_label_default": "Type a message…",
+    "agent_working": "Agent is working…",
+    "message_placeholder": "Message…",
+    "chat_unavailable": "Chat unavailable",
+    "stop_agent_label": "Stop agent",
+    "replying_to": "Replying to {{name}}",
+    "cancel_reply_label": "Cancel reply",
+    "mention_label": "Mention someone or an issue",
+    "upload_image_label": "Upload image",
+    "upload_file_label": "Upload file",
+    "send_label": "Send",
+    "file_too_large_title": "File too large",
+    "file_too_large_message": "Files must be smaller than 100 MB."
+  },
+  "empty_state": {
+    "first_time": {
+      "title": "Chat with your agents",
+      "subtitle_prefix": "✨ They know your workspace — ",
+      "subtitle_highlight": "issues, projects, skills",
+      "subtitle_suffix": ".",
+      "description": "Ask for a summary, plan your day, or hand off a small task."
+    },
+    "returning": {
+      "title_named": "Hi, I'm {{name}}",
+      "title_default": "Welcome back to Multica",
+      "subtitle": "Try asking"
+    },
+    "starter_prompts": {
+      "list_issues": "List my open issues by priority",
+      "summarize_today": "Summarize what I did today",
+      "plan_next": "Help me plan what to do next"
+    }
+  },
+  "message_list": {
+    "show_error_details_label": "Show error details",
+    "show_details": "Show details",
+    "replied_in": "Replied in {{time}}",
+    "finished_in": "Finished in {{time}}",
+    "failed_after": "Failed after {{time}}"
+  },
+  "session_actions": {
+    "session_actions_label": "Session actions",
+    "new_chat_label": "New chat"
+  },
+  "timeline": {
+    "steps_one": "{{count}} step",
+    "steps_other": "{{count}} steps",
+    "tool_fallback": "tool"
+  },
+  "title_button": {
+    "default_agent_name": "Chat",
+    "new_chat_subtitle": "New chat",
+    "accessibility_label": "Sessions and agent picker"
+  },
+  "long_press": {
+    "copy": "Copy",
+    "select_text": "Select Text"
+  },
+  "no_agent_banner": {
+    "accessibility_label": "No agents available, open agents settings",
+    "title": "No agents available",
+    "description": "Add or enable an agent in More → Agents to start chatting."
+  },
+  "offline_banner": {
+    "default_agent_name": "This agent",
+    "unstable": "{{name}} may have just disconnected — your message will queue.",
+    "offline": "{{name}} is offline. Messages will wait until its runtime is back."
+  },
+  "status_pill": {
+    "offline": "Offline",
+    "reconnecting": "Reconnecting",
+    "queued": "Queued",
+    "starting_up": "Starting up",
+    "thinking": "Thinking",
+    "typing": "Typing",
+    "working": "Working",
+    "tool": {
+      "running_command": "Running command",
+      "reading_files": "Reading files",
+      "searching_code": "Searching code",
+      "making_edits": "Making edits",
+      "searching_web": "Searching web"
+    }
+  }
+}

@@ -11,6 +11,7 @@ import { FlatList, Pressable, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
+import { useTranslation } from "react-i18next";
 import type { Project } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ProjectIcon } from "@/components/ui/project-icon";
@@ -29,6 +30,7 @@ interface Props {
 }
 
 export function ProjectPickerBody({ value, query, onChange }: Props) {
+  const { t } = useTranslation("issues");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const listRef = useScrollToTopOnChange(query);
@@ -96,7 +98,9 @@ export function ProjectPickerBody({ value, query, onChange }: Props) {
             className="flex-1 text-base text-foreground"
             numberOfLines={1}
           >
-            {item.kind === "none" ? "No project" : item.project.title}
+            {item.kind === "none"
+              ? t("picker_body.project.no_project")
+              : item.project.title}
           </Text>
           {isSelected(item) ? (
             <Ionicons name="checkmark" size={20} color={checkColor} />
@@ -107,8 +111,8 @@ export function ProjectPickerBody({ value, query, onChange }: Props) {
         <View className="px-3 py-8 items-center">
           <Text className="text-sm text-muted-foreground text-center">
             {query
-              ? "No matches."
-              : "No projects in this workspace yet.\nCreate them on web."}
+              ? t("picker_body.project.no_matches")
+              : t("picker_body.project.empty")}
           </Text>
         </View>
       }

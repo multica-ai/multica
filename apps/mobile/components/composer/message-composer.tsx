@@ -52,6 +52,7 @@ import { router, type Href } from "expo-router";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
+import { useTranslation } from "react-i18next";
 import { api, MAX_FILE_SIZE } from "@/data/api";
 import { useMentionDraftStore } from "@/data/stores/mention-draft-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
@@ -124,11 +125,18 @@ interface Props {
 
   /** When true the composer renders flush at the bottom of its parent
    *  WITHOUT the KeyboardStickyView keyboard-aware lift + safe-area
-   *  inset. Chat's parent owns its own KeyboardAvoidingView and
-   *  bottom-inset handling (chat.tsx), so the composer must not also
-   *  apply them. Comment's parent does NOT handle keyboard, so the
-   *  composer keeps the default `true`. */
+   *  inset — for a parent that already owns keyboard/inset handling
+   *  itself. Both current callers (chat, comment) keep the default
+   *  `true` and let this component manage it. */
   manageKeyboard?: boolean;
+
+  /** Skip the collapsed "pill" resting state — always render the full
+   *  expanded input (text field + attachment/mention toolbar). Chat uses
+   *  this so the composer looks and behaves like a normal always-visible
+   *  message box (tap once to focus and get the keyboard) rather than
+   *  requiring a tap-to-expand step first. Comment keeps the default
+   *  `false` (pill-first, matching its more occasional-use context). */
+  alwaysExpanded?: boolean;
 }
 
 function makeLocalId(): string {
@@ -158,8 +166,8 @@ export function MessageComposer({
   onSubmit,
   mentionPickerPath,
   uploadContext,
-  placeholder = "Type a message…",
-  pillLabel = "Type a message…",
+  placeholder,
+  pillLabel,
   pillIcon = "chatbubble-ellipses-outline",
   value: controlledValue,
   onChangeText: controlledOnChange,
@@ -171,10 +179,18 @@ export function MessageComposer({
   disabled = false,
   disabledReason,
   manageKeyboard = true,
+  alwaysExpanded = false,
 }: Props) {
   const { colorScheme } = useColorScheme();
   const theme = THEME[colorScheme];
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation("chat");
+  // Both callers (chat-composer.tsx, inline-comment-composer.tsx) always
+  // pass explicit placeholder/pillLabel, so these fallbacks are a safety
+  // net rather than the common path — but per apps/mobile/CLAUDE.md they
+  // still need real copy, not hardcoded English.
+  const resolvedPlaceholder = placeholder ?? t("composer.placeholder_default");
+  const resolvedPillLabel = pillLabel ?? t("composer.pill_label_default");
   const inputRef = useRef<TextInput>(null);
   const [expanded, setExpanded] = useState(false);
   const [internalText, setInternalText] = useState("");
@@ -347,7 +363,10 @@ export function MessageComposer({
     const picked = picker.assets[0];
     if (!picked) return;
     if (picked.fileSize != null && picked.fileSize > MAX_FILE_SIZE) {
-      Alert.alert("File too large", "Files must be smaller than 100 MB.");
+      Alert.alert(
+        t("composer.file_too_large_title"),
+        t("composer.file_too_large_message"),
+      );
       return;
     }
     const filename = picked.fileName ?? `image-${Date.now()}.jpg`;
@@ -369,7 +388,7 @@ export function MessageComposer({
       name: filename,
       type: mimeType,
     });
-  }, [startUpload]);
+  }, [startUpload, t]);
 
   const onFilePress = useCallback(async () => {
     const picker = await DocumentPicker.getDocumentAsync({
@@ -380,7 +399,10 @@ export function MessageComposer({
     const picked = picker.assets[0];
     if (!picked) return;
     if (picked.size != null && picked.size > MAX_FILE_SIZE) {
-      Alert.alert("File too large", "Files must be smaller than 100 MB.");
+      Alert.alert(
+        t("composer.file_too_large_title"),
+        t("composer.file_too_large_message"),
+      );
       return;
     }
     const mimeType = picked.mimeType ?? "application/octet-stream";
@@ -401,7 +423,7 @@ export function MessageComposer({
       name: picked.name,
       type: mimeType,
     });
-  }, [startUpload]);
+  }, [startUpload, t]);
 
   const onRemoveAttachment = useCallback((localId: string) => {
     setAttachments((prev) => prev.filter((it) => it.localId !== localId));
@@ -458,7 +480,7 @@ export function MessageComposer({
         onPress={expand}
         disabled={disabled}
         accessibilityRole="button"
-        accessibilityLabel={pillLabel}
+        accessibilityLabel={resolvedPillLabel}
         accessibilityState={{ disabled }}
         className="flex-row items-center gap-2 h-11 px-4 rounded-full bg-secondary active:opacity-80"
       >
@@ -468,7 +490,7 @@ export function MessageComposer({
           color={theme.mutedForeground}
         />
         <Text className="text-base text-muted-foreground">
-          {disabled && disabledReason ? disabledReason : pillLabel}
+          {disabled && disabledReason ? disabledReason : resolvedPillLabel}
         </Text>
       </Pressable>
     </View>
@@ -491,13 +513,13 @@ export function MessageComposer({
               className="flex-1 text-xs font-medium text-muted-foreground"
               numberOfLines={1}
             >
-              Replying to {replyTarget.actorName}
+              {t("composer.replying_to", { name: replyTarget.actorName })}
             </Text>
             <Pressable
               onPress={onClearReplyTarget}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel="Cancel reply"
+              accessibilityLabel={t("composer.cancel_reply_label")}
             >
               <Ionicons
                 name="close-circle"
@@ -538,7 +560,7 @@ export function MessageComposer({
           value={text}
           onChangeText={setText}
           onBlur={onBlur}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
           placeholderTextColor={theme.mutedForeground}
           multiline
           editable={!disabled}
@@ -555,21 +577,21 @@ export function MessageComposer({
             iconSize={20}
             color={mentions.length > 0 ? theme.primary : undefined}
             onPress={onAtPress}
-            accessibilityLabel="Mention someone or an issue"
+            accessibilityLabel={t("composer.mention_label")}
             className="h-8 w-8"
           />
           <IconButton
             name="image-outline"
             iconSize={20}
             onPress={onImagePress}
-            accessibilityLabel="Upload image"
+            accessibilityLabel={t("composer.upload_image_label")}
             className="h-8 w-8"
           />
           <IconButton
             name="attach-outline"
             iconSize={20}
             onPress={onFilePress}
-            accessibilityLabel="Upload file"
+            accessibilityLabel={t("composer.upload_file_label")}
             className="h-8 w-8"
           />
           <View className="flex-1" />
@@ -585,7 +607,7 @@ export function MessageComposer({
               disabled={!canSend}
               hitSlop={12}
               className="h-8 w-8 rounded-full"
-              accessibilityLabel="Send"
+              accessibilityLabel={t("composer.send_label")}
               accessibilityState={{ disabled: !canSend }}
             />
           )}
@@ -594,11 +616,13 @@ export function MessageComposer({
     </View>
   );
 
-  const body = expanded ? expandedContent : pillContent;
+  const body = alwaysExpanded || expanded ? expandedContent : pillContent;
 
-  // When the parent owns keyboard handling (chat.tsx wraps in
-  // KeyboardAvoidingView + SafeAreaView), skip the KeyboardStickyView —
-  // double-stacking causes the composer to jump twice on keyboard show.
+  // When a parent already owns keyboard handling itself, skip the
+  // KeyboardStickyView — double-stacking causes the composer to jump
+  // twice on keyboard show. No current caller passes manageKeyboard=false
+  // (both chat and comment let this component manage it), but the escape
+  // hatch stays for a future parent that needs it.
   if (!manageKeyboard) return body;
 
   return (

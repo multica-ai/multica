@@ -9,10 +9,10 @@
  * different layout — web shows recursive tree, mobile shows one bubble per
  * thread. Counts agree (no comment is dropped or duplicated).
  *
- * Interaction: long-press inside a bubble fires a native iOS
- * `ActionSheetIOS` with the comment's actions (Reply, React…, Copy,
- * Select Text, Copy Link, Resolve, Delete). While the sheet is on screen
- * the targeted bubble's border highlights. See `useCommentLongPress` in
+ * Interaction: long-press inside a bubble fires a cross-platform action
+ * sheet with the comment's actions (Reply, React…, Copy, Select Text,
+ * Copy Link, Resolve, Delete). While the sheet is on screen the targeted
+ * bubble's border highlights. See `useCommentLongPress` in
  * `./comment-context-menu.tsx`.
  *
  * Resolved threads render in a collapsed `<ResolvedThreadBar>` by default —
@@ -32,6 +32,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import type { Reaction, TimelineEntry } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
@@ -210,6 +211,7 @@ function ResolvedThreadBar({
   replies: TimelineEntry[];
   onExpand: () => void;
 }) {
+  const { t } = useTranslation("issues");
   const { getName } = useActorLookup();
   const { colorScheme } = useColorScheme();
   const mutedFg = THEME[colorScheme].mutedForeground;
@@ -238,6 +240,13 @@ function ResolvedThreadBar({
   }, [entry, replies, getName]);
 
   const total = 1 + replies.length;
+  // Chinese doesn't inflect for count, but English does ("message" vs
+  // "messages") — select the key manually rather than i18next's `_one`/
+  // `_other` suffix convention. chat.json's `steps_one`/`steps_other` shows
+  // that convention does work (zh-Hans keeps a permanently-dead `_one` key
+  // since Intl.PluralRules has no "one" category for zh-Hans) — this file
+  // just predates that pattern and hasn't been converted to it.
+  const unitSuffix = total === 1 ? "message" : "messages";
 
   return (
     <View className="px-4">
@@ -245,15 +254,20 @@ function ResolvedThreadBar({
         onPress={onExpand}
         className="flex-row items-center gap-2.5 px-4 py-3 rounded-2xl bg-surface-1 active:opacity-70"
         accessibilityRole="button"
-        accessibilityLabel={`Resolved thread by ${authorsLabel}, ${total} ${total === 1 ? "message" : "messages"}. Tap to expand.`}
+        accessibilityLabel={t(
+          `comment.card.resolved_bar_accessibility_${unitSuffix}`,
+          { count: total, authors: authorsLabel },
+        )}
       >
         <Ionicons name="checkmark-circle" size={18} color={mutedFg} />
         <Text
           className="flex-1 text-sm text-muted-foreground"
           numberOfLines={1}
         >
-          Resolved · {total} {total === 1 ? "message" : "messages"} by{" "}
-          {authorsLabel}
+          {t(`comment.card.resolved_bar_${unitSuffix}`, {
+            count: total,
+            authors: authorsLabel,
+          })}
         </Text>
         <Ionicons name="chevron-down" size={14} color={mutedFg} />
       </Pressable>
@@ -278,6 +292,7 @@ function ResolvedIndicator({
   entry: TimelineEntry;
   onCollapse: () => void;
 }) {
+  const { t } = useTranslation("issues");
   const { getName } = useActorLookup();
   const { colorScheme } = useColorScheme();
   const mutedFg = THEME[colorScheme].mutedForeground;
@@ -291,17 +306,19 @@ function ResolvedIndicator({
       onPress={onCollapse}
       className="flex-row items-center gap-2 active:opacity-60"
       accessibilityRole="button"
-      accessibilityLabel="Collapse resolved thread"
+      accessibilityLabel={t("comment.card.collapse_accessibility_label")}
     >
       <Ionicons name="checkmark-circle" size={14} color={mutedFg} />
       <Text className="text-xs text-muted-foreground flex-1" numberOfLines={1}>
-        Resolved by{" "}
+        {t("comment.card.resolved_by")}{" "}
         <Text className="text-xs text-foreground font-medium">
           {resolverName}
         </Text>
         {entry.resolved_at ? ` · ${timeAgo(entry.resolved_at)}` : ""}
       </Text>
-      <Text className="text-xs text-muted-foreground">Collapse</Text>
+      <Text className="text-xs text-muted-foreground">
+        {t("comment.card.collapse")}
+      </Text>
     </Pressable>
   );
 }
@@ -382,6 +399,7 @@ function CommentBody({
   issueIdentifier: string | undefined;
   onPressChange?: (entryId: string, pressed: boolean) => void;
 }) {
+  const { t } = useTranslation("issues");
   // When this comment is the active selection target, drop the long-press
   // wrapper AND make the markdown selectable — so the next long-press
   // routes to UIKit's native text-selection magnifier instead of our
@@ -461,7 +479,7 @@ function CommentBody({
   //     inline-insert).
   // Mirrors web's split: comment-card.tsx:124 `AttachmentList`.
   //
-  // When NOT selecting: long-press fires the native ActionSheetIOS via
+  // When NOT selecting: long-press fires the cross-platform action sheet via
   // useCommentLongPress. Markdown is non-selectable so the long-press
   // gesture doesn't race UIKit's text selection.
   //
@@ -489,7 +507,7 @@ function CommentBody({
         <Text className="text-sm font-medium text-foreground">{name}</Text>
         <Text className="text-xs text-muted-foreground">
           · {timeAgo(entry.created_at)}
-          {edited ? " · (edited)" : ""}
+          {edited ? ` · ${t("comment.card.edited_suffix")}` : ""}
         </Text>
       </View>
       {entry.content ? (
@@ -544,6 +562,7 @@ function FailedActions({
   onRetry: () => void;
   onDiscard: () => void;
 }) {
+  const { t } = useTranslation("issues");
   const { colorScheme } = useColorScheme();
   const destructive = THEME[colorScheme].destructive;
   return (
@@ -553,24 +572,26 @@ function FailedActions({
         className="flex-1 text-xs text-destructive"
         numberOfLines={1}
       >
-        {error || "Couldn't send"}
+        {error || t("comment.card.send_failed")}
       </Text>
       <Pressable
         onPress={onRetry}
         hitSlop={6}
         accessibilityRole="button"
-        accessibilityLabel="Retry sending comment"
+        accessibilityLabel={t("comment.card.retry_accessibility_label")}
       >
-        <Text className="text-xs text-primary font-medium">Retry</Text>
+        <Text className="text-xs text-primary font-medium">
+          {t("comment.card.retry")}
+        </Text>
       </Pressable>
       <Pressable
         onPress={onDiscard}
         hitSlop={6}
         accessibilityRole="button"
-        accessibilityLabel="Discard failed comment"
+        accessibilityLabel={t("comment.card.discard_accessibility_label")}
       >
         <Text className="text-xs text-muted-foreground font-medium">
-          Discard
+          {t("comment.card.discard")}
         </Text>
       </Pressable>
     </View>

@@ -11,6 +11,7 @@
 import { ActivityIndicator, Alert, Linking, Pressable, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import type {
   GithubRepoResourceRef,
   ProjectResource,
@@ -28,6 +29,7 @@ interface Props {
 }
 
 export function ProjectResourcesSection({ projectId, onAdd }: Props) {
+  const { t } = useTranslation("projects");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data: resources, isLoading } = useQuery(
     projectResourcesOptions(wsId, projectId),
@@ -45,12 +47,12 @@ export function ProjectResourcesSection({ projectId, onAdd }: Props) {
 
   const onLongPress = (resource: ProjectResource) => {
     Alert.alert(
-      "Detach resource?",
+      t("resources.detach_confirm.title"),
       describeResource(resource),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("resources.detach_confirm.cancel"), style: "cancel" },
         {
-          text: "Detach",
+          text: t("resources.detach_confirm.confirm"),
           style: "destructive",
           onPress: () => remove.mutate(resource.id),
         },
@@ -62,10 +64,10 @@ export function ProjectResourcesSection({ projectId, onAdd }: Props) {
     <View>
       <View className="flex-row items-center justify-between px-4 py-2 bg-background">
         <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-          Resources
+          {t("resources.title")}
         </Text>
         <Pressable onPress={onAdd} className="px-2 py-1 active:bg-secondary rounded">
-          <Text className="text-xs text-brand">Add</Text>
+          <Text className="text-xs text-brand">{t("resources.add")}</Text>
         </Pressable>
       </View>
       {isLoading ? (
@@ -75,7 +77,7 @@ export function ProjectResourcesSection({ projectId, onAdd }: Props) {
       ) : !resources || resources.length === 0 ? (
         <View className="px-4 py-3">
           <Text className="text-sm text-muted-foreground/70">
-            No resources attached.
+            {t("resources.empty")}
           </Text>
         </View>
       ) : (

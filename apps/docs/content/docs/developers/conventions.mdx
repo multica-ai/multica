@@ -106,6 +106,8 @@ This rule is aligned with `apps/docs/content/docs/*.zh.mdx` — the docs are the
 | **Long-form doc prose, when the entity is the running subject** | Chinese term, with English in parentheses on first mention | "**执行任务**（task）是智能体每一次工作的单位" |
 | **API / DB fields** | always `task` / `issue` / `skill` | `task_id`, `issue_status`, `skill_uuid` |
 
+A standalone nav-row or section-header label inside product UI (e.g. a mobile "More" page's "Issues" row, a sidebar section title) is a **UI string**, not a doc title/heading — even though it looks similarly bare. It follows the "UI strings" row above (lowercase English: "issue"/"issues"), not the "Doc titles" row, since it isn't a page/doc heading. This distinction is what the 2026-07 mobile More-page review caught: nav rows had been capitalized "Issues" as if they were doc-style headings.
+
 Chinese term reference:
 
 - `task` ↔ `执行任务` (or shortened to `任务` once context is clear)

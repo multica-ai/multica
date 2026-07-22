@@ -11,6 +11,7 @@
  */
 import { Pressable, ScrollView, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
+import { useTranslation } from "react-i18next";
 import type { IssuePriority, IssueStatus } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { StatusIcon } from "@/components/ui/status-icon";
@@ -32,7 +33,9 @@ const PRIORITY_ORDER: IssuePriority[] = [
 ];
 
 // Label map duplicated across several mobile files — out of scope to
-// consolidate per the SheetShell migration plan.
+// consolidate per the SheetShell migration plan. Status/priority labels are
+// intentionally English-only in both locales (mirrors web's
+// packages/core/issues/config/priority.ts, which has no localization layer).
 const PRIORITY_LABEL: Record<IssuePriority, string> = {
   urgent: "Urgent",
   high: "High",
@@ -44,6 +47,7 @@ const PRIORITY_LABEL: Record<IssuePriority, string> = {
 type Scope = "my" | "all";
 
 export default function IssuesFilterRoute() {
+  const { t } = useTranslation("issues");
   const { scope } = useLocalSearchParams<{ scope?: string }>();
   const resolvedScope: Scope = scope === "all" ? "all" : "my";
 
@@ -77,19 +81,23 @@ export default function IssuesFilterRoute() {
   return (
     <View className="flex-1">
       <View className="flex-row items-center justify-between px-4 pt-4 pb-3">
-        <Text className="text-base font-semibold text-foreground">Filter</Text>
+        <Text className="text-base font-semibold text-foreground">
+          {t("filter.title")}
+        </Text>
         {hasActive ? (
           <Pressable
             onPress={onClearFilters}
             hitSlop={8}
             className="px-2 py-1 active:opacity-60"
           >
-            <Text className="text-sm text-primary font-medium">Reset</Text>
+            <Text className="text-sm text-primary font-medium">
+              {t("filter.reset")}
+            </Text>
           </Pressable>
         ) : null}
       </View>
       <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
-        <SectionLabel>Status</SectionLabel>
+        <SectionLabel>{t("filter.status_section")}</SectionLabel>
         {ALL_STATUSES.map((status) => {
           const checked = statusFilters.includes(status);
           return (
@@ -110,7 +118,7 @@ export default function IssuesFilterRoute() {
           );
         })}
 
-        <SectionLabel>Priority</SectionLabel>
+        <SectionLabel>{t("filter.priority_section")}</SectionLabel>
         {PRIORITY_ORDER.map((priority) => {
           const checked = priorityFilters.includes(priority);
           return (

@@ -1,13 +1,14 @@
 import { useMemo } from "react";
 import {
-  ActionSheetIOS,
   Alert,
   FlatList,
   View,
 } from "react-native";
+import { useActionSheet } from "@expo/react-native-action-sheet";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import type { InboxItem } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,9 @@ export default function Inbox() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { colorScheme } = useColorScheme();
+  const { showActionSheetWithOptions } = useActionSheet();
+  const { t } = useTranslation("inbox");
+  const { t: tCommon } = useTranslation("common");
   const { data: rawItems, isLoading, error, refetch, isRefetching } = useQuery(
     inboxListOptions(wsId),
   );
@@ -77,18 +81,18 @@ export default function Inbox() {
   // the iOS red treatment + Alert confirm.
   const onPressMenu = () => {
     const options = [
-      "Cancel",
-      "Mark all read",
-      "Archive all read",
-      "Archive completed",
-      "Archive all",
+      tCommon("cancel"),
+      t("menu.mark_all_read"),
+      t("menu.archive_all_read"),
+      t("menu.archive_completed"),
+      t("menu.archive_all"),
     ];
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex: 0,
         destructiveButtonIndex: 4,
-        title: "Inbox",
+        title: t("menu.title"),
       },
       (i) => {
         if (i === 1) markAllRead.mutate();
@@ -96,12 +100,12 @@ export default function Inbox() {
         else if (i === 3) archiveCompleted.mutate();
         else if (i === 4) {
           Alert.alert(
-            "Archive all?",
-            "This archives every inbox item, read or unread. You can still find them via the issue pages.",
+            t("menu.archive_all_confirm_title"),
+            t("menu.archive_all_confirm_message"),
             [
-              { text: "Cancel", style: "cancel" },
+              { text: tCommon("cancel"), style: "cancel" },
               {
-                text: "Archive all",
+                text: t("menu.archive_all"),
                 style: "destructive",
                 onPress: () => archiveAll.mutate(),
               },
@@ -115,13 +119,13 @@ export default function Inbox() {
   return (
     <View className="flex-1 bg-background">
       <Header
-        title="Inbox"
+        title={t("tab_title")}
         right={
           <>
             <IconButton
               name="ellipsis-horizontal"
               onPress={onPressMenu}
-              accessibilityLabel="Inbox actions"
+              accessibilityLabel={t("actions_a11y")}
             />
             <HeaderActions />
           </>
@@ -132,11 +136,11 @@ export default function Inbox() {
       ) : error ? (
         <View className="px-4 gap-3 pt-4">
           <Text className="text-sm text-destructive">
-            Failed to load inbox:{" "}
-            {error instanceof Error ? error.message : "unknown error"}
+            {t("error.load_prefix")}{" "}
+            {error instanceof Error ? error.message : t("error.unknown")}
           </Text>
           <Button variant="outline" onPress={() => refetch()}>
-            <Text>Retry</Text>
+            <Text>{t("error.retry")}</Text>
           </Button>
         </View>
       ) : !data || data.length === 0 ? (
@@ -184,15 +188,15 @@ function InboxLoading() {
 }
 
 function InboxEmpty({ iconColor }: { iconColor: string }) {
+  const { t } = useTranslation("inbox");
   return (
     <View className="flex-1 items-center justify-center px-8 gap-3">
       <Ionicons name="mail-open-outline" size={42} color={iconColor} />
       <Text className="text-base font-medium text-foreground text-center">
-        Inbox zero
+        {t("empty.title")}
       </Text>
       <Text className="text-sm text-muted-foreground text-center">
-        When someone @mentions you, assigns an issue, or an agent finishes a
-        task, it shows up here.
+        {t("empty.subtitle")}
       </Text>
     </View>
   );

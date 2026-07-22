@@ -2,13 +2,15 @@
  * Notification preferences subscreen. 5 inbox groups + system_notifications
  * toggle, each backed by an optimistic PATCH /api/notification-preferences.
  *
- * Copy mirrors packages/views/settings/components/notifications-tab.tsx but
- * hardcoded English (mobile has no i18n infra yet). The group labels MUST
- * stay in sync with web — they describe the same server-side semantics,
- * and divergent labels would violate behavioral parity (apps/mobile/CLAUDE.md).
+ * Copy mirrors packages/views/settings/components/notifications-tab.tsx in
+ * meaning (translated via apps/mobile/locales/*.json, not shared code). The
+ * group labels MUST stay in sync with web — they describe the same
+ * server-side semantics, and divergent labels would violate behavioral
+ * parity (apps/mobile/CLAUDE.md).
  */
 import { ActivityIndicator, ScrollView, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import type {
   NotificationGroupKey,
   NotificationPreferences,
@@ -20,44 +22,46 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { notificationPreferenceOptions } from "@/data/queries/notification-preferences";
 import { useUpdateNotificationPreferences } from "@/data/mutations/notification-preferences";
 
-const INBOX_GROUPS: Array<{
-  key: Exclude<NotificationGroupKey, "system_notifications">;
-  label: string;
-  description: string;
-}> = [
-  {
-    key: "assignments",
-    label: "Assignments",
-    description: "When you're assigned an issue or removed as assignee.",
-  },
-  {
-    key: "status_changes",
-    label: "Status changes",
-    description: "When an issue's status changes.",
-  },
-  {
-    key: "comments",
-    label: "Comments",
-    description: "New comments on issues you're subscribed to.",
-  },
-  {
-    key: "updates",
-    label: "Issue updates",
-    description: "Edits to title, description, labels, priority, or due date.",
-  },
-  {
-    key: "agent_activity",
-    label: "Agent activity",
-    description: "When an agent picks up, runs, or completes a task.",
-  },
-];
-
 export default function NotificationsSettingsScreen() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data, isLoading, error } = useQuery(
     notificationPreferenceOptions(wsId),
   );
   const mutation = useUpdateNotificationPreferences();
+
+  const { t } = useTranslation("settings");
+
+  const inboxGroups: Array<{
+    key: Exclude<NotificationGroupKey, "system_notifications">;
+    label: string;
+    description: string;
+  }> = [
+    {
+      key: "assignments",
+      label: t("notifications.groups.assignments.label"),
+      description: t("notifications.groups.assignments.description"),
+    },
+    {
+      key: "status_changes",
+      label: t("notifications.groups.status_changes.label"),
+      description: t("notifications.groups.status_changes.description"),
+    },
+    {
+      key: "comments",
+      label: t("notifications.groups.comments.label"),
+      description: t("notifications.groups.comments.description"),
+    },
+    {
+      key: "updates",
+      label: t("notifications.groups.updates.label"),
+      description: t("notifications.groups.updates.description"),
+    },
+    {
+      key: "agent_activity",
+      label: t("notifications.groups.agent_activity.label"),
+      description: t("notifications.groups.agent_activity.description"),
+    },
+  ];
 
   const preferences: NotificationPreferences = data?.preferences ?? {};
 
@@ -86,7 +90,7 @@ export default function NotificationsSettingsScreen() {
     return (
       <View className="flex-1 items-center justify-center bg-background px-6">
         <Text className="text-sm text-destructive text-center">
-          Failed to load notification preferences.
+          {t("notifications.error")}
         </Text>
       </View>
     );
@@ -98,12 +102,12 @@ export default function NotificationsSettingsScreen() {
       contentContainerClassName="px-4 py-4 gap-6"
     >
       <Section
-        title="Inbox notifications"
-        description="Which events show up in your inbox."
+        title={t("notifications.inbox_section.title")}
+        description={t("notifications.inbox_section.description")}
       >
-        {INBOX_GROUPS.map((group, idx) => {
+        {inboxGroups.map((group, idx) => {
           const enabled = preferences[group.key] !== "muted";
-          const isLast = idx === INBOX_GROUPS.length - 1;
+          const isLast = idx === inboxGroups.length - 1;
           return (
             <View key={group.key}>
               <View className="flex-row items-center px-4 py-3 gap-3">
@@ -127,16 +131,16 @@ export default function NotificationsSettingsScreen() {
       </Section>
 
       <Section
-        title="System"
-        description="Multica-wide announcements and important account events."
+        title={t("notifications.system_section.title")}
+        description={t("notifications.system_section.description")}
       >
         <View className="flex-row items-center px-4 py-3 gap-3">
           <View className="flex-1">
             <Text className="text-base font-medium text-foreground">
-              System notifications
+              {t("notifications.system_notifications.label")}
             </Text>
             <Text className="text-xs text-muted-foreground mt-0.5">
-              Account changes, security alerts, product updates.
+              {t("notifications.system_notifications.description")}
             </Text>
           </View>
           <Switch

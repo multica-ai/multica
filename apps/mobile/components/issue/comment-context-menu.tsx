@@ -1,11 +1,12 @@
 /**
  * Long-press handler for a comment bubble. Exposes `onLongPress` (drives a
- * native iOS ActionSheetIOS) and `isPressed` (drives the caller's highlight
- * ring while the sheet is on screen).
+ * cross-platform action sheet) and `isPressed` (drives the caller's
+ * highlight ring while the sheet is on screen).
  *
- * iOS-native first per apps/mobile/CLAUDE.md §UI components → waterfall step
- * 1: `ActionSheetIOS.showActionSheetWithOptions`. Zero custom layout, zero
- * animation, zero overflow math, zero new deps.
+ * Uses `@expo/react-native-action-sheet` per apps/mobile/CLAUDE.md
+ * §Tech-stack baseline — native-styled sheet on iOS, Material bottom
+ * drawer on Android. Zero custom layout, zero animation, zero overflow
+ * math.
  *
  * Item set (conditional, mirrors web's comment context menu):
  *   Reply (stub) · React… (opens nested sheet) · Copy · Select Text ·
@@ -14,14 +15,17 @@
  *
  * The nested React… sheet (5 quick emojis + More reactions… + Cancel) is
  * fired from INSIDE the outer sheet's completion callback rather than
- * inline, because iOS will refuse to present a second ActionSheet while the
- * first is still dismissing — the callback runs after dismissal completes.
+ * inline, because a second sheet cannot be presented while the first is
+ * still dismissing — the callback runs after dismissal completes.
  */
 import { useCallback, useState } from "react";
-import { ActionSheetIOS, Alert } from "react-native";
+import { Alert } from "react-native";
+import { useActionSheet } from "@expo/react-native-action-sheet";
 import { router } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { Reaction, TimelineEntry } from "@multica/core/types";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -49,6 +53,9 @@ export function useCommentLongPress(
   const deleteComment = useDeleteComment(issueId);
   const resolveComment = useResolveComment(issueId);
   const { getName } = useActorLookup();
+  const { showActionSheetWithOptions } = useActionSheet();
+  const { t } = useTranslation("issues");
+  const { t: tCommon } = useTranslation("common");
 
   const onLongPress = useCallback(() => {
     const isOwn = entry.actor_type === "member" && entry.actor_id === userId;
@@ -79,27 +86,30 @@ export function useCommentLongPress(
       actions.push(action);
     };
 
-    push("Reply", { kind: "reply" });
-    push("React…", { kind: "react" });
+    push(t("comment.menu.reply"), { kind: "reply" });
+    push(t("comment.menu.react"), { kind: "react" });
     if (hasContent) {
-      push("Copy", { kind: "copy" });
-      push("Select Text", { kind: "select" });
+      push(t("comment.menu.copy"), { kind: "copy" });
+      push(t("comment.menu.select_text"), { kind: "select" });
     }
-    if (canCopyLink) push("Copy Link", { kind: "copyLink" });
+    if (canCopyLink) push(t("comment.menu.copy_link"), { kind: "copyLink" });
     if (isRoot) {
-      push(resolved ? "Unresolve Thread" : "Resolve Thread", {
-        kind: "resolve",
-      });
+      push(
+        resolved
+          ? t("comment.menu.unresolve_thread")
+          : t("comment.menu.resolve_thread"),
+        { kind: "resolve" },
+      );
     }
-    if (isOwn) push("Delete", { kind: "delete" });
-    push("Cancel", { kind: "cancel" });
+    if (isOwn) push(t("comment.menu.delete"), { kind: "delete" });
+    push(tCommon("cancel"), { kind: "cancel" });
 
     const cancelButtonIndex = options.length - 1;
     const destructiveButtonIndex = isOwn
       ? actions.findIndex((a) => a.kind === "delete")
       : undefined;
 
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex,
@@ -110,6 +120,7 @@ export function useCommentLongPress(
       },
       (i) => {
         setIsPressed(false);
+        if (i === undefined) return;
         const action = actions[i];
         if (!action || action.kind === "cancel") return;
 
@@ -138,6 +149,9 @@ export function useCommentLongPress(
               userId,
               wsSlug,
               issueId,
+              showActionSheetWithOptions,
+              t,
+              tCommon,
               toggle: (emoji, existing) =>
                 toggleReaction.mutate({
                   commentId: entry.id,
@@ -174,12 +188,15 @@ export function useCommentLongPress(
             return;
           case "delete":
             Alert.alert(
-              "Delete comment?",
-              "This comment will be permanently deleted. Replies in the thread will also be removed. This cannot be undone.",
+              t("comment.menu.delete_confirm.title"),
+              t("comment.menu.delete_confirm.message"),
               [
-                { text: "Cancel", style: "cancel" },
                 {
-                  text: "Delete",
+                  text: t("comment.menu.delete_confirm.cancel"),
+                  style: "cancel",
+                },
+                {
+                  text: t("comment.menu.delete_confirm.confirm"),
                   style: "destructive",
                   onPress: () => deleteComment.mutate(entry.id),
                 },
@@ -198,6 +215,9 @@ export function useCommentLongPress(
     toggleReaction,
     deleteComment,
     resolveComment,
+    showActionSheetWithOptions,
+    t,
+    tCommon,
   ]);
 
   return { onLongPress, isPressed };
@@ -209,17 +229,36 @@ function presentReactSheet(args: {
   userId: string | undefined;
   wsSlug: string | null;
   issueId: string;
+  showActionSheetWithOptions: ReturnType<
+    typeof useActionSheet
+  >["showActionSheetWithOptions"];
+  // `useTranslation` cannot be called from this function — it's a plain
+  // helper invoked from inside the outer sheet's completion callback, not
+  // a hook. The caller (`useCommentLongPress`, a real hook) calls
+  // `useTranslation` at its top level and passes `t` / `tCommon` through.
+  t: TFunction;
+  tCommon: TFunction;
   toggle: (emoji: string, existing: Reaction | undefined) => void;
 }) {
-  const { entry, reactions, userId, wsSlug, issueId, toggle } = args;
+  const {
+    entry,
+    reactions,
+    userId,
+    wsSlug,
+    issueId,
+    showActionSheetWithOptions,
+    t,
+    tCommon,
+    toggle,
+  } = args;
   const emojis = QUICK_EMOJIS.slice(0, QUICK_ROW_SIZE);
-  const options = [...emojis, "More reactions…", "Cancel"];
+  const options = [...emojis, t("comment.reaction.more_reactions"), tCommon("cancel")];
   const cancelButtonIndex = options.length - 1;
 
-  ActionSheetIOS.showActionSheetWithOptions(
+  showActionSheetWithOptions(
     { options, cancelButtonIndex },
     (i) => {
-      if (i === cancelButtonIndex) return;
+      if (i === undefined || i === cancelButtonIndex) return;
       if (i === emojis.length) {
         if (!wsSlug) return;
         router.push({

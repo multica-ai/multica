@@ -1,0 +1,50 @@
+{
+  "list": {
+    "header_title": "Usage"
+  },
+  "subtitle": "Token spend and agent activity across this workspace.",
+  "filter": {
+    "all_projects": "All projects"
+  },
+  "kpi": {
+    "cost_label": "Cost · {{days}}D",
+    "tokens_label": "Tokens · {{days}}D",
+    "tokens_hint": "Input {{input}} · Output {{output}}",
+    "run_time_label": "Run time · {{days}}D",
+    "run_time_hint": "Across {{tasks}} tasks",
+    "tasks_label": "Tasks · {{days}}D",
+    "tasks_hint": "{{failed}} failed"
+  },
+  "dim": {
+    "daily": "Daily",
+    "weekly": "Weekly"
+  },
+  "metric": {
+    "cost": "Cost",
+    "tokens": "Tokens",
+    "time": "Time",
+    "tasks": "Tasks"
+  },
+  "leaderboard": {
+    "title": "Leaderboard",
+    "caption": "{{count}} agents",
+    "caption_with_deleted": "{{count}} agents · {{deleted}} deleted",
+    "deleted_agents": "Deleted agents",
+    "sort_tokens": "Tokens",
+    "sort_cost": "Cost",
+    "sort_time": "Time",
+    "sort_tasks": "Tasks"
+  },
+  "empty": {
+    "title": "No usage yet",
+    "body": "Once agents start running tasks here, their token spend and run time will appear in this view."
+  },
+  "error": {
+    "load_prefix": "Failed to load usage data:",
+    "unknown": "Unknown error",
+    "retry": "Retry"
+  },
+  "duration": {
+    "less_than_minute": "<1m"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "agents_placeholder": {
+    "header_title": "Agents",
+    "message": "Agents coming soon."
+  },
+  "pins": {
+    "header_title": "Pinned",
+    "error": {
+      "load_prefix": "Failed to load pins:",
+      "unknown": "unknown error",
+      "retry": "Retry"
+    },
+    "empty": {
+      "message": "No pins yet. Pin an issue or project from its actions menu to surface it here."
+    },
+    "missing": {
+      "item_type": {
+        "issue": "issue",
+        "project": "project"
+      },
+      "a11y": "Unavailable {{itemType}}, tap to unpin",
+      "label": "Unavailable {{itemType}} — tap to unpin"
+    }
+  },
+  "search": {
+    "header_title": "Search",
+    "placeholder": "Search issues and projects",
+    "section": {
+      "recent": "Recent",
+      "projects": "Projects",
+      "issues": "Issues"
+    },
+    "no_results": "No results for “{{query}}”",
+    "empty_prompt": "Type to search issues and projects."
+  },
+  "more_page": {
+    "section_title": "Workspace",
+    "nav": {
+      "pinned": "Pinned",
+      "issues": "Issues",
+      "projects": "Projects",
+      "skills": "Skills",
+      "runtimes": "Runtimes",
+      "usage": "Usage"
+    },
+    "account_settings_a11y": "Account settings",
+    "switch_workspace_a11y": "Switch workspace",
+    "workspace_fallback": "Workspace"
+  },
+  "markdown_toolbar": {
+    "mention_a11y": "Mention someone",
+    "bullet_list_a11y": "Bullet list",
+    "checklist_a11y": "Checklist",
+    "code_block_a11y": "Code block",
+    "quote_a11y": "Quote",
+    "attach_image_a11y": "Attach image",
+    "attach_file_a11y": "Attach file"
+  },
+  "use_file_attach": {
+    "file_too_large_title": "File too large",
+    "file_too_large_message": "Files must be smaller than 100 MB.",
+    "upload_failed_title": "Upload failed",
+    "unknown_error": "Unknown error"
+  }
+}

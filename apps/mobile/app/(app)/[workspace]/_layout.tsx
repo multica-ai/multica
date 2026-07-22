@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import type { ComponentProps } from "react";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { RealtimeProvider } from "@/data/realtime/realtime-provider";
@@ -16,7 +17,6 @@ import { useWorkspacePresencePrefetch } from "@/lib/use-workspace-presence-prefe
 import { ModalCloseButton } from "@/components/ui/modal-close-button";
 import { useNewIssueDraftResetOnWorkspaceChange } from "@/data/stores/new-issue-draft-store";
 import { useNewProjectDraftResetOnWorkspaceChange } from "@/data/stores/new-project-draft-store";
-import { useChatSessionPickerResetOnWorkspaceChange } from "@/data/stores/chat-session-picker-store";
 
 /**
  * Shared Stack.Screen options for every iOS formSheet-presented sheet route.
@@ -104,6 +104,19 @@ export default function WorkspaceLayout() {
   const { data: workspaces, isLoading } = useQuery(workspaceListOptions());
   const setCurrentWorkspace = useWorkspaceStore((s) => s.setCurrentWorkspace);
 
+  // Every namespace referenced by a Stack.Screen header below needs its own
+  // useTranslation() call — this layout owns the static (pre-data-load)
+  // title/headerBackTitle for every pushed route in the workspace navigator.
+  const { t: tIssues } = useTranslation("issues");
+  const { t: tProjects } = useTranslation("projects");
+  const { t: tSettings } = useTranslation("settings");
+  const { t: tRuntimes } = useTranslation("runtimes");
+  const { t: tSkills } = useTranslation("skills");
+  const { t: tUsage } = useTranslation("usage");
+  const { t: tWorkspace } = useTranslation("workspace");
+  const { t: tChat } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
+
   const matched = workspaces?.find((w) => w.slug === slug);
 
   useEffect(() => {
@@ -117,7 +130,6 @@ export default function WorkspaceLayout() {
   // session id, etc.) is invalid in workspace B and must not leak.
   useNewIssueDraftResetOnWorkspaceChange(matched?.id ?? null);
   useNewProjectDraftResetOnWorkspaceChange(matched?.id ?? null);
-  useChatSessionPickerResetOnWorkspaceChange(matched?.id ?? null);
 
   // Wait for the workspaces list before deciding membership — otherwise a
   // valid deep link would briefly redirect away on cold start.
@@ -135,21 +147,21 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="issue/[id]"
           options={{
-            title: "Issue",
-            headerBackTitle: "Back",
+            title: tIssues("detail.header_default_title"),
+            headerBackTitle: tIssues("detail.header_back_title"),
           }}
         />
         <Stack.Screen
           name="project/[id]"
           options={{
-            title: "Project",
-            headerBackTitle: "Back",
+            title: tProjects("detail.header_default_title"),
+            headerBackTitle: tProjects("detail.header_back_title"),
           }}
         />
         <Stack.Screen
           name="project/[id]/edit"
           options={{
-            title: "Edit Project",
+            title: tProjects("edit.header_title"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -157,7 +169,7 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="issue/[id]/edit"
           options={{
-            title: "Edit Issue",
+            title: tIssues("edit.header_title"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -165,7 +177,7 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="project/new"
           options={{
-            title: "New Project",
+            title: tProjects("new_project.header_title"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -195,7 +207,7 @@ export default function WorkspaceLayout() {
           options={{
             ...SHEET_OPTIONS,
             headerShown: true,
-            title: "Assignee",
+            title: tIssues("picker.assignee.title"),
           }}
         />
         <Stack.Screen
@@ -207,7 +219,7 @@ export default function WorkspaceLayout() {
           options={{
             ...SHEET_OPTIONS,
             headerShown: true,
-            title: "Mention",
+            title: tChat("mention_picker.title"),
           }}
         />
         <Stack.Screen
@@ -260,7 +272,7 @@ export default function WorkspaceLayout() {
           options={{
             ...SHEET_OPTIONS,
             headerShown: true,
-            title: "Assignee",
+            title: tIssues("new_issue.picker.assignee.title"),
           }}
         />
         <Stack.Screen
@@ -284,43 +296,120 @@ export default function WorkspaceLayout() {
         {/* Shared filter sheet for My Issues and the workspace Issues page —
             chooses the right view-store via `?scope=my|all` URL param. */}
         <Stack.Screen name="issues-filter" options={SHEET_OPTIONS} />
-        {/* Chat session-switch sheet. */}
-        <Stack.Screen name="chat-sessions" options={SHEET_OPTIONS} />
+        <Stack.Screen
+          name="chat/[id]"
+          options={{
+            title: tChat("title_button.default_agent_name"),
+            headerBackTitle: tCommon("nav.back"),
+            headerTitleAlign: "left",
+          }}
+        />
+        <Stack.Screen
+          name="chat/new"
+          options={{
+            title: tChat("title_button.default_agent_name"),
+            headerBackTitle: tCommon("nav.back"),
+            headerTitleAlign: "left",
+          }}
+        />
         {/* Workspace switcher — reached from the More popover's collapsed
             WorkspaceCard. Two-step (pick → iOS Alert confirm → switch). */}
         <Stack.Screen name="switch-workspace" options={SHEET_OPTIONS} />
         <Stack.Screen
           name="more/issues"
-          options={{ title: "Issues", headerBackTitle: "Back" }}
+          options={{
+            title: tIssues("all_issues.header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
         />
         <Stack.Screen
           name="more/projects"
-          options={{ title: "Projects", headerBackTitle: "Back" }}
+          options={{
+            title: tProjects("list.header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
         />
         <Stack.Screen
           name="more/agents"
-          options={{ title: "Agents", headerBackTitle: "Back" }}
+          options={{
+            title: tWorkspace("agents_placeholder.header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
         />
         <Stack.Screen
           name="more/pins"
-          options={{ title: "Pinned", headerBackTitle: "Back" }}
+          options={{
+            title: tWorkspace("pins.header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
+        />
+        <Stack.Screen
+          name="more/skills"
+          options={{
+            title: tSkills("list.header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
+        />
+        <Stack.Screen
+          name="more/skills/[id]"
+          options={{
+            title: tSkills("detail.header_default_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
+        />
+        <Stack.Screen
+          name="more/skills/[id]/file/[...path]"
+          options={{
+            title: tSkills("file.header_default_title"),
+            headerBackTitle: tSkills("detail.header_default_title"),
+          }}
+        />
+        <Stack.Screen
+          name="more/runtimes"
+          options={{
+            title: tRuntimes("list.header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
+        />
+        <Stack.Screen
+          name="more/usage"
+          options={{
+            title: tUsage("list.header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
+        />
+        <Stack.Screen
+          name="more/runtimes/[id]"
+          options={{
+            title: tRuntimes("detail.header_default_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
         />
         <Stack.Screen
           name="more/settings"
-          options={{ title: "Settings", headerBackTitle: "Back" }}
+          options={{
+            title: tSettings("header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
         />
         <Stack.Screen
           name="more/settings/profile"
-          options={{ title: "Profile", headerBackTitle: "Settings" }}
+          options={{
+            title: tSettings("profile.header_title"),
+            headerBackTitle: tSettings("header_title"),
+          }}
         />
         <Stack.Screen
           name="more/settings/notifications"
-          options={{ title: "Notifications", headerBackTitle: "Settings" }}
+          options={{
+            title: tSettings("account.notifications_row.title"),
+            headerBackTitle: tSettings("header_title"),
+          }}
         />
         <Stack.Screen
           name="new-issue"
           options={{
-            title: "New Issue",
+            title: tIssues("new_issue.header_title"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -328,7 +417,7 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="search"
           options={{
-            title: "Search",
+            title: tWorkspace("search.header_title"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}

@@ -5,6 +5,7 @@
  */
 import { useLocalSearchParams, router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { ProjectLeadPickerBody } from "@/components/project/pickers/project-lead-picker-body";
 import { projectDetailOptions } from "@/data/queries/projects";
 import { useUpdateProject } from "@/data/mutations/projects";
@@ -16,7 +17,8 @@ export default function ProjectLeadPickerRoute() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data: project } = useQuery(projectDetailOptions(wsId, id));
   const updateProject = useUpdateProject(id);
-  const query = useNativeSearchBar("Search members or agents", {
+  const { t } = useTranslation("projects");
+  const query = useNativeSearchBar(t("picker.lead.search_placeholder"), {
     autoFocus: true,
   });
 

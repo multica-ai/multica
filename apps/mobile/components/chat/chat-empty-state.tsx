@@ -18,14 +18,9 @@
  * key-by-key swap.
  */
 import { View } from "react-native";
+import { useTranslation } from "react-i18next";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
-
-const STARTER_PROMPTS: { icon: string; text: string }[] = [
-  { icon: "📋", text: "List my open issues by priority" },
-  { icon: "📝", text: "Summarize what I did today" },
-  { icon: "💡", text: "Help me plan what to do next" },
-];
 
 interface Props {
   hasSessions: boolean;
@@ -34,6 +29,14 @@ interface Props {
 }
 
 export function ChatEmptyState({ hasSessions, agentName, onPickPrompt }: Props) {
+  const { t } = useTranslation("chat");
+
+  const STARTER_PROMPTS: { icon: string; text: string }[] = [
+    { icon: "📋", text: t("empty_state.starter_prompts.list_issues") },
+    { icon: "📝", text: t("empty_state.starter_prompts.summarize_today") },
+    { icon: "💡", text: t("empty_state.starter_prompts.plan_next") },
+  ];
+
   // First-time experience: educate before suggesting actions. Starter
   // prompts here would presume the user already knows what chat is for.
   if (!hasSessions) {
@@ -41,19 +44,21 @@ export function ChatEmptyState({ hasSessions, agentName, onPickPrompt }: Props) 
       <View className="flex-1 items-center justify-center px-6 py-8">
         <View className="max-w-xs items-center gap-3">
           <Text className="text-base font-semibold text-foreground text-center">
-            Chat with your agents
+            {t("empty_state.first_time.title")}
           </Text>
           <Text className="text-sm text-muted-foreground text-center">
             <Text className="text-sm text-muted-foreground">
-              ✨ They know your workspace —{" "}
+              {t("empty_state.first_time.subtitle_prefix")}
             </Text>
             <Text className="text-sm font-medium text-foreground">
-              issues, projects, skills
+              {t("empty_state.first_time.subtitle_highlight")}
             </Text>
-            <Text className="text-sm text-muted-foreground">.</Text>
+            <Text className="text-sm text-muted-foreground">
+              {t("empty_state.first_time.subtitle_suffix")}
+            </Text>
           </Text>
           <Text className="text-sm text-muted-foreground text-center">
-            Ask for a summary, plan your day, or hand off a small task.
+            {t("empty_state.first_time.description")}
           </Text>
         </View>
       </View>
@@ -61,7 +66,9 @@ export function ChatEmptyState({ hasSessions, agentName, onPickPrompt }: Props) 
   }
 
   // Returning user: starter prompts are the fastest path back to action.
-  const title = agentName ? `Hi, I'm ${agentName}` : "Welcome back to Multica";
+  const title = agentName
+    ? t("empty_state.returning.title_named", { name: agentName })
+    : t("empty_state.returning.title_default");
   return (
     <View className="flex-1 items-center justify-center px-6 py-8 gap-5">
       <View className="items-center gap-1">
@@ -69,7 +76,7 @@ export function ChatEmptyState({ hasSessions, agentName, onPickPrompt }: Props) 
           {title}
         </Text>
         <Text className="text-sm text-muted-foreground text-center">
-          Try asking
+          {t("empty_state.returning.subtitle")}
         </Text>
       </View>
       <View className="w-full max-w-xs gap-2">

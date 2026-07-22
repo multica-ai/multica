@@ -89,8 +89,27 @@ Start minimal. Add to this list when actually adopted — do NOT pre-list librar
 - **TanStack Query 5** — mobile owns its `QueryClient` with `AppState` focus listener + `NetInfo` online listener.
 - **Zustand** — mobile-local state only.
 - **expo-secure-store** — auth token persistence + theme preference (`light` / `dark` / `system`).
+- **@expo/react-native-action-sheet** — cross-platform action sheet (iOS
+  native-styled sheet + Android Material bottom drawer). Replaces direct
+  `ActionSheetIOS` calls now that mobile targets both platforms; every
+  call site uses the `useActionSheet()` hook instead of the static
+  `ActionSheetIOS.showActionSheetWithOptions` API.
+- **i18next** + **react-i18next** + **expo-localization** — mobile-owned
+  i18n runtime (independent from `packages/core/i18n` /
+  `packages/views/locales`). Two languages so far: `en`, `zh-Hans`.
+  Resources live in `apps/mobile/locales/<lang>/<namespace>.json`;
+  device-locale detection + persisted override live in
+  `apps/mobile/lib/i18n/`. Chinese copy follows the glossary in
+  `apps/docs/content/docs/developers/conventions.mdx`.
 
 When upgrading any of these, update this list.
+
+### Pluralization
+
+Two conventions coexist for count-dependent strings; both are correct, pick either:
+
+- **i18next `_one`/`_other` suffixes** (e.g. `chat.json`'s `timeline.steps_one`/`steps_other`) — the default choice for new keys. zh-Hans still needs a `_one` variant even though `Intl.PluralRules` has no "one" category for Chinese and it never renders — the parity test (`lib/i18n/parity.test.ts`) checks key sets match across locales, not that every key is reachable at runtime.
+- **Manual key-name branching** (e.g. `comment-card.tsx`'s `resolved_bar_message`/`resolved_bar_messages`) — an older pattern from before the suffix convention was adopted. Fine to leave as-is; no need to convert on sight, but prefer the suffix convention for anything new.
 
 ## UI components & theming
 

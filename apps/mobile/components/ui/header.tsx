@@ -4,7 +4,7 @@
  * plain props instead of `navigation.setOptions` closures.
  *
  *   <Header title="Inbox" right={<HeaderActions />} />
- *   <Header center={<ChatTitleButton ... />} right={<ChatSessionActions ... />} />
+ *   <Header title="Chat" right={<IconButton name="add" ... />} />
  *
  * Self-handles the top safe area. Colors live on RNR tokens
  * (`bg-background`, `text-foreground`, `border-border`) so dark mode flips

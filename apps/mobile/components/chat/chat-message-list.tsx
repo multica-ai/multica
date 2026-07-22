@@ -20,9 +20,9 @@
  *     `AttachmentList` in chat). Inline `![](url)` / `[name](url)` still flow
  *     through the markdown renderer and are de-duped out of the card list.
  *
- * Interaction: long-press inside a bubble fires a native iOS
- * `ActionSheetIOS` (Copy / Select Text / Cancel). While the sheet is on
- * screen the targeted bubble's border highlights. The assistant branch
+ * Interaction: long-press inside a bubble fires a cross-platform action
+ * sheet (Copy / Select Text / Cancel). While the sheet is on screen the
+ * targeted bubble's border highlights. The assistant branch
  * has no border baseline because its bubble has no shell — adding a 2px
  * baseline would shift layout per message. See `useChatMessageLongPress`
  * in `./message-long-press.tsx`.
@@ -44,6 +44,7 @@ import { ActivityIndicator, Pressable, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import type {
   ChatMessage,
   ChatPendingTask,
@@ -384,12 +385,14 @@ function ElapsedCaption({
   variant: "replied" | "failed" | "finished";
   elapsedMs: number;
 }) {
+  const { t } = useTranslation("chat");
+  const time = formatElapsedMs(elapsedMs);
   const label =
     variant === "replied"
-      ? `Replied in ${formatElapsedMs(elapsedMs)}`
+      ? t("message_list.replied_in", { time })
       : variant === "finished"
-        ? `Finished in ${formatElapsedMs(elapsedMs)}`
-        : `Failed after ${formatElapsedMs(elapsedMs)}`;
+        ? t("message_list.finished_in", { time })
+        : t("message_list.failed_after", { time });
   return (
     <Text className="text-xs text-muted-foreground/80 mt-1">{label}</Text>
   );
@@ -408,6 +411,7 @@ function FailureBubble({
   isSelecting: boolean;
   longPress: ReturnType<typeof useChatMessageLongPress>;
 }) {
+  const { t } = useTranslation("chat");
   const hasRawError = rawError.trim().length > 0;
 
   // B6: pass `selectable={isSelecting}` rather than hard-coding
@@ -433,7 +437,7 @@ function FailureBubble({
             <CollapsibleTrigger asChild>
               <View
                 accessibilityRole="button"
-                accessibilityLabel="Show error details"
+                accessibilityLabel={t("message_list.show_error_details_label")}
                 className="mt-1 flex-row items-center gap-1 active:opacity-70"
               >
                 <Ionicons
@@ -442,7 +446,7 @@ function FailureBubble({
                   color="#71717a"
                 />
                 <Text className="text-xs text-muted-foreground">
-                  Show details
+                  {t("message_list.show_details")}
                 </Text>
               </View>
             </CollapsibleTrigger>

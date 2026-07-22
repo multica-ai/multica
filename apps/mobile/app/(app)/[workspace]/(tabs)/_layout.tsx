@@ -1,30 +1,18 @@
 /**
  * Bottom tab bar — JS `<Tabs>` from expo-router (react-navigation under the
- * hood). We tried NativeTabs first but its `canPreventDefault: false`
- * constraint makes "tap More → open something" impossible. JS Tabs
- * supports `listeners.tabPress + e.preventDefault()`, the canonical RN
- * pattern for tab-as-action.
- *
- * The "More" tab is **not a navigation target** — its press opens a
- * DropdownMenu popover anchored above the tab. The popover is rendered
- * by `<MoreTabDropdownAnchor />` as a sibling of `<Tabs>`, NOT as a
- * `tabBarButton` replacement: keeping the real tab button intact means
- * the icon + "More" label render identically to the other three tabs.
- * We just open the dropdown imperatively from `listeners.tabPress` via
- * the exposed `TriggerRef.open()`.
- *
- * The stub (tabs)/more.tsx file still exists only because expo-router
- * requires every Tabs.Screen to have a backing route file — the press
- * is preventDefault'd so we never actually navigate to it.
+ * hood). All four tabs, including More, are plain navigation targets;
+ * More pushes to `(tabs)/more.tsx`, a real page (previously this tab
+ * intercepted tabPress to open a dropdown popover instead — see git
+ * history if you need that shape again).
  *
  * Active / inactive tint colors are derived from the current colour
  * scheme via THEME so dark mode picks contrasting values automatically.
  */
-import { useRef } from "react";
 import { Tabs } from "expo-router";
 import { Image } from "expo-image";
-import { View } from "react-native";
-import type { TriggerRef } from "@rn-primitives/dropdown-menu";
+import { Platform, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
@@ -32,7 +20,6 @@ import {
   useInboxUnreadCount,
   useChatUnreadMessageCount,
 } from "@/lib/unread-counts";
-import { MoreTabDropdownAnchor } from "@/components/nav/more-tab-dropdown";
 
 // Only override backgroundColor — @react-navigation/elements Badge internally
 // sets borderRadius = size/2, height = size, minWidth = size, so a single
@@ -43,9 +30,38 @@ const BADGE_STYLE = {
   backgroundColor: THEME.light.brand,
 };
 
+// SF Symbols (the `sf:` source prefix expo-image resolves) only render on
+// iOS — Android silently shows nothing for that source string. Route to
+// Ionicons (already used elsewhere in this app, e.g. settings.tsx's
+// chevron) on Android instead of losing tab icons there entirely.
+function TabIcon({
+  sfSymbol,
+  ionicon,
+  color,
+  size,
+}: {
+  sfSymbol: string;
+  ionicon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  size: number;
+}) {
+  if (Platform.OS === "ios") {
+    return (
+      <Image
+        source={sfSymbol}
+        tintColor={color}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+  return <Ionicons name={ionicon} size={size} color={color} />;
+}
+
 export default function TabsLayout() {
   const { colorScheme } = useColorScheme();
   const t = THEME[colorScheme];
+  const { t: tInbox } = useTranslation("inbox");
+  const { t: tCommon } = useTranslation("common");
 
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const inboxUnread = useInboxUnreadCount(wsId);
@@ -57,11 +73,6 @@ export default function TabsLayout() {
     inboxUnread > 0 ? (inboxUnread > 99 ? "99+" : String(inboxUnread)) : undefined;
   const chatBadge =
     chatUnread > 0 ? (chatUnread > 99 ? "99+" : String(chatUnread)) : undefined;
-
-  // Imperative handle into the More tab's dropdown — listeners.tabPress
-  // calls .open(); the @rn-primitives Trigger measures itself inside
-  // open() so the popover anchors to MoreTabDropdownAnchor's rect.
-  const moreTriggerRef = useRef<TriggerRef>(null);
 
   return (
     <View style={{ flex: 1 }}>
@@ -77,14 +88,15 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="inbox"
           options={{
-            title: "Inbox",
+            title: tInbox("tab_title"),
             tabBarBadge: inboxBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:tray.fill" : "sf:tray"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <TabIcon
+                sfSymbol={focused ? "sf:tray.fill" : "sf:tray"}
+                ionicon={focused ? "file-tray" : "file-tray-outline"}
+                color={color}
+                size={size}
               />
             ),
           }}
@@ -92,12 +104,13 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="my-issues"
           options={{
-            title: "My Issues",
+            title: tCommon("tabs.my_issues"),
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:checklist" : "sf:checklist.unchecked"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <TabIcon
+                sfSymbol={focused ? "sf:checklist" : "sf:checklist.unchecked"}
+                ionicon={focused ? "checkbox" : "checkbox-outline"}
+                color={color}
+                size={size}
               />
             ),
           }}
@@ -105,14 +118,15 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="chat"
           options={{
-            title: "Chat",
+            title: tCommon("tabs.chat"),
             tabBarBadge: chatBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:bubble.left.fill" : "sf:bubble.left"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <TabIcon
+                sfSymbol={focused ? "sf:bubble.left.fill" : "sf:bubble.left"}
+                ionicon={focused ? "chatbubble" : "chatbubble-outline"}
+                color={color}
+                size={size}
               />
             ),
           }}
@@ -120,29 +134,18 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="more"
           options={{
-            title: "More",
+            title: tCommon("tabs.more"),
             tabBarIcon: ({ color, size }) => (
-              <Image
-                source="sf:ellipsis"
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <TabIcon
+                sfSymbol="sf:ellipsis"
+                ionicon="ellipsis-horizontal"
+                color={color}
+                size={size}
               />
             ),
           }}
-          listeners={() => ({
-            tabPress: (e) => {
-              // Don't navigate to the (stub) /more screen — open the
-              // dropdown popover instead. The trigger is invisible and
-              // mounted in MoreTabDropdownAnchor below; ref.open() also
-              // measures its rect so the popover anchors correctly.
-              e.preventDefault();
-              moreTriggerRef.current?.open();
-            },
-          })}
         />
       </Tabs>
-
-      <MoreTabDropdownAnchor triggerRef={moreTriggerRef} />
     </View>
   );
 }

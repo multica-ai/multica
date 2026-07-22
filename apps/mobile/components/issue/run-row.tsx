@@ -11,7 +11,9 @@
  * ok-plan-linked-taco.md.
  */
 import { Alert, Pressable, View } from "react-native";
-import type { AgentTask, TaskFailureReason } from "@multica/core/types";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import type { AgentTask } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { useCancelTask } from "@/data/mutations/issues";
@@ -30,9 +32,10 @@ const ACTIVE_STATUSES: readonly AgentTask["status"][] = [
 ];
 
 export function RunRow({ task, issueId }: Props) {
+  const { t } = useTranslation("issues");
   const { getName } = useActorLookup();
   const isActive = ACTIVE_STATUSES.includes(task.status);
-  const summary = task.trigger_summary?.trim() || fallbackSummary(task);
+  const summary = task.trigger_summary?.trim() || fallbackSummary(task, t);
   // Past tasks use completed_at when present (server fills it for terminal
   // statuses); active tasks fall back to created_at so the user sees how
   // long it's been waiting.
@@ -62,12 +65,18 @@ export function RunRow({ task, issueId }: Props) {
 }
 
 function StatusBadge({ task }: { task: AgentTask }) {
-  const label = STATUS_LABEL[task.status] ?? task.status;
+  const { t } = useTranslation("issues");
+  const label = t(`activity.run_row.status.${task.status}`, {
+    defaultValue: task.status,
+  });
   const cls = STATUS_CLASS[task.status] ?? "text-muted-foreground";
   // For failed tasks, surface the failure_reason inline so users don't have
   // to drill in. Reasons are coarse enums; missing/empty stays as just "Failed".
   if (task.status === "failed" && task.failure_reason) {
-    const reasonLabel = FAILURE_REASON_LABEL[task.failure_reason];
+    const reasonLabel = t(
+      `activity.run_row.failure_reason.${task.failure_reason}`,
+      { defaultValue: "" },
+    );
     if (reasonLabel) {
       return (
         <Text className={`text-xs ${cls}`}>
@@ -86,16 +95,20 @@ function CancelButton({
   taskId: string;
   issueId: string;
 }) {
+  const { t } = useTranslation("issues");
   const mutation = useCancelTask(issueId);
 
   const onPress = () => {
     Alert.alert(
-      "Cancel task?",
-      "The agent will stop after the current step.",
+      t("activity.run_row.cancel_confirm.title"),
+      t("activity.run_row.cancel_confirm.message"),
       [
-        { text: "Keep running", style: "cancel" },
         {
-          text: "Cancel task",
+          text: t("activity.run_row.cancel_confirm.keep_running"),
+          style: "cancel",
+        },
+        {
+          text: t("activity.run_row.cancel_confirm.confirm"),
           style: "destructive",
           onPress: () => mutation.mutate(taskId),
         },
@@ -109,36 +122,28 @@ function CancelButton({
       disabled={mutation.isPending}
       className="px-3 py-1.5 rounded-md bg-secondary active:opacity-70"
     >
-      <Text className="text-xs font-medium text-foreground">Cancel</Text>
+      <Text className="text-xs font-medium text-foreground">
+        {t("activity.run_row.cancel_button")}
+      </Text>
     </Pressable>
   );
 }
 
-function fallbackSummary(task: AgentTask): string {
+function fallbackSummary(task: AgentTask, t: TFunction): string {
   switch (task.kind) {
     case "comment":
-      return "Comment task";
+      return t("activity.run_row.fallback_summary.comment");
     case "autopilot":
-      return "Autopilot run";
+      return t("activity.run_row.fallback_summary.autopilot");
     case "chat":
-      return "Chat task";
+      return t("activity.run_row.fallback_summary.chat");
     case "quick_create":
-      return "Quick create";
+      return t("activity.run_row.fallback_summary.quick_create");
     case "direct":
     default:
-      return "Task";
+      return t("activity.run_row.fallback_summary.default");
   }
 }
-
-const STATUS_LABEL: Record<AgentTask["status"], string> = {
-  queued: "Queued",
-  dispatched: "Starting",
-  waiting_local_directory: "Waiting for directory",
-  running: "Running",
-  completed: "Done",
-  failed: "Failed",
-  cancelled: "Cancelled",
-};
 
 const STATUS_CLASS: Record<AgentTask["status"], string> = {
   queued: "text-muted-foreground",
@@ -148,13 +153,4 @@ const STATUS_CLASS: Record<AgentTask["status"], string> = {
   completed: "text-muted-foreground",
   failed: "text-destructive",
   cancelled: "text-muted-foreground",
-};
-
-const FAILURE_REASON_LABEL: Record<TaskFailureReason, string> = {
-  agent_error: "Agent error",
-  timeout: "Timeout",
-  codex_semantic_inactivity: "Codex inactivity",
-  runtime_offline: "Runtime offline",
-  runtime_recovery: "Runtime recovery",
-  manual: "Manual",
 };

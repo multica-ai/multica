@@ -24,6 +24,7 @@ import { useMemo } from "react";
 import { View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
+import { useTranslation } from "react-i18next";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ interface Props {
 }
 
 export function ProjectRelatedIssues({ projectId }: Props) {
+  const { t } = useTranslation("projects");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { data, isLoading, error, refetch } = useQuery(
@@ -65,11 +67,13 @@ export function ProjectRelatedIssues({ projectId }: Props) {
     return (
       <View className="px-4 py-6 gap-3">
         <Text className="text-sm text-destructive">
-          Failed to load issues:{" "}
-          {error instanceof Error ? error.message : "unknown error"}
+          {t("related_issues.error.load_prefix")}{" "}
+          {error instanceof Error
+            ? error.message
+            : t("related_issues.error.unknown")}
         </Text>
         <Button variant="outline" onPress={() => refetch()}>
-          <Text>Retry</Text>
+          <Text>{t("related_issues.error.retry")}</Text>
         </Button>
       </View>
     );
@@ -78,7 +82,9 @@ export function ProjectRelatedIssues({ projectId }: Props) {
   if ((data?.length ?? 0) === 0) {
     return (
       <View className="px-4 py-6">
-        <Text className="text-sm text-muted-foreground">No issues yet.</Text>
+        <Text className="text-sm text-muted-foreground">
+          {t("related_issues.empty")}
+        </Text>
       </View>
     );
   }

@@ -1,0 +1,72 @@
+{
+  "tab_title": "Inbox",
+  "actions_a11y": "Inbox actions",
+  "error": {
+    "load_prefix": "Failed to load inbox:",
+    "unknown": "unknown error",
+    "retry": "Retry"
+  },
+  "empty": {
+    "title": "Inbox zero",
+    "subtitle": "When someone @mentions you, assigns an issue, or an agent finishes a task, it shows up here."
+  },
+  "menu": {
+    "title": "Inbox",
+    "mark_all_read": "Mark all read",
+    "archive_all_read": "Archive all read",
+    "archive_completed": "Archive completed",
+    "archive_all": "Archive all",
+    "archive_all_confirm_title": "Archive all?",
+    "archive_all_confirm_message": "This archives every inbox item, read or unread. You can still find them via the issue pages."
+  },
+  "swipe": {
+    "archive": "Archive"
+  },
+  "status_label": {
+    "backlog": "Backlog",
+    "todo": "Todo",
+    "in_progress": "In Progress",
+    "in_review": "In Review",
+    "done": "Done",
+    "blocked": "Blocked",
+    "cancelled": "Cancelled"
+  },
+  "priority_label": {
+    "urgent": "Urgent",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+    "none": "No priority"
+  },
+  "type_label": {
+    "issue_assigned": "Assigned",
+    "issue_subscribed": "Subscribed",
+    "unassigned": "Unassigned",
+    "assignee_changed": "Reassigned",
+    "status_changed": "Status changed",
+    "priority_changed": "Priority changed",
+    "start_date_changed": "Start date changed",
+    "due_date_changed": "Due date changed",
+    "new_comment": "New comment",
+    "mentioned": "Mentioned",
+    "review_requested": "Review requested",
+    "task_completed": "Task completed",
+    "task_failed": "Task failed",
+    "agent_blocked": "Agent blocked",
+    "agent_completed": "Agent completed",
+    "reaction_added": "Reaction added",
+    "quick_create_done": "Quick-create done",
+    "quick_create_failed": "Quick-create failed"
+  },
+  "detail": {
+    "set_status_to": "Set status to",
+    "set_priority_to": "Set priority to",
+    "assigned_to": "Assigned to {{name}}",
+    "removed_assignee": "Removed assignee",
+    "set_due_date_to": "Set due date to {{date}}",
+    "removed_due_date": "Removed due date",
+    "reacted_with": "Reacted with {{emoji}}",
+    "created_with_agent": "Created with agent: {{identifier}}",
+    "failed_with_detail": "Failed: {{detail}}"
+  }
+}

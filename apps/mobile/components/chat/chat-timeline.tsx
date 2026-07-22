@@ -22,6 +22,7 @@
  */
 import { View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import type { TaskMessagePayload } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import {
@@ -38,23 +39,23 @@ interface Props {
 }
 
 export function ChatTimeline({ items, isStreaming = false }: Props) {
+  const { t } = useTranslation("chat");
   const processSteps = items.filter((i) => i.type !== "text");
   if (processSteps.length === 0) return null;
+  const stepsLabel = t("timeline.steps", { count: processSteps.length });
 
   return (
     <Collapsible defaultOpen={isStreaming}>
       <CollapsibleTrigger asChild>
         <View
           accessibilityRole="button"
-          accessibilityLabel={`${processSteps.length} step${processSteps.length === 1 ? "" : "s"}`}
+          accessibilityLabel={stepsLabel}
           className="flex-row items-center gap-1 active:opacity-70"
         >
           <Ionicons name="chevron-forward" size={12} color="#71717a" />
           {isStreaming ? <StreamingDot /> : null}
           <Text className="text-xs text-muted-foreground">
-            {processSteps.length === 1
-              ? "1 step"
-              : `${processSteps.length} steps`}
+            {stepsLabel}
           </Text>
         </View>
       </CollapsibleTrigger>
@@ -123,6 +124,7 @@ function ThinkingRow({ item }: { item: TaskMessagePayload }) {
 }
 
 function ToolCallRow({ item }: { item: TaskMessagePayload }) {
+  const { t } = useTranslation("chat");
   const summary = getToolSummary(item);
   const hasInput = !!item.input && Object.keys(item.input).length > 0;
   // If the call has no expandable input, render a non-interactive row —
@@ -132,7 +134,7 @@ function ToolCallRow({ item }: { item: TaskMessagePayload }) {
       <View className="py-0.5 flex-row items-center gap-1.5">
         <View style={{ width: 12 }} />
         <Text className="text-xs font-medium text-foreground">
-          {item.tool ?? "tool"}
+          {item.tool ?? t("timeline.tool_fallback")}
         </Text>
         {summary ? (
           <Text
@@ -151,7 +153,7 @@ function ToolCallRow({ item }: { item: TaskMessagePayload }) {
         <View className="py-0.5 flex-row items-center gap-1.5 active:opacity-70">
           <Ionicons name="chevron-forward" size={12} color="#71717a" />
           <Text className="text-xs font-medium text-foreground">
-            {item.tool ?? "tool"}
+            {item.tool ?? t("timeline.tool_fallback")}
           </Text>
           {summary ? (
             <Text

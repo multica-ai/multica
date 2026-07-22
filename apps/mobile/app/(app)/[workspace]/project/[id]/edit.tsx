@@ -18,6 +18,7 @@ import {
 } from "react-native";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Text } from "@/components/ui/text";
 import { AutosizeTextArea } from "@/components/ui/autosize-textarea";
 import {
@@ -33,6 +34,8 @@ export default function EditProject() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const detail = useQuery(projectDetailOptions(wsId, id));
   const update = useUpdateProject(id);
+  const { t } = useTranslation("projects");
+  const { t: tCommon } = useTranslation("common");
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -68,18 +71,18 @@ export default function EditProject() {
       return;
     }
     Alert.alert(
-      "Discard changes?",
-      "Your edits to this project will be lost.",
+      t("edit.discard_confirm.title"),
+      t("edit.discard_confirm.message"),
       [
-        { text: "Keep editing", style: "cancel" },
+        { text: t("edit.discard_confirm.keep_editing"), style: "cancel" },
         {
-          text: "Discard",
+          text: t("edit.discard_confirm.discard"),
           style: "destructive",
           onPress: () => router.back(),
         },
       ],
     );
-  }, [dirty]);
+  }, [dirty, t]);
 
   const onSave = useCallback(() => {
     if (!canSave) return;
@@ -92,20 +95,20 @@ export default function EditProject() {
       onSuccess: () => router.back(),
       onError: (err) => {
         Alert.alert(
-          "Failed to save",
-          err instanceof Error ? err.message : "Unknown error",
+          t("edit.save_error.title"),
+          err instanceof Error ? err.message : t("edit.save_error.unknown"),
         );
       },
     });
-  }, [canSave, title, description, icon, update]);
+  }, [canSave, title, description, icon, update, t]);
 
   const headerLeft = useCallback(() => {
     return (
       <Pressable onPress={onCancel} className="px-1 py-1">
-        <Text className="text-base text-brand">Cancel</Text>
+        <Text className="text-base text-brand">{tCommon("cancel")}</Text>
       </Pressable>
     );
-  }, [onCancel]);
+  }, [onCancel, tCommon]);
 
   const headerRight = useCallback(() => {
     return (
@@ -115,11 +118,11 @@ export default function EditProject() {
         className={canSave ? "px-1 py-1" : "px-1 py-1 opacity-40"}
       >
         <Text className="text-base text-brand font-semibold">
-          {update.isPending ? "Saving…" : "Save"}
+          {update.isPending ? t("edit.saving") : tCommon("save")}
         </Text>
       </Pressable>
     );
-  }, [canSave, onSave, update.isPending]);
+  }, [canSave, onSave, update.isPending, t, tCommon]);
 
   return (
     <>
@@ -134,10 +137,12 @@ export default function EditProject() {
           keyboardShouldPersistTaps="handled"
         >
           {!detail.data ? (
-            <Text className="text-sm text-muted-foreground">Loading…</Text>
+            <Text className="text-sm text-muted-foreground">
+              {t("edit.loading")}
+            </Text>
           ) : (
             <>
-              <Field label="Icon (emoji)">
+              <Field label={t("edit.icon_field.label")}>
                 <TextInput
                   value={icon}
                   onChangeText={(v) => {
@@ -153,11 +158,11 @@ export default function EditProject() {
                 />
               </Field>
 
-              <Field label="Title">
+              <Field label={t("edit.title_field.label")}>
                 <TextInput
                   value={title}
                   onChangeText={setTitle}
-                  placeholder="Project title"
+                  placeholder={t("edit.title_field.placeholder")}
                   placeholderTextColor={MOBILE_PLACEHOLDER_COLOR}
                   className="text-base text-foreground bg-secondary/50 rounded-md px-3 py-2"
                   autoFocus={!detail.data?.title}
@@ -165,11 +170,11 @@ export default function EditProject() {
                 />
               </Field>
 
-              <Field label="Description">
+              <Field label={t("edit.description_field.label")}>
                 <AutosizeTextArea
                   value={description}
                   onChangeText={setDescription}
-                  placeholder="What is this project about?"
+                  placeholder={t("edit.description_field.placeholder")}
                   className="bg-secondary/50 rounded-md px-3 py-2"
                   minHeight={MIN_BODY_INPUT_HEIGHT_PX}
                 />

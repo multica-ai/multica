@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { NavRow, SectionGroup } from "@/components/ui/section-group";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -30,13 +31,8 @@ import {
   type ThemePreference,
 } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
-import { cn } from "@/lib/utils";
-
-const THEME_OPTIONS: Array<{ value: ThemePreference; label: string }> = [
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-  { value: "system", label: "System" },
-];
+import { useTranslation } from "react-i18next";
+import { useLocale, type LanguagePreference } from "@/lib/i18n/use-locale";
 
 function initialsOf(name: string | undefined): string {
   if (!name) return "?";
@@ -59,6 +55,23 @@ export default function SettingsPage() {
   const { preference, setPreference, colorScheme } = useColorScheme();
   const mutedFg = THEME[colorScheme].mutedForeground;
 
+  const { t } = useTranslation("settings");
+  const { t: tCommon } = useTranslation("common");
+  const { preference: langPreference, setPreference: setLangPreference } =
+    useLocale();
+
+  const themeOptions: Array<{ value: ThemePreference; label: string }> = [
+    { value: "light", label: t("appearance.theme.light") },
+    { value: "dark", label: t("appearance.theme.dark") },
+    { value: "system", label: t("appearance.theme.system") },
+  ];
+
+  const languageOptions: Array<{ value: LanguagePreference; label: string }> = [
+    { value: "en", label: t("language.options.english") },
+    { value: "zh-Hans", label: t("language.options.chinese") },
+    { value: "system", label: t("language.options.system") },
+  ];
+
   const onSwitch = async (ws: Workspace) => {
     if (ws.slug === currentSlug) return;
     await setCurrentWorkspace(ws.id, ws.slug);
@@ -67,12 +80,12 @@ export default function SettingsPage() {
 
   const onSignOut = () => {
     Alert.alert(
-      "Sign out",
-      "You'll need to sign in again to use Multica on this device.",
+      tCommon("sign_out"),
+      t("sign_out_message"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: tCommon("cancel"), style: "cancel" },
         {
-          text: "Sign out",
+          text: tCommon("sign_out"),
           style: "destructive",
           onPress: async () => {
             await clearWorkspace();
@@ -92,12 +105,12 @@ export default function SettingsPage() {
       className="flex-1 bg-background"
       contentContainerClassName="px-4 py-4 gap-6"
     >
-      <SectionGroup title="Account">
+      <SectionGroup title={t("account.title")}>
         <NavRow
           onPress={goProfile}
           chevronColor={mutedFg}
           leading={
-            <Avatar alt={user?.name ?? "User avatar"} className="size-10">
+            <Avatar alt={user?.name ?? t("account.user_avatar_alt")} className="size-10">
               {user?.avatar_url ? (
                 <AvatarImage source={{ uri: user.avatar_url }} />
               ) : null}
@@ -115,12 +128,12 @@ export default function SettingsPage() {
         <NavRow
           onPress={goNotifications}
           chevronColor={mutedFg}
-          title="Notifications"
-          subtitle="Inbox and system alerts"
+          title={t("account.notifications_row.title")}
+          subtitle={t("account.notifications_row.subtitle")}
         />
       </SectionGroup>
 
-      <SectionGroup title="Workspaces">
+      <SectionGroup title={t("workspaces.title")}>
         {isLoading ? (
           <View className="py-4 items-center">
             <ActivityIndicator />
@@ -128,7 +141,7 @@ export default function SettingsPage() {
         ) : error ? (
           <View className="p-4">
             <Text className="text-sm text-destructive">
-              Failed to load workspaces
+              {t("workspaces.error")}
             </Text>
           </View>
         ) : (
@@ -151,7 +164,7 @@ export default function SettingsPage() {
         )}
       </SectionGroup>
 
-      <SectionGroup title="Appearance">
+      <SectionGroup title={t("appearance.title")}>
         {/* Two converging entry points by design, NOT a double-fire:
               - Tap on small radio circle  → RadioGroupItem (Pressable, inner) consumes → onValueChange fires
               - Tap on text / row padding  → outer Pressable.onPress fires
@@ -164,8 +177,8 @@ export default function SettingsPage() {
           onValueChange={(v) => setPreference(v as ThemePreference)}
           className="gap-0"
         >
-          {THEME_OPTIONS.map((opt, idx) => {
-            const isLast = idx === THEME_OPTIONS.length - 1;
+          {themeOptions.map((opt, idx) => {
+            const isLast = idx === themeOptions.length - 1;
             return (
               <View key={opt.value}>
                 <Pressable
@@ -184,65 +197,38 @@ export default function SettingsPage() {
         </RadioGroup>
       </SectionGroup>
 
+      <SectionGroup title={t("language.title")}>
+        <RadioGroup
+          value={langPreference}
+          onValueChange={(v) => setLangPreference(v as LanguagePreference)}
+          className="gap-0"
+        >
+          {languageOptions.map((opt, idx) => {
+            const isLast = idx === languageOptions.length - 1;
+            return (
+              <View key={opt.value}>
+                <Pressable
+                  onPress={() => setLangPreference(opt.value)}
+                  className="flex-row items-center px-4 py-3.5 active:bg-secondary gap-3"
+                >
+                  <RadioGroupItem value={opt.value} />
+                  <Text className="flex-1 text-base font-medium text-foreground">
+                    {opt.label}
+                  </Text>
+                </Pressable>
+                {!isLast ? <Separator /> : null}
+              </View>
+            );
+          })}
+        </RadioGroup>
+      </SectionGroup>
+
       <View className="pt-2">
         <Button variant="destructive" onPress={onSignOut}>
-          <Text>Sign out</Text>
+          <Text>{tCommon("sign_out")}</Text>
         </Button>
       </View>
     </ScrollView>
-  );
-}
-
-function NavRow({
-  onPress,
-  leading,
-  title,
-  subtitle,
-  chevronColor,
-}: {
-  onPress: () => void;
-  leading?: React.ReactNode;
-  title: string;
-  subtitle?: string;
-  chevronColor: string;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className={cn(
-        "flex-row items-center px-4 py-3.5 active:bg-secondary gap-3",
-      )}
-    >
-      {leading}
-      <View className="flex-1">
-        <Text className="text-base font-medium text-foreground">{title}</Text>
-        {subtitle ? (
-          <Text className="text-sm text-muted-foreground mt-0.5">
-            {subtitle}
-          </Text>
-        ) : null}
-      </View>
-      <Ionicons name="chevron-forward" size={18} color={chevronColor} />
-    </Pressable>
-  );
-}
-
-function SectionGroup({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <View className="gap-2">
-      <Text className="text-xs uppercase tracking-wider text-muted-foreground px-1">
-        {title}
-      </Text>
-      <View className="rounded-md border border-border bg-card overflow-hidden">
-        {children}
-      </View>
-    </View>
   );
 }
 

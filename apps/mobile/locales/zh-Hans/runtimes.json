@@ -1,0 +1,46 @@
+{
+  "list": {
+    "header_title": "运行时",
+    "error": {
+      "load_prefix": "加载运行时失败：",
+      "unknown": "未知错误",
+      "retry": "重试"
+    },
+    "empty": {
+      "title": "还没有运行时",
+      "message": "在桌面端连接的运行时会显示在这里。"
+    }
+  },
+  "health": {
+    "online": { "label": "在线" },
+    "recently_lost": { "label": "最近失联" },
+    "offline": { "label": "离线" },
+    "about_to_gc": { "label": "即将清理" }
+  },
+  "detail": {
+    "header_default_title": "运行时",
+    "error": {
+      "load_prefix": "加载运行时失败：",
+      "unknown": "未知错误",
+      "retry": "重试"
+    },
+    "owner_label": "所有者",
+    "mode_label": "模式",
+    "mode": {
+      "local": "本地",
+      "cloud": "云端"
+    },
+    "visibility_label": "可见性",
+    "visibility": {
+      "private": "私有",
+      "public": "公开"
+    },
+    "device_label": "设备",
+    "created_label": "创建时间",
+    "updated_label": "更新时间",
+    "cli_version_label": "CLI 版本",
+    "update_available": "有新版本可用（{{version}}）",
+    "agents_title": "运行在此运行时上的智能体",
+    "agents_empty": "还没有智能体配置在此运行时上"
+  }
+}
