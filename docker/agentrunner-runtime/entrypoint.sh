@@ -65,5 +65,16 @@ DEVICE_NAME="agentrunner-${WORKSPACE_SLUG}"
 # ── Provision agents once daemon registers (waits in background) ──────────────
 /usr/local/bin/agentfarm-bootstrap.sh &
 
+# ── Seed ~/.agents/skills from ai-enhancement-hub ────────────────────────────
+echo "agentrunner: seeding ai-enhancement-hub skills..."
+if [ ! -d "${HOME}/ai-enhancement-hub" ]; then
+  git clone --depth=1 https://github.com/g2crowd/ai-enhancement-hub "${HOME}/ai-enhancement-hub"
+else
+  git -C "${HOME}/ai-enhancement-hub" pull --ff-only
+fi
+mkdir -p "${HOME}/.agents/skills"
+cp -r "${HOME}/ai-enhancement-hub/skills/." "${HOME}/.agents/skills/"
+rm -rf "${HOME}/ai-enhancement-hub"
+
 # ── Run daemon in foreground ──────────────────────────────────────────────────
 exec multica daemon start --foreground --device-name "${DEVICE_NAME}"
