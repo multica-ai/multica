@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, ScrollText } from "lucide-react";
+import { ScrollText } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -19,6 +19,7 @@ import {
 import type { AgentTask } from "@multica/core/types/agent";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
+import { ExecutionLogDialog } from "./execution-log-dialog";
 import { buildTimeline, type TimelineItem } from "./build-timeline";
 
 interface TranscriptButtonProps {
@@ -26,11 +27,11 @@ interface TranscriptButtonProps {
   agentName: string;
   /**
    * Pre-loaded timeline. When provided the button skips the fetch and opens
-   * the dialog immediately — used by surfaces that already own an accumulating
-   * timeline. Omit for terminal tasks; the button will fetch via
-   * `api.listTaskMessages` on the first click and cache the result. Omit for
-   * live tasks too: the button then subscribes to the shared task-messages
-   * cache so the dialog keeps growing as new events arrive.
+   * AgentTranscriptDialog immediately — used by surfaces that already own an
+   * accumulating timeline. Omit for terminal tasks; the button opens
+   * ExecutionLogDialog, which fetches its own paginated, virtualized pages.
+   * Omit for live tasks too: the button then subscribes to the shared
+   * task-messages cache so the dialog keeps growing as new events arrive.
    */
   items?: TimelineItem[];
   isLive?: boolean;
@@ -50,12 +51,14 @@ interface TranscriptButtonProps {
  * just drops it in.
  *
  * Three data modes:
- *  - Provided items: parent owns the timeline, we just render it.
+ *  - Provided items: parent owns the timeline, we just render it via
+ *    AgentTranscriptDialog.
  *  - Live cache: `isLive` with no provided items and a persisted task id —
  *    subscribe to the shared `["task-messages", taskId]` cache (seeded by the
  *    WS `task:message` stream) so the open dialog keeps growing in real time,
  *    and force a seq-merged backfill on open to heal any WS reconnect gap.
- *  - Lazy: terminal tasks fetch once on first click and cache locally.
+ *  - Terminal: past runs open ExecutionLogDialog, which fetches its own
+ *    bounded, virtualized pages so a long Run never freezes the browser.
  */
 export function TranscriptButton({
   task,
@@ -67,8 +70,6 @@ export function TranscriptButton({
   headerSlot,
 }: TranscriptButtonProps) {
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [loadedItems, setLoadedItems] = useState<TimelineItem[] | null>(null);
 
   // Live cache mode: the running task feeds the shared task-messages cache, so
   // we render straight off that cache instead of a one-shot local snapshot.
@@ -77,45 +78,24 @@ export function TranscriptButton({
 
   // Latch the live path for the duration of an open session. The parent flips
   // `isLive` to false the moment the task finishes; without the latch the
-  // dialog would drop to empty `loadedItems` mid-view. Staying on the cache
-  // path keeps every delivered seq on screen and lets the dialog take a final
+  // dialog would drop off the live cache mid-view. Staying on the cache path
+  // keeps every delivered seq on screen and lets the dialog take a final
   // authoritative backfill on the running→terminal transition.
   const [liveSession, setLiveSession] = useState(false);
   useEffect(() => {
     if (!open) setLiveSession(false);
   }, [open]);
 
-  // Live mode renders from the cache; lazy/provided modes from local state.
-  const items = providedItems ?? loadedItems ?? [];
-
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (liveCacheMode) {
-        setLiveSession(true);
-        setOpen(true);
-        return;
-      }
-      if (providedItems !== undefined || loadedItems !== null) {
-        setOpen(true);
-        return;
-      }
-      setLoading(true);
-      api
-        .listTaskMessages(task.id)
-        .then((msgs) => {
-          setLoadedItems(buildTimeline(msgs));
-          setOpen(true);
-        })
-        .catch((err) => {
-          console.error(err);
-          setLoadedItems([]);
-          setOpen(true);
-        })
-        .finally(() => setLoading(false));
+      // Live path latches onto the shared cache; every other path (provided
+      // items or a terminal run) just opens — the dialog owns its own fetch.
+      if (liveCacheMode) setLiveSession(true);
+      setOpen(true);
     },
-    [liveCacheMode, providedItems, loadedItems, task.id],
+    [liveCacheMode],
   );
 
   useEffect(() => {
@@ -135,20 +115,15 @@ export function TranscriptButton({
     <>
       <Tooltip>
         <TooltipTrigger
-          render={<button type="button" />}
+          render={<button type="button" data-testid="transcript-button" />}
           onClick={handleClick}
-          disabled={loading}
           aria-label={title}
           className={cn(
             "flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50",
             className,
           )}
         >
-          {loading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <ScrollText className="h-3.5 w-3.5" />
-          )}
+          <ScrollText className="h-3.5 w-3.5" />
         </TooltipTrigger>
         <TooltipContent>{title}</TooltipContent>
       </Tooltip>
@@ -162,14 +137,22 @@ export function TranscriptButton({
             onOpenChange={setOpen}
             headerSlot={headerSlot}
           />
-        ) : (
+        ) : providedItems !== undefined ? (
           <AgentTranscriptDialog
             open={open}
             onOpenChange={setOpen}
             task={task}
-            items={items}
+            items={providedItems}
             agentName={agentName}
             isLive={isLive}
+            headerSlot={headerSlot}
+          />
+        ) : (
+          <ExecutionLogDialog
+            open={open}
+            onOpenChange={setOpen}
+            task={task}
+            agentName={agentName}
             headerSlot={headerSlot}
           />
         ))}

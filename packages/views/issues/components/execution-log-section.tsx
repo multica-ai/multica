@@ -145,6 +145,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
               )}
               <button
                 type="button"
+                data-testid="show-past-runs"
                 onClick={() => setShowPast(!showPast)}
                 className="flex w-full items-center gap-1 rounded px-1 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
               >

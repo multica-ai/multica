@@ -54,6 +54,22 @@ vi.mock("./agent-transcript-dialog", () => ({
     ) : null,
 }));
 
+// The terminal (past-run) path now opens the paginated ExecutionLogDialog, which
+// fetches its own pages — the button no longer pre-fetches the whole transcript.
+// Stubbed so these tests can assert routing without pulling in the infinite query.
+vi.mock("./execution-log-dialog", () => ({
+  ExecutionLogDialog: ({
+    open,
+    task,
+  }: {
+    open: boolean;
+    task: { id: string };
+  }) =>
+    open ? (
+      <div role="dialog" data-testid="execution-log-dialog" data-task-id={task.id} />
+    ) : null,
+}));
+
 const LIVE_TASK_ID = "4a2e8d1c-7f9b-4e2a-9c1d-123456789abc";
 
 const baseTask: AgentTask = {
@@ -172,9 +188,8 @@ describe("TranscriptButton", () => {
     );
   });
 
-  it("terminal mode: fetches once on open and does not subscribe to the cache", async () => {
+  it("terminal mode: opens the paginated ExecutionLogDialog and does not pre-fetch", async () => {
     const qc = newClient();
-    listTaskMessages.mockResolvedValue([msg(1, "Bash")]);
 
     renderWith(
       qc,
@@ -185,21 +200,13 @@ describe("TranscriptButton", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "View transcript" }));
-    await waitFor(() =>
-      expect(screen.getAllByTestId("event")).toHaveLength(1),
-    );
 
-    // A later cache write must NOT reach the terminal dialog: it renders a
-    // one-shot local snapshot, never an observer of the shared cache.
-    act(() => {
-      qc.setQueryData(chatKeys.taskMessages(LIVE_TASK_ID), [
-        msg(1, "Bash"),
-        msg(2, "Read"),
-      ]);
-    });
-
-    expect(screen.getAllByTestId("event")).toHaveLength(1);
-    expect(listTaskMessages).toHaveBeenCalledTimes(1);
+    // Past runs now open the self-fetching ExecutionLogDialog. The button no
+    // longer pulls the whole transcript up front (that legacy pre-fetch is what
+    // froze the browser on long runs), and it never renders AgentTranscriptDialog.
+    expect(await screen.findByTestId("execution-log-dialog")).toBeInTheDocument();
+    expect(screen.queryByTestId("transcript-dialog")).not.toBeInTheDocument();
+    expect(listTaskMessages).not.toHaveBeenCalled();
   });
 
   it("running→terminal: keeps the dialog populated and takes a final backfill", async () => {
