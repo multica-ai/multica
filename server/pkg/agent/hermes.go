@@ -2130,12 +2130,18 @@ type acpProviderErrorSniffer struct {
 // acpErrorHeaderRe matches the first line of an API-error block.
 // ACP agents typically prefix these with ⚠️ / ❌ and include an HTTP
 // status code or a non-retryable-error tag.
-var acpErrorHeaderRe = regexp.MustCompile(`(?:⚠️|❌|\[ERROR\]).*(?:BadRequestError|AuthenticationError|RateLimitError|HTTP [0-9]{3}|Non-retryable|API call failed)`)
+// The trailing alternative covers provider.api_error lines that kimi emits
+// without an emoji prefix, e.g.:
+//
+//	error: failed to run prompt: provider.api_error: 400 the message at position …
+var acpErrorHeaderRe = regexp.MustCompile(
+	`(?:⚠️|❌|\[ERROR\]).*(?:BadRequestError|AuthenticationError|RateLimitError|HTTP [0-9]{3}|Non-retryable|API call failed)` +
+		`|provider\.api_error`)
 
 // acpErrorDetailRe pulls the most useful single-line messages out of
-// the subsequent lines of the error block (the one whose "Error:" or
-// "Details:" tag actually spells out what happened).
-var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:)\s*(.+)`)
+// the error block (the line whose "Error:" / "Details:" tag or whose
+// "provider.api_error: NNN " prefix spells out what happened).
+var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:|provider\.api_error: [0-9]+)\s+(.+)`)
 
 // acpTerminalErrorRe matches markers that only appear when the
 // adapter has *given up* on the upstream call — either after
@@ -2143,7 +2149,9 @@ var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:)\s*(.+)`)
 // classified as non-retryable up front (Non-retryable, BadRequest /
 // Authentication errors, ❌ / [ERROR] log levels). Per-attempt
 // warnings ("(attempt 1/3)") deliberately do NOT match this pattern.
-var acpTerminalErrorRe = regexp.MustCompile(`(?:❌|\[ERROR\]|after \d+ retr|Non-retryable|BadRequestError|AuthenticationError)`)
+// "provider.api_error: 4" covers kimi-style 4xx responses which are always
+// client errors and cannot be resolved by retrying the same request.
+var acpTerminalErrorRe = regexp.MustCompile(`(?:❌|\[ERROR\]|after \d+ retr|Non-retryable|BadRequestError|AuthenticationError|provider\.api_error: 4)`)
 
 // acpAgentOutputTerminalRe matches the synthetic agent-text turn that
 // hermes-style ACP adapters inject when they exhaust retries against

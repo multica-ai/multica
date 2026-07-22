@@ -1874,6 +1874,66 @@ func TestHermesProviderErrorSnifferTerminalNonRetryable(t *testing.T) {
 	}
 }
 
+// TestACPProviderErrorSnifferKimiApiError covers the kimi-specific error
+// format that was previously invisible to the sniffer, causing tasks to
+// silently complete instead of failing (GitHub multica#5760):
+//
+//	error: failed to run prompt: provider.api_error: 400 the message at
+//	position 43 with role 'assistant' must not be empty
+//
+// The line has no emoji prefix and uses lowercase "error:", so the original
+// acpErrorHeaderRe / acpErrorDetailRe did not capture it. The fix adds
+// provider.api_error as an additional header match, recognises 4xx codes as
+// terminal, and extracts the error message after "provider.api_error: NNN ".
+func TestACPProviderErrorSnifferKimiApiError(t *testing.T) {
+	t.Parallel()
+
+	stderr := "error: failed to run prompt: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty\n"
+	s := newACPProviderErrorSniffer("kimi")
+	if _, err := s.Write([]byte(stderr)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	msg := s.terminalMessage()
+	if msg == "" {
+		t.Fatal("expected a non-empty terminal message; sniffer did not recognise provider.api_error line")
+	}
+	if !strings.Contains(msg, "must not be empty") {
+		t.Errorf("expected error detail about empty assistant message, got %q", msg)
+	}
+	if !strings.Contains(msg, "kimi") {
+		t.Errorf("expected provider prefix 'kimi' in message, got %q", msg)
+	}
+
+	// promoteACPResultOnProviderError must flip completed→failed so resumed
+	// sessions with a permanently broken history surface as task failures.
+	finalStatus, finalError := promoteACPResultOnProviderError("completed", "", "", s)
+	if finalStatus != "failed" {
+		t.Errorf("status = %q, want %q", finalStatus, "failed")
+	}
+	if !strings.Contains(finalError, "must not be empty") {
+		t.Errorf("error = %q, want it to mention the empty assistant message", finalError)
+	}
+}
+
+// TestACPProviderErrorSnifferKimiApiError5xx verifies that a 5xx
+// provider.api_error (potentially transient) is captured but not classified
+// as terminal, so it only promotes to failed when output is also empty.
+func TestACPProviderErrorSnifferKimiApiError5xx(t *testing.T) {
+	t.Parallel()
+
+	stderr := "error: provider.api_error: 503 upstream temporarily unavailable\n"
+	s := newACPProviderErrorSniffer("kimi")
+	s.Write([]byte(stderr))
+
+	if s.terminalMessage() != "" {
+		t.Error("5xx provider.api_error should not be classified as terminal")
+	}
+	if s.message() == "" {
+		t.Error("5xx provider.api_error should still be captured as a non-terminal error")
+	}
+}
+
 // TestHermesBackendPromotesProviderErrorWithNonEmptyOutput pins the
 // fix for GitHub multica#1952: a hermes run that hits a 429 (or any
 // upstream provider error) must surface as Status=failed even though
