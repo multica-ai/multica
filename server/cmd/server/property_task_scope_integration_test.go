@@ -72,16 +72,21 @@ func createTaskScopedPropertyFixture(t *testing.T) (token, ownIssueID, otherIssu
 	otherIssueID = createIssue("Task-scoped property other")
 
 	ctx := context.Background()
-	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text, runtime_id::text
+		FROM agent
+		WHERE workspace_id = $1 AND runtime_id IS NOT NULL
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("load fixture agent: %v", err)
 	}
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, status)
-		VALUES ($1, $2, 'running')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status)
+		VALUES ($1, $2, $3, 'running')
 		RETURNING id
-	`, agentID, ownIssueID).Scan(&taskID); err != nil {
+	`, agentID, runtimeID, ownIssueID).Scan(&taskID); err != nil {
 		t.Fatalf("create fixture task: %v", err)
 	}
 	token = "mat_" + uuid.NewString()
@@ -111,6 +116,14 @@ func TestTaskTokenPropertyRoutesAreBoundToTheirIssue(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		t.Fatalf("set own issue property: expected 200, got %d: %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	resp = taskTokenRequest(t, token, http.MethodDelete, "/api/issues/"+ownIssueID+"/properties/"+propertyID, nil)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("unset own issue property: expected 200, got %d: %s", resp.StatusCode, body)
 	}
 	resp.Body.Close()
 
