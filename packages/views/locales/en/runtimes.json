@@ -204,6 +204,7 @@
     "no_runtime_title": "Computer connected, but no agent runtime was found",
     "no_runtime_hint": "Install a supported agent CLI such as Claude Code or Codex on this computer. The daemon keeps checking and this screen will update automatically.",
     "connected_summary": "Connected runtimes: {{runtimeCount}} · Computers: {{computerCount}}",
+    "choose_runtime": "Choose the agent runtime for your first agent",
     "runtime_count": "Runtimes: {{count}}",
     "continue": "Connect & continue",
     "step1_label": "Install the Multica CLI",

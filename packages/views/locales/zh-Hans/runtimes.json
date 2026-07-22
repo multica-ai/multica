@@ -192,6 +192,7 @@
     "no_runtime_title": "电脑已连接，但未检测到 agent runtime",
     "no_runtime_hint": "请在这台电脑上安装 Claude Code、Codex 等受支持的 agent CLI。daemon 会持续检测，此处将自动更新。",
     "connected_summary": "{{computerCount}} 台电脑上共有 {{runtimeCount}} 个 agent runtime",
+    "choose_runtime": "选择第一个智能体使用的 agent 运行时",
     "runtime_count": "{{count}} 个 runtime",
     "continue": "连接并继续",
     "step1_label": "安装 Multica CLI",

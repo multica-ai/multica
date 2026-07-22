@@ -192,6 +192,7 @@
     "no_runtime_title": "컴퓨터는 연결됐지만 agent runtime을 찾지 못했습니다",
     "no_runtime_hint": "이 컴퓨터에 Claude Code 또는 Codex 같은 지원 agent CLI를 설치하세요. 데몬이 계속 확인하며 이 화면이 자동으로 업데이트됩니다.",
     "connected_summary": "컴퓨터 {{computerCount}}대의 agent runtime {{runtimeCount}}개",
+    "choose_runtime": "첫 에이전트가 사용할 agent 런타임을 선택하세요",
     "runtime_count": "runtime {{count}}개",
     "continue": "연결하고 계속",
     "step1_label": "Multica CLI 설치",

@@ -41,6 +41,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
 import { buildRuntimeMachines } from "./runtime-machines";
+import { CompactRuntimeRow } from "../../onboarding/components/compact-runtime-row";
 
 const INSTALL_SCRIPT =
   "https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh";
@@ -136,17 +137,46 @@ export function ConnectRemoteDialog({
   const command = created.data?.token
     ? runtimeSetupCommand(created.data.token, daemonServerUrl, daemonAppUrl)
     : "";
-  const setupRuntimes = useMemo(() => {
+  const sessionRuntimes = useMemo(() => {
     if (!session?.daemon_id) return [];
     return (runtimes.data ?? []).filter(
       (runtime) => runtime.daemon_id === session.daemon_id,
     );
   }, [runtimes.data, session?.daemon_id]);
   const machines = useMemo(
-    () => buildRuntimeMachines(setupRuntimes, { now: Date.now() }),
-    [setupRuntimes],
+    () => buildRuntimeMachines(sessionRuntimes, { now: Date.now() }),
+    [sessionRuntimes],
   );
-  const firstRuntime = setupRuntimes[0] ?? null;
+
+  // Onboarding (onConnected) attaches the Multica Helper agent to a runtime, so
+  // it needs a concrete pick. Offer the machine connected in THIS session; when
+  // the user already had a computer connected (a returning session whose daemon
+  // differs), fall back to any online runtime so onboarding never dead-ends
+  // with a permanently-disabled Continue (MUL-5112 regression).
+  const onboarding = Boolean(onConnected);
+  const selectableRuntimes = useMemo(() => {
+    if (!onboarding) return sessionRuntimes;
+    if (sessionRuntimes.length > 0) return sessionRuntimes;
+    return (runtimes.data ?? []).filter((runtime) => runtime.status === "online");
+  }, [onboarding, sessionRuntimes, runtimes.data]);
+
+  const [selectedRuntimeId, setSelectedRuntimeId] = useState<string | null>(null);
+  useEffect(() => {
+    if (
+      selectedRuntimeId &&
+      selectableRuntimes.some((runtime) => runtime.id === selectedRuntimeId)
+    ) {
+      return;
+    }
+    setSelectedRuntimeId(selectableRuntimes[0]?.id ?? null);
+  }, [selectableRuntimes, selectedRuntimeId]);
+  const selectedRuntime =
+    selectableRuntimes.find((runtime) => runtime.id === selectedRuntimeId) ?? null;
+
+  // The runtimes-page "View runtime" button still targets the just-connected
+  // machine; onboarding advances with the runtime the user picked.
+  const firstRuntime = sessionRuntimes[0] ?? null;
+  const primaryRuntime = onboarding ? selectedRuntime : firstRuntime;
 
   // A progress poll can succeed even if the corresponding websocket event
   // was missed. Refresh the runtime list when that fallback discovers one.
@@ -162,11 +192,11 @@ export function ConnectRemoteDialog({
   };
 
   const handlePrimary = () => {
-    if (!firstRuntime) return;
     if (onConnected) {
-      onConnected(firstRuntime);
+      if (selectedRuntime) onConnected(selectedRuntime);
       return;
     }
+    if (!firstRuntime) return;
     onClose();
     if (slug) navigation.push(paths.workspace(slug).runtimeDetail(firstRuntime.id));
   };
@@ -266,7 +296,13 @@ export function ConnectRemoteDialog({
                 </div>
               ) : null}
 
-              {session?.runtime_count ? (
+              {onboarding && selectableRuntimes.length > 0 ? (
+                <RuntimePicker
+                  runtimes={selectableRuntimes}
+                  selectedId={selectedRuntimeId}
+                  onSelect={setSelectedRuntimeId}
+                />
+              ) : session?.runtime_count ? (
                 <ConnectedMachines machines={machines} runtimeCount={session.runtime_count} />
               ) : null}
             </>
@@ -283,7 +319,7 @@ export function ConnectRemoteDialog({
                 {t(($) => $.connect.create_agent)}
               </Button>
             ) : null}
-            <Button size="sm" disabled={!firstRuntime} onClick={handlePrimary}>
+            <Button size="sm" disabled={!primaryRuntime} onClick={handlePrimary}>
               {onConnected
                 ? t(($) => $.connect.continue)
                 : t(($) => $.connect.view_runtime)}
@@ -369,6 +405,42 @@ function ConnectedMachines({
               {machine.providerNames.join(" · ")}
             </p>
           </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Selectable runtime list for onboarding: the connected machine can expose
+ * several agent runtimes (Claude Code, Codex, Cursor, …), and the user picks
+ * which one their first agent runs on. Restores the selection step that the
+ * onboarding runtime picker used to own before the connect dialog was unified
+ * (MUL-5112).
+ */
+function RuntimePicker({
+  runtimes,
+  selectedId,
+  onSelect,
+}: {
+  runtimes: AgentRuntime[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const { t } = useT("runtimes");
+  return (
+    <div className="rounded-lg border p-3">
+      <p className="mb-2.5 text-xs font-medium text-foreground">
+        {t(($) => $.connect.choose_runtime)}
+      </p>
+      <div className="flex max-h-[240px] flex-col gap-2 overflow-y-auto">
+        {runtimes.map((runtime) => (
+          <CompactRuntimeRow
+            key={runtime.id}
+            runtime={runtime}
+            selected={runtime.id === selectedId}
+            onSelect={() => onSelect(runtime.id)}
+          />
         ))}
       </div>
     </div>
