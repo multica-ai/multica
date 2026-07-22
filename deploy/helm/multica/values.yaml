@@ -167,8 +167,9 @@ frontend:
 # Ingress
 # -----------------------------------------------------------------------------
 ingress:
-  # Enabled by default for compatibility with existing installations. Disable
-  # this when using Gateway API instead.
+  # Enabled by default for compatibility with existing installations. Ingress
+  # and Gateway API are mutually exclusive; disable this before enabling
+  # gatewayAPI.enabled.
   enabled: true
   className: traefik
   annotations: {}
@@ -185,7 +186,9 @@ ingress:
 # -----------------------------------------------------------------------------
 gatewayAPI:
   # Requires the Gateway API CRDs and a controller-managed Gateway. The chart
-  # creates HTTPRoutes only; it does not create or manage the parent Gateway.
+  # creates HTTPRoutes only; it does not create or manage the parent Gateway,
+  # listeners, TLS certificates, or attachment policy. This cannot be enabled
+  # while ingress.enabled is true.
   enabled: false
   annotations: {}
   # Parent Gateway(s) to attach both HTTPRoutes to. Namespace and sectionName

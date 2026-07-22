@@ -140,7 +140,7 @@ multica daemon status
 
 ## Kubernetes Deployment (Alternative)
 
-If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/multica-ai/charts/multica` or the source chart at [`deploy/helm/multica/`](deploy/helm/multica/). It supports either Kubernetes Ingress or Gateway API for external traffic and expects a default `ReadWriteOnce` StorageClass. Ingress is enabled by default for compatibility; Gateway API is opt-in.
+If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/multica-ai/charts/multica` or the source chart at [`deploy/helm/multica/`](deploy/helm/multica/). It supports either Kubernetes Ingress or Gateway API for external traffic and expects a default `ReadWriteOnce` StorageClass. Ingress is enabled by default for compatibility; Gateway API is opt-in. The exposure modes are mutually exclusive: rendering the chart with both `ingress.enabled=true` and `gatewayAPI.enabled=true` fails instead of creating competing resources for the same DNS names.
 
 The chart creates the following resources in the target namespace:
 
@@ -154,7 +154,7 @@ The `multica-secrets` Secret is **not** managed by the chart — you create it o
 
 > **One release per namespace:** the prebuilt `multica-web` image bakes `REMOTE_API_URL=http://backend:8080` at build time, so the chart ships an ExternalName Service literally named `backend`. Because that name is unprefixed, you can run only one Multica release per namespace, and `helm install` will fail if a `Service/backend` already exists there (pass `--take-ownership`, or use a dedicated namespace). If you build a web image with a patched `REMOTE_API_URL`, set `frontend.compatibility.backendAlias: false` to drop the alias.
 
-> **Prerequisites:** `kubectl` and `helm` (v3.13+ for `--take-ownership`, or v4+) configured for the target cluster, a default StorageClass, and either an Ingress controller (Traefik / NGINX) or Gateway API CRDs plus a controller-managed `Gateway`. The chart creates `HTTPRoute` resources but does not manage the parent `Gateway`.
+> **Prerequisites:** `kubectl` and `helm` (v3.13+ for `--take-ownership`, or v4+) configured for the target cluster, a default StorageClass, and either an Ingress controller (Traefik / NGINX) or Gateway API CRDs plus a controller-managed `Gateway`. The chart creates `HTTPRoute` resources but does not manage the parent `Gateway`, listeners, TLS certificates, or route attachment policy.
 
 ### Step 1 — Point hostnames at the cluster
 
@@ -206,9 +206,12 @@ helm install multica oci://ghcr.io/multica-ai/charts/multica \
 
 For Gateway API, point the routes at an existing Gateway. Add
 `gatewayAPI.parentRefs[0].namespace` when it is outside the `multica` namespace,
-and optionally set `gatewayAPI.parentRefs[0].sectionName` to select a listener.
-The selected Gateway listener must allow `HTTPRoute` attachments from the
-Multica namespace:
+and set `gatewayAPI.parentRefs[0].sectionName` to select a listener. A listener
+permits routes only from its own namespace by default, so a cross-namespace
+Gateway must explicitly select the Multica namespace through
+`listeners[].allowedRoutes.namespaces`. The route-to-Gateway attachment itself
+does not require a `ReferenceGrant`; `allowedRoutes` is the authorization
+boundary.
 
 ```bash
 helm install multica oci://ghcr.io/multica-ai/charts/multica \
@@ -217,8 +220,77 @@ helm install multica oci://ghcr.io/multica-ai/charts/multica \
   --set ingress.enabled=false \
   --set gatewayAPI.enabled=true \
   --set 'gatewayAPI.parentRefs[0].name=my-gateway' \
-  --set 'gatewayAPI.parentRefs[0].namespace=gateway-system'
+  --set 'gatewayAPI.parentRefs[0].namespace=gateway-system' \
+  --set 'gatewayAPI.parentRefs[0].sectionName=https'
 ```
+
+#### Supported Gateway API boundary
+
+The chart's automated controller test uses **Envoy Gateway v1.8.2** with its
+pinned **Gateway API v1.5.1** dependency. Other conformant controllers should
+work because the chart emits only Standard-channel `HTTPRoute` fields, but they
+are not part of the tested support boundary. The test covers Gateway-only
+rendering, cross-namespace attachment, listener rejection, and an HTTPS
+listener with TLS termination.
+
+For the tested cross-namespace model, label the application namespace and make
+the listener select it:
+
+```bash
+kubectl label namespace multica multica.ai/gateway-access=allowed
+```
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: my-gateway
+  namespace: gateway-system
+spec:
+  gatewayClassName: envoy
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes: &multicaRoutes
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              multica.ai/gateway-access: allowed
+        kinds:
+          - kind: HTTPRoute
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: multica-tls
+      allowedRoutes: *multicaRoutes
+```
+
+The TLS Secret belongs in the Gateway namespace (`gateway-system` above), and
+its certificate must cover every configured route hostname. The Multica chart
+does not create or rotate that Secret. Select the `https` listener with
+`gatewayAPI.parentRefs[].sectionName`; add a second parent reference if both
+HTTP and HTTPS listeners should accept the routes.
+
+If `allowedRoutes.namespaces` is omitted or set to `from: Same` on a Gateway in
+another namespace, attachment is intentionally rejected. After installation,
+verify each parent reference reports `Accepted=True`:
+
+```bash
+kubectl -n multica get httproute \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .status.parents[*]}  {.parentRef.namespace}/{.parentRef.name} listener={.parentRef.sectionName}{"\n"}{range .conditions[*]}    {.type}={.status} reason={.reason}{"\n"}{end}{end}{end}'
+```
+
+`Accepted=False` with reason `NotAllowedByListeners` means the listener's
+`allowedRoutes` policy rejected the namespace or route kind. A TLS listener
+with `ResolvedRefs=False` usually means its certificate reference is missing or
+invalid. Hostnames must also intersect the selected listener hostname, if the
+listener declares one.
 
 Released chart versions strip the leading `v` from the Git tag. For example, release tag `v0.3.5` publishes chart version `0.3.5`; the chart defaults the backend and frontend image tags to `v0.3.5`.
 
