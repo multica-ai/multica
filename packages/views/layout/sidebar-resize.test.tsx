@@ -70,7 +70,7 @@ describe("left sidebar resizing", () => {
     });
 
     expect(setPointerCapture).toHaveBeenCalledWith(7);
-    expect(rail).toHaveClass("cursor-ew-resize");
+    expect(rail).toHaveClass("cursor-col-resize");
     expect(wrapper).toHaveAttribute("data-sidebar-resizing", "true");
     expect(document.documentElement).toHaveAttribute("data-sidebar-resizing", "true");
 
