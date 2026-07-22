@@ -572,7 +572,89 @@ func TestMigration213RecoversPartialConcurrentIndex(t *testing.T) {
 			if got, want := f.appliedVersions(t), []string{version}; !equalStrings(got, want) {
 				t.Fatalf("schema_migrations after recovery = %v, want %v", got, want)
 			}
+			assertRuntimeArbiter(t, f.pool, tableFQN)
 		})
+	}
+}
+
+func TestMigration213RejectsWrongIndexDefinition(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		definition string
+	}{
+		{
+			name:       "wrong_columns_order",
+			definition: "(workspace_id, author_id, author_type, idempotency_key) WHERE idempotency_key IS NOT NULL",
+		},
+		{
+			name:       "wrong_predicate",
+			definition: "(workspace_id, author_type, author_id, idempotency_key) WHERE idempotency_key <> ''",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			ctx, cancel := context.WithTimeout(context.Background(), raceTestTimeout)
+			defer cancel()
+
+			tableName := "comment_213_wrong"
+			indexName := "comment_author_idempotency_key_idx_213_wrong"
+			tableFQN := pgx.Identifier{f.schema, tableName}.Sanitize()
+			indexIdent := pgx.Identifier{indexName}.Sanitize()
+			if _, err := f.pool.Exec(ctx, fmt.Sprintf(`
+				CREATE TABLE %s (
+					workspace_id BIGINT NOT NULL,
+					author_type TEXT NOT NULL,
+					author_id BIGINT NOT NULL,
+					idempotency_key TEXT
+				)`, tableFQN)); err != nil {
+				t.Fatalf("create comment fixture: %v", err)
+			}
+			if _, err := f.pool.Exec(ctx, fmt.Sprintf(
+				"CREATE UNIQUE INDEX CONCURRENTLY %s ON %s %s", indexIdent, tableFQN, tc.definition)); err != nil {
+				t.Fatalf("create wrong-definition index: %v", err)
+			}
+
+			version := "213_comment_idempotency_index"
+			path := filepath.Join(t.TempDir(), version+".up.sql")
+			correctSQL := fmt.Sprintf(
+				"CREATE UNIQUE INDEX CONCURRENTLY %s ON %s (workspace_id, author_type, author_id, idempotency_key) WHERE idempotency_key IS NOT NULL",
+				indexIdent, tableFQN)
+			if err := os.WriteFile(path, []byte(correctSQL), 0o600); err != nil {
+				t.Fatalf("write migration fixture: %v", err)
+			}
+			opts := f.opts()
+			opts.Files = []string{path}
+			opts.Hooks = map[string]preMigrationHook{
+				version: func(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
+					return reconcileConcurrentIndex(ctx, pool, f.schema+"."+indexName, f.schema+"."+tableName)
+				},
+			}
+			err := runMigrations(ctx, f.pool, opts)
+			if err == nil || !strings.Contains(err.Error(), "does not exactly match") {
+				t.Fatalf("migrate up with wrong definition error = %v, want exact-definition rejection", err)
+			}
+			if got := f.appliedVersions(t); len(got) != 0 {
+				t.Fatalf("wrong-definition index recorded migration versions: %v", got)
+			}
+		})
+	}
+}
+
+func assertRuntimeArbiter(t *testing.T, pool *pgxpool.Pool, tableFQN string) {
+	t.Helper()
+	stmt := fmt.Sprintf(`
+		INSERT INTO %s (workspace_id, author_type, author_id, idempotency_key)
+		VALUES (9, 'agent', 11, 'retry-key')
+		ON CONFLICT (workspace_id, author_type, author_id, idempotency_key)
+		WHERE idempotency_key IS NOT NULL DO NOTHING`, tableFQN)
+	for attempt, wantRows := range []int64{1, 0} {
+		result, err := pool.Exec(context.Background(), stmt)
+		if err != nil {
+			t.Fatalf("runtime ON CONFLICT attempt %d: %v", attempt+1, err)
+		}
+		if got := result.RowsAffected(); got != wantRows {
+			t.Fatalf("runtime ON CONFLICT attempt %d rows = %d, want %d", attempt+1, got, wantRows)
+		}
 	}
 }
 

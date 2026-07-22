@@ -97,19 +97,29 @@ func runCommentIdempotencyIndexHook(ctx context.Context, pool *pgxpool.Pool) (bo
 		"public.comment_author_idempotency_key_idx", "public.comment")
 }
 
-// reconcileConcurrentIndex returns skipSQL only for a valid, ready, unique
-// index on the expected table. An invalid/not-ready artifact from a failed
+// reconcileConcurrentIndex returns skipSQL only for a valid, ready index whose
+// table, ordered plain keys, uniqueness, and predicate exactly match the
+// runtime ON CONFLICT arbiter. An invalid/not-ready artifact from a failed
 // concurrent build is removed outside a transaction so the migration SQL can
 // create it again. A same-name index on another table (or a non-unique one)
 // fails closed instead of silently accepting an unexpected schema object.
 func reconcileConcurrentIndex(ctx context.Context, pool *pgxpool.Pool, indexName, tableName string) (bool, error) {
-	var valid, ready, unique, expectedTable bool
+	var valid, ready, semanticMatch bool
 	err := pool.QueryRow(ctx, `
-		SELECT i.indisvalid, i.indisready, i.indisunique,
-		       i.indrelid = to_regclass($2)
+		SELECT i.indisvalid, i.indisready,
+		       i.indisunique
+		       AND i.indrelid = to_regclass($2)
+		       AND i.indnkeyatts = 4
+		       AND i.indnatts = 4
+		       AND i.indexprs IS NULL
+		       AND i.indkey[0] = (SELECT attnum FROM pg_attribute WHERE attrelid = i.indrelid AND attname = 'workspace_id' AND NOT attisdropped)
+		       AND i.indkey[1] = (SELECT attnum FROM pg_attribute WHERE attrelid = i.indrelid AND attname = 'author_type' AND NOT attisdropped)
+		       AND i.indkey[2] = (SELECT attnum FROM pg_attribute WHERE attrelid = i.indrelid AND attname = 'author_id' AND NOT attisdropped)
+		       AND i.indkey[3] = (SELECT attnum FROM pg_attribute WHERE attrelid = i.indrelid AND attname = 'idempotency_key' AND NOT attisdropped)
+		       AND pg_get_expr(i.indpred, i.indrelid) = '(idempotency_key IS NOT NULL)'
 		FROM pg_index i
 		WHERE i.indexrelid = to_regclass($1)
-	`, indexName, tableName).Scan(&valid, &ready, &unique, &expectedTable)
+	`, indexName, tableName).Scan(&valid, &ready, &semanticMatch)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return false, nil
@@ -118,8 +128,8 @@ func reconcileConcurrentIndex(ctx context.Context, pool *pgxpool.Pool, indexName
 	}
 
 	if valid && ready {
-		if !unique || !expectedTable {
-			return false, fmt.Errorf("index %q is valid but does not match the expected unique index on %q", indexName, tableName)
+		if !semanticMatch {
+			return false, fmt.Errorf("index %q is valid but does not exactly match the expected idempotency arbiter on %q", indexName, tableName)
 		}
 		slog.Info("concurrent index already valid; skipping migration SQL", "index", indexName)
 		return true, nil
