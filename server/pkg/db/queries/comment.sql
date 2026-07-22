@@ -418,6 +418,45 @@ SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.
 FROM touched_issue ti
 RETURNING *;
 
+-- name: CreateCommentIdempotent :one
+-- The unique partial index claims an idempotency key for one actor. A losing
+-- concurrent delivery returns no row; its caller then loads the winner in a
+-- fresh statement, whose READ COMMITTED snapshot can see the committed row.
+-- Side effects are deliberately outside this query and run only when this
+-- INSERT returns a row. The issue activity timestamp also advances only for
+-- the winning insert, not for a deduplicated retry.
+WITH candidate_issue AS (
+    SELECT id, workspace_id FROM issue
+    WHERE issue.id = sqlc.arg(issue_id) AND issue.workspace_id = sqlc.arg(workspace_id)
+), inserted AS (
+    INSERT INTO comment (
+        issue_id, workspace_id, author_type, author_id, content, type, parent_id,
+        source_task_id, idempotency_key, idempotency_hash
+    )
+    SELECT ci.id, ci.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id),
+           sqlc.arg(content), sqlc.arg(type), sqlc.narg(parent_id),
+           sqlc.narg(source_task_id), sqlc.arg(idempotency_key),
+           sqlc.arg(idempotency_hash)
+    FROM candidate_issue ci
+    ON CONFLICT (workspace_id, author_type, author_id, idempotency_key)
+        WHERE idempotency_key IS NOT NULL
+        DO NOTHING
+    RETURNING *
+), touched_issue AS (
+    UPDATE issue SET updated_at = now()
+    WHERE issue.id = (SELECT issue_id FROM inserted)
+    RETURNING issue.id
+)
+SELECT inserted.* FROM inserted
+JOIN touched_issue ON touched_issue.id = inserted.issue_id;
+
+-- name: GetCommentByIdempotencyKey :one
+SELECT * FROM comment
+WHERE workspace_id = @workspace_id
+  AND author_type = @author_type
+  AND author_id = @author_id
+  AND idempotency_key = @idempotency_key;
+
 -- name: UpdateComment :one
 UPDATE comment SET
     content = $2,
