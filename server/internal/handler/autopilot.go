@@ -2003,6 +2003,25 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAutopilotWrite(w, r, autopilot, workspaceID) {
 		return
 	}
+
+	// dry_run previews a dispatch without persisting state (WS-749). It reuses
+	// the same auth (requireAutopilotWrite) as a real trigger but performs NO
+	// writes - no autopilot_run, no issue, no task - so the active-status gate
+	// that protects real execution does not apply to a read-only preview. The
+	// plan reports what WOULD happen: resolved leader, readiness, and the
+	// rendered issue title/description (create_issue) or task prompt
+	// (run_only), plus the admission skip reason when the gate would reject.
+	dryRun, ok := parseBoolQueryDefault(w, r, "dry_run", false)
+	if !ok {
+		// Malformed value: parseBoolQueryDefault already wrote a 400. Return so
+		// we never fall through into a real dispatch on a typo.
+		return
+	}
+	if dryRun {
+		h.dryRunAutopilot(w, r, autopilot, workspaceID)
+		return
+	}
+
 	if autopilot.Status != "active" {
 		writeError(w, http.StatusBadRequest, "autopilot is not active")
 		return
@@ -2033,4 +2052,52 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 		resp.ReasonCode = &c
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// dryRunAutopilot previews a manual trigger without persisting state
+// (WS-749). It resolves the same actor a real manual trigger would and
+// returns the PlanDispatch projection. The plan carries DryRun=true so a
+// caller can distinguish it from a real run response.
+//
+// Auth is identical to a real trigger (requireAutopilotWrite was already
+// enforced by TriggerAutopilot). The autopilot-active gate is skipped: a
+// read-only preview is safe on a paused/archived autopilot and the most
+// useful moment to preview is often right before activating a configuration.
+func (h *Handler) dryRunAutopilot(w http.ResponseWriter, r *http.Request, autopilot db.Autopilot, workspaceID string) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	plan, err := h.AutopilotService.PlanDispatch(
+		r.Context(),
+		autopilot,
+		pgtype.UUID{},
+		"manual",
+		nil,
+		memberActorUserID(actorType, actorID),
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to preview autopilot: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, plan)
+}
+
+// parseBoolQueryDefault parses a boolean query parameter. An absent or empty
+// value returns (def, true). A value strconv.ParseBool accepts
+// (true/1/t/yes, false/0/f/no) returns (parsed, true). Any other non-empty
+// value is a 400 (the error is written to w) and returns (def, false) so the
+// caller can return without falling through into a real dispatch on a typo.
+func parseBoolQueryDefault(w http.ResponseWriter, r *http.Request, key string, def bool) (bool, bool) {
+	raw := r.URL.Query().Get(key)
+	if raw == "" {
+		return def, true
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid boolean for %q: %s", key, raw))
+		return def, false
+	}
+	return v, true
 }
