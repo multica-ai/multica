@@ -91,7 +91,7 @@ describe("my-issues stacked date builder submenu (FIR-1658 / FIR-1799)", () => {
     // The condition row (field label) and the add/clear affordances must render;
     // the empty-state copy must not.
     expect(await screen.findByText("Add filter")).toBeInTheDocument();
-    expect(screen.getByText("Clear all dates")).toBeInTheDocument();
+    expect(screen.getByText("Clear all")).toBeInTheDocument();
     expect(screen.queryByText("No date filters yet")).not.toBeInTheDocument();
   });
 });
