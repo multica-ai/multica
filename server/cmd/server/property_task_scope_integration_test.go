@@ -96,6 +96,21 @@ func createTaskScopedPropertyFixture(t *testing.T) (token, ownIssueID, otherIssu
 	`, auth.HashToken(token), taskID, agentID, testWorkspaceID, testUserID, time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("create fixture task token: %v", err)
 	}
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		if _, err := testPool.Exec(cleanupCtx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID); err != nil {
+			t.Errorf("delete fixture task: %v", err)
+		}
+		if _, err := testPool.Exec(cleanupCtx, `DELETE FROM issue WHERE id IN ($1, $2)`, ownIssueID, otherIssueID); err != nil {
+			t.Errorf("delete fixture issues: %v", err)
+		}
+		if _, err := testPool.Exec(cleanupCtx, `DELETE FROM issue_property WHERE id = $1`, propertyID); err != nil {
+			t.Errorf("delete fixture property: %v", err)
+		}
+		if _, err := testPool.Exec(cleanupCtx, `UPDATE agent SET status = 'idle' WHERE id = $1`, agentID); err != nil {
+			t.Errorf("reset fixture agent: %v", err)
+		}
+	})
 
 	return token, ownIssueID, otherIssueID, propertyID
 }
