@@ -2999,6 +2999,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 	}
 	d.reportTaskSkillUsage(ctx, task, provider, result) // CEREBRO-PATCH(task-skill-usage-report): FIR-2996 extract explicit SKILL.md reads from supported runtime transcripts.
+	d.enqueueTraceUpload(task, provider, result)        // CEREBRO-PATCH(daemon-trace-upload): queue transcript for Registry upload before an early return can discard the result (FIR-3645).
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
