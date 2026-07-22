@@ -4,10 +4,13 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { orgChartOptions, settingsOptions, useCreateOrgChartSeat, useDeleteOrgChartSeat, useUpdateOrgChartSeat } from "../core/queries";
 import type { OrgChartSeat, OrgChartSeatInput } from "../core/types";
 import { SearchSelect, type SearchSelectOption } from "./search-select";
 import { RolesChart, type InsertMode, type SeatActor } from "./roles-chart";
+import { PeopleRolesTable, type RoleHolder } from "./people-roles-table";
 
 function inputFromSeat(seat: OrgChartSeat): OrgChartSeatInput {
   return { parent_id: seat.parent_id, name: seat.name, responsibilities: seat.responsibilities, owner_type: seat.owner_type, owner_id: seat.owner_id, position: seat.position };
@@ -45,7 +48,7 @@ function SeatEditor({ seat, seats, ownerOptions, presetParentId, onSave, onCance
   }
 
   return (
-    <div className="grid gap-3 rounded-xl border bg-card p-4">
+    <div className="grid gap-3">
       <div className="grid gap-3 md:grid-cols-2">
         <label className="grid gap-1 text-sm font-medium">Seat name
           <input aria-label="Seat name" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="e.g. Operations" className="min-h-11 rounded-md border bg-background px-3" />
@@ -97,6 +100,19 @@ function SeatEditor({ seat, seats, ownerOptions, presetParentId, onSave, onCance
   );
 }
 
+// One presentation, two shapes: a centred modal from the `sm` breakpoint up,
+// and a sheet anchored to the bottom edge of the screen on a phone.
+function SeatEditorDialog({ title, open, onOpenChange, children }: { title: string; open: boolean; onOpenChange: (open: boolean) => void; children: React.ReactNode }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="top-auto bottom-0 left-0 max-h-[85dvh] max-w-none translate-x-0 translate-y-0 rounded-b-none sm:top-1/2 sm:bottom-auto sm:left-1/2 sm:max-w-2xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl">
+        <DialogTitle className="text-base font-semibold">{title}</DialogTitle>
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function OrgChartPage() {
   const wsId = useWorkspaceId();
   const chart = useQuery(orgChartOptions(wsId));
@@ -131,8 +147,22 @@ export function OrgChartPage() {
     return agent ? { name: agent.name, initials: initialsOf(agent.name), avatarUrl: agent.avatar_url, isAgent: true } : undefined;
   };
 
-  if (chart.isLoading) return <div className="mx-auto max-w-5xl p-6 text-sm text-muted-foreground">Loading org chart…</div>;
-  if (chart.isError) return <div role="alert" className="mx-auto max-w-5xl p-6 text-sm text-destructive">Org chart could not be loaded.</div>;
+  // The People tab reads the same seats from the other direction: every person
+  // and agent in the workspace, with the roles they currently hold.
+  const rolesByOwner = new Map<string, string[]>();
+  for (const seat of seats) {
+    if (!seat.owner_id || !seat.owner_type) continue;
+    const key = `${seat.owner_type}:${seat.owner_id}`;
+    rolesByOwner.set(key, [...(rolesByOwner.get(key) ?? []), seat.name]);
+  }
+  const holders: RoleHolder[] = [
+    ...memberList.map((member) => ({ key: `member:${member.id}`, name: member.name, type: "member" as const, initials: initialsOf(member.name), avatarUrl: member.avatar_url, roles: rolesByOwner.get(`member:${member.id}`) ?? [] })),
+    ...agentList.map((agent) => ({ key: `agent:${agent.id}`, name: agent.name, type: "agent" as const, initials: initialsOf(agent.name), avatarUrl: agent.avatar_url, roles: rolesByOwner.get(`agent:${agent.id}`) ?? [] })),
+  ].sort((a, b) => b.roles.length - a.roles.length || a.name.localeCompare(b.name));
+  const vacantRoles = seats.filter((seat) => !seat.owner_id).map((seat) => seat.name);
+
+  if (chart.isLoading) return <div className="w-full p-6 text-sm text-muted-foreground">Loading org chart…</div>;
+  if (chart.isError) return <div role="alert" className="w-full p-6 text-sm text-destructive">Org chart could not be loaded.</div>;
 
   const editingSeat = seats.find((seat) => seat.id === editingId);
   const rolesLabel = settings.data?.terminology?.org_chart ?? "Roles";
@@ -167,8 +197,8 @@ export function OrgChartPage() {
   }
 
   return (
-    <div className="mx-auto grid max-w-5xl gap-6 p-6">
-      <div className="flex items-end justify-between gap-3">
+    <div className="grid w-full gap-6 p-4 md:p-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">{rolesLabel}</h1>
           <p className="mt-1 text-sm text-muted-foreground">Seats reporting into each other. Pick an owner by name; an empty seat stays visible as vacant.</p>
@@ -176,13 +206,28 @@ export function OrgChartPage() {
         <button type="button" onClick={() => { setAdding(true); setEditingId(undefined); setInsert(undefined); }} className="min-h-11 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground">+ Add seat</button>
       </div>
 
-      {adding && <SeatEditor seats={seats} ownerOptions={ownerOptions} presetParentId={presetParentId} pending={create.isPending || update.isPending} onCancel={closeAdd} onSave={handleCreate} />}
+      <SeatEditorDialog title="Add role" open={adding} onOpenChange={(open) => { if (!open) closeAdd(); }}>
+        <SeatEditor seats={seats} ownerOptions={ownerOptions} presetParentId={presetParentId} pending={create.isPending || update.isPending} onCancel={closeAdd} onSave={handleCreate} />
+      </SeatEditorDialog>
 
-      {editingSeat && <SeatEditor seat={editingSeat} seats={seats} ownerOptions={ownerOptions} pending={update.isPending || remove.isPending} onCancel={() => setEditingId(undefined)} onSave={(input) => update.mutate({ id: editingSeat.id, input }, { onSuccess: () => setEditingId(undefined) })} onDelete={() => remove.mutate(editingSeat.id, { onSuccess: () => setEditingId(undefined) })} />}
+      <SeatEditorDialog title={editingSeat ? `Edit ${editingSeat.name}` : "Edit role"} open={Boolean(editingSeat)} onOpenChange={(open) => { if (!open) setEditingId(undefined); }}>
+        {editingSeat && <SeatEditor seat={editingSeat} seats={seats} ownerOptions={ownerOptions} pending={update.isPending || remove.isPending} onCancel={() => setEditingId(undefined)} onSave={(input) => update.mutate({ id: editingSeat.id, input }, { onSuccess: () => setEditingId(undefined) })} onDelete={() => remove.mutate(editingSeat.id, { onSuccess: () => setEditingId(undefined) })} />}
+      </SeatEditorDialog>
 
-      {seats.length === 0 && !adding
-        ? <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">No seats yet. Add the first seat to make ownership visible.</div>
-        : <RolesChart seats={seats} onEdit={(id) => { setEditingId(id); setAdding(false); }} onInsert={startInsert} resolveActor={resolveActor} />}
+      <Tabs defaultValue="chart" className="gap-4">
+        <TabsList>
+          <TabsTrigger value="chart">Chart</TabsTrigger>
+          <TabsTrigger value="people">People</TabsTrigger>
+        </TabsList>
+        <TabsContent value="chart">
+          {seats.length === 0
+            ? <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">No seats yet. Add the first seat to make ownership visible.</div>
+            : <RolesChart seats={seats} onEdit={(id) => { setEditingId(id); setAdding(false); }} onInsert={startInsert} resolveActor={resolveActor} />}
+        </TabsContent>
+        <TabsContent value="people">
+          <PeopleRolesTable holders={holders} vacantRoles={vacantRoles} />
+        </TabsContent>
+      </Tabs>
 
       {(create.isError || update.isError || remove.isError) && <p role="alert" className="text-sm text-destructive">The org chart change could not be saved.</p>}
     </div>

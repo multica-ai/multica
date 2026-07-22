@@ -106,7 +106,7 @@ describe("OrgChartPage", () => {
     expect(screen.getByLabelText("Responsibility 1")).toBeInTheDocument();
   });
 
-  it("renders reports nested under their parent seat", () => {
+  it("puts each level on its own row under its parent", () => {
     state.seats = [
       seat({ id: "root", name: "CEO" }),
       seat({ id: "child", name: "Operations", parent_id: "root", position: 0 }),
@@ -114,9 +114,8 @@ describe("OrgChartPage", () => {
 
     render(<OrgChartPage />);
 
-    expect(screen.getByRole("heading", { name: "CEO" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Operations" })).toBeInTheDocument();
-    expect(screen.getByText("1 direct report")).toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: /^CEO,/ })).toHaveAttribute("aria-level", "1");
+    expect(screen.getByRole("treeitem", { name: /^Operations,/ })).toHaveAttribute("aria-level", "2");
   });
 
   it("creates a seat from the add form", () => {
@@ -143,7 +142,6 @@ describe("OrgChartPage", () => {
 
   it("inserts a report below a seat with the parent preset", () => {
     render(<OrgChartPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Add a role near Operations" }));
     fireEvent.click(screen.getByRole("button", { name: "Add role below Operations" }));
     fireEvent.change(screen.getByLabelText("Seat name"), { target: { value: "Finance" } });
     fireEvent.click(screen.getByRole("button", { name: "Save seat" }));
@@ -158,7 +156,6 @@ describe("OrgChartPage", () => {
     state.create.mockImplementation((_input: { name: string }, opts?: { onSuccess?: (created: { id: string }) => void }) => opts?.onSuccess?.({ id: "new-seat" }));
 
     render(<OrgChartPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Add a role near Operations" }));
     fireEvent.click(screen.getByRole("button", { name: "Add role above Operations" }));
     fireEvent.change(screen.getByLabelText("Seat name"), { target: { value: "Leadership" } });
     fireEvent.click(screen.getByRole("button", { name: "Save seat" }));
@@ -166,5 +163,37 @@ describe("OrgChartPage", () => {
     expect(state.update).toHaveBeenCalledWith(
       expect.objectContaining({ id: "seat-1", input: expect.objectContaining({ parent_id: "new-seat" }) }),
     );
+  });
+
+  it("opens the editor as a modal on desktop and a bottom sheet on mobile", () => {
+    render(<OrgChartPage />);
+    expect(document.querySelector("[data-slot='dialog-content']")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Operations" }));
+
+    const dialog = document.querySelector("[data-slot='dialog-content']");
+    expect(dialog).not.toBeNull();
+    expect(screen.getByLabelText("Seat name")).toBeInTheDocument();
+    // Anchored to the bottom edge on a phone, centred from `sm` up.
+    expect(dialog?.className).toContain("bottom-0");
+    expect(dialog?.className).toContain("sm:top-1/2");
+  });
+
+  it("lists people and the roles they hold on a second tab", () => {
+    state.seats = [
+      seat({ id: "seat-1", name: "Operations", owner_type: "member", owner_id: "member-1", owner_name: "Jesper", vacant: false }),
+      seat({ id: "seat-2", name: "Marketing" }),
+    ];
+
+    render(<OrgChartPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "People" }));
+
+    expect(screen.getByRole("columnheader", { name: "Roles" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Operations" })).toBeInTheDocument();
+    // An agent with no seat is still listed, rather than silently dropped.
+    expect(screen.getByText("Sara")).toBeInTheDocument();
+    expect(screen.getAllByText("No role yet").length).toBeGreaterThan(0);
+    // A seat nobody owns shows up as vacant instead of disappearing.
+    expect(screen.getByRole("region", { name: "Vacant roles" })).toHaveTextContent("Marketing");
   });
 });
