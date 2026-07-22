@@ -170,6 +170,56 @@ func TestStreamChatSessionRun_ReplaysCompletedTask(t *testing.T) {
 	}
 }
 
+func TestStreamChatSessionRun_ReplaysCompletedToolEvidence(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	withChatStreamBroker(t)
+	ctx := context.Background()
+	sessionID := createChatSessionForCoalesceTest(t)
+	taskID := insertChatTask(t, sessionID, "running")
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_message (task_id, seq, type, tool, input)
+		VALUES ($1, 1, 'tool_use', 'get_forecast', '{"month":"2026-07"}'::jsonb),
+		       ($1, 2, 'tool_result', 'get_forecast', NULL)
+	`, taskID); err != nil {
+		t.Fatalf("insert task messages: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE task_message SET output = '{"bonus":125000}'
+		WHERE task_id = $1 AND seq = 2
+	`, taskID); err != nil {
+		t.Fatalf("set tool result: %v", err)
+	}
+
+	result, _ := json.Marshal(protocol.TaskCompletedPayload{TaskID: taskID, Output: "July forecast"})
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), result, "", ""); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.StreamChatSessionRun(w, streamRequest(sessionID, taskID))
+	types := frameTypes(t, sseFrames(w.Body.String()))
+	want := []string{
+		"start",
+		"tool-input-available",
+		"tool-output-available",
+		"text-start",
+		"text-delta",
+		"text-end",
+		"finish",
+		"[DONE]",
+	}
+	if strings.Join(types, ",") != strings.Join(want, ",") {
+		t.Fatalf("frame types = %v, want %v", types, want)
+	}
+	if !strings.Contains(w.Body.String(), `"month":"2026-07"`) ||
+		!strings.Contains(w.Body.String(), `"bonus":125000`) {
+		t.Fatalf("stream missing tool evidence: %s", w.Body.String())
+	}
+}
+
 func TestStreamChatSessionRun_ReplaysArtifactURLWithWorkspaceSlug(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -238,6 +288,28 @@ func TestStreamChatSessionRun_LiveChatDoneFinishesStream(t *testing.T) {
 	deadline := time.After(5 * time.Second)
 	for {
 		testHandler.Bus.Publish(events.Event{
+			Type:   protocol.EventTaskMessage,
+			TaskID: taskID,
+			Payload: protocol.TaskMessagePayload{
+				TaskID: taskID,
+				Seq:    1,
+				Type:   "tool_use",
+				Tool:   "get_forecast",
+				Input:  map[string]any{"month": "2026-07"},
+			},
+		})
+		testHandler.Bus.Publish(events.Event{
+			Type:   protocol.EventTaskMessage,
+			TaskID: taskID,
+			Payload: protocol.TaskMessagePayload{
+				TaskID: taskID,
+				Seq:    2,
+				Type:   "tool_result",
+				Tool:   "get_forecast",
+				Output: `{"bonus":125000}`,
+			},
+		})
+		testHandler.Bus.Publish(events.Event{
 			Type:          protocol.EventChatDone,
 			WorkspaceID:   testWorkspaceID,
 			ChatSessionID: sessionID,
@@ -262,6 +334,10 @@ func TestStreamChatSessionRun_LiveChatDoneFinishesStream(t *testing.T) {
 	body := w.Body.String()
 	if !strings.Contains(body, "live streamed answer") {
 		t.Errorf("stream missing live content: %s", body)
+	}
+	if !strings.Contains(body, `"toolName":"get_forecast"`) ||
+		!strings.Contains(body, `"bonus":125000`) {
+		t.Errorf("stream missing live tool evidence: %s", body)
 	}
 	if !strings.Contains(body, "data: [DONE]") {
 		t.Errorf("stream missing [DONE] terminator: %s", body)
