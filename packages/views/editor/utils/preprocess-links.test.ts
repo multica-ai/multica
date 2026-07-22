@@ -85,12 +85,10 @@ describe("preprocessLinks — CJK punctuation boundary", () => {
     expect(preprocessLinks(input)).toBe(input);
   });
 
-  it("still linkifies fuzzy domains outside existing markdown links", () => {
+  it("leaves bare domains outside existing markdown links as plain text", () => {
     const input = "数据来源：[NBA.com Schedule](https://www.nba.com/schedule)，官网 NBA.com";
 
-    expect(preprocessLinks(input)).toBe(
-      "数据来源：[NBA.com Schedule](https://www.nba.com/schedule)，官网 [NBA.com](http://NBA.com)",
-    );
+    expect(preprocessLinks(input)).toBe(input);
   });
 });
 
@@ -120,13 +118,21 @@ describe("preprocessLinks — bare filenames are not auto-linked as URLs", () =>
     );
   });
 
-  it("still linkifies real fuzzy domains whose TLD is not a file extension", () => {
-    expect(preprocessLinks("官网 NBA.com")).toBe("官网 [NBA.com](http://NBA.com)");
+  it("leaves bare domains as plain text regardless of their TLD", () => {
+    expect(preprocessLinks("官网 NBA.com")).toBe("官网 NBA.com");
   });
 
-  it("suppresses the bare filename but still linkifies a real domain after it", () => {
-    expect(preprocessLinks("plan.md，example.com")).toBe(
-      "plan.md，[example.com](http://example.com)",
+  it("leaves both a bare filename and a bare domain as plain text", () => {
+    expect(preprocessLinks("plan.md，example.com")).toBe("plan.md，example.com");
+  });
+
+  it("auto-links only explicit web URLs, www URLs, and email addresses", () => {
+    expect(
+      preprocessLinks(
+        "http://4399.com https://4399.com www.4399.com contact@example.com 4399.com ai.md ftp://example.com",
+      ),
+    ).toBe(
+      "[http://4399.com](http://4399.com) [https://4399.com](https://4399.com) [www.4399.com](https://www.4399.com) [contact@example.com](mailto:contact@example.com) 4399.com ai.md ftp://example.com",
     );
   });
 

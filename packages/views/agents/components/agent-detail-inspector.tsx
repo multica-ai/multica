@@ -220,7 +220,13 @@ export function AgentDetailInspector({
               members={members}
               currentUserId={currentUserId}
               canEdit={canEdit}
-              onChange={(id) => update({ runtime_id: id })}
+              // Model and thinking level are per-runtime/per-model; clear both
+              // so the new runtime resolves its own defaults instead of keeping
+              // values it may not support (a stale thinking level would linger
+              // as an orphan token otherwise).
+              onChange={(id) =>
+                update({ runtime_id: id, model: "", thinking_level: "" })
+              }
             />
           </SettingsRow>
           <SettingsRow

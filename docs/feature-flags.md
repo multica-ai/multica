@@ -181,25 +181,29 @@ Outside a `FeatureFlagsProvider` (Storybook, unit tests, error pages) `useFlag` 
 
 ### v0.3.44 compatibility rollout
 
-The following release flags default to `false` so the schema can ship before
-the new persisted states are visible to older server pods or a rollback:
+The following release flag defaults to `false` so the schema can ship before
+the new persisted state is visible to older server pods or a rollback:
 
 ```yaml
 # Enable only after every v0.3.43 server pod has drained and rollback reads
 # have been validated against the migrated database.
-agents_agent_builder:
-  default: true
 settings_resource_labels:
   default: true
 ```
 
-Keep both off for v0.3.44: it is a schema-only deployment for these
-features. A later rollout may enable them only after it ships and verifies a
-rollback normalizer for builder agents and resource-label rows. Do not rely on
-turning the flags off to make a database safe for an older binary; it prevents
-new writes but cannot remove states that already exist. Until that normalizer
-exists, rollbacks must target a version that understands these states or happen
-before either flag is enabled.
+Keep it off for v0.3.44: it is a schema-only deployment for resource labels. A
+later rollout may enable it only after it ships and verifies a rollback
+normalizer for resource-label rows. Do not rely on turning the flag off to make
+a database safe for an older binary; it prevents new writes but cannot remove
+states that already exist. Until that normalizer exists, rollbacks must target
+a version that understands these states or happen before the flag is enabled.
+
+Agent Builder has completed this rollout and is now always available. Current
+clients always render the AI creation entry, and the backend no longer gates the
+session endpoint. `/api/config` still reports `agents_agent_builder: true` so
+installed desktop clients that still gate the entry on this config decision
+also receive the permanently enabled behavior; this is a client-compatibility
+decision, not an operator-controlled flag.
 
 Agent skill toggles have completed this rollout and are now always available.
 Current clients render the switch without a release flag, and the backend no

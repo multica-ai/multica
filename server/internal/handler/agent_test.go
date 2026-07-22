@@ -190,6 +190,70 @@ func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
+func TestCreateAgent_AssignsAvatarDefault(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	tests := []struct {
+		name       string
+		avatarURL  *string
+		wantAvatar string
+		wantEmoji  bool
+	}{
+		{name: "omitted", wantEmoji: true},
+		{name: "empty", avatarURL: ptr(""), wantEmoji: true},
+		{
+			name:       "explicit",
+			avatarURL:  ptr("https://cdn.example.com/avatars/agent.png"),
+			wantAvatar: "https://cdn.example.com/avatars/agent.png",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agentName := "avatar-default-test-" + tt.name
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(),
+					`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
+					testWorkspaceID, agentName,
+				)
+			})
+
+			body := map[string]any{
+				"name":       agentName,
+				"runtime_id": testRuntimeID,
+			}
+			if tt.avatarURL != nil {
+				body["avatar_url"] = *tt.avatarURL
+			}
+
+			w := httptest.NewRecorder()
+			testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+			if w.Code != http.StatusCreated {
+				t.Fatalf("CreateAgent: expected 201, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var response AgentResponse
+			if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if response.AvatarURL == nil {
+				t.Fatal("CreateAgent: avatar_url is nil")
+			}
+			if tt.wantEmoji {
+				if !strings.HasPrefix(*response.AvatarURL, "emoji:") {
+					t.Fatalf("CreateAgent: avatar_url = %q, want emoji avatar", *response.AvatarURL)
+				}
+				return
+			}
+			if *response.AvatarURL != tt.wantAvatar {
+				t.Fatalf("CreateAgent: avatar_url = %q, want %q", *response.AvatarURL, tt.wantAvatar)
+			}
+		})
+	}
+}
+
 func TestWorkspaceAlwaysRedactSecrets(t *testing.T) {
 	tests := []struct {
 		name     string

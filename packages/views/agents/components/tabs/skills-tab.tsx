@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import type {
   Agent,
   AgentRuntime,
+  DisabledRuntimeSkill,
   RuntimeLocalSkillSummary,
 } from "@multica/core/types";
 import { api, ApiError } from "@multica/core/api";
@@ -97,6 +98,34 @@ export function SkillsTab({
         error instanceof Error
           ? error.message
           : t(($) => $.tab_body.skills.toggle_failed_toast),
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleRuntimeToggle = async (
+    skill: RuntimeLocalSkillSummary,
+    enabled: boolean,
+  ) => {
+    if (!runtime || !skill.root) return;
+    const busyKey = runtimeSkillIdentity(skill);
+    setBusyId(busyKey);
+    try {
+      await api.setAgentRuntimeSkillEnabled(agent.id, {
+        runtime_id: runtime.id,
+        root: skill.root,
+        key: skill.key,
+        name: skill.name,
+        plugin: skill.plugin,
+        enabled,
+      });
+      await refreshAgent();
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t(($) => $.tab_body.skills.runtime_toggle_failed_toast),
       );
     } finally {
       setBusyId(null);
@@ -245,25 +274,66 @@ export function SkillsTab({
           <RuntimeNotice text={t(($) => $.tab_body.skills.runtime_empty)} />
         ) : (
           <ul className="divide-y rounded-lg border bg-surface-raised/40">
-            {runtimeSkills.map((skill) => (
-              <li key={`${skill.root ?? "unknown"}:${skill.key}`}>
-                <button
-                  type="button"
-                  onClick={() => setSelected({ kind: "runtime", skill })}
-                  className="flex w-full items-center gap-3 p-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            {runtimeSkills.map((skill) => {
+              const disabled = isRuntimeSkillDisabled(
+                agent.disabled_runtime_skills,
+                runtime?.id,
+                skill,
+              );
+              const busyKey = runtimeSkillIdentity(skill);
+              const busy = busyId === busyKey;
+              return (
+                <li
+                  key={`${skill.root ?? "unknown"}:${skill.key}`}
+                  className="flex items-center gap-3 p-3"
                 >
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                    <Server className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium">{skill.name}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {skill.description || skill.source_path}
+                  <button
+                    type="button"
+                    onClick={() => setSelected({ kind: "runtime", skill })}
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span
+                      className={cn(
+                        "flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground",
+                        disabled && "opacity-50",
+                      )}
+                    >
+                      <Server className="h-4 w-4" />
                     </span>
-                  </span>
-                </button>
-              </li>
-            ))}
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className={cn(
+                          "block text-sm font-medium",
+                          disabled && "text-muted-foreground",
+                        )}
+                      >
+                        {skill.name}
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {skill.description || skill.source_path}
+                      </span>
+                    </span>
+                  </button>
+                  {canEdit &&
+                    skill.can_disable === true &&
+                    skill.root &&
+                    (busy ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground motion-reduce:animate-none" />
+                    ) : (
+                      <Switch
+                        checked={!disabled}
+                        onCheckedChange={(checked) =>
+                          handleRuntimeToggle(skill, checked)
+                        }
+                        aria-label={t(
+                          ($) => $.tab_body.skills.runtime_toggle_aria,
+                          { name: skill.name },
+                        )}
+                      />
+                    ))}
+                </li>
+              );
+            })}
           </ul>
         )}
       </CapabilitySection>
@@ -276,6 +346,26 @@ export function SkillsTab({
         loading={selected?.kind === "workspace" && detailQuery.isLoading}
       />
     </div>
+  );
+}
+
+function runtimeSkillIdentity(skill: RuntimeLocalSkillSummary): string {
+  return `runtime:${skill.root ?? "unknown"}:${skill.key}:${skill.plugin ?? ""}`;
+}
+
+function isRuntimeSkillDisabled(
+  disabledSkills: DisabledRuntimeSkill[] | undefined,
+  runtimeId: string | undefined,
+  skill: RuntimeLocalSkillSummary,
+): boolean {
+  if (!runtimeId || !skill.root) return false;
+  return (disabledSkills ?? []).some(
+    (disabled) =>
+      disabled.runtime_id === runtimeId &&
+      disabled.provider === skill.provider &&
+      disabled.root === skill.root &&
+      disabled.key === skill.key &&
+      (disabled.plugin ?? "") === (skill.plugin ?? ""),
   );
 }
 

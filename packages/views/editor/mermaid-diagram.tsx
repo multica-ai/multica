@@ -147,7 +147,7 @@ function getMermaidLayout(svg: string): Size | null {
 // in this session. Picked to absorb most issue-detail diagrams without
 // excessive empty space; web.dev's CLS guidance recommends reserving any
 // such space upfront so async content doesn't shift surrounding layout.
-const MERMAID_SKELETON_HEIGHT_PX = 280;
+export const MERMAID_SKELETON_HEIGHT_PX = 280;
 const MERMAID_LAYOUT_CACHE_PREFIX = "multica:mermaid:layout:";
 
 // DJB2 — small, fast, sufficient for sessionStorage cache keys. The chart
@@ -159,6 +159,23 @@ function hashChart(chart: string): string {
     hash = ((hash << 5) + hash) ^ chart.charCodeAt(i);
   }
   return (hash >>> 0).toString(36);
+}
+
+/**
+ * Height to reserve for a diagram that has not rendered yet: the real height
+ * when this exact chart already rendered in this session, otherwise the
+ * skeleton default. Exported so the near-viewport lazy shell
+ * (rich-content/lazy-rich-block.tsx) reserves the SAME space this component
+ * would, instead of maintaining a second guess at the size.
+ *
+ * NOT safe to call during render: it reads sessionStorage, which does not exist
+ * on the server, so the value differs between the server frame and the browser's
+ * hydration frame whenever the cache is warm. Callers must use the skeleton
+ * default for the first frame and call this from an effect (see
+ * useReservedMermaidHeightPx in rich-content/rich-code-block.tsx).
+ */
+export function reservedMermaidHeightPx(chart: string): number {
+  return readCachedLayout(chart)?.height ?? MERMAID_SKELETON_HEIGHT_PX;
 }
 
 function readCachedLayout(chart: string): Size | null {

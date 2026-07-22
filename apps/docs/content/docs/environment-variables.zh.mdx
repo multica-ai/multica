@@ -19,6 +19,9 @@ Multica 的 [自部署](/self-host-quickstart) 服务器启动时从环境变量
 | `APP_ENV` | 空 | **是**（必须 `production`）|
 | `FRONTEND_ORIGIN` | 空 | **是**（self-host 要填你自己的域名）|
 | `MULTICA_DEV_VERIFICATION_CODE` | 空 | 否（生产必须保持为空）|
+| `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 否。收到 `SIGTERM`/`SIGINT` 后、开始优雅退出前的可选等待时间。接受 `300s`、`5m` 等非负 Go duration；留空或设为 `0` 时立即开始退出 |
+
+在 Kubernetes 中使用 `MULTICA_SHUTDOWN_HOLD_DURATION` 时，`terminationGracePeriodSeconds` 必须大于 hold 时长与后续优雅退出预算之和。如果两者配置成相同时长，kubelet 可能在清理完成前发送 `SIGKILL`。
 
 <Callout type="warning">
 **生产环境保持 `MULTICA_DEV_VERIFICATION_CODE` 为空。** 固定本地测试验证码默认关闭；如果你设置 `MULTICA_DEV_VERIFICATION_CODE=888888`，在 `APP_ENV` 非 production 时，任何能请求验证码的人都能用这个固定值登录。`APP_ENV=production` 时该快捷码会被忽略。

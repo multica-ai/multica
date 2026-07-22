@@ -41,7 +41,7 @@ export function isTableStructureSuspended(total: number): boolean {
  *
  * - `hasError`: a page that keeps failing leaves `hasNextPage` true and
  *   `isFetchingNextPage` false after each attempt, so an ungated effect
- *   refires forever — a silent request storm behind a stuck "Loaded X of N"
+ *   refires forever — a silent request storm
  *   (round-4 review P1#1). Terminal errors stop the loop; resuming is an
  *   explicit user Retry.
  * - `loadedCount`: an ABSOLUTE stop at the ceiling, independent of any
@@ -328,6 +328,27 @@ export function buildIssueTableRows(
     }
   }
   return rows;
+}
+
+/**
+ * Refresh the issue objects inside a frozen row snapshot. While a cell editor
+ * popup is open the table renders a structural snapshot (row order, grouping,
+ * nesting stay put so the popup's anchor row cannot be reordered out of the
+ * virtualized render window mid-interaction), but the VALUES inside those
+ * rows must stay live — a multi-select toggle, for example, commits while the
+ * popup is open and its checkmark has to reflect the optimistic cache.
+ * Issues deleted from the live window keep their stale snapshot object; the
+ * structure catches up the moment the editor closes.
+ */
+export function refreshFrozenTableRows(
+  snapshot: IssueTableDisplayRow[],
+  issueById: ReadonlyMap<string, Issue>,
+): IssueTableDisplayRow[] {
+  return snapshot.map((row) => {
+    if (row.kind !== "issue") return row;
+    const live = issueById.get(row.issue.id);
+    return live && live !== row.issue ? { ...row, issue: live } : row;
+  });
 }
 
 function columnValue(
