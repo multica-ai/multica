@@ -435,6 +435,49 @@ func TestFilterCustomArgsBlocksProtocolFlags(t *testing.T) {
 	}
 }
 
+func TestFilterCustomArgsBlocksVariadicValues(t *testing.T) {
+	t.Parallel()
+
+	blocked := map[string]blockedArgMode{"--allowed-tools": blockedVariadicValues}
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "space separated values",
+			args: []string{"--allowed-tools", "read_file", "write_file", "--debug"},
+			want: []string{"--debug"},
+		},
+		{
+			name: "comma separated inline value",
+			args: []string{"--allowed-tools=read_file,write_file", "--debug"},
+			want: []string{"--debug"},
+		},
+		{
+			name: "repeated flag",
+			args: []string{"--allowed-tools", "read_file", "--allowed-tools", "write_file", "--debug"},
+			want: []string{"--debug"},
+		},
+		{
+			name: "no value before another flag",
+			args: []string{"--allowed-tools", "--debug", "trace"},
+			want: []string{"--debug", "trace"},
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := filterCustomArgs(tc.args, blocked, slog.Default())
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("filterCustomArgs(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFilterCustomArgsStripsShellQuotes(t *testing.T) {
 	t.Parallel()
 

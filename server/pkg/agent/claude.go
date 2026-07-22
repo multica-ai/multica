@@ -850,9 +850,10 @@ func isFilteredChildEnvKey(key string) bool {
 type blockedArgMode int
 
 const (
-	blockedWithValue     blockedArgMode = iota // flag takes a value (next arg or =value)
-	blockedStandalone                          // flag is boolean, no value
-	blockedOptionalValue                       // flag may take the next non-flag arg or =value
+	blockedWithValue      blockedArgMode = iota // flag takes a value (next arg or =value)
+	blockedStandalone                           // flag is boolean, no value
+	blockedOptionalValue                        // flag may take the next non-flag arg or =value
+	blockedVariadicValues                       // flag takes zero or more following non-flag values or =value
 )
 
 // filterCustomArgs removes protocol-critical flags from user-configured custom
@@ -887,6 +888,12 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *
 			if mode == blockedWithValue && !hasInlineValue {
 				// The next arg is the value for this flag — skip it too.
 				i++
+			} else if mode == blockedVariadicValues {
+				// Array-valued flags consume every following non-flag token. Skip
+				// all of them so none can leak into a positional argument.
+				for i+1 < len(args) && !strings.HasPrefix(unshellQuoteArg(args[i+1]), "-") {
+					i++
+				}
 			} else if mode == blockedOptionalValue && !hasInlineValue && i+1 < len(args) &&
 				!strings.HasPrefix(unshellQuoteArg(args[i+1]), "-") {
 				// Optional values are consumed only when the next token is not

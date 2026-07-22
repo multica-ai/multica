@@ -40,7 +40,7 @@ var qwenBlockedArgs = map[string]blockedArgMode{
 	"--mcp-config":         blockedWithValue,
 	"--safe-mode":          blockedStandalone,
 	"--approval-mode":      blockedWithValue,
-	"--allowed-tools":      blockedWithValue,
+	"--allowed-tools":      blockedVariadicValues,
 	"--yolo":               blockedStandalone,
 	"-y":                   blockedStandalone,
 }

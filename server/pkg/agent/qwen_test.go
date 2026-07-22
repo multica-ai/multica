@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -25,56 +26,54 @@ func TestNewReturnsQwenBackend(t *testing.T) {
 
 func TestBuildQwenArgsKeepsProtocolManaged(t *testing.T) {
 	t.Parallel()
-	args := buildQwenArgs("task prompt", ExecOptions{
+	got := buildQwenArgs("task prompt", ExecOptions{
 		Model:           "qwen3.8-max-preview",
 		ResumeSessionID: "session-1",
 		ExtraArgs:       []string{"--output-format", "text", "--sandbox"},
 		CustomArgs: []string{
 			"--prompt=replace", "-o", "json", "--model", "other", "--resume", "other-session",
 			"--safe-mode", "--chat-recording", "false", "--mcp-config", "injected-mcp.json", "--mcp-config=inline-mcp.json",
-			"--approval-mode", "auto", "--approval-mode=yolo", "--allowed-tools", "web_fetch", "--allowed-tools=agent", "--yolo", "-y",
+			"--approval-mode", "auto", "--approval-mode=yolo", "--allowed-tools", "web_fetch", "agent", "--allowed-tools=read_file,write_file", "--yolo", "-y",
 			"--exclude-tools", "run_shell_command", "--debug",
 		},
 	}, slog.Default())
-	joined := strings.Join(args, " ")
-	for _, forbidden := range []string{"text", "replace", "other-session", "other", "--safe-mode", "--chat-recording", "injected-mcp.json", "inline-mcp.json", "auto", "web_fetch", "--allowed-tools"} {
-		if strings.Contains(joined, forbidden) {
-			t.Fatalf("managed argument %q leaked into %v", forbidden, args)
-		}
-	}
-	wantPrefix := []string{
+	want := []string{
 		"-p", "task prompt", "--output-format", "stream-json", "--yolo",
 		"--model", "qwen3.8-max-preview", "--resume", "session-1",
+		"--sandbox", "--exclude-tools", "run_shell_command", "--debug",
 	}
-	if len(args) < len(wantPrefix) {
-		t.Fatalf("args too short: %v", args)
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildQwenArgs() = %v, want %v", got, want)
 	}
-	for i, want := range wantPrefix {
-		if args[i] != want {
-			t.Fatalf("args[%d] = %q, want %q; all=%v", i, args[i], want, args)
-		}
+}
+
+func TestBuildQwenArgsFiltersAllowedToolsForms(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		customArgs []string
+		wantTail   []string
+	}{
+		{name: "space separated", customArgs: []string{"--allowed-tools", "read_file", "write_file", "--debug"}, wantTail: []string{"--debug"}},
+		{name: "comma separated", customArgs: []string{"--allowed-tools", "read_file,write_file", "--debug"}, wantTail: []string{"--debug"}},
+		{name: "inline", customArgs: []string{"--allowed-tools=read_file,write_file", "--debug"}, wantTail: []string{"--debug"}},
+		{name: "repeated", customArgs: []string{"--allowed-tools", "read_file", "--allowed-tools", "write_file", "--debug"}, wantTail: []string{"--debug"}},
+		{name: "no value", customArgs: []string{"--allowed-tools", "--debug"}, wantTail: []string{"--debug"}},
+		{name: "hard deny preserved", customArgs: []string{"--exclude-tools", "run_shell_command"}, wantTail: []string{"--exclude-tools", "run_shell_command"}},
 	}
-	if !strings.Contains(joined, "--sandbox") || !strings.Contains(joined, "--debug") {
-		t.Fatalf("non-managed custom args missing from %v", args)
-	}
-	excludeToolsPreserved := false
-	yoloCount := 0
-	for i, arg := range args {
-		if arg == "--yolo" {
-			yoloCount++
-		}
-		if arg == "--exclude-tools" && i+1 < len(args) && args[i+1] == "run_shell_command" {
-			excludeToolsPreserved = true
-		}
-		if arg == "-y" || arg == "--approval-mode" || strings.HasPrefix(arg, "--approval-mode=") {
-			t.Fatalf("custom permission argument %q leaked into %v", arg, args)
-		}
-	}
-	if !excludeToolsPreserved {
-		t.Fatalf("user-controlled --exclude-tools missing from %v", args)
-	}
-	if yoloCount != 1 {
-		t.Fatalf("daemon --yolo count = %d, want 1; args=%v", yoloCount, args)
+
+	wantPrefix := []string{"-p", "task prompt", "--output-format", "stream-json", "--yolo"}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := buildQwenArgs("task prompt", ExecOptions{CustomArgs: tc.customArgs}, slog.Default())
+			want := append(slices.Clone(wantPrefix), tc.wantTail...)
+			if !slices.Equal(got, want) {
+				t.Fatalf("buildQwenArgs() = %v, want %v", got, want)
+			}
+		})
 	}
 }
 
