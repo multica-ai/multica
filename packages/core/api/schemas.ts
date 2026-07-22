@@ -13,6 +13,7 @@ import type {
   BillingTopupsPage,
   BillingTransactionsPage,
   CancelTaskResponse,
+  ChatMessage,
   ChatDraftRestoresResponse,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
@@ -228,6 +229,41 @@ const ReactionSchema = z.object({
 // into the fallback `[]`.
 const AttachmentSchema = z.object({
   id: z.string(),
+}).loose();
+
+const ChatQuickActionSchema = z.object({
+  label: z.string(),
+  prompt: z.string(),
+  primary: z.boolean().optional(),
+}).loose();
+
+export const ChatMessageSchema = z.object({
+  id: z.string(),
+  chat_session_id: z.string(),
+  role: z.enum(["user", "assistant"]).catch("assistant"),
+  content: z.string().default(""),
+  task_id: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  attachments: z.array(AttachmentSchema).optional(),
+  failure_reason: z.string().nullable().optional(),
+  elapsed_ms: z.number().nullable().optional(),
+  message_kind: z.enum(["message", "no_response"]).catch("message").optional(),
+  // Optional additive data degrades independently: a malformed suggestion
+  // must not hide the assistant reply that contains it.
+  quick_actions: z.array(ChatQuickActionSchema).catch([]).optional().default([]),
+}).loose();
+
+export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
+export const EMPTY_CHAT_MESSAGE_LIST: ChatMessage[] = [];
+
+export const ChatMessagesPageSchema = z.object({
+  messages: z.array(ChatMessageSchema).default([]),
+  limit: z.number().default(50),
+  has_more: z.boolean().default(false),
+  next_cursor: z.object({
+    created_at: z.string(),
+    id: z.string(),
+  }).loose().nullable().optional(),
 }).loose();
 
 // Standalone attachment lookup (`GET /api/attachments/{id}`) is the source of

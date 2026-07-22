@@ -61,6 +61,20 @@ describe("applyChatDoneToCache", () => {
     });
   });
 
+  it("carries quick actions into the instant mobile bubble", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), []);
+    const quickActions = [
+      { label: "Build a checklist", prompt: "Build the complete checklist", primary: true },
+    ];
+
+    applyChatDoneToCache(qc, donePayload({ quick_actions: quickActions }));
+
+    expect(
+      qc.getQueryData<ChatMessage[]>(chatKeys.messages(SESSION))?.[0]?.quick_actions,
+    ).toEqual(quickActions);
+  });
+
   it("does not duplicate an echoed message on reconnect", () => {
     const qc = new QueryClient();
     const existing: ChatMessage = {

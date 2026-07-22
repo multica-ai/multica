@@ -239,7 +239,11 @@ export default function ChatTab() {
   );
 
   const handleSend = useCallback(
-    async (content: string, attachmentIds: string[] = []) => {
+    async (
+      content: string,
+      attachmentIds: string[] = [],
+      options: { clearDraft?: boolean } = {},
+    ) => {
       if (!currentAgent) return;
 
       const isNewSession = !activeSessionId;
@@ -278,7 +282,9 @@ export default function ChatTab() {
           created_at: result.created_at,
         });
         qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-        clearDraft(sessionId);
+        if (options.clearDraft !== false) {
+          clearDraft(sessionId);
+        }
       } catch (err) {
         qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
           old ? old.filter((m) => m.id !== optimistic.id) : old,
@@ -397,6 +403,10 @@ export default function ChatTab() {
           hasSessions={sessions.length > 0}
           agentName={currentAgent?.name}
           onPickPrompt={(text) => setDraft(draftKey, text)}
+          onQuickAction={(action) =>
+            handleSend(action.prompt, [], { clearDraft: false })
+          }
+          quickActionsDisabled={sending || disabled}
           pendingTask={pendingTask}
           liveTaskMessages={liveTaskMessages}
           availability={presenceAvailability}

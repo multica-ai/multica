@@ -2776,6 +2776,14 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	// Same unescape as the issue-comment path: literal `\n` from agent stdout
 	// becomes a real newline so the chat panel renders paragraph breaks.
 	body := util.UnescapeBackslashEscapes(payload.Output)
+	var quickActions []protocol.ChatQuickAction
+	if task.ChatInputTaskID.Valid {
+		body, quickActions = splitChatQuickActions(body)
+		for i := range quickActions {
+			quickActions[i].Label = redact.Text(quickActions[i].Label)
+			quickActions[i].Prompt = redact.Text(quickActions[i].Prompt)
+		}
+	}
 	isEmpty := strings.TrimSpace(body) == ""
 
 	// MUL-4899 completion-boundary observation. Measures whether the delivery
@@ -2815,8 +2823,15 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 		TaskID:        task.ID,
 		ElapsedMs:     computeChatElapsedMs(task),
 	}
+	if len(quickActions) > 0 {
+		encoded, err := json.Marshal(quickActions)
+		if err != nil {
+			return nil, fmt.Errorf("marshal chat quick actions: %w", err)
+		}
+		params.QuickActions = encoded
+	}
 	switch {
-	case !isEmpty:
+	case !isEmpty || len(quickActions) > 0:
 		params.Content = redact.Text(body)
 		// message_kind left NULL → COALESCE defaults to 'message'.
 	case pendingAttachments > 0:
@@ -4061,6 +4076,9 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 		payload.MessageID = util.UUIDToString(msg.ID)
 		payload.Content = msg.Content
 		payload.MessageKind = msg.MessageKind
+		if len(msg.QuickActions) > 0 {
+			_ = json.Unmarshal(msg.QuickActions, &payload.QuickActions)
+		}
 		if msg.CreatedAt.Valid {
 			payload.CreatedAt = msg.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
 		}

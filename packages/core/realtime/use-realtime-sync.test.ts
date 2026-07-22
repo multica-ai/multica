@@ -110,6 +110,20 @@ describe("applyChatDoneToCache", () => {
     expect(msgs?.[1]?.message_kind).toBe("no_response");
   });
 
+  it("carries quick actions on the inline assistant message", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatMessage[]>(messagesKey, [userMessage()]);
+    const quickActions = [
+      { label: "Draft it", prompt: "Draft the full brief", primary: true },
+    ];
+
+    applyChatDoneToCache(qc, donePayload({ quick_actions: quickActions }));
+
+    expect(qc.getQueryData<ChatMessage[]>(messagesKey)?.[1]?.quick_actions).toEqual(
+      quickActions,
+    );
+  });
+
   it("does not duplicate a replayed chat done event", () => {
     const qc = createQueryClient();
     const assistant: ChatMessage = {

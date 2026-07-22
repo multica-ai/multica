@@ -70,9 +70,13 @@ func (q *Queries) CreateChatDraftRestore(ctx context.Context, arg CreateChatDraf
 }
 
 const createChatMessage = `-- name: CreateChatMessage :one
-INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms, message_kind)
-VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::text, 'message'))
-RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind
+INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms, message_kind, quick_actions)
+VALUES (
+    $1, $2, $3, $4, $5,
+    $6, COALESCE($7::text, 'message'),
+    COALESCE($8::jsonb, '[]'::jsonb)
+)
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions
 `
 
 type CreateChatMessageParams struct {
@@ -83,9 +87,10 @@ type CreateChatMessageParams struct {
 	FailureReason pgtype.Text `json:"failure_reason"`
 	ElapsedMs     pgtype.Int8 `json:"elapsed_ms"`
 	MessageKind   pgtype.Text `json:"message_kind"`
+	QuickActions  []byte      `json:"quick_actions"`
 }
 
-// message_kind defaults to 'message' via COALESCE so every existing caller
+// message_kind and quick_actions default via COALESCE so every existing caller
 // (which omits it) keeps writing ordinary messages; the empty-reply path passes
 // 'no_response' to mark a visible turn with no text output (MUL-4351).
 func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessageParams) (ChatMessage, error) {
@@ -97,6 +102,7 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 		arg.FailureReason,
 		arg.ElapsedMs,
 		arg.MessageKind,
+		arg.QuickActions,
 	)
 	var i ChatMessage
 	err := row.Scan(
@@ -109,6 +115,7 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 		&i.FailureReason,
 		&i.ElapsedMs,
 		&i.MessageKind,
+		&i.QuickActions,
 	)
 	return i, err
 }
@@ -357,7 +364,7 @@ func (q *Queries) DeleteChatSession(ctx context.Context, arg DeleteChatSessionPa
 const deleteUserChatMessageByTask = `-- name: DeleteUserChatMessageByTask :one
 DELETE FROM chat_message
 WHERE task_id = $1 AND role = 'user'
-RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions
 `
 
 func (q *Queries) DeleteUserChatMessageByTask(ctx context.Context, taskID pgtype.UUID) (ChatMessage, error) {
@@ -373,12 +380,13 @@ func (q *Queries) DeleteUserChatMessageByTask(ctx context.Context, taskID pgtype
 		&i.FailureReason,
 		&i.ElapsedMs,
 		&i.MessageKind,
+		&i.QuickActions,
 	)
 	return i, err
 }
 
 const getChatMessage = `-- name: GetChatMessage :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions FROM chat_message
 WHERE id = $1
 `
 
@@ -395,6 +403,7 @@ func (q *Queries) GetChatMessage(ctx context.Context, id pgtype.UUID) (ChatMessa
 		&i.FailureReason,
 		&i.ElapsedMs,
 		&i.MessageKind,
+		&i.QuickActions,
 	)
 	return i, err
 }
@@ -498,7 +507,7 @@ func (q *Queries) GetLastChatTaskSession(ctx context.Context, chatSessionID pgty
 }
 
 const getMostRecentUserChatMessage = `-- name: GetMostRecentUserChatMessage :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions FROM chat_message
 WHERE chat_session_id = $1 AND role = 'user'
 ORDER BY created_at DESC
 LIMIT 1
@@ -522,6 +531,7 @@ func (q *Queries) GetMostRecentUserChatMessage(ctx context.Context, chatSessionI
 		&i.FailureReason,
 		&i.ElapsedMs,
 		&i.MessageKind,
+		&i.QuickActions,
 	)
 	return i, err
 }
@@ -739,7 +749,7 @@ func (q *Queries) ListChatDraftRestoresBySession(ctx context.Context, chatSessio
 }
 
 const listChatInputMessages = `-- name: ListChatInputMessages :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions FROM chat_message
 WHERE task_id = $1 AND role = 'user'
 ORDER BY created_at ASC, id ASC
 `
@@ -770,6 +780,7 @@ func (q *Queries) ListChatInputMessages(ctx context.Context, taskID pgtype.UUID)
 			&i.FailureReason,
 			&i.ElapsedMs,
 			&i.MessageKind,
+			&i.QuickActions,
 		); err != nil {
 			return nil, err
 		}
@@ -782,7 +793,7 @@ func (q *Queries) ListChatInputMessages(ctx context.Context, taskID pgtype.UUID)
 }
 
 const listChatMessages = `-- name: ListChatMessages :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions FROM chat_message
 WHERE chat_session_id = $1
 ORDER BY created_at ASC
 `
@@ -806,6 +817,7 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 			&i.FailureReason,
 			&i.ElapsedMs,
 			&i.MessageKind,
+			&i.QuickActions,
 		); err != nil {
 			return nil, err
 		}
@@ -818,7 +830,7 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 }
 
 const listChatMessagesPage = `-- name: ListChatMessagesPage :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions FROM chat_message
 WHERE chat_session_id = $1
   AND (
     $3::timestamptz IS NULL
@@ -859,6 +871,7 @@ func (q *Queries) ListChatMessagesPage(ctx context.Context, arg ListChatMessages
 			&i.FailureReason,
 			&i.ElapsedMs,
 			&i.MessageKind,
+			&i.QuickActions,
 		); err != nil {
 			return nil, err
 		}

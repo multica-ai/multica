@@ -148,11 +148,15 @@ UPDATE chat_session SET updated_at = now()
 WHERE id = $1;
 
 -- name: CreateChatMessage :one
--- message_kind defaults to 'message' via COALESCE so every existing caller
+-- message_kind and quick_actions default via COALESCE so every existing caller
 -- (which omits it) keeps writing ordinary messages; the empty-reply path passes
 -- 'no_response' to mark a visible turn with no text output (MUL-4351).
-INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms, message_kind)
-VALUES ($1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms), COALESCE(sqlc.narg(message_kind)::text, 'message'))
+INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms, message_kind, quick_actions)
+VALUES (
+    $1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason),
+    sqlc.narg(elapsed_ms), COALESCE(sqlc.narg(message_kind)::text, 'message'),
+    COALESCE(sqlc.narg(quick_actions)::jsonb, '[]'::jsonb)
+)
 RETURNING *;
 
 -- name: LinkChatMessageToTask :exec

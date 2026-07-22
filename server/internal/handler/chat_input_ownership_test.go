@@ -196,6 +196,54 @@ func TestCompleteTask_ChatNonEmptyOutputWritesMessage(t *testing.T) {
 	}
 }
 
+// TestCompleteTask_ChatQuickActions persists only the visible reply plus a
+// validated action payload. The reserved footer never enters message content.
+func TestCompleteTask_ChatQuickActions(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "quick-actions chat")
+	taskID := sendDirectChat(t, ctx, agentID, sessionID, "what next?")
+	markTaskRunning(t, ctx, taskID)
+
+	output := "Here is the plan.\n\n```quick-actions\n" +
+		`[{"label":"Draft it","prompt":"Draft the complete plan","primary":true},` +
+		`{"label":"Make a checklist","prompt":"Turn this into a checklist"}]` +
+		"\n```"
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), completeResult(t, output), "", ""); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+
+	rows := assistantRows(t, ctx, sessionID)
+	if len(rows) != 1 {
+		t.Fatalf("expected one assistant message, got %d", len(rows))
+	}
+	if rows[0].Content != "Here is the plan." || rows[0].MessageKind != protocol.ChatMessageKindMessage {
+		t.Fatalf("persisted reply = kind %q content %q", rows[0].MessageKind, rows[0].Content)
+	}
+	var actions []protocol.ChatQuickAction
+	if err := json.Unmarshal(rows[0].QuickActions, &actions); err != nil {
+		t.Fatalf("decode quick actions: %v", err)
+	}
+	if len(actions) != 2 || actions[0].Prompt != "Draft the complete plan" || !actions[0].Primary {
+		t.Fatalf("persisted quick actions = %+v", actions)
+	}
+
+	// A useful actions-only turn is still an ordinary message, not the
+	// no_response fallback: the chips themselves are the assistant outcome.
+	actionsOnlyTask := sendDirectChat(t, ctx, agentID, sessionID, "give me options only")
+	markTaskRunning(t, ctx, actionsOnlyTask)
+	actionsOnly := "```quick-actions\n[{\"label\":\"Continue\",\"prompt\":\"Continue the plan\"}]\n```"
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(actionsOnlyTask), completeResult(t, actionsOnly), "", ""); err != nil {
+		t.Fatalf("complete actions-only task: %v", err)
+	}
+	rows = assistantRows(t, ctx, sessionID)
+	if len(rows) != 2 || rows[1].Content != "" || rows[1].MessageKind != protocol.ChatMessageKindMessage {
+		t.Fatalf("actions-only outcome = %+v", rows)
+	}
+}
+
 // TestCompleteTask_ChatCallbackIdempotent: a replayed completion callback must
 // not write a second assistant outcome.
 func TestCompleteTask_ChatCallbackIdempotent(t *testing.T) {

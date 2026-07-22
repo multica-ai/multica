@@ -17,7 +17,15 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
-import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Copy } from "lucide-react";
+import {
+  ChevronRight,
+  ChevronDown,
+  Brain,
+  AlertCircle,
+  AlertTriangle,
+  ArrowUpRight,
+  Copy,
+} from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { RichContent } from "../../rich-content";
@@ -28,6 +36,7 @@ import type { AgentAvailability } from "@multica/core/agents";
 import type {
   ChatMessage,
   ChatPendingTask,
+  ChatQuickAction,
   TaskFailureReason,
   TaskMessagePayload,
 } from "@multica/core/types";
@@ -36,6 +45,7 @@ import { buildTimeline } from "../../common/task-transcript";
 import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
+import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
 import { useT } from "../../i18n";
 
 // ─── Public component ────────────────────────────────────────────────────
@@ -55,6 +65,9 @@ interface ChatMessageListProps {
   onLoadOlderMessages?: () => void;
   /** Transform assistant task text for embedded chat protocols before render/copy. */
   transformContent?: (content: string) => string;
+  /** Send the full hidden prompt behind an assistant follow-up chip. */
+  onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
+  quickActionsDisabled?: boolean;
 }
 
 // ─── Virtuoso chrome ─────────────────────────────────────────────────────
@@ -143,6 +156,8 @@ export function ChatMessageList({
   isFetchingOlderMessages = false,
   onLoadOlderMessages,
   transformContent,
+  onQuickAction,
+  quickActionsDisabled = false,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -253,6 +268,8 @@ export function ChatMessageList({
               item={item}
               isPending={!!pendingTaskId && item.taskId === pendingTaskId}
               transformContent={transformContent}
+              onQuickAction={onQuickAction}
+              quickActionsDisabled={quickActionsDisabled}
             />
           </div>
         )}
@@ -301,10 +318,14 @@ const MessageBubble = memo(function MessageBubble({
   item,
   isPending,
   transformContent,
+  onQuickAction,
+  quickActionsDisabled,
 }: {
   item: ChatRenderItem;
   isPending: boolean;
   transformContent?: (content: string) => string;
+  onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
+  quickActionsDisabled: boolean;
 }) {
   // The live row and the persisted assistant row both land here under one key,
   // and both render <AssistantMessage> — same component type, same position —
@@ -315,6 +336,8 @@ const MessageBubble = memo(function MessageBubble({
         taskId={item.taskId}
         isPending={isPending}
         transformContent={transformContent}
+        onQuickAction={onQuickAction}
+        quickActionsDisabled={quickActionsDisabled}
       />
     );
   }
@@ -352,6 +375,8 @@ const MessageBubble = memo(function MessageBubble({
       message={message}
       isPending={isPending}
       transformContent={transformContent}
+      onQuickAction={onQuickAction}
+      quickActionsDisabled={quickActionsDisabled}
     />
   );
 });
@@ -378,11 +403,15 @@ function AssistantMessage({
   message,
   isPending,
   transformContent,
+  onQuickAction,
+  quickActionsDisabled,
 }: {
   taskId: string | null;
   message?: ChatMessage;
   isPending: boolean;
   transformContent?: (content: string) => string;
+  onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
+  quickActionsDisabled: boolean;
 }) {
   const canFetchTaskMessages = isTaskMessageTaskId(taskId);
 
@@ -453,6 +482,13 @@ function AssistantMessage({
             attachments={message.attachments}
             content={message.content}
           />
+          {onQuickAction && (message.quick_actions?.length ?? 0) > 0 && (
+            <QuickActions
+              actions={message.quick_actions ?? []}
+              disabled={quickActionsDisabled || isPending}
+              onSelect={onQuickAction}
+            />
+          )}
           <MessageFooter
             message={message}
             timeline={timeline}
@@ -468,11 +504,60 @@ function transformTimeline(
   timeline: ChatTimelineItem[],
   transformContent?: (content: string) => string,
 ): ChatTimelineItem[] {
-  if (!transformContent) return timeline;
   return timeline.map((item) =>
     item.type === "text" && item.content
-      ? { ...item, content: transformContent(item.content) }
+      ? {
+          ...item,
+          content: transformContent
+            ? transformContent(stripChatQuickActionsProtocol(item.content))
+            : stripChatQuickActionsProtocol(item.content),
+        }
       : item,
+  );
+}
+
+function QuickActions({
+  actions,
+  disabled,
+  onSelect,
+}: {
+  actions: ChatQuickAction[];
+  disabled: boolean;
+  onSelect: (action: ChatQuickAction) => void | Promise<unknown>;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const blocked = disabled || submitting;
+
+  const handleSelect = async (action: ChatQuickAction) => {
+    if (blocked) return;
+    setSubmitting(true);
+    try {
+      await onSelect(action);
+    } catch {
+      // The send path owns user-facing error feedback and optimistic rollback.
+      // Re-enable the chip so a transient failure can be retried.
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap gap-2 pt-1" aria-label="Suggested follow-ups">
+      {actions.slice(0, 3).map((action, index) => (
+        <Button
+          key={`${action.label}-${index}`}
+          type="button"
+          variant={action.primary ? "brandSubtle" : "outline"}
+          size="sm"
+          className="max-w-full rounded-full px-3"
+          disabled={blocked}
+          onClick={() => void handleSelect(action)}
+        >
+          <span className="truncate">{action.label}</span>
+          {action.primary ? <ArrowUpRight aria-hidden="true" /> : null}
+        </Button>
+      ))}
+    </div>
   );
 }
 

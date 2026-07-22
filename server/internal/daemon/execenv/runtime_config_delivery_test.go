@@ -150,6 +150,28 @@ func TestChannelDisplayName(t *testing.T) {
 	}
 }
 
+func TestQuickActionsInstructionsOnlyReachDirectChat(t *testing.T) {
+	t.Parallel()
+	direct := buildMetaSkillContent("claude", TaskContextForEnv{
+		ChatSessionID: "c-1", AgentName: "Eve", AgentID: "eve-1",
+	})
+	for _, want := range []string{"### Quick Actions", "```quick-actions", "Complete prompt sent when selected"} {
+		if !strings.Contains(direct, want) {
+			t.Fatalf("direct-chat brief is missing %q", want)
+		}
+	}
+
+	for _, channelType := range []string{ChannelTypeSlack, ChannelTypeFeishu} {
+		channel := buildMetaSkillContent("claude", TaskContextForEnv{
+			ChatSessionID: "c-1", ChatChannelType: channelType,
+			AgentName: "Eve", AgentID: "eve-1",
+		})
+		if strings.Contains(channel, "```quick-actions") || strings.Contains(channel, "### Quick Actions") {
+			t.Fatalf("%s brief must not advertise direct-chat quick actions", channelType)
+		}
+	}
+}
+
 // outputSection extracts the brief's `## Output` section for readable failures.
 func outputSection(brief string) string {
 	idx := strings.Index(brief, "\n## Output\n")

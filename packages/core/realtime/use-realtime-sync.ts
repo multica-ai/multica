@@ -134,12 +134,12 @@ export function applyChatDoneToCache(
   const taskId = payload.task_id;
   const messageId = payload.message_id;
   const content = payload.content;
-  if (messageId && content !== undefined) {
+  if (messageId && (content !== undefined || (payload.quick_actions?.length ?? 0) > 0)) {
     const assistant: ChatMessage = {
       id: messageId,
       chat_session_id: sessionId,
       role: "assistant",
-      content,
+      content: content ?? "",
       task_id: taskId,
       created_at: payload.created_at ?? new Date().toISOString(),
       elapsed_ms: payload.elapsed_ms ?? null,
@@ -147,6 +147,9 @@ export function applyChatDoneToCache(
       // without waiting for the reconciling refetch (MUL-4351). Missing →
       // "message" for older servers.
       message_kind: payload.message_kind ?? "message",
+      ...(payload.quick_actions !== undefined
+        ? { quick_actions: payload.quick_actions }
+        : {}),
     };
     qc.setQueryData<ChatMessage[] | undefined>(
       chatKeys.messages(sessionId),

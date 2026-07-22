@@ -799,6 +799,10 @@ export function ChatWindow() {
           hasOlderMessages={!!hasOlderMessages}
           isFetchingOlderMessages={isFetchingOlderMessages}
           onLoadOlderMessages={() => void fetchOlderMessages()}
+          onQuickAction={(action) => handleSend(action.prompt)}
+          quickActionsDisabled={
+            !!pendingTaskId || isSessionArchived || isAgentArchived || noAgent
+          }
         />
       ) : (
         <EmptyState

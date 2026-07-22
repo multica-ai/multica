@@ -360,6 +360,7 @@ type ChatMessage struct {
 	FailureReason pgtype.Text        `json:"failure_reason"`
 	ElapsedMs     pgtype.Int8        `json:"elapsed_ms"`
 	MessageKind   string             `json:"message_kind"`
+	QuickActions  []byte             `json:"quick_actions"`
 }
 
 type ChatPinnedAgent struct {

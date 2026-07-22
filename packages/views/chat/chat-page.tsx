@@ -235,6 +235,10 @@ export function ChatPage() {
           hasOlderMessages={c.hasOlderMessages}
           isFetchingOlderMessages={c.isFetchingOlderMessages}
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
+          onQuickAction={(action) => c.handleSend(action.prompt)}
+          quickActionsDisabled={
+            !!c.pendingTaskId || c.isSessionArchived || c.isAgentArchived || c.noAgent
+          }
         />
       ) : (
         <EmptyState agent={c.activeAgent} />

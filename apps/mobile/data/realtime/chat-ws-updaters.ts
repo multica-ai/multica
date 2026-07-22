@@ -113,12 +113,16 @@ export function applyChatDoneToCache(
   qc: QueryClient,
   payload: ChatDonePayload,
 ) {
-  if (payload.message_id && payload.content != null && payload.created_at) {
+  if (
+    payload.message_id &&
+    (payload.content != null || (payload.quick_actions?.length ?? 0) > 0) &&
+    payload.created_at
+  ) {
     const assistantMsg: ChatMessage = {
       id: payload.message_id,
       chat_session_id: payload.chat_session_id,
       role: "assistant",
-      content: payload.content,
+      content: payload.content ?? "",
       task_id: payload.task_id,
       created_at: payload.created_at,
       elapsed_ms: payload.elapsed_ms ?? null,
@@ -126,6 +130,9 @@ export function applyChatDoneToCache(
       // renders its notice inline; missing → "message" for older servers
       // (MUL-4351).
       message_kind: payload.message_kind ?? "message",
+      ...(payload.quick_actions !== undefined
+        ? { quick_actions: payload.quick_actions }
+        : {}),
     };
     qc.setQueryData<ChatMessage[]>(
       chatKeys.messages(payload.chat_session_id),

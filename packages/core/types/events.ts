@@ -376,6 +376,8 @@ export interface ChatDonePayload {
    * populated alongside this even for a no_response turn.
    */
   message_kind?: import("./chat").ChatMessageKind;
+  /** Server-validated follow-ups attached to the persisted assistant reply. */
+  quick_actions?: import("./chat").ChatQuickAction[];
 }
 
 /**
