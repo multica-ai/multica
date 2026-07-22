@@ -1,12 +1,12 @@
 ---
 title: Sign-in and signup configuration
-description: Configure email + verification code sign-in, Google OAuth, signup allowlists, and local test codes.
+description: Configure email codes, Google OAuth, generic OpenID Connect, signup allowlists, and local test codes.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Mermaid } from "@/components/mermaid";
 
-Multica supports two sign-in methods: **email + verification code** (default) and **Google OAuth** (optional). On successful sign-in, the server issues a JWT cookie with a 30-day lifetime. This page covers how to configure each method, how to restrict who can sign up, and the single biggest trap for self-hosted deployments.
+Multica supports **email + verification code** (default), **Google OAuth**, and one generic **OpenID Connect** provider. On successful sign-in, the server issues a JWT cookie with a 30-day lifetime. This page covers how to configure each method, how to restrict who can sign up, and the single biggest trap for self-hosted deployments.
 
 For the list of environment variables referenced below, see [Environment variables](/environment-variables); for token usage and lifecycle details, see [Authentication and tokens](/auth-tokens).
 
@@ -130,6 +130,32 @@ Optional. Without it, only email + verification code is available; with it, the 
 <Callout type="warning">
 **The redirect URI must match exactly in both the Google Console and `GOOGLE_REDIRECT_URI`** — including protocol (`http` vs `https`), trailing slash, and port. Any mismatch and Google rejects the entire OAuth flow; the error shown to the user is `redirect_uri_mismatch`.
 </Callout>
+
+## Generic OpenID Connect
+
+Multica can use one discovery-capable OIDC provider alongside email codes and Google. This covers Authentik, GitLab, and other providers that expose a standard OpenID Configuration document.
+
+1. Register a confidential web application in the provider with this callback URL:
+
+    ```text
+    https://multica.yourdomain.com/auth/callback
+    ```
+
+2. Configure Multica:
+
+    ```bash
+    OIDC_ISSUER_URL=https://auth.yourdomain.com/application/o/multica
+    OIDC_CLIENT_ID=multica
+    OIDC_CLIENT_SECRET=replace-me
+    OIDC_REDIRECT_URI=https://multica.yourdomain.com/auth/callback
+    OIDC_PROVIDER_NAME=Company SSO
+    ```
+
+   For GitLab.com the issuer is `https://gitlab.com`. For self-managed GitLab it is the instance root. For Authentik it is the provider-specific issuer shown in its OpenID Configuration.
+
+3. Grant the `openid`, `profile`, and `email` scopes, then restart the server.
+
+By default Multica requires `email_verified=true` before it creates or links an account by email. Set `OIDC_REQUIRE_VERIFIED_EMAIL=false` only when the provider cannot emit this claim and its email ownership policy is trusted. OIDC configuration is read at runtime, so the frontend does not need to be rebuilt.
 
 ## Restricting who can sign up
 

@@ -6,6 +6,7 @@ const {
   mockPush,
   mockSearchParams,
   mockLoginWithGoogle,
+  mockLoginWithOIDC,
   mockListWorkspaces,
   mockListMyInvitations,
   mockSetQueryData,
@@ -13,6 +14,7 @@ const {
   mockPush: vi.fn(),
   mockSearchParams: new URLSearchParams(),
   mockLoginWithGoogle: vi.fn(),
+  mockLoginWithOIDC: vi.fn(),
   mockListWorkspaces: vi.fn(),
   mockListMyInvitations: vi.fn(),
   mockSetQueryData: vi.fn(),
@@ -54,7 +56,10 @@ vi.mock("@multica/core/auth", async () => {
   return {
     ...actual,
     useAuthStore: (selector: (s: unknown) => unknown) =>
-      selector({ loginWithGoogle: mockLoginWithGoogle }),
+      selector({
+        loginWithGoogle: mockLoginWithGoogle,
+        loginWithOIDC: mockLoginWithOIDC,
+      }),
   };
 });
 
@@ -94,6 +99,11 @@ describe("CallbackPage", () => {
     );
     mockSearchParams.set("code", "test-code");
     mockLoginWithGoogle.mockResolvedValue(makeUser());
+    mockLoginWithOIDC.mockResolvedValue({
+      user: makeUser(),
+      token: "oidc-token",
+      appState: "",
+    });
     mockListWorkspaces.mockResolvedValue([]);
     mockListMyInvitations.mockResolvedValue([]);
   });
@@ -115,6 +125,26 @@ describe("CallbackPage", () => {
       expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
     });
     expect(mockListMyInvitations).toHaveBeenCalled();
+  });
+
+  it("completes generic OIDC login using the protected app state", async () => {
+    mockSearchParams.set("state", "oidc.server-generated-state");
+    mockLoginWithOIDC.mockResolvedValue({
+      user: makeUser(),
+      token: "oidc-token",
+      appState: "next:/invite/oidc-invite",
+    });
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockLoginWithOIDC).toHaveBeenCalledWith(
+        "test-code",
+        "oidc.server-generated-state",
+      );
+      expect(mockPush).toHaveBeenCalledWith("/invite/oidc-invite");
+    });
+    expect(mockLoginWithGoogle).not.toHaveBeenCalled();
   });
 
   it("unonboarded user with pending invitations lands on /invitations", async () => {

@@ -27,6 +27,7 @@ images:
 #     --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
 #     --from-literal=RESEND_API_KEY="" \
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
+#     --from-literal=OIDC_CLIENT_SECRET="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
 #     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
 #
@@ -37,6 +38,7 @@ images:
 #     --from-literal=DATABASE_URL="postgres://user:pass@host:5432/multica?sslmode=require" \
 #     --from-literal=RESEND_API_KEY="" \
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
+#     --from-literal=OIDC_CLIENT_SECRET="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
 #     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
 #
@@ -126,6 +128,12 @@ backend:
     disableWorkspaceCreation: false
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
+    oidcIssuerUrl: ""
+    oidcClientId: ""
+    oidcRedirectUri: http://multica.dev.lan/auth/callback
+    oidcProviderName: OpenID Connect
+    oidcScopes: openid profile email
+    oidcRequireVerifiedEmail: true
     s3Bucket: ""
     s3Region: us-west-2
     cloudfrontDomain: ""
