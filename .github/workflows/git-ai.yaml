@@ -2,26 +2,34 @@ name: Git AI
 
 on:
   pull_request:
-    types: [closed, synchronize]
+    types: [closed]
+    branches: [main]
+
+concurrency:
+  group: git-ai-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   git-ai:
-    if: github.event.pull_request.merged == true || github.event.action == 'synchronize'
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+    runs-on: ubicloud-standard-2-arm
+    timeout-minutes: 5
     permissions:
-      contents: write
+      contents: write  # writes refs/notes/ai only; no PR comments or check-runs
 
     steps:
       - name: Install git-ai v1.6.15
         env:
           GIT_AI_VERSION: v1.6.15
-          # sha256 of git-ai-linux-x64 from https://github.com/git-ai-project/git-ai/releases/tag/v1.6.15
-          GIT_AI_SHA256: 726fd59562866947f23b5eb14b0973ebbbc4a964796dc5377cfeb7dbda5e0646
+          # sha256 of git-ai-linux-arm64 from https://github.com/git-ai-project/git-ai/releases/tag/v1.6.15
+          GIT_AI_SHA256: 26860999755434988e5da753d343463a4f2dd3b800dcbe5298b30681b30c6b7c
         run: |
-          curl -fsSL "https://github.com/git-ai-project/git-ai/releases/download/${GIT_AI_VERSION}/git-ai-linux-x64" -o /tmp/git-ai
+          curl -fsSL --retry 3 "https://github.com/git-ai-project/git-ai/releases/download/${GIT_AI_VERSION}/git-ai-linux-arm64" -o /tmp/git-ai
           echo "${GIT_AI_SHA256}  /tmp/git-ai" | sha256sum -c
           install -m 755 /tmp/git-ai /usr/local/bin/git-ai
       - name: Run git-ai
+        # git-ai self-clones the repo; do not add actions/checkout here —
+        # it would execute PR-author code with contents:write in scope
         id: run-git-ai
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
