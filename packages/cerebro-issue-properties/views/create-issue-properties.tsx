@@ -50,7 +50,7 @@ export const CreateIssueProperties = forwardRef<
   function CreateIssueProperties({ hiddenPropertyIds = [] }: CreateIssuePropertiesProps, ref) {
     const workspaceId = useWorkspaceId();
     const { data: catalog = [] } = useQuery(propertyListOptions(workspaceId));
-    const setProperty = useSetIssueProperty();
+    const setProperty = useSetIssueProperty(workspaceId);
     const [values, setValues] = useState<Record<string, IssuePropertyValue>>({});
 
     useImperativeHandle(

@@ -1753,6 +1753,9 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 	r.Register(&FirtalCreateIssueTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalUpdateIssueTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalAssignIssueTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalListIssuePropertiesTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalSetIssuePropertyTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalUnsetIssuePropertyTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalListCommentsTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalAddCommentTool{queries: queries, tctx: tctx})
 	if queries != nil {

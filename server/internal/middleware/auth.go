@@ -93,6 +93,14 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}
+				// CEREBRO-PATCH(property-task-routes): attach the existing task-scope
+				// context so the route allowlist can bind property writes to one issue.
+				task, err := queries.GetAgentTask(r.Context(), tt.TaskID)
+				if err != nil || task.AgentID != tt.AgentID {
+					slog.Warn("auth: task token binding is invalid", "path", r.URL.Path, "error", err)
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
 				r.Header.Set("X-User-ID", uuidToString(tt.UserID))
 				r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
 				r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
@@ -103,7 +111,16 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// this header is allowed to carry — strip anything else a
 				// client tried to send.
 				r.Header.Set("X-Actor-Source", "task_token")
-				next.ServeHTTP(w, r)
+				issueID := ""
+				if task.IssueID.Valid {
+					issueID = uuidToString(task.IssueID)
+				}
+				next.ServeHTTP(w, r.WithContext(withTaskScope(r.Context(), TaskScopeContext{
+					TaskID:      uuidToString(tt.TaskID),
+					IssueID:     issueID,
+					AgentID:     uuidToString(tt.AgentID),
+					WorkspaceID: uuidToString(tt.WorkspaceID),
+				})))
 				return
 			}
 

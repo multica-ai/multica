@@ -14,9 +14,8 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions } from "@multica/core/workspace/queries";
+import { useCurrentMember } from "@multica/core/permissions";
 import {
   propertyListOptions,
   useCreateProperty,
@@ -110,7 +109,6 @@ function typeHasOptions(type: string): boolean {
 export function PropertiesTab() {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
-  const user = useAuthStore((s) => s.user);
 
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -118,12 +116,11 @@ export function PropertiesTab() {
   const [createOpen, setCreateOpen] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<IssueProperty | null>(null);
 
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
-  const canManage = currentMember?.role === "owner" || currentMember?.role === "admin";
+  const { role } = useCurrentMember(wsId);
+  const canManage = role === "owner" || role === "admin";
 
   const { data: properties = [], isLoading } = useQuery(propertyListOptions(wsId, true));
-  const update = useUpdateProperty();
+  const update = useUpdateProperty(wsId);
 
   const activeCount = useMemo(
     () => properties.filter((p) => !p.archived).length,
@@ -362,8 +359,9 @@ function PropertyEditorDialog({
   property?: IssueProperty | null;
 }) {
   const { t } = useT("settings");
-  const create = useCreateProperty();
-  const update = useUpdateProperty();
+  const wsId = useWorkspaceId();
+  const create = useCreateProperty(wsId);
+  const update = useUpdateProperty(wsId);
   const [draft, setDraft] = useState<PropertyDraft>(EMPTY_DRAFT);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
@@ -656,7 +654,8 @@ function ArchivePropertyDialog({
   onClose: () => void;
 }) {
   const { t } = useT("settings");
-  const update = useUpdateProperty();
+  const wsId = useWorkspaceId();
+  const update = useUpdateProperty(wsId);
   return (
     <AlertDialog open={Boolean(property)} onOpenChange={(open) => !open && onClose()}>
       <AlertDialogContent>

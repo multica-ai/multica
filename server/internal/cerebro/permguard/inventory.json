@@ -637,7 +637,7 @@
       "gate": "project_access"
     },
     {
-      "id": "PATCH /api/properties/{id}/",
+      "id": "PATCH /api/properties/{id}",
       "gate": "workspace_admin"
     },
     {
@@ -1341,7 +1341,7 @@
       "gate": "workspace_member"
     },
     {
-      "id": "POST /api/properties/",
+      "id": "POST /api/properties",
       "gate": "workspace_admin"
     },
     {
@@ -2091,6 +2091,10 @@
       "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
+      "id": "list_issue_properties",
+      "exempt": "read-only — wraps GET /api/issues/{id} and GET /api/properties"
+    },
+    {
       "id": "read_attachment",
       "exempt": "read-only — wraps GET /api/attachments/{id}/content"
     },
@@ -2109,6 +2113,14 @@
     {
       "id": "request_approval",
       "gate": "via:POST /api/workspaces/{id}/mcp"
+    },
+    {
+      "id": "set_issue_property",
+      "gate": "via:PUT /api/issues/{id}/properties/{propertyId}"
+    },
+    {
+      "id": "unset_issue_property",
+      "gate": "via:DELETE /api/issues/{id}/properties/{propertyId}"
     },
     {
       "id": "search_notes",
@@ -3182,7 +3194,7 @@
     },
     {
       "id": "issue property list",
-      "exempt": "read-only — wraps GET /api/issues/{id} and GET /api/properties/"
+      "exempt": "read-only — wraps GET /api/issues/{id} and GET /api/properties"
     },
     {
       "id": "issue property set",
@@ -3386,27 +3398,27 @@
     },
     {
       "id": "property archive",
-      "gate": "via:PATCH /api/properties/{id}/"
+      "gate": "via:PATCH /api/properties/{id}"
     },
     {
       "id": "property create",
-      "gate": "via:POST /api/properties/"
+      "gate": "via:POST /api/properties"
     },
     {
       "id": "property get",
-      "exempt": "read-only — wraps GET /api/properties/"
+      "exempt": "read-only — wraps GET /api/properties"
     },
     {
       "id": "property list",
-      "exempt": "read-only — wraps GET /api/properties/"
+      "exempt": "read-only — wraps GET /api/properties"
     },
     {
       "id": "property unarchive",
-      "gate": "via:PATCH /api/properties/{id}/"
+      "gate": "via:PATCH /api/properties/{id}"
     },
     {
       "id": "property update",
-      "gate": "via:PATCH /api/properties/{id}/"
+      "gate": "via:PATCH /api/properties/{id}"
     },
     {
       "id": "repo check",

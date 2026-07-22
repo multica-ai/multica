@@ -13,7 +13,7 @@ not a full upstream sync.
   property-filter/sort persistence, and websocket reconciliation are present.
 - Issue detail and manual Create issue expose the active property catalog with
   typed editors.
-- Settings > Properties now exposes the upstream catalog UI, including
+- Settings > Issue now exposes the upstream catalog UI, including
   admin-only definition changes, archive/restore, icons, and option colors.
 - Board cards and List rows now render the custom fields selected in Display.
 - Board Display now offers active select properties as grouping choices, with
@@ -26,6 +26,9 @@ not a full upstream sync.
   export, server pagination, and optimistic cache reconciliation.
 - Create issue field visibility/Quick create, Settings > Issue, the two default
   DKK fields, and Cerebro's stacked date/time parity in Table are present.
+- Agents can list, set, and unset issue properties through the CLI, local MCP,
+  and Firtal Gateway tool surfaces. Task tokens can read the property catalog
+  and can only change values on their bound issue.
 - The remaining delivery gate is fresh independent browser QA/polish for the
   current revision.
 
@@ -65,16 +68,19 @@ not a full upstream sync.
   flat-window Table contract.
 - Updated the built-in issue-working skill because the public API and CLI gain
   property operations.
+- Kept definition management human-only while moving catalog reads and issue
+  value writes into Cerebro's task-scoped route allowlist.
 
-The change deliberately carries no `CEREBRO-PATCH` marker: it is an exact,
-documented sync-down of upstream behavior with conflict resolution at the fork
-seams. A later full upstream sync should use this provenance to avoid stacking
-or reimplementing the feature.
+The imported upstream feature files deliberately carry no `CEREBRO-PATCH`
+marker: they are a documented sync-down of upstream behavior. Cerebro-specific
+mounts, task-token routing, and agent tool parity are marked and registered in
+`docs/cerebro-patches.md`. A later full upstream sync should use this provenance
+to avoid stacking or reimplementing the imported feature.
 
 ## Current-revision QA list derived from changed UI files
 
 - Settings navigation: desktop sidebar and responsive selector with Properties.
-- Settings > Properties: empty state, admin create/edit/archive flow, member
+- Settings > Issue: empty state, admin create/edit/archive flow, member
   read-only state, option colors, and property icons.
 - Board: Display-selected number/select/date values on cards.
 - Board grouping: select-property option and No value columns, empty columns,

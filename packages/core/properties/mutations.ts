@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { propertyKeys } from "./queries";
-import { useWorkspaceId } from "../hooks";
 import { issueKeys, type IssueFlatCache } from "../issues/queries";
 import {
   invalidatePropertyWindowQueries,
@@ -18,9 +17,8 @@ import type {
   ListIssuesCache,
 } from "../types";
 
-export function useCreateProperty() {
+export function useCreateProperty(wsId: string) {
   const qc = useQueryClient();
-  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (data: CreatePropertyRequest) => api.createProperty(data),
     onSettled: () => {
@@ -34,9 +32,8 @@ export function useCreateProperty() {
  * happen in the settings dialog where a round-trip is acceptable, and config
  * canonicalization (option id assignment) is server-side anyway.
  */
-export function useUpdateProperty() {
+export function useUpdateProperty(wsId: string) {
   const qc = useQueryClient();
-  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({ id, ...data }: { id: string } & UpdatePropertyRequest) =>
       api.updateProperty(id, data),
@@ -92,9 +89,8 @@ function readIssueProperties(qc: ReturnType<typeof useQueryClient>, wsId: string
  *     invalidate of the detail cache plus the definition catalog (usage
  *     counts), reconciling any raced WS snapshots under staleTime:Infinity.
  */
-export function useSetIssueProperty() {
+export function useSetIssueProperty(wsId: string) {
   const qc = useQueryClient();
-  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({ issueId, propertyId, value }: { issueId: string; propertyId: string; value: IssuePropertyValue }) =>
       api.setIssueProperty(issueId, propertyId, value),
@@ -125,9 +121,8 @@ export function useSetIssueProperty() {
   });
 }
 
-export function useUnsetIssueProperty() {
+export function useUnsetIssueProperty(wsId: string) {
   const qc = useQueryClient();
-  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({ issueId, propertyId }: { issueId: string; propertyId: string }) =>
       api.unsetIssueProperty(issueId, propertyId),

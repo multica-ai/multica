@@ -13,10 +13,6 @@ import { onIssuePropertiesChanged } from "../issues/ws-updaters";
 import type { Issue, ListIssuesCache } from "../types";
 import { useSetIssueProperty } from "./mutations";
 
-vi.mock("../hooks", () => ({
-  useWorkspaceId: () => "workspace-1",
-}));
-
 const WS_ID = "workspace-1";
 const ISSUE_ID = "issue-1";
 
@@ -94,7 +90,7 @@ describe("useSetIssueProperty", () => {
       makeListCache(makeIssue({ "property-effort": 50000 })),
     );
 
-    const { result } = renderHook(() => useSetIssueProperty(), {
+    const { result } = renderHook(() => useSetIssueProperty(WS_ID), {
       wrapper: createWrapper(qc),
     });
     let pending!: Promise<unknown>;
@@ -132,7 +128,7 @@ describe("useSetIssueProperty", () => {
       makeIssue({ "property-business-value": 100000 }),
     );
 
-    const { result } = renderHook(() => useSetIssueProperty(), {
+    const { result } = renderHook(() => useSetIssueProperty(WS_ID), {
       wrapper: createWrapper(qc),
     });
     let pending!: Promise<unknown>;
@@ -188,7 +184,7 @@ describe("useSetIssueProperty", () => {
       pageParams: [0],
     });
 
-    const { result } = renderHook(() => useSetIssueProperty(), {
+    const { result } = renderHook(() => useSetIssueProperty(WS_ID), {
       wrapper: createWrapper(qc),
     });
     let pending!: Promise<unknown>;

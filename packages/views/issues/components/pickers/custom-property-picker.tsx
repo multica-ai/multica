@@ -40,8 +40,8 @@ export function CustomPropertyValueEditor({
 }) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(defaultOpen);
-  const setProperty = useSetIssueProperty();
-  const unsetProperty = useUnsetIssueProperty();
+  const setProperty = useSetIssueProperty(issue.workspace_id);
+  const unsetProperty = useUnsetIssueProperty(issue.workspace_id);
 
   const value = issue.properties[property.id];
   const hasValue = value !== undefined;

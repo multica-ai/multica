@@ -270,6 +270,46 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("property mutations", () => {
+    it("degrades a malformed create response to an empty property", async () => {
+      stubFetchJson({ wrong: "shape" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.createProperty({ name: "Value", type: "number" })).resolves.toMatchObject({
+        id: "",
+        name: "",
+      });
+    });
+
+    it("degrades a malformed update response to an empty property", async () => {
+      stubFetchJson({ wrong: "shape" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.updateProperty("property-1", { name: "Value" })).resolves.toMatchObject({
+        id: "",
+        name: "",
+      });
+    });
+
+    it("degrades a malformed set-value response to an empty value bag", async () => {
+      stubFetchJson({ properties: "not-an-object" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.setIssueProperty("issue-1", "property-1", 42)).resolves.toEqual({
+        properties: {},
+      });
+    });
+
+    it("degrades a malformed unset-value response to an empty value bag", async () => {
+      stubFetchJson({ properties: "not-an-object" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.unsetIssueProperty("issue-1", "property-1")).resolves.toEqual({
+        properties: {},
+      });
+    });
+  });
+
   describe("listAutopilots", () => {
     const baseAutopilot = {
       id: "ap-1",

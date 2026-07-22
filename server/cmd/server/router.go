@@ -1101,7 +1101,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	})
 
 	// === Task-scoped allowlist ===
-	// Per-task tokens (mtt_) authenticate agents while they execute one
+	// Per-task tokens (mat_) authenticate agents while they execute one
 	// task and may only reach the small set of routes the agent needs:
 	// read/update its own issue, post comments, read its own agent
 	// config, look up workspace members for mentions, upload
@@ -1166,6 +1166,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.With(issueScope).Put("/api/issues/{id}", h.UpdateIssue)
 			r.With(issueScope).Get("/api/issues/{id}/comments", h.ListComments)
 			r.With(issueScope).Post("/api/issues/{id}/comments", h.CreateComment)
+			// CEREBRO-PATCH(property-task-routes): FIR-3447 expose value writes and definition reads through the task-scoped allowlist while keeping definition management human-only.
+			r.With(issueScope).Put("/api/issues/{id}/properties/{propertyId}", h.SetIssueProperty)
+			r.With(issueScope).Delete("/api/issues/{id}/properties/{propertyId}", h.DeleteIssueProperty)
+			propertyWorkspaceScope := middleware.AllowTaskScopeForWorkspace("workspaceId")
+			r.With(propertyWorkspaceScope).Get("/api/properties", h.ListProperties)
+			r.With(propertyWorkspaceScope).Get("/api/properties/{id}", h.GetProperty)
+			r.With(middleware.RequireUserScope).Post("/api/properties", h.CreateProperty)
+			r.With(middleware.RequireUserScope).Patch("/api/properties/{id}", h.UpdateProperty)
 			// CEREBRO-PATCH(scheduled-messages): FIR-2873 — Slack-style deferred Channel/DM delivery.
 			r.With(middleware.RequireUserScope).Get("/api/issues/{id}/scheduled-messages", h.ListScheduledMessages)
 			r.With(middleware.RequireUserScope).Post("/api/issues/{id}/scheduled-messages", h.CreateScheduledMessage)
@@ -1637,8 +1645,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/metadata", h.ListIssueMetadata)
 					r.Put("/metadata/{key}", h.SetIssueMetadataKey)
 					r.Delete("/metadata/{key}", h.DeleteIssueMetadataKey)
-					r.Put("/properties/{propertyId}", h.SetIssueProperty)
-					r.Delete("/properties/{propertyId}", h.DeleteIssueProperty)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
 				})
 			})
@@ -1657,16 +1663,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/messages", h.ReportWorkSessionMessages)
 					r.Post("/resume", h.ResumeWorkSession)
 					r.Post("/fork", h.ForkWorkSession)
-				})
-			})
-
-			// Custom issue properties (definitions; values live under /api/issues/{id}/properties)
-			r.Route("/api/properties", func(r chi.Router) {
-				r.Get("/", h.ListProperties)
-				r.Post("/", h.CreateProperty)
-				r.Route("/{id}", func(r chi.Router) {
-					r.Get("/", h.GetProperty)
-					r.Patch("/", h.UpdateProperty)
 				})
 			})
 

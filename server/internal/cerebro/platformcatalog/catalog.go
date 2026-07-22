@@ -259,8 +259,8 @@ var catalog = []Capability{
 		Description:   "Create, edit, archive, or restore workspace custom issue properties (distinct from setting a value on an issue).",
 		DescriptionZh: "创建、编辑、归档或恢复工作区自定义工单属性（区别于在工单上设置属性值）。",
 		Ops: []string{
-			"POST /api/properties/",
-			"PATCH /api/properties/{id}/",
+			"POST /api/properties",
+			"PATCH /api/properties/{id}",
 		},
 	},
 	{

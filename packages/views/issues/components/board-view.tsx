@@ -206,8 +206,8 @@ export function BoardView({
         : undefined,
     [groupingProperty],
   );
-  const setIssuePropertyMutation = useSetIssueProperty();
-  const unsetIssuePropertyMutation = useUnsetIssueProperty();
+  const setIssuePropertyMutation = useSetIssueProperty(boardWsId);
+  const unsetIssuePropertyMutation = useUnsetIssueProperty(boardWsId);
   const applyPropertyGroupValue = useCallback(
     (group: BoardColumnGroup, issueId: string) => {
       if (group.propertyId === undefined) return;

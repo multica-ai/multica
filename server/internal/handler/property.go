@@ -399,6 +399,13 @@ func validatePropertyValue(def db.IssueProperty, raw json.RawMessage) ([]byte, e
 	}
 }
 
+// ValidateIssuePropertyValue exposes the canonical value contract to the
+// in-process Firtal Gateway tools. HTTP handlers and cloud tools must accept,
+// reject, and canonicalize the same values.
+func ValidateIssuePropertyValue(def db.IssueProperty, raw json.RawMessage) ([]byte, error) {
+	return validatePropertyValue(def, raw)
+}
+
 // removedOptionIDs returns option ids present in the stored config but
 // absent from the incoming replacement.
 func removedOptionIDs(existingConfig, nextConfig []byte) []string {
