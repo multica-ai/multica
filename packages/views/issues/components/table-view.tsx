@@ -850,7 +850,7 @@ type TableViewMeta = {
   editingCellKey: string | null;
   setEditingCellKey: (key: string | null) => void;
   updateIssue: (issueId: string, updates: Partial<UpdateIssueRequest>) => void;
-  openIssue: (issueId: string) => void;
+  openIssue: (issue: Issue) => void;
   createSubIssue: (issue: Issue) => void;
   toggleTableParentCollapsed: (issueId: string) => void;
   handleIssueSelection: (issueId: string, shiftKey: boolean) => void;
@@ -1042,7 +1042,7 @@ function IssueTableBodyCell({
           editing={editorOpen}
           onEditingChange={setEditorOpen}
           onUpdate={onUpdate}
-          onOpen={() => meta.openIssue(issue.id)}
+          onOpen={() => meta.openIssue(issue)}
           onCreateSubIssue={() => meta.createSubIssue(issue)}
           onToggleParent={() => meta.toggleTableParentCollapsed(issue.id)}
           toggleLabel={t(($) => $.table.toggle_sub_issues)}
@@ -1976,7 +1976,19 @@ export function TableView({
   );
 
   const openIssue = useCallback(
-    (issueId: string) => navigation.push(paths.issueDetail(issueId)),
+    (issue: Issue) => {
+      const path = paths.issueDetail(issue.id);
+      if (navigation.openInNewTab) {
+        navigation.openInNewTab(path, issue.identifier, { activate: true });
+        return;
+      }
+
+      window.open(
+        navigation.getShareableUrl(path),
+        "_blank",
+        "noopener,noreferrer",
+      );
+    },
     [navigation, paths],
   );
 
@@ -2290,7 +2302,7 @@ export function TableView({
             emptyMessage={t(($) => $.table.empty)}
             onRowClick={(row) => {
               if (row.original.kind === "issue") {
-                openIssue(row.original.issue.id);
+                openIssue(row.original.issue);
               }
             }}
             renderRow={(row) => {
