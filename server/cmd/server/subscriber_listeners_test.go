@@ -60,6 +60,21 @@ func cleanupTestUser(t *testing.T, email string) {
 	testPool.Exec(context.Background(), `DELETE FROM "user" WHERE email = $1`, email)
 }
 
+func addTestMember(t *testing.T, workspaceID, userID, role string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, $3)
+	`, workspaceID, userID, role); err != nil {
+		t.Fatalf("add test member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `
+			DELETE FROM member WHERE workspace_id = $1 AND user_id = $2
+		`, workspaceID, userID)
+	})
+}
+
 func isSubscribed(t *testing.T, queries *db.Queries, issueID, userType, userID string) bool {
 	t.Helper()
 	subscribed, err := queries.IsIssueSubscriber(context.Background(), db.IsIssueSubscriberParams{
@@ -283,6 +298,7 @@ func TestSubscriberCommentCreated_CommenterSubscribed(t *testing.T) {
 	commenterEmail := "subscriber-commenter-test@multica.ai"
 	commenterID := createTestUser(t, commenterEmail)
 	t.Cleanup(func() { cleanupTestUser(t, commenterEmail) })
+	addTestMember(t, testWorkspaceID, commenterID, "member")
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
@@ -306,6 +322,77 @@ func TestSubscriberCommentCreated_CommenterSubscribed(t *testing.T) {
 
 	if !isSubscribed(t, queries, issueID, "member", commenterID) {
 		t.Fatal("expected commenter to be subscribed after comment:created")
+	}
+}
+
+func TestSubscriberCommentCreated_WorkspaceOwnerNotSubscribed(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000000",
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   testUserID,
+				Content:    "owner asks a question",
+				Type:       "comment",
+			},
+		},
+	})
+
+	if isSubscribed(t, queries, issueID, "member", testUserID) {
+		t.Fatal("workspace owner must not be subscribed merely by commenting")
+	}
+}
+
+func TestSubscriberIssueCreated_WorkspaceOwnerMentionNotSubscribed(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	creatorEmail := "subscriber-nonowner-creator-test@multica.ai"
+	creatorID := createTestUser(t, creatorEmail)
+	t.Cleanup(func() { cleanupTestUser(t, creatorEmail) })
+	addTestMember(t, testWorkspaceID, creatorID, "member")
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+	description := "Needs [@Owner](mention://member/" + testUserID + ")."
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     creatorID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "owner mention test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   creatorID,
+				Description: &description,
+			},
+		},
+	})
+
+	if !isSubscribed(t, queries, issueID, "member", creatorID) {
+		t.Fatal("expected non-owner creator to be subscribed")
+	}
+	if isSubscribed(t, queries, issueID, "member", testUserID) {
+		t.Fatal("workspace owner must not be subscribed merely by a mention")
 	}
 }
 

@@ -447,6 +447,73 @@ func TestNotification_CommentCreated(t *testing.T) {
 	}
 }
 
+func TestNotification_CommentMentionNotifiesOwnerWithoutSubscribing(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	commenterEmail := "notif-owner-mention-commenter@multica.ai"
+	commenterID := createTestUser(t, commenterEmail)
+	t.Cleanup(func() { cleanupTestUser(t, commenterEmail) })
+	addTestMember(t, testWorkspaceID, commenterID, "member")
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	mention := "[@Owner](mention://member/" + testUserID + ")"
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     commenterID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000000",
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   commenterID,
+				Content:    "Decision needed from " + mention,
+				Type:       "comment",
+			},
+			"issue_title":  "owner mention test issue",
+			"issue_status": "todo",
+		},
+	})
+
+	ownerItems := inboxItemsForRecipient(t, queries, testUserID)
+	if len(ownerItems) != 1 || ownerItems[0].Type != "mentioned" {
+		t.Fatalf("expected one direct mention inbox item for owner, got %+v", ownerItems)
+	}
+	if isSubscribed(t, queries, issueID, "member", testUserID) {
+		t.Fatal("direct owner mention must not subscribe the owner to the thread")
+	}
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     commenterID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000001",
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   commenterID,
+				Content:    "follow-up without another mention",
+				Type:       "comment",
+			},
+			"issue_title":  "owner mention test issue",
+			"issue_status": "todo",
+		},
+	})
+
+	if ownerItems = inboxItemsForRecipient(t, queries, testUserID); len(ownerItems) != 1 {
+		t.Fatalf("expected no follow-up inbox item after a direct mention, got %+v", ownerItems)
+	}
+}
+
 // TestNotification_SystemCommentSkipsInboxAndMentions guards the MUL-2538
 // must-fix: a comment with author_type='system' (the platform-generated
 // child-done parent notify) must NOT create any inbox rows for parent

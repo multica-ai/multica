@@ -11,8 +11,9 @@ import (
 )
 
 // registerSubscriberListeners wires up event bus listeners that auto-subscribe
-// relevant users to issues. This ensures creators, assignees, and commenters
-// are automatically tracked as issue subscribers.
+// relevant users to issues. Creators and assignees are automatically tracked;
+// workspace owners receive mentions directly without being added to a thread's
+// later-comment firehose.
 func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 	// issue:created — subscribe creator + assignee (if different)
 	bus.Subscribe(protocol.EventIssueCreated, func(e events.Event) {
@@ -145,8 +146,15 @@ func extractIssueFields(v any) (handler.IssueResponse, bool) {
 }
 
 // addSubscriber adds a user as an issue subscriber and publishes a
-// subscriber:added event for real-time frontend sync.
+// subscriber:added event for real-time frontend sync. A workspace owner is not
+// auto-subscribed merely by a comment or mention: both are direct signals, not
+// a request to follow the entire thread. Creator, assignee, and manual
+// subscriptions remain intentional thread participation.
 func addSubscriber(bus *events.Bus, queries *db.Queries, workspaceID, issueID, userType, userID, reason string) {
+	if !shouldAutoSubscribe(queries, workspaceID, userType, userID, reason) {
+		return
+	}
+
 	err := queries.AddIssueSubscriber(context.Background(), db.AddIssueSubscriberParams{
 		IssueID:  parseUUID(issueID),
 		UserType: userType,
@@ -174,4 +182,29 @@ func addSubscriber(bus *events.Bus, queries *db.Queries, workspaceID, issueID, u
 			"reason":    reason,
 		},
 	})
+}
+
+func shouldAutoSubscribe(queries *db.Queries, workspaceID, userType, userID, reason string) bool {
+	if userType != "member" || (reason != "commenter" && reason != "mentioned") {
+		return true
+	}
+
+	member, err := queries.GetMemberByUserAndWorkspace(context.Background(), db.GetMemberByUserAndWorkspaceParams{
+		UserID:      parseUUID(userID),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		// Keep existing subscription behavior if membership cannot be read;
+		// silently dropping a collaborator's requested signal is worse than a
+		// transient extra notification.
+		slog.Error("failed to load member role for issue subscription",
+			"workspace_id", workspaceID,
+			"user_id", userID,
+			"reason", reason,
+			"error", err,
+		)
+		return true
+	}
+
+	return member.Role != "owner"
 }
