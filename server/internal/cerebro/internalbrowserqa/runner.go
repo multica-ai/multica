@@ -98,6 +98,16 @@ var targets = map[string]Target{
 		Name: "customer-service", URL: "http://customer-service.internal:3456/desk",
 		ExpectedText: []string{"Desk", "Analytics"},
 	},
+	// Firtal Shift is served under the /shift base path, so every in-app route —
+	// including its login page — carries that prefix on the private host too.
+	// Production planning is the board this target exists to prove, so the run
+	// navigates there instead of stopping at the post-login landing page.
+	"warehouse": {
+		Name: "warehouse", URL: "http://firtal-shift-private.internal:3000/shift/auth/login",
+		Vault: "Shared/browser-login/warehouse", UsernameSelector: "#email", PasswordSelector: "#password",
+		SubmitSelector: "button[type=submit]", NavigateLinkName: "Production planning",
+		ExpectedText: []string{"Production planning", "Job assignment"},
+	},
 	// Atlas serves the catalog itself; the private host carries no app login, so
 	// the landing page's own heading is the proof that the app rendered.
 	"data-catalog": {

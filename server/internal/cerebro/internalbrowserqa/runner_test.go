@@ -724,6 +724,27 @@ func (c *countingOpenFailureCommander) Run(ctx context.Context, stdin string, ar
 	return c.stageFailingCommander.Run(ctx, stdin, args...)
 }
 
+// Firtal Shift lives under a /shift base path, so a login URL without that
+// prefix 404s on the private host and the whole run fails at the auth stage.
+func TestTargetForResolvesWarehouseUnderItsBasePath(t *testing.T) {
+	target, err := TargetFor("warehouse")
+	if err != nil {
+		t.Fatalf("TargetFor(warehouse) failed: %v", err)
+	}
+	if target.Host() != "firtal-shift-private.internal:3000" {
+		t.Fatalf("host = %q, want firtal-shift-private.internal:3000", target.Host())
+	}
+	if !strings.Contains(target.URL, "/shift/auth/login") {
+		t.Fatalf("url = %q, want the /shift base path on the login route", target.URL)
+	}
+	if target.Vault != "Shared/browser-login/warehouse" {
+		t.Fatalf("vault = %q, want Shared/browser-login/warehouse", target.Vault)
+	}
+	if target.NavigateLinkName != "Production planning" {
+		t.Fatalf("navigate link = %q, want Production planning", target.NavigateLinkName)
+	}
+}
+
 func TestTargetForResolvesDataCatalogOnItsPrivateHost(t *testing.T) {
 	target, err := TargetFor("data-catalog")
 	if err != nil {
