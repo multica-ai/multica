@@ -41,17 +41,26 @@ type fakeSessionQueries struct {
 	messages        []string
 	touched         int
 	replyTargets    int
-	lockedWorkspace int    // count of LockWorkspaceForChatSessionCreate calls
-	lastConfig      []byte // config of the most recent CreateChannelChatSessionBinding
+	lockedWorkspace int                  // count of LockWorkspaceForChatSessionCreate calls
+	supersedes      int
+	sessionRows     map[pgtype.UUID]bool // every session that has a binding row; supersede must NOT remove it
+	lastTitle       string               // title of the most recent CreateChatSession
+	lastConfig      []byte               // config of the most recent CreateChannelChatSessionBinding
 
 	prevMessage      *string // GetMostRecentUserChatMessage result; nil → ErrNoRows
+	prevLookups      int     // GetMostRecentUserChatMessage call count
 	markRows         int64   // MarkChannelInboundDedupProcessed result
+	marks            int     // MarkChannelInboundDedupProcessed call count
 	createBindingErr error   // simulate a unique violation on create
 	raceWinner       pgtype.UUID
+
+	attachments   []db.CreateAttachmentParams // recorded CreateAttachment calls
+	linkCalls     []db.LinkAttachmentsToChatMessageParams
+	attachmentErr error // CreateAttachment failure injection
 }
 
 func newFake() *fakeSessionQueries {
-	return &fakeSessionQueries{bindings: map[string]pgtype.UUID{}, markRows: 1}
+	return &fakeSessionQueries{bindings: map[string]pgtype.UUID{}, sessionRows: map[pgtype.UUID]bool{}, markRows: 1}
 }
 
 func bindKey(inst pgtype.UUID, chat string) string { return fmt.Sprintf("%x|%s", inst.Bytes, chat) }
@@ -70,10 +79,22 @@ func (f *fakeSessionQueries) LockWorkspaceForChatSessionCreate(_ context.Context
 	return id, nil
 }
 
-func (f *fakeSessionQueries) CreateChatSession(_ context.Context, _ db.CreateChatSessionParams) (db.ChatSession, error) {
+func (f *fakeSessionQueries) CreateChatSession(_ context.Context, arg db.CreateChatSessionParams) (db.ChatSession, error) {
 	f.nextSession++
 	f.createdSessions++
+	f.lastTitle = arg.Title
 	return db.ChatSession{ID: uid(f.nextSession)}, nil
+}
+
+// SupersedeChannelChatSessionBinding marks the chat's ACTIVE binding inactive:
+// it drops the "current session for this chat" mapping so a fresh insert can
+// take its place, but must NOT forget the superseded session's row (that
+// retention is the whole point of the /new fix — its in-flight reply stays
+// reverse-resolvable).
+func (f *fakeSessionQueries) SupersedeChannelChatSessionBinding(_ context.Context, arg db.SupersedeChannelChatSessionBindingParams) error {
+	f.supersedes++
+	delete(f.bindings, bindKey(arg.InstallationID, arg.ChannelChatID))
+	return nil
 }
 
 func (f *fakeSessionQueries) CreateChannelChatSessionBinding(_ context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error) {
@@ -81,15 +102,30 @@ func (f *fakeSessionQueries) CreateChannelChatSessionBinding(_ context.Context, 
 	if f.createBindingErr != nil {
 		// Simulate the race winner having committed its binding first.
 		f.bindings[bindKey(arg.InstallationID, arg.ChannelChatID)] = f.raceWinner
+		f.sessionRows[f.raceWinner] = true
 		return db.ChannelChatSessionBinding{}, f.createBindingErr
 	}
 	f.bindings[bindKey(arg.InstallationID, arg.ChannelChatID)] = arg.ChatSessionID
+	f.sessionRows[arg.ChatSessionID] = true
 	return db.ChannelChatSessionBinding{ChatSessionID: arg.ChatSessionID}, nil
 }
 
 func (f *fakeSessionQueries) CreateChatMessage(_ context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	f.messages = append(f.messages, arg.Content)
-	return db.ChatMessage{}, nil
+	return db.ChatMessage{ID: uid(0x77)}, nil
+}
+
+func (f *fakeSessionQueries) CreateAttachment(_ context.Context, arg db.CreateAttachmentParams) (db.Attachment, error) {
+	if f.attachmentErr != nil {
+		return db.Attachment{}, f.attachmentErr
+	}
+	f.attachments = append(f.attachments, arg)
+	return db.Attachment{ID: arg.ID}, nil
+}
+
+func (f *fakeSessionQueries) LinkAttachmentsToChatMessage(_ context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error) {
+	f.linkCalls = append(f.linkCalls, arg)
+	return arg.AttachmentIds, nil
 }
 
 func (f *fakeSessionQueries) TouchChatSession(context.Context, pgtype.UUID) error {
@@ -98,6 +134,7 @@ func (f *fakeSessionQueries) TouchChatSession(context.Context, pgtype.UUID) erro
 }
 
 func (f *fakeSessionQueries) GetMostRecentUserChatMessage(context.Context, pgtype.UUID) (db.ChatMessage, error) {
+	f.prevLookups++
 	if f.prevMessage != nil {
 		return db.ChatMessage{Content: *f.prevMessage}, nil
 	}
@@ -110,11 +147,76 @@ func (f *fakeSessionQueries) UpdateChannelChatSessionBindingReplyTarget(context.
 }
 
 func (f *fakeSessionQueries) MarkChannelInboundDedupProcessed(context.Context, db.MarkChannelInboundDedupProcessedParams) (int64, error) {
+	f.marks++
 	return f.markRows, nil
 }
 
 func newTestSession(f SessionQueries) *ChatSession {
 	return newChatSessionWith(f, fakeTxStarter{}, channel.TypeFeishu, SessionTitles{Group: "G", Direct: "D", Fallback: "F"})
+}
+
+func TestEnsureSession_FreshRotatesToNewSession(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	base := EnsureSessionInput{InstallationID: uid(1), BindingKey: "chatA", ChatType: channel.ChatTypeP2P, Sender: uid(7)}
+
+	id1, err := s.EnsureSession(context.Background(), base)
+	if err != nil {
+		t.Fatalf("first contact: %v", err)
+	}
+	// A Fresh call on the SAME binding must mint a new session and repoint the
+	// binding to it, not reuse the old one.
+	fresh := base
+	fresh.Fresh = true
+	id2, err := s.EnsureSession(context.Background(), fresh)
+	if err != nil {
+		t.Fatalf("fresh: %v", err)
+	}
+	if id1 == id2 {
+		t.Fatal("/new must rotate to a brand-new chat_session")
+	}
+	if f.supersedes != 1 {
+		t.Fatalf("expected exactly one supersede, got %d", f.supersedes)
+	}
+	// The fix: /new supersedes (does NOT move or delete) the old binding, so the
+	// old session's row survives and its still-in-flight reply stays
+	// reverse-resolvable to this chat.
+	if !f.sessionRows[id1] {
+		t.Fatal("/new must retain the superseded session's binding row, not orphan it")
+	}
+	if !f.sessionRows[id2] {
+		t.Fatal("the fresh session must have its own binding row")
+	}
+	// A subsequent normal message resumes the rotated-in session, not the old one.
+	id3, err := s.EnsureSession(context.Background(), base)
+	if err != nil {
+		t.Fatalf("reuse after fresh: %v", err)
+	}
+	if id3 != id2 {
+		t.Fatalf("normal message after /new must reuse the fresh session, got %v want %v", id3, id2)
+	}
+}
+
+func TestEnsureSession_TitleSeedAndFallback(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	in := EnsureSessionInput{InstallationID: uid(1), BindingKey: "chatA", ChatType: channel.ChatTypeP2P, Sender: uid(7), Title: "let's talk weather"}
+	if _, err := s.EnsureSession(context.Background(), in); err != nil {
+		t.Fatalf("seeded title: %v", err)
+	}
+	if f.lastTitle != "let's talk weather" {
+		t.Fatalf("session title should use the seed, got %q", f.lastTitle)
+	}
+
+	f2 := newFake()
+	s2 := newTestSession(f2)
+	blank := EnsureSessionInput{InstallationID: uid(2), BindingKey: "chatB", ChatType: channel.ChatTypeP2P, Sender: uid(7)}
+	if _, err := s2.EnsureSession(context.Background(), blank); err != nil {
+		t.Fatalf("blank title: %v", err)
+	}
+	if f2.lastTitle != "D" { // SessionTitles.Direct fallback
+		t.Fatalf("empty seed should fall back to platform default, got %q", f2.lastTitle)
+	}
 }
 
 func TestEnsureSession_CreateThenReuse(t *testing.T) {
@@ -286,6 +388,9 @@ func TestAppendUserMessage_CommandTextOverridesEnrichedBody(t *testing.T) {
 	}
 }
 
+// Direct-create channels (Feishu/Slack) keep the bare-/issue fallback: a lone
+// "/issue" adopts the previous user message's first line as its title, which
+// createIssue needs.
 func TestAppendUserMessage_BareIssueUsesPreviousMessage(t *testing.T) {
 	f := newFake()
 	prev := "Make the export button work"
@@ -297,6 +402,126 @@ func TestAppendUserMessage_BareIssueUsesPreviousMessage(t *testing.T) {
 	}
 	if res.IssueCommand == nil || res.IssueCommand.Title != "Make the export button work" {
 		t.Errorf("bare /issue should fall back to previous message title: %+v", res.IssueCommand)
+	}
+	if f.prevLookups != 1 {
+		t.Errorf("the fallback must query the previous message once, got %d", f.prevLookups)
+	}
+}
+
+// Quick-create channels (DingTalk) opt out via SkipPreviousFallback: a bare
+// "/issue" keeps an empty title AND never queries the previous message, so the
+// caller can ask the user what to file instead of silently adopting the prior
+// turn (which could be an unrelated image). Regression guard for the reported
+// bug where a bare "/issue" after an image message filed that image as an issue.
+func TestAppendUserMessage_SkipPreviousFallback(t *testing.T) {
+	f := newFake()
+	prev := "Make the export button work"
+	f.prevMessage = &prev
+	s := newTestSession(f)
+	res, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Body: "/issue", MessageID: "m2", SkipPreviousFallback: true,
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if res.IssueCommand == nil || res.IssueCommand.Title != "" {
+		t.Errorf("SkipPreviousFallback must leave the title empty: %+v", res.IssueCommand)
+	}
+	if f.prevLookups != 0 {
+		t.Errorf("SkipPreviousFallback must not query the previous message, got %d lookups", f.prevLookups)
+	}
+}
+
+func stagedFixture() []StagedMedia {
+	return []StagedMedia{
+		{ID: uid(0xA1), StorageKey: "workspaces/w/x.png", URL: "https://cdn.example/x.png", Filename: "image-1.png", ContentType: "image/png", SizeBytes: 10},
+		{ID: uid(0xA2), StorageKey: "workspaces/w/y.jpg", URL: "https://cdn.example/y.jpg", Filename: "image-2.jpg", ContentType: "image/jpeg", SizeBytes: 20},
+	}
+}
+
+func TestAppendUserMessage_StagedAttachments_ChatBound(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	res, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Sender: uid(7), WorkspaceID: uid(9),
+		Body: "look [image: image-1.png]", MessageID: "m1",
+		Staged: stagedFixture(), MediaChatBind: true,
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if len(f.messages) != 1 || f.messages[0] != "look [image: image-1.png]" {
+		t.Errorf("messages = %v", f.messages)
+	}
+	if len(f.attachments) != 2 {
+		t.Fatalf("attachments = %d, want 2", len(f.attachments))
+	}
+	first := f.attachments[0]
+	if first.ID != uid(0xA1) || first.WorkspaceID != uid(9) || first.UploaderType != "member" ||
+		first.UploaderID != uid(7) || first.Filename != "image-1.png" ||
+		first.Url != "https://cdn.example/x.png" || first.ContentType != "image/png" || first.SizeBytes != 10 {
+		t.Errorf("attachment[0] = %+v", first)
+	}
+	if first.ChatSessionID != uid(1) || f.attachments[1].ChatSessionID != uid(1) {
+		t.Error("chat-bound attachments must carry the chat_session_id")
+	}
+	if len(f.linkCalls) != 1 {
+		t.Fatalf("linkCalls = %d, want 1", len(f.linkCalls))
+	}
+	link := f.linkCalls[0]
+	if link.ChatMessageID != uid(0x77) || link.ChatSessionID != uid(1) || link.WorkspaceID != uid(9) ||
+		link.UploaderType != "member" || link.UploaderID != uid(7) || len(link.AttachmentIds) != 2 {
+		t.Errorf("link = %+v", link)
+	}
+	if len(res.AttachmentIDs) != 2 || res.AttachmentIDs[0] != uid(0xA1) || res.AttachmentIDs[1] != uid(0xA2) {
+		t.Errorf("res.AttachmentIDs = %v", res.AttachmentIDs)
+	}
+}
+
+func TestAppendUserMessage_StagedAttachments_IssueDestined(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	res, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Sender: uid(7), WorkspaceID: uid(9),
+		Body: "/issue broken [image: image-1.png]", MessageID: "m1",
+		Staged: stagedFixture(), MediaChatBind: false,
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if len(f.attachments) != 2 {
+		t.Fatalf("attachments = %d, want 2", len(f.attachments))
+	}
+	for i, a := range f.attachments {
+		if a.ChatSessionID.Valid {
+			t.Errorf("attachment[%d] must not be chat-bound: %+v", i, a)
+		}
+	}
+	if len(f.linkCalls) != 0 {
+		t.Errorf("linkCalls = %d, want 0", len(f.linkCalls))
+	}
+	if len(res.AttachmentIDs) != 2 {
+		t.Errorf("res.AttachmentIDs = %v", res.AttachmentIDs)
+	}
+}
+
+func TestAppendUserMessage_AttachmentFailureRollsBack(t *testing.T) {
+	f := newFake()
+	f.attachmentErr = fmt.Errorf("insert failed")
+	s := newTestSession(f)
+	_, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Sender: uid(7), WorkspaceID: uid(9),
+		Body: "x", MessageID: "m1", ClaimToken: uid(3),
+		Staged: stagedFixture(), MediaChatBind: true,
+	})
+	if err == nil {
+		t.Fatal("expected an error from the attachment insert")
+	}
+	if len(f.linkCalls) != 0 {
+		t.Errorf("linkCalls = %d, want 0", len(f.linkCalls))
+	}
+	if f.marks != 0 {
+		t.Errorf("dedup mark ran despite the failed tx (marks=%d)", f.marks)
 	}
 }
 

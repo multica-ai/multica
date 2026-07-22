@@ -34,6 +34,7 @@
     "github-integration",
     "lark-bot-integration",
     "slack-bot-integration",
+    "dingtalk-bot-integration",
     "---セルフホスト & 運用---",
     "environment-variables",
     "auth-setup",

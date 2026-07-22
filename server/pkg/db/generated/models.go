@@ -280,6 +280,7 @@ type ChannelChatSessionBinding struct {
 	LastThreadID   pgtype.Text        `json:"last_thread_id"`
 	Config         []byte             `json:"config"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	Active         bool               `json:"active"`
 }
 
 type ChannelInboundAudit struct {

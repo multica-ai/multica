@@ -45,6 +45,11 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 		// hard rules
 		"never invent requirements",
 		"never reduce multi-sentence input",
+		// inline images: keep each one exactly where the user placed it —
+		// channel media turns interleave text and image markdown, and a
+		// sentence may refer to the image right above it
+		"keep every inline image reference exactly where it appears",
+		"never move, reorder, drop, or duplicate them",
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {

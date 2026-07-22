@@ -57,6 +57,7 @@ export type WSEventType =
   | "chat:message"
   | "chat:done"
   | "chat:cancel_finalized"
+  | "quick_create:done"
   | "chat:session_read"
   | "chat:session_deleted"
   | "chat:session_updated"
@@ -408,6 +409,18 @@ export interface ChatCancelFinalizedPayload {
   elapsed_ms?: number;
 }
 
+/**
+ * Broadcast when a chat-originated quick-create task finishes (success or
+ * failure): the server has appended the outcome to the session transcript.
+ * Content is informational; handlers refetch the transcript rather than
+ * trusting it.
+ */
+export interface QuickCreateDonePayload {
+  chat_session_id: string;
+  task_id?: string;
+  content?: string;
+}
+
 export interface ChatSessionReadPayload {
   chat_session_id: string;
 }
@@ -508,6 +521,7 @@ export interface WSEventPayloadMap {
   "chat:message": ChatMessageEventPayload;
   "chat:done": ChatDonePayload;
   "chat:cancel_finalized": ChatCancelFinalizedPayload;
+  "quick_create:done": QuickCreateDonePayload;
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;
   "chat:session_updated": unknown;

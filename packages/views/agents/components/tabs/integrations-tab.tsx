@@ -7,9 +7,11 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
+import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { LarkAgentBindButton } from "../../../settings/components/lark-tab";
 import { SlackAgentBindButton } from "../../../settings/components/slack-tab";
+import { DingTalkAgentBindButton } from "../../../settings/components/dingtalk-tab";
 import { useT } from "../../../i18n";
 
 /**
@@ -43,6 +45,9 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     ...slackInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: dingtalkListing } = useQuery({
+    ...dingtalkInstallationsOptions(wsId),
+  });
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
     enabled: !!wsId,
@@ -74,11 +79,16 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
       (inst) => inst.agent_id === agent.id && inst.status === "active",
     ) ?? false;
 
-  // A member who can manage neither platform (not a workspace admin and not
-  // this agent's owner) gets the read-only note instead of the sections.
+  const dingtalkConfigured = dingtalkListing?.configured === true;
+  // DingTalk BYO install/revoke are workspace owner/admin-only at the router,
+  // matching Slack rather than Lark's owner-or-admin rule.
+  const canManageDingtalk = isWorkspaceAdmin;
+
+  // A member who can manage no platform (not a workspace admin and not this
+  // agent's owner) gets the read-only note instead of the sections.
   // Members can still view connected bots in the (member-visible)
   // Settings → Integrations listing.
-  if (!canManageLark && !canManageSlack) {
+  if (!canManageLark && !canManageSlack && !canManageDingtalk) {
     return (
       <div className="space-y-6">
         <p className="text-xs text-muted-foreground">
@@ -180,6 +190,36 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             </div>
           ) : (
             <SlackAgentBindButton agentId={agent.id} agentName={agent.name} />
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border">
+        <div className="flex items-start gap-3 p-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
+            <MessagesSquare className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="text-sm font-medium">{ts(($) => $.dingtalk.section_title)}</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {ts(($) => $.dingtalk.page_description)}
+            </p>
+          </div>
+        </div>
+        <div className="border-t px-4 py-3">
+          {!canManageDingtalk ? (
+            // DingTalk install/revoke stay workspace owner/admin-only, so an
+            // agent owner who is not an admin only gets the read-only note
+            // here (unlike Lark above). Reuses the shared members note.
+            <p className="text-xs text-muted-foreground">
+              {t(($) => $.tab_body.integrations.members_note)}
+            </p>
+          ) : !dingtalkConfigured ? (
+            <p className="text-xs text-muted-foreground">
+              {ts(($) => $.dingtalk.not_enabled_title)}
+            </p>
+          ) : (
+            <DingTalkAgentBindButton agentId={agent.id} agentName={agent.name} />
           )}
         </div>
       </section>
