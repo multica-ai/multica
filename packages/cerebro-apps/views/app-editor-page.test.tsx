@@ -67,4 +67,23 @@ describe("AppEditorPage", () => {
 
     expect(publishAppVersion).toHaveBeenCalledWith("app-1", expect.objectContaining({ version: "0.1.0", release_notes: "Initial release" }), "firtal");
   });
+
+  it("rewrites app.json manifest.version to match the published version", async () => {
+    getAppDetail.mockResolvedValue({ id: "app-1", name: "Published helper", status: "published", current_version: "1.2.3", versions: [{ version: "1.2.3" }] });
+    getAppVersionFiles.mockResolvedValue([
+      { path: "app.json", media_type: "application/json", content: '{"manifest":{"schema_version":"1","name":"Published helper","version":"1.2.3","scopes":[],"frontend":{"entry":"frontend/index.html"}}}' },
+      { path: "frontend/index.html", media_type: "text/html", content: "<h1>Saved source</h1>" },
+    ]);
+    render(<AppEditorPage appId="app-1" />);
+    await screen.findByRole("tab", { name: "app.json" });
+    await userEvent.click(screen.getByRole("button", { name: "Publish" }));
+    expect(screen.getByLabelText("Version")).toHaveValue("1.2.4");
+    await userEvent.type(screen.getByLabelText("Release notes"), "Patch");
+    await userEvent.click(screen.getByRole("button", { name: "Publish version" }));
+
+    const [, payload] = publishAppVersion.mock.calls[0] as [string, { version: string; files: { path: string; content: string }[] }, string];
+    expect(payload.version).toBe("1.2.4");
+    const manifestFile = payload.files.find((file) => file.path === "app.json");
+    expect(JSON.parse(manifestFile!.content).manifest.version).toBe("1.2.4");
+  });
 });
