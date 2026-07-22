@@ -170,6 +170,8 @@ export function AgentCreatePanel({
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
+  const selectionDraft = useIssueDraftStore((s) => s.draft);
+  const setSelectionDraft = useIssueDraftStore((s) => s.setDraft);
 
   // Resolve a candidate actor against the currently-visible agents / squads.
   // Returns null when the candidate doesn't exist in this workspace right
@@ -194,18 +196,35 @@ export function AgentCreatePanel({
 
   const seedActor = useCallback((): ActorSelection | null => {
     // Caller-provided seed wins (e.g. shell pre-seeds with `agent_id` /
-    // `squad_id`), then persisted preference, then first visible agent.
+    // `squad_id`), then the unfinished draft, the last successful pick, and
+    // finally the first visible agent.
     const dataAgent = data?.agent_id as string | undefined;
     const dataSquad = data?.squad_id as string | undefined;
     return (
       resolveActor("agent", dataAgent) ||
       resolveActor("squad", dataSquad) ||
+      resolveActor(
+        selectionDraft.assigneeType === "agent" ||
+          selectionDraft.assigneeType === "squad"
+          ? selectionDraft.assigneeType
+          : null,
+        selectionDraft.assigneeId,
+      ) ||
       resolveActor(lastActorType, lastActorId) ||
       (visibleAgents[0]
         ? ({ type: "agent", id: visibleAgents[0].id } as const)
         : null)
     );
-  }, [resolveActor, data?.agent_id, data?.squad_id, lastActorType, lastActorId, visibleAgents]);
+  }, [
+    resolveActor,
+    data?.agent_id,
+    data?.squad_id,
+    selectionDraft.assigneeType,
+    selectionDraft.assigneeId,
+    lastActorType,
+    lastActorId,
+    visibleAgents,
+  ]);
 
   const [actor, setActor] = useState<ActorSelection | null>(() => seedActor());
 
@@ -228,19 +247,21 @@ export function AgentCreatePanel({
     return visibleSquads.find((s) => s.id === actor.id);
   }, [actor, visibleSquads]);
 
-  // Project selection — defaults to the last project the user picked in this
-  // workspace. `data?.project_id` lets the modal opener seed a one-shot
-  // override (e.g. a future "+ Issue" button on a project page); it does NOT
-  // replace the persisted default.
+  // Unfinished selections live in the shared issue draft. Last-successful
+  // actor/project values remain separate fallbacks, so closing a draft never
+  // overwrites the defaults established by an actual create.
   const [projectId, setProjectId] = useState<string | null>(() => {
-    const seed = (data?.project_id as string | undefined) ?? lastProjectId;
+    const seed =
+      (data?.project_id as string | undefined) ??
+      selectionDraft.projectId ??
+      lastProjectId;
     return seed ?? null;
   });
   const [priority, setPriority] = useState<IssuePriority>(
-    (data?.priority as IssuePriority | undefined) ?? "none",
+    (data?.priority as IssuePriority | undefined) ?? selectionDraft.priority,
   );
   const [dueDate, setDueDate] = useState<string | null>(
-    (data?.due_date as string | undefined) ?? null,
+    (data?.due_date as string | undefined) ?? selectionDraft.dueDate,
   );
   const [fieldPickerOpen, setFieldPickerOpen] = useState<QuickCreateField | null>(null);
 
@@ -257,15 +278,26 @@ export function AgentCreatePanel({
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
   // a `projectId` that isn't in the list means the project was deleted in
-  // another session. Clear BOTH local state and the persisted preference;
-  // dropping only local state would leave the deleted UUID in `lastProjectId`,
-  // and the next open would re-seed it and submit the same dead value.
+  // another session. Clear local state, the unfinished draft, and the
+  // last-successful preference; dropping any persisted copy would make the
+  // next open re-seed and submit the same dead value.
   useEffect(() => {
     if (!projectsLoaded || projectId === null) return;
     if (projects.some((p) => p.id === projectId)) return;
     setProjectId(null);
+    if (selectionDraft.projectId === projectId) {
+      setSelectionDraft({ projectId: undefined });
+    }
     if (lastProjectId === projectId) setLastProjectId(null);
-  }, [projectsLoaded, projects, projectId, lastProjectId, setLastProjectId]);
+  }, [
+    projectsLoaded,
+    projects,
+    projectId,
+    selectionDraft.projectId,
+    lastProjectId,
+    setSelectionDraft,
+    setLastProjectId,
+  ]);
 
   // Daemon CLI version gate. The agent-create flow needs the runtime's
   // bundled multica CLI to be ≥ MIN_QUICK_CREATE_CLI_VERSION; older
@@ -371,6 +403,16 @@ export function AgentCreatePanel({
       });
       setLastActor(actor.type, actor.id);
       setLastProjectId(projectId);
+      // A successful create ends this draft. Keep last-successful actor and
+      // project preferences above, but clear the unfinished selections so a
+      // future draft does not inherit priority or due date accidentally.
+      setSelectionDraft({
+        assigneeType: undefined,
+        assigneeId: undefined,
+        projectId: undefined,
+        priority: "none",
+        dueDate: null,
+      });
       clearPrompt();
       setLastMode("agent");
       toast.success(t(($) => $.create_issue.agent.toast_sent), {
@@ -525,6 +567,7 @@ export function AgentCreatePanel({
             selectedSquad={selectedSquad}
             onPick={(next) => {
               setActor(next);
+              setSelectionDraft({ assigneeType: next.type, assigneeId: next.id });
               setError(null);
             }}
             t={t}
@@ -576,7 +619,7 @@ export function AgentCreatePanel({
 
         {/* Property toolbar — the project is visible by default; priority and
             due date live behind the overflow until exposed in settings or
-            given a value. The project pick remains workspace-persistent.
+            given a value. Unfinished picks remain workspace-persistent.
             When the modal was opened from "Add sub issue" on an existing
             issue, a read-only chip on the same row tells the user that the
             new issue will be filed as a sub-issue of that parent — the agent
@@ -590,7 +633,11 @@ export function AgentCreatePanel({
             fieldPickerOpen === "project") && (
             <ProjectPicker
               projectId={projectId}
-              onUpdate={(u) => setProjectId(u.project_id ?? null)}
+              onUpdate={(u) => {
+                const next = u.project_id ?? null;
+                setProjectId(next);
+                setSelectionDraft({ projectId: next ?? undefined });
+              }}
               triggerRender={<PillButton />}
               align="start"
               open={fieldPickerOpen === "project" ? true : undefined}
@@ -603,7 +650,10 @@ export function AgentCreatePanel({
             <PriorityPicker
               priority={priority}
               onUpdate={(updates) => {
-                if (updates.priority) setPriority(updates.priority);
+                if (updates.priority) {
+                  setPriority(updates.priority);
+                  setSelectionDraft({ priority: updates.priority });
+                }
               }}
               triggerRender={<PillButton />}
               align="start"
@@ -616,7 +666,11 @@ export function AgentCreatePanel({
             fieldPickerOpen === "due_date") && (
             <DueDatePicker
               dueDate={dueDate}
-              onUpdate={(updates) => setDueDate(updates.due_date ?? null)}
+              onUpdate={(updates) => {
+                const next = updates.due_date ?? null;
+                setDueDate(next);
+                setSelectionDraft({ dueDate: next });
+              }}
               triggerRender={<PillButton />}
               align="start"
               open={fieldPickerOpen === "due_date" ? true : undefined}
