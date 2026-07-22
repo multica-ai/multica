@@ -1168,6 +1168,15 @@ type CerebroIssueStatus struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroLegacyAgentToolGrantArchive struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	ToolName    string             `json:"tool_name"`
+	Enabled     bool               `json:"enabled"`
+	ConfigJson  []byte             `json:"config_json"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
+}
+
 type CerebroLoopCheckRun struct {
 	ID           pgtype.UUID        `json:"id"`
 	IssueID      pgtype.UUID        `json:"issue_id"`
@@ -1426,6 +1435,18 @@ type CerebroOsElementSetting struct {
 	Enabled     bool               `json:"enabled"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroPermissionRecoveryAudit struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	SourceFingerprint   string             `json:"source_fingerprint"`
+	ApprovalID          pgtype.UUID        `json:"approval_id"`
+	ApprovedBy          pgtype.UUID        `json:"approved_by"`
+	ImportedCount       int32              `json:"imported_count"`
+	AlreadyPresentCount int32              `json:"already_present_count"`
+	ImportedIdentities  []byte             `json:"imported_identities"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 }
 
 type CerebroProjectGrant struct {

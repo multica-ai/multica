@@ -16,13 +16,33 @@ import (
 )
 
 type options struct {
-	sourceURL         string
-	targetURL         string
-	workspaceID       string
-	apply             bool
-	approvedBy        string
-	approvalReference string
+	sourceURL   string
+	targetURL   string
+	workspaceID string
+	apply       bool
+	approvalID  string
 }
+
+const recoveryApprovalQuery = `
+	UPDATE cerebro_approval_request AS approval
+	SET consumed_at = now(), updated_at = now()
+	FROM member AS approver
+	WHERE approval.id = $1
+	  AND approval.workspace_id = $2
+	  AND approval.agent_id IS NULL
+	  AND approval.capability = $3
+	  AND approval.resource = $4
+	  AND approval.context ->> 'issue_id' = $5
+	  AND approval.context ->> 'approval_boundary' = $6
+	  AND approval.status = 'approved'
+	  AND approval.single_use = TRUE
+	  AND approval.consumed_at IS NULL
+	  AND (approval.expires_at IS NULL OR approval.expires_at > now())
+	  AND approval.decided_by_id = approver.user_id
+	  AND approver.workspace_id = approval.workspace_id
+	  AND approver.role IN ('owner', 'admin')
+	RETURNING approval.decided_by_id::text
+`
 
 func main() {
 	if err := run(context.Background(), os.Args[1:]); err != nil {
@@ -38,8 +58,7 @@ func run(ctx context.Context, args []string) error {
 	flags.StringVar(&opts.targetURL, "target-url", os.Getenv("DATABASE_URL"), "current database URL")
 	flags.StringVar(&opts.workspaceID, "workspace-id", "", "workspace UUID to reconcile")
 	flags.BoolVar(&opts.apply, "apply", false, "apply a safe diff; default is dry-run")
-	flags.StringVar(&opts.approvedBy, "approved-by", "", "member UUID that approved the production import")
-	flags.StringVar(&opts.approvalReference, "approval-reference", "", "durable approval reference, for example FIR-3388 comment link")
+	flags.StringVar(&opts.approvalID, "approval-id", "", "single-use production recovery approval UUID")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -94,8 +113,8 @@ func validateOptions(opts options) error {
 	if opts.sourceURL == opts.targetURL {
 		return errors.New("source and target database URLs must be different")
 	}
-	if opts.apply && (strings.TrimSpace(opts.approvedBy) == "" || strings.TrimSpace(opts.approvalReference) == "") {
-		return errors.New("apply requires approved-by and approval-reference")
+	if opts.apply && strings.TrimSpace(opts.approvalID) == "" {
+		return errors.New("apply requires approval-id")
 	}
 	return nil
 }
@@ -190,6 +209,10 @@ func apply(ctx context.Context, target *pgxpool.Pool, opts options, grants []gra
 	if !diff.SafeToApply() {
 		return fmt.Errorf("target changed: %d conflicting and %d unmapped rows", len(diff.Conflicting), len(diff.Unmapped))
 	}
+	approvedBy, err := consumeRecoveryApproval(ctx, tx, opts, diff.SourceFingerprint)
+	if err != nil {
+		return err
+	}
 
 	identities := make([]string, 0, len(diff.Mapped))
 	for _, rule := range diff.Mapped {
@@ -198,7 +221,7 @@ func apply(ctx context.Context, target *pgxpool.Pool, opts options, grants []gra
 				workspace_id, tool_key, layer, subject_id, setting, resource_pattern, conditions, updated_by
 			) VALUES ($1, $2, 'agent', $3, $4, $5, $6, $7)
 			ON CONFLICT (workspace_id, tool_key, layer, subject_id, resource_pattern) DO NOTHING
-		`, rule.WorkspaceID, rule.ToolKey, rule.AgentID, rule.Setting, rule.ResourcePattern, rule.Conditions, opts.approvedBy)
+		`, rule.WorkspaceID, rule.ToolKey, rule.AgentID, rule.Setting, rule.ResourcePattern, rule.Conditions, approvedBy)
 		if err != nil {
 			return fmt.Errorf("insert %s/%s: %w", rule.AgentID, rule.ToolKey, err)
 		}
@@ -210,11 +233,11 @@ func apply(ctx context.Context, target *pgxpool.Pool, opts options, grants []gra
 	identityJSON, _ := json.Marshal(identities)
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO cerebro_permission_recovery_audit (
-			workspace_id, source_fingerprint, approval_reference, approved_by,
+			workspace_id, source_fingerprint, approval_id, approved_by,
 			imported_count, already_present_count, imported_identities
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (workspace_id, source_fingerprint) DO NOTHING
-	`, opts.workspaceID, diff.SourceFingerprint, opts.approvalReference, opts.approvedBy, len(diff.Mapped), len(diff.AlreadyPresent), identityJSON); err != nil {
+	`, opts.workspaceID, diff.SourceFingerprint, opts.approvalID, approvedBy, len(diff.Mapped), len(diff.AlreadyPresent), identityJSON); err != nil {
 		return fmt.Errorf("write recovery audit: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -222,6 +245,31 @@ func apply(ctx context.Context, target *pgxpool.Pool, opts options, grants []gra
 	}
 	fmt.Fprintf(os.Stderr, "applied %d policy rows at %s\n", len(diff.Mapped), time.Now().UTC().Format(time.RFC3339))
 	return nil
+}
+
+type rowQuerier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func consumeRecoveryApproval(ctx context.Context, queryer rowQuerier, opts options, fingerprint string) (string, error) {
+	var approvedBy string
+	err := queryer.QueryRow(
+		ctx,
+		recoveryApprovalQuery,
+		opts.approvalID,
+		opts.workspaceID,
+		grantrecovery.ApprovalCapability,
+		grantrecovery.ApprovalResource(opts.workspaceID, fingerprint),
+		grantrecovery.ApprovalIssueID,
+		grantrecovery.ApprovalBoundary,
+	).Scan(&approvedBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", errors.New("apply refused: approval must be a live, unused, single-use recovery approval decided by a workspace owner or admin")
+	}
+	if err != nil {
+		return "", fmt.Errorf("consume recovery approval: %w", err)
+	}
+	return approvedBy, nil
 }
 
 func printJSON(value any) error {

@@ -577,22 +577,29 @@ window, assume these gates were NOT enforced on local daemon runtimes.
 
 ## Recovering direct grants after migration 9152
 
-`cerebro_permission_recovery` is the only supported recovery path for direct
+The Cerebro permission recovery command is the only supported recovery path for direct
 `agent_tool_grant` rows already removed by migration 9152. It reads a separate
 point-in-time-restored database in PostgreSQL read-only mode and compares it
 with the current database. Dry-run is the default:
 
 ```sh
 RECOVERY_SOURCE_DATABASE_URL='<restored database>' DATABASE_URL='<current database>' \
-  go run ./cmd/cerebro_permission_recovery --workspace-id '<workspace UUID>'
+  go run ./internal/cerebro/grantrecovery/cmd/recovery --workspace-id '<workspace UUID>'
 ```
 
 The JSON diff separates `mapped`, `already_present`, `conflicting`, and
 `unmapped`. Non-Registry tool config, a missing target agent, or a conflicting
 current policy blocks import. Never edit or reuse the restored database as the
 target. After a reviewed zero-conflict diff and explicit production approval,
-repeat with `--apply --approved-by '<member UUID>' --approval-reference '<durable
-comment/reference>'`. The import uses a serializable transaction, takes a
+create a single-use approval request whose capability is
+`permission_recovery:apply`, whose resource is
+`workspace:<workspace UUID>:source:<source_fingerprint>`, and whose context
+contains the FIR-3388 issue ID plus the
+`production_permission_recovery_import` approval boundary. Jesper must approve
+that exact request through the normal Approval inbox. Then repeat with
+`--apply --approval-id '<approval UUID>'`. The command atomically verifies that
+the approval is live, unused, belongs to this workspace and exact diff, and was
+decided by a workspace owner or admin. The import uses a serializable transaction, takes a
 workspace advisory lock, refuses races, and records a source fingerprint and
 the imported identities in `cerebro_permission_recovery_audit`. A second run is
 a no-op for identical rows. Delete the paid restored database only after the

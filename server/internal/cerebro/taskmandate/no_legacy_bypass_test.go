@@ -29,7 +29,7 @@ func TestNoLegacyAccessStoreCanReenterServerCode(t *testing.T) {
 		// The standalone recovery command is an operator-only, read-only source
 		// reader for a separate PITR database. It is deliberately not linked into
 		// the server or runtime and writes only canonical cerebro_tool_policy rows.
-		if strings.Contains(filepath.ToSlash(path), "/cmd/cerebro_permission_recovery/") {
+		if strings.Contains(filepath.ToSlash(path), "/internal/cerebro/grantrecovery/cmd/recovery/") {
 			return nil
 		}
 		raw, readErr := os.ReadFile(path)

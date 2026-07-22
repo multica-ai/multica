@@ -10,6 +10,16 @@ import (
 	"strings"
 )
 
+const (
+	ApprovalCapability = "permission_recovery:apply"
+	ApprovalBoundary   = "production_permission_recovery_import"
+	ApprovalIssueID    = "72b52abc-6d80-4611-8fd8-5a164602d788"
+)
+
+func ApprovalResource(workspaceID, sourceFingerprint string) string {
+	return "workspace:" + workspaceID + ":source:" + sourceFingerprint
+}
+
 type LegacyGrant struct {
 	WorkspaceID string          `json:"workspace_id"`
 	AgentID     string          `json:"agent_id"`
