@@ -114,7 +114,12 @@ RETURNING *;
 -- of custom_env handling so all env mutations flow through here and the
 -- handler's audit-log + **** sentinel guard.
 UPDATE agent
-SET custom_env = $2, updated_at = now()
+SET custom_env = $2,
+    custom_env_updated_at = CASE
+      WHEN custom_env IS DISTINCT FROM $2 THEN now()
+      ELSE custom_env_updated_at
+    END,
+    updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -654,6 +659,16 @@ RETURNING *;
 -- window overflow that would immediately overflow again on resume. Keep this
 -- list in sync with resumeUnsafeFailureReason and GetLastChatTaskSession.
 --
+-- A custom_env change invalidates sessions whose tasks were claimed before the
+-- change. custom_env is captured while building the claim response, before the
+-- daemon reports started_at, so dispatched_at is the conservative freshness
+-- boundary. Legacy rows fall back to started_at and then created_at.
+-- Those provider sessions may retain an old shell environment snapshot even
+-- though every daemon execution starts a fresh provider process with the
+-- current env. Surface that decision separately from session_id while preserving
+-- work_dir so the next execution keeps any uncommitted files and starts a fresh
+-- provider conversation in the same directory.
+--
 -- The error-text ILIKE clause is defense-in-depth for the api_invalid_request
 -- shape: a legacy row tagged 'agent_error' (pre-MUL-1921), a deploy-window
 -- row that the old code wrote between migration and rollout, or a future
@@ -662,18 +677,26 @@ RETURNING *;
 -- error text. Migration 079 backfills the failure_reason column itself,
 -- so observability stays accurate; this clause guarantees session resume
 -- never picks up a bad session even when failure_reason hasn't caught up.
-SELECT session_id, work_dir, runtime_id FROM agent_task_queue
-WHERE agent_id = $1 AND issue_id = $2
+SELECT atq.session_id,
+       atq.work_dir,
+       atq.runtime_id,
+       (
+         a.custom_env_updated_at IS NULL
+         OR COALESCE(atq.dispatched_at, atq.started_at, atq.created_at) >= a.custom_env_updated_at
+       ) AS session_has_current_env
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE atq.agent_id = $1 AND atq.issue_id = $2
   AND (
-    status = 'completed'
+    atq.status = 'completed'
     OR (
-      status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
-      AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
+      atq.status = 'failed'
+      AND COALESCE(atq.failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
+      AND NOT (COALESCE(atq.error, '') ILIKE '%400%' AND COALESCE(atq.error, '') ILIKE '%invalid_request_error%')
     )
   )
-  AND session_id IS NOT NULL
-ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+  AND atq.session_id IS NOT NULL
+ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) DESC
 LIMIT 1;
 
 -- name: GetLastTaskStartedAtForIssueAndAgent :one
