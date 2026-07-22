@@ -65,6 +65,9 @@ jobs:
       - name: Test local check process cleanup
         run: bash scripts/check-process-tree.test.sh
 
+      - name: Test Pi Firtal Gateway model discovery
+        run: node --experimental-strip-types --test docker/pi-firtal-gateway.test.mjs
+
       - name: Verify Cerebro distribution boundary
         run: bash scripts/cerebro/check-distribution-boundary.sh
 
