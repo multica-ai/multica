@@ -165,7 +165,11 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 // event fires on that edge, covering both the verification-code and Google
 // OAuth entry points.
 func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.User, isNew bool, err error) {
-	user, err = h.Queries.GetUserByEmail(ctx, email)
+	return h.findOrCreateUserWithQueries(ctx, h.Queries, email)
+}
+
+func (h *Handler) findOrCreateUserWithQueries(ctx context.Context, queries *db.Queries, email string) (user db.User, isNew bool, err error) {
+	user, err = queries.GetUserByEmail(ctx, email)
 	isNew = isNotFound(err)
 	if err != nil && !isNew {
 		return db.User{}, false, err
@@ -183,7 +187,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 	if at := strings.Index(email, "@"); at > 0 {
 		name = email[:at]
 	}
-	created, err := h.Queries.CreateUser(ctx, db.CreateUserParams{
+	created, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Name:  name,
 		Email: email,
 	})
@@ -565,6 +569,10 @@ func (h *Handler) completeFederatedLogin(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusInternalServerError, "failed to create user")
 		return LoginResponse{}, false
 	}
+	return h.completeFederatedLoginForUser(w, r, user, isNew, name, picture, method)
+}
+
+func (h *Handler) completeFederatedLoginForUser(w http.ResponseWriter, r *http.Request, user db.User, isNew bool, name, picture, method string) (LoginResponse, bool) {
 	if isNew {
 		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
 		evt.Properties["auth_method"] = method
@@ -577,7 +585,7 @@ func (h *Handler) completeFederatedLogin(w http.ResponseWriter, r *http.Request,
 	newName := user.Name
 	newAvatar := user.AvatarUrl
 
-	if name != "" && user.Name == strings.Split(email, "@")[0] {
+	if name != "" && user.Name == strings.Split(user.Email, "@")[0] {
 		newName = name
 		needsUpdate = true
 	}
@@ -599,7 +607,7 @@ func (h *Handler) completeFederatedLogin(w http.ResponseWriter, r *http.Request,
 
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
-		slog.Warn(method+" login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+		slog.Warn(method+" login failed", append(logger.RequestAttrs(r), "error", err, "email", user.Email)...)
 		writeError(w, http.StatusInternalServerError, "failed to generate token")
 		return LoginResponse{}, false
 	}

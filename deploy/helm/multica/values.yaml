@@ -133,6 +133,8 @@ backend:
     oidcRedirectUri: http://multica.dev.lan/auth/callback
     oidcProviderName: OpenID Connect
     oidcScopes: openid profile email
+    oidcAllowedGroups: ""
+    oidcGroupsClaim: groups
     oidcRequireVerifiedEmail: true
     s3Bucket: ""
     s3Region: us-west-2

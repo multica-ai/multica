@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"golang.org/x/oauth2"
 )
 
@@ -30,6 +32,8 @@ type oidcRuntimeConfig struct {
 	RedirectURI          string
 	ProviderName         string
 	Scopes               []string
+	AllowedGroups        []string
+	GroupsClaim          string
 	RequireVerifiedEmail bool
 }
 
@@ -56,6 +60,7 @@ type oidcClaims struct {
 	EmailVerified bool   `json:"email_verified"`
 	Name          string `json:"name"`
 	Picture       string `json:"picture"`
+	Groups        []string
 }
 
 var oidcProviders sync.Map
@@ -67,6 +72,8 @@ func loadOIDCRuntimeConfig() (oidcRuntimeConfig, error) {
 		ClientSecret:         strings.TrimSpace(os.Getenv("OIDC_CLIENT_SECRET")),
 		RedirectURI:          strings.TrimSpace(os.Getenv("OIDC_REDIRECT_URI")),
 		ProviderName:         strings.TrimSpace(os.Getenv("OIDC_PROVIDER_NAME")),
+		AllowedGroups:        splitCommaSeparated(os.Getenv("OIDC_ALLOWED_GROUPS")),
+		GroupsClaim:          strings.TrimSpace(os.Getenv("OIDC_GROUPS_CLAIM")),
 		RequireVerifiedEmail: os.Getenv("OIDC_REQUIRE_VERIFIED_EMAIL") != "false",
 	}
 	if cfg.IssuerURL == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.RedirectURI == "" {
@@ -83,6 +90,9 @@ func loadOIDCRuntimeConfig() (oidcRuntimeConfig, error) {
 	if cfg.ProviderName == "" {
 		cfg.ProviderName = "OpenID Connect"
 	}
+	if cfg.GroupsClaim == "" {
+		cfg.GroupsClaim = "groups"
+	}
 	cfg.Scopes = strings.Fields(os.Getenv("OIDC_SCOPES"))
 	if len(cfg.Scopes) == 0 {
 		cfg.Scopes = []string{oidc.ScopeOpenID, "profile", "email"}
@@ -91,6 +101,52 @@ func loadOIDCRuntimeConfig() (oidcRuntimeConfig, error) {
 		cfg.Scopes = append([]string{oidc.ScopeOpenID}, cfg.Scopes...)
 	}
 	return cfg, nil
+}
+
+func splitCommaSeparated(value string) []string {
+	var result []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" && !contains(result, item) {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func readOIDCClaims(read func(any) error, claims *oidcClaims, groupsClaim string) error {
+	if err := read(claims); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := read(&raw); err != nil {
+		return err
+	}
+	value, ok := raw[groupsClaim]
+	if !ok {
+		return nil
+	}
+	var groups []string
+	if err := json.Unmarshal(value, &groups); err != nil {
+		var group string
+		if stringErr := json.Unmarshal(value, &group); stringErr != nil {
+			return errors.New("OIDC groups claim must be a string or an array of strings")
+		}
+		groups = []string{group}
+	}
+	claims.Groups = groups
+	return nil
+}
+
+func oidcGroupAllowed(userGroups, allowedGroups []string) bool {
+	if len(allowedGroups) == 0 {
+		return true
+	}
+	for _, allowed := range allowedGroups {
+		if contains(userGroups, allowed) {
+			return true
+		}
+	}
+	return false
 }
 
 func validOIDCURL(value *url.URL) bool {
@@ -219,7 +275,7 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	claims := oidcClaims{}
-	if err := idToken.Claims(&claims); err != nil {
+	if err := readOIDCClaims(idToken.Claims, &claims, cfg.GroupsClaim); err != nil {
 		writeError(w, http.StatusBadGateway, "failed to parse OIDC claims")
 		return
 	}
@@ -229,7 +285,7 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "OIDC userinfo subject does not match ID token")
 			return
 		}
-		if err := userInfo.Claims(&claims); err != nil {
+		if err := readOIDCClaims(userInfo.Claims, &claims, cfg.GroupsClaim); err != nil {
 			slog.Warn("failed to parse OIDC userinfo claims", append(logger.RequestAttrs(r), "error", err)...)
 		}
 	}
@@ -242,11 +298,72 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "OIDC account email is not verified")
 		return
 	}
-	login, ok := h.completeFederatedLogin(w, r, claims.Email, claims.Name, claims.Picture, "oidc")
+	if !oidcGroupAllowed(claims.Groups, cfg.AllowedGroups) {
+		writeError(w, http.StatusForbidden, "OIDC account is not in an allowed group")
+		return
+	}
+	user, isNew, err := h.resolveOIDCUser(ctx, idToken.Issuer, idToken.Subject, claims.Email)
+	if err != nil {
+		var signupErr SignupError
+		if errors.As(err, &signupErr) {
+			writeError(w, http.StatusForbidden, signupErr.Error())
+			return
+		}
+		slog.Error("failed to resolve OIDC identity", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to resolve OIDC account")
+		return
+	}
+	login, ok := h.completeFederatedLoginForUser(w, r, user, isNew, claims.Name, claims.Picture, "oidc")
 	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, oidcLoginResponse{LoginResponse: login, AppState: flow.AppState})
+}
+
+func (h *Handler) resolveOIDCUser(ctx context.Context, issuer, subject, email string) (db.User, bool, error) {
+	if h.TxStarter == nil {
+		return db.User{}, false, errors.New("OIDC identity storage is unavailable")
+	}
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.User{}, false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	identityKey := issuer + "\x00" + subject
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", identityKey); err != nil {
+		return db.User{}, false, err
+	}
+	queries := h.Queries.WithTx(tx)
+	user, err := queries.GetUserByOIDCIdentity(ctx, db.GetUserByOIDCIdentityParams{Issuer: issuer, Subject: subject})
+	if err == nil {
+		if err := queries.UpdateOIDCIdentityEmail(ctx, db.UpdateOIDCIdentityEmailParams{Issuer: issuer, Subject: subject, Email: email}); err != nil {
+			return db.User{}, false, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return db.User{}, false, err
+		}
+		return user, false, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.User{}, false, err
+	}
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", "oidc-email\x00"+email); err != nil {
+		return db.User{}, false, err
+	}
+	user, isNew, err := h.findOrCreateUserWithQueries(ctx, queries, email)
+	if err != nil {
+		return db.User{}, false, err
+	}
+	if err := queries.CreateOIDCIdentity(ctx, db.CreateOIDCIdentityParams{
+		Issuer: issuer, Subject: subject, UserID: user.ID, Email: email,
+	}); err != nil {
+		return db.User{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.User{}, false, err
+	}
+	return user, isNew, nil
 }
 
 func oidcConfigForPublicResponse() (string, bool) {

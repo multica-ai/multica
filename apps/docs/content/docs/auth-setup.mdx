@@ -149,13 +149,16 @@ Multica can use one discovery-capable OIDC provider alongside email codes and Go
     OIDC_CLIENT_SECRET=replace-me
     OIDC_REDIRECT_URI=https://multica.yourdomain.com/auth/callback
     OIDC_PROVIDER_NAME=Company SSO
+    # Optional group restriction:
+    OIDC_ALLOWED_GROUPS=multica-users,multica-admins
+    OIDC_GROUPS_CLAIM=groups
     ```
 
    For GitLab.com the issuer is `https://gitlab.com`. For self-managed GitLab it is the instance root. For Authentik it is the provider-specific issuer shown in its OpenID Configuration.
 
 3. Grant the `openid`, `profile`, and `email` scopes, then restart the server.
 
-By default Multica requires `email_verified=true` before it creates or links an account by email. Set `OIDC_REQUIRE_VERIFIED_EMAIL=false` only when the provider cannot emit this claim and its email ownership policy is trusted. OIDC configuration is read at runtime, so the frontend does not need to be rebuilt.
+By default Multica requires `email_verified=true` before it creates an account. On first login, the account is linked to the provider's stable `(issuer, subject)` identity, so later email changes do not create a second account. Set `OIDC_REQUIRE_VERIFIED_EMAIL=false` only when the provider cannot emit this claim and its email ownership policy is trusted. `OIDC_ALLOWED_GROUPS` optionally requires an exact match in `OIDC_GROUPS_CLAIM`. OIDC configuration is read at runtime, so the frontend does not need to be rebuilt.
 
 ## Restricting who can sign up
 

@@ -6,6 +6,21 @@ WHERE id = $1;
 SELECT * FROM "user"
 WHERE email = $1;
 
+-- name: GetUserByOIDCIdentity :one
+SELECT u.*
+FROM user_oidc_identity AS identity
+JOIN "user" AS u ON u.id = identity.user_id
+WHERE identity.issuer = $1 AND identity.subject = $2;
+
+-- name: CreateOIDCIdentity :exec
+INSERT INTO user_oidc_identity (issuer, subject, user_id, email)
+VALUES ($1, $2, $3, $4);
+
+-- name: UpdateOIDCIdentityEmail :exec
+UPDATE user_oidc_identity
+SET email = $3, updated_at = now()
+WHERE issuer = $1 AND subject = $2 AND email IS DISTINCT FROM $3;
+
 -- name: GetUsersByIDs :many
 -- Batch lookup from the GLOBAL user table (not gated on membership, so departed
 -- members still render). Used to enrich attribution initiator / originator refs on

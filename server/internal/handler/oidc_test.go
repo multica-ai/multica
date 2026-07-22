@@ -87,6 +87,44 @@ func TestOIDCConfigRequiresCompleteConfiguration(t *testing.T) {
 	}
 }
 
+func TestOIDCConfigParsesGroupRestriction(t *testing.T) {
+	t.Setenv("OIDC_ISSUER_URL", "https://auth.example.com")
+	t.Setenv("OIDC_CLIENT_ID", "client")
+	t.Setenv("OIDC_CLIENT_SECRET", "secret")
+	t.Setenv("OIDC_REDIRECT_URI", "https://app.example.com/auth/callback")
+	t.Setenv("OIDC_ALLOWED_GROUPS", "developers, platform,developers")
+	t.Setenv("OIDC_GROUPS_CLAIM", "groups_direct")
+	cfg, err := loadOIDCRuntimeConfig()
+	if err != nil {
+		t.Fatalf("loadOIDCRuntimeConfig: %v", err)
+	}
+	if got, want := strings.Join(cfg.AllowedGroups, ","), "developers,platform"; got != want {
+		t.Fatalf("allowed groups: got %q, want %q", got, want)
+	}
+	if cfg.GroupsClaim != "groups_direct" {
+		t.Fatalf("groups claim: got %q", cfg.GroupsClaim)
+	}
+}
+
+func TestReadOIDCClaimsAndGroupAllowlist(t *testing.T) {
+	read := func(target any) error {
+		return json.Unmarshal([]byte(`{"email":"user@example.com","groups_direct":["developers","platform"]}`), target)
+	}
+	claims := oidcClaims{}
+	if err := readOIDCClaims(read, &claims, "groups_direct"); err != nil {
+		t.Fatalf("readOIDCClaims: %v", err)
+	}
+	if !oidcGroupAllowed(claims.Groups, []string{"platform"}) {
+		t.Fatal("expected matching group to be allowed")
+	}
+	if oidcGroupAllowed(claims.Groups, []string{"finance"}) {
+		t.Fatal("expected unmatched group to be rejected")
+	}
+	if !oidcGroupAllowed(nil, nil) {
+		t.Fatal("expected empty allowlist to allow access")
+	}
+}
+
 func TestOIDCLoginRejectsStateMismatchBeforeTokenExchange(t *testing.T) {
 	t.Setenv("OIDC_ISSUER_URL", "https://auth.example.com")
 	t.Setenv("OIDC_CLIENT_ID", "client")
