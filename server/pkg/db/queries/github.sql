@@ -197,11 +197,22 @@ ORDER BY pr.pr_created_at DESC;
 -- newest linked PR with a head_sha when none are open. Returns no rows (empty
 -- string) when the issue has no linked PR — callers treat that as "no SHA key"
 -- and dedup on (issue_id, agent_id) alone, preserving pre-TEN-356 behavior.
-SELECT pr.head_sha
-FROM github_pull_request pr
-JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-WHERE ipr.issue_id = $1 AND pr.head_sha <> ''
-ORDER BY (pr.state IN ('open', 'draft')) DESC, pr.pr_updated_at DESC
+--
+-- Spans both GitHub and self-hosted VCS PRs: a self-hosted PR pushing a new
+-- commit must move the dedup head SHA the same way a GitHub PR does, otherwise
+-- a fresh review round could be merged away against a stale key.
+SELECT head_sha FROM (
+    SELECT pr.head_sha AS head_sha, pr.state AS state, pr.pr_updated_at AS pr_updated_at
+    FROM github_pull_request pr
+    JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+    WHERE ipr.issue_id = $1 AND pr.head_sha <> ''
+    UNION ALL
+    SELECT pr.head_sha AS head_sha, pr.state AS state, pr.pr_updated_at AS pr_updated_at
+    FROM vcs_pull_request pr
+    JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+    WHERE ipr.issue_id = $1 AND pr.head_sha <> ''
+) combined
+ORDER BY (state IN ('open', 'draft')) DESC, pr_updated_at DESC
 LIMIT 1;
 
 -- name: ListIssueIDsForPullRequest :many

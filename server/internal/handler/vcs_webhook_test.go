@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -134,6 +135,147 @@ func TestVCSWebhook_ForgejoMirrorsAndCloses(t *testing.T) {
 	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
 	if updated.Status != "done" {
 		t.Errorf("expected issue done, got %q", updated.Status)
+	}
+}
+
+// A bare body mention ("Related MUL-X", no closing keyword, not in title or
+// branch) must link reference_only: excluded from the issue PR list and from
+// the close gate, so it neither shows as a working PR nor blocks a genuine
+// Closes sibling from advancing the issue. Mirrors the GitHub qualifying rule.
+func TestVCSWebhook_ReferenceOnlyExcludedAndNonBlocking(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
+	issue := newVCSIssue(t, "Reference-only mention")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	// PR #7: OPEN, mentions the issue only in the body with no closing keyword,
+	// generic title/branch → reference_only.
+	refRaw, _ := json.Marshal(map[string]any{
+		"action": "opened",
+		"pull_request": map[string]any{
+			"number": 7, "html_url": "https://forgejo.test/acme/widget/pulls/7",
+			"title": "Update docs", "body": "Related " + issue.Identifier,
+			"state": "open", "merged": false,
+			"created_at": "2026-04-28T00:00:00Z", "updated_at": "2026-04-28T00:00:00Z",
+			"head": map[string]any{"ref": "docs", "sha": "ref7"},
+			"user": map[string]any{"username": "octo"},
+		},
+		"repository": map[string]any{"name": "widget", "owner": map[string]any{"username": "acme"}},
+	})
+	w := httptest.NewRecorder()
+	testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+		"X-Gitea-Event": "pull_request", "X-Gitea-Signature": giteaSig(refRaw),
+	}, refRaw))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("ref PR: expected 202, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	// The link exists but is reference_only, so it is hidden from the PR list.
+	var referenceOnly bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT reference_only FROM issue_vcs_pull_request WHERE issue_id = $1`,
+		issue.ID).Scan(&referenceOnly); err != nil {
+		t.Fatalf("select reference_only: %v", err)
+	}
+	if !referenceOnly {
+		t.Fatalf("body-only mention should be reference_only")
+	}
+	if rows, err := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issue.ID)); err != nil {
+		t.Fatalf("list: %v", err)
+	} else if len(rows) != 0 {
+		t.Fatalf("reference_only PR must be excluded from the list, got %d rows", len(rows))
+	}
+
+	// PR #8: MERGED with a title reference + Closes keyword → qualifying,
+	// close_intent. The still-open reference_only PR #7 must NOT block advance.
+	closeRaw, _ := json.Marshal(map[string]any{
+		"action": "closed",
+		"pull_request": map[string]any{
+			"number": 8, "html_url": "https://forgejo.test/acme/widget/pulls/8",
+			"title": "Fix " + issue.Identifier, "body": "Closes " + issue.Identifier,
+			"state": "closed", "merged": true,
+			"merged_at": "2026-04-29T00:00:00Z", "closed_at": "2026-04-29T00:00:00Z",
+			"created_at": "2026-04-28T00:00:00Z", "updated_at": "2026-04-29T00:00:00Z",
+			"head": map[string]any{"ref": "fix", "sha": "cls8"},
+			"user": map[string]any{"username": "octo"},
+		},
+		"repository": map[string]any{"name": "widget", "owner": map[string]any{"username": "acme"}},
+	})
+	w = httptest.NewRecorder()
+	testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+		"X-Gitea-Event": "pull_request", "X-Gitea-Signature": giteaSig(closeRaw),
+	}, closeRaw))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("close PR: expected 202, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
+	if updated.Status != "done" {
+		t.Errorf("issue should advance despite the open reference_only PR, got %q", updated.Status)
+	}
+}
+
+// The close gate must span providers: an issue with an OPEN GitHub PR and a
+// MERGED close-intent VCS PR must report open_count > 0, so neither webhook
+// auto-advances it out from under the still-open GitHub work (and vice versa).
+func TestCombinedCloseAggregateSpansProviders(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	issue := newVCSIssue(t, "Cross-provider close gate")
+	now := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		cleanupVCS(ctx, issue.ID)
+	})
+
+	// OPEN GitHub PR linked to the issue (installation_id carries no FK).
+	ghPR, err := testHandler.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
+		WorkspaceID: parseUUID(testWorkspaceID), InstallationID: 987654,
+		RepoOwner: "acme", RepoName: "gh", PrNumber: 3,
+		Title: "WIP " + issue.Identifier, State: "open",
+		HtmlUrl:     "https://github.com/acme/gh/pull/3",
+		PrCreatedAt: now, PrUpdatedAt: now, HeadSha: "ghsha",
+	})
+	if err != nil {
+		t.Fatalf("UpsertGitHubPullRequest: %v", err)
+	}
+	if err := testHandler.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
+		IssueID: parseUUID(issue.ID), PullRequestID: ghPR.ID, CloseIntent: false,
+		ReferenceOnly: false, LinkedByType: strToText("system"),
+	}); err != nil {
+		t.Fatalf("LinkIssueToPullRequest: %v", err)
+	}
+
+	// MERGED close-intent VCS PR linked to the same issue.
+	vcsPR, err := testHandler.Queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
+		WorkspaceID: parseUUID(testWorkspaceID), ConnectionID: parseUUID(connID),
+		Provider: "gitlab", RepoOwner: "acme", RepoName: "gl", PrNumber: 4,
+		Title: "Fix " + issue.Identifier, State: "merged",
+		HtmlUrl:     "https://gitlab.test/acme/gl/-/merge_requests/4",
+		PrCreatedAt: now, PrUpdatedAt: now, HeadSha: "glsha",
+	})
+	if err != nil {
+		t.Fatalf("UpsertVCSPullRequest: %v", err)
+	}
+	if err := testHandler.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
+		IssueID: parseUUID(issue.ID), PullRequestID: vcsPR.ID, CloseIntent: true,
+		ReferenceOnly: false, LinkedByType: strToText("system"),
+	}); err != nil {
+		t.Fatalf("LinkIssueToVCSPullRequest: %v", err)
+	}
+
+	counts, err := testHandler.Queries.GetIssueCombinedPullRequestCloseAggregate(ctx, parseUUID(issue.ID))
+	if err != nil {
+		t.Fatalf("GetIssueCombinedPullRequestCloseAggregate: %v", err)
+	}
+	if counts.OpenCount != 1 {
+		t.Errorf("open_count = %d, want 1 (the open GitHub PR must be seen)", counts.OpenCount)
+	}
+	if counts.MergedWithCloseIntentCount != 1 {
+		t.Errorf("merged_with_close_intent_count = %d, want 1 (the VCS MR)", counts.MergedWithCloseIntentCount)
 	}
 }
 

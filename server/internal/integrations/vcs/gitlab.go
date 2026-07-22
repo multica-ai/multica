@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // gitlabProvider implements Provider for GitLab, which differs from
@@ -93,9 +94,37 @@ func (gitlabProvider) ParsePullRequest(body []byte) (PullRequestEvent, error) {
 		HeadSHA:         d.ObjectAttributes.LastCommit.ID,
 		AuthorLogin:     d.User.Username,
 		AuthorAvatarURL: d.User.AvatarURL,
-		CreatedAt:       d.ObjectAttributes.CreatedAt,
-		UpdatedAt:       d.ObjectAttributes.UpdatedAt,
+		CreatedAt:       normalizeGitLabTime(d.ObjectAttributes.CreatedAt),
+		UpdatedAt:       normalizeGitLabTime(d.ObjectAttributes.UpdatedAt),
 	}, nil
+}
+
+// normalizeGitLabTime converts GitLab's webhook timestamp format
+// ("2017-09-20 08:31:45 UTC") into the RFC3339 the rest of the pipeline expects
+// (PullRequestEvent/CIStatusEvent document their time fields as "RFC3339 or
+// empty", and the shared parser is RFC3339-only). Without this every GitLab
+// event's timestamp failed to parse and was silently replaced with ingestion
+// time, defeating the PR-upsert and commit-status monotonic guards for GitLab
+// and skewing PR list ordering. Normalizing here keeps the fix inside the
+// provider adapter, matching the package's "providers contribute only what
+// differs" design rather than teaching the shared parser a GitLab dialect.
+// Unrecognized input returns "" so the handler falls back to ingestion time.
+func normalizeGitLabTime(s string) string {
+	if s == "" {
+		return ""
+	}
+	for _, layout := range []string{
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05 MST",
+		"2006-01-02 15:04:05 -0700",
+		"2006-01-02 15:04:05.999999 MST",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC().Format(time.RFC3339)
+		}
+	}
+	return ""
 }
 
 // normalizeGitLabMRState maps GitLab MR states onto open/closed/merged/draft.
@@ -117,9 +146,11 @@ func normalizeGitLabMRState(state string, draft bool) string {
 type glPipelinePayload struct {
 	ObjectKind       string `json:"object_kind"`
 	ObjectAttributes struct {
-		SHA    string `json:"sha"`
-		Status string `json:"status"`
-		URL    string `json:"url"`
+		SHA        string `json:"sha"`
+		Status     string `json:"status"`
+		URL        string `json:"url"`
+		CreatedAt  string `json:"created_at"`
+		FinishedAt string `json:"finished_at"`
 	} `json:"object_attributes"`
 }
 
@@ -128,6 +159,13 @@ func (gitlabProvider) ParseCIStatus(body []byte) (CIStatusEvent, error) {
 	if err := json.Unmarshal(body, &d); err != nil {
 		return CIStatusEvent{}, err
 	}
+	// Prefer the pipeline's finished_at (the state transition we're recording);
+	// fall back to created_at. Normalized to RFC3339 so the commit-status
+	// monotonic guard has a real, comparable timestamp instead of ingestion time.
+	updatedAt := d.ObjectAttributes.FinishedAt
+	if updatedAt == "" {
+		updatedAt = d.ObjectAttributes.CreatedAt
+	}
 	return CIStatusEvent{
 		SHA: d.ObjectAttributes.SHA,
 		// GitLab pipelines are one per commit, not per named check, so a stable
@@ -135,6 +173,7 @@ func (gitlabProvider) ParseCIStatus(body []byte) (CIStatusEvent, error) {
 		Context:   "gitlab/pipeline",
 		State:     normalizeGitLabPipelineState(d.ObjectAttributes.Status),
 		TargetURL: d.ObjectAttributes.URL,
+		UpdatedAt: normalizeGitLabTime(updatedAt),
 	}, nil
 }
 

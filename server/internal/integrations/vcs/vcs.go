@@ -100,6 +100,11 @@ type CIStatusEvent struct {
 	State       string // passed | failed | pending
 	TargetURL   string
 	Description string
+	// UpdatedAt is the provider's own event timestamp (RFC3339 or empty). It
+	// feeds the commit-status monotonic guard so an out-of-order redelivery
+	// can't regress a status; empty means "unknown", and the handler falls back
+	// to ingestion time.
+	UpdatedAt string
 }
 
 // Account is the minimal identity returned by ValidateToken.

@@ -121,7 +121,7 @@ WITH checks AS (
         ON cs.connection_id = pr.connection_id
        AND cs.sha = pr.head_sha
        AND pr.head_sha <> ''
-    WHERE ipr.issue_id = sqlc.arg('issue_id')
+    WHERE ipr.issue_id = sqlc.arg('issue_id') AND NOT ipr.reference_only
     GROUP BY pr.id
 )
 SELECT
@@ -133,19 +133,34 @@ SELECT
 FROM vcs_pull_request pr
 JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
 LEFT JOIN checks c ON c.pr_id = pr.id
-WHERE ipr.issue_id = sqlc.arg('issue_id')
+WHERE ipr.issue_id = sqlc.arg('issue_id') AND NOT ipr.reference_only
 ORDER BY pr.pr_created_at DESC;
 
--- name: GetVCSIssuePullRequestCloseAggregate :one
--- Counts in-flight (open/draft) linked PRs and merged PRs that declared close
--- intent. The webhook auto-advances the issue when open_count = 0 AND
--- merged_with_close_intent_count > 0.
+-- name: GetIssueCombinedPullRequestCloseAggregate :one
+-- Cross-provider close gate. An issue can carry PRs from GitHub AND a
+-- self-hosted VCS provider at the same time, so auto-advance has to see BOTH
+-- table pairs. Reading only one (as the per-provider aggregates do) lets a
+-- merged close-intent PR/MR on one provider advance an issue that still has an
+-- open PR on the other — either webhook is blind to the other's in-flight work.
+-- Sum the in-flight (open/draft) and merged-with-close-intent counts across
+-- github_pull_request+issue_pull_request and vcs_pull_request+
+-- issue_vcs_pull_request. reference_only links are excluded on both sides, so a
+-- bare body mention neither counts as in-flight nor gates advance.
+WITH combined AS (
+    SELECT pr.state AS state, ipr.close_intent AS close_intent
+    FROM github_pull_request pr
+    JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+    WHERE ipr.issue_id = $1 AND NOT ipr.reference_only
+    UNION ALL
+    SELECT pr.state AS state, ipr.close_intent AS close_intent
+    FROM vcs_pull_request pr
+    JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+    WHERE ipr.issue_id = $1 AND NOT ipr.reference_only
+)
 SELECT
-    COALESCE(SUM(CASE WHEN pr.state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
-    COALESCE(SUM(CASE WHEN pr.state = 'merged' AND ipr.close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
-FROM vcs_pull_request pr
-JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
-WHERE ipr.issue_id = $1;
+    COALESCE(SUM(CASE WHEN state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
+    COALESCE(SUM(CASE WHEN state = 'merged' AND close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
+FROM combined;
 
 -- =====================
 -- VCS commit status (CI)
@@ -180,13 +195,21 @@ WHERE pr.connection_id = $1 AND pr.head_sha = $2 AND pr.head_sha <> '';
 -- =====================
 
 -- name: LinkIssueToVCSPullRequest :exec
+-- reference_only marks a link justified ONLY by a bare body mention (no closing
+-- keyword and no title/branch reference), mirroring the GitHub link upsert.
+-- preserve_close_intent freezes both close_intent and reference_only once a
+-- terminal merge/close event has been recorded.
 INSERT INTO issue_vcs_pull_request (
-    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent
+    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent, reference_only
 ) VALUES (
-    $1, $2, sqlc.narg('linked_by_type'), sqlc.narg('linked_by_id'), $3
+    $1, $2, sqlc.narg('linked_by_type'), sqlc.narg('linked_by_id'), $3, sqlc.arg('reference_only')
 )
 ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
     close_intent = CASE
         WHEN sqlc.arg('preserve_close_intent') THEN issue_vcs_pull_request.close_intent
         ELSE EXCLUDED.close_intent
+    END,
+    reference_only = CASE
+        WHEN sqlc.arg('preserve_close_intent') THEN issue_vcs_pull_request.reference_only
+        ELSE EXCLUDED.reference_only
     END;

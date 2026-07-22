@@ -135,6 +135,9 @@ type fjStatusPayload struct {
 	State       string `json:"state"`
 	TargetURL   string `json:"target_url"`
 	Description string `json:"description"`
+	// Forgejo/Gitea send these as RFC3339 on the commit-status object.
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 func (p forgejoProvider) ParseCIStatus(body []byte) (CIStatusEvent, error) {
@@ -142,12 +145,19 @@ func (p forgejoProvider) ParseCIStatus(body []byte) (CIStatusEvent, error) {
 	if err := json.Unmarshal(body, &d); err != nil {
 		return CIStatusEvent{}, err
 	}
+	// Prefer the status' own updated_at (RFC3339) so the monotonic guard is
+	// real; fall back to created_at, then empty (handler uses ingestion time).
+	updatedAt := d.UpdatedAt
+	if updatedAt == "" {
+		updatedAt = d.CreatedAt
+	}
 	return CIStatusEvent{
 		SHA:         d.SHA,
 		Context:     d.Context,
 		State:       normalizeForgejoState(d.State),
 		TargetURL:   d.TargetURL,
 		Description: d.Description,
+		UpdatedAt:   updatedAt,
 	}, nil
 }
 

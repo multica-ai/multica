@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestRegistry(t *testing.T) {
@@ -205,6 +206,70 @@ func TestValidateToken(t *testing.T) {
 				t.Errorf("login = %q, want %q", acct.Login, c.wantLogin)
 			}
 		})
+	}
+}
+
+// GitLab sends timestamps as "2017-09-20 08:31:45 UTC" (not RFC3339). The
+// shared handler parser is RFC3339-only, so without normalization every GitLab
+// timestamp was dropped and replaced with ingestion time — defeating the
+// monotonic guards on PR upsert and commit status for GitLab specifically, and
+// skewing PR list ordering. These assert the adapter normalizes to RFC3339.
+func TestNormalizeGitLabTime(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", ""},
+		{"2017-09-20 08:31:45 UTC", "2017-09-20T08:31:45Z"},
+		{"2017-09-20T08:31:45Z", "2017-09-20T08:31:45Z"},
+		{"2017-09-20T08:31:45.123Z", "2017-09-20T08:31:45Z"},
+		{"not a time", ""},
+	}
+	for _, c := range cases {
+		if got := normalizeGitLabTime(c.in); got != c.want {
+			t.Errorf("normalizeGitLabTime(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestGitlabParseTimestamps(t *testing.T) {
+	p, _ := For("gitlab")
+	// A merge_request payload with GitLab-format created_at/updated_at.
+	pr, err := p.ParsePullRequest([]byte(`{
+		"object_kind":"merge_request",
+		"project":{"path_with_namespace":"g/r"},
+		"object_attributes":{"iid":1,"title":"MUL-1","state":"opened","action":"open",
+			"created_at":"2017-09-20 08:31:45 UTC","updated_at":"2017-09-21 09:00:00 UTC",
+			"last_commit":{"id":"abc"}}}`))
+	if err != nil {
+		t.Fatalf("ParsePullRequest: %v", err)
+	}
+	if pr.CreatedAt != "2017-09-20T08:31:45Z" || pr.UpdatedAt != "2017-09-21T09:00:00Z" {
+		t.Errorf("timestamps not normalized: created=%q updated=%q", pr.CreatedAt, pr.UpdatedAt)
+	}
+	if _, err := time.Parse(time.RFC3339, pr.UpdatedAt); err != nil {
+		t.Errorf("UpdatedAt not RFC3339: %v", err)
+	}
+
+	// A pipeline payload's finished_at feeds the commit-status guard.
+	st, err := p.ParseCIStatus([]byte(`{"object_kind":"pipeline",
+		"object_attributes":{"sha":"abc","status":"success",
+			"created_at":"2017-09-20 08:00:00 UTC","finished_at":"2017-09-20 08:05:00 UTC"}}`))
+	if err != nil {
+		t.Fatalf("ParseCIStatus: %v", err)
+	}
+	if st.UpdatedAt != "2017-09-20T08:05:00Z" {
+		t.Errorf("CI UpdatedAt = %q, want finished_at normalized", st.UpdatedAt)
+	}
+}
+
+func TestForgejoStatusTimestamp(t *testing.T) {
+	p, _ := For("forgejo")
+	// Forgejo/Gitea status payloads carry RFC3339 created_at/updated_at.
+	st, err := p.ParseCIStatus([]byte(`{"sha":"abc","context":"ci","state":"success",
+		"created_at":"2017-09-20T08:00:00Z","updated_at":"2017-09-20T08:05:00Z"}`))
+	if err != nil {
+		t.Fatalf("ParseCIStatus: %v", err)
+	}
+	if st.UpdatedAt != "2017-09-20T08:05:00Z" {
+		t.Errorf("CI UpdatedAt = %q, want updated_at", st.UpdatedAt)
 	}
 }
 

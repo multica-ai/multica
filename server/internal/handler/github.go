@@ -998,7 +998,10 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 				if issue.Status == "done" || issue.Status == "cancelled" {
 					continue
 				}
-				counts, err := h.Queries.GetIssuePullRequestCloseAggregate(ctx, issue.ID)
+				// Combined across providers: an issue may also carry a still-open
+				// self-hosted VCS PR, which must block auto-advance here just as
+				// an open GitHub PR blocks it on the VCS webhook path.
+				counts, err := h.Queries.GetIssueCombinedPullRequestCloseAggregate(ctx, issue.ID)
 				if err != nil {
 					slog.Warn("github: count linked pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
 					continue

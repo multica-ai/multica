@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -190,6 +189,21 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	for _, c := range extractClosingIdentifiers(ev.Title, ev.Body) {
 		closingIdents[c] = struct{}{}
 	}
+	// qualifyingIdents genuinely tie this PR to an issue: a title prefix, a
+	// branch-name reference, or a body closing keyword. An identifier matched
+	// ONLY by a bare body mention is reference_only — it links (so the PR shows
+	// in history) but is hidden from the issue PR list and excluded from the
+	// close aggregate, so a drive-by "Related MUL-1" neither looks like a
+	// working PR nor blocks a genuine Closes sibling from advancing the issue.
+	// Mirrors the GitHub path (MUL-3739); branch is deliberately excluded from
+	// the closing-keyword scan there and here.
+	qualifyingIdents := map[string]struct{}{}
+	for _, id := range extractIdentifiers(ev.Title, ev.Branch) {
+		qualifyingIdents[id] = struct{}{}
+	}
+	for c := range closingIdents {
+		qualifyingIdents[c] = struct{}{}
+	}
 	// Freeze close_intent once the terminal merge/close event has arrived.
 	preserveCloseIntent := !ev.Terminal() && (ev.State == "merged" || ev.State == "closed")
 	prefix := h.getIssuePrefix(ctx, conn.WorkspaceID)
@@ -201,10 +215,13 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		}
 		_, declared := closingIdents[id]
 		closeIntent := declared && !preserveCloseIntent
+		_, qualifies := qualifyingIdents[id]
+		referenceOnly := !qualifies
 		if err := h.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
 			IssueID:             issue.ID,
 			PullRequestID:       pr.ID,
 			CloseIntent:         closeIntent,
+			ReferenceOnly:       referenceOnly,
 			PreserveCloseIntent: preserveCloseIntent,
 			LinkedByType:        strToText("system"),
 			LinkedByID:          pgtype.UUID{},
@@ -221,7 +238,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 			if issue.Status == "done" || issue.Status == "cancelled" {
 				continue
 			}
-			counts, err := h.Queries.GetVCSIssuePullRequestCloseAggregate(ctx, issue.ID)
+			counts, err := h.Queries.GetIssueCombinedPullRequestCloseAggregate(ctx, issue.ID)
 			if err != nil {
 				slog.Warn("vcs: count linked pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
 				continue
@@ -242,6 +259,10 @@ func (h *Handler) mirrorVCSCIStatus(ctx context.Context, conn db.VcsConnection, 
 	if ev.SHA == "" || ev.State == "" {
 		return
 	}
+	// Use the provider's own event timestamp so UpsertVCSCommitStatus's
+	// monotonic guard has something real to compare — writing time.Now() here
+	// made the guard always true, so an out-of-order redelivery could regress a
+	// status. Falls back to now() only when the payload carried no timestamp.
 	if err := h.Queries.UpsertVCSCommitStatus(ctx, db.UpsertVCSCommitStatusParams{
 		ConnectionID: conn.ID,
 		Sha:          ev.SHA,
@@ -249,7 +270,7 @@ func (h *Handler) mirrorVCSCIStatus(ctx context.Context, conn db.VcsConnection, 
 		State:        ev.State,
 		TargetUrl:    ptrToText(strPtrOrNil(ev.TargetURL)),
 		Description:  ptrToText(strPtrOrNil(ev.Description)),
-		UpdatedAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		UpdatedAt:    parseGHTimeRequired(ev.UpdatedAt),
 	}); err != nil {
 		slog.Warn("vcs: upsert commit status failed", "err", err)
 		return
