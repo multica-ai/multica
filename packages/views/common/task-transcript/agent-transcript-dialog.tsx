@@ -44,6 +44,12 @@ import {
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
+import {
+  traceEventFilterKey,
+  traceEventHasDetail,
+  traceEventLabel,
+  traceEventSummary,
+} from "./trace-event-presenter";
 import { useT } from "../../i18n";
 
 interface AgentTranscriptDialogProps {
@@ -93,80 +99,22 @@ const colorClasses: Record<EventColor, { bg: string; bgActive: string; label: st
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+// Readability decisions (label, summary, filter key, expandability) live in the
+// pure, unit-tested Trace Event Presenter so this component owns only rendering.
 function getEventLabel(item: TimelineItem): string {
-  switch (item.type) {
-    case "text":
-      return "Agent";
-    case "thinking":
-      return "Thinking";
-    case "tool_use":
-      return item.tool ?? "Tool";
-    case "tool_result":
-      return item.tool ? `${item.tool}` : "Result";
-    case "error":
-      return "Error";
-    default:
-      return "Event";
-  }
+  return traceEventLabel(item);
 }
 
 function getItemFilterKey(item: TimelineItem): TranscriptFilterKey {
-  return item.tool && (item.type === "tool_use" || item.type === "tool_result")
-    ? `tool:${item.tool}`
-    : item.type;
+  return traceEventFilterKey(item);
 }
 
 function getEventSummary(item: TimelineItem): string {
-  switch (item.type) {
-    case "text":
-      return item.content?.split("\n").find((l) => l.trim().length > 0) ?? "";
-    case "thinking":
-      return item.content?.slice(0, 200) ?? "";
-    case "tool_use": {
-      if (!item.input) return "";
-      const inp = item.input as Record<string, string>;
-      if (inp.query) return inp.query;
-      if (inp.file_path) return shortenPath(inp.file_path);
-      if (inp.path) return shortenPath(inp.path);
-      if (inp.pattern) return inp.pattern;
-      if (inp.description) return String(inp.description);
-      if (inp.command) {
-        const cmd = String(inp.command);
-        return cmd.length > 120 ? cmd.slice(0, 120) + "..." : cmd;
-      }
-      if (inp.prompt) {
-        const p = String(inp.prompt);
-        return p.length > 120 ? p.slice(0, 120) + "..." : p;
-      }
-      if (inp.skill) return String(inp.skill);
-      for (const v of Object.values(inp)) {
-        if (typeof v === "string" && v.length > 0 && v.length < 120) return v;
-      }
-      return "";
-    }
-    case "tool_result":
-      return item.output?.slice(0, 200) ?? "";
-    case "error":
-      return item.content ?? "";
-    default:
-      return "";
-  }
+  return traceEventSummary(item);
 }
 
 function hasEventDetail(item: TimelineItem): boolean {
-  return (
-    (item.type === "tool_use" && !!item.input && Object.keys(item.input).length > 0) ||
-    (item.type === "tool_result" && !!item.output && item.output.length > 0) ||
-    (item.type === "thinking" && !!item.content && item.content.length > 0) ||
-    (item.type === "text" && !!item.content && item.content.length > 0) ||
-    (item.type === "error" && !!item.content && item.content.length > 0)
-  );
-}
-
-function shortenPath(p: string): string {
-  const parts = p.split("/");
-  if (parts.length <= 3) return p;
-  return ".../" + parts.slice(-2).join("/");
+  return traceEventHasDetail(item);
 }
 
 function formatDuration(start: string, end: string): string {
