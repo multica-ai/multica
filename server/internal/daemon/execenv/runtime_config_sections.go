@@ -403,7 +403,7 @@ func writeWorkflowComment(b *strings.Builder, provider string, ctx TaskContextFo
 		b.WriteString(buildCommentReplyInstructionsSlim(provider, ctx.IssueID, ctx.TriggerCommentID))
 	}
 	b.WriteString("8. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
-	b.WriteString("9. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
+	b.WriteString("9. Issue status: do NOT change it unless the comment explicitly asks for it, with one exception — rework. If this issue is currently `in_review` and the triggering comment asks you to revise, fix, or redo work this issue already delivered, set the issue to `in_progress` when you start that rework and set it back to `in_review` when you post the reworked result. Questions, discussion, and acknowledgements never change the status.\n\n")
 }
 
 // writeWorkflowAssignment emits the assignment-triggered workflow.
