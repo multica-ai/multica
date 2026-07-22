@@ -1130,10 +1130,13 @@ func newSkillsShImportedSkill(skillMdBody []byte, skillName, rawURL, owner, repo
 }
 
 // addSupportingFilesViaCrawl is the legacy per-directory enumeration path, used
-// only as a fallback when the recursive tree is unavailable or truncated. It
-// lists skillDir via the contents API, recurses subdirectories, and downloads
-// each file. It stays lenient on a listing failure (returns with only SKILL.md)
-// to match prior behavior under GitHub API rate limiting.
+// as a fallback only for a truncated recursive tree (and by the github.com
+// importer). A tree-fetch failure no longer routes here — it returns a retryable
+// error instead. It lists skillDir via the contents API, recurses
+// subdirectories, and downloads each file. It stays lenient on a genuine listing
+// failure (returns with only SKILL.md, matching prior behavior under GitHub API
+// rate limiting) but treats a cancelled context as fatal so a mid-crawl deadline
+// or disconnect can't persist an incomplete bundle as a success.
 func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, result *importedSkill, owner, repo, ref, skillDir string) error {
 	apiURL := buildGitHubContentsURL(owner, repo, skillDir, ref)
 	dirResp, err := doGitHubAPIGet(ctx, httpClient, apiURL)
@@ -1153,6 +1156,13 @@ func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, re
 
 	var entries []githubContentEntry
 	if err := json.NewDecoder(dirResp.Body).Decode(&entries); err != nil {
+		// A cancelled context surfaces as a decode error when the deadline or a
+		// client disconnect lands while the response body is still being read.
+		// Treat it as fatal rather than swallowing it — otherwise the import is
+		// saved with a valid SKILL.md but zero supporting files.
+		if ctx.Err() != nil {
+			return fmt.Errorf("github import: directory listing read aborted: %w", ctx.Err())
+		}
 		slog.Warn("github import: failed to decode top-level directory listing", "url", apiURL, "error", err)
 		return nil
 	}

@@ -887,6 +887,56 @@ func TestFetchFromClawHub_ContextCancelledMidDownloadAborts(t *testing.T) {
 	}
 }
 
+// A cancellation that lands while the top-level contents listing body is being
+// read (200 headers received, decode fails with "context canceled") must abort
+// the crawl, not be swallowed into a valid-SKILL.md/zero-files "success".
+func TestFetchFromSkillsSh_CrawlListingDecodeCancelledAborts(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree:      []githubTreeEntry{{Path: "skills/foo/SKILL.md", Type: "blob"}},
+					Truncated: true,
+				})
+			case "/repos/acme/skills/contents/skills/foo":
+				// Flush 200 headers so the client sees a valid response, then
+				// cancel and block: the JSON decode of the body is torn down
+				// mid-stream and returns "context canceled".
+				w.WriteHeader(http.StatusOK)
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+				cancel()
+				<-r.Context().Done()
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			if r.URL.Path == "/acme/skills/main/skills/foo/SKILL.md" {
+				w.Write([]byte("---\nname: foo\n---\nbody"))
+				return
+			}
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := fetchFromSkillsSh(ctx, client, "https://skills.sh/acme/skills/foo")
+	if err == nil {
+		t.Fatal("expected crawl listing decode to abort on cancellation")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %q, want context.Canceled", err.Error())
+	}
+}
+
 func TestImportFetchErrorResponse(t *testing.T) {
 	capErr := fmt.Errorf("%w: import bundle would contain 999 files", errImportCapExceeded)
 	if status, _ := importFetchErrorResponse(context.Background(), capErr); status != http.StatusRequestEntityTooLarge {
