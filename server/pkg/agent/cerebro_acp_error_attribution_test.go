@@ -60,3 +60,20 @@ func TestSnifferIgnoresTerminalToolOutput(t *testing.T) {
 		t.Errorf("a failing terminal command was captured as a provider error: %q", msg)
 	}
 }
+
+// TestSnifferKeepsHeaderlessProviderError guards the header gate from
+// over-reaching: an adapter that spells out a provider failure without first
+// printing a ⚠️/❌ banner must still be captured, or the run reports empty
+// output instead of the real failure.
+func TestSnifferKeepsHeaderlessProviderError(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	if _, err := s.Write([]byte("Error: HTTP 503: upstream is unavailable\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if msg := s.message(); !strings.Contains(msg, "503") {
+		t.Errorf("headerless provider error was dropped, got %q", msg)
+	}
+}
