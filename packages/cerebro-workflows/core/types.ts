@@ -125,7 +125,9 @@ export interface LoopChainBlock {
   status_on_start?: string;
   status_on_done?: string;
   skill?: string;
+  skills?: string[];
   goal?: string;
+  command_id?: string;
   check?: string[];
   expect?: "exit_zero";
   rubric?: string;

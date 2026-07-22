@@ -116,6 +116,7 @@ const nextConfig = {
     "@multica/cerebro-ui",
     "@multica/cerebro-users",
     "@multica/cerebro-workflows",
+    "@multica/cerebro-commands",
     "@multica/cerebro-evals",
     "@multica/core",
     "@multica/ui",

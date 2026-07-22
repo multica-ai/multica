@@ -226,6 +226,20 @@ func classifyAutoPause(task db.AgentTaskQueue, now time.Time) autoPauseDecision 
 			detail:        "Runtimen er midlertidigt sat på pause, fordi forbindelsen til AI-gateway'en blev afbrudt. Den prøver automatisk igen.",
 		}
 	}
+	// FIR-3651: same treatment when the agent process cannot open a socket to
+	// its provider at all. Without it the runtime stays online and burns both
+	// attempts of every task it claims on the same unreachable provider.
+	// runtime_recovery is in the unpause resume set, so the suspended tasks are
+	// reclaimed once the runtime can reach the provider again.
+	if isProviderUnreachableError(task.Error.String) {
+		return autoPauseDecision{
+			pauseWorthy:   true,
+			pauseReason:   "runtime_recovery",
+			failureReason: "runtime_recovery",
+			title:         "Provider unreachable from this runtime",
+			detail:        "Runtimen er midlertidigt sat på pause, fordi den ikke kan få forbindelse til AI-tjenesten. Opgaverne venter og køres igen, når forbindelsen er tilbage.",
+		}
+	}
 	resetAt, hasReset, pauseWorthy := account.ClassifyRateLimitReset(task.Error.String, now)
 	if !pauseWorthy {
 		return autoPauseDecision{}

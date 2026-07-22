@@ -306,6 +306,54 @@ func TestTaskDispatcher_DispatchBlockRejectsRunnerMissingSkill(t *testing.T) {
 	}
 }
 
+func TestTaskDispatcher_DispatchBlockRequiresEveryConfiguredSkill(t *testing.T) {
+	agentID := mustScanUUID(t, "11111111-1111-1111-1111-111111111111")
+	runtimeID := mustScanUUID(t, "22222222-2222-2222-2222-222222222222")
+	issueID := mustScanUUID(t, "33333333-3333-3333-3333-333333333333")
+	workspaceID := mustScanUUID(t, "44444444-4444-4444-4444-444444444444")
+	q := &fakeDispatchQueries{
+		agents:      map[[16]byte]db.Agent{agentID.Bytes: {ID: agentID, WorkspaceID: workspaceID, RuntimeID: runtimeID, MaxConcurrentTasks: 1}},
+		runtimes:    map[[16]byte]db.AgentRuntime{runtimeID.Bytes: {ID: runtimeID, Status: "online"}},
+		agentSkills: map[[16]byte][]db.Skill{agentID.Bytes: {{Name: "plan"}}},
+		issue:       db.Issue{ID: issueID, WorkspaceID: workspaceID, Title: "Build"},
+	}
+
+	_, err := NewTaskDispatcher(q).DispatchBlock(context.Background(), BlockDispatch{
+		Run:   ChainRun{IssueID: issueID},
+		Phase: Phase{ID: "build", Limits: PhaseLimits{MaxWaitSeconds: 60}},
+		Block: Block{ID: "build", Type: BlockSession, Skills: []string{"plan", "review"}, Agents: []AgentRef{{AgentID: uuidToString(agentID)}}},
+		Step:  ChainStep{StepRef: StepRef{BlockID: "build", Number: 1}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "review") {
+		t.Fatalf("error = %v, want missing review skill", err)
+	}
+	if len(q.issueTasks) != 0 {
+		t.Fatal("no task should be enqueued unless the runner has every skill")
+	}
+}
+
+func TestBuildBlockPromptListsEveryConfiguredSkill(t *testing.T) {
+	prompt, err := buildBlockPrompt(Block{ID: "build", Type: BlockSession, Skills: []string{"plan", "review"}, Goal: "Ship it"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "- plan") || !strings.Contains(prompt, "- review") {
+		t.Fatalf("prompt omitted skills: %s", prompt)
+	}
+}
+
+func TestRenderApprovalPromptUsesPreviousOutcomeAndRemovesUnknownPlaceholders(t *testing.T) {
+	steps := []ChainStep{{
+		StepRef: StepRef{BlockID: "build", Number: 1},
+		Status:  StepCompleted,
+		Outcome: json.RawMessage(`{"output":"Feature shipped","evidence":"Tests green"}`),
+	}}
+	prompt := renderApprovalPrompt("Delivered: {{previous.output}}\nEvidence: {{previous.evidence}}\n{{missing.value}}", steps)
+	if prompt != "Delivered: Feature shipped\nEvidence: Tests green" {
+		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
 func TestTaskDispatcher_DispatchBlockAppliesEveryAllBusyPolicy(t *testing.T) {
 	agentID := mustScanUUID(t, "11111111-1111-1111-1111-111111111111")
 	runtimeID := mustScanUUID(t, "22222222-2222-2222-2222-222222222222")

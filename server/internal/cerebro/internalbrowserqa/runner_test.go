@@ -337,13 +337,31 @@ func TestTargetForUsesOnlyInternalAllowlist(t *testing.T) {
 	}
 }
 
-func TestFinanceTargetUsesAuthenticatedDashboardMarker(t *testing.T) {
+// firtal-internal-private (the employee portal) and firtal-agents-private (the
+// finance app) share a login, so aiming this target at the employee portal
+// logged in and reported PASS while never once loading the finance app. Pin the
+// host, and prove the AI CFO screen itself rather than a post-login landing page.
+func TestFinanceTargetReachesTheAiCfoScreenOnTheFinanceApp(t *testing.T) {
 	target, err := TargetFor("finance")
 	if err != nil {
 		t.Fatalf("TargetFor(finance): %v", err)
 	}
-	if len(target.ExpectedText) != 1 || target.ExpectedText[0] != "Your roles:" {
-		t.Fatalf("finance markers = %v, want Your roles:", target.ExpectedText)
+	if target.Host() != "firtal-agents-private.internal:3000" {
+		t.Fatalf("host = %q, want firtal-agents-private.internal:3000", target.Host())
+	}
+	if target.NavigateLinkName != "AI CFO" {
+		t.Fatalf("navigate link = %q, want AI CFO", target.NavigateLinkName)
+	}
+	want := []string{"Monthly overview", "Controllership review", "Versus budget"}
+	if strings.Join(target.ExpectedText, "|") != strings.Join(want, "|") {
+		t.Fatalf("finance markers = %v, want %v", target.ExpectedText, want)
+	}
+	// "Your roles:" is the employee portal's marker. If it ever comes back here,
+	// the target has drifted onto the wrong app again.
+	for _, marker := range target.ExpectedText {
+		if marker == "Your roles:" {
+			t.Fatal("finance is matching the employee portal marker again")
+		}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
@@ -21,7 +22,8 @@ type InternalBrowserQARunner interface {
 }
 
 type internalBrowserVerifyRequest struct {
-	App string `json:"app"`
+	App   string `json:"app"`
+	Async bool   `json:"async,omitempty"`
 }
 
 func (h *Handler) VerifyInternalAgentBrowser(w http.ResponseWriter, r *http.Request) {
@@ -88,14 +90,78 @@ func (h *Handler) VerifyInternalAgentBrowser(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
-	result, err := h.InternalBrowserQA.Verify(r.Context(), target.Name, credential)
-	if err != nil {
-		h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "deny", "browser verification failed")
-		writeInternalBrowserVerificationError(w, result, err)
+	// Older CLIs use the original synchronous response contract. New CLIs opt
+	// into jobs explicitly so deployed desktop binaries do not break when the
+	// server is upgraded first.
+	if !req.Async {
+		result, verifyErr := h.InternalBrowserQA.Verify(r.Context(), target.Name, credential)
+		if verifyErr != nil {
+			h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "deny", "browser verification failed")
+			writeInternalBrowserVerificationError(w, result, verifyErr)
+			return
+		}
+		h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "allow", "internal target verified")
+		writeJSON(w, http.StatusOK, result)
 		return
 	}
-	h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "allow", "internal target verified")
-	writeJSON(w, http.StatusOK, result)
+	if h.InternalBrowserJobs == nil {
+		h.InternalBrowserJobs = newInternalBrowserJobStore()
+	}
+	jobID, err := h.InternalBrowserJobs.create(util.UUIDToString(wsID), util.UUIDToString(agentID), target.Name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "browser verification could not be started")
+		return
+	}
+	go h.runInternalBrowserJob(jobID, wsID, agentID, target, credential)
+	writeJSON(w, http.StatusAccepted, map[string]string{"job_id": jobID, "state": "pending"})
+}
+
+func (h *Handler) runInternalBrowserJob(jobID string, wsID, agentID pgtype.UUID, target internalbrowserqa.Target, credential internalbrowserqa.Credential) {
+	ctx, cancel := context.WithTimeout(context.Background(), internalbrowserqa.MaxVerificationDuration)
+	defer cancel()
+	result, err := h.InternalBrowserQA.Verify(ctx, target.Name, credential)
+	if err != nil {
+		h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "deny", "browser verification failed")
+	} else {
+		h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "allow", "internal target verified")
+	}
+	h.InternalBrowserJobs.complete(jobID, result, err)
+}
+
+func (h *Handler) GetInternalAgentBrowserVerification(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Actor-Source") != "task_token" {
+		writeError(w, http.StatusForbidden, "internal browser verification is agent-only")
+		return
+	}
+	workspaceID := strings.TrimSpace(r.Header.Get("X-Workspace-ID"))
+	agentID := strings.TrimSpace(r.Header.Get("X-Agent-ID"))
+	if workspaceID == "" || agentID == "" || h.InternalBrowserJobs == nil {
+		writeError(w, http.StatusNotFound, "browser verification job not found")
+		return
+	}
+	job, ok := h.InternalBrowserJobs.get(chi.URLParam(r, "jobId"), workspaceID, agentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "browser verification job not found")
+		return
+	}
+	target, err := internalbrowserqa.TargetFor(job.App)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "browser verification job not found")
+		return
+	}
+	if _, _, _, allowed := h.authorizeInternalAgentBrowser(w, r, target.Vault); !allowed {
+		return
+	}
+	if job.State != "complete" {
+		w.Header().Set("Retry-After", "2")
+		writeJSON(w, http.StatusAccepted, map[string]string{"state": "pending"})
+		return
+	}
+	if job.Err != nil {
+		writeInternalBrowserVerificationError(w, job.Result, job.Err)
+		return
+	}
+	writeJSON(w, http.StatusOK, job.Result)
 }
 
 func writeInternalBrowserVerificationError(w http.ResponseWriter, result internalbrowserqa.Result, err error) {

@@ -34,6 +34,12 @@ import (
 const (
 	CapabilityCreateRuntime = "create_runtime"
 	CapabilityCreateAgent   = "create_agent"
+	// App lifecycle capabilities are enforced by the mini-app handlers. They
+	// live in the same group-capability store so non-admin builders can receive
+	// only the app actions they need.
+	CapabilityAppsCreate = "apps.create"
+	CapabilityAppsManage = "apps.manage"
+	CapabilityAppsDelete = "apps.delete"
 	// CapabilityCreateSharedFilters gates who may create shared/workspace saved
 	// filters (FIR-1659 Fase 4). Read by the savedfilters handler via
 	// HasCerebroCapability; granted per group on the group detail page.
@@ -55,6 +61,9 @@ const (
 var knownCapabilities = map[string]struct{}{
 	CapabilityCreateRuntime:       {},
 	CapabilityCreateAgent:         {},
+	CapabilityAppsCreate:          {},
+	CapabilityAppsManage:          {},
+	CapabilityAppsDelete:          {},
 	CapabilityCreateSharedFilters: {},
 	CapabilityCreateMemory:        {},
 	CapabilitySetBlockingGate:     {},

@@ -84,10 +84,16 @@ var targets = map[string]Target{
 		Vault: "Shared/browser-login/registry", UsernameSelector: "#email", PasswordSelector: "#password",
 		SubmitSelector: "button[type=submit]", ExpectedText: []string{"Dashboard", "Data Sources"},
 	},
+	// Finance is firtal-agents-private, not firtal-internal-private — those are
+	// two different apps that share a login, so pointing at the wrong one logged
+	// in cleanly and "passed" against the employee portal instead. The AI CFO
+	// screen is what this target exists to prove, so the run navigates there and
+	// matches its starter prompts rather than stopping at the landing page.
 	"finance": {
-		Name: "finance", URL: "http://firtal-internal-private.internal:3000/login?manual=true",
+		Name: "finance", URL: "http://firtal-agents-private.internal:3000/auth/login?manual=true",
 		Vault: "Shared/browser-login/finance", UsernameSelector: "#email", PasswordSelector: "#password",
-		SubmitSelector: "button[type=submit]", ExpectedText: []string{"Your roles:"},
+		SubmitSelector: "button[type=submit]", NavigateLinkName: "AI CFO",
+		ExpectedText: []string{"Monthly overview", "Controllership review", "Versus budget"},
 	},
 	"pricing": {
 		Name: "pricing", URL: "http://ecommerce-pricing-engine-private.internal:3000/login?manual=true",
@@ -358,10 +364,30 @@ type stageObservation struct {
 	TargetHost string
 }
 
+const (
+	defaultOpenTimeout  = 75 * time.Second
+	defaultStageTimeout = 30 * time.Second
+)
+
+// countedStages is how many stageTimeout-bounded steps a full verification can
+// spend after the open stage: auth, reload, render, dialog, navigation, the
+// second render, snapshot, url, errors and screenshot.
+const countedStages = 10
+
+// MaxVerificationDuration is the longest a single Verify can legitimately take:
+// the DNS preflight, every open attempt including the cold-start retry, and each
+// remaining stage at its own ceiling. A caller MUST allow at least this long.
+// A deadline shorter than this makes the cold-start retry unreachable — the
+// caller hangs up mid-retry — which is exactly how a healthy but idle app came
+// back as a failure.
+const MaxVerificationDuration = dnsPreflightTimeout +
+	(openStageRetries+1)*defaultOpenTimeout +
+	countedStages*defaultStageTimeout
+
 func NewRunner(commander Commander) *Runner {
 	return &Runner{
-		commander: commander, openTimeout: 75 * time.Second,
-		stageTimeout: 30 * time.Second, cleanupTimeout: 30 * time.Second,
+		commander: commander, openTimeout: defaultOpenTimeout,
+		stageTimeout: defaultStageTimeout, cleanupTimeout: defaultStageTimeout,
 		dnsTimeout: dnsPreflightTimeout, resolveHost: resolveInternalHost,
 		observeStage: func(observation stageObservation) {
 			log.Printf("internal browser diagnostic app=%s stage=%s duration_ms=%d exit_class=%s target_host=%s",

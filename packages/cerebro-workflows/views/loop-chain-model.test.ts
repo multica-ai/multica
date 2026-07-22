@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { LoopChainBlock, LoopChainPhase } from "../core/types";
 import {
+  applyCommandSelection,
   blockSummary,
   nudgeBlock,
   nudgePhase,
   reorderBlocks,
   reorderPhases,
+  skillNamesFromPrompt,
   totalSteps,
 } from "./loop-chain-model";
 
@@ -55,6 +57,20 @@ describe("reorderBlocks", () => {
     const phases = [phase("p1", ["a", "b", "c"])];
     reorderBlocks(phases, "a", "c", false);
     expect(ids(phases)).toEqual([["a", "b", "c"]]);
+  });
+});
+
+describe("skillNamesFromPrompt", () => {
+  it("resolves multiple references, removes duplicates, and ignores stale ids", () => {
+    const prompt = "Use [/plan](slash://skill/a), [/review](slash://skill/b), [/plan](slash://skill/a), and [/missing](slash://skill/x).";
+    expect(skillNamesFromPrompt(prompt, [{ id: "a", name: "plan" }, { id: "b", name: "review" }])).toEqual(["plan", "review"]);
+  });
+});
+
+describe("applyCommandSelection", () => {
+  it("snapshots the selected library command as executable argv", () => {
+    const selected = applyCommandSelection(block("tests", "command"), { id: "command-1", argv: ["pnpm", "test"] });
+    expect(selected).toMatchObject({ command_id: "command-1", check: ["pnpm", "test"], expect: "exit_zero" });
   });
 });
 

@@ -147,11 +147,10 @@ func (b *IssueLoopBridge) validateSkillsExist(ctx context.Context, workspaceID p
 	}
 	for pi, phase := range chain.Phases {
 		for bi, block := range phase.Blocks {
-			if block.Skill == "" {
-				continue
-			}
-			if _, ok := have[block.Skill]; !ok {
-				return fmt.Errorf("loop_spec: phases[%d].blocks[%d].skill %q does not exist in this workspace", pi, bi, block.Skill)
+			for _, skill := range block.ConfiguredSkills() {
+				if _, ok := have[skill]; !ok {
+					return fmt.Errorf("loop_spec: phases[%d].blocks[%d].skill %q does not exist in this workspace", pi, bi, skill)
+				}
 			}
 		}
 	}
@@ -321,7 +320,7 @@ func (b *IssueLoopBridge) ReadIssueLoopState(ctx context.Context, workflowID, is
 			}
 			for _, block := range phase.Blocks {
 				if block.ID == step.BlockID && block.Type == BlockHuman && block.ApproverType == AssigneeMember && block.ApproverID == memberID {
-					state.PendingHumanChecks = append(state.PendingHumanChecks, workflows.PendingHumanCheck{CheckID: block.ID, Prompt: block.Prompt, AssigneeType: block.ApproverType, AssigneeID: block.ApproverID})
+					state.PendingHumanChecks = append(state.PendingHumanChecks, workflows.PendingHumanCheck{CheckID: block.ID, Prompt: approvalPromptFromOutcome(block.Prompt, step.Outcome), AssigneeType: block.ApproverType, AssigneeID: block.ApproverID})
 					break
 				}
 			}
