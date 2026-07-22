@@ -1,6 +1,6 @@
 ALTER TABLE comment
-  ADD COLUMN idempotency_key TEXT,
-  ADD COLUMN idempotency_hash BYTEA;
+  DROP CONSTRAINT IF EXISTS comment_idempotency_key_length_check,
+  DROP CONSTRAINT IF EXISTS comment_idempotency_pair_check;
 
 ALTER TABLE comment
   ADD CONSTRAINT comment_idempotency_pair_check CHECK (

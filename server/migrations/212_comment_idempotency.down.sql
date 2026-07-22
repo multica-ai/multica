@@ -1,5 +1,3 @@
-DROP INDEX CONCURRENTLY IF EXISTS comment_author_idempotency_key_idx;
-
 ALTER TABLE comment
   DROP CONSTRAINT IF EXISTS comment_idempotency_key_length_check,
   DROP CONSTRAINT IF EXISTS comment_idempotency_pair_check,
