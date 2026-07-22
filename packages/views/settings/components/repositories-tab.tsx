@@ -5,6 +5,13 @@ import { Plus, Trash2 } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -21,7 +28,11 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
-import type { Workspace, WorkspaceRepo } from "@multica/core/types";
+import type {
+  Workspace,
+  WorkspaceRepo,
+  WorkspaceRepoCloneMode,
+} from "@multica/core/types";
 import { useT } from "../../i18n";
 import {
   SettingsCard,
@@ -33,13 +44,27 @@ import { useAutoSave } from "./use-auto-save";
 
 const EMPTY_REPOSITORIES: WorkspaceRepo[] = [];
 
+const CLONE_MODES: WorkspaceRepoCloneMode[] = ["full", "on-demand"];
+
+// The backend omits clone_mode for every repo registered before the feature
+// existed, and treats the missing value as a full clone.
+const DEFAULT_CLONE_MODE: WorkspaceRepoCloneMode = "full";
+
+function cloneModeOf(repo: WorkspaceRepo): WorkspaceRepoCloneMode {
+  return repo.clone_mode ?? DEFAULT_CLONE_MODE;
+}
+
 function repositoriesEqual(left: WorkspaceRepo[], right: WorkspaceRepo[]) {
   if (left.length !== right.length) return false;
-  return left.every(
-    (repo, index) =>
-      repo.url === right[index]?.url &&
-      (repo.description ?? "") === (right[index]?.description ?? ""),
-  );
+  return left.every((repo, index) => {
+    const other = right[index];
+    if (!other) return false;
+    return (
+      repo.url === other.url &&
+      (repo.description ?? "") === (other.description ?? "") &&
+      cloneModeOf(repo) === cloneModeOf(other)
+    );
+  });
 }
 
 export function RepositoriesTab() {
@@ -53,6 +78,11 @@ export function RepositoriesTab() {
     workspace?.repos ?? EMPTY_REPOSITORIES,
   );
   const [pendingRemovalIndex, setPendingRemovalIndex] = useState<number | null>(null);
+
+  const cloneModeLabels: Record<WorkspaceRepoCloneMode, string> = {
+    full: t(($) => $.repositories.clone_mode_full),
+    "on-demand": t(($) => $.repositories.clone_mode_on_demand),
+  };
 
   const currentMember = members.find((member) => member.user_id === user?.id) ?? null;
   const canManageWorkspace =
@@ -100,7 +130,7 @@ export function RepositoriesTab() {
 
   const updateRepository = (
     index: number,
-    field: keyof WorkspaceRepo,
+    field: "url" | "description",
     value: string,
   ) => {
     setRepositories((current) =>
@@ -110,6 +140,19 @@ export function RepositoriesTab() {
     );
   };
 
+  const updateCloneMode = (index: number, mode: WorkspaceRepoCloneMode) => {
+    const next = repositories.map((repo, repoIndex) =>
+      repoIndex === index ? { ...repo, clone_mode: mode } : repo,
+    );
+    setRepositories(next);
+    // A select has no blur-to-commit affordance the way the text inputs do,
+    // so persist the choice as soon as it is made.
+    autoSave.saveNow(next);
+  };
+
+  // clone_mode is left unset so an untouched repository keeps serializing
+  // exactly as it did before this field existed. The select still shows the
+  // default, because an absent mode means a full clone.
   const addRepository = () => {
     setRepositories((current) => [...current, { url: "" }]);
   };
@@ -145,7 +188,7 @@ export function RepositoriesTab() {
           {repositories.map((repository, index) => (
             <div
               key={index}
-              className="grid gap-2 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_auto] sm:items-center"
+              className="grid gap-2 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,auto)_auto] sm:items-center"
             >
               <Input
                 type="text"
@@ -176,6 +219,33 @@ export function RepositoriesTab() {
                 disabled={!canManageWorkspace}
                 placeholder={t(($) => $.repositories.description_placeholder)}
               />
+              <Select
+                items={CLONE_MODES.map((value) => ({
+                  value,
+                  label: cloneModeLabels[value],
+                }))}
+                value={cloneModeOf(repository)}
+                onValueChange={(value) =>
+                  updateCloneMode(index, value as WorkspaceRepoCloneMode)
+                }
+                disabled={!canManageWorkspace}
+              >
+                <SelectTrigger
+                  size="sm"
+                  aria-label={t(($) => $.repositories.clone_mode_label)}
+                >
+                  <SelectValue>
+                    {() => cloneModeLabels[cloneModeOf(repository)]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {CLONE_MODES.map((mode) => (
+                    <SelectItem key={mode} value={mode}>
+                      {cloneModeLabels[mode]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {canManageWorkspace ? (
                 <Button
                   variant="ghost"
@@ -202,11 +272,19 @@ export function RepositoriesTab() {
                 </span>
               ) : null}
             </div>
-          ) : (
+          ) : null}
+
+          {repositories.length > 0 ? (
+            <div className="border-t px-4 py-3 text-xs text-muted-foreground">
+              {t(($) => $.repositories.clone_mode_hint)}
+            </div>
+          ) : null}
+
+          {!canManageWorkspace ? (
             <div className="px-4 py-3 text-xs text-muted-foreground">
               {t(($) => $.repositories.manage_hint)}
             </div>
-          )}
+          ) : null}
         </SettingsCard>
       </SettingsSection>
 

@@ -16,6 +16,7 @@ const workspaceRef = vi.hoisted(() => ({
     repos: [{ url: "https://github.com/multica-ai/multica" }] as {
       url: string;
       description?: string;
+      clone_mode?: "full" | "on-demand";
     }[],
   },
 }));
@@ -228,5 +229,96 @@ describe("RepositoriesTab — automatic updates", () => {
 
     expect(screen.getAllByRole("textbox").every((input) => input.hasAttribute("disabled"))).toBe(true);
     expect(screen.queryByRole("button", { name: /Add repository/ })).toBeNull();
+  });
+});
+
+describe("RepositoriesTab — clone mode", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    workspaceRef.current = {
+      id: "workspace-1",
+      name: "Test Workspace",
+      slug: "test-workspace",
+      repos: [{ url: "https://github.com/multica-ai/multica" }],
+    };
+    membersRef.current = [{ user_id: "user-1", role: "owner" }];
+    mockUpdateWorkspace.mockImplementation(
+      async (_id: string, payload: { repos: { url: string; description?: string }[] }) => ({
+        ...workspaceRef.current,
+        repos: payload.repos,
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function setupUser() {
+    return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  }
+
+  it("shows a repository with no stored mode as a full clone", () => {
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    expect(
+      screen.getByRole("combobox", { name: "Download mode" }).textContent,
+    ).toContain("Full");
+  });
+
+  it("reflects a stored on-demand mode", () => {
+    workspaceRef.current = {
+      ...workspaceRef.current,
+      repos: [
+        {
+          url: "https://github.com/multica-ai/multica",
+          clone_mode: "on-demand" as const,
+        },
+      ],
+    };
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    expect(
+      screen.getByRole("combobox", { name: "Download mode" }).textContent,
+    ).toContain("On demand");
+  });
+
+  it("persists a clone mode change immediately", async () => {
+    const user = setupUser();
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("combobox", { name: "Download mode" }));
+    await user.click(await screen.findByRole("option", { name: "On demand" }));
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
+        repos: [
+          {
+            url: "https://github.com/multica-ai/multica",
+            clone_mode: "on-demand",
+          },
+        ],
+      });
+    });
+  });
+
+  it("explains that the mode only applies when the cache is first created", () => {
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    expect(
+      screen.getByText(/does not rebuild an existing cache/),
+    ).toBeTruthy();
+  });
+
+  it("does not let members change the clone mode", () => {
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    expect(
+      screen
+        .getByRole("combobox", { name: "Download mode" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
   });
 });

@@ -119,9 +119,40 @@ func runGitWithTimeout(timeout time.Duration, args ...string) error {
 	return err
 }
 
+// CloneMode selects how much of a repository the bare cache downloads up front.
+type CloneMode string
+
+const (
+	// CloneModeFull downloads the entire repository, including every blob of
+	// every historical commit. This is the default and the only mode that
+	// keeps the cache usable without network access.
+	CloneModeFull CloneMode = "full"
+	// CloneModeOnDemand creates a blobless partial clone: the full commit and
+	// tree history is downloaded, but file contents are fetched lazily the
+	// first time a checkout actually needs them. Repositories whose history is
+	// dominated by large binaries download dramatically less on first use, at
+	// the cost of needing the remote reachable when old contents are read.
+	CloneModeOnDemand CloneMode = "on-demand"
+)
+
+// NormalizeCloneMode maps an arbitrary string onto a known mode. Anything
+// unrecognized — including the empty string, which is what every repo entry
+// created before this feature stores — falls back to CloneModeFull. Callers
+// are expected to reject invalid input at the API boundary; this function
+// exists so daemon-side code never has to special-case a missing value.
+func NormalizeCloneMode(mode string) CloneMode {
+	if CloneMode(strings.TrimSpace(strings.ToLower(mode))) == CloneModeOnDemand {
+		return CloneModeOnDemand
+	}
+	return CloneModeFull
+}
+
 // RepoInfo describes a repository to cache.
 type RepoInfo struct {
 	URL string
+	// CloneMode is the download strategy for the *initial* clone. It has no
+	// effect on a cache that already exists — see Cache.Sync.
+	CloneMode CloneMode
 }
 
 // CachedRepo describes a cached bare clone ready for worktree creation.
@@ -179,10 +210,20 @@ func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 		}
 		barePath := filepath.Join(wsDir, bareDirName(repo.URL))
 
+		mode := NormalizeCloneMode(string(repo.CloneMode))
+
 		repoLock := c.lockForRepo(barePath)
 		repoLock.Lock()
 		if isBareRepo(barePath) {
-			// Already cached — fetch latest.
+			// Already cached — fetch latest. The clone mode is deliberately
+			// not re-applied here: it describes how the cache was built, and
+			// the cache is shared by every task in the workspace. Rebuilding
+			// it behind the user's back would either throw away a download
+			// they already paid for (full -> on-demand) or silently start a
+			// multi-GB transfer (on-demand -> full). A mismatch is surfaced
+			// as a warning so the operator can act on it; `git fetch` itself
+			// preserves whatever filter the cache was created with.
+			c.warnOnCloneModeMismatch(repo.URL, barePath, mode)
 			c.logger.Info("repo cache: fetching", "url", repo.URL, "path", barePath)
 			if err := gitFetch(barePath); err != nil {
 				c.logger.Warn("repo cache: fetch failed", "url", repo.URL, "error", err)
@@ -192,8 +233,8 @@ func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 			}
 		} else {
 			// Not cached — bare clone.
-			c.logger.Info("repo cache: cloning", "url", repo.URL, "path", barePath)
-			if err := gitCloneBare(repo.URL, barePath); err != nil {
+			c.logger.Info("repo cache: cloning", "url", repo.URL, "path", barePath, "clone_mode", string(mode))
+			if err := gitCloneBare(repo.URL, barePath, mode); err != nil {
 				c.logger.Error("repo cache: clone failed", "url", repo.URL, "error", err)
 				if firstErr == nil {
 					firstErr = err
@@ -319,8 +360,29 @@ func isBareRepo(path string) bool {
 // refs and abort the entire fetch.
 const modernFetchRefspec = "+refs/heads/*:refs/remotes/origin/*"
 
-func gitCloneBare(url, dest string) error {
-	if out, err := runGitCombinedOutput("clone", "--bare", url, dest); err != nil {
+// warnOnCloneModeMismatch logs when an existing cache was built with a
+// different clone mode than the registry now asks for. Reusing the cache is
+// always safe — a full cache is a strict superset of a blobless one, and a
+// blobless cache backfills on demand — so this is informational only.
+func (c *Cache) warnOnCloneModeMismatch(repoURL, barePath string, want CloneMode) {
+	have := CloneModeFull
+	if isPartialClone(barePath) {
+		have = CloneModeOnDemand
+	}
+	if have == want {
+		return
+	}
+	c.logger.Warn("repo cache: clone mode differs from existing cache; keeping the cache as-is",
+		"url", repoURL, "path", barePath, "cache_mode", string(have), "requested_mode", string(want))
+}
+
+func gitCloneBare(url, dest string, mode CloneMode) error {
+	args := []string{"clone", "--bare"}
+	if mode == CloneModeOnDemand {
+		args = append(args, "--filter="+partialCloneFilter)
+	}
+	args = append(args, url, dest)
+	if out, err := runGitCombinedOutput(args...); err != nil {
 		// Clean up partial clone.
 		os.RemoveAll(dest)
 		return fmt.Errorf("git clone --bare: %s: %w", strings.TrimSpace(string(out)), err)

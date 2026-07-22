@@ -246,6 +246,11 @@ type RepoData struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
 	Ref         string `json:"ref,omitempty"`
+	// CloneMode selects the download strategy the daemon uses when it first
+	// builds the bare cache for this repo ("full" or "on-demand"). Empty means
+	// full, which is what every repo registered before this field existed
+	// serializes to.
+	CloneMode string `json:"clone_mode,omitempty"`
 }
 
 // ProjectResourceData is the wire shape for a project resource included in a

@@ -254,6 +254,35 @@ type UpdateWorkspaceRequest struct {
 type workspaceRepoRef struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
+	// CloneMode picks how much the daemon downloads when it first builds this
+	// repo's shared bare cache. Omitted (the only value repos registered
+	// before this feature have) is equivalent to workspaceCloneModeFull.
+	CloneMode string `json:"clone_mode,omitempty"`
+}
+
+// Clone modes accepted on a workspace repo entry. These mirror
+// repocache.CloneMode; the handler keeps its own copy so the HTTP boundary
+// does not depend on the daemon package.
+const (
+	workspaceCloneModeFull     = "full"
+	workspaceCloneModeOnDemand = "on-demand"
+)
+
+// normalizeWorkspaceCloneMode validates a repo entry's clone mode. The empty
+// string is preserved rather than expanded to "full" so existing rows are not
+// rewritten on every unrelated workspace update; the daemon treats empty and
+// "full" identically.
+func normalizeWorkspaceCloneMode(mode string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "":
+		return "", nil
+	case workspaceCloneModeFull:
+		return workspaceCloneModeFull, nil
+	case workspaceCloneModeOnDemand:
+		return workspaceCloneModeOnDemand, nil
+	default:
+		return "", fmt.Errorf("clone_mode must be %q or %q", workspaceCloneModeFull, workspaceCloneModeOnDemand)
+	}
 }
 
 func validateAndNormalizeWorkspaceRepos(value any) ([]byte, error) {
@@ -278,6 +307,11 @@ func validateAndNormalizeWorkspaceRepos(value any) ([]byte, error) {
 		if !isValidGitRepoURL(repo.URL) {
 			return nil, fmt.Errorf("repos[%d]: url must be a valid http(s) or ssh git URL", i)
 		}
+		cloneMode, err := normalizeWorkspaceCloneMode(repo.CloneMode)
+		if err != nil {
+			return nil, fmt.Errorf("repos[%d]: %w", i, err)
+		}
+		repo.CloneMode = cloneMode
 		if _, ok := seen[repo.URL]; ok {
 			continue
 		}

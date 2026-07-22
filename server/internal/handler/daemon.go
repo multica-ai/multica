@@ -220,21 +220,29 @@ func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
 			continue
 		}
 		seen[url] = struct{}{}
-		normalized = append(normalized, RepoData{URL: url, Description: repo.Description})
+		normalized = append(normalized, RepoData{
+			URL:         url,
+			Description: repo.Description,
+			CloneMode:   repo.CloneMode,
+		})
 	}
 	return normalized
 }
 
+// workspaceReposVersion fingerprints the repo list the daemon needs to act on.
+// clone_mode participates because it changes what the daemon does on a cold
+// clone; without it, flipping a not-yet-cloned repo to on-demand would not
+// reach a daemon that already holds the current version.
 func workspaceReposVersion(repos []RepoData) string {
-	urls := make([]string, 0, len(repos))
+	entries := make([]string, 0, len(repos))
 	for _, repo := range repos {
 		if repo.URL == "" {
 			continue
 		}
-		urls = append(urls, repo.URL)
+		entries = append(entries, repo.URL+"\x00"+repo.CloneMode)
 	}
-	sort.Strings(urls)
-	sum := sha256.Sum256([]byte(strings.Join(urls, "\n")))
+	sort.Strings(entries)
+	sum := sha256.Sum256([]byte(strings.Join(entries, "\n")))
 	return hex.EncodeToString(sum[:])
 }
 
