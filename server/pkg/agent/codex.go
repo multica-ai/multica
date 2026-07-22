@@ -1139,7 +1139,14 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			}
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			finalError = withAgentStderr(fmt.Sprintf("codex initialize failed: %v", err), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
+			finalError = fmt.Sprintf("codex initialize failed: %v", err)
+			if !timedOut {
+				// Timeout stderr is untrusted provider output and may echo opaque
+				// Config.Env/auth values that pattern sanitization cannot identify.
+				// Keep it out of persisted/user-visible Results; cleanup lifecycle
+				// still records bounded byte/truncation metadata.
+				finalError = withAgentStderr(finalError, "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
+			}
 			retrySafe := timedOut && !semanticObserved.Load() && cleanupConfirmed && codexInitializeRetrySupported()
 			if timedOut && !cleanupConfirmed {
 				finalError += "; retry suppressed: process cleanup/reap not confirmed"

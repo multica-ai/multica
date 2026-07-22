@@ -100,3 +100,45 @@ func TestCodexInitializeTimeoutReapsDetachedStdioDescendant(t *testing.T) {
 		t.Fatalf("process-tree cleanup/retry gate not confirmed: %v", failure)
 	}
 }
+
+func TestCodexInitializeTimeoutDoesNotPersistOpaqueEnv(t *testing.T) {
+	const secret = "opaque-init-auth-sentinel-7319"
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo "$OPAQUE_AUTH_VALUE" >&2`+"\n"+
+		`sleep 3.2`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n")
+
+	var logs strings.Builder
+	backendRaw, err := New("codex", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"OPAQUE_AUTH_VALUE": secret},
+		Logger:         slog.New(slog.NewJSONHandler(&logs, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := backendRaw.(*codexBackend)
+	session, err := backend.executeOnce(context.Background(), "prompt", ExecOptions{Timeout: 8 * time.Second, HandshakeTimeout: 3 * time.Second}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" || !strings.Contains(result.Error, CodexHandshakeTimeoutMarker) {
+		t.Fatalf("expected initialize timeout failure, got %+v", result)
+	}
+	if strings.Contains(result.Error, secret) {
+		t.Fatalf("opaque env persisted in Result.Error: %q", result.Error)
+	}
+	if strings.Contains(logs.String(), secret) {
+		t.Fatalf("opaque env persisted in lifecycle logs: %s", logs.String())
+	}
+	failure := findCodexLifecyclePhase(t, parseJSONLogEntries(t, logs.String()), "initialize_failure")
+	if failure["cleanup_confirmed"] != true || failure["retry_safe"] != true {
+		t.Fatalf("cleanup/retry gate changed: %v", failure)
+	}
+}
