@@ -16,8 +16,8 @@ import type { OnboardingStep } from "./types";
  *
  * Note: "teammate" (the old "Create your first agent" step) is no longer
  * part of the in-flow sequence. Helper agent creation now happens after
- * onboarding exits, via the workspace OnboardingHelperModal — see
- * `packages/views/workspace/onboarding-helper-modal.tsx`.
+ * onboarding exits, in the workspace shell — see
+ * `packages/views/workspace/welcome-after-onboarding.tsx`.
  */
 export const ONBOARDING_STEP_ORDER: readonly OnboardingStep[] = [
   "source",
