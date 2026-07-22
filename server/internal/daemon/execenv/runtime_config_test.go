@@ -143,9 +143,12 @@ func TestBriefHasNoParentNotificationGuidance(t *testing.T) {
 // Comment-triggered briefs must NOT carry any unconditional status-flip
 // command targeting the current issue. Previous revisions had a
 // dedicated protocol step that wrote `multica issue status <this-issue-id> in_review`;
-// the comment-triggered workflow rule "Do NOT change the issue status
-// unless the comment explicitly asks for it" must remain the source of
-// truth (Elon's blocking review on PR #2918).
+// the comment-triggered workflow rule "do NOT change it unless the comment
+// explicitly asks for it" must remain the default (Elon's blocking review
+// on PR #2918). MUL-5165 adds the one conditional exception: a rework
+// request on an `in_review` issue cycles the status through `in_progress`
+// and back to `in_review`, so boards reflect that the agent is actively
+// re-working the issue.
 func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 	t.Parallel()
 	ctx := TaskContextForEnv{
@@ -158,9 +161,16 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 		t.Errorf("comment-triggered brief must not contain a placeholder `<this-issue-id> in_review` flip — that conflicts with the comment-triggered \"do not change status unless asked\" rule")
 	}
 
-	const guardrail = "Do NOT change the issue status unless the comment explicitly asks for it"
+	const guardrail = "do NOT change it unless the comment explicitly asks for it"
 	if !strings.Contains(out, guardrail) {
 		t.Errorf("expected the comment-triggered workflow guardrail %q to be present", guardrail)
+	}
+
+	// MUL-5165: the rework exception must be present and must stay
+	// conditional on the issue currently sitting in in_review.
+	const rework = "If this issue is currently `in_review` and the triggering comment asks you to revise"
+	if !strings.Contains(out, rework) {
+		t.Errorf("expected the comment-triggered rework status exception %q to be present", rework)
 	}
 }
 
