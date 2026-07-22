@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"regexp"
@@ -145,6 +146,7 @@ func init() {
 
 	// trigger (manual run)
 	autopilotTriggerCmd.Flags().String("output", "json", "Output format: table or json")
+	autopilotTriggerCmd.Flags().Bool("dry-run", false, "Preview the dispatch plan without creating a run, issue, or task")
 
 	// runs
 	autopilotRunsCmd.Flags().Int("limit", 20, "Max number of runs to return")
@@ -467,17 +469,78 @@ func runAutopilotTrigger(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve autopilot: %w", err)
 	}
 
-	var run map[string]any
-	if err := client.PostJSON(ctx, "/api/autopilots/"+autopilotRef.ID+"/trigger", nil, &run); err != nil {
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	path := "/api/autopilots/" + autopilotRef.ID + "/trigger"
+	if dryRun {
+		path += "?dry_run=true"
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, path, nil, &result); err != nil {
 		return fmt.Errorf("trigger autopilot: %w", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
-		return cli.PrintJSON(os.Stdout, run)
+		return cli.PrintJSON(os.Stdout, result)
 	}
-	fmt.Printf("Autopilot triggered: run %s (status: %s)\n", strVal(run, "id"), strVal(run, "status"))
+
+	if dryRun {
+		return printDispatchPlan(os.Stdout, autopilotRef.ID, result)
+	}
+
+	fmt.Printf("Autopilot triggered: run %s (status: %s)\n", strVal(result, "id"), strVal(result, "status"))
 	return nil
+}
+
+// printDispatchPlan renders a DispatchPlan response (from the dry-run API)
+// as a human-readable summary. Field presence follows the plan contract:
+// agent_* and squad_id are omitted when unresolved; rendered_title /
+// rendered_description / task_summary only appear when Allowed.
+func printDispatchPlan(w io.Writer, autopilotID string, plan map[string]any) error {
+	fmt.Fprintf(w, "Dispatch plan (dry-run) for autopilot %s\n", autopilotID)
+	fmt.Fprintf(w, "  Execution mode: %s\n", strVal(plan, "execution_mode"))
+	fmt.Fprintf(w, "  Source:         %s\n", strVal(plan, "source"))
+	fmt.Fprintf(w, "  Assignee type:  %s\n", strVal(plan, "assignee_type"))
+	if name := strVal(plan, "agent_name"); name != "" {
+		fmt.Fprintf(w, "  Agent:          %s (%s)\n", name, strVal(plan, "agent_id"))
+	}
+	if squad := strVal(plan, "squad_id"); squad != "" {
+		fmt.Fprintf(w, "  Squad:          %s\n", squad)
+	}
+	fmt.Fprintf(w, "  Agent ready:    %v", boolVal(plan, "agent_ready"))
+	if reason := strVal(plan, "readiness_reason"); reason != "" {
+		fmt.Fprintf(w, " (%s)", reason)
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  Invoke allowed: %v\n", boolVal(plan, "invoke_allowed"))
+	if boolVal(plan, "allowed") {
+		fmt.Fprintln(w, "  Result:         ✅ would dispatch")
+		if title := strVal(plan, "rendered_title"); title != "" {
+			fmt.Fprintf(w, "  Title:          %s\n", title)
+		}
+		if summary := strVal(plan, "task_summary"); summary != "" {
+			fmt.Fprintf(w, "  Task summary:   %s\n", summary)
+		}
+	} else {
+		fmt.Fprintf(w, "  Result:         ❌ would skip: %s\n", strVal(plan, "skip_reason"))
+		if code := strVal(plan, "reason_code"); code != "" {
+			fmt.Fprintf(w, "  Reason code:    %s\n", code)
+		}
+	}
+	return nil
+}
+
+// boolVal coerces a JSON-decoded any to a bool. Missing keys or wrong types
+// come back as false, which matches the "field not populated" contract of the
+// dispatch plan response.
+func boolVal(m map[string]any, key string) bool {
+	v, ok := m[key]
+	if !ok {
+		return false
+	}
+	b, ok := v.(bool)
+	return ok && b
 }
 
 func runAutopilotRuns(cmd *cobra.Command, args []string) error {

@@ -473,3 +473,127 @@ func TestUUIDRegexp(t *testing.T) {
 		}
 	}
 }
+
+func newAutopilotTriggerTestCmd(dryRun bool) *cobra.Command {
+	cmd := &cobra.Command{Use: "trigger"}
+	cmd.Flags().String("output", "table", "")
+	cmd.Flags().Bool("dry-run", dryRun, "")
+	return cmd
+}
+
+// TestRunAutopilotTrigger_DryRunAppendsQuery guards the request wiring:
+// --dry-run must POST to /trigger?dry_run=true (the query the handler branches
+// on), and a real trigger must NOT carry it.
+func TestRunAutopilotTrigger_DryRunAppendsQuery(t *testing.T) {
+	const apID = "11111111-1111-1111-1111-111111111111"
+
+	var capturedQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/autopilots/"+apID+"/trigger" {
+			capturedQuery = r.URL.RawQuery
+			json.NewEncoder(w).Encode(map[string]any{
+				"allowed":        true,
+				"execution_mode": "create_issue",
+				"source":         "manual",
+				"assignee_type":  "agent",
+				"agent_id":       "22222222-2222-2222-2222-222222222222",
+				"agent_name":     "Lambda",
+				"agent_ready":    true,
+				"invoke_allowed": true,
+				"rendered_title": "Daily Report 2026-07-22",
+			})
+			return
+		}
+		// resolveAutopilotID passes a full UUID through without a lookup, so no
+		// GET /api/autopilots should arrive; 404 anything unexpected.
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	t.Run("dry_run carries the query", func(t *testing.T) {
+		capturedQuery = ""
+		cmd := newAutopilotTriggerTestCmd(true)
+		_ = cmd.Flags().Set("output", "json")
+		if err := runAutopilotTrigger(cmd, []string{apID}); err != nil {
+			t.Fatalf("runAutopilotTrigger: %v", err)
+		}
+		if !strings.Contains(capturedQuery, "dry_run=true") {
+			t.Fatalf("expected dry_run=true in query, got %q", capturedQuery)
+		}
+	})
+
+	t.Run("real trigger omits the query", func(t *testing.T) {
+		capturedQuery = ""
+		cmd := newAutopilotTriggerTestCmd(false)
+		_ = cmd.Flags().Set("output", "json")
+		// The non-dry-run response is a run, not a plan; the test server above
+		// returns a plan-shaped body either way, which is fine - we only assert
+		// the query here. runAutopilotTrigger tolerates the extra fields.
+		if err := runAutopilotTrigger(cmd, []string{apID}); err != nil {
+			t.Fatalf("runAutopilotTrigger: %v", err)
+		}
+		if strings.Contains(capturedQuery, "dry_run") {
+			t.Fatalf("real trigger must not carry dry_run, got query %q", capturedQuery)
+		}
+	})
+}
+
+// TestPrintDispatchPlan verifies the table renderer covers both outcomes:
+// an allowed plan surfaces the rendered title, and a blocked plan surfaces
+// the skip reason + typed code. JSON output is the raw API response, so it
+// is not rendered here.
+func TestPrintDispatchPlan(t *testing.T) {
+	t.Run("allowed create_issue", func(t *testing.T) {
+		var b strings.Builder
+		plan := map[string]any{
+			"allowed":              true,
+			"execution_mode":       "create_issue",
+			"source":               "manual",
+			"assignee_type":        "agent",
+			"agent_id":             "22222222-2222-2222-2222-222222222222",
+			"agent_name":           "Lambda",
+			"agent_ready":          true,
+			"invoke_allowed":       true,
+			"rendered_title":       "Daily Report 2026-07-22",
+			"rendered_description": "body text",
+		}
+		if err := printDispatchPlan(&b, "11111111-1111-1111-1111-111111111111", plan); err != nil {
+			t.Fatal(err)
+		}
+		out := b.String()
+		for _, want := range []string{"would dispatch", "Daily Report 2026-07-22", "Lambda", "Execution mode"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output missing %q; got:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("blocked run_only", func(t *testing.T) {
+		var b strings.Builder
+		plan := map[string]any{
+			"allowed":          false,
+			"execution_mode":   "run_only",
+			"source":           "manual",
+			"assignee_type":    "agent",
+			"agent_id":         "22222222-2222-2222-2222-222222222222",
+			"agent_name":       "Lambda",
+			"agent_ready":      false,
+			"readiness_reason": "agent has no runtime bound",
+			"skip_reason":      "assignee agent has no runtime bound",
+			"reason_code":      "runtime_offline",
+		}
+		if err := printDispatchPlan(&b, "11111111-1111-1111-1111-111111111111", plan); err != nil {
+			t.Fatal(err)
+		}
+		out := b.String()
+		for _, want := range []string{"would skip", "runtime_offline", "agent has no runtime bound"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output missing %q; got:\n%s", want, out)
+			}
+		}
+	})
+}

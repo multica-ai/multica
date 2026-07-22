@@ -146,6 +146,141 @@ func (s *AutopilotService) DispatchAutopilotManual(
 	return s.dispatchAutopilot(ctx, autopilot, triggerID, "manual", payload, pgtype.Timestamptz{}, pgtype.UUID{}, actorUserID)
 }
 
+// DispatchPlan describes the resolved outcome of an autopilot dispatch without
+// persisting any run, issue, or task. Dry-run API and CLI callers consume it
+// to preview what would happen if a trigger fired, so they can validate
+// assignee/leader resolution, readiness, template rendering, and the invoke
+// gate before committing side effects.
+type DispatchPlan struct {
+	Allowed             bool   `json:"allowed"`
+	ExecutionMode       string `json:"execution_mode"`
+	Source              string `json:"source"`
+	AssigneeType        string `json:"assignee_type"`
+	AgentID             string `json:"agent_id,omitempty"`
+	AgentName           string `json:"agent_name,omitempty"`
+	SquadID             string `json:"squad_id,omitempty"`
+	AgentReady          bool   `json:"agent_ready"`
+	ReadinessReason     string `json:"readiness_reason,omitempty"`
+	InvokeAllowed       bool   `json:"invoke_allowed"`
+	SkipReason          string `json:"skip_reason,omitempty"`
+	ReasonCode          string `json:"reason_code,omitempty"`
+	RenderedTitle       string `json:"rendered_title,omitempty"`
+	RenderedDescription string `json:"rendered_description,omitempty"`
+	TaskSummary         string `json:"task_summary,omitempty"`
+	TriggerID           string `json:"trigger_id,omitempty"`
+}
+
+// PlanDispatch simulates a dispatch of the given autopilot with the given
+// trigger/source/payload/actor and returns the resolved plan without
+// persisting anything. It mirrors shouldSkipDispatch for admission and the
+// render logic from dispatchCreateIssue/dispatchRunOnly for output. Returns
+// (nil, error) only on transient lookup failures that prevented a decision;
+// a resolved skip (readiness/invoke/target) comes back as (plan, nil) with
+// plan.Allowed=false so the caller can render the reason.
+func (s *AutopilotService) PlanDispatch(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	payload []byte,
+	actorUserID pgtype.UUID,
+) (*DispatchPlan, error) {
+	plan := &DispatchPlan{
+		ExecutionMode: autopilot.ExecutionMode,
+		Source:        source,
+		AssigneeType:  autopilot.AssigneeType,
+	}
+	if triggerID.Valid {
+		plan.TriggerID = util.UUIDToString(triggerID)
+	}
+
+	if !autopilot.AssigneeID.Valid {
+		plan.SkipReason = "autopilot has no assignee"
+		plan.ReasonCode = string(dispatch.ReasonTargetUnavailable)
+		return plan, nil
+	}
+
+	// Resolve leader (agent or squad leader). Mirrors shouldSkipDispatch's
+	// resolution so the dry-run reports exactly what real dispatch would see.
+	agent, _, err := s.resolveAutopilotLeader(ctx, autopilot)
+	if err != nil {
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			plan.SkipReason = "assignee agent no longer exists"
+		case errors.Is(err, errSquadArchived):
+			plan.SkipReason = "assignee squad is archived"
+		default:
+			// Transient DB error — surface as an error so the caller can
+			// distinguish "we couldn't tell" from "we told you no".
+			return nil, fmt.Errorf("resolve leader: %w", err)
+		}
+		plan.ReasonCode = string(dispatch.ReasonTargetUnavailable)
+		return plan, nil
+	}
+	plan.AgentID = util.UUIDToString(agent.ID)
+	plan.AgentName = agent.Name
+	if autopilot.AssigneeType == "squad" && autopilot.AssigneeID.Valid {
+		plan.SquadID = util.UUIDToString(autopilot.AssigneeID)
+	}
+
+	// Agent readiness. Same tolerance as shouldSkipDispatch: create_issue mode
+	// tolerates offline runtime (issue still created, task queued when runtime
+	// comes back); run_only requires online runtime.
+	ready, reason, err := AgentReadiness(ctx, s.Queries, agent)
+	if err != nil {
+		return nil, fmt.Errorf("readiness check: %w", err)
+	}
+	plan.AgentReady = ready
+	plan.ReadinessReason = reason
+
+	wouldBlock := !ready
+	if !ready && autopilot.ExecutionMode == "create_issue" && strings.HasPrefix(reason, "agent runtime is ") {
+		wouldBlock = false
+	}
+	if wouldBlock {
+		plan.SkipReason = formatAdmissionReason(autopilot, reason)
+		plan.ReasonCode = string(agentReadinessReasonCode(agent))
+		return plan, nil
+	}
+
+	// Invoke gate. The admission principal mirrors autopilotAdmitInvoke's
+	// callers: a MANUAL trigger (actorUserID valid) is gated by the clicking
+	// member; automation falls back to the creator.
+	if !s.autopilotAdmitInvoke(ctx, autopilot, agent, actorUserID) {
+		plan.InvokeAllowed = false
+		if actorUserID.Valid {
+			plan.SkipReason = "you are not allowed to trigger this autopilot's assignee agent"
+		} else {
+			plan.SkipReason = "autopilot creator lacks access to private assignee agent"
+		}
+		plan.ReasonCode = string(dispatch.ReasonInvocationNotAllowed)
+		return plan, nil
+	}
+	plan.InvokeAllowed = true
+
+	// Render the would-be output. Use a synthetic run carrying source/payload/now
+	// so interpolateTemplate / buildIssueDescription produce the same text the
+	// real dispatch would have, modulo the run's DB-assigned fields (id,
+	// triggered_at) which don't flow into the rendered strings.
+	fakeRun := db.AutopilotRun{
+		Source:         source,
+		TriggerPayload: payload,
+		TriggeredAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	}
+	triggerTimezone := s.resolveAutopilotTriggerTimezone(ctx, triggerID)
+
+	if autopilot.ExecutionMode == "create_issue" {
+		plan.RenderedTitle = s.interpolateTemplate(autopilot, fakeRun, triggerTimezone)
+		desc := s.buildIssueDescription(autopilot, fakeRun, triggerTimezone)
+		plan.RenderedDescription = desc.String
+	} else {
+		plan.TaskSummary = truncateForSummary(autopilot.Title, triggerSummaryMaxLen)
+	}
+
+	plan.Allowed = true
+	return plan, nil
+}
+
 // AdmitAutopilotWebhookDelivery creates or reuses the idempotent run for a
 // durable webhook delivery without executing its downstream issue/task side
 // effect. The HTTP ingress calls this synchronously so the public webhook

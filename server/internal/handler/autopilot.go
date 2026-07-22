@@ -2017,8 +2017,22 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	actor := memberActorUserID(actorType, actorID)
 
-	run, reasonCode, err := h.AutopilotService.DispatchAutopilotManual(r.Context(), autopilot, pgtype.UUID{}, nil, memberActorUserID(actorType, actorID))
+	// Dry-run: preview the dispatch plan without committing a run/issue/task.
+	// Reuses the same authorization gate as the real trigger so the preview
+	// reflects exactly what the clicking member would be allowed to do.
+	if r.URL.Query().Get("dry_run") == "true" {
+		plan, err := h.AutopilotService.PlanDispatch(r.Context(), autopilot, pgtype.UUID{}, "manual", nil, actor)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to plan dispatch: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, plan)
+		return
+	}
+
+	run, reasonCode, err := h.AutopilotService.DispatchAutopilotManual(r.Context(), autopilot, pgtype.UUID{}, nil, actor)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())
 		return
