@@ -55,9 +55,11 @@ function makeRow(title: string): Extract<
 const baseProps = {
   onUpdate: vi.fn(),
   onOpen: vi.fn(),
+  onCreateSubIssue: vi.fn(),
   onToggleParent: vi.fn(),
   toggleLabel: "Toggle sub-issues",
   renameLabel: "Rename issue",
+  createSubIssueLabel: "Create sub-issue",
 };
 
 /** Editing state lives in the table (one editor at a time); mirror that. */
@@ -66,11 +68,13 @@ function Harness({
   onOpen,
   onUpdate,
   onEditingChange,
+  onCreateSubIssue,
 }: {
   title: string;
   onOpen?: () => void;
   onUpdate?: (updates: unknown) => void;
   onEditingChange?: (editing: boolean) => void;
+  onCreateSubIssue?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   return (
@@ -84,6 +88,7 @@ function Harness({
       }}
       onOpen={onOpen ?? baseProps.onOpen}
       onUpdate={onUpdate ?? baseProps.onUpdate}
+      onCreateSubIssue={onCreateSubIssue ?? baseProps.onCreateSubIssue}
     />
   );
 }
@@ -118,6 +123,23 @@ describe("InlineTitle", () => {
 
     expect(onUpdate).toHaveBeenCalledWith({ title: "Renamed" });
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("opens sub-issue creation without also navigating into the issue", () => {
+    const onCreateSubIssue = vi.fn();
+    const rowClick = vi.fn();
+    render(
+      <div onClick={rowClick}>
+        <Harness title="Original" onCreateSubIssue={onCreateSubIssue} />
+      </div>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Create sub-issue" }),
+    );
+
+    expect(onCreateSubIssue).toHaveBeenCalledTimes(1);
+    expect(rowClick).not.toHaveBeenCalled();
   });
 
   it("commits on click-away without also navigating into the issue", async () => {

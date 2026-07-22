@@ -116,6 +116,7 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { useT } from "../../i18n";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import type { IssueCreateDefaults } from "../surface/types";
 import { ProgressRing } from "./progress-ring";
 import {
   AssigneePicker,
@@ -145,6 +146,7 @@ type TableViewProps = {
   search: string;
   onSearchChange: (query: string) => void;
   onLoadedIssuesChange: (issues: Issue[]) => void;
+  onCreateIssue: (defaults: IssueCreateDefaults) => void;
   exportIssues: () => Promise<Issue[]>;
   resolveExportLookups: (needs: {
     projects: boolean;
@@ -578,9 +580,11 @@ export function InlineTitle({
   onEditingChange,
   onUpdate,
   onOpen,
+  onCreateSubIssue,
   onToggleParent,
   toggleLabel,
   renameLabel,
+  createSubIssueLabel,
 }: {
   row: Extract<IssueTableDisplayRow, { kind: "issue" }>;
   /** Rename state is owned by the table (one editor at a time) so it also
@@ -590,9 +594,11 @@ export function InlineTitle({
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   /** Navigate to the issue — clicking the title is the primary way IN. */
   onOpen: () => void;
+  onCreateSubIssue: () => void;
   onToggleParent: () => void;
   toggleLabel: string;
   renameLabel: string;
+  createSubIssueLabel: string;
 }) {
   const [draft, setDraft] = useState(row.issue.title);
   const editingRef = useRef(editing);
@@ -686,6 +692,17 @@ export function InlineTitle({
             }}
           >
             {row.issue.title}
+          </button>
+          <button
+            type="button"
+            aria-label={createSubIssueLabel}
+            className="shrink-0 rounded p-1 text-muted-foreground/60 opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+            onClick={(event) => {
+              event.stopPropagation();
+              onCreateSubIssue();
+            }}
+          >
+            <Plus className="size-3" />
           </button>
           <button
             type="button"
@@ -834,6 +851,7 @@ type TableViewMeta = {
   setEditingCellKey: (key: string | null) => void;
   updateIssue: (issueId: string, updates: Partial<UpdateIssueRequest>) => void;
   openIssue: (issueId: string) => void;
+  createSubIssue: (issue: Issue) => void;
   toggleTableParentCollapsed: (issueId: string) => void;
   handleIssueSelection: (issueId: string, shiftKey: boolean) => void;
   getActorName: (actorType: string, actorId: string) => string;
@@ -1025,9 +1043,11 @@ function IssueTableBodyCell({
           onEditingChange={setEditorOpen}
           onUpdate={onUpdate}
           onOpen={() => meta.openIssue(issue.id)}
+          onCreateSubIssue={() => meta.createSubIssue(issue)}
           onToggleParent={() => meta.toggleTableParentCollapsed(issue.id)}
           toggleLabel={t(($) => $.table.toggle_sub_issues)}
           renameLabel={t(($) => $.table.rename_title)}
+          createSubIssueLabel={t(($) => $.actions.create_sub_issue)}
         />
       );
     case "identifier":
@@ -1163,6 +1183,7 @@ export function TableView({
   search,
   onSearchChange,
   onLoadedIssuesChange,
+  onCreateIssue,
   exportIssues,
   resolveExportLookups,
 }: TableViewProps) {
@@ -1959,6 +1980,16 @@ export function TableView({
     [navigation, paths],
   );
 
+  const createSubIssue = useCallback(
+    (issue: Issue) =>
+      onCreateIssue({
+        parent_issue_id: issue.id,
+        parent_issue_identifier: issue.identifier,
+        ...(issue.project_id ? { project_id: issue.project_id } : {}),
+      }),
+    [onCreateIssue],
+  );
+
   const onSort = useCallback(
     (field: SortField, direction: "asc" | "desc") => {
       setSortBy(field);
@@ -1979,6 +2010,7 @@ export function TableView({
     setEditingCellKey,
     updateIssue,
     openIssue,
+    createSubIssue,
     toggleTableParentCollapsed,
     handleIssueSelection,
     getActorName,

@@ -172,7 +172,7 @@ Agentic coding CLI using the ACP protocol over stdio (shares the transport with 
 
 ### Qwen Code (Alibaba)
 
-Qwen Code uses its native JSONL protocol in daemon mode: `qwen -p <prompt> --output-format stream-json`. Session resumption works through `--resume`; the task runtime brief is written to `QWEN.md`; assigned skills are copied to `.qwen/skills/`; and personal skills use `$QWEN_HOME/skills/` (default `~/.qwen/skills/`).
+Qwen Code uses its native JSONL protocol in daemon mode: `qwen -p <prompt> --output-format stream-json --yolo`. Multica owns `--yolo` for unattended runs so shell, edit, and write tools remain available without an approval UI. This does not enable Qwen's sandbox: unless the deployment explicitly enables `--sandbox` or `QWEN_SANDBOX`, tools run with the daemon OS user's permissions and credential scope. Use `--exclude-tools` in custom arguments to hard-deny specific tools. Session resumption works through `--resume`; the task runtime brief is written to `QWEN.md`; assigned skills are copied to `.qwen/skills/`; and personal skills use `$QWEN_HOME/skills/` (default `~/.qwen/skills/`).
 
 | | |
 |---|---|

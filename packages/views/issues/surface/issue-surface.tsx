@@ -283,6 +283,7 @@ function IssueSurfaceContent({
                 search={controller.tableSearch}
                 onSearchChange={controller.setTableSearch}
                 onLoadedIssuesChange={handleTableLoadedIssuesChange}
+                onCreateIssue={openCreateIssue}
                 exportIssues={controller.exportTableIssues}
                 resolveExportLookups={controller.resolveTableExportLookups}
               />

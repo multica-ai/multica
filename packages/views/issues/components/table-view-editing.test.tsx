@@ -32,6 +32,7 @@ import type {
 import { renderWithI18n } from "../../test/i18n";
 import { IssueSurfaceSelectionProvider } from "../surface/selection-context";
 import type { IssueSurfaceSelection } from "../surface/selection-context";
+import type { IssueCreateDefaults } from "../surface/types";
 import type { ChildProgress } from "./list-row";
 import { TableView, useReleaseEditingCellOnUnmount } from "./table-view";
 
@@ -150,9 +151,11 @@ let serverIssues: Issue[] = [];
 function Harness({
   childProgressMap,
   surfaceKey,
+  onCreateIssue = () => {},
 }: {
   childProgressMap: Map<string, ChildProgress>;
   surfaceKey: string;
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
 }) {
   return (
     <ViewStoreProvider store={getIssueSurfaceViewStore(surfaceKey)}>
@@ -163,6 +166,7 @@ function Harness({
           search=""
           onSearchChange={() => {}}
           onLoadedIssuesChange={() => {}}
+          onCreateIssue={onCreateIssue}
           exportIssues={() => Promise.resolve(serverIssues)}
           resolveExportLookups={() =>
             Promise.resolve({
@@ -287,6 +291,37 @@ describe("TableView cell editors under data refresh", () => {
     expect(screen.queryByRole("button", { name: /Backlog/ })).toBeNull();
     expect(identifiers()).toEqual(["MUL-b", "MUL-a"]);
   }, 20_000);
+
+  it("opens creation with the row as parent and inherits its project", async () => {
+    const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
+    const onCreateIssue = vi.fn();
+    const issue = {
+      ...makeIssue("a", "Alpha task", "todo"),
+      project_id: "project-1",
+    };
+    serverIssues = [issue];
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <Harness
+          childProgressMap={new Map()}
+          surfaceKey={`test-create-sub-issue-${Math.floor(Math.random() * 1e9)}`}
+          onCreateIssue={onCreateIssue}
+        />
+      </QueryClientProvider>,
+    );
+
+    const row = (await screen.findByText("MUL-a")).closest("tr")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Create sub-issue" }),
+    );
+
+    expect(onCreateIssue).toHaveBeenCalledWith({
+      parent_issue_id: "a",
+      parent_issue_identifier: "MUL-a",
+      project_id: "project-1",
+    });
+  });
 });
 
 // Row virtualization unmounts a cell when its row scrolls out of the window
