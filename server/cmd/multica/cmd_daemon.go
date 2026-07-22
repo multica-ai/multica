@@ -50,6 +50,13 @@ var daemonStatusCmd = &cobra.Command{
 	RunE:  runDaemonStatus,
 }
 
+var daemonProbeRuntimesCmd = &cobra.Command{
+	Use:    "probe-runtimes",
+	Short:  "Probe locally configured runtimes for the Desktop app",
+	Hidden: true,
+	RunE:   runDaemonProbeRuntimes,
+}
+
 var daemonRestartCmd = &cobra.Command{
 	Use:   "restart",
 	Short: "Restart the running daemon (stop + start)",
@@ -125,8 +132,39 @@ func init() {
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
+	daemonCmd.AddCommand(daemonProbeRuntimesCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonDiskUsageCmd)
+}
+
+type daemonRuntimeProbe struct {
+	ProbeResult     string         `json:"probe_result"`
+	RuntimeCount    int            `json:"runtime_count"`
+	ProviderSummary map[string]int `json:"provider_summary"`
+}
+
+func runDaemonProbeRuntimes(cmd *cobra.Command, _ []string) error {
+	cfg, err := daemon.LoadConfig(daemon.Overrides{
+		Profile:       resolveProfile(cmd),
+		AllowNoAgents: true,
+	})
+	if err != nil {
+		return err
+	}
+	probe := daemonRuntimeProbeFromAgents(cfg.Agents)
+	return json.NewEncoder(cmd.OutOrStdout()).Encode(probe)
+}
+
+func daemonRuntimeProbeFromAgents(agents map[string]daemon.AgentEntry) daemonRuntimeProbe {
+	probe := daemonRuntimeProbe{
+		ProbeResult:     "success",
+		RuntimeCount:    len(agents),
+		ProviderSummary: make(map[string]int, len(agents)),
+	}
+	for provider := range agents {
+		probe.ProviderSummary[provider]++
+	}
+	return probe
 }
 
 // daemonDirForProfile returns the state directory for the given profile.

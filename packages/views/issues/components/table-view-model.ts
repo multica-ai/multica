@@ -41,7 +41,7 @@ export function isTableStructureSuspended(total: number): boolean {
  *
  * - `hasError`: a page that keeps failing leaves `hasNextPage` true and
  *   `isFetchingNextPage` false after each attempt, so an ungated effect
- *   refires forever — a silent request storm behind a stuck "Loaded X of N"
+ *   refires forever — a silent request storm
  *   (round-4 review P1#1). Terminal errors stop the loop; resuming is an
  *   explicit user Retry.
  * - `loadedCount`: an ABSOLUTE stop at the ceiling, independent of any

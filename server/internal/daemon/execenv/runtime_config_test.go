@@ -162,6 +162,45 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 	if !strings.Contains(out, guardrail) {
 		t.Errorf("expected the comment-triggered workflow guardrail %q to be present", guardrail)
 	}
+
+	// For an ordinary agent the guardrail is absolute — the squad-leader
+	// carve-out below must not leak into this path.
+	if strings.Contains(out, "Own the parent issue status") {
+		t.Errorf("ordinary-agent comment brief must not reference the squad status grant:\n%s", out)
+	}
+}
+
+// A squad leader on a comment-triggered turn gets the same guardrail plus a
+// named exception. Without it the guardrail and the Squad Operating Protocol's
+// "Own the parent issue status" responsibility contradict each other on the
+// @mention-dispatch shape, where the member's delivery comment never asks for
+// a status change and no child-done system comment exists to ask on its
+// behalf — so the parent would sit in in_progress forever.
+func TestCommentTriggeredSquadLeaderDefersToStatusOwnershipGrant(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          "55555555-6666-7777-8888-999999999999",
+		TriggerCommentID: "66666666-7777-8888-9999-aaaaaaaaaaaa",
+		IsSquadLeader:    true,
+	})
+
+	for _, want := range []string{
+		"Do NOT change the issue status unless the comment explicitly asks for it",
+		`Squad Operating Protocol's "Own the parent issue status"`,
+		"only appears when this issue is assigned to your squad",
+		"without waiting to be asked",
+		"When it is absent, the rule above is absolute.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("squad-leader comment brief missing %q\n---\n%s", want, out)
+		}
+	}
+
+	// The unqualified sentence must be gone: its presence alongside the grant
+	// is the contradiction this branch exists to remove.
+	if strings.Contains(out, "explicitly asks for it\n") {
+		t.Errorf("squad-leader comment brief still ends the guardrail unqualified\n---\n%s", out)
+	}
 }
 
 // The CLAUDE.md workflow surface must carry the same issue-wide since-delta
@@ -323,6 +362,39 @@ func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
 	} {
 		if strings.Contains(out, banned) {
 			t.Errorf("assignment-triggered brief still contains unconditional legacy workflow text %q\n---\n%s", banned, out)
+		}
+	}
+}
+
+// Squad-leader assignment briefs must open the parent with in_progress, but
+// must not treat the first dispatch turn as completion (no unconditional
+// in_review). Leaders move the parent to in_review only on a later re-trigger
+// once the overall goal is met.
+func TestSquadLeaderAssignmentProtocolKeepsParentInProgress(t *testing.T) {
+	t.Parallel()
+	const issueID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:       issueID,
+		IsSquadLeader: true,
+	})
+
+	for _, want := range []string{
+		"Run `multica issue status " + issueID + " in_progress` unless your Agent Identity forbids issue status changes; if it does, skip this step.",
+		"After this initial dispatch, leave the parent issue `in_progress`",
+		"do NOT run `multica issue status " + issueID + " in_review` or `done` on this turn",
+		"only then, if the overall goal is met, move the parent to `in_review`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("squad-leader assignment brief missing %q\n---\n%s", want, out)
+		}
+	}
+
+	for _, banned := range []string{
+		"When done, run `multica issue status " + issueID + " in_review`",
+		"8. When done, run `multica issue status " + issueID + " in_review`",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("squad-leader assignment brief must not contain ordinary-agent completion step %q\n---\n%s", banned, out)
 		}
 	}
 }

@@ -47,9 +47,10 @@ type Agent struct {
 	// Composio toolkit slugs this agent is allowed to mount as MCP. NULL or empty array = no MCP overlay. Mounted for any run that passes the agent invocation-permission gate (MUL-3963); the overlay uses the agent OWNER's active Composio connection, so sharing the agent (public_to) shares these apps with whoever may invoke it. No longer gated on originator == owner. Stored as TEXT[] so the dispatch path can intersect against the owner's active connections with a single SQL ANY() filter.
 	ComposioToolkitAllowlist []string `json:"composio_toolkit_allowlist"`
 	// Agent invocation permission mode (MUL-3963). private = owner only; public_to = allow-list in agent_invocation_target. Replaces visibility as the authorization source for triggering runs; visibility is now a derived legacy field. Default private = deny-by-default.
-	PermissionMode string      `json:"permission_mode"`
-	Kind           string      `json:"kind"`
-	SystemKey      pgtype.Text `json:"system_key"`
+	PermissionMode        string      `json:"permission_mode"`
+	Kind                  string      `json:"kind"`
+	SystemKey             pgtype.Text `json:"system_key"`
+	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 }
 
 // Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target); targets stack and canInvokeAgent OR-matches. workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to. No DB foreign keys: agent_id / created_by / member target_id relationships are maintained in the application layer (see migration comment).
@@ -386,6 +387,26 @@ type ChatSession struct {
 	LastReadAt   pgtype.Timestamptz `json:"last_read_at"`
 	IsAgentIntro bool               `json:"is_agent_intro"`
 	PinnedAt     pgtype.Timestamptz `json:"pinned_at"`
+}
+
+type ClientUsageDaily struct {
+	UserID          pgtype.UUID        `json:"user_id"`
+	ClientType      string             `json:"client_type"`
+	InstallID       pgtype.UUID        `json:"install_id"`
+	ActivityDate    pgtype.Date        `json:"activity_date"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ClientVersion   string             `json:"client_version"`
+	Os              string             `json:"os"`
+	FirstActiveAt   pgtype.Timestamptz `json:"first_active_at"`
+	LastActiveAt    pgtype.Timestamptz `json:"last_active_at"`
+	RuntimeProbedAt pgtype.Timestamptz `json:"runtime_probed_at"`
+	ProbeResult     pgtype.Text        `json:"probe_result"`
+	RuntimeCount    pgtype.Int4        `json:"runtime_count"`
+	ProviderSummary []byte             `json:"provider_summary"`
+	OnlineCount     pgtype.Int4        `json:"online_count"`
+	OfflineCount    pgtype.Int4        `json:"offline_count"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Comment struct {

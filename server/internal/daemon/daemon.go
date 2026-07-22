@@ -4076,6 +4076,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentName:                        agentName,
 		AgentInstructions:                instructions,
 		AgentSkills:                      convertSkillsForEnv(skills),
+		DisabledRuntimeSkills:            convertDisabledRuntimeSkillsForEnv(task.Agent, task.RuntimeID, provider),
 		Repos:                            convertReposForEnv(task.Repos),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
@@ -4583,12 +4584,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// survived to here, the backend must disclose to the user when the live
 		// resume still fails — even across the fresh-session retry below, which
 		// clears ResumeSessionID but not this (MUL-4424).
-		ResumeExpected: task.PriorSessionID != "",
-		ExtraArgs:      extraArgs,
-		CustomArgs:     customArgs,
-		McpConfig:      mcpConfig,
-		ThinkingLevel:  thinkingLevel,
-		OpenclawMode:   openclawMode,
+		ResumeExpected:     task.PriorSessionID != "",
+		ExtraArgs:          extraArgs,
+		CustomArgs:         customArgs,
+		McpConfig:          mcpConfig,
+		ThinkingLevel:      thinkingLevel,
+		OpenclawMode:       openclawMode,
+		ClaudeSettingsPath: env.ClaudeSettingsPath,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -5557,6 +5559,25 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 				Content: f.Content,
 			})
 		}
+	}
+	return result
+}
+
+func convertDisabledRuntimeSkillsForEnv(agentData *AgentData, runtimeID, provider string) []execenv.RuntimeSkillRefForEnv {
+	if agentData == nil || len(agentData.DisabledRuntimeSkills) == 0 {
+		return nil
+	}
+	result := make([]execenv.RuntimeSkillRefForEnv, 0, len(agentData.DisabledRuntimeSkills))
+	for _, skill := range agentData.DisabledRuntimeSkills {
+		if skill.RuntimeID != runtimeID || skill.Provider != provider {
+			continue
+		}
+		result = append(result, execenv.RuntimeSkillRefForEnv{
+			Root:   skill.Root,
+			Key:    skill.Key,
+			Name:   skill.Name,
+			Plugin: skill.Plugin,
+		})
 	}
 	return result
 }

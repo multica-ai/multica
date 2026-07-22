@@ -13,6 +13,20 @@
     "skills": "스킬",
     "settings": "설정"
   },
+  "tab": {
+    "issue": "이슈",
+    "project": "프로젝트",
+    "autopilot": "오토파일럿",
+    "agent": "에이전트",
+    "member": "멤버",
+    "squad": "스쿼드",
+    "skill": "스킬",
+    "machine": "머신",
+    "runtime": "런타임",
+    "attachment": "첨부파일",
+    "create_agent": "에이전트 만들기",
+    "unknown": "알 수 없는 페이지"
+  },
   "help": {
     "trigger": "도움말",
     "docs": "문서",

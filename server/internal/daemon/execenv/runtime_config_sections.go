@@ -403,10 +403,35 @@ func writeWorkflowComment(b *strings.Builder, provider string, ctx TaskContextFo
 		b.WriteString(buildCommentReplyInstructionsSlim(provider, ctx.IssueID, ctx.TriggerCommentID))
 	}
 	b.WriteString("8. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
-	b.WriteString("9. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
+	if ctx.IsSquadLeader {
+		// The default rule below and the Squad Operating Protocol's
+		// "Own the parent issue status" responsibility would otherwise
+		// contradict each other on the squad's most common shape:
+		// @mention dispatch with no child issues, where the member's
+		// delivery comment never "explicitly asks" for a status change and
+		// no child-done system comment exists to carry that ask. Naming the
+		// protocol section as the exception resolves it in one direction.
+		//
+		// The exception is safe to state unconditionally here because the
+		// grant only exists in the instructions when the server determined
+		// this issue is assigned to this squad (see buildSquadLeaderBriefing);
+		// a guest leader gets the opposite text and this stays a no-op.
+		b.WriteString("9. Do NOT change the issue status unless the comment explicitly asks for it — **or** a section in your instructions explicitly grants you ownership of this issue's status (the Squad Operating Protocol's \"Own the parent issue status\" responsibility). That section only appears when this issue is assigned to your squad; when it is there, treat it as a standing instruction and move the parent to `in_review` on the turn you confirm the overall goal is met, without waiting to be asked. When it is absent, the rule above is absolute.\n\n")
+	} else {
+		b.WriteString("9. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
+	}
 }
 
 // writeWorkflowAssignment emits the assignment-triggered workflow.
+//
+// Ordinary agents own the full status arc for their issue: open with
+// in_progress, deliver with in_review. Squad leaders share the opening
+// in_progress step so the parent leaves todo as soon as coordination
+// starts, but their first assignment turn is only a dispatch — flipping
+// the parent to in_review there would mark unfinished multi-stage work
+// as ready for review. Leaders move the parent to in_review later, when
+// a re-trigger (member update / stage barrier) confirms the overall goal
+// is met; see the Squad Operating Protocol and child-done system comments.
 func writeWorkflowAssignment(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("You are responsible for managing the issue status throughout your work, unless your Agent Identity forbids issue status changes.\n\n")
 	fmt.Fprintf(b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
@@ -420,7 +445,11 @@ func writeWorkflowAssignment(b *strings.Builder, ctx TaskContextForEnv) {
 		fmt.Fprintf(b, "6. **Post your final results as a comment — this step is mandatory**: post it with `multica issue comment add %s` using the platform-correct non-inline mode from ## Comment Formatting (never inline `--content`). Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
 	}
 	b.WriteString("7. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
-	fmt.Fprintf(b, "8. When done, run `multica issue status %s in_review` unless your Agent Identity forbids issue status changes; if it does, skip this step.\n", ctx.IssueID)
+	if ctx.IsSquadLeader {
+		fmt.Fprintf(b, "8. After this initial dispatch, leave the parent issue `in_progress` — do NOT run `multica issue status %s in_review` or `done` on this turn. Dispatching members is not completion. You will be re-triggered when members post updates or a stage closes; only then, if the overall goal is met, move the parent to `in_review`.\n", ctx.IssueID)
+	} else {
+		fmt.Fprintf(b, "8. When done, run `multica issue status %s in_review` unless your Agent Identity forbids issue status changes; if it does, skip this step.\n", ctx.IssueID)
+	}
 	fmt.Fprintf(b, "9. If blocked, run `multica issue status %s blocked` unless your Agent Identity forbids issue status changes. Post a comment explaining the blocker unless your Agent Identity forbids issue comments.\n\n", ctx.IssueID)
 }
 
