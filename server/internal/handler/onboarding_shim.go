@@ -28,7 +28,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
@@ -45,17 +44,19 @@ import (
 // small cap so this endpoint cannot be used as bulk storage.
 const runtimeBootstrapBodyLimit = 8 * 1024
 
-// resolveOnboardingStatus closes the onboarding create paths against the
-// archive-concurrency protocol: it takes the workspace status-write lock in the
-// unified lock order, then resolves the default "todo" onboarding status to its
+// resolveOnboardingStatus resolves the default "todo" onboarding status to its
 // catalog row so the seeded issue double-writes (legacy token + status_id) from
 // the same active row. On an unseeded workspace ResolveForWrite reports no row
-// and we fall back to the bare legacy token with a nil status_id. The caller
-// must run this inside the same transaction that writes the issue.
-func resolveOnboardingStatus(ctx context.Context, tx pgx.Tx, qtx *db.Queries, wsUUID pgtype.UUID) (string, pgtype.UUID, error) {
-	if err := issuestatus.LockWorkspaceForStatusWrite(ctx, tx, wsUUID); err != nil {
-		return "", pgtype.UUID{}, err
-	}
+// and we fall back to the bare legacy token with a nil status_id.
+//
+// The caller MUST already hold LockWorkspaceForStatusWrite on the same
+// transaction, taken BEFORE the duplicate guard: every issue create shares one
+// `workspace/status → duplicate → issue` lock order (matching IssueService.Create,
+// MUL-4809 §5.5), so an onboarding create and a normal create racing on the same
+// workspace can never take the status and duplicate advisory locks in opposite
+// orders and deadlock. Holding the lock also keeps the resolved status stable
+// against a concurrent archive migration.
+func resolveOnboardingStatus(ctx context.Context, qtx *db.Queries, wsUUID pgtype.UUID) (string, pgtype.UUID, error) {
 	resolved, ok, err := issuestatus.ResolveForWrite(ctx, qtx, wsUUID, "todo")
 	if err != nil {
 		return "", pgtype.UUID{}, err
@@ -261,6 +262,18 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		assistantCreated = true
 	}
 
+	// Take the status-write lock BEFORE the duplicate guard so this create shares
+	// the unified `workspace/status → duplicate → issue` lock order with
+	// IssueService.Create (MUL-4809 §5.5); otherwise an onboarding create and a
+	// normal create racing on the same workspace + title could take the status and
+	// duplicate advisory locks in opposite orders and deadlock. It is also the
+	// workspace-row existence gate + lock-order anchor for IncrementIssueCounter.
+	if err := issuestatus.LockWorkspaceForStatusWrite(r.Context(), tx, wsUUID); err != nil {
+		slog.Warn("bootstrap onboarding (shim): lock workspace for status write failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+		return
+	}
+
 	var emptyUUID pgtype.UUID
 	issue, foundIssue, err := issueguard.LockAndFindActiveDuplicate(
 		r.Context(), qtx, wsUUID, emptyUUID, emptyUUID, onboardingIssueTitle, false,
@@ -281,7 +294,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		if req.StarterPrompt != "" {
 			description = req.StarterPrompt
 		}
-		onboardingStatus, onboardingStatusID, err := resolveOnboardingStatus(r.Context(), tx, qtx, wsUUID)
+		onboardingStatus, onboardingStatusID, err := resolveOnboardingStatus(r.Context(), qtx, wsUUID)
 		if err != nil {
 			slog.Warn("bootstrap onboarding (shim): resolve status failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
 			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
@@ -426,6 +439,18 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Take the status-write lock BEFORE the duplicate guard so this create shares
+	// the unified `workspace/status → duplicate → issue` lock order with
+	// IssueService.Create (MUL-4809 §5.5); otherwise an onboarding create and a
+	// normal create racing on the same workspace + title could take the status and
+	// duplicate advisory locks in opposite orders and deadlock. It is also the
+	// workspace-row existence gate + lock-order anchor for IncrementIssueCounter.
+	if err := issuestatus.LockWorkspaceForStatusWrite(r.Context(), tx, wsUUID); err != nil {
+		slog.Warn("bootstrap no-runtime onboarding (shim): lock workspace for status write failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+		return
+	}
+
 	var emptyUUID pgtype.UUID
 	existing, foundIssue, err := issueguard.LockAndFindActiveDuplicate(
 		r.Context(), qtx, wsUUID, emptyUUID, emptyUUID, noRuntimeIssueTitle, false,
@@ -446,7 +471,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
 			return
 		}
-		onboardingStatus, onboardingStatusID, err := resolveOnboardingStatus(r.Context(), tx, qtx, wsUUID)
+		onboardingStatus, onboardingStatusID, err := resolveOnboardingStatus(r.Context(), qtx, wsUUID)
 		if err != nil {
 			slog.Warn("bootstrap no-runtime onboarding (shim): resolve status failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
 			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
