@@ -31,6 +31,9 @@ spec:
               value: "0.0.0.0"
             - name: PORT
               value: "3000"
+            {{- with .Values.frontend.extraEnv }}
+            {{- include "multica.extraEnv" (dict "root" $ "env" .) | nindent 12 }}
+            {{- end }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
       {{- with .Values.frontend.affinity }}

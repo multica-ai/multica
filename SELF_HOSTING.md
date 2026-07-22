@@ -182,19 +182,25 @@ kubectl create namespace multica
 
 ### Step 3 — Create the `multica-secrets` Secret
 
-The chart references this Secret by name. Create it once with random values:
+The chart references this Secret by name and imports the whole Secret into the backend via `envFrom`. Create it once with random values, then keep optional integration secrets there as you enable them:
 
 ```bash
 kubectl -n multica create secret generic multica-secrets \
   --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
   --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
   --from-literal=RESEND_API_KEY="" \
+  --from-literal=SMTP_PASSWORD="" \
   --from-literal=GOOGLE_CLIENT_SECRET="" \
+  --from-literal=AWS_ACCESS_KEY_ID="" \
+  --from-literal=AWS_SECRET_ACCESS_KEY="" \
   --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+  --from-literal=GITHUB_WEBHOOK_SECRET="" \
+  --from-literal=MULTICA_LARK_SECRET_KEY="" \
+  --from-literal=MULTICA_SLACK_SECRET_KEY="" \
   --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
 ```
 
-Leave optional values empty for now — you can fill them in later (see [Step 5 — Log In](#step-5--log-in)).
+Leave optional values empty for now — you can patch them later as needed. For an external PostgreSQL cluster, set `postgres.external.enabled=true` and put `DATABASE_URL` in this Secret instead of `POSTGRES_PASSWORD`.
 
 ### Step 4 — Install the chart
 
@@ -271,7 +277,31 @@ The chart defaults to `APP_ENV=production` (set in `values.yaml` under `backend.
   kubectl -n multica rollout restart deploy/multica-backend
   ```
 
-`ALLOW_SIGNUP`, `DISABLE_WORKSPACE_CREATION`, and `GOOGLE_CLIENT_ID` likewise live under `backend.config.*` in `values.yaml` (as `allowSignup`, `disableWorkspaceCreation`, and `googleClientId`). After `helm upgrade`, the backend pod will roll automatically because the ConfigMap hash changes; the web UI reads all three from `/api/config` at runtime, so no web rebuild is needed.
+Docker self-host backend env has Helm equivalents in two places:
+
+- Non-secret values live under `backend.config.*` in `values.yaml`, including signup gates, Google client ID / redirect URI, SMTP host/port, S3/AWS endpoint switches, attachment download mode, GitHub app slug, public API URL, trusted proxies, metrics, log level, and Lark callback URLs.
+- Sensitive values live in `existingSecret` and are imported via `envFrom`, including `JWT_SECRET`, database credentials or external `DATABASE_URL`, email provider secrets, OAuth secrets, AWS credentials, CloudFront private key, GitHub webhook secret, and Lark/Slack secrets.
+
+For less-common or provider-specific env vars that do not have a dedicated `backend.config.*` key, use `backend.extraEnv`. It renders directly into the backend Deployment's Kubernetes `env` list and supports both plain `value` and `valueFrom` references:
+
+```yaml
+backend:
+  config:
+    smtpHost: smtp.internal.example.com
+    smtpPort: "587"
+    publicUrl: https://api.example.com
+    trustedProxies: "10.0.0.0/8"
+  extraEnv:
+    - name: REDIS_URL
+      valueFrom:
+        secretKeyRef:
+          name: multica-redis
+          key: url
+    - name: CLOUDFRONT_PRIVATE_KEY_SECRET
+      value: multica/cloudfront-signing-key
+```
+
+After `helm upgrade`, the backend pod rolls automatically when the rendered ConfigMap changes; values that only change in the out-of-band Secret still require a backend rollout restart. The web UI reads signup and auth config from `/api/config` at runtime, so those backend config changes do not require a web rebuild. `frontend.extraEnv` is available for runtime-only frontend env; build-time web variables such as `REMOTE_API_URL`, `NEXT_PUBLIC_WS_URL`, and `NEXT_PUBLIC_APP_VERSION` still require a custom web image built with those values.
 
 > **Warning:** do **not** set `MULTICA_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
 
