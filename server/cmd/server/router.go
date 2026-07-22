@@ -1080,6 +1080,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+			// Paged Execution Log (MUL-5122). Additive; the array endpoint above
+			// stays as-is for Web Chat, Mobile and CLI.
+			r.Get("/api/tasks/{taskId}/messages/page", h.ListTaskMessagesPage)
 
 			// Custom issue properties (definitions; values live under /api/issues/{id}/properties)
 			r.Route("/api/properties", func(r chi.Router) {

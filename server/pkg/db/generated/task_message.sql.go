@@ -11,6 +11,43 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countTaskMessages = `-- name: CountTaskMessages :one
+SELECT COUNT(*) FROM task_message WHERE task_id = $1
+`
+
+// Raw total: every persisted event for the Run, ignoring filters.
+func (q *Queries) CountTaskMessages(ctx context.Context, taskID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countTaskMessages, taskID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTaskMessagesMatched = `-- name: CountTaskMessagesMatched :one
+SELECT COUNT(*) FROM task_message
+WHERE task_id = $1
+  AND (
+    (cardinality($2::text[]) = 0 AND cardinality($3::text[]) = 0)
+    OR type = ANY($2::text[])
+    OR (tool IS NOT NULL AND tool = ANY($3::text[]))
+  )
+`
+
+type CountTaskMessagesMatchedParams struct {
+	TaskID pgtype.UUID `json:"task_id"`
+	Types  []string    `json:"types"`
+	Tools  []string    `json:"tools"`
+}
+
+// Matched total: events satisfying the full-Run OR filter (equals the raw total
+// when no filter is selected).
+func (q *Queries) CountTaskMessagesMatched(ctx context.Context, arg CountTaskMessagesMatchedParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countTaskMessagesMatched, arg.TaskID, arg.Types, arg.Tools)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createTaskMessage = `-- name: CreateTaskMessage :one
 INSERT INTO task_message (task_id, seq, type, tool, content, input, output)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -98,6 +135,138 @@ func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]T
 	return items, nil
 }
 
+const listTaskMessagesAfter = `-- name: ListTaskMessagesAfter :many
+SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
+WHERE task_id = $1
+  AND (seq, id) > ($2::int, $3::uuid)
+  AND (
+    (cardinality($4::text[]) = 0 AND cardinality($5::text[]) = 0)
+    OR type = ANY($4::text[])
+    OR (tool IS NOT NULL AND tool = ANY($5::text[]))
+  )
+ORDER BY seq ASC, id ASC
+LIMIT $6
+`
+
+type ListTaskMessagesAfterParams struct {
+	TaskID   pgtype.UUID `json:"task_id"`
+	AfterSeq int32       `json:"after_seq"`
+	AfterID  pgtype.UUID `json:"after_id"`
+	Types    []string    `json:"types"`
+	Tools    []string    `json:"tools"`
+	Lim      int32       `json:"lim"`
+}
+
+// Bounded terminal catch-up: events strictly after the client's newest known
+// (seq, id). Ascending, so the page is already chronological.
+func (q *Queries) ListTaskMessagesAfter(ctx context.Context, arg ListTaskMessagesAfterParams) ([]TaskMessage, error) {
+	rows, err := q.db.Query(ctx, listTaskMessagesAfter,
+		arg.TaskID,
+		arg.AfterSeq,
+		arg.AfterID,
+		arg.Types,
+		arg.Tools,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskMessage{}
+	for rows.Next() {
+		var i TaskMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.TaskID,
+			&i.Seq,
+			&i.Type,
+			&i.Tool,
+			&i.Content,
+			&i.Input,
+			&i.Output,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTaskMessagesPage = `-- name: ListTaskMessagesPage :many
+
+SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
+WHERE task_id = $1
+  AND (
+    $2::int IS NULL
+    OR (seq, id) < ($2::int, $3::uuid)
+  )
+  AND (
+    (cardinality($4::text[]) = 0 AND cardinality($5::text[]) = 0)
+    OR type = ANY($4::text[])
+    OR (tool IS NOT NULL AND tool = ANY($5::text[]))
+  )
+ORDER BY seq DESC, id DESC
+LIMIT $6
+`
+
+type ListTaskMessagesPageParams struct {
+	TaskID    pgtype.UUID `json:"task_id"`
+	BeforeSeq pgtype.Int4 `json:"before_seq"`
+	BeforeID  pgtype.UUID `json:"before_id"`
+	Types     []string    `json:"types"`
+	Tools     []string    `json:"tools"`
+	Lim       int32       `json:"lim"`
+}
+
+// Execution Log pagination (MUL-5122). The stable order is (seq, id): seq is
+// the daemon's intended order but is not unique across a fresh-session retry, so
+// id breaks ties to give a deterministic total order. The full-Run OR filter:
+// a row matches when its type is a selected type OR its tool is a selected tool;
+// empty selections match everything. Callers pass non-null (possibly empty)
+// text[] so cardinality(...) = 0 is the "no filter" test.
+// Newest-first window. With no before-cursor it opens at the most recent events;
+// a before-cursor loads older history. Fetch limit+1 to detect more history.
+func (q *Queries) ListTaskMessagesPage(ctx context.Context, arg ListTaskMessagesPageParams) ([]TaskMessage, error) {
+	rows, err := q.db.Query(ctx, listTaskMessagesPage,
+		arg.TaskID,
+		arg.BeforeSeq,
+		arg.BeforeID,
+		arg.Types,
+		arg.Tools,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskMessage{}
+	for rows.Next() {
+		var i TaskMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.TaskID,
+			&i.Seq,
+			&i.Type,
+			&i.Tool,
+			&i.Content,
+			&i.Input,
+			&i.Output,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTaskMessagesSince = `-- name: ListTaskMessagesSince :many
 SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
 WHERE task_id = $1 AND seq > $2
@@ -129,6 +298,74 @@ func (q *Queries) ListTaskMessagesSince(ctx context.Context, arg ListTaskMessage
 			&i.Output,
 			&i.CreatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const taskMessageToolFacets = `-- name: TaskMessageToolFacets :many
+SELECT tool, COUNT(*) AS count FROM task_message
+WHERE task_id = $1 AND tool IS NOT NULL AND tool <> ''
+GROUP BY tool
+ORDER BY count DESC, tool ASC
+`
+
+type TaskMessageToolFacetsRow struct {
+	Tool  pgtype.Text `json:"tool"`
+	Count int64       `json:"count"`
+}
+
+// Full-Run tool facets. A tool key covers both its tool_use and tool_result
+// rows because both carry the same tool value.
+func (q *Queries) TaskMessageToolFacets(ctx context.Context, taskID pgtype.UUID) ([]TaskMessageToolFacetsRow, error) {
+	rows, err := q.db.Query(ctx, taskMessageToolFacets, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskMessageToolFacetsRow{}
+	for rows.Next() {
+		var i TaskMessageToolFacetsRow
+		if err := rows.Scan(&i.Tool, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const taskMessageTypeFacets = `-- name: TaskMessageTypeFacets :many
+SELECT type, COUNT(*) AS count FROM task_message
+WHERE task_id = $1
+GROUP BY type
+ORDER BY count DESC, type ASC
+`
+
+type TaskMessageTypeFacetsRow struct {
+	Type  string `json:"type"`
+	Count int64  `json:"count"`
+}
+
+// Full-Run type facets so a type present only in unloaded history is still
+// discoverable and selectable.
+func (q *Queries) TaskMessageTypeFacets(ctx context.Context, taskID pgtype.UUID) ([]TaskMessageTypeFacetsRow, error) {
+	rows, err := q.db.Query(ctx, taskMessageTypeFacets, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskMessageTypeFacetsRow{}
+	for rows.Next() {
+		var i TaskMessageTypeFacetsRow
+		if err := rows.Scan(&i.Type, &i.Count); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
