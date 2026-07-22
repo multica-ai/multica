@@ -154,10 +154,17 @@ type phaseRecordingEvalRunner struct {
 	phases []string
 }
 
-type fakeMonitorBindingLister struct{ keys []string }
+type fakeMonitorBindingLister struct {
+	keys     []string
+	bindings []EvalBindingKey
+}
 
 func (f *fakeMonitorBindingLister) ListMonitorAdvisoryEvalKeys(_ context.Context, _ pgtype.UUID) ([]string, error) {
 	return f.keys, nil
+}
+
+func (f *fakeMonitorBindingLister) ListEvalBindingKeys(_ context.Context, _ pgtype.UUID) ([]EvalBindingKey, error) {
+	return f.bindings, nil
 }
 
 func (r *phaseRecordingEvalRunner) RunEvalBlock(_ context.Context, d BlockDispatch) (StepStatus, json.RawMessage, error) {
@@ -194,7 +201,7 @@ func TestIssueLoopBridge_MonitorAdvisoryRunsAfterDeliveryAndKeepsDoneTerminal(t 
 	runner := &phaseRecordingEvalRunner{}
 	bridge := NewIssueLoopBridge(loopTestPool, cerebrodb.New(loopTestPool), db.New(loopTestPool), workflows.NewIssueLoopColumnStore(loopTestPool)).
 		WithEvalBlockRunner(runner).
-		WithMonitorEvalBindingLister(&fakeMonitorBindingLister{keys: []string{"quality"}})
+		WithMonitorEvalBindingLister(&fakeMonitorBindingLister{keys: []string{"quality"}, bindings: []EvalBindingKey{{EvalKey: "quality", Phase: "delivery"}, {EvalKey: "quality", Phase: "monitor"}}})
 	if err := bridge.ActivateOnIssue(ctx, workspaceID, recipe, pgtype.UUID{}, recipe, issueID, "member", raw); err != nil {
 		t.Fatalf("activate monitor chain: %v", err)
 	}

@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/loops"
 )
 
 var (
@@ -275,6 +277,33 @@ func (s *Store) ListMonitorAdvisoryEvalKeys(ctx context.Context, workflowID pgty
 	for rows.Next() {
 		var key string
 		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
+
+// ListEvalBindingKeys returns every gate bound to this workflow, at every
+// phase. The Issue workflow bridge uses it to reject a recipe naming a gate the
+// engine could not resolve, at save time instead of mid-run. The COALESCE
+// mirrors ListMonitorAdvisoryEvalKeys: an activation marker resolves back to
+// the recipe that owns the bindings.
+func (s *Store) ListEvalBindingKeys(ctx context.Context, workflowID pgtype.UUID) ([]loops.EvalBindingKey, error) {
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT e.eval_key, b.phase
+      FROM cerebro_workflow_eval_binding b
+      JOIN cerebro_eval e ON e.id=b.eval_id
+      JOIN cerebro_workflow w ON w.id=$1
+      WHERE b.workflow_id=COALESCE(w.generated_from_workflow_id, w.id)
+      ORDER BY e.eval_key, b.phase`, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keys := make([]loops.EvalBindingKey, 0)
+	for rows.Next() {
+		var key loops.EvalBindingKey
+		if err := rows.Scan(&key.EvalKey, &key.Phase); err != nil {
 			return nil, err
 		}
 		keys = append(keys, key)

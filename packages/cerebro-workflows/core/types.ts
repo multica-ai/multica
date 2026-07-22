@@ -390,3 +390,21 @@ export const FORBIDDEN_OUTBOUND_HEADER_PREFIXES: ReadonlyArray<string> = [
 ];
 
 export const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
+
+// A quality gate bound to an Issue workflow. This mirrors the eval package's
+// EvalBinding, deliberately re-declared here instead of imported: cerebro-evals
+// already depends on cerebro-workflows, so importing back would make the two
+// packages circular. Only the fields the workflow editor reads are declared;
+// the schema is passthrough, so extra server fields survive untouched.
+export interface WorkflowEvalBinding {
+  id: string;
+  workspace_id: string;
+  workflow_id: string;
+  eval_id: string;
+  phase: string;
+  blocking: boolean;
+  eval_key: string;
+  eval_version: string;
+  eval_title: string;
+  created_at: string;
+}

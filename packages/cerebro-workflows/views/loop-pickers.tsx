@@ -52,10 +52,12 @@ export function SkillNamePicker({
       onSearchChange={setFilter}
       triggerRender={
         // A bordered, input-looking trigger so the picker reads as a form
-        // field (matching the Input/Textarea siblings), not a bare link.
+        // field (matching the Input/Textarea siblings), not a bare link. The
+        // 32px height and 10px radius are the editor's single control size —
+        // the old 36px/6px pair made the picker the odd one out in the column.
         <button
           type="button"
-          className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm hover:bg-accent/30"
+          className="flex h-8 w-full items-center justify-between gap-2 rounded-[10px] border border-input bg-transparent px-2.5 text-sm transition-colors hover:bg-accent/30"
         />
       }
       trigger={

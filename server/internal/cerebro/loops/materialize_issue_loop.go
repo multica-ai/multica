@@ -24,8 +24,20 @@ type WorkspaceSkillLister interface {
 	ListSkillSummariesByWorkspace(context.Context, pgtype.UUID) ([]db.ListSkillSummariesByWorkspaceRow, error)
 }
 
+// EvalBindingKey identifies one quality gate bound to a workflow. The engine
+// resolves an eval block on the pair, not the key alone: the block runner joins
+// on `e.eval_key = block.EvalKey AND b.phase = block.EvalPhase`, so a key bound
+// at the wrong phase is just as unresolvable as a key that was never bound.
+type EvalBindingKey struct {
+	EvalKey string
+	Phase   string
+}
+
 type MonitorEvalBindingLister interface {
 	ListMonitorAdvisoryEvalKeys(context.Context, pgtype.UUID) ([]string, error)
+	// ListEvalBindingKeys returns every gate bound to this workflow, at every
+	// phase, so a recipe naming an unbound gate can be rejected at save time.
+	ListEvalBindingKeys(context.Context, pgtype.UUID) ([]EvalBindingKey, error)
 }
 
 type IssueLoopBridge struct {
@@ -146,12 +158,61 @@ func (b *IssueLoopBridge) validateSkillsExist(ctx context.Context, workspaceID p
 	return nil
 }
 
+// An eval block whose key has no gate bound to this workflow used to save fine
+// and only fail mid-run, as `resolve eval block "…": no rows in result set`
+// from block_runner.go. Rejecting it here moves that failure to the moment the
+// user can still do something about it.
+func (b *IssueLoopBridge) validateEvalBindingsExist(ctx context.Context, workflowID pgtype.UUID, chain *Chain) error {
+	if b.monitorEvals == nil {
+		return nil
+	}
+	hasEvalBlock := false
+	for _, phase := range chain.Phases {
+		for _, block := range phase.Blocks {
+			if block.Type == BlockEval {
+				hasEvalBlock = true
+			}
+		}
+	}
+	if !hasEvalBlock {
+		return nil
+	}
+	bound, err := b.monitorEvals.ListEvalBindingKeys(ctx, workflowID)
+	if err != nil {
+		return fmt.Errorf("loop_spec: verify quality gates: %w", err)
+	}
+	have := make(map[EvalBindingKey]struct{}, len(bound))
+	for _, key := range bound {
+		have[key] = struct{}{}
+	}
+	for pi, phase := range chain.Phases {
+		for bi, block := range phase.Blocks {
+			if block.Type != BlockEval {
+				continue
+			}
+			// An empty phase means delivery everywhere else in the engine
+			// (block_runner.go), so it must mean delivery here too.
+			evalPhase := block.EvalPhase
+			if evalPhase == "" {
+				evalPhase = "delivery"
+			}
+			if _, ok := have[EvalBindingKey{EvalKey: block.EvalKey, Phase: evalPhase}]; !ok {
+				return fmt.Errorf("loop_spec: phases[%d].blocks[%d].eval_key %q has no %s gate bound to this workflow — bind it under Workflow gates first", pi, bi, block.EvalKey, evalPhase)
+			}
+		}
+	}
+	return nil
+}
+
 func (b *IssueLoopBridge) SyncIssueLoop(ctx context.Context, workspaceID, workflowID, projectID, createdByID pgtype.UUID, createdByType string, loopSpecJSON []byte) error {
 	chain, err := decodeChain(loopSpecJSON)
 	if err != nil {
 		return err
 	}
 	if err := b.validateSkillsExist(ctx, workspaceID, chain); err != nil {
+		return err
+	}
+	if err := b.validateEvalBindingsExist(ctx, workflowID, chain); err != nil {
 		return err
 	}
 	return b.columns.DeleteGeneratedChildren(ctx, workflowID)
@@ -166,6 +227,9 @@ func (b *IssueLoopBridge) ActivateOnIssue(ctx context.Context, workspaceID, work
 		return err
 	}
 	if err := b.validateSkillsExist(ctx, workspaceID, chain); err != nil {
+		return err
+	}
+	if err := b.validateEvalBindingsExist(ctx, workflowID, chain); err != nil {
 		return err
 	}
 	if err := b.columns.DeleteAllGeneratedChildrenForIssue(ctx, issueID); err != nil {

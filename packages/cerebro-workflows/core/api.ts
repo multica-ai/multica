@@ -20,6 +20,8 @@ import {
   workflowRunsListSchema,
   workflowSchema,
   workflowsListSchema,
+  workflowEvalBindingsListSchema,
+  EMPTY_WORKFLOW_EVAL_BINDINGS,
 } from "./api-schemas";
 import type {
   ActivateWorkflowResponse,
@@ -33,6 +35,7 @@ import type {
   WorkflowRunsListResponse,
   WorkflowsListResponse,
   WorkflowWriteInput,
+  WorkflowEvalBinding,
 } from "./types";
 
 // All cerebro-workflows reads route through parseWithFallback so an older
@@ -196,4 +199,16 @@ export async function fetchWorkflowLoopRuns(
   return parseWithFallback(raw, issueLoopRunsSchema, EMPTY_ISSUE_LOOP_RUNS, {
     endpoint: "workflowLoopRuns",
   });
+}
+
+// Reads the quality gates bound to one Issue workflow. Same endpoint the evals
+// page uses; re-declared here because cerebro-evals already depends on this
+// package and importing back would make the two circular.
+export async function fetchWorkflowEvalBindings(workflowId: string): Promise<WorkflowEvalBinding[]> {
+  const raw = await api.cerebroRequest<unknown>(
+    `/api/cerebro/evals/bindings?workflow_id=${encodeURIComponent(workflowId)}`,
+  );
+  return parseWithFallback(raw, workflowEvalBindingsListSchema, EMPTY_WORKFLOW_EVAL_BINDINGS, {
+    endpoint: "listCerebroWorkflowEvalBindings",
+  }).bindings as WorkflowEvalBinding[];
 }

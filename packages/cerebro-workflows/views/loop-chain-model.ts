@@ -100,6 +100,45 @@ export function reorderBlocks(
   return next;
 }
 
+// Pure reorder for whole phases, the phase-level twin of reorderBlocks.
+// `above` places the dragged phase just before the target, otherwise just
+// after it. Unknown ids and a self-drop are no-ops, so a stale drag hint can
+// never rewrite the chain.
+export function reorderPhases(
+  phases: LoopChainPhase[],
+  dragId: string,
+  targetId: string,
+  above: boolean,
+): LoopChainPhase[] {
+  if (dragId === targetId) return phases;
+  const from = phases.findIndex((phase) => phase.id === dragId);
+  const to = phases.findIndex((phase) => phase.id === targetId);
+  if (from < 0 || to < 0) return phases;
+
+  const next = [...phases];
+  const [moved] = next.splice(from, 1);
+  if (!moved) return phases;
+
+  let insertIndex = to + (above ? 0 : 1);
+  if (from < to) insertIndex -= 1;
+  next.splice(insertIndex, 0, moved);
+  return next;
+}
+
+// Move a phase one slot up (-1) or down (+1) — the keyboard path on the phase
+// drag handle, mirroring nudgeBlock so reordering never needs a pointer.
+export function nudgePhase(
+  phases: LoopChainPhase[],
+  phaseId: string,
+  offset: -1 | 1,
+): LoopChainPhase[] {
+  const from = phases.findIndex((phase) => phase.id === phaseId);
+  if (from < 0) return phases;
+  const target = from + offset;
+  if (target < 0 || target >= phases.length) return phases;
+  return reorderPhases(phases, phaseId, phases[target]!.id, offset < 0);
+}
+
 // Move a block one slot up (-1) or down (+1) within its phase — the keyboard
 // path on the drag handle, so reordering stays reachable without a pointer.
 export function nudgeBlock(
