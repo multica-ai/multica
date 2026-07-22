@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -158,5 +159,119 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 		SessionID:      uuidToString(session.ID),
 		BuilderAgentID: uuidToString(builder.ID),
 		RuntimeID:      runtimeID,
+	})
+}
+
+type SwitchAgentBuilderRuntimeRequest struct {
+	RuntimeID string `json:"runtime_id"`
+	Model     string `json:"model,omitempty"`
+}
+
+type SwitchAgentBuilderRuntimeResponse struct {
+	RuntimeID string `json:"runtime_id"`
+}
+
+// SwitchAgentBuilderRuntime rebinds the hidden builder carrier agent to a
+// different online runtime mid-conversation. The live-draft RuntimePicker
+// updates only local React state; without this endpoint subsequent chat tasks
+// keep enqueueing against the runtime frozen at CreateAgentBuilderSession.
+// chat_session.runtime_id is intentionally left alone so the daemon's
+// runtime-match resume guard starts a fresh provider session on the new
+// runtime instead of resuming state from the previous one.
+func (h *Handler) SwitchAgentBuilderRuntime(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	sessionID := strings.TrimSpace(chi.URLParam(r, "sessionId"))
+
+	var req SwitchAgentBuilderRuntimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	runtimeID := strings.TrimSpace(req.RuntimeID)
+	if runtimeID == "" {
+		writeError(w, http.StatusBadRequest, "runtime_id is required")
+		return
+	}
+
+	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+	if session.Status != "active" {
+		writeError(w, http.StatusConflict, "chat session is archived")
+		return
+	}
+
+	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if agent.Kind != "system" || !agent.SystemKey.Valid || !strings.HasPrefix(agent.SystemKey.String, "agent_builder:") {
+		writeError(w, http.StatusNotFound, "agent builder session not found")
+		return
+	}
+
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return
+	}
+	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID:          runtimeUUID,
+		WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		return
+	}
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if !canUseRuntimeForAgent(member, runtime) {
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can use it")
+		return
+	}
+	if runtime.Status != "online" {
+		writeError(w, http.StatusConflict, "runtime must be online to switch an agent builder session")
+		return
+	}
+
+	if _, err := h.Queries.GetPendingChatTask(r.Context(), session.ID); err == nil {
+		writeError(w, http.StatusConflict, "wait for the current reply to finish before switching runtime")
+		return
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to check pending builder task")
+		return
+	}
+
+	// Idempotent no-op when the carrier is already on the requested runtime;
+	// still clear model when the client asks to reset it.
+	model := strings.TrimSpace(req.Model)
+	updated, err := h.Queries.UpdateAgentBuilderRuntime(r.Context(), db.UpdateAgentBuilderRuntimeParams{
+		ID:          agent.ID,
+		RuntimeID:   runtime.ID,
+		RuntimeMode: runtime.RuntimeMode,
+		Model:       pgtype.Text{String: model, Valid: model != ""},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "agent builder session not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to switch agent builder runtime")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, SwitchAgentBuilderRuntimeResponse{
+		RuntimeID: uuidToString(updated.RuntimeID),
 	})
 }

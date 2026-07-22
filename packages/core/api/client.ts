@@ -1038,6 +1038,16 @@ export class ApiClient {
     );
   }
 
+  async switchAgentBuilderRuntime(
+    sessionId: string,
+    data: { runtime_id: string; model?: string },
+  ): Promise<{ runtime_id: string }> {
+    return this.fetch(`/api/agent-builder/sessions/${sessionId}/runtime`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
   async listAgentTemplates(): Promise<AgentTemplateSummary[]> {
     const raw = await this.fetch<unknown>("/api/agent-templates");
     return parseWithFallback(

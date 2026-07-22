@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func TestAgentBuilderInstructionsConstrainModelsToRuntimeCatalog(t *testing.T) {
@@ -157,5 +159,215 @@ func TestCreateAgentAttachesSkillsInCreateTransaction(t *testing.T) {
 	}
 	if introSessions != 1 {
 		t.Fatalf("welcome chat sessions = %d, want 1", introSessions)
+	}
+}
+
+func TestSwitchAgentBuilderRuntimeRebindsCarrier(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+			DELETE FROM agent
+			WHERE workspace_id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%'
+		`, testWorkspaceID)
+	})
+
+	var otherRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, NULL, 'Builder Switch Runtime B', 'cloud', 'builder_switch_b', 'online', 'builder switch', '{}'::jsonb, $2, now())
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&otherRuntimeID); err != nil {
+		t.Fatalf("create second runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, otherRuntimeID)
+	})
+
+	createW := httptest.NewRecorder()
+	testHandler.CreateAgentBuilderSession(createW, newRequest(http.MethodPost, "/api/agent-builder/sessions", map[string]any{
+		"runtime_id": testRuntimeID,
+		"model":      "stale-model-a",
+	}))
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("CreateAgentBuilderSession: expected 201, got %d: %s", createW.Code, createW.Body.String())
+	}
+	var session CreateAgentBuilderSessionResponse
+	if err := json.Unmarshal(createW.Body.Bytes(), &session); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	switchW := httptest.NewRecorder()
+	req := withURLParams(
+		newRequest(http.MethodPatch, "/api/agent-builder/sessions/"+session.SessionID+"/runtime", map[string]any{
+			"runtime_id": otherRuntimeID,
+		}),
+		"sessionId", session.SessionID,
+	)
+	testHandler.SwitchAgentBuilderRuntime(switchW, req)
+	if switchW.Code != http.StatusOK {
+		t.Fatalf("SwitchAgentBuilderRuntime: expected 200, got %d: %s", switchW.Code, switchW.Body.String())
+	}
+	var switchResp SwitchAgentBuilderRuntimeResponse
+	if err := json.Unmarshal(switchW.Body.Bytes(), &switchResp); err != nil {
+		t.Fatalf("decode switch response: %v", err)
+	}
+	if switchResp.RuntimeID != otherRuntimeID {
+		t.Fatalf("switch response runtime = %q, want %q", switchResp.RuntimeID, otherRuntimeID)
+	}
+
+	var agentRuntimeID, runtimeMode string
+	var model pgtype.Text
+	if err := testPool.QueryRow(ctx, `
+		SELECT runtime_id::text, runtime_mode, model FROM agent WHERE id = $1
+	`, session.BuilderAgentID).Scan(&agentRuntimeID, &runtimeMode, &model); err != nil {
+		t.Fatalf("load builder agent: %v", err)
+	}
+	if agentRuntimeID != otherRuntimeID {
+		t.Fatalf("builder agent runtime = %q, want %q", agentRuntimeID, otherRuntimeID)
+	}
+	if runtimeMode != "cloud" {
+		t.Fatalf("builder agent runtime_mode = %q, want cloud", runtimeMode)
+	}
+	if model.Valid {
+		t.Fatalf("builder agent model should be cleared, got %q", model.String)
+	}
+
+	var sessionRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT runtime_id::text FROM chat_session WHERE id = $1
+	`, session.SessionID).Scan(&sessionRuntimeID); err != nil {
+		t.Fatalf("load chat session runtime: %v", err)
+	}
+	if sessionRuntimeID != testRuntimeID {
+		t.Fatalf("chat_session.runtime_id = %q, want original %q (resume pointer must stay)", sessionRuntimeID, testRuntimeID)
+	}
+}
+
+func TestSwitchAgentBuilderRuntimeRejectsGuards(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+			DELETE FROM agent
+			WHERE workspace_id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%'
+		`, testWorkspaceID)
+		_, _ = testPool.Exec(context.Background(), `
+			DELETE FROM agent WHERE workspace_id = $1 AND name = 'Builder Switch User Agent'
+		`, testWorkspaceID)
+	})
+
+	var offlineRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, NULL, 'Builder Switch Offline', 'cloud', 'builder_switch_offline', 'offline', 'offline', '{}'::jsonb, $2, now())
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&offlineRuntimeID); err != nil {
+		t.Fatalf("create offline runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, offlineRuntimeID)
+	})
+
+	createW := httptest.NewRecorder()
+	testHandler.CreateAgentBuilderSession(createW, newRequest(http.MethodPost, "/api/agent-builder/sessions", map[string]any{
+		"runtime_id": testRuntimeID,
+	}))
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("CreateAgentBuilderSession: expected 201, got %d: %s", createW.Code, createW.Body.String())
+	}
+	var session CreateAgentBuilderSessionResponse
+	if err := json.Unmarshal(createW.Body.Bytes(), &session); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	offlineW := httptest.NewRecorder()
+	offlineReq := withURLParams(
+		newRequest(http.MethodPatch, "/api/agent-builder/sessions/"+session.SessionID+"/runtime", map[string]any{
+			"runtime_id": offlineRuntimeID,
+		}),
+		"sessionId", session.SessionID,
+	)
+	testHandler.SwitchAgentBuilderRuntime(offlineW, offlineReq)
+	if offlineW.Code != http.StatusConflict {
+		t.Fatalf("offline runtime: expected 409, got %d: %s", offlineW.Code, offlineW.Body.String())
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, chat_session_id, status, priority, context, runtime_id)
+		VALUES ($1, $2, 'running', 2, '{}'::jsonb, $3)
+	`, session.BuilderAgentID, session.SessionID, testRuntimeID); err != nil {
+		t.Fatalf("insert pending task: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE chat_session_id = $1`, session.SessionID)
+	})
+
+	var onlineRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, NULL, 'Builder Switch Pending Target', 'cloud', 'builder_switch_pending', 'online', 'online', '{}'::jsonb, $2, now())
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&onlineRuntimeID); err != nil {
+		t.Fatalf("create online runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, onlineRuntimeID)
+	})
+
+	pendingW := httptest.NewRecorder()
+	pendingReq := withURLParams(
+		newRequest(http.MethodPatch, "/api/agent-builder/sessions/"+session.SessionID+"/runtime", map[string]any{
+			"runtime_id": onlineRuntimeID,
+		}),
+		"sessionId", session.SessionID,
+	)
+	testHandler.SwitchAgentBuilderRuntime(pendingW, pendingReq)
+	if pendingW.Code != http.StatusConflict {
+		t.Fatalf("pending task: expected 409, got %d: %s", pendingW.Code, pendingW.Body.String())
+	}
+
+	var userAgentID, userSessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'Builder Switch User Agent', '', 'cloud', '{}'::jsonb, $2, 'workspace', 'public_to', 1, $3)
+		RETURNING id
+	`, testWorkspaceID, testRuntimeID, testUserID).Scan(&userAgentID); err != nil {
+		t.Fatalf("create user agent: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id)
+		VALUES ($1, $2, $3, 'Not a builder', $4)
+		RETURNING id
+	`, testWorkspaceID, userAgentID, testUserID, testRuntimeID).Scan(&userSessionID); err != nil {
+		t.Fatalf("create user chat session: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, userSessionID)
+	})
+
+	userW := httptest.NewRecorder()
+	userReq := withURLParams(
+		newRequest(http.MethodPatch, "/api/agent-builder/sessions/"+userSessionID+"/runtime", map[string]any{
+			"runtime_id": onlineRuntimeID,
+		}),
+		"sessionId", userSessionID,
+	)
+	testHandler.SwitchAgentBuilderRuntime(userW, userReq)
+	if userW.Code != http.StatusNotFound {
+		t.Fatalf("user agent session: expected 404, got %d: %s", userW.Code, userW.Body.String())
 	}
 }

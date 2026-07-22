@@ -145,6 +145,7 @@ export function AgentCreationStudio() {
   const [builderSessionId, setBuilderSessionId] = useState("");
   const [builderStarting, setBuilderStarting] = useState(false);
   const [builderClosing, setBuilderClosing] = useState(false);
+  const [builderSwitchingRuntime, setBuilderSwitchingRuntime] = useState(false);
   const [builderError, setBuilderError] = useState<string | null>(null);
   const [builderRestoreDraft, setBuilderRestoreDraft] = useState<{
     id: string;
@@ -478,6 +479,37 @@ export function AgentCreationStudio() {
     }
   };
 
+  const switchBuilderRuntime = async (runtimeId: string) => {
+    if (!runtimeId || runtimeId === draft.runtimeId) return;
+    if (!builderSessionId) {
+      setDraft((current) => ({ ...current, runtimeId, model: "" }));
+      return;
+    }
+    if (builderPending || builderSwitchingRuntime) {
+      setBuilderError(t(($) => $.creation_studio.builder.switch_runtime_pending));
+      return;
+    }
+    setBuilderSwitchingRuntime(true);
+    setBuilderError(null);
+    try {
+      await api.switchAgentBuilderRuntime(builderSessionId, {
+        runtime_id: runtimeId,
+      });
+      // Only mutate local draft after the server rebinds the carrier agent,
+      // otherwise the UI can claim runtime B while tasks still enqueue on A.
+      setDraft((current) => ({ ...current, runtimeId, model: "" }));
+      toast.success(t(($) => $.creation_studio.builder.switch_runtime_success));
+    } catch (error) {
+      setBuilderError(
+        error instanceof Error
+          ? error.message
+          : t(($) => $.creation_studio.builder.switch_runtime_failed),
+      );
+    } finally {
+      setBuilderSwitchingRuntime(false);
+    }
+  };
+
   const sendBuilderMessage = async (content: string): Promise<boolean> => {
     const text = content.trim();
     if (!text || !builderSessionId || builderPending) return false;
@@ -783,6 +815,10 @@ export function AgentCreationStudio() {
                 members={members}
                 currentUserId={currentUser?.id ?? null}
                 createError={createError}
+                onRuntimeSelect={(runtimeId) => {
+                  void switchBuilderRuntime(runtimeId);
+                }}
+                runtimeSwitchDisabled={builderPending || builderSwitchingRuntime}
               />
             </div>
             <StudioFooter
@@ -974,6 +1010,8 @@ function ConfigurationPanel({
   currentUserId,
   createError,
   compact = false,
+  onRuntimeSelect,
+  runtimeSwitchDisabled = false,
 }: {
   draft: AgentDraft;
   onChange: (draft: AgentDraft) => void;
@@ -983,11 +1021,25 @@ function ConfigurationPanel({
   currentUserId: string | null;
   createError: string | null;
   compact?: boolean;
+  /** Optional override for runtime changes (AI builder session rebind). */
+  onRuntimeSelect?: (runtimeId: string) => void;
+  /** Disable the runtime picker while a builder reply/switch is in flight. */
+  runtimeSwitchDisabled?: boolean;
 }) {
   const { t } = useT("agents");
   const selectedRuntime = runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
   const set = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => onChange({ ...draft, [key]: value });
   const otherMembers = members.filter((member) => member.user_id !== currentUserId);
+  const handleRuntimeSelect = (id: string) => {
+    if (id === draft.runtimeId) return;
+    if (onRuntimeSelect) {
+      onRuntimeSelect(id);
+      return;
+    }
+    // Model is per-runtime; clear it on runtime change so the new
+    // runtime resolves its own default instead of a stale value.
+    onChange({ ...draft, runtimeId: id, model: "" });
+  };
 
   return (
     <div className={cn("space-y-8", compact && "space-y-6")}>
@@ -1090,11 +1142,8 @@ function ConfigurationPanel({
               members={members}
               currentUserId={currentUserId}
               selectedRuntimeId={draft.runtimeId}
-              onSelect={(id) => {
-                // Model is per-runtime; clear it on runtime change so the new
-                // runtime resolves its own default instead of a stale value.
-                if (id !== draft.runtimeId) onChange({ ...draft, runtimeId: id, model: "" });
-              }}
+              onSelect={handleRuntimeSelect}
+              disabled={runtimeSwitchDisabled}
             />
             <ModelDropdown
               runtimeId={selectedRuntime?.id ?? null}

@@ -33,6 +33,7 @@ export function RuntimePicker({
   currentUserId,
   selectedRuntimeId,
   onSelect,
+  disabled = false,
 }: {
   runtimes: RuntimeDevice[];
   runtimesLoading?: boolean;
@@ -40,6 +41,8 @@ export function RuntimePicker({
   currentUserId: string | null;
   selectedRuntimeId: string;
   onSelect: (id: string) => void;
+  /** When true the picker cannot be opened (e.g. builder reply in flight). */
+  disabled?: boolean;
 }) {
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
@@ -138,12 +141,13 @@ export function RuntimePicker({
       <Popover
         open={open}
         onOpenChange={(next) => {
+          if (disabled) return;
           setOpen(next);
           if (!next) setSearch("");
         }}
       >
         <PopoverTrigger
-          disabled={runtimes.length === 0 && !runtimesLoading}
+          disabled={disabled || (runtimes.length === 0 && !runtimesLoading)}
           className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
         >
           {runtimesLoading ? (

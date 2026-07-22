@@ -54,6 +54,20 @@ RETURNING *;
 DELETE FROM agent
 WHERE id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%';
 
+-- name: UpdateAgentBuilderRuntime :one
+-- Re-bind a builder carrier agent to a new runtime mid-session. Model is
+-- reset wholesale (models are per-runtime). The kind/system_key guard
+-- prevents this path from ever touching a user-authored agent. Does not
+-- mutate chat_session.runtime_id — the daemon resume guard skips prior
+-- provider sessions when runtime_id mismatches.
+UPDATE agent
+SET runtime_id = @runtime_id,
+    runtime_mode = @runtime_mode,
+    model = sqlc.narg('model'),
+    updated_at = now()
+WHERE id = @id AND kind = 'system' AND system_key LIKE 'agent_builder:%'
+RETURNING *;
+
 -- name: UpdateAgent :one
 -- composio_toolkit_allowlist is set wholesale: the API layer is responsible
 -- for normalising the request payload to either (a) the new slug list — sent

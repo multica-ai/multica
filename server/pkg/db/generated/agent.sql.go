@@ -4957,6 +4957,67 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 	return i, err
 }
 
+const updateAgentBuilderRuntime = `-- name: UpdateAgentBuilderRuntime :one
+UPDATE agent
+SET runtime_id = $1,
+    runtime_mode = $2,
+    model = $3,
+    updated_at = now()
+WHERE id = $4 AND kind = 'system' AND system_key LIKE 'agent_builder:%'
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+`
+
+type UpdateAgentBuilderRuntimeParams struct {
+	RuntimeID   pgtype.UUID `json:"runtime_id"`
+	RuntimeMode string      `json:"runtime_mode"`
+	Model       pgtype.Text `json:"model"`
+	ID          pgtype.UUID `json:"id"`
+}
+
+// Re-bind a builder carrier agent to a new runtime mid-session. Model is
+// reset wholesale (models are per-runtime). The kind/system_key guard
+// prevents this path from ever touching a user-authored agent. Does not
+// mutate chat_session.runtime_id — the daemon resume guard skips prior
+// provider sessions when runtime_id mismatches.
+func (q *Queries) UpdateAgentBuilderRuntime(ctx context.Context, arg UpdateAgentBuilderRuntimeParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, updateAgentBuilderRuntime,
+		arg.RuntimeID,
+		arg.RuntimeMode,
+		arg.Model,
+		arg.ID,
+	)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.ComposioToolkitAllowlist,
+		&i.PermissionMode,
+		&i.Kind,
+		&i.SystemKey,
+	)
+	return i, err
+}
+
 const updateAgentCustomEnv = `-- name: UpdateAgentCustomEnv :one
 UPDATE agent
 SET custom_env = $2, updated_at = now()
