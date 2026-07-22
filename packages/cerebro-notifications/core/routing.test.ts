@@ -3,6 +3,7 @@ import {
   CHANNELS,
   DEFAULT_CHANNEL_CHOICES,
   DEFAULT_CHANNEL_TRANSPORT,
+  SPLIT_TYPES,
   getChannelChoice,
   getChannelTransport,
   getDMExcerpt,
@@ -58,6 +59,18 @@ describe("getChannelChoice", () => {
     expect(getChannelChoice(prefs, "mobile", "mentioned")).toBe("on");
   });
 
+  test("inherits a legacy explicit choice for both split variants", () => {
+    const prefs = {
+      notifications: { mobile: { new_comment: "off" } },
+    };
+    expect(
+      getChannelChoice(prefs, "mobile", "new_comment.assignee"),
+    ).toBe("off");
+    expect(
+      getChannelChoice(prefs, "mobile", "new_comment.follower"),
+    ).toBe("off");
+  });
+
   test("split keys are looked up with the .assignee / .follower suffix as-is", () => {
     expect(
       getChannelChoice(undefined, "inbox", "due_date_changed.assignee"),
@@ -65,6 +78,35 @@ describe("getChannelChoice", () => {
     expect(
       getChannelChoice(undefined, "inbox", "due_date_changed.follower"),
     ).toBe("off");
+
+    expect(
+      getChannelChoice(
+        undefined,
+        "mobile",
+        "new_comment.assignee",
+      ),
+    ).toBe("on");
+    expect(
+      getChannelChoice(
+        undefined,
+        "mobile",
+        "new_comment.follower",
+      ),
+    ).toBe("off");
+  });
+});
+
+describe("SPLIT_TYPES", () => {
+  test("separates noisy issue events for assignees and followers", () => {
+    expect([...SPLIT_TYPES]).toEqual(
+      expect.arrayContaining([
+        "new_comment",
+        "status_changed",
+        "agent_comment_no_tag",
+        "agent_comment_member_tag",
+        "agent_comment_agent_tag",
+      ]),
+    );
   });
 });
 
