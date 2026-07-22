@@ -705,3 +705,110 @@ func TestIssueTableHierarchyDoesNotCrossGroups(t *testing.T) {
 		t.Fatalf("hierarchy rows query must preserve ordered paging and page-local counts:\n%s", rowQuerySQL)
 	}
 }
+
+func TestIssueTableHierarchyRootKeysetPagination(t *testing.T) {
+	ctx := context.Background()
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, 'Server table hierarchy pagination')
+		RETURNING id
+	`, testWorkspaceID).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE project_id = $1`, projectID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+	})
+
+	var finalNumber int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = GREATEST(
+			issue_counter,
+			(SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)
+		) + 3
+		WHERE id = $1
+		RETURNING issue_counter
+	`, testWorkspaceID).Scan(&finalNumber); err != nil {
+		t.Fatalf("reserve issue numbers: %v", err)
+	}
+	rows, err := testPool.Query(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			position, number, project_id
+		)
+		SELECT $1, 'Hierarchy root ' || n::text, 'todo', 'none', 'member', $2,
+		       n::double precision, $3 + n - 1, $4
+		FROM generate_series(1, 3) AS n
+		ORDER BY n
+		RETURNING id
+	`, testWorkspaceID, testUserID, finalNumber-2, projectID)
+	if err != nil {
+		t.Fatalf("seed hierarchy roots: %v", err)
+	}
+	expectedIDs := make(map[string]struct{}, 3)
+	for rows.Next() {
+		var issueID string
+		if err := rows.Scan(&issueID); err != nil {
+			rows.Close()
+			t.Fatalf("scan hierarchy root: %v", err)
+		}
+		expectedIDs[issueID] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatalf("seed hierarchy roots: %v", err)
+	}
+	rows.Close()
+
+	query := issueTableQuerySpec{
+		Scope: issueTableScope{Kind: "project", ProjectID: projectID},
+		Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+	}
+	fetchPage := func(cursor *string) issueTableRowsResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.ListIssueTableRows(w, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
+			Query:     query,
+			Group:     issueTableGroupSpec{Kind: "none"},
+			Hierarchy: issueTableHierarchyRequest{Enabled: true},
+			Page:      issueTablePageRequest{Limit: 2, Cursor: cursor},
+		}))
+		if w.Code != http.StatusOK {
+			t.Fatalf("list hierarchy roots: status=%d body=%s", w.Code, w.Body.String())
+		}
+		var response issueTableRowsResponse
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatalf("decode hierarchy roots: %v", err)
+		}
+		return response
+	}
+
+	first := fetchPage(nil)
+	if first.Total != 3 || len(first.Rows) != 2 || first.NextCursor == nil {
+		t.Fatalf("unexpected first hierarchy page: total=%d rows=%d cursor=%v", first.Total, len(first.Rows), first.NextCursor)
+	}
+	second := fetchPage(first.NextCursor)
+	if second.Total != 0 || len(second.Rows) != 1 || second.NextCursor != nil {
+		t.Fatalf("unexpected second hierarchy page: total=%d rows=%d cursor=%v", second.Total, len(second.Rows), second.NextCursor)
+	}
+
+	seenIDs := make(map[string]struct{}, 3)
+	for _, page := range []issueTableRowsResponse{first, second} {
+		for _, row := range page.Rows {
+			if _, duplicate := seenIDs[row.Issue.ID]; duplicate {
+				t.Fatalf("hierarchy root %s repeated across pages", row.Issue.ID)
+			}
+			seenIDs[row.Issue.ID] = struct{}{}
+		}
+	}
+	if len(seenIDs) != len(expectedIDs) {
+		t.Fatalf("reachable hierarchy roots = %d, want %d", len(seenIDs), len(expectedIDs))
+	}
+	for issueID := range expectedIDs {
+		if _, ok := seenIDs[issueID]; !ok {
+			t.Fatalf("hierarchy root %s was not reachable through pagination", issueID)
+		}
+	}
+}

@@ -310,7 +310,7 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 	cte := fmt.Sprintf(`%spage AS MATERIALIZED (
   SELECT i.*, (%s)::text AS table_sort_key
   FROM %s i
-  WHERE %s AND %s
+  WHERE (%s) AND %s
   ORDER BY %s
   LIMIT %s
 )`, ctePrefix, resolvedSort.expression, pageSource, pagePredicate, cursorPredicate, resolvedSort.orderBy(), limitRef)
