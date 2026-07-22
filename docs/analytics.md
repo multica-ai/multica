@@ -739,6 +739,20 @@ provider/online/offline counts. The server supplies user, date, and timestamps.
 Device names, hostnames, local usernames, filesystem paths, raw user agents,
 IP addresses, and raw probe errors are not stored here.
 
+`first_active_at` and `last_active_at` are the first and latest successful
+reports **within that UTC day**, not lifetime installation timestamps. Compute
+historical first use with `min(first_active_at)` across the installation's daily
+rows. The client's UTC day is only a best-effort request throttle; the server's
+UTC date is authoritative, so clock skew near midnight can delay the next row
+until a later focus/resume without assigning activity to the wrong server day.
+
+Desktop runtime availability is deliberately a daemon-level approximation in
+this MVP, not a connection test for each provider. The probe counts locally
+detected providers; if the managed daemon is running, all detected providers
+are reported online, and otherwise they are reported offline. Use
+`probe_result = 'error'` as unknown rather than treating a failed probe as zero
+runtimes.
+
 Use this query for a 30-day client split and user-level Desktop runtime state.
 It first selects the latest non-null probe for each installation, then rolls
 installations up to the user so multi-device users are not double counted and
@@ -803,8 +817,10 @@ add another in-process background job; operators should run
 `DELETE FROM client_usage_daily WHERE activity_date < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 179`
 through the existing database-maintenance schedule until a shared retention
 worker exists. Deleting a workspace nulls its optional context, while deleting
-a user must delete that user's daily rows explicitly because this table has no
-foreign keys by repository policy.
+a user must delete that user's daily rows in the same application transaction
+because this table has no foreign keys by repository policy. There is currently
+no production account hard-delete path; any future one must add that explicit
+cleanup before it deletes the user row.
 
 ## Governance
 

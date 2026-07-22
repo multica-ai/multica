@@ -118,7 +118,11 @@ export function CoreProvider({
         cookieAuth={cookieAuth}
         identity={identity}
       >
-        <ClientUsageReporter storage={storage} identity={identity} />
+        {/* Desktop's reporter owns both activity and runtime state so it must
+            be the only writer for that installation. */}
+        {identity?.platform !== "desktop" && (
+          <ClientUsageReporter storage={storage} identity={identity} />
+        )}
         <WSProvider
           wsUrl={wsUrl}
           authStore={authStore}
