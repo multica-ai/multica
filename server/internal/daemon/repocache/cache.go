@@ -644,6 +644,14 @@ func (c *Cache) createOrUpdateIsolatedCheckout(barePath, repoURL, checkoutPath, 
 		if err := setIsolatedCheckoutOrigin(checkoutPath, repoURL); err != nil {
 			return "", err
 		}
+		// Idempotent, and required for a workdir that was first created while
+		// the cache was still a full clone: without it, a checkout backed by a
+		// blobless cache resolves missing blobs to nothing instead of fetching.
+		if isPartialClone(barePath) {
+			if err := configurePromisorRemote(checkoutPath); err != nil {
+				return "", err
+			}
+		}
 		if err := syncIsolatedCheckoutRefs(barePath, checkoutPath, baseRef); err != nil {
 			return "", err
 		}
@@ -731,17 +739,30 @@ func createIsolatedCheckout(barePath, repoURL, checkoutPath, branchName, baseRef
 		}
 	}()
 
-	if out, err := runGitCombinedOutput("-C", checkoutPath, "checkout", "--detach", baseCommit); err != nil {
-		return "", fmt.Errorf("git checkout --detach: %s: %w", strings.TrimSpace(string(out)), err)
-	}
+	// The origin swap has to happen before the first checkout when the cache
+	// is a partial clone. `git clone --local` hardlinks the objects it can see
+	// and does NOT inherit the promisor configuration, so a blobless cache
+	// yields a checkout whose blobs are unreachable — and git reports that as
+	// success with every file "deleted" rather than as an error. Pointing
+	// origin at the real remote and restoring the promisor config first lets
+	// the checkout below lazily fetch what it needs.
 	if out, err := runGitCombinedOutput("-C", checkoutPath, "remote", "remove", isolatedCacheRemoteName); err != nil {
 		return "", fmt.Errorf("remove cache remote: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	if err := deleteAllLocalBranches(checkoutPath); err != nil {
-		return "", err
-	}
 	if out, err := runGitCombinedOutput("-C", checkoutPath, "remote", "add", "origin", repoURL); err != nil {
 		return "", fmt.Errorf("add origin remote: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	if isPartialClone(barePath) {
+		if err := configurePromisorRemote(checkoutPath); err != nil {
+			return "", err
+		}
+	}
+
+	if out, err := runGitCombinedOutput("-C", checkoutPath, "checkout", "--detach", baseCommit); err != nil {
+		return "", fmt.Errorf("git checkout --detach: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	if err := deleteAllLocalBranches(checkoutPath); err != nil {
+		return "", err
 	}
 	if err := syncIsolatedCheckoutRefs(barePath, checkoutPath, baseRef); err != nil {
 		return "", err
@@ -777,6 +798,39 @@ func isIsolatedCheckout(path string) bool {
 	}
 	out, err := runGitOutput("-C", path, "config", "--get", isolatedCheckoutConfigKey)
 	return err == nil && strings.TrimSpace(string(out)) == isolatedCheckoutConfigValue
+}
+
+// partialCloneFilter is the object filter a blobless partial clone is created
+// with, and the value that has to be restored on any repository that inherits
+// such a clone's incomplete object store.
+const partialCloneFilter = "blob:none"
+
+// isPartialClone reports whether a repository was created as a partial clone,
+// i.e. whether git will lazily fetch missing objects from its promisor remote.
+func isPartialClone(repoPath string) bool {
+	out, err := runGitOutputWithTimeout(30*time.Second, "-C", repoPath, "config", "--get", "remote.origin.promisor")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "true"
+}
+
+// configurePromisorRemote marks origin as the promisor remote for a repository
+// whose object store is incomplete, so git lazily fetches missing blobs from
+// the real remote instead of failing. It mirrors the two config keys
+// `git clone --filter=blob:none` writes; `git clone --local` does not copy
+// them across, which is why they have to be restored by hand.
+func configurePromisorRemote(repoPath string) error {
+	settings := [][2]string{
+		{"remote.origin.promisor", "true"},
+		{"remote.origin.partialclonefilter", partialCloneFilter},
+	}
+	for _, kv := range settings {
+		if out, err := runGitCombinedOutput("-C", repoPath, "config", kv[0], kv[1]); err != nil {
+			return fmt.Errorf("set %s: %s: %w", kv[0], strings.TrimSpace(string(out)), err)
+		}
+	}
+	return nil
 }
 
 func setIsolatedCheckoutOrigin(path, repoURL string) error {
