@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/internalbrowserqa"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/spf13/cobra"
 )
@@ -48,10 +49,13 @@ type agentBrowserProvisionOptions struct {
 }
 
 type internalBrowserVerifyRequest struct {
-	App string `json:"app"`
+	App   string `json:"app"`
+	Async bool   `json:"async,omitempty"`
 }
 
 type internalBrowserVerifyResponse struct {
+	JobID         string   `json:"job_id"`
+	State         string   `json:"state"`
 	Error         string   `json:"error"`
 	App           string   `json:"app"`
 	InternalHost  string   `json:"internal_host"`
@@ -162,9 +166,18 @@ func verifyInternalAgentBrowser(ctx context.Context, client *cli.APIClient, out 
 	var response internalBrowserVerifyResponse
 	status, err := client.PostJSONWithDiagnostic(ctx,
 		"/api/cerebro/agent-browser/internal-verify",
-		internalBrowserVerifyRequest{App: app}, &response, http.StatusUnprocessableEntity)
+		internalBrowserVerifyRequest{App: app, Async: true}, &response, http.StatusUnprocessableEntity)
 	if err != nil {
 		return err
+	}
+	if status == http.StatusAccepted {
+		if response.JobID == "" {
+			return fmt.Errorf("internal browser verification returned an invalid job")
+		}
+		response, status, err = pollInternalBrowserVerification(ctx, client, response.JobID)
+		if err != nil {
+			return err
+		}
 	}
 	if status == http.StatusUnprocessableEntity {
 		return reportInternalBrowserFailure(out, response, screenshotPath)
@@ -180,6 +193,25 @@ func verifyInternalAgentBrowser(ctx context.Context, client *cli.APIClient, out 
 		"app": response.App, "internal_host": response.InternalHost, "final_url": response.FinalURL,
 		"markers": response.Markers, "errors": response.Errors, "screenshot": absPath,
 	})
+}
+
+func pollInternalBrowserVerification(ctx context.Context, client *cli.APIClient, jobID string) (internalBrowserVerifyResponse, int, error) {
+	path := "/api/cerebro/agent-browser/internal-verify/" + jobID
+	for {
+		var response internalBrowserVerifyResponse
+		status, err := client.GetJSONWithDiagnostic(ctx, path, &response, http.StatusUnprocessableEntity)
+		if err != nil {
+			return internalBrowserVerifyResponse{}, status, err
+		}
+		if status != http.StatusAccepted {
+			return response, status, nil
+		}
+		select {
+		case <-ctx.Done():
+			return internalBrowserVerifyResponse{}, 0, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 func writeInternalBrowserScreenshot(screenshot []byte, screenshotPath string) (string, error) {
@@ -234,7 +266,11 @@ func reportInternalBrowserFailure(out io.Writer, response internalBrowserVerifyR
 	return fmt.Errorf("%s", message)
 }
 
-const internalBrowserVerifyTimeout = 2 * time.Minute
+// The caller must outlast the verifier's own worst case, plus a margin for the
+// request itself. At two minutes it did not: the verifier can spend 155s on the
+// open stage alone once the cold-start retry fires, so the CLI hung up mid-retry
+// and reported "context deadline exceeded" for apps that were merely idle.
+const internalBrowserVerifyTimeout = internalbrowserqa.MaxVerificationDuration + time.Minute
 
 func configureInternalBrowserVerifyClient(client *cli.APIClient) {
 	client.HTTPClient.Timeout = internalBrowserVerifyTimeout

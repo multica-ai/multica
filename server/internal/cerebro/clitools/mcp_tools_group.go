@@ -231,7 +231,7 @@ func registerCerebroGroupTools(srv *mcp.Server, client *cli.APIClient) {
 
 	srv.RegisterTool(mcp.Tool{
 		Name:        "list_group_capabilities",
-		Description: "List capabilities granted to a group. Capabilities (e.g. 'create_runtime', 'create_agent') let group members perform workspace-scoped admin actions without being workspace admins.",
+		Description: "List capabilities granted to a group. Capabilities (for example 'create_runtime', 'create_agent', or 'apps.manage') let group members perform workspace-scoped actions without being workspace admins.",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"group_id"},
@@ -253,13 +253,13 @@ func registerCerebroGroupTools(srv *mcp.Server, client *cli.APIClient) {
 
 	srv.RegisterTool(mcp.Tool{
 		Name:        "set_group_capability",
-		Description: "Grant a capability to a group. Workspace admin/owner only. Known capabilities: 'create_runtime', 'create_agent'.",
+		Description: "Grant a capability to a group. Workspace admin/owner only. Known capabilities: 'create_runtime', 'create_agent', 'apps.create', 'apps.manage', 'apps.delete', 'create_shared_filters', 'create_memory', and 'set_blocking_gate'.",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"group_id", "capability"},
 			"properties": map[string]any{
 				"group_id":   map[string]any{"type": "string", "description": "Group UUID"},
-				"capability": map[string]any{"type": "string", "description": "Capability identifier (create_runtime, create_agent)"},
+				"capability": map[string]any{"type": "string", "description": "Capability identifier, for example create_runtime or apps.manage"},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {

@@ -45,8 +45,10 @@ import {
   buildPermissionAuditRows,
 } from "./permission-audit";
 import type {
+  PermissionAuditAgent,
   PermissionAuditCell,
   PermissionAuditEffectiveCell,
+  PermissionAuditMember,
   PermissionAuditResolved,
   PermissionAuditRow,
 } from "./permission-audit";
@@ -358,6 +360,58 @@ function PermissionAuditMatrix({ rows }: { rows: PermissionAuditRow[] }) {
   );
 }
 
+type AgentUserDecision = {
+  member: PermissionAuditMember;
+  setting?: string;
+  source?: string;
+};
+
+function AgentUsersTable({
+  agent,
+  decisions,
+  isLoading,
+}: {
+  agent: PermissionAuditAgent;
+  decisions: AgentUserDecision[];
+  isLoading: boolean;
+}) {
+  if (isLoading) {
+    return <p className="p-6 text-sm text-muted-foreground">Loading users…</p>;
+  }
+
+  return (
+    <Table aria-label={`Users for ${agent.name}`}>
+      <TableHeader>
+        <TableRow>
+          <TableHead>User</TableHead>
+          <TableHead>Access</TableHead>
+          <TableHead>Why</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {decisions.map(({ member, setting, source }) => (
+          <TableRow key={member.id}>
+            <TableCell>
+              <div className="font-medium">{member.name}</div>
+              <div className="text-xs text-muted-foreground">{member.email}</div>
+            </TableCell>
+            <TableCell>
+              {setting ? (
+                <DecisionBadge setting={setting} />
+              ) : (
+                <span className="text-sm text-muted-foreground">Unavailable</span>
+              )}
+            </TableCell>
+            <TableCell className="text-sm text-muted-foreground">
+              {source ?? "Unable to resolve"}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
 export function PermissionDetailPage({
   toolKey,
   onBack,
@@ -387,6 +441,8 @@ export function PermissionDetailPage({
   });
 
   const directory = useHolderDirectory(wsId, enabled);
+  const [activeTab, setActiveTab] = useState("audit");
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [decisionFilter, setDecisionFilter] = useState<
     "all" | "deny" | "ask" | "allow"
@@ -495,6 +551,53 @@ export function PermissionDetailPage({
           ].some((cell) => cell.setting === decisionFilter)),
     );
   }, [auditRows, decisionFilter, search]);
+  const selectedAgent = directory.agents.find((agent) => agent.id === selectedAgentId);
+  const agentUserContexts = useMemo(
+    () =>
+      activeTab === "agents" && selectedAgent
+        ? directory.members.map((member) => ({
+            id: `${selectedAgent.id}:${member.id}:${selectedAgent.runtimeId}`,
+            userId: member.id,
+            agentId: selectedAgent.id,
+            ...(selectedAgent.runtimeId ? { runtimeId: selectedAgent.runtimeId } : {}),
+          }))
+        : [],
+    [activeTab, directory.members, selectedAgent],
+  );
+  const agentUserQueries = useQueries({
+    queries: agentUserContexts.map((context) => ({
+      queryKey: [
+        "cerebro",
+        "tool-policy",
+        "agent-user-permission-audit",
+        wsId,
+        toolKey,
+        context.agentId,
+        context.userId,
+        context.runtimeId ?? null,
+      ],
+      queryFn: async () => {
+        const rows = await fetchToolPolicyTable(wsId, context);
+        const row = rows.find((candidate) => candidate.tool_key === toolKey);
+        if (!row) return null;
+        const source = row.effective.capped_by || row.effective.decided_by;
+        return {
+          setting: row.effective.setting,
+          source: source ? layerLabel(source) : "Default",
+        };
+      },
+      enabled: enabled && Boolean(wsId && toolKey && selectedAgent),
+    })),
+  });
+  const agentUserDecisions = useMemo(
+    () =>
+      agentUserContexts.map((context, index) => ({
+        member: directory.members.find((member) => member.id === context.userId)!,
+        ...agentUserQueries[index]?.data,
+      })),
+    [agentUserContexts, agentUserQueries, directory.members],
+  );
+  const agentUsersLoading = agentUserQueries.some((query) => query.isLoading);
 
   // Safety fallback: the route always registers, so guard the flag here. Nothing
   // links to the page while off, so this is only reached by a hand-typed URL.
@@ -540,9 +643,10 @@ export function PermissionDetailPage({
         </div>
       </header>
 
-      <Tabs defaultValue="audit">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList variant="line" className="mb-3">
           <TabsTrigger value="audit">Permission audit</TabsTrigger>
+          <TabsTrigger value="agents">Agents {directory.agents.length}</TabsTrigger>
           <TabsTrigger value="changes">
             Changes {(changesQuery.data?.changes ?? []).length}
           </TabsTrigger>
@@ -626,6 +730,39 @@ export function PermissionDetailPage({
           </section>
         </TabsContent>
 
+        <TabsContent value="agents" className="pt-2">
+          <section className="overflow-hidden rounded-xl border bg-card">
+            <div className="border-b p-4">
+              <h2 className="font-semibold">Agents</h2>
+              <p className="text-sm text-muted-foreground">
+                Select an agent to see every user's effective access to this permission.
+              </p>
+            </div>
+            {directory.isLoading ? (
+              <p className="p-6 text-sm text-muted-foreground">Loading agents…</p>
+            ) : directory.agents.length === 0 ? (
+              <p className="p-6 text-sm text-muted-foreground">No agents found.</p>
+            ) : (
+              <div className="divide-y">
+                {directory.agents.map((agent) => (
+                  <AgentUsersRow
+                    key={agent.id}
+                    agent={agent}
+                    runtimeName={
+                      directory.runtimes.find((runtime) => runtime.id === agent.runtimeId)?.name ??
+                      "No runtime"
+                    }
+                    isSelected={selectedAgentId === agent.id}
+                    decisions={agentUserDecisions}
+                    isLoading={agentUsersLoading}
+                    onSelect={() => setSelectedAgentId(agent.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        </TabsContent>
+
         <TabsContent value="changes" className="pt-4">
           {changesQuery.isLoading || directory.isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
@@ -703,5 +840,46 @@ export function PermissionDetailPage({
         </TabsContent>
       </Tabs>
     </main>
+  );
+}
+
+function AgentUsersRow({
+  agent,
+  runtimeName,
+  isSelected,
+  decisions,
+  isLoading,
+  onSelect,
+}: {
+  agent: PermissionAuditAgent;
+  runtimeName: string;
+  isSelected: boolean;
+  decisions: AgentUserDecision[];
+  isLoading: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <div className="p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="font-medium">{agent.name}</div>
+          <div className="text-sm text-muted-foreground">{runtimeName}</div>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant={isSelected ? "secondary" : "outline"}
+          aria-label={`View users for ${agent.name}`}
+          onClick={onSelect}
+        >
+          View users
+        </Button>
+      </div>
+      {isSelected ? (
+        <div className="mt-4 overflow-x-auto rounded-lg border">
+          <AgentUsersTable agent={agent} decisions={decisions} isLoading={isLoading} />
+        </div>
+      ) : null}
+    </div>
   );
 }

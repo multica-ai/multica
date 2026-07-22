@@ -1554,6 +1554,8 @@ type acpProviderErrorSniffer struct {
 	lines    []string // captured error lines, bounded
 	seen     map[string]bool
 	terminal bool // sticky: at least one line matched acpTerminalErrorRe
+
+	sawHeader bool // CEREBRO-PATCH(acp-error-attribution): FIR-3651 — sticky: a detail line only counts inside an error block.
 }
 
 // acpErrorHeaderRe matches the first line of an API-error block.
@@ -1614,9 +1616,10 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 		if line == "" {
 			continue
 		}
-		if !(acpErrorHeaderRe.MatchString(line) || acpErrorDetailRe.MatchString(line)) {
+		if !acpCaptureErrorLine(line, s.sawHeader) { // CEREBRO-PATCH(acp-error-attribution): FIR-3651 — don't capture ordinary tool output as a provider error.
 			continue
 		}
+		s.sawHeader = s.sawHeader || acpErrorHeaderRe.MatchString(line) // CEREBRO-PATCH(acp-error-attribution): FIR-3651
 		if acpTerminalErrorRe.MatchString(line) {
 			s.terminal = true
 		}
@@ -1668,20 +1671,11 @@ func (s *acpProviderErrorSniffer) terminalMessage() string {
 // and terminalMessage(). Caller must hold s.mu.
 func (s *acpProviderErrorSniffer) messageLocked() string {
 	prefix := s.provider + " provider error: "
-	for _, line := range s.lines {
-		if m := acpErrorDetailRe.FindStringSubmatch(line); m != nil {
-			detail := strings.TrimSpace(m[1])
-			if detail != "" {
-				return prefix + detail
-			}
-		}
+	detail := selectACPErrorDetail(s.lines) // CEREBRO-PATCH(acp-error-attribution): FIR-3651 — report the terminal error, not the first one seen.
+	if detail == "" {
+		return ""
 	}
-	for _, line := range s.lines {
-		if acpErrorHeaderRe.MatchString(line) {
-			return prefix + line
-		}
-	}
-	return ""
+	return prefix + detail
 }
 
 // promoteACPResultOnProviderError flips finalStatus to "failed" if

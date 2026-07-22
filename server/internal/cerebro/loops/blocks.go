@@ -117,14 +117,20 @@ type Block struct {
 	StatusOnDone  string `yaml:"status_on_done,omitempty" json:"status_on_done,omitempty"`
 
 	// Skill is the skill run by a BlockSession, and the skill a BlockReview
-	// runs instead of a bare rubric prompt when set.
-	Skill string `yaml:"skill,omitempty" json:"skill,omitempty"`
+	// runs instead of a bare rubric prompt when set. Skills is the multi-skill
+	// form selected through slash references. Skill remains readable for saved
+	// Chain v2 specs created before multi-skill support.
+	Skill  string   `yaml:"skill,omitempty" json:"skill,omitempty"`
+	Skills []string `yaml:"skills,omitempty" json:"skills,omitempty"`
 	// Goal is free-text instruction for a BlockSession's step.
 	Goal string `yaml:"goal,omitempty" json:"goal,omitempty"`
 
-	// Check is a BlockCommand's argv. Never a shell string.
-	Check  []string `yaml:"check,omitempty" json:"check,omitempty"`
-	Expect string   `yaml:"expect,omitempty" json:"expect,omitempty"`
+	// CommandID records which reusable catalog entry supplied Check. Check is
+	// still snapshotted as argv so saved workflows remain executable if the
+	// library entry later changes or is deleted.
+	CommandID string   `yaml:"command_id,omitempty" json:"command_id,omitempty"`
+	Check     []string `yaml:"check,omitempty" json:"check,omitempty"`
+	Expect    string   `yaml:"expect,omitempty" json:"expect,omitempty"`
 
 	// Rubric is what a BlockReview scores against.
 	Rubric string `yaml:"rubric,omitempty" json:"rubric,omitempty"`
@@ -308,7 +314,7 @@ func validateBlock(label string, b Block, limits PhaseLimits) []error {
 
 	switch b.Type {
 	case BlockSession:
-		if b.Skill == "" {
+		if len(b.ConfiguredSkills()) == 0 {
 			errs = append(errs, fmt.Errorf("%s: session block needs a skill", label))
 		}
 	case BlockCommand:
@@ -378,6 +384,24 @@ func validateBlock(label string, b Block, limits PhaseLimits) []error {
 	}
 
 	return errs
+}
+
+// ConfiguredSkills returns the de-duplicated multi-skill list while retaining
+// the legacy singular field for workflows saved before this capability.
+func (b Block) ConfiguredSkills() []string {
+	seen := make(map[string]struct{}, len(b.Skills)+1)
+	result := make([]string, 0, len(b.Skills)+1)
+	for _, name := range append(append([]string(nil), b.Skills...), b.Skill) {
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		result = append(result, name)
+	}
+	return result
 }
 
 func validBusyPolicy(p BusyPolicy) bool {

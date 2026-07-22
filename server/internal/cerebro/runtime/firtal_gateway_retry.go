@@ -115,3 +115,36 @@ func isTransientGatewayError(errText string) bool {
 	}
 	return matchesTransientTransportText(lower)
 }
+
+// isProviderUnreachableError reports whether the agent process could not open
+// a connection to its model provider at all — not a slow or half-broken call,
+// but "no socket". isTransientGatewayError deliberately only covers our own
+// AI gateway (it is gated on the word "gateway" so unrelated connection errors
+// to other hosts are not swept in); a runtime talking straight to a provider
+// emits none of those strings, so it was never pause-worthy (FIR-3651).
+//
+// That gap is expensive: a runtime in this state stays online and keeps
+// claiming work, and every task it claims burns both of its attempts on the
+// same error before surfacing red. Claude (sara.local) failed 14 of its last
+// 15 runs this way on 2026-07-22 while Codex on the very same machine
+// completed 212 runs in the same windows.
+//
+// The signatures below are deliberately narrow — each one means "the socket
+// could not be opened", never "the request failed" — so a single unrelated
+// blip cannot pause a healthy runtime. Callers pair it with the existing
+// auto-pause backoff and circuit breaker, so a one-off still self-heals.
+func isProviderUnreachableError(errText string) bool {
+	lower := strings.ToLower(errText)
+	for _, sig := range []string{
+		// Bun/Node socket-open failure surfaced by the Claude Code CLI.
+		"failedtoopensocket",
+		"unable to connect to api",
+		"no such host",
+		"network is unreachable",
+	} {
+		if strings.Contains(lower, sig) {
+			return true
+		}
+	}
+	return false
+}

@@ -39,6 +39,7 @@ import (
 	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196 credential registry handler import
 	cerebrocredentials "github.com/multica-ai/multica/server/internal/cerebro/credentials"
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler import
+	cerebrocommands "github.com/multica-ai/multica/server/internal/cerebro/commands" // CEREBRO-PATCH(cerebro-commands-route): FIR-3493 reusable workflow command catalog.
 	cerebrodashboard "github.com/multica-ai/multica/server/internal/cerebro/dashboard"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroevals "github.com/multica-ai/multica/server/internal/cerebro/evals"                   // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 eval catalog API.
@@ -839,6 +840,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		WithPlanDocuments(workflowPlanDocuments)
 	evalExecutor := cerebroevalrun.New(pool)
 	cerebroEvalsHandler := cerebroevals.NewHandler(pool).WithRunExecutor(evalExecutor).WithActorResolver(h.ResolveActor).WithBlockingGateAuthorizer(evalBlockingGateAdapter{svc: cerebroGroupPermissionsHandler.Service}) // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308/FIR-3493 eval catalog + server runner. CEREBRO-PATCH(cerebro-evals-blocking-gate): FIR-3496 restrict blocking bindings. CEREBRO-PATCH(cerebro-evals-actor): FIR-3496 trusted ownership identity.
+	cerebroCommandsHandler := cerebrocommands.NewHandler(pool).WithActorResolver(h.ResolveActor)                                                                                                                          // CEREBRO-PATCH(cerebro-commands-route): FIR-3493 reusable workflow command catalog.
 	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool), cerebroevals.NewStore(pool).WithRunExecutor(evalExecutor))                                                            // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature; FIR-3496 Phase 4 eval store (eval.gate verdict + eval.run via the shared Run-now executor).
 	h.TaskService.WorkflowCompletionGate = workflowHooksFeature.CompletionGate                                                                                                                                            // CEREBRO-PATCH(workflow-hooks-completion-wire): FIR-3101 pre-completion delegation.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 — plug the loop planning-dispatch materializer so a run_skill workflow's `loop_planning` toggle actually creates its companion planning-phase rule (see workflows/loop_planning.go).
@@ -2160,6 +2162,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/cerebro/personal-browser/secure-fill", h.SecureFillPersonalBrowser)   // CEREBRO-PATCH(personal-browser-secure-fill): FIR-3006
 			r.Post("/api/cerebro/agent-browser/provision-auth", h.ProvisionAgentBrowserAuth)   // CEREBRO-PATCH(agent-browser-vault-route): FIR-3006
 			r.Post("/api/cerebro/agent-browser/internal-verify", h.VerifyInternalAgentBrowser) // CEREBRO-PATCH(internal-agent-browser-qa-route): FIR-3006
+			r.Get("/api/cerebro/agent-browser/internal-verify/{jobId}", h.GetInternalAgentBrowserVerification) // CEREBRO-PATCH(internal-agent-browser-qa-async): FIR-3006
 			// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools for the Multica MCP server (agent token; default-deny per agent).
 			r.Get("/api/cerebro/connection-tools", cerebroConnectionToolsHandler.List)
 			r.Post("/api/cerebro/connection-tools/call", cerebroConnectionToolsHandler.Call)
@@ -2227,6 +2230,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			r.Mount("/api/cerebro/workflow-hooks", workflowHooksFeature.Routes()) // CEREBRO-PATCH(workflow-hooks-routes): FIR-3101 fork-owned management API.
 			r.Mount("/api/cerebro/evals", cerebroEvalsHandler.Routes())           // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 catalog, runs, and workflow bindings.
+			r.Mount("/api/cerebro/commands", cerebroCommandsHandler.Routes())     // CEREBRO-PATCH(cerebro-commands-route): FIR-3493 reusable workflow command catalog.
 			// CEREBRO-PATCH(session-mode-config-routes): FIR-3111 versioned Mode configuration.
 			r.Route("/api/cerebro/session-modes", func(r chi.Router) {
 				r.Get("/", cerebroSessionModeHandler.List)

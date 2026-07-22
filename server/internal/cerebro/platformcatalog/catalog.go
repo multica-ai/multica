@@ -1311,6 +1311,15 @@ var excluded = map[string]string{
 	"POST /api/cerebro/embedded-chat/sessions":                      "personal-chat — verified embedded member creates their own API chat; application PAT and OIDC user assertion are both enforced",
 	"POST /api/cerebro/embedded-chat/sessions/{sessionId}/messages": "personal-chat — verified embedded member sends to their own API chat; session ownership and original_user_id are enforced",
 
+	// Workflow Command definitions are ordinary workspace-member content. Agent
+	// calls are already governed per concrete list_commands/get_command/create_command/
+	// update_command/delete_command tool by the shared list/call policy gate; the
+	// HTTP routes add workspace membership and row scoping, not a second platform
+	// capability.
+	"POST /api/cerebro/commands/":       "workspace-member content — creates a reusable Workflow Command; agent tool list/call authorization is enforced separately for create_command (FIR-3493)",
+	"PUT /api/cerebro/commands/{id}":    "workspace-member content — updates a workspace-scoped Workflow Command; agent tool list/call authorization is enforced separately for update_command (FIR-3493)",
+	"DELETE /api/cerebro/commands/{id}": "workspace-member content — deletes a workspace-scoped Workflow Command; agent tool list/call authorization is enforced separately for delete_command (FIR-3493)",
+
 	// daemon-token — runtime daemon callbacks; the daemon token binds the call to
 	// a runtime, which is the authorisation. Represented by daemon_runtime_callback.
 	"POST /api/daemon/accounts/{id}/usage":                                         "daemon-token — runtime daemon callback",

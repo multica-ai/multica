@@ -837,6 +837,19 @@ type CerebroChatSessionContext struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroCommand struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	CommandKey    string             `json:"command_key"`
+	Title         string             `json:"title"`
+	Description   string             `json:"description"`
+	Argv          []string           `json:"argv"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroCommentTask struct {
 	CommentID   pgtype.UUID        `json:"comment_id"`
 	TaskID      pgtype.UUID        `json:"task_id"`

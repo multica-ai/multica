@@ -321,6 +321,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/cerebro/commands/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/status-models/default",
       "gate": "workspace_admin"
     },
@@ -886,6 +890,10 @@
     },
     {
       "id": "POST /api/cerebro/evals/{id}/runs",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/commands/",
       "gate": "workspace_member"
     },
     {
@@ -1773,6 +1781,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/cerebro/commands/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/cerebro/strategy-items/{id}",
       "gate": "workspace_member"
     },
@@ -2155,6 +2167,10 @@
       "gate": "via:POST /api/workspaces/{id}/connections"
     },
     {
+      "id": "create_command",
+      "gate": "via:POST /api/cerebro/commands/"
+    },
+    {
       "id": "create_eval",
       "gate": "via:POST /api/cerebro/evals/"
     },
@@ -2175,6 +2191,10 @@
       "gate": "via:DELETE /api/workspaces/{id}/connections/{connId}"
     },
     {
+      "id": "delete_command",
+      "gate": "via:DELETE /api/cerebro/commands/{id}"
+    },
+    {
       "id": "delete_eval",
       "gate": "via:DELETE /api/cerebro/evals/{id}"
     },
@@ -2189,6 +2209,10 @@
     {
       "id": "get_connection",
       "exempt": "read-only — wraps GET /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "get_command",
+      "exempt": "read-only — wraps GET /api/cerebro/commands/{id}"
     },
     {
       "id": "get_eval",
@@ -2217,6 +2241,10 @@
     {
       "id": "list_connections",
       "exempt": "read-only — wraps GET /api/workspaces/{id}/connections"
+    },
+    {
+      "id": "list_commands",
+      "exempt": "read-only — wraps GET /api/cerebro/commands"
     },
     {
       "id": "list_eval_bindings",
@@ -2273,6 +2301,10 @@
     {
       "id": "update_connection",
       "gate": "via:PUT /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "update_command",
+      "gate": "via:PUT /api/cerebro/commands/{id}"
     },
     {
       "id": "update_eval",
@@ -3539,6 +3571,26 @@
     {
       "id": "version",
       "exempt": "local-only — prints build metadata"
+    },
+    {
+      "id": "command create",
+      "gate": "via:POST /api/cerebro/commands/"
+    },
+    {
+      "id": "command delete",
+      "gate": "via:DELETE /api/cerebro/commands/{id}"
+    },
+    {
+      "id": "command get",
+      "exempt": "read-only — wraps GET /api/cerebro/commands/{id}"
+    },
+    {
+      "id": "command list",
+      "exempt": "read-only — wraps GET /api/cerebro/commands"
+    },
+    {
+      "id": "command update",
+      "gate": "via:PUT /api/cerebro/commands/{id}"
     },
     {
       "id": "wakeup cancel",

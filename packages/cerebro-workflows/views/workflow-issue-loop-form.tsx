@@ -4,7 +4,9 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { skillListOptions } from "@multica/core/workspace/queries";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { commandsListOptions } from "@multica/cerebro-commands";
 import { cn } from "@multica/ui/lib/utils";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { AppLink, useNavigation } from "@multica/views/navigation";
@@ -22,13 +24,14 @@ import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { AgentPicker } from "@multica/views/autopilots/components/pickers/agent-picker";
 import { AssigneePicker } from "@multica/views/issues/components";
+import { ContentEditor } from "@multica/views/editor";
 import { ChevronDown, Eye, Gauge, GripVertical, Play, Plus, SquareTerminal, Trash2, User } from "lucide-react";
 
-import { SkillNamePicker } from "./loop-pickers";
 import { MachineControlNotice } from "./workflow-issue-loop-chain";
 import {
   BLOCK_TYPES,
   ISSUE_STATUS_OPTIONS,
+  applyCommandSelection,
   issueStatusLabel,
   blockMeta,
   blockSummary,
@@ -36,6 +39,7 @@ import {
   nudgePhase,
   reorderBlocks,
   reorderPhases,
+  skillNamesFromPrompt,
   totalSteps,
   type LoopBlockKind,
 } from "./loop-chain-model";
@@ -173,16 +177,24 @@ export const WF_STEP_COLOR_CSS = `
 interface EditorScope {
   workflowId?: string;
   gatesHref: string;
+  commandsHref: string;
 }
 
-const EditorScopeContext = createContext<EditorScope>({ gatesHref: "" });
+const EditorScopeContext = createContext<EditorScope>({ gatesHref: "", commandsHref: "" });
 
 function key(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 // A new Human step is born with a usable request instead of an empty box.
-const DEFAULT_APPROVAL_PROMPT = "Confirm the delivered result is correct and ready to ship.";
+export const DEFAULT_APPROVAL_PROMPT = `Work completed:
+{{previous.output}}
+
+Evidence:
+{{previous.evidence}}
+
+Approval requested:
+Confirm the work is correct and the workflow may continue.`;
 
 function newBlock(type: LoopBlockType = "session"): LoopChainBlock {
   const id = key(type);
@@ -386,7 +398,7 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
   );
 
   return (
-    <EditorScopeContext.Provider value={{ workflowId, gatesHref: `/${workspace.slug}/workflows/evals` }}>
+    <EditorScopeContext.Provider value={{ workflowId, gatesHref: `/${workspace.slug}/workflows/evals`, commandsHref: `/${workspace.slug}/workflows/commands` }}>
       <div data-wf-editor="" className="flex h-full flex-col">
         <style>{WF_STEP_COLOR_CSS}</style>
         <div className="sticky top-0 z-10 flex shrink-0 items-center border-b bg-background px-4 py-2.5 sm:px-6">{topBar}</div>
@@ -827,32 +839,13 @@ export function StepStatusFields({ block, onChange }: { block: LoopChainBlock; o
 
 function BlockFields({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
   if (block.type === "session") {
-    return (
-      <>
-        <AgentCandidates block={block} onChange={onChange} />
-        <Field label="Skill"><SkillNamePicker value={block.skill ?? ""} onChange={(skill) => onChange((current) => ({ ...current, skill }))} placeholder="Select the skill this session runs" /></Field>
-        <Field label="What should this step accomplish?"><Textarea rows={3} value={block.goal ?? ""} onChange={(event) => onChange((current) => ({ ...current, goal: event.target.value }))} placeholder="Describe the goal…" /></Field>
-        <AllowMoreSteps block={block} onChange={onChange} />
-      </>
-    );
+    return <SessionBlockFields block={block} onChange={onChange} />;
   }
   if (block.type === "command") {
-    return (
-      <Field label="Command">
-        <Input value={(block.check ?? []).join(" ")} onChange={(event) => onChange((current) => ({ ...current, check: event.target.value.trim().split(/\s+/).filter(Boolean), expect: "exit_zero" }))} placeholder="make test" className={cn(CONTROL_HEIGHT, CONTROL_RADIUS, INPUT_TEXT_SM)} />
-        <p className="text-xs text-muted-foreground">Must exit with code 0.</p>
-      </Field>
-    );
+    return <CommandBlockFields block={block} onChange={onChange} />;
   }
   if (block.type === "review") {
-    return (
-      <>
-        <AgentCandidates block={block} onChange={onChange} />
-        <Field label="Review skill (optional)"><SkillNamePicker value={block.skill ?? ""} onChange={(skill) => onChange((current) => ({ ...current, skill }))} placeholder="Leave empty to use the rubric" /></Field>
-        <Field label="What should they check?"><Textarea rows={3} value={block.rubric ?? ""} onChange={(event) => onChange((current) => ({ ...current, rubric: event.target.value }))} placeholder="Review against the plan…" /></Field>
-        <AllowMoreSteps block={block} onChange={onChange} />
-      </>
-    );
+    return <ReviewBlockFields block={block} onChange={onChange} />;
   }
   if (block.type === "human") {
     return (
@@ -866,7 +859,7 @@ function BlockFields({ block, onChange }: { block: LoopChainBlock; onChange: (up
             triggerRender={<button type="button" className={PICKER_TRIGGER_CLASS} />}
           />
         </Field>
-        <Field label="Approval request"><Textarea rows={3} value={block.prompt ?? ""} onChange={(event) => onChange((current) => ({ ...current, prompt: event.target.value }))} placeholder="What should the approver confirm?" /></Field>
+        <ApprovalTemplateField block={block} onChange={onChange} />
       </>
     );
   }
@@ -874,6 +867,115 @@ function BlockFields({ block, onChange }: { block: LoopChainBlock; onChange: (up
     return <EvalBlockFields block={block} onChange={onChange} />;
   }
   return null;
+}
+
+export function ApprovalTemplateField({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
+  return <Field label="Approval request template" hint="The workflow fills {{previous.output}} and {{previous.evidence}} from the preceding agent step before asking for approval."><Textarea rows={8} value={block.prompt ?? ""} onChange={(event) => onChange((current) => ({ ...current, prompt: event.target.value }))} placeholder="What should the approver confirm?" /></Field>;
+}
+
+function CommandBlockFields({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
+  const scope = useContext(EditorScopeContext);
+  if (!scope.commandsHref) return <CommandFields block={block} commands={[]} commandsHref="" onChange={onChange} />;
+  return <ConnectedCommandFields block={block} commandsHref={scope.commandsHref} onChange={onChange} />;
+}
+
+function ConnectedCommandFields({ block, commandsHref, onChange }: { block: LoopChainBlock; commandsHref: string; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
+  const wsId = useWorkspaceId();
+  const { data: commands = [] } = useQuery(commandsListOptions(wsId));
+  return <CommandFields block={block} commands={commands} commandsHref={commandsHref} onChange={onChange} />;
+}
+
+function CommandFields({ block, commands, commandsHref, onChange }: { block: LoopChainBlock; commands: Array<{ id: string; title: string; argv: string[] }>; commandsHref: string; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
+  const selected = commands.find((command) => command.id === block.command_id);
+  return (
+    <>
+      <Field label="Library command" hint="Choose a reusable command, or keep Custom command for this workflow only.">
+        <Select
+          value={selected?.id ?? "custom"}
+          onValueChange={(value) => {
+            if (value === "custom") {
+              onChange((current) => ({ ...current, command_id: undefined }));
+              return;
+            }
+            const command = commands.find((item) => item.id === value);
+            if (command) onChange((current) => applyCommandSelection(current, command));
+          }}
+        >
+          <SelectTrigger className={cn("w-full", CONTROL_HEIGHT, CONTROL_RADIUS)} aria-label="Library command"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="custom">Custom command</SelectItem>{commands.map((command) => <SelectItem key={command.id} value={command.id}>{command.title}</SelectItem>)}</SelectContent>
+        </Select>
+        {commands.length === 0 && <p className="text-xs text-muted-foreground">No reusable commands yet. {commandsHref && <AppLink href={commandsHref} className="font-medium underline underline-offset-2">Open Command library</AppLink>}</p>}
+      </Field>
+      <Field label="Resolved arguments">
+        <Input value={(block.check ?? []).join(" ")} onChange={(event) => onChange((current) => ({ ...current, command_id: undefined, check: event.target.value.trim().split(/\s+/).filter(Boolean), expect: "exit_zero" }))} placeholder="make test" className={cn(CONTROL_HEIGHT, CONTROL_RADIUS, INPUT_TEXT_SM)} />
+        <p className="text-xs text-muted-foreground">Stored with this workflow and must exit with code 0.</p>
+      </Field>
+    </>
+  );
+}
+
+function SkillPromptEditor({
+  value,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  placeholder: string;
+  onChange: (markdown: string, skills: string[]) => void;
+}) {
+  const wsId = useWorkspaceId();
+  const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
+  return (
+    <ContentEditor
+      defaultValue={value}
+      onUpdate={(markdown) => onChange(markdown, skillNamesFromPrompt(markdown, workspaceSkills))}
+      placeholder={placeholder}
+      // Same border, radius and focus ring as the Input/Textarea siblings in
+      // this column — without them the goal field is the only control in the
+      // step card that gives no feedback when it is focused.
+      className={cn(
+        "min-h-24 border border-input bg-transparent px-2.5 py-2 text-sm transition-colors",
+        "focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50",
+        CONTROL_RADIUS,
+      )}
+      debounceMs={0}
+      disableMentions
+      enableSlashCommands
+      showBubbleMenu={false}
+    />
+  );
+}
+
+function SessionBlockFields({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
+  return (
+    <>
+      <AgentCandidates block={block} onChange={onChange} />
+      <Field label="Goal and skills" hint="Type / in the goal to add every skill this step requires.">
+        <SkillPromptEditor
+          value={block.goal ?? ""}
+          placeholder="Describe the goal and type / to add skills…"
+          onChange={(goal, skills) => onChange((current) => ({ ...current, goal, skills, skill: undefined }))}
+        />
+      </Field>
+      <AllowMoreSteps block={block} onChange={onChange} />
+    </>
+  );
+}
+
+function ReviewBlockFields({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
+  return (
+    <>
+      <AgentCandidates block={block} onChange={onChange} />
+      <Field label="Review brief and skills" hint="Type / to add one or more skills. Leave skills out to review only against the brief.">
+        <SkillPromptEditor
+          value={block.rubric ?? ""}
+          placeholder="Describe what to review and type / to add skills…"
+          onChange={(rubric, skills) => onChange((current) => ({ ...current, rubric, skills, skill: undefined }))}
+        />
+      </Field>
+      <AllowMoreSteps block={block} onChange={onChange} />
+    </>
+  );
 }
 
 // Reads the workflow's own gate bindings so the quality-gate field can only
@@ -996,7 +1098,7 @@ function AllowMoreSteps({ block, onChange }: { block: LoopChainBlock; onChange: 
   );
 }
 
-function AgentCandidates({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
+export function AgentCandidates({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
   const agents = block.agents ?? [];
   return (
     <div className={cn("flex flex-col gap-2 border bg-muted/20 p-3", PANEL_RADIUS)}>
@@ -1005,7 +1107,6 @@ function AgentCandidates({ block, onChange }: { block: LoopChainBlock; onChange:
           <p className="text-xs font-medium">Who runs it?</p>
           <p className="text-xs text-muted-foreground">The first available agent runs this step.</p>
         </div>
-        <Button type="button" size="sm" variant="outline" onClick={() => onChange((current) => ({ ...current, agents: [...(current.agents ?? []), { agent_id: "" }] }))}><Plus className="size-3.5" /> Add agent</Button>
       </div>
       {agents.length === 0 && <p className="text-xs text-muted-foreground">No agent pinned — use the issue assignee.</p>}
       {agents.map((agent, index) => (
@@ -1021,6 +1122,7 @@ function AgentCandidates({ block, onChange }: { block: LoopChainBlock; onChange:
           <Button type="button" variant="ghost" size="icon" aria-label="Remove agent" onClick={() => onChange((current) => ({ ...current, agents: (current.agents ?? []).filter((_, itemIndex) => itemIndex !== index) }))}><Trash2 className="size-4" /></Button>
         </div>
       ))}
+      <Button type="button" size="sm" variant="outline" className="self-start" onClick={() => onChange((current) => ({ ...current, agents: [...(current.agents ?? []), { agent_id: "" }] }))}><Plus className="size-3.5" /> Add agent</Button>
       <Field label="When every agent is busy">
         <Select
           value={block.on_all_busy ?? "wait"}

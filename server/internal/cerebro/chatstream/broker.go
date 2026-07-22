@@ -10,15 +10,15 @@ import (
 
 // Event kinds delivered to stream subscribers.
 const (
+	EventMessage   = "message"
 	EventDone      = "done"
 	EventFailed    = "failed"
 	EventCancelled = "cancelled"
 )
 
-// subscriberBuffer sizes each subscription channel. A chat session emits a
-// handful of terminal events per run, so a small buffer plus non-blocking
-// send keeps the synchronous bus from ever stalling on a slow SSE client.
-const subscriberBuffer = 16
+// subscriberBuffer absorbs ordinary bursts of task transcript events while
+// non-blocking sends keep the synchronous bus safe from a stalled SSE client.
+const subscriberBuffer = 128
 
 // Event is the transport-neutral run event a stream subscriber receives.
 type Event struct {
@@ -29,21 +29,27 @@ type Event struct {
 	Content   string
 	ElapsedMs int64
 	CreatedAt string
+	Message   *protocol.TaskMessagePayload
 }
 
 // Broker fans chat-run bus events out to per-session SSE subscribers. One
 // Broker is created at router setup and subscribes to the event bus once;
 // stream handlers register per-request subscriptions keyed by session id.
 type Broker struct {
-	mu   sync.Mutex
-	subs map[string]map[chan Event]struct{}
+	mu       sync.Mutex
+	subs     map[string]map[chan Event]struct{}
+	taskSubs map[string]map[chan Event]struct{}
 }
 
 // NewBroker wires a broker onto the bus. It listens for chat:done plus the
 // task:failed / task:cancelled broadcasts (which carry chat_session_id in
 // their map payload rather than the Event scope hint).
 func NewBroker(bus *events.Bus) *Broker {
-	b := &Broker{subs: make(map[string]map[chan Event]struct{})}
+	b := &Broker{
+		subs:     make(map[string]map[chan Event]struct{}),
+		taskSubs: make(map[string]map[chan Event]struct{}),
+	}
+	bus.Subscribe(protocol.EventTaskMessage, b.onTaskMessage)
 	bus.Subscribe(protocol.EventChatDone, b.onChatDone)
 	bus.Subscribe(protocol.EventTaskFailed, b.onTaskTerminal(EventFailed))
 	bus.Subscribe(protocol.EventTaskCancelled, b.onTaskTerminal(EventCancelled))
@@ -52,7 +58,7 @@ func NewBroker(bus *events.Bus) *Broker {
 
 // Subscribe registers a listener for one chat session. The returned cancel
 // func must be called when the stream ends; it closes the channel.
-func (b *Broker) Subscribe(sessionID string) (<-chan Event, func()) {
+func (b *Broker) Subscribe(sessionID, taskID string) (<-chan Event, func()) {
 	ch := make(chan Event, subscriberBuffer)
 	b.mu.Lock()
 	set := b.subs[sessionID]
@@ -61,6 +67,14 @@ func (b *Broker) Subscribe(sessionID string) (<-chan Event, func()) {
 		b.subs[sessionID] = set
 	}
 	set[ch] = struct{}{}
+	if taskID != "" {
+		taskSet := b.taskSubs[taskID]
+		if taskSet == nil {
+			taskSet = make(map[chan Event]struct{})
+			b.taskSubs[taskID] = taskSet
+		}
+		taskSet[ch] = struct{}{}
+	}
 	b.mu.Unlock()
 
 	var once sync.Once
@@ -73,11 +87,38 @@ func (b *Broker) Subscribe(sessionID string) (<-chan Event, func()) {
 					delete(b.subs, sessionID)
 				}
 			}
+			if taskID != "" {
+				if set, ok := b.taskSubs[taskID]; ok {
+					delete(set, ch)
+					if len(set) == 0 {
+						delete(b.taskSubs, taskID)
+					}
+				}
+			}
 			b.mu.Unlock()
 			close(ch)
 		})
 	}
 	return ch, cancel
+}
+
+func (b *Broker) onTaskMessage(e events.Event) {
+	payload, ok := e.Payload.(protocol.TaskMessagePayload)
+	if !ok {
+		return
+	}
+	taskID := e.TaskID
+	if taskID == "" {
+		taskID = payload.TaskID
+	}
+	if taskID == "" {
+		return
+	}
+	b.deliverTo(b.taskSubs, taskID, Event{
+		Type:    EventMessage,
+		TaskID:  taskID,
+		Message: &payload,
+	})
 }
 
 func (b *Broker) onChatDone(e events.Event) {
@@ -122,19 +163,23 @@ func (b *Broker) onTaskTerminal(kind string) events.Handler {
 }
 
 func (b *Broker) deliver(sessionID string, ev Event) {
-	if sessionID == "" {
+	b.deliverTo(b.subs, sessionID, ev)
+}
+
+func (b *Broker) deliverTo(subscriptions map[string]map[chan Event]struct{}, key string, ev Event) {
+	if key == "" {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for ch := range b.subs[sessionID] {
+	for ch := range subscriptions[key] {
 		select {
 		case ch <- ev:
 		default:
 			// Never block the synchronous bus. A full buffer means the SSE
 			// client stopped reading; it will recover via the replay path.
 			slog.Warn("chatstream: dropping event for slow subscriber",
-				"chat_session_id", sessionID, "event", ev.Type, "task_id", ev.TaskID)
+				"subscription", key, "event", ev.Type, "task_id", ev.TaskID)
 		}
 	}
 }

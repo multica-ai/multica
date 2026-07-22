@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func TestNewWriterSetsSSEHeaders(t *testing.T) {
@@ -195,6 +197,45 @@ func TestWritePartsEmitsToolApprovalStepAndDataChunks(t *testing.T) {
 		if chunk["type"] != want[i] {
 			t.Errorf("frame %d type = %v, want %s", i, chunk["type"], want[i])
 		}
+	}
+}
+
+func TestToolPartBuilderPairsPersistedToolUseAndResult(t *testing.T) {
+	builder := NewToolPartBuilder()
+	parts := append(
+		builder.Parts(protocol.TaskMessagePayload{
+			Seq:  4,
+			Type: "tool_use",
+			Tool: "get_forecast",
+			Input: map[string]any{
+				"month": "2026-07",
+			},
+		}),
+		builder.Parts(protocol.TaskMessagePayload{
+			Seq:    5,
+			Type:   "tool_result",
+			Tool:   "get_forecast",
+			Output: `{"bonus":125000}`,
+		})...,
+	)
+
+	if len(parts) != 2 {
+		t.Fatalf("got %d parts, want input + output: %#v", len(parts), parts)
+	}
+	input, ok := parts[0].(ToolInputAvailableChunk)
+	if !ok {
+		t.Fatalf("part 0 = %T, want ToolInputAvailableChunk", parts[0])
+	}
+	output, ok := parts[1].(ToolOutputAvailableChunk)
+	if !ok {
+		t.Fatalf("part 1 = %T, want ToolOutputAvailableChunk", parts[1])
+	}
+	if input.ToolCallID == "" || output.ToolCallID != input.ToolCallID {
+		t.Fatalf("tool call ids do not pair: input=%q output=%q", input.ToolCallID, output.ToolCallID)
+	}
+	result, ok := output.Output.(map[string]any)
+	if !ok || result["bonus"] != float64(125000) {
+		t.Fatalf("output = %#v, want parsed JSON result", output.Output)
 	}
 }
 

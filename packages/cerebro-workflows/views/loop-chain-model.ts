@@ -25,6 +25,33 @@ export const BLOCK_TYPES: ReadonlyArray<BlockTypeMeta> = [
   { value: "eval", label: "Eval", kind: "machine", hint: "The server scores and decides." },
 ];
 
+const SLASH_SKILL_RE = /\[\/((?:[^\]\\]|\\.)+)\]\(slash:\/\/skill\/([^)]+)\)/g;
+
+// ContentEditor stores slash choices as stable ids while Chain v2 stores
+// human-readable names. Resolve them at edit time and ignore stale ids.
+export function skillNamesFromPrompt(
+  markdown: string,
+  skills: ReadonlyArray<{ id: string; name: string }>,
+): string[] {
+  const namesById = new Map(skills.map((skill) => [skill.id, skill.name]));
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const match of markdown.matchAll(SLASH_SKILL_RE)) {
+    const name = namesById.get(match[2] ?? "");
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    result.push(name);
+  }
+  return result;
+}
+
+export function applyCommandSelection(
+  block: LoopChainBlock,
+  command: { id: string; argv: string[] },
+): LoopChainBlock {
+  return { ...block, command_id: command.id, check: [...command.argv], expect: "exit_zero" };
+}
+
 export function blockMeta(type: LoopBlockType): BlockTypeMeta {
   return BLOCK_TYPES.find((item) => item.value === type) ?? BLOCK_TYPES[0]!;
 }
@@ -55,7 +82,8 @@ export function blockSummary(block: LoopChainBlock): string {
   switch (block.type) {
     case "session": {
       const parts: string[] = [];
-      if (block.skill) parts.push(`Skill ${block.skill}`);
+      const skills = block.skills?.length ? block.skills : block.skill ? [block.skill] : [];
+      if (skills.length) parts.push(skills.length === 1 ? `Skill ${skills[0]}` : `${skills.length} skills`);
       const agentCount = block.agents?.filter((agent) => agent.agent_id).length ?? 0;
       if (agentCount > 0) parts.push(agentCount === 1 ? "1 agent" : `${agentCount} agents`);
       return parts.length ? parts.join(" · ") : "An agent runs a skill on the issue";
@@ -65,7 +93,7 @@ export function blockSummary(block: LoopChainBlock): string {
       return command ? `${command} · must pass` : "A machine check that must pass";
     }
     case "review":
-      return block.skill ? `Reviews with ${block.skill}` : "An agent reviews the work";
+      return block.skills?.length ? `Reviews with ${block.skills.length} skills` : block.skill ? `Reviews with ${block.skill}` : "An agent reviews the work";
     case "human":
       return "Waits for a person to approve";
     case "eval":
