@@ -490,6 +490,13 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	}
 	h.PRRefresh = ghsnapshot.NewManager(ghClient, queries, txStarter, h.broadcastPRSnapshotApplied)
 
+	// Wire the shared post-terminal comment reconciler so the service-layer
+	// terminal transitions (complete / fail / cancel / sweeper fail) replay
+	// undelivered comment triggers. cmd/server reuses this same TaskService
+	// instance for its background sweeper / autopilot dispatch (backgroundServices),
+	// so the runtime/stale/orphan-recovery fail paths inherit this wiring too (#5278).
+	h.TaskService.ReconcileTerminal = h.ReconcileTerminalTask
+
 	return h
 }
 
