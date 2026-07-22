@@ -290,6 +290,7 @@ function IssueSurfaceContent({
                 total={controller.flatTotal}
                 search={controller.tableSearch}
                 onSearchChange={controller.setTableSearch}
+                onCreateIssue={openCreateIssue}
                 exportIssues={controller.exportTableIssues}
                 resolveExportLookups={controller.resolveTableExportLookups}
               />
