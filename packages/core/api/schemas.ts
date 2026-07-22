@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentTemplate,
   AgentTemplateSummary,
+  AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
   Attachment,
   AutopilotRun,
@@ -980,6 +981,18 @@ export const AgentBuilderSessionSchema = z.object({
 export const EMPTY_AGENT_BUILDER_SESSION: AgentBuilderSession = {
   session_id: "",
   builder_agent_id: "",
+  runtime_id: "",
+};
+
+export const AgentBuilderRuntimeSwitchSchema = z.object({
+  runtime_id: z.string(),
+}).loose();
+
+// A malformed switch response must not read as "the server bound runtime B".
+// The caller compares the returned id against the one it asked for and treats a
+// mismatch — including this empty fallback — as a failed switch, so the picker
+// keeps showing the runtime that is actually executing.
+export const EMPTY_AGENT_BUILDER_RUNTIME_SWITCH: AgentBuilderRuntimeSwitch = {
   runtime_id: "",
 };
 

@@ -44,6 +44,46 @@ describe("ApiClient label response schemas", () => {
   });
 });
 
+describe("ApiClient agent builder runtime switch", () => {
+  it("PATCHes the session runtime endpoint and returns the runtime the server bound", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ runtime_id: "runtime-b" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.switchAgentBuilderRuntime("session-1", { runtime_id: "runtime-b" }),
+    ).resolves.toEqual({ runtime_id: "runtime-b" });
+
+    const call = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(call[0]).toContain("/api/agent-builder/sessions/session-1/runtime");
+    expect(call[1].method).toBe("PATCH");
+    expect(JSON.parse(String(call[1].body))).toEqual({ runtime_id: "runtime-b" });
+  });
+
+  it("falls back to an empty runtime id for a malformed response", async () => {
+    // The caller compares this against the runtime it asked for, so an empty id
+    // reads as "the switch did not happen" rather than a silent success that
+    // would put the picker and the executing runtime back out of sync.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ runtime_id: 42 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.switchAgentBuilderRuntime("session-1", { runtime_id: "runtime-b" }),
+    ).resolves.toEqual({ runtime_id: "" });
+  });
+});
+
 describe("ApiClient notification preferences", () => {
   it("sends atomic preference updates with PATCH", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
