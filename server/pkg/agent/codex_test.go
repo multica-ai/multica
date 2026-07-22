@@ -2448,8 +2448,8 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 			`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
 			`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
 			`read line`+"\n"+
-			`sleep 1`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+			`sleep 1.2`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: time.Second})
 		if result.Status != "failed" || !strings.Contains(result.Error, CodexHandshakeTimeoutMarker) {
 			t.Fatalf("expected final initialize timeout, got status=%q error=%q", result.Status, result.Error)
 		}
@@ -2465,8 +2465,8 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 			`echo x >> `+countPath+"\n"+
 			`read line`+"\n"+
 			`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"unexpected","item":{"type":"commandExecution","id":"cmd-1","command":"true"}}}'`+"\n"+
-			`sleep 1`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+			`sleep 1.2`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: time.Second})
 		if result.Status != "failed" {
 			t.Fatalf("expected failed, got %q", result.Status)
 		}
@@ -2483,8 +2483,8 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 		fakePath := writeFakeCodexAppServer(t, ""+
 			`echo x >> `+countPath+"\n"+
 			`read line`+"\n"+
-			`sleep 1`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+			`sleep 1.2`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: time.Second})
 		if !strings.Contains(result.Error, "retry suppressed: process cleanup/reap not confirmed") {
 			t.Fatalf("expected cleanup reason, got %q", result.Error)
 		}

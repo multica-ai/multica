@@ -1129,14 +1129,21 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		})
 		if err != nil {
 			initializeLatency := time.Since(initializeStarted)
+			var handshakeErr *codexHandshakeTimeoutError
+			timedOut := errors.As(err, &handshakeErr) && handshakeErr.Method == "initialize"
+			if timedOut {
+				// A timed-out initialize may still complete after the host gives up.
+				// Kill the whole process group before waiting so a leader that exits
+				// on stdin EOF cannot leave detached-stdio descendants behind.
+				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+			}
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
 			finalError = withAgentStderr(fmt.Sprintf("codex initialize failed: %v", err), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
-			var handshakeErr *codexHandshakeTimeoutError
-			retrySafe := errors.As(err, &handshakeErr) && handshakeErr.Method == "initialize" && !semanticObserved.Load() && cleanupConfirmed && codexInitializeRetrySupported()
-			if errors.As(err, &handshakeErr) && handshakeErr.Method == "initialize" && !cleanupConfirmed {
+			retrySafe := timedOut && !semanticObserved.Load() && cleanupConfirmed && codexInitializeRetrySupported()
+			if timedOut && !cleanupConfirmed {
 				finalError += "; retry suppressed: process cleanup/reap not confirmed"
-			} else if errors.As(err, &handshakeErr) && handshakeErr.Method == "initialize" && cleanupConfirmed && !codexInitializeRetrySupported() {
+			} else if timedOut && cleanupConfirmed && !codexInitializeRetrySupported() {
 				finalError += "; retry suppressed: process-tree cleanup cannot be confirmed on this platform"
 			}
 			b.cfg.Logger.Warn("codex lifecycle", "phase", "initialize_failure", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process.Pid, "attempt", attempt, "latency", initializeLatency.Round(time.Millisecond).String(), "semantic_activity", semanticObserved.Load(), "cleanup_confirmed", cleanupConfirmed, "retry_safe", retrySafe)
