@@ -84,10 +84,16 @@ var targets = map[string]Target{
 		Vault: "Shared/browser-login/registry", UsernameSelector: "#email", PasswordSelector: "#password",
 		SubmitSelector: "button[type=submit]", ExpectedText: []string{"Dashboard", "Data Sources"},
 	},
+	// Finance is firtal-agents-private, not firtal-internal-private — those are
+	// two different apps that share a login, so pointing at the wrong one logged
+	// in cleanly and "passed" against the employee portal instead. The AI CFO
+	// screen is what this target exists to prove, so the run navigates there and
+	// matches its starter prompts rather than stopping at the landing page.
 	"finance": {
-		Name: "finance", URL: "http://firtal-internal-private.internal:3000/login?manual=true",
+		Name: "finance", URL: "http://firtal-agents-private.internal:3000/auth/login?manual=true",
 		Vault: "Shared/browser-login/finance", UsernameSelector: "#email", PasswordSelector: "#password",
-		SubmitSelector: "button[type=submit]", ExpectedText: []string{"Your roles:"},
+		SubmitSelector: "button[type=submit]", NavigateLinkName: "AI CFO",
+		ExpectedText: []string{"Monthly overview", "Controllership review", "Versus budget"},
 	},
 	"pricing": {
 		Name: "pricing", URL: "http://ecommerce-pricing-engine-private.internal:3000/login?manual=true",
