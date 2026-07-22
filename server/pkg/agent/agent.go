@@ -76,6 +76,10 @@ type ExecOptions struct {
 	// ignore this field, mirroring ThinkingLevel's renderer-side fall-through
 	// pattern. See issue #3260.
 	OpenclawMode string
+	// ClaudeSettingsPath is a daemon-owned, task-local settings file passed
+	// through Claude Code's --settings flag. It currently carries restrictive
+	// runtime-skill overrides only; other providers ignore it.
+	ClaudeSettingsPath string
 }
 
 // runContext derives the execution context for an agent subprocess from the

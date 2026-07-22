@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -283,11 +284,13 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	// Fetch only the skills that aren't already in the workspace. fetched[j]
 	// corresponds to toFetchRefs[j], whose original index is toFetchOrigIdx[j].
 	httpClient := &http.Client{Timeout: 30 * time.Second}
+	fetchCtx, cancelFetch := context.WithTimeout(r.Context(), importFetchTimeout)
+	defer cancelFetch()
 	fetchStart := time.Now()
 	var fetched []*importedSkill
 	var failedURLs []string
 	if len(toFetchRefs) > 0 {
-		fetched, failedURLs = fetchTemplateSkillsParallel(httpClient, toFetchRefs)
+		fetched, failedURLs = fetchTemplateSkillsParallel(fetchCtx, httpClient, toFetchRefs)
 	}
 	slog.Info("agent-template create: fetch phase done",
 		append(logger.RequestAttrs(r),
@@ -645,7 +648,7 @@ type templateFetchResult struct {
 // importedSkill, in parallel. Returns the imports in input order; failed_urls
 // is non-nil iff any fetch failed. Logs per-URL timing so we can spot which
 // upstream is the long pole in a slow request.
-func fetchTemplateSkillsParallel(client *http.Client, refs []agenttmpl.TemplateSkillRef) ([]*importedSkill, []string) {
+func fetchTemplateSkillsParallel(ctx context.Context, client *http.Client, refs []agenttmpl.TemplateSkillRef) ([]*importedSkill, []string) {
 	results := make(chan templateFetchResult, len(refs))
 	var wg sync.WaitGroup
 	for i, ref := range refs {
@@ -654,7 +657,7 @@ func fetchTemplateSkillsParallel(client *http.Client, refs []agenttmpl.TemplateS
 			defer wg.Done()
 			start := time.Now()
 			slog.Info("agent-template fetch: start", "index", i, "source_url", ref.SourceURL)
-			imp, err := fetchSkillFromURL(client, ref.SourceURL)
+			imp, err := fetchSkillFromURL(ctx, client, ref.SourceURL)
 			elapsedMs := time.Since(start).Milliseconds()
 			if err != nil {
 				slog.Warn("agent-template fetch: failed",
@@ -699,18 +702,18 @@ func fetchTemplateSkillsParallel(client *http.Client, refs []agenttmpl.TemplateS
 // fetchSkillFromURL dispatches to the right upstream fetcher based on URL.
 // Mirrors the switch inside ImportSkill (skill.go:1566) so both entry points
 // stay in sync.
-func fetchSkillFromURL(client *http.Client, rawURL string) (*importedSkill, error) {
+func fetchSkillFromURL(ctx context.Context, client *http.Client, rawURL string) (*importedSkill, error) {
 	source, normalized, err := detectImportSource(rawURL)
 	if err != nil {
 		return nil, err
 	}
 	switch source {
 	case sourceClawHub:
-		return fetchFromClawHub(client, normalized)
+		return fetchFromClawHub(ctx, client, normalized)
 	case sourceSkillsSh:
-		return fetchFromSkillsSh(client, normalized)
+		return fetchFromSkillsSh(ctx, client, normalized)
 	case sourceGitHub:
-		return fetchFromGitHub(client, normalized)
+		return fetchFromGitHub(ctx, client, normalized)
 	}
 	return nil, fmt.Errorf("unknown import source for %s", rawURL)
 }

@@ -571,7 +571,7 @@
       "save_failed_toast": "保存路由配置失败"
     },
     "skills": {
-      "intro": "这里展示该智能体实际拥有的全部 skill。工作区 skill 可在此管理；本地运行时 skill 会自动发现并以只读方式继承。",
+      "intro": "这里展示该智能体实际拥有的全部 skill。工作区 skill 可在此管理；从 Codex 和 Claude Code 继承的 skill 也可以按智能体单独关闭。",
       "assigned_title": "分配给智能体",
       "assigned_hint": "工作区 skill 会跟随智能体。你可以临时关闭，而不必将其移除。",
       "runtime_title": "从运行时继承",
@@ -583,6 +583,8 @@
       "toggle_aria": "启用或关闭 {{name}}",
       "remove_aria": "移除 {{name}}",
       "toggle_failed_toast": "修改 skill 状态失败",
+      "runtime_toggle_aria": "启用或关闭继承的 {{name}}",
+      "runtime_toggle_failed_toast": "修改继承 skill 状态失败",
       "runtime_missing": "请先分配一个本地运行时，以发现继承的 skill。",
       "runtime_offline": "本地运行时处于离线状态，重新连接后即可刷新继承的 skill。",
       "runtime_discovering": "正在从本地运行时发现 skill…",

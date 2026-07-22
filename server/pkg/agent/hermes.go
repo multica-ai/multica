@@ -1107,6 +1107,7 @@ func (c *hermesClient) extractPromptResult(data json.RawMessage) {
 	var resp struct {
 		StopReason string          `json:"stopReason"`
 		Usage      json.RawMessage `json:"usage"`
+		Meta       json.RawMessage `json:"_meta"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return
@@ -1118,10 +1119,49 @@ func (c *hermesClient) extractPromptResult(data json.RawMessage) {
 	if len(resp.Usage) > 0 && string(resp.Usage) != "null" {
 		pr.usage = parseACPTokenUsage(resp.Usage)
 	}
+	// Prefer the standard top-level ACP `usage` field when present. Some
+	// agents (notably xAI Grok Build) put per-turn metering only under
+	// result._meta — either as `_meta.usage` or as flat token counters on
+	// `_meta` itself. Without this fallback, tasks complete with an empty
+	// usage map and Multica's Usage/cost dashboards stay at zero.
+	if !acpTokenUsagePresent(pr.usage) {
+		if metaUsage := parseACPTokenUsageFromMeta(resp.Meta); acpTokenUsagePresent(metaUsage) {
+			pr.usage = metaUsage
+		}
+	}
 
 	if c.onPromptDone != nil {
 		c.onPromptDone(pr)
 	}
+}
+
+// acpTokenUsagePresent reports whether any token counter is non-zero.
+func acpTokenUsagePresent(u TokenUsage) bool {
+	return u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0
+}
+
+// parseACPTokenUsageFromMeta extracts token usage from an ACP result `_meta`
+// object. Grok Build returns shapes like:
+//
+//	{"inputTokens":…,"outputTokens":…,"cachedReadTokens":…,"usage":{…}}
+//
+// Prefer the nested `usage` object when it carries counters; otherwise parse
+// the flat `_meta` fields with the same alias rules as top-level usage.
+func parseACPTokenUsageFromMeta(meta json.RawMessage) TokenUsage {
+	if len(meta) == 0 || string(meta) == "null" {
+		return TokenUsage{}
+	}
+	var envelope struct {
+		Usage json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal(meta, &envelope); err == nil {
+		if len(envelope.Usage) > 0 && string(envelope.Usage) != "null" {
+			if u := parseACPTokenUsage(envelope.Usage); acpTokenUsagePresent(u) {
+				return u
+			}
+		}
+	}
+	return parseACPTokenUsage(meta)
 }
 
 func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {

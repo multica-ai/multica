@@ -32,10 +32,12 @@ func TestBuildQwenArgsKeepsProtocolManaged(t *testing.T) {
 		CustomArgs: []string{
 			"--prompt=replace", "-o", "json", "--model", "other", "--resume", "other-session",
 			"--safe-mode", "--chat-recording", "false", "--mcp-config", "injected-mcp.json", "--mcp-config=inline-mcp.json", "--debug",
+			"--yolo", "-y", "--approval-mode", "default", "--core-tools", "write_file", "--core-tools=run_shell_command",
+			"--allowed-tools", "read_file", "--exclude-tools", "monitor",
 		},
 	}, slog.Default())
 	joined := strings.Join(args, " ")
-	for _, forbidden := range []string{"text", "replace", "other-session", "other", "--safe-mode", "--chat-recording", "injected-mcp.json", "inline-mcp.json"} {
+	for _, forbidden := range []string{"text", "replace", "other-session", "other", "--safe-mode", "--chat-recording", "injected-mcp.json", "inline-mcp.json", "default", "write_file", "run_shell_command"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("managed argument %q leaked into %v", forbidden, args)
 		}
@@ -49,8 +51,24 @@ func TestBuildQwenArgsKeepsProtocolManaged(t *testing.T) {
 			t.Fatalf("args[%d] = %q, want %q; all=%v", i, args[i], want, args)
 		}
 	}
-	if !strings.Contains(joined, "--sandbox") || !strings.Contains(joined, "--debug") {
+	if !strings.Contains(joined, "--sandbox") || !strings.Contains(joined, "--debug") ||
+		!strings.Contains(joined, "--allowed-tools read_file") || !strings.Contains(joined, "--exclude-tools monitor") {
 		t.Fatalf("non-managed custom args missing from %v", args)
+	}
+	// daemon-owned --yolo must be present; user's --yolo/-y must be stripped so
+	// it appears exactly once regardless of what custom_args contain.
+	if count := strings.Count(joined, "--yolo"); count != 1 {
+		t.Fatalf("--yolo count = %d in %v, want exactly 1 (daemon-owned)", count, args)
+	}
+}
+
+func TestBuildQwenArgsYoloAlwaysPresent(t *testing.T) {
+	t.Parallel()
+	// --yolo must be injected even when custom_args is empty: Qwen's
+	// non-interactive mode otherwise filters out shell, edit, and write tools.
+	args := buildQwenArgs("task", ExecOptions{}, slog.Default())
+	if !strings.Contains(strings.Join(args, " "), "--yolo") {
+		t.Fatalf("--yolo missing from base args %v", args)
 	}
 }
 

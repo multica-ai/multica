@@ -582,7 +582,7 @@
       "save_failed_toast": "Failed to save routing config"
     },
     "skills": {
-      "intro": "This is the agent's effective skill set. Workspace skills are managed here; local runtime skills are discovered automatically and inherited read-only.",
+      "intro": "This is the agent's effective skill set. Workspace skills are managed here; inherited Codex and Claude Code skills can also be turned off per agent.",
       "assigned_title": "Assigned to agent",
       "assigned_hint": "Workspace skills travel with the agent. Turn one off temporarily without removing it.",
       "runtime_title": "Inherited from runtime",
@@ -594,6 +594,8 @@
       "toggle_aria": "Toggle {{name}}",
       "remove_aria": "Remove {{name}}",
       "toggle_failed_toast": "Failed to change skill status",
+      "runtime_toggle_aria": "Toggle inherited {{name}}",
+      "runtime_toggle_failed_toast": "Failed to change inherited skill status",
       "runtime_missing": "Assign a local runtime to discover inherited skills.",
       "runtime_offline": "The local runtime is offline. Reconnect it to refresh inherited skills.",
       "runtime_discovering": "Discovering skills from the local runtime…",
