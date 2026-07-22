@@ -2160,6 +2160,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/cerebro/personal-browser/secure-fill", h.SecureFillPersonalBrowser)   // CEREBRO-PATCH(personal-browser-secure-fill): FIR-3006
 			r.Post("/api/cerebro/agent-browser/provision-auth", h.ProvisionAgentBrowserAuth)   // CEREBRO-PATCH(agent-browser-vault-route): FIR-3006
 			r.Post("/api/cerebro/agent-browser/internal-verify", h.VerifyInternalAgentBrowser) // CEREBRO-PATCH(internal-agent-browser-qa-route): FIR-3006
+			r.Get("/api/cerebro/agent-browser/internal-verify/{jobId}", h.GetInternalAgentBrowserVerification) // CEREBRO-PATCH(internal-agent-browser-qa-async): FIR-3006
 			// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools for the Multica MCP server (agent token; default-deny per agent).
 			r.Get("/api/cerebro/connection-tools", cerebroConnectionToolsHandler.List)
 			r.Post("/api/cerebro/connection-tools/call", cerebroConnectionToolsHandler.Call)

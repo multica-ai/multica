@@ -364,10 +364,30 @@ type stageObservation struct {
 	TargetHost string
 }
 
+const (
+	defaultOpenTimeout  = 75 * time.Second
+	defaultStageTimeout = 30 * time.Second
+)
+
+// countedStages is how many stageTimeout-bounded steps a full verification can
+// spend after the open stage: auth, reload, render, dialog, navigation, the
+// second render, snapshot, url, errors and screenshot.
+const countedStages = 10
+
+// MaxVerificationDuration is the longest a single Verify can legitimately take:
+// the DNS preflight, every open attempt including the cold-start retry, and each
+// remaining stage at its own ceiling. A caller MUST allow at least this long.
+// A deadline shorter than this makes the cold-start retry unreachable — the
+// caller hangs up mid-retry — which is exactly how a healthy but idle app came
+// back as a failure.
+const MaxVerificationDuration = dnsPreflightTimeout +
+	(openStageRetries+1)*defaultOpenTimeout +
+	countedStages*defaultStageTimeout
+
 func NewRunner(commander Commander) *Runner {
 	return &Runner{
-		commander: commander, openTimeout: 75 * time.Second,
-		stageTimeout: 30 * time.Second, cleanupTimeout: 30 * time.Second,
+		commander: commander, openTimeout: defaultOpenTimeout,
+		stageTimeout: defaultStageTimeout, cleanupTimeout: defaultStageTimeout,
 		dnsTimeout: dnsPreflightTimeout, resolveHost: resolveInternalHost,
 		observeStage: func(observation stageObservation) {
 			log.Printf("internal browser diagnostic app=%s stage=%s duration_ms=%d exit_class=%s target_host=%s",

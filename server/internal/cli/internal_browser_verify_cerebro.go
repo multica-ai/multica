@@ -53,3 +53,28 @@ func (c *APIClient) PostJSONWithDiagnostic(ctx context.Context, path string, bod
 	}
 	return resp.StatusCode, json.NewDecoder(io.LimitReader(resp.Body, diagnosticBodyLimit)).Decode(out)
 }
+
+// GetJSONWithDiagnostic is the polling counterpart to
+// PostJSONWithDiagnostic. It preserves the verifier's structured failure body,
+// including its screenshot, instead of truncating it to the generic 4 KiB
+// error limit.
+func (c *APIClient) GetJSONWithDiagnostic(ctx context.Context, path string, out any, diagnosticStatus int) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return 0, err
+	}
+	c.setHeaders(req)
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 && resp.StatusCode != diagnosticStatus {
+		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, &HTTPError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: string(bytes.TrimSpace(respData))}
+	}
+	if out == nil {
+		return resp.StatusCode, nil
+	}
+	return resp.StatusCode, json.NewDecoder(io.LimitReader(resp.Body, diagnosticBodyLimit)).Decode(out)
+}

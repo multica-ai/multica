@@ -145,6 +145,8 @@ type Handler struct {
 	BudgetService *service.BudgetService
 	PushService   *service.PushService
 	PingStore     *PingStore
+
+	InternalBrowserJobs *internalBrowserJobStore // CEREBRO-PATCH(internal-agent-browser-qa-async): FIR-3006
 	// CEREBRO-PATCH(handler-channel-listen): channel-listener (per-(channel,agent)
 	// listen-mode) service. Set by the router after construction so the upstream
 	// handler.New signature stays unchanged.
@@ -538,7 +540,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		cfg: cfg,
 		// CEREBRO-PATCH(handler-push-service-wire): wire pushService into the
 		// handler so /api/push/public-key reports enabled when VAPID is set.
-		PushService: pushService,
+		PushService:         pushService,
+		InternalBrowserJobs: newInternalBrowserJobStore(), // CEREBRO-PATCH(internal-agent-browser-qa-async): FIR-3006
 	}
 }
 
