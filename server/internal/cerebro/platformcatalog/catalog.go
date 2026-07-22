@@ -1080,6 +1080,9 @@ var catalog = []Capability{
 		Description:   "Create, edit, delete, or toggle workflows and their eval gates, or regenerate workflow tokens and signing secrets.",
 		DescriptionZh: "创建、编辑、删除、启停工作流，或重新生成其令牌和签名密钥。",
 		Ops: []string{
+			"POST /api/cerebro/commands/",
+			"PUT /api/cerebro/commands/{id}",
+			"DELETE /api/cerebro/commands/{id}",
 			"POST /api/cerebro/workflows/",
 			"PUT /api/cerebro/workflows/{id}",
 			"DELETE /api/cerebro/workflows/{id}",
