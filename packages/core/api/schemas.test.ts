@@ -32,7 +32,6 @@ import {
   TimelineEntriesSchema,
   UserSchema,
   ExecutionLogPageResponseSchema,
-  EMPTY_EXECUTION_LOG_PAGE,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
 
@@ -989,15 +988,15 @@ describe("ExecutionLogPageResponseSchema", () => {
     expect(parsed.messages[0]?.tool).toBeUndefined();
   });
 
-  it("falls back to an empty page on a malformed response rather than throwing", () => {
-    const parsed = parseWithFallback(
-      { messages: "not-an-array", limit: "nope" },
-      ExecutionLogPageResponseSchema,
-      EMPTY_EXECUTION_LOG_PAGE,
-      { endpoint: "listTaskMessagesPage" },
-    );
-    expect(parsed).toBe(EMPTY_EXECUTION_LOG_PAGE);
-    expect(parsed.messages).toEqual([]);
-    expect(parsed.raw_total).toBe(0);
+  it("rejects a malformed response so the client surfaces a retriable error, not an empty page", () => {
+    // The Execution Log page deliberately does NOT use parseWithFallback: a
+    // wrong-typed / non-object body must FAIL validation so `listTaskMessagesPage`
+    // rejects into the query's error branch (→ Retry UI), rather than silently
+    // degrading to an empty "no records" page (MUL-5122).
+    expect(
+      ExecutionLogPageResponseSchema.safeParse({ messages: "not-an-array", limit: "nope" }).success,
+    ).toBe(false);
+    expect(ExecutionLogPageResponseSchema.safeParse("not-an-object").success).toBe(false);
+    expect(ExecutionLogPageResponseSchema.safeParse(null).success).toBe(false);
   });
 });

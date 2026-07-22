@@ -150,12 +150,13 @@ test("loading older history keeps the reading anchor in place", async ({ page })
     await expect(dialog).toContainText(`${PAGE_SIZE * 2} loaded`, { timeout: 800 });
   }).toPass({ timeout: 25000 });
 
-  await page.waitForTimeout(400); // let the virtualizer settle the prepend
-
-  // Anchor preserved: the fold row (seq 9951) is still on screen after older
-  // history prepended above it — the virtualizer shifted the viewport down to
-  // hold its position instead of snapping to the newly prepended top (which
-  // would leave scrollTop at 0 and jump the reader away).
-  await expect(anchor).toBeInViewport();
-  expect(await scroll.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  // Anchor preserved — asserted on observable state, not a fixed sleep: once the
+  // prepend settles, the fold row (seq 9951) is still on screen AND the viewport
+  // was shifted down (scrollTop > 0) to hold its position rather than snapping to
+  // the newly prepended top (which would leave scrollTop at 0 and jump the reader
+  // away). toPass polls both until they hold together.
+  await expect(async () => {
+    await expect(anchor).toBeInViewport();
+    expect(await scroll.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  }).toPass({ timeout: 5000 });
 });

@@ -175,7 +175,6 @@ import {
   ChatDraftRestoresResponseSchema,
   ChildIssuesResponseSchema,
   ExecutionLogPageResponseSchema,
-  EMPTY_EXECUTION_LOG_PAGE,
   CommentsListSchema,
   CommentTriggerPreviewSchema,
   IssueTriggerPreviewSchema,
@@ -1683,9 +1682,16 @@ export class ApiClient {
       const raw = await this.fetch(
         `/api/tasks/${taskId}/messages/page?${query.toString()}`,
       );
-      return parseWithFallback(raw, ExecutionLogPageResponseSchema, EMPTY_EXECUTION_LOG_PAGE, {
-        endpoint: "listTaskMessagesPage",
-      });
+      // Unlike most endpoints, a malformed Execution Log page must surface a
+      // RETRIABLE error, not a silent empty page (MUL-5122): parseWithFallback's
+      // empty fallback would render a broken backend as "no records" and hide
+      // the failure. A schema failure here rejects into the infinite query's
+      // error branch, so the dialog shows its error + Retry state instead.
+      const result = ExecutionLogPageResponseSchema.safeParse(raw);
+      if (!result.success) {
+        throw new Error("listTaskMessagesPage: response failed schema validation");
+      }
+      return result.data as ExecutionLogPage;
     } catch (err) {
       // Deployment-order compatibility: a backend deployed before this endpoint
       // existed 404s the unknown route. Only the initial, unfiltered, cursorless

@@ -1199,3 +1199,49 @@ describe("ApiClient", () => {
     });
   });
 });
+
+describe("ApiClient Execution Log page", () => {
+  const TASK_ID = "11111111-1111-1111-1111-111111111111";
+
+  it("parses a valid page response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          messages: [
+            { task_id: "t1", issue_id: "i1", seq: 1, type: "text", content: "hi" },
+          ],
+          limit: 50,
+          older_cursor: null,
+          latest_cursor: null,
+          raw_total: 1,
+          matched_total: 1,
+          type_facets: [],
+          tool_facets: [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const page = await client.listTaskMessagesPage(TASK_ID);
+    expect(page.raw_total).toBe(1);
+    expect(page.messages).toHaveLength(1);
+  });
+
+  it("rejects a malformed page response so the caller surfaces a retriable error, not an empty log", async () => {
+    // Wrong-typed body: `messages` is a string, `limit` is not a number. This
+    // must REJECT (→ query error branch → Retry UI), never resolve to an empty
+    // page that would read as "no records" (MUL-5122).
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ messages: "not-an-array", limit: "nope" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listTaskMessagesPage(TASK_ID)).rejects.toThrow(/schema validation/);
+  });
+});
