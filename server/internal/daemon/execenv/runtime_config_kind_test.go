@@ -36,7 +36,7 @@ func TestClassifyTask(t *testing.T) {
 }
 
 // TestTaskKindHasIssueContext pins the predicate that gates Project
-// Context / Issue Metadata / Sub-issue Creation in the slim dispatcher.
+// Context / Issue Metadata / Single-Issue Execution in the slim dispatcher.
 func TestTaskKindHasIssueContext(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -113,7 +113,7 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		}},
 		{"## Issue Metadata", issueKinds},
 		{"## Instruction Precedence", map[taskKind]bool{kindAssignmentTriggered: true}},
-		{"## Sub-issue Creation", issueKinds},
+		{"## Single-Issue Execution", issueKinds},
 		{"## Skills", map[taskKind]bool{
 			kindCommentTriggered: true, kindAssignmentTriggered: true,
 			kindAutopilotRunOnly: true, kindChat: true,

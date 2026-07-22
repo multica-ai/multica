@@ -3423,7 +3423,11 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 			if err != nil {
 				return nil, fmt.Errorf("issue is assigned to a squad but squad not found")
 			}
-			agentID = squad.LeaderID
+			_, resolvedLeaderID, ready := ResolveReadySquadLeader(ctx, s.Queries, squad)
+			if !ready {
+				return nil, fmt.Errorf("issue is assigned to a squad with no ready leader")
+			}
+			agentID = resolvedLeaderID
 			isLeader = true
 			squadID = issue.AssigneeID
 		default:

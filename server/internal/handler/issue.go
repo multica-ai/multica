@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issuepolicy"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -2134,7 +2135,12 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "squad is archived")
 			return
 		}
-		agentUUID = squad.LeaderID
+		_, resolvedLeaderID, ready := h.IssueService.ResolveSquadLeader(r.Context(), squad)
+		if !ready {
+			writeError(w, http.StatusBadRequest, "squad has no ready leader")
+			return
+		}
+		agentUUID = resolvedLeaderID
 	} else {
 		var ok bool
 		agentUUID, ok = parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
@@ -2402,6 +2408,15 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// Get creator from context (set by auth middleware)
 	creatorID, ok := requireUserID(w, r)
 	if !ok {
+		return
+	}
+	requestActorType, _ := h.resolveActor(r, creatorID, workspaceID)
+	requestOriginType := ""
+	if req.OriginType != nil {
+		requestOriginType = *req.OriginType
+	}
+	if err := issuepolicy.ValidateCreate(requestActorType, requestOriginType, req.ParentIssueID != nil); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
 
@@ -2690,6 +2705,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := requestUserID(r)
 	workspaceID := uuidToString(prevIssue.WorkspaceID)
+	actorType, _ := h.resolveActor(r, userID, workspaceID)
 
 	// Read body as raw bytes so we can detect which fields were explicitly sent.
 	bodyBytes, err := io.ReadAll(r.Body)
@@ -2729,6 +2745,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Status != nil {
 		if !validateIssueEnum(w, "status", *req.Status, validIssueStatuses) {
+			return
+		}
+		if err := issuepolicy.ValidateStatus(actorType, *req.Status); err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
@@ -2786,6 +2806,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if _, ok := rawFields["parent_issue_id"]; ok {
+		if err := issuepolicy.ValidateHierarchyChange(actorType, true); err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
 		if req.ParentIssueID != nil {
 			newParentID, ok := parseUUIDOrBadRequest(w, *req.ParentIssueID, "parent_issue_id")
 			if !ok {
@@ -3022,9 +3046,9 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		if squad.ArchivedAt.Valid {
 			return http.StatusBadRequest, "cannot assign to an archived squad"
 		}
-		leader, err := h.Queries.GetAgent(ctx, squad.LeaderID)
-		if err != nil || leader.ArchivedAt.Valid {
-			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
+		leader, _, ready := h.IssueService.ResolveSquadLeader(ctx, squad)
+		if !ready {
+			return http.StatusBadRequest, "squad has no ready leader; cannot assign to this squad"
 		}
 		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
 		if !h.canInvokeAgent(ctx, leader, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
@@ -3250,6 +3274,19 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
 		return
+	}
+	actorType, _ := h.resolveActor(r, userID, workspaceID)
+	if req.Updates.Status != nil {
+		if err := issuepolicy.ValidateStatus(actorType, *req.Updates.Status); err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+	}
+	if _, touchedParent := rawUpdates["parent_issue_id"]; touchedParent {
+		if err := issuepolicy.ValidateHierarchyChange(actorType, true); err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
 	}
 	updated := 0
 	// Children that transitioned into a terminal status this batch, collected so

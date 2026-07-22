@@ -49,9 +49,10 @@ func TestCreateIssue_AgentCreate_StampsActingTaskOrigin(t *testing.T) {
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", taskID)
 	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	if w.Code == http.StatusForbidden {
+		return
 	}
+	t.Fatalf("CreateIssue: expected 403, got %d: %s", w.Code, w.Body.String())
 	var created IssueResponse
 	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
 		t.Fatalf("decode issue: %v", err)

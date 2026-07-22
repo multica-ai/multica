@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -535,15 +536,39 @@ func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) b
 	if err != nil {
 		return false
 	}
-	agent, err := s.Queries.GetAgent(ctx, squad.LeaderID)
-	if err != nil {
-		return false
+	_, _, ok := s.ResolveSquadLeader(ctx, squad)
+	return ok
+}
+
+// ResolveSquadLeader returns the configured leader when ready, otherwise the
+// first ready agent member whose role is "fallback leader".
+func (s *IssueService) ResolveSquadLeader(ctx context.Context, squad db.Squad) (db.Agent, pgtype.UUID, bool) {
+	return ResolveReadySquadLeader(ctx, s.Queries, squad)
+}
+
+func ResolveReadySquadLeader(ctx context.Context, queries *db.Queries, squad db.Squad) (db.Agent, pgtype.UUID, bool) {
+	if agent, err := queries.GetAgent(ctx, squad.LeaderID); err == nil {
+		if ready, _, readinessErr := AgentReadiness(ctx, queries, agent); readinessErr == nil && ready {
+			return agent, squad.LeaderID, true
+		}
 	}
-	ready, _, err := AgentReadiness(ctx, s.Queries, agent)
+	members, err := queries.ListSquadMembers(ctx, squad.ID)
 	if err != nil {
-		return false
+		return db.Agent{}, pgtype.UUID{}, false
 	}
-	return ready
+	for _, member := range members {
+		if member.MemberType != "agent" || !strings.EqualFold(strings.TrimSpace(member.Role), "fallback leader") {
+			continue
+		}
+		agent, getErr := queries.GetAgent(ctx, member.MemberID)
+		if getErr != nil {
+			continue
+		}
+		if ready, _, readinessErr := AgentReadiness(ctx, queries, agent); readinessErr == nil && ready {
+			return agent, member.MemberID, true
+		}
+	}
+	return db.Agent{}, pgtype.UUID{}, false
 }
 
 func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {
@@ -554,20 +579,24 @@ func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issu
 	if err != nil {
 		return
 	}
+	_, leaderID, ready := s.ResolveSquadLeader(ctx, squad)
+	if !ready {
+		return
+	}
 	hasPending, err := s.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 		IssueID: issue.ID,
-		AgentID: squad.LeaderID,
+		AgentID: leaderID,
 		// Key dedup on the reviewed head (TEN-356).
 		HeadSha: headShaText(s.TaskService.ResolveIssueReviewSHA(ctx, issue.ID)),
 	})
 	if err != nil || hasPending {
 		return
 	}
-	if _, err := s.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, squad.ID, triggerCommentID); err != nil {
+	if _, err := s.TaskService.EnqueueTaskForSquadLeader(ctx, issue, leaderID, squad.ID, triggerCommentID); err != nil {
 		slog.Warn("enqueue squad leader task on create failed",
 			"issue_id", util.UUIDToString(issue.ID),
 			"squad_id", util.UUIDToString(squad.ID),
-			"leader_id", util.UUIDToString(squad.LeaderID),
+			"leader_id", util.UUIDToString(leaderID),
 			"error", err)
 	}
 }

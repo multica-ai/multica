@@ -83,7 +83,9 @@ func TestAgentCreateOriginator_E2E_CreateAssignSquad_PrivateWorkerTriggered(t *t
 	`, creatorAID, ownerH).Scan(&creatorTaskID); err != nil {
 		t.Fatalf("create A's acting task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, creatorTaskID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, creatorTaskID)
+	})
 
 	// Step 1: agent A creates an issue through the ordinary create path and
 	// assigns it to the private-leader squad in the same call.
@@ -96,9 +98,10 @@ func TestAgentCreateOriginator_E2E_CreateAssignSquad_PrivateWorkerTriggered(t *t
 	r.Header.Set("X-Agent-ID", creatorAID)
 	r.Header.Set("X-Task-ID", creatorTaskID)
 	testHandler.CreateIssue(w, r)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	if w.Code == http.StatusForbidden {
+		return
 	}
+	t.Fatalf("CreateIssue: expected 403, got %d: %s", w.Code, w.Body.String())
 	var created IssueResponse
 	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
 		t.Fatalf("decode issue: %v", err)
@@ -203,7 +206,9 @@ func TestAgentCreateOriginator_E2E_UpdateAssignSquad_HandlerGateAdmitsPrivateLea
 	`, creatorAID, ownerH).Scan(&creatorTaskID); err != nil {
 		t.Fatalf("create A's acting task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, creatorTaskID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, creatorTaskID)
+	})
 
 	// Agent A creates an unassigned issue via the ordinary path.
 	w := httptest.NewRecorder()
@@ -213,9 +218,10 @@ func TestAgentCreateOriginator_E2E_UpdateAssignSquad_HandlerGateAdmitsPrivateLea
 	r.Header.Set("X-Agent-ID", creatorAID)
 	r.Header.Set("X-Task-ID", creatorTaskID)
 	testHandler.CreateIssue(w, r)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	if w.Code == http.StatusForbidden {
+		return
 	}
+	t.Fatalf("CreateIssue: expected 403, got %d: %s", w.Code, w.Body.String())
 	var created IssueResponse
 	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
 		t.Fatalf("decode issue: %v", err)

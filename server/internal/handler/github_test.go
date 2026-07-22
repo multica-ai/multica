@@ -335,8 +335,8 @@ func TestWebhook_MergedPR_AdvancesLinkedIssueToDone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetIssue: %v", err)
 	}
-	if updated.Status != "done" {
-		t.Errorf("expected issue status 'done', got %q", updated.Status)
+	if updated.Status != "in_review" {
+		t.Errorf("expected issue status 'in_review', got %q", updated.Status)
 	}
 }
 
@@ -564,14 +564,14 @@ func TestWebhook_MergedPR_WaitsForOpenSibling(t *testing.T) {
 		t.Errorf("issue should stay in_progress while sibling PR is open, got %q", issueAfterA.Status)
 	}
 
-	// Now merge PR B. Issue should advance to done — last sibling resolved.
+	// Now merge PR B. Issue should advance to review — last sibling resolved.
 	fire(t, "repo-b", 2, true)
 	issueAfterB, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
 	if err != nil {
 		t.Fatalf("GetIssue: %v", err)
 	}
-	if issueAfterB.Status != "done" {
-		t.Errorf("expected issue 'done' after every linked PR merged, got %q", issueAfterB.Status)
+	if issueAfterB.Status != "in_review" {
+		t.Errorf("expected issue 'in_review' after every linked PR merged, got %q", issueAfterB.Status)
 	}
 }
 
@@ -685,15 +685,15 @@ func TestWebhook_ClosedSiblingAfterMerge(t *testing.T) {
 		t.Fatalf("issue should stay in_progress while sibling PR open, got %q", intermediate.Status)
 	}
 
-	// Close PR B WITHOUT merging — issue should now advance to done because
+	// Close PR B WITHOUT merging — issue should now advance to review because
 	// PR-A's merge already delivered the work.
 	firePullRequestWebhook(t, secret, created.Identifier, installationID, "repo-b", 2, "closed")
 	final, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
 	if err != nil {
 		t.Fatalf("GetIssue: %v", err)
 	}
-	if final.Status != "done" {
-		t.Errorf("expected issue 'done' after sibling closed-without-merge follows a prior merge, got %q", final.Status)
+	if final.Status != "in_review" {
+		t.Errorf("expected issue 'in_review' after sibling closed-without-merge follows a prior merge, got %q", final.Status)
 	}
 }
 
@@ -890,9 +890,9 @@ func TestWebhook_MergedPR_OnlyClosesIdentifiersWithClosingKeyword(t *testing.T) 
 		}
 	}
 
-	// Only the closing-keyword identifier advances to done.
+	// Only the closing-keyword identifier advances to review.
 	wantStatus := map[string]string{
-		closes.ID:   "done",
+		closes.ID:   "in_review",
 		followUp.ID: "in_progress",
 		unblocks.ID: "in_progress",
 	}
@@ -1271,8 +1271,8 @@ func TestWebhook_LinkOnlySiblingMergeAfterCloseKeywordPR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetIssue after B merge: %v", err)
 	}
-	if got.Status != "done" {
-		t.Errorf("after both PRs merged (A with close_intent, B link-only): status = %q, want done", got.Status)
+	if got.Status != "in_review" {
+		t.Errorf("after both PRs merged (A with close_intent, B link-only): status = %q, want in_review", got.Status)
 	}
 }
 
@@ -1416,14 +1416,14 @@ func TestWebhook_HiddenBodyMentionDoesNotBlockAutoAdvance(t *testing.T) {
 	}
 
 	// PR A merges. PR B is still open but reference_only, so it must NOT count
-	// toward open_count — the issue should advance to done.
+	// toward open_count — the issue should advance to review.
 	firePRWebhook(t, secret, installationID, 2, "Primary work", "Closes "+created.Identifier, "feat/primary", "merged")
 	got, err = testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
 	if err != nil {
 		t.Fatalf("GetIssue after merge: %v", err)
 	}
-	if got.Status != "done" {
-		t.Errorf("closing PR merged while only a hidden body-only mention is open: status = %q, want done", got.Status)
+	if got.Status != "in_review" {
+		t.Errorf("closing PR merged while only a hidden body-only mention is open: status = %q, want in_review", got.Status)
 	}
 }
 
@@ -2247,16 +2247,9 @@ func TestGitHubInstallationBroadcastRedaction(t *testing.T) {
 	}
 }
 
-// TestWebhook_MergedPR_ChildWithParent_NotifiesParent guards the MUL-2538
-// must-fix: a merged PR is the dominant path by which a sub-issue actually
-// reaches `done`, and that path goes through advanceIssueToDone — not the
-// HTTP UpdateIssue / BatchUpdateIssues handlers that originally wired up
-// notifyParentOfChildDone. Without the helper call inside advanceIssueToDone,
-// the parent receives nothing when a child is closed by merging its PR.
-// This test fires a `pull_request closed merged` webhook against a child
-// issue and verifies the parent gets exactly one platform-generated system
-// comment with the child's real workspace identifier.
-func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
+// TestWebhook_MergedPR_ChildWithParent_StopsAtReview verifies that a merge
+// never completes a child or triggers terminal child-to-parent orchestration.
+func TestWebhook_MergedPR_ChildWithParent_StopsAtReview(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
@@ -2346,16 +2339,16 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 		t.Fatalf("webhook: expected 202, got %d (%s)", w.Code, w.Body.String())
 	}
 
-	// Child must now be done (sanity check — the existing path).
+	// Child must now be ready for human review.
 	updatedChild, err := testHandler.Queries.GetIssue(ctx, parseUUID(child.ID))
 	if err != nil {
 		t.Fatalf("GetIssue child: %v", err)
 	}
-	if updatedChild.Status != "done" {
-		t.Fatalf("expected child status 'done', got %q", updatedChild.Status)
+	if updatedChild.Status != "in_review" {
+		t.Fatalf("expected child status 'in_review', got %q", updatedChild.Status)
 	}
 
-	// Parent must have received exactly one platform-generated system comment.
+	// Review is not terminal, so the parent receives no completion comment.
 	var sysCount int
 	if err := testPool.QueryRow(ctx,
 		`SELECT count(*) FROM comment WHERE issue_id = $1 AND author_type = 'system'`,
@@ -2363,27 +2356,8 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 	).Scan(&sysCount); err != nil {
 		t.Fatalf("count system comments on parent: %v", err)
 	}
-	if sysCount != 1 {
-		t.Fatalf("expected 1 system comment on parent after PR-merge auto-done, got %d", sysCount)
-	}
-
-	var content string
-	if err := testPool.QueryRow(ctx,
-		`SELECT content FROM comment WHERE issue_id = $1 AND author_type = 'system' LIMIT 1`,
-		parent.ID,
-	).Scan(&content); err != nil {
-		t.Fatalf("read system comment: %v", err)
-	}
-	if !strings.Contains(content, child.Identifier) {
-		t.Errorf("system comment should reference child identifier %q, got: %s", child.Identifier, content)
-	}
-	// Parent has no assignee in this fixture, so the routing mentions stay
-	// absent. Behavior for assigned parents is covered in
-	// issue_child_done_test.go (MUL-2538 Option C).
-	for _, banned := range []string{"mention://agent/", "mention://member/", "mention://squad/"} {
-		if strings.Contains(content, banned) {
-			t.Errorf("system comment must not include %q mention (parent unassigned), got: %s", banned, content)
-		}
+	if sysCount != 0 {
+		t.Fatalf("expected no system comment on parent after PR merge, got %d", sysCount)
 	}
 }
 
