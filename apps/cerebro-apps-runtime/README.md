@@ -11,8 +11,15 @@ The Cerebro server and runtime must share `CEREBRO_APPS_RUNTIME_SERVICE_KEY`. Se
 - `CEREBRO_APPS_SLIPLANE_PROJECT_ID`: project that owns app services
 - `CEREBRO_APPS_SLIPLANE_SERVER_ID`: the same server as the control plane
 - `CEREBRO_APPS_WORKER_BRANCH`: the explicit Git branch used to build private workers
-- `CEREBRO_APPS_WORKER_COMMIT`: the exact 40-character commit that the worker health check must report before a deployment becomes ready
 - `SLIPLANE_KEY`: service-management credential
+
+On Sliplane, the control plane uses the platform-provided
+`SLIPLANE_COMMIT_HASH` as the exact worker commit required by the health check.
+`CEREBRO_APPS_WORKER_COMMIT` remains a fallback for local and non-Sliplane
+environments where that reserved variable is unavailable. Before reusing an
+existing deterministic worker service, the control plane updates its pinned
+`WORKER_COMMIT`; the worker reports that value when Sliplane does not expose the
+reserved commit variable inside the running container.
 
 Published app services are created with `network.public=false`. The runtime stores the concrete `.internal` domain returned by Sliplane and never guesses a service hostname.
 
