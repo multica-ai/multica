@@ -23,6 +23,14 @@ type Credential struct {
 	Username     string
 	Password     string
 	SessionToken string
+	// LoginCode is the staging master code (MULTICA_DEV_MASTER_CODE) that
+	// replaces the emailed one-time code on the staging deployment.
+	LoginCode string
+	// AccessClientID/AccessClientSecret are the Cloudflare Access service-token
+	// headers that let the verifier through the public edge for a target that
+	// has no reachable internal address.
+	AccessClientID     string
+	AccessClientSecret string
 }
 
 type Target struct {
@@ -35,6 +43,16 @@ type Target struct {
 	NavigateLinkName string
 	ExpectedText     []string
 	SessionCookie    bool
+	// SubmitButtonName clicks a button by its accessible name instead of a CSS
+	// selector, for a form whose submit control carries no stable selector.
+	SubmitButtonName string
+	// CodeSelector turns the login into the two-step code flow: submit the
+	// email, then type LoginCode into this field.
+	CodeSelector string
+	// AccessHeaders sends the Cloudflare Access service-token headers with the
+	// first navigation. Only a target on the public edge needs this, and it is
+	// the one case where the URL is allowed to be public HTTPS.
+	AccessHeaders bool
 }
 
 func (t Target) Host() string {
@@ -50,9 +68,16 @@ var targets = map[string]Target{
 		Name: "multica", URL: "http://multica.internal:3000/login",
 		NavigateLinkName: "Issues", ExpectedText: []string{"Issues", "Agents", "Settings"}, SessionCookie: true,
 	},
+	// Cerebro staging runs on its own Sliplane server, so the verifier cannot
+	// resolve its internal address. It is reached over the public edge with a
+	// Cloudflare Access service token instead, and signs in with the staging
+	// master code because a production session token means nothing there.
 	"cerebro": {
-		Name: "cerebro", URL: "http://multica-staging-web.internal:3000/login",
-		NavigateLinkName: "Issues", ExpectedText: []string{"Issues", "Agents", "Settings"}, SessionCookie: true,
+		Name: "cerebro", URL: "https://cerebro.firtal.com/login",
+		Vault: "Shared/browser-login/cerebro", AccessHeaders: true,
+		UsernameSelector: "#login-email", SubmitButtonName: "Continue",
+		CodeSelector:     "input[data-input-otp]",
+		NavigateLinkName: "Issues", ExpectedText: []string{"Issues", "Agents", "Settings"},
 	},
 	"registry": {
 		Name: "registry", URL: "http://firtal-data-registry-private.internal:3000/auth/login?manual=true",
@@ -73,6 +98,22 @@ var targets = map[string]Target{
 		Name: "customer-service", URL: "http://customer-service.internal:3456/desk",
 		ExpectedText: []string{"Desk", "Analytics"},
 	},
+	// Firtal Shift is served under the /shift base path, so every in-app route —
+	// including its login page — carries that prefix on the private host too.
+	// Production planning is the board this target exists to prove, so the run
+	// navigates there instead of stopping at the post-login landing page.
+	"warehouse": {
+		Name: "warehouse", URL: "http://firtal-shift-private.internal:3000/shift/auth/login",
+		Vault: "Shared/browser-login/warehouse", UsernameSelector: "#email", PasswordSelector: "#password",
+		SubmitSelector: "button[type=submit]", NavigateLinkName: "Production planning",
+		ExpectedText: []string{"Production planning", "Job assignment"},
+	},
+	// Atlas serves the catalog itself; the private host carries no app login, so
+	// the landing page's own heading is the proof that the app rendered.
+	"data-catalog": {
+		Name: "data-catalog", URL: "http://data-catalog.internal:3000/",
+		ExpectedText: []string{"Atlas Graph Health"},
+	},
 }
 
 func TargetFor(name string) (Target, error) {
@@ -81,7 +122,15 @@ func TargetFor(name string) (Target, error) {
 		return Target{}, fmt.Errorf("internal browser target is not allowed")
 	}
 	parsed, err := url.Parse(target.URL)
-	if err != nil || parsed.Scheme != "http" || !strings.Contains(parsed.Hostname(), ".internal") {
+	if err != nil {
+		return Target{}, fmt.Errorf("internal browser target is misconfigured")
+	}
+	// A target is either a private internal address over http, or — when it has
+	// no internal address the verifier can resolve — the public edge over HTTPS
+	// behind a Cloudflare Access service token. Nothing else is allowed.
+	internal := parsed.Scheme == "http" && strings.Contains(parsed.Hostname(), ".internal")
+	publicEdge := target.AccessHeaders && parsed.Scheme == "https" && strings.HasSuffix(parsed.Hostname(), ".firtal.com")
+	if !internal && !publicEdge {
 		return Target{}, fmt.Errorf("internal browser target is misconfigured")
 	}
 	return target, nil
@@ -273,6 +322,8 @@ const dnsPreflightTimeout = 5 * time.Second
 
 const dnsStage = "dns"
 
+const openStage = "open"
+
 func resolveInternalHost(ctx context.Context, host string) error {
 	hostname := host
 	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
@@ -319,13 +370,43 @@ func NewRunner(commander Commander) *Runner {
 	}
 }
 
+// openStage is the first navigation of a run, so it absorbs the target's cold
+// start. A container that has been idle can spend longer waking than the browser
+// action timeout allows, which surfaced as a plain "timeout" for an app that is
+// healthy on the very next attempt. Retry that one stage once on a timeout so a
+// slow wake-up is not reported as a failing app; every other cause fails on the
+// first attempt as before.
+const openStageRetries = 1
+
 func (r *Runner) runStage(ctx context.Context, target Target, stage, stdin string, args ...string) ([]byte, error) {
+	if stage != openStage {
+		return r.runStageOnce(ctx, target, stage, stdin, args...)
+	}
+	var lastErr error
+	for attempt := 0; attempt <= openStageRetries; attempt++ {
+		output, err := r.runStageOnce(ctx, target, stage, stdin, args...)
+		if err == nil {
+			return output, nil
+		}
+		lastErr = err
+		var stage stageError
+		if !errors.As(err, &stage) || stage.kind != commandFailureTimeout {
+			return nil, err
+		}
+		if ctx.Err() != nil {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}
+
+func (r *Runner) runStageOnce(ctx context.Context, target Target, stage, stdin string, args ...string) ([]byte, error) {
 	stageTimeout := r.stageTimeout
-	if stage == "open" {
+	if stage == openStage {
 		stageTimeout = r.openTimeout
 	}
 	if stageTimeout <= 0 {
-		if stage == "open" {
+		if stage == openStage {
 			stageTimeout = 60 * time.Second
 		} else {
 			stageTimeout = 30 * time.Second
@@ -348,6 +429,26 @@ func (r *Runner) runStage(ctx context.Context, target Target, stage, stdin strin
 		return nil, stageError{stage: stage, kind: safeCommandFailureKind(err)}
 	}
 	return output, nil
+}
+
+// dismissBlockingDialog clicks away a modal that a first login can raise before
+// the workspace is usable — today the "How did you hear about Multica?" survey,
+// which covers the navigation and makes a perfectly healthy app look like it is
+// missing its menu. Best effort by design: no dialog is the normal case, so a
+// failure here is never the run's verdict and the navigation stage still speaks.
+func (r *Runner) dismissBlockingDialog(ctx context.Context, target Target, baseArgs []string) {
+	dismissCtx, cancel := context.WithTimeout(ctx, r.stageTimeout)
+	defer cancel()
+	if _, err := r.commander.Run(dismissCtx, "",
+		append(baseArgs, "find", "role", "button", "click", "--name", "Skip")...); err != nil {
+		return
+	}
+	if r.observeStage != nil {
+		r.observeStage(stageObservation{
+			App: target.Name, Stage: "dialog", ExitClass: "success", TargetHost: target.Host(),
+		})
+	}
+	_, _ = r.commander.Run(dismissCtx, "", append(baseArgs, "wait", "1000")...)
 }
 
 // preflightDNS resolves the target host before the browser ever launches, so an
@@ -420,7 +521,7 @@ func (r *Runner) failure(target Target, baseArgs []string, detail string, err er
 var safeStageErrors = buildSafeStageErrors()
 
 func buildSafeStageErrors() map[string]struct{} {
-	stages := []string{dnsStage, "open", "auth", "reload", "render", "navigation", "snapshot", "markers", "url", "errors", "screenshot"}
+	stages := []string{dnsStage, openStage, "auth", "reload", "render", "navigation", "snapshot", "markers", "url", "errors", "screenshot"}
 	kinds := []commandFailureKind{
 		"", commandFailureUnknown, commandFailureTimeout, commandFailureDNS, commandFailureDNSTimeout,
 		commandFailureConnection, commandFailureBrowserLaunch, commandFailureNotFound,
@@ -447,11 +548,21 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	if err != nil {
 		return Result{}, err
 	}
-	hasPassword := credential.Username != "" || credential.Password != ""
-	if target.Vault == "" && hasPassword {
+	// A code-login target signs in with the staging master code, so its second
+	// secret is the code rather than a password. Everything else is unchanged:
+	// a vault target must arrive complete, and a vault-less one must arrive bare.
+	secondSecret := credential.Password
+	if target.CodeSelector != "" {
+		secondSecret = credential.LoginCode
+	}
+	hasCredential := credential.Username != "" || secondSecret != ""
+	if target.Vault == "" && hasCredential {
 		return Result{}, fmt.Errorf("target does not accept a browser credential")
 	}
-	if target.Vault != "" && (!hasPassword || credential.Username == "" || credential.Password == "") {
+	if target.Vault != "" && (credential.Username == "" || secondSecret == "") {
+		return Result{}, fmt.Errorf("target requires a complete browser credential")
+	}
+	if target.AccessHeaders && (credential.AccessClientID == "" || credential.AccessClientSecret == "") {
 		return Result{}, fmt.Errorf("target requires a complete browser credential")
 	}
 	if target.SessionCookie != (credential.SessionToken != "") {
@@ -483,17 +594,41 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		_, _ = r.commander.Run(cleanupCtx, "", append(baseArgs, "close")...)
 	}()
 
-	if _, err := r.runStage(ctx, target, "open", "", append(baseArgs, "open", target.URL)...); err != nil {
+	if target.AccessHeaders {
+		// The service-token headers are secrets, so the navigation that carries
+		// them goes through batch stdin instead of the argument vector.
+		headers, headerErr := json.Marshal(map[string]string{
+			"CF-Access-Client-Id":     credential.AccessClientID,
+			"CF-Access-Client-Secret": credential.AccessClientSecret,
+		})
+		if headerErr != nil {
+			return r.failure(target, baseArgs, target.URL, stageError{stage: openStage, kind: commandFailureUnknown})
+		}
+		payload, _ := json.Marshal([][]string{{"open", target.URL, "--headers", string(headers)}})
+		if _, err := r.runStage(ctx, target, openStage, string(payload), append(baseArgs, "batch")...); err != nil {
+			return r.failure(target, baseArgs, target.URL, err)
+		}
+	} else if _, err := r.runStage(ctx, target, openStage, "", append(baseArgs, "open", target.URL)...); err != nil {
 		return r.failure(target, baseArgs, target.URL, err)
 	}
 	if target.Vault != "" || target.SessionCookie {
-		commands := make([][]string, 0, 4)
+		commands := make([][]string, 0, 6)
 		if target.Vault != "" {
-			commands = append(commands,
-				[]string{"fill", target.UsernameSelector, credential.Username},
-				[]string{"fill", target.PasswordSelector, credential.Password},
-				[]string{"click", target.SubmitSelector},
-			)
+			commands = append(commands, []string{"fill", target.UsernameSelector, credential.Username})
+			if target.CodeSelector != "" {
+				// Two-step code login: submit the email, wait for the code field,
+				// then type the staging master code into it.
+				commands = append(commands,
+					[]string{"find", "role", "button", "click", "--name", target.SubmitButtonName},
+					[]string{"wait", target.CodeSelector},
+					[]string{"fill", target.CodeSelector, credential.LoginCode},
+				)
+			} else {
+				commands = append(commands,
+					[]string{"fill", target.PasswordSelector, credential.Password},
+					[]string{"click", target.SubmitSelector},
+				)
+			}
 		}
 		if target.SessionCookie {
 			parsed, _ := url.Parse(target.URL)
@@ -504,7 +639,11 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 				[]string{"open", rootURL},
 			)
 		}
-		commands = append(commands, []string{"wait", "1500"})
+		settle := "1500"
+		if target.CodeSelector != "" {
+			settle = "4000"
+		}
+		commands = append(commands, []string{"wait", settle})
 		payload, _ := json.Marshal(commands)
 		// This output is deliberately discarded: the stdin payload contains secrets.
 		if _, err := r.runStage(ctx, target, "auth", string(payload), append(baseArgs, "batch")...); err != nil {
@@ -518,6 +657,7 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		return r.failure(target, baseArgs, target.URL, err)
 	}
 	if target.NavigateLinkName != "" {
+		r.dismissBlockingDialog(ctx, target, baseArgs)
 		if _, err := r.runStage(ctx, target, "navigation", "", append(baseArgs, "find", "role", "link", "click", "--name", target.NavigateLinkName)...); err != nil {
 			return r.failure(target, baseArgs, "link: "+target.NavigateLinkName, err)
 		}

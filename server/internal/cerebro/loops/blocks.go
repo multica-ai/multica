@@ -107,6 +107,15 @@ type Block struct {
 	// Steps, when Allowed, lets this block open further steps of itself.
 	Steps StepsConfig `yaml:"steps,omitempty" json:"steps,omitempty"`
 
+	// StatusOnStart is the issue status the engine sets before this block's
+	// first step opens; StatusOnDone is the status it sets once every step of
+	// this block has completed. Both are optional: empty leaves the status
+	// alone, so a chain that only wants a status per phase keeps working. The
+	// driver applies them at block boundaries only — never while a step runs —
+	// so a status the engine already reached is never re-applied.
+	StatusOnStart string `yaml:"status_on_start,omitempty" json:"status_on_start,omitempty"`
+	StatusOnDone  string `yaml:"status_on_done,omitempty" json:"status_on_done,omitempty"`
+
 	// Skill is the skill run by a BlockSession, and the skill a BlockReview
 	// runs instead of a bare rubric prompt when set.
 	Skill string `yaml:"skill,omitempty" json:"skill,omitempty"`
@@ -156,8 +165,10 @@ type Phase struct {
 	// ID is stable and unique within the chain.
 	ID   string `yaml:"id" json:"id"`
 	Name string `yaml:"name,omitempty" json:"name,omitempty"`
-	// Status, when set, is the issue status whose entry starts this phase.
-	// Empty chains phases directly: the phase starts when the previous ends.
+	// Status, when set, is the issue status this phase runs in: the driver puts
+	// the issue in it before the phase's first block opens, so the board shows
+	// where the run actually is. Empty chains phases directly: the phase starts
+	// when the previous one ends and the status is left alone.
 	Status string      `yaml:"status,omitempty" json:"status,omitempty"`
 	Blocks []Block     `yaml:"blocks" json:"blocks"`
 	Limits PhaseLimits `yaml:"limits" json:"limits"`
@@ -173,6 +184,22 @@ type Chain struct {
 
 // ChainVersion is the only supported chain schema version.
 const ChainVersion = 2
+
+// IssueStatuses is the issue status vocabulary a chain may move an issue
+// through. Every status the editor offers is validated against this list at
+// save time, so a typed status can no longer reach the engine and silently
+// park an issue in a status the board does not have.
+var IssueStatuses = []string{"backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"}
+
+// ValidIssueStatus reports whether s is a status a chain may set.
+func ValidIssueStatus(s string) bool {
+	for _, known := range IssueStatuses {
+		if s == known {
+			return true
+		}
+	}
+	return false
+}
 
 // MachineDecided reports whether the block's outcome is decided by the engine
 // rather than asserted by an agent or a person. Commands use their exit code;
@@ -206,6 +233,9 @@ func (c *Chain) Validate() error {
 	if len(c.Phases) == 0 {
 		errs = append(errs, errors.New("at least one phase is required"))
 	}
+	if c.DoneStatus != "" && !ValidIssueStatus(c.DoneStatus) {
+		errs = append(errs, fmt.Errorf("done_status %q is not an issue status", c.DoneStatus))
+	}
 
 	seenPhase := make(map[string]bool, len(c.Phases))
 	for i, p := range c.Phases {
@@ -230,6 +260,9 @@ func validatePhase(label string, p Phase) []error {
 
 	if len(p.Blocks) == 0 {
 		errs = append(errs, fmt.Errorf("%s: at least one block is required", label))
+	}
+	if p.Status != "" && !ValidIssueStatus(p.Status) {
+		errs = append(errs, fmt.Errorf("%s: status %q is not an issue status", label, p.Status))
 	}
 	// A phase with no bound is the runaway we refuse to emit. Unlike the old
 	// caps these are per-phase, and unlike the old caps both of them can
@@ -324,6 +357,12 @@ func validateBlock(label string, b Block, limits PhaseLimits) []error {
 		if a.AgentID == "" {
 			errs = append(errs, fmt.Errorf("%s: agents[%d] needs an agent_id", label, i))
 		}
+	}
+	if b.StatusOnStart != "" && !ValidIssueStatus(b.StatusOnStart) {
+		errs = append(errs, fmt.Errorf("%s: status_on_start %q is not an issue status", label, b.StatusOnStart))
+	}
+	if b.StatusOnDone != "" && !ValidIssueStatus(b.StatusOnDone) {
+		errs = append(errs, fmt.Errorf("%s: status_on_done %q is not an issue status", label, b.StatusOnDone))
 	}
 	if b.OnAllBusy != "" && !validBusyPolicy(b.OnAllBusy) {
 		errs = append(errs, fmt.Errorf("%s: unknown on_all_busy %q (wait|pause|wakeup|ping_member)", label, b.OnAllBusy))

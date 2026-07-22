@@ -20,8 +20,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
-	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy" // CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 staged local tool-policy import.
-	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"     // CEREBRO-PATCH(session-modes): FIR-3111 normalize claim profiles.
+	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode" // CEREBRO-PATCH(session-modes): FIR-3111 normalize claim profiles.
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -1434,14 +1434,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		resp.RuntimeSandboxPolicy = withAgentBrowserSandbox(resp.RuntimeSandboxPolicy)
 	}
 
-	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — resolve the staged
-	// local-runtime enforcement mode from workspace settings so the daemon
-	// wires the Claude PreToolUse hook only when the workspace opted in.
-	// Off (default) leaves the field empty and the daemon wires nothing.
-	if stage := h.localToolPolicyMode(r.Context(), runtime.WorkspaceID); stage != localtoolpolicy.ModeOff {
-		resp.LocalToolPolicyStage = string(stage)
-	}
-
 	// Resolve the runtime owner's profile description so the daemon can
 	// inject "## Requesting User" into the brief. Empty fields short-circuit
 	// the heading entirely on the daemon side; cloud / system runtimes with
@@ -2158,19 +2150,24 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			skillPayloadBytes = len(skillPayload)
 		}
 	}
-	resp.EffectiveTools = h.cerebroEffectiveToolsForBrief(r.Context(), runtime, resp.Agent, resp.InitiatorType, resp.InitiatorID) // CEREBRO-PATCH(agent-task-effective-tools-callsite): FIR-2312 resolve per-permission non-CLI tools for the brief
+	var mandateTools []string
+	var toolResolveErr error
+	resp.EffectiveTools, mandateTools, toolResolveErr = h.cerebroEffectiveToolsForClaim(r.Context(), runtime, resp.Agent, resp.InitiatorType, resp.InitiatorID) // CEREBRO-PATCH(agent-task-effective-tools-callsite): FIR-2312 resolve per-permission tools once for both the brief and immutable mandate
+	if toolResolveErr != nil {
+		// CEREBRO-PATCH(agent-task-tool-resolve-failclaim): FIR-3403 TRIN 1b — never issue an empty (total-lockout) mandate on a resolution error; fail the claim so the task retries.
+		outcome = "error_tool_resolve"
+		slog.Error("task claim: failed to resolve agent tool mandate", "task_id", uuidToString(task.ID), "error", toolResolveErr)
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent tool mandate")
+		return
+	}
 	if resp.SessionModeConfig != nil && len(resp.SessionModeConfig.AllowedTools) > 0 {
-		allowed := make(map[string]struct{}, len(resp.SessionModeConfig.AllowedTools))
-		for _, name := range resp.SessionModeConfig.AllowedTools {
-			allowed[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
-		}
-		filtered := resp.EffectiveTools[:0]
-		for _, tool := range resp.EffectiveTools {
-			if _, ok := allowed[strings.ToLower(strings.TrimSpace(tool.Name))]; ok {
-				filtered = append(filtered, tool)
-			}
-		}
-		resp.EffectiveTools = filtered
+		resp.EffectiveTools, mandateTools = filterClaimToolsForSessionMode(resp.EffectiveTools, mandateTools, resp.SessionModeConfig.AllowedTools)
+	}
+	if err := taskmandate.NewStoreDB(h.DB).Issue(r.Context(), task.ID, parseUUID(resp.WorkspaceID), task.AgentID, mandateTools, time.Now().Add(24*time.Hour)); err != nil {
+		outcome = "error_task_mandate"
+		slog.Error("task claim: failed to issue task mandate", "task_id", uuidToString(task.ID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to issue task mandate")
+		return
 	}
 	h.applyMemoryAutoRecall(r.Context(), &resp, *task) // CEREBRO-PATCH(daemon-memory-autorecall-callsite): FIR-1794 layer 3 — auto-recall memories into the claim when cerebro_memory is on
 

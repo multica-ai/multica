@@ -161,9 +161,6 @@ vi.mock("@multica/ui/components/common/actor-avatar", () => ({ ActorAvatar: () =
 vi.mock("@multica/cerebro-approvals/views/approvals-nav-item", () => ({
   ApprovalsNavItem: () => <span>Approvals</span>,
 }));
-vi.mock("@multica/cerebro-agent-passes/views/agent-passes-nav-item", () => ({
-  AgentPassesNavItem: () => <span>Agent passes</span>,
-}));
 vi.mock("@multica/cerebro-notes/views/notes-nav-item", () => ({
   NotesNavItem: () => <span>Notes</span>,
 }));
@@ -322,15 +319,12 @@ describe("PinRow", () => {
     expect(screen.queryByText("Sidebar Project")).not.toBeInTheDocument();
   });
 
-  it("groups Approvals with Agent passes under Configure", () => {
+  it("groups Approvals under Configure", () => {
     featureFlags.current = true;
     render(<AppSidebar />);
 
     const approvalsSection = screen.getByText("Approvals").closest("section");
-    const passesSection = screen.getByText("Agent passes").closest("section");
-
     expect(approvalsSection).not.toBeNull();
-    expect(approvalsSection).toBe(passesSection);
     expect(approvalsSection).not.toContainElement(screen.getByText("Notes"));
   });
 });

@@ -7,24 +7,20 @@ package runtime
 // Pending was always empty.
 //
 // guardToolCall is the single choke-point every tool dispatch in the gateway
-// tool loops now passes through. Its default behaviour is a pure no-op: when
-// no gate is configured (the default) it returns allowed=true without touching
-// the resolver, so the fleet is completely unaffected. The gate is only
-// activated by MaybeEnableApprovalGate, which the server wires solely when the
-// CEREBRO_APPROVAL_GATE_ENABLED env flag is set — a controlled, default-off
-// rollout that can be scoped to a single agent via CEREBRO_APPROVAL_GATE_AGENTS.
+// tool loops now passes through. The Policy Decision Service always decides
+// access; this file only supplies the shared approval inbox for Ask outcomes.
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/accessdecision"
 	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
@@ -191,13 +187,9 @@ func (e *FirtalGatewayExecutor) guardConnectionAsk(
 
 // guardToolCall is the enforcement choke-point. It returns (allowed, reason).
 //
-// Default-off: when e.gate is nil it allows immediately without any lookup.
-// Controlled scope: when gateAgents is non-empty, agents outside the set are
-// allowed without a lookup. Ungated tools (toolCapabilityKey == "") are always
-// allowed. Otherwise it asks the gate, which on requires_approval creates an
-// inbox ask and BLOCKS until a human approves (continue), rejects/expires
-// (stop), or the wait budget elapses (stop, fail-closed). A gate error also
-// fails closed — needs_approval is never silently downgraded to allow.
+// Policy Decision Service is authoritative and fail-closed for every call.
+// Connection-specific Deny and Ask plus create_issue's platform-action gate
+// remain stricter safety floors on top of an Allow verdict.
 func (e *FirtalGatewayExecutor) guardToolCall(
 	ctx context.Context,
 	agentID, workspaceID pgtype.UUID,
@@ -209,14 +201,32 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	if e == nil {
 		return true, ""
 	}
+	// The task mandate is the immutable per-run contract. Check it at this
+	// shared dispatch choke-point so every Gateway transport, including the
+	// create_issue early-return path, performs a fresh expiry and membership
+	// read immediately before execution.
+	if e.taskMandates != nil {
+		taskID := optionalGatewayUUID(meta.TaskID)
+		if !taskID.Valid {
+			return false, "task mandate missing"
+		}
+		if err := e.taskMandates.Authorize(ctx, taskID, workspaceID, agentID, toolName); err != nil {
+			return false, fmt.Sprintf("task mandate denied the call: %v", err)
+		}
+	}
+	var decision, connNameLog string
 	if toolName == "create_issue" {
+		entry := e.decideAccess(ctx, agentID, workspaceID, toolName, reg, meta, gatewayPolicyRequestContext(toolName, args))
+		if entry.ShadowDecision != accessdecision.DecisionAllow {
+			return false, entry.Reason
+		}
+		decision = "policy_decision_service+platform_action"
 		return e.guardPlatformAction(ctx, agentID, workspaceID, toolName, args, meta)
 	}
 	// FIR-2243 B1: emit one structured runtime decision line per tool call, tying
 	// the tool to the permission verdict it ran under — for EVERY call, including
 	// the default-off common path that previously logged nothing. decision is set
 	// at each return below; the defer reads the final named (allowed, reason).
-	var decision, connNameLog string
 	defer func() {
 		e.logToolDecision(meta, toolName, connNameLog, decision, allowed, reason)
 	}()
@@ -265,111 +275,35 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 		decision = "deny_connection"
 		return false, fmt.Sprintf("tool %q is denied for this agent by a connection permission", toolName)
 	}
+
+	entry := e.decideAccess(ctx, agentID, workspaceID, toolName, reg, meta, gatewayPolicyRequestContext(toolName, args))
+	decision = "policy_decision_service"
+	if entry.ShadowDecision != accessdecision.DecisionAllow {
+		return false, entry.Reason
+	}
+	// Connection Ask remains a safety floor on top of the authoritative Policy
+	// Decision Service. When the approval inbox is active, preserve the existing
+	// blocking approval flow; API endpoint Ask already fails closed above when it
+	// is inactive, while MCP Ask keeps its established inactive-inbox behavior.
+	if connSetting == toolpolicy.SettingAsk && e.approvalInboxActive(ctx, workspaceID) {
+		decision = "policy_decision_service+ask_connection"
+		return e.guardConnectionAsk(ctx, agentID, workspaceID, toolName, connName, args, meta)
+	}
 	// FIR-2388: an API-connection ENDPOINT set to Ask fronts the secrets box and is
 	// dispatched server-side on this runtime, so it MUST reach the approval inbox
 	// before it runs — it must never be silently downgraded to Allow by an inactive
 	// approval gate. Unlike an ordinary Ask (a UX pause) or an MCP-connection Ask
 	// (relayed, TECH-3498 "no-op when the gate is off"), letting this through
 	// unapproved would dispatch a credentialed secrets call the agent should have
-	// had to get approved. So if the inbox will not run for this call (gate off,
-	// workspace approval flag off, or agent outside the gate's rollout scope), fail
+	// had to get approved. So if the inbox will not run for this call (gate off or
+	// workspace approval flag off), fail
 	// CLOSED — mirroring the local MCP path, which 403s an Ask endpoint. When the
 	// inbox IS active the Ask flows to guardConnectionAsk below via connSetting.
-	if epSetting == toolpolicy.SettingAsk && !e.approvalInboxActive(ctx, agentID, workspaceID) {
+	if epSetting == toolpolicy.SettingAsk && !e.approvalInboxActive(ctx, workspaceID) {
 		e.logger.Info("api endpoint Ask blocked — approval inbox inactive (FIR-2388)",
 			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool", toolName, "connection", connName)
 		decision = "deny_ask_inbox_inactive"
 		return false, fmt.Sprintf("tool %q requires human approval, which is not available for this run", toolName)
-	}
-	if e.gate == nil {
-		decision = "allow_gate_off"
-		return true, ""
-	}
-	if len(e.gateAgents) > 0 {
-		if _, ok := e.gateAgents[agentID.Bytes]; !ok || !agentID.Valid {
-			decision = "allow_out_of_scope"
-			return true, ""
-		}
-	}
-	// Workspace feature flag: cerebro_approval_gate. Defaults true (gate on).
-	// A workspace admin can turn it off from Settings → Features without a
-	// server restart. Any DB error → fail-open (keep gate on, don't block work).
-	if !e.workspaceApprovalGateEnabled(ctx, workspaceID) {
-		decision = "allow_flag_off"
-		return true, ""
-	}
-
-	// TECH-3498: a connection tool set to Ask routes through the same inbox + await
-	// as any other Ask. Checked here — after the gate/flag/allowlist preconditions —
-	// so it only fires when the approval inbox is active, and returns directly
-	// (the generic resolver below keys on the bare tool name and never sees the
-	// connection:<name> rows, so it would resolve such a tool to Allow).
-	if connSetting == toolpolicy.SettingAsk {
-		decision = "ask_connection"
-		return e.guardConnectionAsk(ctx, agentID, workspaceID, toolName, connName, args, meta)
-	}
-
-	// FIR-2230: when the unified per-tool policy chain is wired, it decides this
-	// call before the legacy capability resolver. That lets explicit per-tool
-	// rows gate every platform tool, including older tools with no capability key.
-	if e.toolPolicy != nil {
-		decision = "tool_policy"
-		return e.guardToolCallViaPolicy(ctx, agentID, workspaceID, toolName, args, meta)
-	}
-
-	// Legacy approval gate: ungated tools are allowed. Checked after the workspace
-	// flag so the zero-value test executor can still exercise the old resolver.
-	capKey := toolCapabilityKey(toolName)
-	if capKey == "" {
-		decision = "allow_ungated"
-		return true, ""
-	}
-
-	req := permgate.Request{
-		Permission: permissions.Request{
-			WorkspaceID: workspaceID,
-			Actor:       permissions.Actor{Type: "agent", ID: agentID},
-			Agent:       agentID,
-			Capability:  capKey,
-		},
-		RequesterType: approvals.RequesterAgent,
-		RequesterID:   agentID,
-		Surface:       approvals.SurfaceSystem,
-		Context: map[string]any{
-			"tool_name": toolName,
-			"task_id":   meta.TaskID,
-			"issue_id":  meta.IssueID,
-			"args":      args,
-		},
-	}
-
-	res, err := e.gate.Guard(ctx, req)
-	if err != nil {
-		e.logger.Warn("approval gate error — failing closed",
-			"task_id", meta.TaskID,
-			"agent_id", meta.AgentID,
-			"tool_name", toolName,
-			"capability", capKey,
-			"error", err,
-		)
-		decision = "capability_error"
-		return false, fmt.Sprintf("permission gate error: %v", err)
-	}
-	e.logger.Info("approval gate decision",
-		"task_id", meta.TaskID,
-		"agent_id", meta.AgentID,
-		"tool_name", toolName,
-		"capability", capKey,
-		"outcome", string(res.Outcome),
-		"reason", res.Reason,
-	)
-	decision = "capability_" + string(res.Outcome)
-	if res.Outcome.Stops() {
-		r := res.Reason
-		if r == "" {
-			r = string(res.Outcome)
-		}
-		return false, r
 	}
 	return true, ""
 }
@@ -640,21 +574,15 @@ func (e *FirtalGatewayExecutor) workspaceApprovalGateEnabled(ctx context.Context
 	return enabled
 }
 
-// approvalInboxActive reports whether an Ask verdict on this call will actually
-// reach the approval inbox (and block for a human) rather than be short-circuited
-// to Allow. It mirrors exactly the gate/allowlist/workspace-flag preconditions
-// guardToolCall applies before routing any Ask (e.gate != nil, agent inside the
-// gate's rollout scope, workspace approval flag on). FIR-2388 uses it to fail
+// approvalInboxActive reports whether an Ask verdict on this call will reach
+// the approval inbox and block for a human. The workspace feature setting is
+// the only authoring switch; there is no second server rollout control.
+// FIR-2388 uses it to fail
 // CLOSED on an API-connection endpoint Ask when the inbox is inactive: those
 // front the secrets box and must never run unapproved.
-func (e *FirtalGatewayExecutor) approvalInboxActive(ctx context.Context, agentID, workspaceID pgtype.UUID) bool {
+func (e *FirtalGatewayExecutor) approvalInboxActive(ctx context.Context, workspaceID pgtype.UUID) bool {
 	if e == nil || e.gate == nil {
 		return false
-	}
-	if len(e.gateAgents) > 0 {
-		if _, ok := e.gateAgents[agentID.Bytes]; !ok || !agentID.Valid {
-			return false
-		}
 	}
 	return e.workspaceApprovalGateEnabled(ctx, workspaceID)
 }
@@ -711,128 +639,34 @@ func (e *FirtalGatewayExecutor) policyCELEvaluator(ctx context.Context, workspac
 	return eval.Eval
 }
 
-// EnableApprovalGate activates the enforcement gate on this executor, scoped to
-// the given agent allowlist (empty = all agents). Calling it is what turns the
-// default no-op into real enforcement; the server only calls it under the env
-// flag, so the zero-value executor stays unchanged.
-func (e *FirtalGatewayExecutor) EnableApprovalGate(gate *permgate.Gate, agentAllowlist []pgtype.UUID) {
+// EnableApprovalGate wires the one shared approval seam for every agent.
+func (e *FirtalGatewayExecutor) EnableApprovalGate(gate *permgate.Gate) {
 	if e == nil {
 		return
 	}
 	e.gate = gate
-	if len(agentAllowlist) == 0 {
-		e.gateAgents = nil
-		return
-	}
-	allow := make(map[[16]byte]struct{}, len(agentAllowlist))
-	for _, id := range agentAllowlist {
-		if id.Valid {
-			allow[id.Bytes] = struct{}{}
-		}
-	}
-	e.gateAgents = allow
 }
 
-// Approval gate env knobs. All default to off / unset so production behaviour
-// is unchanged until an operator opts in.
+// Operational timing knobs do not change who has access. Access and the Ask
+// behavior are authored in Settings → Permissions and Settings → Features.
 const (
-	envApprovalGateEnabled = "CEREBRO_APPROVAL_GATE_ENABLED"
-	envApprovalGateAgents  = "CEREBRO_APPROVAL_GATE_AGENTS"
-	envApprovalGateWait    = "CEREBRO_APPROVAL_GATE_WAIT"
-	envApprovalGateTTL     = "CEREBRO_APPROVAL_GATE_TTL"
-	// envApprovalGateMode selects which engine resolves each tool call:
-	// "toolpolicy" (FIR-2230 unified per-tool chain) or the default capability
-	// resolver (FIR-2193). Unset/anything else = capability, so prod is unchanged.
-	envApprovalGateMode = "CEREBRO_APPROVAL_GATE_MODE"
+	envApprovalGateWait = "CEREBRO_APPROVAL_GATE_WAIT"
+	envApprovalGateTTL  = "CEREBRO_APPROVAL_GATE_TTL"
 
 	defaultApprovalGateWait = 10 * time.Minute
 	defaultApprovalGateTTL  = 30 * time.Minute
 )
 
 // BuildApprovalGate constructs the shared approval enforcement gate — the single
-// "resolve → on Ask create an inbox request → await the human decision" seam
-// (FIR-2586). It returns nil when CEREBRO_APPROVAL_GATE_ENABLED is off, so every
-// caller keeps its prior behaviour until an operator opts in. The same gate type
-// backs the agent tool loop (MaybeEnableApprovalGate), the daemon repo checkout
-// (Handler.ApprovalGate) and credential governance, so a needs-approval verdict
+// "resolve → on Ask create an inbox request → await the human decision" seam.
+// The same gate type backs the agent tool loop, daemon repo checkout, and
+// credential governance, so a needs-approval verdict
 // from any of them lands in the one /approvals inbox instead of a silent block.
 func BuildApprovalGate(cerebroQueries *cerebrodb.Queries, tx approvals.TxStarter, bus *events.Bus) *permgate.Gate {
-	if !approvalGateEnvEnabled() {
-		return nil
-	}
 	resolver := permissions.New(cerebroQueries)
 	approvalsSvc := approvals.New(cerebroQueries, tx, bus)
 	gate := permgate.New(resolver, approvalsSvc)
 	gate.WaitTimeout = durationFromEnv(defaultApprovalGateWait, envApprovalGateWait)
 	gate.ApprovalTTL = durationFromEnv(defaultApprovalGateTTL, envApprovalGateTTL)
 	return gate
-}
-
-// MaybeEnableApprovalGate reads the env flags and, only when
-// CEREBRO_APPROVAL_GATE_ENABLED is truthy, constructs the resolver + approvals
-// service + gate and enables it on the executor. When the flag is off it is a
-// no-op: tool execution behaves exactly as before. Invalid agent UUIDs in the
-// allowlist are skipped with a warning rather than failing startup.
-func MaybeEnableApprovalGate(e *FirtalGatewayExecutor, cerebroQueries *cerebrodb.Queries, tx approvals.TxStarter, bus *events.Bus) {
-	if e == nil {
-		return
-	}
-	gate := BuildApprovalGate(cerebroQueries, tx, bus)
-	if gate == nil {
-		return
-	}
-
-	// Tool-policy mode resolves every tool through the unified Runtime › Agent ›
-	// Group › User chain so the permission table's Allow/Ask/Deny rows gate real
-	// tool calls; the gate above still provides the shared inbox + await. Default
-	// (capability) keeps the prior FIR-2193 resolver path.
-	toolPolicyMode := approvalGateModeToolPolicy()
-	if toolPolicyMode {
-		e.toolPolicy = toolpolicy.NewStoreFromQueries(cerebroQueries)
-	}
-
-	var allowlist []pgtype.UUID
-	if raw := strings.TrimSpace(os.Getenv(envApprovalGateAgents)); raw != "" {
-		for _, part := range splitCSV(raw) {
-			id, err := util.ParseUUID(part)
-			if err != nil {
-				e.logger.Warn("approval gate: skipping invalid agent id",
-					"value", part, "error", err)
-				continue
-			}
-			allowlist = append(allowlist, id)
-		}
-	}
-
-	e.EnableApprovalGate(gate, allowlist)
-	mode := "capability"
-	if toolPolicyMode {
-		mode = "toolpolicy"
-	}
-	e.logger.Info("approval enforcement gate ENABLED (controlled rollout)",
-		"resolver_mode", mode,
-		"scoped_agents", len(allowlist),
-		"wait_timeout", gate.WaitTimeout.String(),
-		"approval_ttl", gate.ApprovalTTL.String(),
-	)
-}
-
-func approvalGateEnvEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(envApprovalGateEnabled))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
-
-// approvalGateModeToolPolicy reports whether the gate should resolve through the
-// FIR-2230 per-tool policy chain instead of the default capability resolver.
-func approvalGateModeToolPolicy() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(envApprovalGateMode))) {
-	case "toolpolicy", "tool-policy", "tool_policy":
-		return true
-	default:
-		return false
-	}
 }

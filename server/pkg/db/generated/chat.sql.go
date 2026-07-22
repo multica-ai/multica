@@ -113,7 +113,7 @@ type CreateOrGetQueuedChatTaskParams struct {
 // (migration 057). The DO UPDATE branch is a no-op write — the assignment
 // to priority is what makes RETURNING surface the existing row instead of
 // producing zero rows.
-// CEREBRO-PATCH(chat-task-original-user-id): seed original_user_id so chat tasks use the cerebro_runtime_tool cascade (same as issue tasks).
+// CEREBRO-PATCH(chat-task-original-user-id): seed original_user_id so chat tasks resolve canonical tool policy with the same member context as issue tasks.
 func (q *Queries) CreateOrGetQueuedChatTask(ctx context.Context, arg CreateOrGetQueuedChatTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createOrGetQueuedChatTask,
 		arg.AgentID,

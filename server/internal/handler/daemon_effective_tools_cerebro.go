@@ -17,6 +17,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -84,13 +85,34 @@ type CerebroAPIConnectionBriefTool struct {
 // cerebroEffectiveToolsForBrief resolves the agent's exposed non-CLI tools for
 // the brief. Returns nil (no section) when the tool-access service is not wired,
 // the agent is unknown, or nothing is exposed — all expected, non-error cases.
+// The brief is best-effort, so a resolution error is swallowed here (no section);
+// the claim path handles it via cerebroEffectiveToolsForClaim's error return.
 func (h *Handler) cerebroEffectiveToolsForBrief(ctx context.Context, runtime db.AgentRuntime, agent *TaskAgentData, initiatorType, initiatorID string) []AgentTaskToolEntry {
+	tools, _, _ := h.cerebroEffectiveToolsForClaim(ctx, runtime, agent, initiatorType, initiatorID)
+	return tools
+}
+
+// cerebroEffectiveToolsForClaim resolves the final claim-time tool exposure once
+// and returns the human-readable brief entries, the exact callable names that may
+// be snapshotted into the task mandate, and an error.
+//
+// FIR-3403 (TRIN 1b): the mandate is a fail-closed allowlist — an EMPTY mandate
+// denies every tool (Authorize returns ErrToolDeny for all), including built-in
+// Bash/Read/Edit. So "resolved to zero tools" and "could not resolve" must not
+// collapse to the same nil result: the former is a legitimate empty mandate, the
+// latter must NOT silently issue a total-lockout mandate. The two cases where the
+// resolver was actually consulted and FAILED (a malformed agent id, or a
+// ListEffectiveTools error) therefore return a non-nil error, so the claim path
+// fails the claim (task retries) instead of bricking the run. The
+// resolver-not-wired / nil-agent cases stay non-error (the feature is simply
+// unavailable — unchanged behaviour), as does a genuine zero-tool resolution.
+func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.AgentRuntime, agent *TaskAgentData, initiatorType, initiatorID string) ([]AgentTaskToolEntry, []string, error) {
 	if h == nil || h.runtimeToolAccess == nil || agent == nil {
-		return nil
+		return nil, nil, nil
 	}
 	agentID, err := util.ParseUUID(agent.ID)
 	if err != nil {
-		return nil
+		return nil, nil, fmt.Errorf("cerebro effective tools: parse agent id %q: %w", agent.ID, err)
 	}
 
 	// Actor layers (FIR-2441). The agent owner and the delegated member (the task
@@ -134,12 +156,15 @@ func (h *Handler) cerebroEffectiveToolsForBrief(ctx context.Context, runtime db.
 		OnBehalfOfID:        initiatorMember,
 	})
 	if err != nil {
-		// Best-effort: a resolution error must not fail the claim. The agent
-		// just gets no dynamic tools section (the CLI list is unaffected).
-		return nil
+		// FIR-3403 (TRIN 1b): a resolution error is NOT "zero tools". Returning an
+		// empty mandate here would deny every tool (including built-ins) for the
+		// whole run. Surface the error so the claim path fails the claim and the
+		// task retries, rather than issuing a silent total-lockout mandate.
+		return nil, nil, fmt.Errorf("cerebro effective tools: list effective tools: %w", err)
 	}
 
 	out := make([]AgentTaskToolEntry, 0, len(rows))
+	mandateTools := make([]string, 0, len(rows))
 	for _, v := range rows {
 		if !v.ExposureEffective.Effective {
 			continue // not actually exposed to this agent → omit
@@ -151,6 +176,11 @@ func (h *Handler) cerebroEffectiveToolsForBrief(ctx context.Context, runtime db.
 		if name == "" {
 			continue
 		}
+		callableName := strings.TrimSpace(v.Inventory.ToolName)
+		if callableName == "" {
+			callableName = name
+		}
+		mandateTools = append(mandateTools, callableName)
 		family := "Platform tools"
 		server := strings.TrimSpace(v.Inventory.MCPServerName)
 		switch {
@@ -200,6 +230,7 @@ func (h *Handler) cerebroEffectiveToolsForBrief(ctx context.Context, runtime db.
 				continue
 			}
 			seen[name] = struct{}{}
+			mandateTools = append(mandateTools, name)
 			verdict := strings.TrimSpace(t.Verdict)
 			if verdict == "" {
 				verdict = "allow"
@@ -229,7 +260,38 @@ func (h *Handler) cerebroEffectiveToolsForBrief(ctx context.Context, runtime db.
 	}
 
 	if len(out) == 0 {
-		return nil
+		// Resolved successfully to zero exposed tools — a legitimate empty result,
+		// distinct from the error returns above. The caller may issue an empty
+		// mandate for it (no error).
+		return nil, nil, nil
 	}
-	return out
+	return out, mandateTools, nil
+}
+
+func filterClaimToolsForSessionMode(tools []AgentTaskToolEntry, mandateTools, allowedTools []string) ([]AgentTaskToolEntry, []string) {
+	if len(allowedTools) == 0 {
+		return tools, mandateTools
+	}
+	allowed := make(map[string]struct{}, len(allowedTools))
+	for _, name := range allowedTools {
+		allowed[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+	}
+	filteredTools := tools[:0]
+	filteredMandate := mandateTools[:0]
+	for i, tool := range tools {
+		_, displayAllowed := allowed[strings.ToLower(strings.TrimSpace(tool.Name))]
+		callableName := ""
+		callableAllowed := false
+		if i < len(mandateTools) {
+			callableName = mandateTools[i]
+			_, callableAllowed = allowed[strings.ToLower(strings.TrimSpace(callableName))]
+		}
+		if displayAllowed || callableAllowed {
+			filteredTools = append(filteredTools, tool)
+			if callableName != "" {
+				filteredMandate = append(filteredMandate, callableName)
+			}
+		}
+	}
+	return filteredTools, filteredMandate
 }

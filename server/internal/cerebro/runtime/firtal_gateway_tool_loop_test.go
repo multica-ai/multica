@@ -13,7 +13,10 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/cerebro/permissions"
+	"github.com/multica-ai/multica/server/internal/cerebro/accessdecision"
+	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
+	"github.com/multica-ai/multica/server/internal/cerebro/capabilitycatalog"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/mcp"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -337,7 +340,7 @@ func TestRunToolLoopSendsToolResultsAsRoleToolMessages(t *testing.T) {
 		captured = append(captured, body.Messages)
 		w.Header().Set("Content-Type", "application/json")
 		if len(captured) == 1 {
-			w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"echo","arguments":"{\"text\":\"hej\"}"}}]}}]}`))
+			w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_issue","arguments":"{\"text\":\"hej\"}"}}]}}]}`))
 			return
 		}
 		w.Write([]byte(`{"choices":[{"message":{"content":"done"}}]}`))
@@ -346,20 +349,26 @@ func TestRunToolLoopSendsToolResultsAsRoleToolMessages(t *testing.T) {
 	gateway := NewGatewayClient(FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096}, srv.Client())
 
 	toolSrv := mcp.NewServer("test-tools", "0.0.0")
-	toolSrv.RegisterTool(mcp.Tool{Name: "echo"}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+	toolSrv.RegisterTool(mcp.Tool{Name: "get_issue"}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
 		return mcp.TextResult("echoed:" + args["text"].(string)), nil
 	})
 
-	e := &FirtalGatewayExecutor{gateway: gateway, logger: testLogger()}
+	e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
+	setAgentToolPolicy(t, agentID, "get_issue", toolpolicy.SettingAllow)
+	e.SetAccessDecisionObserver(accessdecision.NewObserver(e.toolPolicy, shadowEvidence{
+		capabilitycatalog.PlatformTool("get_issue").ID: {Level: availabilityevidence.LevelVerified},
+	}, &shadowLedgerWriter{}))
+	e.gateway = gateway
+	e.logger = testLogger()
 	if _, err := e.runToolLoopWithServer(context.Background(),
 		FirtalGatewayRuntimeConfig{BaseURL: "https://x", APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096},
 		db.Agent{},
 		[]GatewayMessage{{Role: "system", Content: "be helpful"}, {Role: "user", Content: "summarise"}},
 		GatewayRequestMeta{TaskID: "t1"},
-		pgtype.UUID{},
-		pgtype.UUID{},
+		agentID,
+		runtimeAccountTestWSID,
 		toolSrv,
-		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "echo"}}},
+		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "get_issue"}}},
 		false,
 	); err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
@@ -533,7 +542,7 @@ func TestGatewayCompatRegistryToolLoopFallsBackToCoreToolsOnMalformedFullList(t 
 
 type fallbackTestTool struct{}
 
-func (fallbackTestTool) Name() string { return "echo" }
+func (fallbackTestTool) Name() string { return "get_issue" }
 func (fallbackTestTool) Description() string {
 	return "Echo input text."
 }
@@ -562,7 +571,7 @@ func TestGatewayCompatRegistryToolLoopDispatchesTools(t *testing.T) { // CEREBRO
 		captured = append(captured, body)
 		w.Header().Set("Content-Type", "application/json")
 		if len(captured) == 1 {
-			w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"echo","arguments":"{\"text\":\"hej\"}"}}]}}],"firtal":{"input_tokens":3,"output_tokens":2}}`))
+			w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_issue","arguments":"{\"text\":\"hej\"}"}}]}}],"firtal":{"input_tokens":3,"output_tokens":2}}`))
 			return
 		}
 		w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"firtal":{"input_tokens":5,"output_tokens":7}}`))
@@ -571,14 +580,17 @@ func TestGatewayCompatRegistryToolLoopDispatchesTools(t *testing.T) { // CEREBRO
 
 	reg := NewRegistry(nil)
 	reg.Register(fallbackTestTool{})
-	e := &FirtalGatewayExecutor{gateway: NewGatewayClient(FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096}, srv.Client()), logger: testLogger()}
+	e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
+	setAgentToolPolicy(t, agentID, "get_issue", toolpolicy.SettingAllow)
+	e.gateway = NewGatewayClient(FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096}, srv.Client())
+	e.logger = testLogger()
 	completion, err := e.runGatewayCompatRegistryToolLoop(context.Background(),
 		FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096},
 		db.Agent{},
 		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
 		GatewayRequestMeta{TaskID: "t1"},
-		pgtype.UUID{},
-		pgtype.UUID{},
+		agentID,
+		runtimeAccountTestWSID,
 		reg,
 		[]Tool{fallbackTestTool{}},
 		false,
@@ -621,18 +633,26 @@ func TestRunToolLoopUsesGatewayCompatTransportForToolEnabledTasks(t *testing.T) 
 	}))
 	defer srv.Close()
 
-	e := &FirtalGatewayExecutor{
-		gateway: NewGatewayClient(FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096}, srv.Client()),
-		logger:  testLogger(),
+	e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
+	setAgentToolPolicy(t, agentID, "get_issue", toolpolicy.SettingAllow)
+	e.gateway = NewGatewayClient(FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096}, srv.Client())
+	e.logger = testLogger()
+	e.registry = NewRegistry(runtimeAccountTestPool)
+	if !e.agentHasCallableTools(context.Background(), agentID, runtimeAccountTestWSID, runtimeAccountTestUserID, runtimeAccountTestUserID) {
+		t.Fatal("expected get_issue to be callable before entering the tool loop")
+	}
+	agent, err := e.queries.GetAgent(context.Background(), agentID)
+	if err != nil {
+		t.Fatalf("load policy test agent: %v", err)
 	}
 	completion, err := e.runToolLoop(context.Background(),
 		FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096},
-		db.Agent{},
+		agent,
 		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
-		GatewayRequestMeta{TaskID: "t1"},
-		pgtype.UUID{},
-		pgtype.UUID{},
-		pgtype.UUID{},
+		GatewayRequestMeta{},
+		agentID,
+		runtimeAccountTestWSID,
+		runtimeAccountTestUserID,
 		false,
 	)
 	if err != nil {
@@ -672,10 +692,8 @@ func TestRunToolLoopWithServerGateBlocksDeniedTool(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Deny resolver via the capability path (web_fetch → network.external).
-	res := &gateFakeResolver{decision: permissions.Decision{Kind: permissions.DecisionDeny, Reason: "no matching grant"}}
-	agentID := gateTestUUID(1)
-	e := newGatedExecutor(res, &gateFakeApprovals{}, agentID)
+	e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
+	setAgentToolPolicy(t, agentID, "web_fetch", toolpolicy.SettingDeny)
 	e.gateway = NewGatewayClient(FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096}, srv.Client())
 
 	dispatched := false
@@ -691,7 +709,7 @@ func TestRunToolLoopWithServerGateBlocksDeniedTool(t *testing.T) {
 		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
 		GatewayRequestMeta{TaskID: "t1"},
 		agentID,
-		gateTestUUID(9),
+		runtimeAccountTestWSID,
 		toolSrv,
 		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "web_fetch"}}},
 		false,
@@ -701,9 +719,6 @@ func TestRunToolLoopWithServerGateBlocksDeniedTool(t *testing.T) {
 	}
 	if dispatched {
 		t.Fatal("denied tool was dispatched — the fallback loop bypassed the approval gate")
-	}
-	if res.calls == 0 {
-		t.Fatal("approval gate resolver was never consulted by the fallback loop")
 	}
 	if completion.Output != "done without fetching" {
 		t.Fatalf("Output = %q, want final text after the blocked call", completion.Output)

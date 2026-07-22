@@ -232,7 +232,7 @@ declare module "@multica/core/types/autopilot" {
 }
 
 // JEH-1284/1290: Agent tool grants — W3 registry + W8 UI.
-// AgentTool is a cerebro-only concept (agent_tool_grant table).
+// AgentTool describes one item in the read-only runtime capability inventory.
 export interface AgentTool {
   name: string;
   description: string;
@@ -279,10 +279,6 @@ export interface RuntimeToolEffectiveAccess {
     decided_by?: string;
     capped_by?: string;
   };
-  runtime_grant: {
-    effective: string;
-    reason: string;
-  };
   protocol: {
     effective: string;
     required_protocols: string[];
@@ -302,42 +298,12 @@ export interface RuntimeToolEffectiveAccess {
   layers?: Record<string, string>;
 }
 
-export interface RuntimeToolGroupGrant {
-  runtime_id: string;
-  tool_name: string;
-  group_id: string;
-  group_name: string;
-  granted_at: string;
-}
-
-export interface RuntimeToolUserGrant {
-  runtime_id: string;
-  tool_name: string;
-  user_id: string;
-  user_name: string;
-  user_email: string;
-  user_avatar_url: string;
-  granted_at: string;
-}
-
-export interface RuntimeToolGrants {
-  group_grants: RuntimeToolGroupGrant[];
-  user_grants: RuntimeToolUserGrant[];
-}
-
 // JEH-1710 (bid 4): per-agent override on top of the runtime-level tool grant.
 // One row per (agent_id, tool_name) with `enabled` forcing the effective state
 // either on or off — the absence of a row means the agent inherits the runtime
 // default. The override never widens beyond a runtime that has the tool off
 // for everyone; it expresses the agent-specific exception inside the rules the
 // runtime already permits.
-export interface AgentToolOverride {
-  agent_id: string;
-  tool_name: string;
-  enabled: boolean;
-  updated_at: string;
-}
-
 // TECH-3352: per-user snooze ("remind me") target on a channel/DM. A future
 // timestamp means the conversation is muted and hidden from the normal inbox
 // views until then; null/absent means not snoozed. The server overlays this

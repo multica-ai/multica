@@ -15,24 +15,15 @@ package handler
 // names by hand.
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	// CEREBRO-PATCH(runtime-tool-scan-connections): merge workspace Connections into daemon scan config.
 	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"
 )
-
-// RuntimeToolsScanService is the daemon-side seam the cerebro runtimetools
-// service implements. Kept distinct from RuntimeToolsAdminService so the
-// admin permission gate and the daemon ingest path can evolve independently.
-type RuntimeToolsScanService interface {
-	RecordScan(ctx context.Context, runtimeID pgtype.UUID, scannedAt time.Time, servers []RuntimeToolScanServer) error
-}
 
 // RuntimeToolScanServer is one entry in the daemon's scan payload. Empty Tools
 // with a non-empty Error signals an unreachable / failing MCP server — the
@@ -55,12 +46,6 @@ type RuntimeToolScanTool struct {
 type runtimeToolScanRequest struct {
 	ScannedAt time.Time               `json:"scanned_at"`
 	Servers   []RuntimeToolScanServer `json:"servers"`
-}
-
-// SetRuntimeToolsScan wires the daemon-side ingest service into the handler.
-// Called after handler.New() so the upstream constructor stays clean.
-func (h *Handler) SetRuntimeToolsScan(svc RuntimeToolsScanService) {
-	h.runtimeToolsScan = svc
 }
 
 // GetRuntimeMcpConfig handles GET /api/daemon/runtimes/{runtimeId}/mcp-config.
@@ -112,10 +97,6 @@ func (h *Handler) GetRuntimeMcpConfig(w http.ResponseWriter, r *http.Request) {
 
 // IngestRuntimeToolScan handles POST /api/daemon/runtimes/{runtimeId}/tool-scan.
 func (h *Handler) IngestRuntimeToolScan(w http.ResponseWriter, r *http.Request) {
-	if h.runtimeToolsScan == nil {
-		writeError(w, http.StatusServiceUnavailable, "runtime tools scan not enabled")
-		return
-	}
 	runtimeID := chi.URLParam(r, "runtimeId")
 	rt, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
 	if !ok {
@@ -131,13 +112,8 @@ func (h *Handler) IngestRuntimeToolScan(w http.ResponseWriter, r *http.Request) 
 	if scannedAt.IsZero() {
 		scannedAt = time.Now().UTC()
 	}
-	if err := h.runtimeToolsScan.RecordScan(r.Context(), rt.ID, scannedAt, body.Servers); err != nil {
-		writeError(w, http.StatusInternalServerError, "record scan: "+err.Error())
-		return
-	}
-	// CEREBRO-PATCH(runtime-tools-scan-capability-bridge): FIR-2284 — the legacy
-	// RecordScan above only fills cerebro_runtime_tool; mirror the scanned MCP
-	// tools into the capability register so they show up in the unified table.
+	// The capability register is the only persisted inventory. Availability
+	// evidence and canonical policy decide whether an observed tool is usable.
 	h.persistScannedToolsToCapabilityRegister(r, rt.ID, rt.WorkspaceID, body.Servers)
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -10,6 +10,7 @@ import type {
   RegenerateOutboundSecretResponse,
   WorkflowRunsListResponse,
   WorkflowsListResponse,
+  WorkflowEvalBinding,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -30,6 +31,8 @@ const loopBlockSchema = z
     agents: z.array(loopAgentRefSchema).optional(),
     on_all_busy: z.enum(["wait", "pause", "wakeup", "ping_member"]).optional(),
     steps: z.object({ allowed: z.boolean(), max: z.number().int().positive().optional() }).passthrough().optional(),
+    status_on_start: z.string().optional(),
+    status_on_done: z.string().optional(),
     skill: z.string().optional(),
     goal: z.string().optional(),
     check: z.array(z.string()).optional(),
@@ -288,3 +291,26 @@ export const EMPTY_ACTIVATE_WORKFLOW: ActivateWorkflowResponse = {
 export const EMPTY_ACTIVE_WORKFLOW_FOR_ISSUE: ActiveWorkflowForIssueResponse = {
   active: false,
 };
+
+// Quality gates bound to an Issue workflow. The Eval step picks its key from
+// this list, so a malformed response must degrade to "no gates bound" (which
+// the editor renders as a clear empty state) rather than to a free-text field
+// that would let an unresolvable key be saved.
+export const workflowEvalBindingSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  workflow_id: z.string(),
+  eval_id: z.string(),
+  phase: z.string(),
+  blocking: z.boolean(),
+  eval_key: z.string(),
+  eval_version: z.string(),
+  eval_title: z.string(),
+  created_at: z.string(),
+}).passthrough();
+
+export const workflowEvalBindingsListSchema = z
+  .object({ bindings: z.array(workflowEvalBindingSchema).default([]) })
+  .passthrough();
+
+export const EMPTY_WORKFLOW_EVAL_BINDINGS: { bindings: WorkflowEvalBinding[] } = { bindings: [] };

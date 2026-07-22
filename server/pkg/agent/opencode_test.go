@@ -1117,7 +1117,7 @@ func TestOpencodeBackendQuestionDenySurvivesUserConfig(t *testing.T) {
 		t.Fatalf("read args file: %v", err)
 	}
 	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if !containsString(args, "--auto") {
+	if !containsString(args, "--auto") { // CEREBRO-PATCH(opencode-daemon-auto): FIR-3403 removes the retired permission bypass.
 		t.Fatalf("expected daemon-mode argv to include --auto, got %q", args)
 	}
 }

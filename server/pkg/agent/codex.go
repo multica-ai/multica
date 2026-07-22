@@ -585,6 +585,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 	c := &codexClient{
 		cfg:                  b.cfg,
+		requestContext:       runCtx, // CEREBRO-PATCH(codex-tool-policy-context): pin approvals to this run.
 		stdin:                stdin,
 		pending:              make(map[int]*pendingRPC),
 		notificationProtocol: "unknown",
@@ -1167,6 +1168,7 @@ func describeCodexSemanticActivity(msg Message) string {
 
 type codexClient struct {
 	cfg                Config
+	requestContext     context.Context // CEREBRO-PATCH(codex-tool-policy-context): FIR-3403
 	stdin              interface{ Write([]byte) (int, error) }
 	mu                 sync.Mutex
 	nextID             int
@@ -1378,12 +1380,11 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
 
-	// Auto-approve all exec/patch requests in daemon mode
 	switch method {
 	case "item/commandExecution/requestApproval", "execCommandApproval":
-		c.respond(id, map[string]any{"decision": "accept"})
+		c.handleCerebroToolPolicyDecision(id, "bash", raw["params"]) // CEREBRO-PATCH(codex-tool-policy-gate): FIR-3403
 	case "item/fileChange/requestApproval", "applyPatchApproval":
-		c.respond(id, map[string]any{"decision": "accept"})
+		c.handleCerebroToolPolicyDecision(id, "apply_patch", raw["params"])
 	case "mcpServer/elicitation/request":
 		c.respond(id, map[string]any{"action": "accept", "content": nil, "_meta": nil})
 	default:

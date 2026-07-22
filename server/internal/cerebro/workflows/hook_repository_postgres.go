@@ -154,6 +154,9 @@ func (r *PostgresHookRepository) Delete(ctx context.Context, workspaceID string,
 }
 
 func (r *PostgresHookRepository) insertVersion(ctx context.Context, workspaceID string, actor HookPermissionActor, familyID string, version int, policy HookPolicy) (HookPolicy, error) {
+	if policy.FailMode == HookFailMode("open") {
+		policy.FailMode = HookFailWarn
+	}
 	wsID, err := util.ParseUUID(workspaceID)
 	if err != nil {
 		return HookPolicy{}, err

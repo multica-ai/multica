@@ -322,14 +322,6 @@ func TestFirtalRegistryCallUpdateAppPostsToDeploy(t *testing.T) {
 	}
 }
 
-func TestFirtalRegistryUpdateAppRequiresAllowWrite(t *testing.T) {
-	// AllowWrite is gated in Call(); assert the flag is deny-by-default.
-	cfg := firtalRegistryGrantConfig{}
-	if cfg.AllowWrite {
-		t.Fatal("AllowWrite must default to false")
-	}
-}
-
 func TestFirtalRegistryCallUpdateAppNon2xxBubblesError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

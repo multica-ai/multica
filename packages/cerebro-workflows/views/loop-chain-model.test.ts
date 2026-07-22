@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { LoopChainBlock, LoopChainPhase } from "../core/types";
-import { blockSummary, nudgeBlock, reorderBlocks, totalSteps } from "./loop-chain-model";
+import {
+  blockSummary,
+  nudgeBlock,
+  nudgePhase,
+  reorderBlocks,
+  reorderPhases,
+  totalSteps,
+} from "./loop-chain-model";
 
 function block(id: string, type: LoopChainBlock["type"] = "session"): LoopChainBlock {
   return { id, type, name: id };
@@ -66,6 +73,53 @@ describe("nudgeBlock", () => {
     const phases = [phase("p1", ["a", "b"])];
     expect(nudgeBlock(phases, "a", -1)).toBe(phases);
     expect(nudgeBlock(phases, "b", 1)).toBe(phases);
+  });
+});
+
+describe("reorderPhases", () => {
+  const phaseIds = (phases: LoopChainPhase[]) => phases.map((p) => p.id);
+
+  it("moves a phase above the target", () => {
+    const phases = [phase("p1", ["a"]), phase("p2", ["b"]), phase("p3", ["c"])];
+    expect(phaseIds(reorderPhases(phases, "p3", "p1", true))).toEqual(["p3", "p1", "p2"]);
+  });
+
+  it("moves a phase below the target", () => {
+    const phases = [phase("p1", ["a"]), phase("p2", ["b"]), phase("p3", ["c"])];
+    expect(phaseIds(reorderPhases(phases, "p1", "p3", false))).toEqual(["p2", "p3", "p1"]);
+  });
+
+  it("keeps every block with its phase", () => {
+    const phases = [phase("p1", ["a", "b"]), phase("p2", ["c"])];
+    expect(ids(reorderPhases(phases, "p2", "p1", true))).toEqual([["c"], ["a", "b"]]);
+  });
+
+  it("is a no-op when dropping onto itself or an unknown phase", () => {
+    const phases = [phase("p1", ["a"]), phase("p2", ["b"])];
+    expect(reorderPhases(phases, "p1", "p1", true)).toBe(phases);
+    expect(reorderPhases(phases, "p1", "nope", true)).toBe(phases);
+  });
+
+  it("does not mutate the input", () => {
+    const phases = [phase("p1", ["a"]), phase("p2", ["b"])];
+    reorderPhases(phases, "p1", "p2", false);
+    expect(phaseIds(phases)).toEqual(["p1", "p2"]);
+  });
+});
+
+describe("nudgePhase", () => {
+  const phaseIds = (phases: LoopChainPhase[]) => phases.map((p) => p.id);
+
+  it("moves a phase up and down", () => {
+    const phases = [phase("p1", ["a"]), phase("p2", ["b"]), phase("p3", ["c"])];
+    expect(phaseIds(nudgePhase(phases, "p2", -1))).toEqual(["p2", "p1", "p3"]);
+    expect(phaseIds(nudgePhase(phases, "p2", 1))).toEqual(["p1", "p3", "p2"]);
+  });
+
+  it("clamps at the ends", () => {
+    const phases = [phase("p1", ["a"]), phase("p2", ["b"])];
+    expect(nudgePhase(phases, "p1", -1)).toBe(phases);
+    expect(nudgePhase(phases, "p2", 1)).toBe(phases);
   });
 });
 

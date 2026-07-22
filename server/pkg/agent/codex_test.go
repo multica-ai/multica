@@ -122,10 +122,13 @@ func TestCodexHandleResponseError(t *testing.T) {
 	}
 }
 
-func TestCodexHandleServerRequestAutoApproves(t *testing.T) {
+func TestCodexHandleServerRequestAcceptsAllowedCommand(t *testing.T) {
 	t.Parallel()
 
 	c, fs, _ := newTestCodexClient(t)
+	c.cfg.ToolPolicy = func(_ context.Context, _ string, _ map[string]any) (bool, string) { // CEREBRO-PATCH(codex-tool-policy-fixture): approvals now require a policy verdict.
+		return true, ""
+	}
 
 	// Command execution approval
 	c.handleLine(`{"jsonrpc":"2.0","id":10,"method":"item/commandExecution/requestApproval","params":{}}`)
@@ -152,6 +155,9 @@ func TestCodexHandleServerRequestFileChangeApproval(t *testing.T) {
 	t.Parallel()
 
 	c, fs, _ := newTestCodexClient(t)
+	c.cfg.ToolPolicy = func(_ context.Context, _ string, _ map[string]any) (bool, string) {
+		return true, ""
+	}
 
 	c.handleLine(`{"jsonrpc":"2.0","id":11,"method":"applyPatchApproval","params":{}}`)
 

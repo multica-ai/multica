@@ -12,10 +12,12 @@ type ToolPolicyResolveResult struct {
 	ApprovalID string `json:"approval_id,omitempty"`
 }
 
-func (c *Client) ResolveToolPolicy(ctx context.Context, workspaceID, agentID, toolName, resourcePattern string, args map[string]any) (ToolPolicyResolveResult, error) {
+// CEREBRO-PATCH(daemon-task-mandate): resolve against the immutable task ceiling.
+func (c *Client) ResolveToolPolicy(ctx context.Context, workspaceID, agentID, taskID, toolName, resourcePattern string, args map[string]any) (ToolPolicyResolveResult, error) {
 	var resp ToolPolicyResolveResult
 	err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/tool-policy/resolve", workspaceID), map[string]any{
 		"agent_id":         agentID,
+		"task_id":          taskID,
 		"tool_name":        toolName,
 		"resource_pattern": resourcePattern,
 		"args":             args,

@@ -159,18 +159,26 @@ func TestRuntimeSignatureRejectsReplayAndTampering(t *testing.T) {
 	}
 }
 
-func TestBundleTokenIsBoundToAppVersionAndExpiry(t *testing.T) {
-	now := time.Date(2026, time.July, 15, 18, 0, 0, 0, time.UTC)
+func TestBundleTokenIsBoundToAppVersionAndDurable(t *testing.T) {
 	appID := "f1540000-0000-4154-8154-000000000001"
-	token := mintBundleToken("secret", appID, "1.0.0", now.Add(30*time.Minute))
-	if err := verifyBundleToken("secret", token, appID, "1.0.0", now); err != nil {
+	token := mintBundleToken("secret", appID, "1.0.0")
+	if err := verifyBundleToken("secret", token, appID, "1.0.0"); err != nil {
 		t.Fatalf("valid bundle token rejected: %v", err)
 	}
-	if err := verifyBundleToken("secret", token, appID, "2.0.0", now); err == nil {
+	if err := verifyBundleToken("secret", token, appID, "2.0.0"); err == nil {
 		t.Fatal("bundle token escaped its version")
 	}
-	if err := verifyBundleToken("secret", token, appID, "1.0.0", now.Add(31*time.Minute)); err == nil {
-		t.Fatal("expired bundle token was accepted")
+	if err := verifyBundleToken("secret", token, "a1540000-0000-4154-8154-000000000002", "1.0.0"); err == nil {
+		t.Fatal("bundle token escaped its app")
+	}
+	if err := verifyBundleToken("other-secret", token, appID, "1.0.0"); err == nil {
+		t.Fatal("bundle token accepted under the wrong signing key")
+	}
+	// Durability regression: the token carries no expiry, so a worker that was
+	// provisioned long ago and restarts today must still be able to download its
+	// bundle. A token minted "in the past" (any time) stays valid.
+	if err := verifyBundleToken("secret", token, appID, "1.0.0"); err != nil {
+		t.Fatalf("durable bundle token rejected on a later restart: %v", err)
 	}
 }
 

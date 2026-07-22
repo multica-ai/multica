@@ -1,186 +1,84 @@
 package main
 
-// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 wiring adapter for the
-// unified runtime tool inventory + access-control admin API.
-//
-// Bridges runtimetools.Service to handler.RuntimeToolsAdminService so the
-// handler package never imports cerebrodb generated types.
+// CEREBRO-PATCH(router-runtime-tools-admin): FIR-3403 keeps the existing
+// runtime-tools HTTP contract while sourcing inventory from the capability
+// register and authoring access exclusively through canonical tool policy.
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
+	"github.com/multica-ai/multica/server/internal/cerebro/capabilityregistry"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// runtimeToolsAdminAdapter implements handler.RuntimeToolsAdminService by
-// translating between handler view types and runtimetools domain types.
 type runtimeToolsAdminAdapter struct {
-	svc *runtimetools.Service
+	pool     *pgxpool.Pool
+	registry *capabilityregistry.Service
+	policy   *toolpolicy.Store
 }
 
-func newRuntimeToolsAdminAdapter(svc *runtimetools.Service) *runtimeToolsAdminAdapter {
-	return &runtimeToolsAdminAdapter{svc: svc}
+func newRuntimeToolsAdminAdapter(pool *pgxpool.Pool, registry *capabilityregistry.Service, policy *toolpolicy.Store) *runtimeToolsAdminAdapter {
+	return &runtimeToolsAdminAdapter{pool: pool, registry: registry, policy: policy}
+}
+
+func (a *runtimeToolsAdminAdapter) runtimeWorkspace(ctx context.Context, runtimeID pgtype.UUID) (pgtype.UUID, error) {
+	var workspaceID pgtype.UUID
+	if err := a.pool.QueryRow(ctx, `SELECT workspace_id FROM agent_runtime WHERE id=$1`, runtimeID).Scan(&workspaceID); err != nil {
+		return pgtype.UUID{}, err
+	}
+	return workspaceID, nil
+}
+
+func (a *runtimeToolsAdminAdapter) capabilities(ctx context.Context, runtimeID pgtype.UUID) (pgtype.UUID, []capabilityregistry.View, error) {
+	workspaceID, err := a.runtimeWorkspace(ctx, runtimeID)
+	if err != nil {
+		return pgtype.UUID{}, nil, err
+	}
+	subject := capabilityregistry.Subject{Type: "runtime", ID: util.UUIDToString(runtimeID)}
+	caps, err := a.registry.List(ctx, workspaceID, &subject, nil)
+	return workspaceID, caps, err
 }
 
 func (a *runtimeToolsAdminAdapter) ListTools(ctx context.Context, runtimeID pgtype.UUID) ([]handler.RuntimeToolView, error) {
-	tools, err := a.svc.ListTools(ctx, runtimeID)
+	workspaceID, caps, err := a.capabilities(ctx, runtimeID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]handler.RuntimeToolView, 0, len(tools))
-	for _, t := range tools {
-		out = append(out, toolToView(t))
-	}
-	return out, nil
-}
-
-func (a *runtimeToolsAdminAdapter) SetEnabled(ctx context.Context, runtimeID pgtype.UUID, toolName string, enabled bool) (handler.RuntimeToolView, error) {
-	tool, err := a.svc.SetEnabled(ctx, runtimeID, toolName, enabled)
-	if err != nil {
-		return handler.RuntimeToolView{}, err
-	}
-	return toolToView(tool), nil
-}
-
-// CEREBRO-PATCH(runtime-tools-scan-now-local-stamp): FIR-2284 stamp last_scanned_at on a local scan.
-func (a *runtimeToolsAdminAdapter) StampScanned(ctx context.Context, runtimeID pgtype.UUID) error {
-	_, err := a.svc.StampScanned(ctx, runtimeID)
-	return err
-}
-
-func (a *runtimeToolsAdminAdapter) ListGroupGrants(ctx context.Context, runtimeID pgtype.UUID) ([]handler.RuntimeToolGroupGrantView, error) {
-	grants, err := a.svc.ListGroupGrants(ctx, runtimeID)
+	settings, err := a.policy.ListForSubject(ctx, workspaceID, toolpolicy.LayerRuntime, runtimeID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]handler.RuntimeToolGroupGrantView, 0, len(grants))
-	for _, g := range grants {
-		out = append(out, handler.RuntimeToolGroupGrantView{
-			RuntimeID: uuidString(g.RuntimeID),
-			ToolName:  g.ToolName,
-			GroupID:   uuidString(g.GroupID),
-			GroupName: g.GroupName,
-			GrantedAt: timestampString(g.GrantedAt),
-		})
-	}
-	return out, nil
-}
-
-func (a *runtimeToolsAdminAdapter) AddGroupGrant(ctx context.Context, runtimeID pgtype.UUID, toolName string, groupID, grantedBy pgtype.UUID) error {
-	return a.svc.AddGroupGrant(ctx, runtimeID, toolName, groupID, grantedBy)
-}
-
-func (a *runtimeToolsAdminAdapter) RemoveGroupGrant(ctx context.Context, runtimeID pgtype.UUID, toolName string, groupID pgtype.UUID) error {
-	return a.svc.RemoveGroupGrant(ctx, runtimeID, toolName, groupID)
-}
-
-func (a *runtimeToolsAdminAdapter) ListUserGrants(ctx context.Context, runtimeID pgtype.UUID) ([]handler.RuntimeToolUserGrantView, error) {
-	grants, err := a.svc.ListUserGrants(ctx, runtimeID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]handler.RuntimeToolUserGrantView, 0, len(grants))
-	for _, g := range grants {
-		out = append(out, handler.RuntimeToolUserGrantView{
-			RuntimeID:     uuidString(g.RuntimeID),
-			ToolName:      g.ToolName,
-			UserID:        uuidString(g.UserID),
-			UserName:      g.UserName,
-			UserEmail:     g.UserEmail,
-			UserAvatarURL: g.UserAvatarURL,
-			GrantedAt:     timestampString(g.GrantedAt),
-		})
-	}
-	return out, nil
-}
-
-func (a *runtimeToolsAdminAdapter) AddUserGrant(ctx context.Context, runtimeID pgtype.UUID, toolName string, userID, grantedBy pgtype.UUID) error {
-	return a.svc.AddUserGrant(ctx, runtimeID, toolName, userID, grantedBy)
-}
-
-func (a *runtimeToolsAdminAdapter) RemoveUserGrant(ctx context.Context, runtimeID pgtype.UUID, toolName string, userID pgtype.UUID) error {
-	return a.svc.RemoveUserGrant(ctx, runtimeID, toolName, userID)
-}
-
-func (a *runtimeToolsAdminAdapter) ListAgentOverrides(ctx context.Context, agentID pgtype.UUID) ([]handler.AgentToolOverrideView, error) {
-	overrides, err := a.svc.ListAgentOverrides(ctx, agentID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]handler.AgentToolOverrideView, 0, len(overrides))
-	for _, o := range overrides {
-		out = append(out, handler.AgentToolOverrideView{
-			AgentID:   uuidString(o.AgentID),
-			ToolName:  o.ToolName,
-			Enabled:   o.Enabled,
-			UpdatedAt: timestampString(o.UpdatedAt),
-		})
-	}
-	return out, nil
-}
-
-func (a *runtimeToolsAdminAdapter) UpsertAgentOverride(ctx context.Context, agentID pgtype.UUID, toolName string, enabled bool, updatedBy pgtype.UUID) (handler.AgentToolOverrideView, error) {
-	o, err := a.svc.UpsertAgentOverride(ctx, agentID, toolName, enabled, updatedBy)
-	if err != nil {
-		return handler.AgentToolOverrideView{}, err
-	}
-	return handler.AgentToolOverrideView{
-		AgentID:   uuidString(o.AgentID),
-		ToolName:  o.ToolName,
-		Enabled:   o.Enabled,
-		UpdatedAt: timestampString(o.UpdatedAt),
-	}, nil
-}
-
-func (a *runtimeToolsAdminAdapter) DeleteAgentOverride(ctx context.Context, agentID pgtype.UUID, toolName string) error {
-	return a.svc.DeleteAgentOverride(ctx, agentID, toolName)
-}
-
-func toolToView(t runtimetools.Tool) handler.RuntimeToolView {
-	v := handler.RuntimeToolView{
-		ID:            uuidString(t.ID),
-		RuntimeID:     uuidString(t.RuntimeID),
-		Name:          t.Name,
-		Source:        t.Source,
-		MCPServerName: t.MCPServerName,
-		Description:   t.Description,
-		Enabled:       t.Enabled,
-	}
-	if t.LastScannedAt.Valid {
-		s := t.LastScannedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
-		v.LastScannedAt = &s
-	}
-	return v
-}
-
-func uuidString(u pgtype.UUID) string {
-	if !u.Valid {
-		return ""
-	}
-	// pgtype.UUID.Bytes is [16]byte. Format as canonical UUID.
-	const hex = "0123456789abcdef"
-	out := make([]byte, 36)
-	const dashes = "00000000-0000-0000-0000-000000000000"
-	copy(out, dashes)
-	idx := 0
-	for i, b := range u.Bytes {
-		if i == 4 || i == 6 || i == 8 || i == 10 {
-			idx++
+	byKey := make(map[string]toolpolicy.Setting, len(settings))
+	for _, setting := range settings {
+		if setting.ResourcePattern == "" {
+			byKey[setting.ToolKey] = setting.Setting
 		}
-		out[idx] = hex[b>>4]
-		idx++
-		out[idx] = hex[b&0x0f]
-		idx++
 	}
-	return string(out)
+	out := make([]handler.RuntimeToolView, 0, len(caps))
+	for _, cap := range caps {
+		out = append(out, capabilityToRuntimeTool(cap, runtimeID, byKey[cap.Key] != toolpolicy.SettingDeny))
+	}
+	return out, nil
 }
 
-func timestampString(t pgtype.Timestamptz) string {
-	if !t.Valid {
-		return ""
+// Scan freshness is evidence-owned: capability reports update last_reported_at.
+func (a *runtimeToolsAdminAdapter) StampScanned(context.Context, pgtype.UUID) error { return nil }
+
+func capabilityToRuntimeTool(cap capabilityregistry.View, runtimeID pgtype.UUID, enabled bool) handler.RuntimeToolView {
+	source := cap.Source
+	serverName := ""
+	if value, ok := cap.Metadata["server_name"].(string); ok {
+		serverName = value
 	}
-	return t.Time.UTC().Format("2006-01-02T15:04:05.000Z")
+	if serverName != "" {
+		source = "mcp"
+	}
+	last := cap.LastReportedAt.UTC().Format(time.RFC3339)
+	return handler.RuntimeToolView{ID: cap.ID, RuntimeID: util.UUIDToString(runtimeID), Name: cap.Key, Source: source, MCPServerName: serverName, Description: cap.Description, Enabled: enabled, LastScannedAt: &last}
 }

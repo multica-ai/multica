@@ -3,7 +3,7 @@
 // enablement_audit.go answers the go/no-go question ("would flipping a gate to
 // the chain lock anyone out?"). This file is the fix-up half: the "fejl-luk hvis
 // ikke 1:1" migration the milestone calls for. Before a workspace flips a gate
-// (repo_grants_enabled, cerebro_local_tool_policy, credentials, cerebro_policy_cel)
+// (repo_grants_enabled, credentials, cerebro_policy_cel)
 // from a legacy enforcing path to the chain, it pins today's access as EXPLICIT
 // workspace-root Allow rows so the flip can never silently drop a grant.
 //

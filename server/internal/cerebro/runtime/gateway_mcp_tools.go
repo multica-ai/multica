@@ -39,11 +39,12 @@ type mcpServerEntryDoc struct {
 // interface. The exposed name is namespaced (mcp__conn__tool); Call dispatches
 // the bare tool name against the connection's client.
 type gatewayMCPTool struct {
-	exposedName string
-	toolName    string
-	description string
-	inputSchema map[string]any
-	client      *mcpHTTPClient
+	exposedName    string
+	connectionName string
+	toolName       string
+	description    string
+	inputSchema    map[string]any
+	client         *mcpHTTPClient
 }
 
 func (t *gatewayMCPTool) Name() string        { return t.exposedName }
@@ -114,11 +115,12 @@ func buildGatewayMCPTools(ctx context.Context, servers json.RawMessage, hc *http
 		}
 		for _, t := range tools {
 			out = append(out, &gatewayMCPTool{
-				exposedName: toolpolicy.MCPToolToken(name, t.Name),
-				toolName:    t.Name,
-				description: t.Description,
-				inputSchema: t.InputSchema,
-				client:      client,
+				exposedName:    toolpolicy.MCPToolToken(name, t.Name),
+				connectionName: name,
+				toolName:       t.Name,
+				description:    t.Description,
+				inputSchema:    t.InputSchema,
+				client:         client,
 			})
 		}
 	}

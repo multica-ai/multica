@@ -11,6 +11,15 @@ import (
 	"testing"
 )
 
+func rowByPattern(rows []TableRow, pattern string) (TableRow, bool) {
+	for _, row := range rows {
+		if row.ResourcePattern == pattern {
+			return row, true
+		}
+	}
+	return TableRow{}, false
+}
+
 func TestAppendRegistryDataSourceRows_RuntimeLayerAuthored(t *testing.T) {
 	s := newTPStore(t)
 	clearAll(t, s)
@@ -74,7 +83,7 @@ func TestAppendRegistryDataSourceRows_RuntimeLayerAuthored(t *testing.T) {
 	}
 }
 
-func TestAppendAuthoredRegistryDataSourceRows_AgentLayerOverridesLegacyProjection(t *testing.T) {
+func TestAppendRegistryDataSourceRows_AgentLayerUsesCanonicalPolicy(t *testing.T) {
 	s := newTPStore(t)
 	clearAll(t, s)
 	ctx := context.Background()
@@ -99,18 +108,14 @@ func TestAppendAuthoredRegistryDataSourceRows_AgentLayerOverridesLegacyProjectio
 		{ID: legacyOnly, Name: "Finance"},
 	}
 
-	rows, err := s.AppendAuthoredRegistryDataSourceRows(ctx, TableQuery{
+	rows, err := s.AppendRegistryDataSourceRows(ctx, TableQuery{
 		WorkspaceID: tpTestWorkspaceID,
 		AgentID:     agent,
 		Base:        SettingAllow,
 	}, catalog, nil)
 	if err != nil {
-		t.Fatalf("append authored rows: %v", err)
+		t.Fatalf("append registry rows: %v", err)
 	}
-	rows = AppendRegistryProjection(rows, RegistryProjection{
-		DataSources: catalog,
-		Grant:       RegistryGrant{},
-	}, LayerAgent, SettingAllow)
 
 	if got, ok := rowByPattern(rows, authoredAllow); !ok {
 		t.Fatalf("authored allow source row missing")
@@ -119,8 +124,8 @@ func TestAppendAuthoredRegistryDataSourceRows_AgentLayerOverridesLegacyProjectio
 	}
 
 	if got, ok := rowByPattern(rows, legacyOnly); !ok {
-		t.Fatalf("legacy-only source row missing")
-	} else if got.Layers[LayerAgent] != SettingDeny || got.Effective.Setting != SettingDeny {
-		t.Fatalf("legacy-only source = layer %q effective %q, want deny/deny", got.Layers[LayerAgent], got.Effective.Setting)
+		t.Fatalf("unconfigured source row missing")
+	} else if _, authored := got.Layers[LayerAgent]; authored || got.Effective.Setting != SettingAllow {
+		t.Fatalf("unconfigured source = layers %v effective %q, want inherited allow", got.Layers, got.Effective.Setting)
 	}
 }

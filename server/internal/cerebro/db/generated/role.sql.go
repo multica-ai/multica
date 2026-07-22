@@ -73,14 +73,24 @@ type CreateCerebroRoleParams struct {
 	CreatedBy   pgtype.UUID `json:"created_by"`
 }
 
-func (q *Queries) CreateCerebroRole(ctx context.Context, arg CreateCerebroRoleParams) (CerebroRole, error) {
+type CreateCerebroRoleRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) CreateCerebroRole(ctx context.Context, arg CreateCerebroRoleParams) (CreateCerebroRoleRow, error) {
 	row := q.db.QueryRow(ctx, createCerebroRole,
 		arg.WorkspaceID,
 		arg.Name,
 		arg.Description,
 		arg.CreatedBy,
 	)
-	var i CerebroRole
+	var i CreateCerebroRoleRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -109,9 +119,19 @@ FROM cerebro_role
 WHERE id = $1
 `
 
-func (q *Queries) GetCerebroRole(ctx context.Context, id pgtype.UUID) (CerebroRole, error) {
+type GetCerebroRoleRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetCerebroRole(ctx context.Context, id pgtype.UUID) (GetCerebroRoleRow, error) {
 	row := q.db.QueryRow(ctx, getCerebroRole, id)
-	var i CerebroRole
+	var i GetCerebroRoleRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -131,15 +151,23 @@ WHERE role_id = $1
 ORDER BY subject_type, added_at ASC
 `
 
-func (q *Queries) ListCerebroRoleAssignments(ctx context.Context, roleID pgtype.UUID) ([]CerebroRoleAssignment, error) {
+type ListCerebroRoleAssignmentsRow struct {
+	RoleID      pgtype.UUID        `json:"role_id"`
+	SubjectType string             `json:"subject_type"`
+	SubjectID   pgtype.UUID        `json:"subject_id"`
+	AddedBy     pgtype.UUID        `json:"added_by"`
+	AddedAt     pgtype.Timestamptz `json:"added_at"`
+}
+
+func (q *Queries) ListCerebroRoleAssignments(ctx context.Context, roleID pgtype.UUID) ([]ListCerebroRoleAssignmentsRow, error) {
 	rows, err := q.db.Query(ctx, listCerebroRoleAssignments, roleID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CerebroRoleAssignment{}
+	items := []ListCerebroRoleAssignmentsRow{}
 	for rows.Next() {
-		var i CerebroRoleAssignment
+		var i ListCerebroRoleAssignmentsRow
 		if err := rows.Scan(
 			&i.RoleID,
 			&i.SubjectType,
@@ -256,15 +284,25 @@ WHERE workspace_id = $1
 ORDER BY lower(name), created_at ASC
 `
 
-func (q *Queries) ListCerebroRoles(ctx context.Context, workspaceID pgtype.UUID) ([]CerebroRole, error) {
+type ListCerebroRolesRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListCerebroRoles(ctx context.Context, workspaceID pgtype.UUID) ([]ListCerebroRolesRow, error) {
 	rows, err := q.db.Query(ctx, listCerebroRoles, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CerebroRole{}
+	items := []ListCerebroRolesRow{}
 	for rows.Next() {
-		var i CerebroRole
+		var i ListCerebroRolesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -296,9 +334,17 @@ type UnassignCerebroRoleParams struct {
 	SubjectID   pgtype.UUID `json:"subject_id"`
 }
 
-func (q *Queries) UnassignCerebroRole(ctx context.Context, arg UnassignCerebroRoleParams) (CerebroRoleAssignment, error) {
+type UnassignCerebroRoleRow struct {
+	RoleID      pgtype.UUID        `json:"role_id"`
+	SubjectType string             `json:"subject_type"`
+	SubjectID   pgtype.UUID        `json:"subject_id"`
+	AddedBy     pgtype.UUID        `json:"added_by"`
+	AddedAt     pgtype.Timestamptz `json:"added_at"`
+}
+
+func (q *Queries) UnassignCerebroRole(ctx context.Context, arg UnassignCerebroRoleParams) (UnassignCerebroRoleRow, error) {
 	row := q.db.QueryRow(ctx, unassignCerebroRole, arg.RoleID, arg.SubjectType, arg.SubjectID)
-	var i CerebroRoleAssignment
+	var i UnassignCerebroRoleRow
 	err := row.Scan(
 		&i.RoleID,
 		&i.SubjectType,
@@ -325,9 +371,19 @@ type UpdateCerebroRoleParams struct {
 	ID          pgtype.UUID `json:"id"`
 }
 
-func (q *Queries) UpdateCerebroRole(ctx context.Context, arg UpdateCerebroRoleParams) (CerebroRole, error) {
+type UpdateCerebroRoleRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpdateCerebroRole(ctx context.Context, arg UpdateCerebroRoleParams) (UpdateCerebroRoleRow, error) {
 	row := q.db.QueryRow(ctx, updateCerebroRole, arg.Name, arg.Description, arg.ID)
-	var i CerebroRole
+	var i UpdateCerebroRoleRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,

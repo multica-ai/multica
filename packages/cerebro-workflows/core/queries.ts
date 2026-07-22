@@ -6,6 +6,7 @@ import {
   fetchLoopState,
   fetchWorkflow,
   fetchWorkflowLoopRuns,
+  fetchWorkflowEvalBindings,
   fetchWorkflowRuns,
   fetchWorkflows,
   regenerateInboundSigningSecret,
@@ -203,5 +204,13 @@ export function useApproveHumanCheckMutation(wsId: string, workflowId: string, i
         queryKey: cerebroWorkflowsKeys.loopState(wsId, workflowId, issueId),
       });
     },
+  });
+}
+
+export function workflowEvalBindingsOptions(wsId: string, workflowId: string) {
+  return queryOptions({
+    queryKey: [...cerebroWorkflowsKeys.all(wsId), "eval-bindings", workflowId] as const,
+    queryFn: () => fetchWorkflowEvalBindings(workflowId),
+    enabled: !!wsId && !!workflowId,
   });
 }

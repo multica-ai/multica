@@ -1,72 +1,31 @@
 package runtime
 
-// FIR-2761 — cloud gateway tool-loop gate follows runtime tools, not CSV allowlist.
+// FIR-2761 / FIR-3400 — cloud Gateway tool-loop admission follows the
+// authoritative Policy Decision Service, not the retired cascade or CSV list.
 
 import (
 	"context"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
-func TestAgentHasCallableTools_UsesRuntimeGrantsNotCSVAllowlist(t *testing.T) {
-	f := newCascadeFixture(t)
-	// Use a real built-in tool name: agentHasCallableTools resolves through a
-	// per-task NewDefaultRegistry that only carries the cerebro built-ins, so a
-	// stub name like "alpha" would be filtered out even when the cascade emits
-	// it. "get_issue" is registered by registerBuiltinTools, so it round-trips.
-	f.addRuntimeTool("get_issue", true)
-	f.addUserGrant("get_issue", f.userID)
+func TestAgentHasCallableTools_UsesPolicyDecisionServiceAllow(t *testing.T) {
+	e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
+	e.registry = NewRegistry(runtimeAccountTestPool)
+	setAgentToolPolicy(t, agentID, "get_issue", toolpolicy.SettingAllow)
 
-	e := &FirtalGatewayExecutor{
-		registry: f.registry,
-		cerebro:  f.cerebro,
-	}
-	cfg := FirtalGatewayRuntimeConfig{
-		ToolsEnabledAgentIDs: []pgtype.UUID{f.agentID},
-	}
-	_ = cfg // would have enabled tool loop under the old CSV gate
-
-	if !e.agentHasCallableTools(context.Background(), f.agentID, runtimeAccountTestWSID, f.userID, f.userID) {
-		t.Fatal("expected callable tools when runtime grants exist")
+	if !e.agentHasCallableTools(context.Background(), agentID, runtimeAccountTestWSID, runtimeAccountTestUserID, runtimeAccountTestUserID) {
+		t.Fatal("expected callable tools when the Policy Decision Service allows a live registry tool")
 	}
 }
 
-func TestAgentHasCallableTools_FalseWithoutGrantsEvenOnCSVAllowlist(t *testing.T) {
-	f := newCascadeFixture(t)
-	// Same built-in name as the positive case so both arms test the cascade end
-	// to end. Without a grant the cascade rejects the user; agentHasCallableTools
-	// must return false, even though the agent sits on the deprecated CSV.
-	f.addRuntimeTool("get_issue", true)
-	// No user/group grants — runtime default-deny.
+func TestAgentHasCallableTools_MissingPolicyDecisionServiceFailsClosed(t *testing.T) {
+	e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
+	e.registry = NewRegistry(runtimeAccountTestPool)
+	e.accessDecisionObserver = nil
 
-	e := &FirtalGatewayExecutor{
-		registry: f.registry,
-		cerebro:  f.cerebro,
-	}
-	cfg := FirtalGatewayRuntimeConfig{
-		ToolsEnabledAgentIDs: []pgtype.UUID{f.agentID},
-	}
-	if !cfg.ToolsEnabledForAgent(f.agentID) {
-		t.Fatal("test setup: agent should be on deprecated CSV allowlist")
-	}
-
-	if e.agentHasCallableTools(context.Background(), f.agentID, runtimeAccountTestWSID, f.userID, f.userID) {
-		t.Fatal("expected chat-only without runtime grants, even when CSV allowlist includes agent")
-	}
-}
-
-func TestAgentHasCallableTools_FallsBackToOwnerWhenOriginalUserMissing(t *testing.T) {
-	f := newCascadeFixture(t)
-	f.addRuntimeTool("get_issue", true)
-	f.addUserGrant("get_issue", f.userID)
-
-	e := &FirtalGatewayExecutor{
-		registry: f.registry,
-		cerebro:  f.cerebro,
-	}
-
-	if !e.agentHasCallableTools(context.Background(), f.agentID, runtimeAccountTestWSID, pgtype.UUID{}, f.userID) {
-		t.Fatal("expected owner grants to enable tools when original user is missing")
+	if e.agentHasCallableTools(context.Background(), agentID, runtimeAccountTestWSID, runtimeAccountTestUserID, runtimeAccountTestUserID) {
+		t.Fatal("expected chat-only when the Policy Decision Service is unavailable")
 	}
 }

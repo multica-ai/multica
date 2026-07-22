@@ -142,7 +142,6 @@ func verifyRuntimeSignature(secret, method, requestPath string, body []byte, tim
 type bundleTokenPayload struct {
 	AppID   string `json:"app_id"`
 	Version string `json:"version"`
-	Expires int64  `json:"exp"`
 }
 
 type invocationGrant struct {
@@ -184,15 +183,20 @@ func verifyInvocationGrant(secret, token string, now time.Time) (invocationGrant
 	return grant, nil
 }
 
-func mintBundleToken(secret, appID, version string, expires time.Time) string {
-	payload, _ := json.Marshal(bundleTokenPayload{AppID: appID, Version: version, Expires: expires.Unix()})
+// mintBundleToken issues a durable, app+version-scoped capability. It carries no
+// expiry: a worker re-downloads its immutable, hash-verified bundle on every
+// container start, and its Sliplane env is immutable, so the token must remain
+// valid for the worker's whole lifetime. See mintBundleToken in
+// apps/cerebro-apps-runtime/auth.mjs (the production minter) for the same rule.
+func mintBundleToken(secret, appID, version string) string {
+	payload, _ := json.Marshal(bundleTokenPayload{AppID: appID, Version: version})
 	encoded := base64.RawURLEncoding.EncodeToString(payload)
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(encoded))
 	return encoded + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func verifyBundleToken(secret, token, appID, version string, now time.Time) error {
+func verifyBundleToken(secret, token, appID, version string) error {
 	parts := strings.Split(token, ".")
 	if len(parts) != 2 {
 		return errors.New("invalid bundle token")
@@ -208,7 +212,7 @@ func verifyBundleToken(secret, token, appID, version string, now time.Time) erro
 		return errors.New("invalid bundle token")
 	}
 	var payload bundleTokenPayload
-	if json.Unmarshal(raw, &payload) != nil || payload.AppID != appID || payload.Version != version || now.Unix() >= payload.Expires {
+	if json.Unmarshal(raw, &payload) != nil || payload.AppID != appID || payload.Version != version {
 		return errors.New("invalid bundle token")
 	}
 	return nil

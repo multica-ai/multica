@@ -3,10 +3,8 @@ package handler
 // CEREBRO-PATCH(daemon-tool-policy-cerebro): handler test for the local-runtime
 // per-tool resolver (TECH-3173).
 //
-// Proves the staged-rollout contract end to end through the HTTP seam: OFF never
-// blocks even a denied tool (no behaviour change), OBSERVE resolves and flags
-// would_block but still allows (dry run), and ENFORCE acts on the verdict
-// (denied tool blocked, unconfigured tool allowed). The verdict itself comes
+// Proves the always-enforced contract end to end through the HTTP seam: a denied
+// tool is blocked and an unconfigured tool is allowed. The verdict itself comes
 // from the same cerebro_tool_policy chain the gateway gate uses. Skips when no DB.
 
 import (
@@ -17,10 +15,9 @@ import (
 	"testing"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
-	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"
 )
 
-func TestResolveDaemonToolPolicy_StagedRollout(t *testing.T) {
+func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -68,6 +65,30 @@ func TestResolveDaemonToolPolicy_StagedRollout(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+		VALUES ($1, $2, 'running', 0)
+		RETURNING id
+	`, agentID, handlerTestRuntimeID(t)).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	// The real claim path (cerebroEffectiveToolsForClaim) snapshots CAPABILITY KEYS
+	// into the mandate — built-ins as "tools:<Name>", because the daemon capability
+	// snapshot reports them under the "tools" kind (verified in
+	// TestLocalTaskMandateStoresCapabilityKeyNotBareToolName). The hook posts the
+	// bare Claude name, and Authorize canonicalises it through PolicyToolKey to
+	// match, exactly as the policy-chain resolve does. Seed the realistic key.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO cerebro_task_mandate (task_id, workspace_id, agent_id, allowed_tools, expires_at)
+		VALUES ($1, $2, $3, '["tools:Read"]'::jsonb, now() + interval '1 hour')
+	`, taskID, testWorkspaceID, agentID); err != nil {
+		t.Fatalf("issue task mandate: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
 	clear := func() {
 		testPool.Exec(ctx,
 			`DELETE FROM cerebro_tool_policy WHERE workspace_id = $1 AND tool_key IN ('tools:Bash','tools:Read')`,
@@ -75,35 +96,6 @@ func TestResolveDaemonToolPolicy_StagedRollout(t *testing.T) {
 	}
 	clear()
 	t.Cleanup(clear)
-
-	// Stage is driven by workspace settings (TECH-3173), not an env var: seed the
-	// two workspace-level feature-flag rows (all-zero sentinel user_id) the way
-	// the Settings UI writes them, then map the desired Mode onto the pair.
-	clearFlags := func() {
-		testPool.Exec(ctx, `
-			DELETE FROM cerebro_feature_flags
-			WHERE workspace_id = $1
-			  AND flag_key IN ('cerebro_local_tool_policy','cerebro_local_tool_policy_enforce')
-		`, testWorkspaceID)
-	}
-	clearFlags()
-	t.Cleanup(clearFlags)
-	setMode := func(mode localtoolpolicy.Mode) {
-		t.Helper()
-		enabled := mode == localtoolpolicy.ModeObserve || mode == localtoolpolicy.ModeEnforce
-		enforce := mode == localtoolpolicy.ModeEnforce
-		upsert := func(key string, on bool) {
-			if _, err := testPool.Exec(ctx, `
-				INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled)
-				VALUES ($1, '00000000-0000-0000-0000-000000000000', $2, $3)
-				ON CONFLICT (workspace_id, user_id, flag_key) DO UPDATE SET enabled = EXCLUDED.enabled
-			`, testWorkspaceID, key, on); err != nil {
-				t.Fatalf("seed flag %s: %v", key, err)
-			}
-		}
-		upsert("cerebro_local_tool_policy", enabled)
-		upsert("cerebro_local_tool_policy_enforce", enforce)
-	}
 
 	// CEREBRO-PATCH(daemon-tool-policy-cerebro): TECH-2563 — seed the Deny under the
 	// canonical capability key "tools:Bash", which is what the permissions screen
@@ -119,7 +111,7 @@ func TestResolveDaemonToolPolicy_StagedRollout(t *testing.T) {
 
 	resolve := func(tool string) map[string]any {
 		t.Helper()
-		body := map[string]any{"tool_name": tool, "agent_id": agentID}
+		body := map[string]any{"tool_name": tool, "agent_id": agentID, "task_id": taskID}
 		req := withURLParams(
 			newRequest(http.MethodPost, "/api/daemon/workspaces/"+testWorkspaceID+"/tool-policy/resolve", body),
 			"workspaceId", testWorkspaceID,
@@ -136,24 +128,22 @@ func TestResolveDaemonToolPolicy_StagedRollout(t *testing.T) {
 		return resp
 	}
 
-	// OFF (default): even the denied tool is allowed — spawning is unchanged.
-	setMode(localtoolpolicy.ModeOff)
-	if r := resolve(deniedTool); r["allowed"] != true || r["decision"] != "allow" {
-		t.Fatalf("off/denied: got allowed=%v decision=%v, want true/allow", r["allowed"], r["decision"])
-	}
-
-	// OBSERVE: the denied tool is STILL allowed (dry run never blocks) but the
-	// response flags that an enforce would have blocked it.
-	setMode(localtoolpolicy.ModeObserve)
-	if r := resolve(deniedTool); r["allowed"] != true || r["would_block"] != true || r["observed"] != "deny" {
-		t.Fatalf("observe/denied: got allowed=%v would_block=%v observed=%v, want true/true/deny",
-			r["allowed"], r["would_block"], r["observed"])
-	}
-
-	// ENFORCE: the denied tool is blocked.
-	setMode(localtoolpolicy.ModeEnforce)
+	// The denied tool is blocked with no rollout switch.
 	if r := resolve(deniedTool); r["allowed"] != false || r["decision"] != "deny" {
 		t.Fatalf("enforce/denied: got allowed=%v decision=%v, want false/deny", r["allowed"], r["decision"])
+	}
+
+	// Opening the policy after claim must not expand the immutable run contract:
+	// Bash was outside the initial intersection, so the same running task remains
+	// denied by its Task Mandate even after the later rule becomes Allow.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE cerebro_tool_policy SET setting='allow'
+		WHERE workspace_id=$1 AND tool_key='tools:Bash' AND layer='agent' AND subject_id=$2
+	`, testWorkspaceID, agentID); err != nil {
+		t.Fatalf("open Bash policy after claim: %v", err)
+	}
+	if r := resolve(deniedTool); r["allowed"] != false || r["decision"] != "deny" {
+		t.Fatalf("mandate expanded after policy opened: got allowed=%v decision=%v, want false/deny", r["allowed"], r["decision"])
 	}
 
 	// ENFORCE: an unconfigured tool resolves to the Base default (Allow) — tools

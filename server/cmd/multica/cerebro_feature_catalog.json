@@ -449,13 +449,6 @@
       "default": true
     },
     {
-      "key": "cerebro_runtime_tool_grant_ui",
-      "label": "Tool access grants (groups & people)",
-      "description": "Show the grant editor on the runtime page even when the unified tool-policy table is on: attach a group or a person to a specific tool so that runtime exposes it to them. This is the grant layer (an allow-list of who a tool is opened for) — the layer that silently gave a user zero tools when no UI could set it (FIR-426 / Saga). Reads GET and writes POST/DELETE /api/runtimes/{id}/tools/{tool}/groups|users. Default OFF.",
-      "group": "permissions",
-      "default": false
-    },
-    {
       "key": "cerebro_simple_tool_policy",
       "label": "Simple tool permissions",
       "description": "Show the simplified, user-facing tool permission table on the agent Tools tab: one Allow/Ask/Block toggle per tool, grouped into Read · Execute · Fetch · Destructive. Reuses the cerebro_tool_policy data layer — writes the agent layer only. The rich Effective-chain table stays behind cerebro_tool_policy as a power-view. FIR-2358.",
@@ -502,13 +495,6 @@
       "label": "Move comments to a new thread",
       "description": "Add a 'Reply in new thread' action on comments. Enters a select mode where you pick comments in the thread and lift them into a new thread on the same issue; each moved comment is left as a breadcrumb linking to the new thread. JEH-2488.",
       "group": "issues",
-      "default": true
-    },
-    {
-      "key": "cerebro_agent_passes",
-      "label": "Agent passes admin",
-      "description": "Enable the workspace agent-pass admin page at /:workspace/agent-passes — issue, list, and revoke agent passes (machine-readable mandates that scope what an agent may do on an issue). Owner/admin only. JEH-1731.",
-      "group": "permissions",
       "default": true
     },
     {
@@ -576,10 +562,10 @@
     },
     {
       "key": "cerebro_permission_detail",
-      "label": "Permission detail page",
-      "description": "Open a detail page for a single tool permission that shows who holds it (which agents, people, groups and runtimes have it set) and which layer grants it. Permissions that are shown but not enforced at runtime yet are greyed out. Off by default while it is built; nothing links to the page until it is turned on, so the change is reversible. Later phases add a change log and a usage log. FIR-3091.",
+      "label": "Why Access and Permission audit",
+      "description": "Explain why a person or agent has access to a capability and audit every effective decision across workspace, runtime, agent, group and member layers. Uses the same resolved policy answer as get_agent_capabilities. FIR-3403.",
       "group": "permissions",
-      "default": false
+      "default": true
     },
     {
       "key": "cerebro_image_reload",
@@ -962,7 +948,7 @@
     {
       "key": "cerebro_approval_gate",
       "label": "Tool approval enforcement",
-      "description": "When on, the server enforces the per-tool Allow / Ask / Block policy for every agent tool call — tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off lets all tool calls through for this workspace without an inbox ask, even when the server gate is active. Requires the server's CEREBRO_APPROVAL_GATE_ENABLED flag to have any effect. FIR-2563.",
+      "description": "When on, tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off keeps Ask blocked without opening an inbox request. Allow / Ask / Block access is always enforced from Settings → Permissions. FIR-3403.",
       "group": "permissions",
       "default": true
     },
@@ -1014,20 +1000,6 @@
       "description": "Show a small orange clock dot on issue list rows and board cards when the issue has a pending agent wakeup, stacked next to the running-agent indicator so a row can show both at once. Click the dot to expand a list of every scheduled run with a live countdown and a cancel button. Off keeps lists and boards showing only the running-agent indicator. FIR-1521.",
       "group": "issues",
       "default": true
-    },
-    {
-      "key": "cerebro_local_tool_policy",
-      "label": "Tool enforcement on local runtimes",
-      "description": "Extend the per-tool Allow / Ask / Block policy to agents running on LOCAL CLI runtimes (Claude, Codex, Cursor, Gemini), which otherwise bypass the gateway gate entirely. When on, the daemon resolves each tool call through the SAME tool-policy chain and approval inbox as the gateway. Off by default — turning it on starts in observe-only mode (see 'Enforce on local runtimes'). No restart needed. TECH-3173.",
-      "group": "permissions",
-      "default": false
-    },
-    {
-      "key": "cerebro_local_tool_policy_enforce",
-      "label": "Enforce on local runtimes (else observe-only)",
-      "description": "Only matters when 'Tool enforcement on local runtimes' is on. Off = observe-only dry run: the daemon resolves every tool call and logs what an enforce WOULD block, but allows everything through (safe to watch before committing). On = enforce: Allow proceeds, Block stops, Ask routes to the approval inbox and blocks until a human decides. Default off so you can watch the would-block stream first. TECH-3173.",
-      "group": "permissions",
-      "default": false
     },
     {
       "key": "cerebro_policy_cel",

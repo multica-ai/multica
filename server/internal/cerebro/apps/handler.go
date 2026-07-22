@@ -117,7 +117,7 @@ func (h *Handler) BundleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	signed := h.authenticateRuntimeRequest(r, nil)
-	granted := h != nil && h.runtimeServiceKey != "" && verifyBundleToken(h.runtimeServiceKey, bearer, appID.String(), version, time.Now().UTC()) == nil
+	granted := h != nil && h.runtimeServiceKey != "" && verifyBundleToken(h.runtimeServiceKey, bearer, appID.String(), version) == nil
 	if !signed && !granted {
 		writeError(w, http.StatusUnauthorized, "runtime authentication failed")
 		return
@@ -395,14 +395,14 @@ func updateDeploymentState(ctx context.Context, tx bundleExec, appID uuid.UUID, 
 			return err
 		}
 		_, err := tx.Exec(ctx, `INSERT INTO cerebro_app_audit_log (workspace_id,app_id,actor_type,actor_id,action,metadata)
-			SELECT workspace_id,id,'system','apps-runtime','app.version.published',jsonb_build_object('version',$2) FROM cerebro_app WHERE id=$1`, appID, version)
+			SELECT workspace_id,id,'system','apps-runtime','app.version.published',jsonb_build_object('version',$2::text) FROM cerebro_app WHERE id=$1`, appID, version)
 		return err
 	case "failed":
 		if _, err := tx.Exec(ctx, `UPDATE cerebro_app_deployment SET status='failed',last_error='App runtime failed',updated_at=now() WHERE app_id=$1 AND version=$2`, appID, version); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `INSERT INTO cerebro_app_audit_log (workspace_id,app_id,actor_type,actor_id,action,metadata)
-			SELECT workspace_id,id,'system','apps-runtime','app.runtime.failed',jsonb_build_object('version',$2) FROM cerebro_app WHERE id=$1`, appID, version)
+			SELECT workspace_id,id,'system','apps-runtime','app.runtime.failed',jsonb_build_object('version',$2::text) FROM cerebro_app WHERE id=$1`, appID, version)
 		return err
 	default:
 		return errors.New("unsupported deployment status")
@@ -827,7 +827,7 @@ func markRollbackProvisioning(ctx context.Context, exec bundleExec, appID, actor
 		return errors.New("rollback version is not available")
 	}
 	_, err = exec.Exec(ctx, `INSERT INTO cerebro_app_audit_log (workspace_id,app_id,actor_type,actor_id,action,metadata)
-		SELECT workspace_id,id,'user',$2,$3,jsonb_build_object('version',$4,'status','provisioning') FROM cerebro_app WHERE id=$1`, appID, actorID.String(), "app.version.rollback", version)
+		SELECT workspace_id,id,'user',$2,$3,jsonb_build_object('version',$4::text,'status','provisioning') FROM cerebro_app WHERE id=$1`, appID, actorID.String(), "app.version.rollback", version)
 	return err
 }
 
@@ -949,7 +949,7 @@ func (h *Handler) ApproveScopes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to activate app version")
 		return
 	}
-	if _, err := tx.Exec(r.Context(), `INSERT INTO cerebro_app_audit_log (workspace_id,app_id,actor_type,actor_id,action,metadata) VALUES ($1,$2,'user',$3,'app.scopes.approved',jsonb_build_object('version',$4))`, app.WorkspaceID, app.ID, approverID.String(), req.Version); err != nil {
+	if _, err := tx.Exec(r.Context(), `INSERT INTO cerebro_app_audit_log (workspace_id,app_id,actor_type,actor_id,action,metadata) VALUES ($1,$2,'user',$3,'app.scopes.approved',jsonb_build_object('version',$4::text))`, app.WorkspaceID, app.ID, approverID.String(), req.Version); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to record scope approval")
 		return
 	}

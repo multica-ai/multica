@@ -22,8 +22,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 account handler import
 	cerebroaccount "github.com/multica-ai/multica/server/internal/cerebro/account"
-	// CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin handler import
-	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
 	// CEREBRO-PATCH(cerebro-agent-memory-routes): FIR-1794 Gate 3 per-(user,agent) memory toggle service import.
 	cerebroagentmemory "github.com/multica-ai/multica/server/internal/cerebro/agentmemory"
 	cerebroanalytics "github.com/multica-ai/multica/server/internal/cerebro/analytics"
@@ -96,8 +94,6 @@ import (
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
 	// CEREBRO-PATCH(router-semantic-search): FIR-2604 semantic Provider + worker.
 	cerebrosemantic "github.com/multica-ai/multica/server/internal/cerebro/semantic"
-	// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 unified runtime tool admin service.
-	"github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 	// CEREBRO-PATCH(router-capability-register): FIR-2129 capability register service.
 	cerebrocapabilityregistry "github.com/multica-ai/multica/server/internal/cerebro/capabilityregistry"
 	// CEREBRO-PATCH(router-cloud-runtime-tool-scan): FIR-2284 server-side cloud-runtime tool scan.
@@ -744,7 +740,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
 	cerebroAccountHandler := cerebroaccount.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(router-approval-gate): FIR-2586 build the shared approval gate
-	// once (nil when CEREBRO_APPROVAL_GATE_ENABLED is off) and wire it into every
+	// once and wire it into every // CEREBRO-PATCH(router-approval-switch-retirement): FIR-3403 approval policy no longer has a server switch.
 	// enforcement point so an "Ask" lands in the one /approvals inbox: daemon repo
 	// checkout (h.ApprovalGate) and credential governance (newCredentialsPolicy).
 	sharedApprovalGate := cerebroruntime.BuildApprovalGate(cerebroQueries, pool, bus)
@@ -804,23 +800,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.ToolExecutor = &cerebroruntime.ToolExecutorInvoker{
 		Queries:        queries,
 		CerebroQueries: cerebroQueries,
-		Pool:           pool,                        // CEREBRO-PATCH(invoke-grant-config-pool): TECH-3356 — registry needs the pool to read agent_tool_grant.config_json.
+		Pool:           pool, // Server-side tools retain database-backed configuration access.
+		Policy:         cerebrotoolpolicy.NewStore(pool),
 		LoopStore:      cerebroloops.NewStore(pool), // CEREBRO-PATCH(workflow-open-step-invoker): FIR-3493 wires task-scoped step opening into external runtimes.
 	}
-	// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 wire the unified
-	// runtime tool admin service (per-runtime tool inventory + group/user
-	// grants + per-agent overrides) and the daemon-side scan ingest seam.
-	runtimeToolsSvc := runtimetools.New(pool)
-	h.SetRuntimeToolsAdmin(newRuntimeToolsAdminAdapter(runtimeToolsSvc))
-	h.SetRuntimeToolAccess(newRuntimeToolAccessAdapter(cerebrotoolaccess.New(runtimeToolsSvc, cerebrotoolpolicy.NewStore(pool))))
-	h.SetRuntimeToolsScan(newRuntimeToolsScanAdapter(runtimeToolsSvc))
 	// CEREBRO-PATCH(router-capability-register): FIR-2129 wire capability register API.
 	capabilityRegisterSvc := cerebrocapabilityregistry.New(pool)
 	h.SetCapabilityRegister(newCapabilityRegisterAdapter(capabilityRegisterSvc))
+	// runtime tool admin service (capability register inventory + canonical
+	// tool-policy authoring) and read-only effective access preview.
+	policyStore := cerebrotoolpolicy.NewStore(pool)
+	h.SetRuntimeToolsAdmin(newRuntimeToolsAdminAdapter(pool, capabilityRegisterSvc, policyStore))
+	h.SetRuntimeToolAccess(newRuntimeToolAccessAdapter(cerebrotoolaccess.New(capabilityRegisterSvc, policyStore)))
 	// CEREBRO-PATCH(router-cloud-runtime-tool-scan): FIR-2284 — server-side "Scan now"
 	// for cloud runtimes (no daemon): record the gateway's callable built-in tool
-	// surface into the capability register (the unified table's source) + legacy inventory.
-	h.SetCloudRuntimeToolScanner(cloudtoolscan.New(capabilityRegisterSvc, runtimeToolsSvc, callableCloudToolMeta()))
+	// surface into the capability register, the unified table's source.
+	h.SetCloudRuntimeToolScanner(cloudtoolscan.New(capabilityRegisterSvc, callableCloudToolMeta()))
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
 	// CEREBRO-PATCH(cerebro-terminal-routes): interactive terminal handler instance
@@ -1138,9 +1133,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// a user turns memory on for themselves on one agent, never a task token.
 			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/memory-settings", h.GetAgentMemorySettings)
 			r.With(middleware.RequireUserScope).Put("/api/agents/{id}/memory-settings", h.SetAgentMemorySettings)
-			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess)  // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
-			r.With(middleware.RequireUserScope).Post("/api/agents/{id}/tool-grants", h.AddAgentToolGrant)      // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
-			r.With(middleware.RequireUserScope).Delete("/api/agents/{id}/tool-grants", h.RemoveAgentToolGrant) // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
+			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess) // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
 
 			// Issue routes registered flat (not via r.Route) so they
 			// share the chi routing tree with the user-only sibling
@@ -1836,17 +1829,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(agent-capabilities-card-task-route): FIR-2243 — GET /capabilities is registered in the task-allowlist group above (AllowTaskScopeForAgent) so an agent's own task token can also reach it; chi forbids a duplicate flat+nested registration of the same path.
 					r.Get("/capabilities/swap", h.GetAgentCapabilitySwap)                      // CEREBRO-PATCH(agent-capabilities-swap-route): FIR-3212 Swap slice — operator-facing preview of what a runtime change costs this agent; human route only, so it stays out of the task-token allowlist above.
 					r.Get("/capabilities/approval-impact", h.GetAgentCapabilityApprovalImpact) // CEREBRO-PATCH(agent-capabilities-approval-route): FIR-3212 Approval slice — what approving a pending proposal actually changes on this agent's engine; human route only, same as the swap preview above.
-					// CEREBRO-PATCH(agent-tools-routes): cerebro tool grant admin endpoints.
-					// NOTE: GET /tools and POST /tools/{name}/invoke are registered in the
-					// task-allowlist group above so agent task tokens can also reach them.
-					r.Route("/tools/{name}", func(r chi.Router) {
-						r.Put("/", h.UpsertAgentTool)
-					})
-					// CEREBRO-PATCH(agent-tool-overrides-routes): JEH-1710 per-agent
-					// override of the runtime tool default.
-					r.Get("/tool-overrides", h.ListAgentToolOverrides)
-					r.Put("/tool-overrides/{toolName}", h.PutAgentToolOverride)
-					r.Delete("/tool-overrides/{toolName}", h.DeleteAgentToolOverride)
 					// CEREBRO-PATCH(agent-infisical-secrets): Infisical folder grants for daemon spawn injection.
 					r.Get("/infisical-folders", h.ListAgentInfisicalFolders)
 					r.Put("/infisical-folders", h.ReplaceAgentInfisicalFolders)
@@ -1974,14 +1956,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/tools", h.ListRuntimeTools)
 					// CEREBRO-PATCH(runtime-agnostic-tool-access): TECH-3071 read-only effective access preview.
 					r.Get("/tools/effective", h.ListRuntimeToolEffectiveAccess)
-					r.Patch("/tools/{toolName}", h.SetRuntimeToolEnabled)
 					// CEREBRO-PATCH(router-runtime-tools-scan-now): FIR-2230 admin-triggered live scan.
 					r.Post("/tools/scan-now", h.RequestRuntimeToolScan)
-					r.Get("/tool-grants", h.ListRuntimeToolGrants)
-					r.Post("/tools/{toolName}/groups/{groupId}", h.AddRuntimeToolGroupGrant)
-					r.Delete("/tools/{toolName}/groups/{groupId}", h.RemoveRuntimeToolGroupGrant)
-					r.Post("/tools/{toolName}/users/{userId}", h.AddRuntimeToolUserGrant)
-					r.Delete("/tools/{toolName}/users/{userId}", h.RemoveRuntimeToolUserGrant)
+					// CEREBRO-PATCH(runtime-tool-policy-only): FIR-3403 legacy runtime authoring routes removed; use /api/tool-policy.
 					r.Delete("/", h.DeleteAgentRuntime)
 					// Cascade variant of DELETE: archive every active agent
 					// bound to this runtime, cancel their tasks, then delete
@@ -2222,7 +2199,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/done", cerebroReminderHandler.MarkDone)
 				r.Delete("/{id}", cerebroReminderHandler.Delete)
 			})
-			r.Mount("/api/cerebro/agent-passes", cerebroagentpass.NewAdminRoutes(cerebroQueries)) // CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin API.
 			// CEREBRO-PATCH(cerebro-terminal-routes): interactive terminal endpoints.
 			r.Route("/api/cerebro/terminal", func(r chi.Router) {
 				r.Post("/sessions", cerebroTerminalHandler.CreateSession)

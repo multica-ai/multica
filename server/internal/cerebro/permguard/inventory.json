@@ -149,18 +149,6 @@
       "gate": "workspace_member"
     },
     {
-      "id": "DELETE /api/agents/{id}/tool-grants",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/agents/{id}/tool-overrides/{toolName}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/agents/{id}/tool-grants",
-      "gate": "workspace_admin"
-    },
-    {
       "id": "POST /api/agents/{id}/context/change-requests",
       "gate": "workspace_member"
     },
@@ -202,10 +190,6 @@
     },
     {
       "id": "DELETE /api/autopilots/{id}/triggers/{triggerId}/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/cerebro/agent-passes/{passId}",
       "gate": "workspace_admin"
     },
     {
@@ -509,14 +493,6 @@
       "gate": "cerebro_runtime_access"
     },
     {
-      "id": "DELETE /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
-      "gate": "workspace_admin"
-    },
-    {
       "id": "DELETE /api/skills/{id}/",
       "gate": "skill_ownership"
     },
@@ -661,10 +637,6 @@
       "gate": "workspace_admin"
     },
     {
-      "id": "PATCH /api/runtimes/{runtimeId}/tools/{toolName}",
-      "gate": "workspace_admin"
-    },
-    {
       "id": "PATCH /api/squads/{id}/members/role",
       "gate": "workspace_member"
     },
@@ -775,10 +747,6 @@
     {
       "id": "POST /api/capabilities/report",
       "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/agent-passes/",
-      "gate": "workspace_admin"
     },
     {
       "id": "POST /api/cerebro/channels/{id}/typing",
@@ -1493,14 +1461,6 @@
       "gate": "workspace_admin"
     },
     {
-      "id": "POST /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
-      "gate": "workspace_admin"
-    },
-    {
       "id": "POST /api/runtimes/{runtimeId}/unpause",
       "gate": "cerebro_runtime_access"
     },
@@ -1714,14 +1674,6 @@
     },
     {
       "id": "PUT /api/agents/{id}/skills",
-      "gate": "cerebro_agent_access"
-    },
-    {
-      "id": "PUT /api/agents/{id}/tool-overrides/{toolName}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/agents/{id}/tools/{name}/",
       "gate": "cerebro_agent_access"
     },
     {
@@ -2767,14 +2719,6 @@
     {
       "id": "agent tool-access",
       "exempt": "read-only — wraps GET /api/agents/{id}/tool-access"
-    },
-    {
-      "id": "agent tool-grant add",
-      "gate": "via:POST /api/agents/{id}/tool-grants"
-    },
-    {
-      "id": "agent tool-grant remove",
-      "gate": "via:DELETE /api/agents/{id}/tool-grants"
     },
     {
       "id": "agent usage",

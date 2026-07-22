@@ -271,8 +271,9 @@ const AgentToolSchema = z.preprocess((value) => {
 
 export const AgentToolsListSchema = z.array(AgentToolSchema);
 
-// CEREBRO-PATCH(runtime-tools-schema): JEH-1710 — runtime tool inventory +
-// grants. Keep source/policy strings open-ended so new backend values render
+// CEREBRO-PATCH(runtime-tools-schema): FIR-3403 — runtime tool inventory and
+// effective diagnostics only; access authoring uses canonical tool-policy.
+// Keep source/policy strings open-ended so new backend values render
 // through the UI's fallback branches instead of failing validation.
 const RuntimeToolSchema = z.object({
   id: z.string().default(""),
@@ -310,10 +311,7 @@ const RuntimeToolEffectiveAccessSchema = z.object({
     decided_by: z.string().optional(),
     capped_by: z.string().optional(),
   }).loose(),
-  runtime_grant: z.object({
-    effective: z.string().default(""),
-    reason: z.string().default(""),
-  }).loose(),
+  // CEREBRO-PATCH(runtime-authoring-retirement): runtime_grant was removed; policy is the canonical verdict.
   protocol: z.object({
     effective: z.string().default(""),
     required_protocols: z.array(z.string()).default([]),
@@ -337,28 +335,7 @@ export const RuntimeToolEffectiveAccessListSchema = z.array(
   RuntimeToolEffectiveAccessSchema,
 );
 
-const RuntimeToolGroupGrantSchema = z.object({
-  runtime_id: z.string().default(""),
-  tool_name: z.string().default(""),
-  group_id: z.string().default(""),
-  group_name: z.string().default(""),
-  granted_at: z.string().default(""),
-}).loose();
-
-const RuntimeToolUserGrantSchema = z.object({
-  runtime_id: z.string().default(""),
-  tool_name: z.string().default(""),
-  user_id: z.string().default(""),
-  user_name: z.string().default(""),
-  user_email: z.string().default(""),
-  user_avatar_url: z.string().default(""),
-  granted_at: z.string().default(""),
-}).loose();
-
-export const RuntimeToolGrantsSchema = z.object({
-  group_grants: z.array(RuntimeToolGroupGrantSchema).default([]),
-  user_grants: z.array(RuntimeToolUserGrantSchema).default([]),
-}).loose();
+// CEREBRO-PATCH(runtime-authoring-retirement): legacy runtime grant schemas were deleted with their API.
 
 const CapabilitySubjectSchema = z.object({
   type: z.string().default("workspace"),

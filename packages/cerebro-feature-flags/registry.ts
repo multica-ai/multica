@@ -174,10 +174,6 @@ export type CerebroFlagKey =
   | "cerebro_workflow_step_model_override"
   | "cerebro_skill_mention"
   | "cerebro_tool_policy"
-  // FIR-1496: surface the group/person → tool grant editor alongside the unified
-  // tool-policy table on the runtime page (the grant layer that silently denied
-  // Jakob had no UI once cerebro_tool_policy hid the legacy grants card).
-  | "cerebro_runtime_tool_grant_ui"
   | "cerebro_simple_tool_policy"
   // FIR-1771: the "Test as user" profile-menu entry that resolves another
   // user+agent's effective tool verdict. The real gate is the
@@ -196,7 +192,6 @@ export type CerebroFlagKey =
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
   | "cerebro_move_comment_to_thread"
-  | "cerebro_agent_passes"
   // JEH-216: skill ownership, approvers, version history, change requests, forks.
   | "cerebro_skill_ownership"
   | "cerebro_references"
@@ -324,10 +319,9 @@ export type CerebroFlagKey =
   | "cerebro_sub_issue_no_owner_mention"
   | "cerebro_sub_issue_require_agent_tag"
   | "cerebro_sub_issue_no_split_session"
-  // FIR-2563: per-workspace toggle for the approval enforcement gate. When off,
-  // the server-side gate lets every tool call through for this workspace without
-  // an inbox ask or a deny — even when CEREBRO_APPROVAL_GATE_ENABLED is true on
-  // the server. Defaults ON so existing workspaces keep their current behaviour.
+  // FIR-2563/FIR-3403: per-workspace toggle for the approval inbox. When off,
+  // Ask remains blocked but no inbox request is opened. Allow / Ask / Block
+  // access itself is always enforced by the Policy Decision Service.
   | "cerebro_approval_gate"
   // FIR-1914: append each agent's concrete firtal_registry data-source access
   // summary to the system prompt so the model knows the tool IS its data access
@@ -349,15 +343,6 @@ export type CerebroFlagKey =
   // FIR-1521 (part 2): stack a small orange scheduled-wakeup clock pip next to the
   // running-agent indicator on issue lists + board cards; click expands the list.
   | "cerebro_activity_wakeup_dot"
-  // TECH-3173: staged rollout of per-tool enforcement on LOCAL CLI runtimes
-  // (Claude/Codex/Cursor/Gemini). Master on/off; when on the daemon resolves each
-  // tool call through the same tool-policy chain + approval inbox as the gateway.
-  // Default OFF (no behaviour change until an admin opts in from Settings).
-  | "cerebro_local_tool_policy"
-  // TECH-3173: when cerebro_local_tool_policy is on, flips the stage from observe
-  // (resolve + log what WOULD block, allow everything) to enforce (Allow proceeds,
-  // Block stops, Ask → inbox + wait). Default OFF = observe-only dry run.
-  | "cerebro_local_tool_policy_enforce"
   // FIR-1609: enables the CEL expression escape hatch on tool-policy Conditions
   // (the WHEN layer of a rule). While OFF, only structured conditions (host-
   // allowlist, action-list) bite; a rule carrying an `expr` is undecidable and
@@ -563,9 +548,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_workflow_step_model_override: true,
   cerebro_skill_mention: true,
   cerebro_tool_policy: true,
-  // FIR-1496: grant editor (group/person → tool) on the runtime page. Default OFF
-  // — nothing changes until an admin turns it on.
-  cerebro_runtime_tool_grant_ui: false,
   cerebro_simple_tool_policy: true,
   // FIR-1771: Test as user. Default ON — the feature is still locked down by the
   // tools:test-as-user permission (default Allow for the workspace owner only),
@@ -588,7 +570,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_approvals: true,
   cerebro_move_comment_to_subissue: true,
   cerebro_move_comment_to_thread: true,
-  cerebro_agent_passes: true,
   // JEH-216: ON by default. Surfaces ownership/approvers, version history,
   // change-request review, and forking on the skill detail page. Off restores
   // the plain upstream skill editor with no governance UI.
@@ -730,7 +711,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // reachable; it shows who holds a tool permission and which layer grants it
   // (later phases add its change log and usage log). Nothing links to the page
   // while off, so the change is reversible.
-  cerebro_permission_detail: false,
+  cerebro_permission_detail: true,
   // TECH-2880: OFF by default — workspace opts in to surface the Projects
   // collapsible (header + sub-items) in the sidebar.
   cerebro_projects: false,
@@ -782,10 +763,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_sub_issue_no_owner_mention: false,
   cerebro_sub_issue_require_agent_tag: false,
   cerebro_sub_issue_no_split_session: false,
-  // FIR-2563: ON by default. When the server gate is active
-  // (CEREBRO_APPROVAL_GATE_ENABLED=true), this per-workspace flag lets an admin
-  // disable enforcement for their workspace without a server restart. Off = all
-  // tool calls are allowed through for this workspace regardless of policy rows.
+  // FIR-3403: ON by default. Turning it off disables inbox requests without
+  // disabling access enforcement; Ask remains blocked.
   cerebro_approval_gate: true,
   // FIR-1914: firtal_registry per-agent access summary in the system prompt.
   cerebro_registry_access_hint: true,
@@ -804,12 +783,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-1521 (part 2): ON by default — additive clock pip on list/board rows. Off
   // restores the rows to running-only indicators with no scheduled-wakeup dot.
   cerebro_activity_wakeup_dot: true,
-  // TECH-3173: OFF by default — local-runtime per-tool enforcement stays dormant
-  // until an admin opts in from Settings, so a deploy never changes behaviour.
-  cerebro_local_tool_policy: false,
-  // TECH-3173: OFF by default — when the master is on, observe-only (dry run)
-  // until an admin explicitly flips to enforce. Staged rollout, fail-safe.
-  cerebro_local_tool_policy_enforce: false,
   // FIR-1609: OFF by default — the CEL expression escape hatch on tool-policy
   // Conditions stays dormant; structured host/action terms bite, an `expr` rule
   // fails closed until an admin opts in. No deploy-time behaviour change.
@@ -1354,13 +1327,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Enable the capability catalog on agent and runtime pages: one flat, filterable list of every tool (Tool · Class · Side effect · Decision · Resolved by), narrowed by combinable class / side-effect / decision filters + search, with one editable decision pill per row and a mobile card layout. Backed by the four-layer Runtime › Agent › Group › User chain. GET /api/workspaces/{id}/tool-policy (member) + PUT/DELETE (admin/owner). FIR-2284 (redesign of FIR-2230).",
   },
   {
-    key: "cerebro_runtime_tool_grant_ui",
-    label: "Tool access grants (groups & people)",
-    group: "permissions",
-    description:
-      "Show the grant editor on the runtime page even when the unified tool-policy table is on: attach a group or a person to a specific tool so that runtime exposes it to them. This is the grant layer (an allow-list of who a tool is opened for) — the layer that silently gave a user zero tools when no UI could set it (FIR-426 / Saga). Reads GET and writes POST/DELETE /api/runtimes/{id}/tools/{tool}/groups|users. Default OFF.",
-  },
-  {
     key: "cerebro_simple_tool_policy",
     label: "Simple tool permissions",
     group: "permissions",
@@ -1408,13 +1374,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Add a 'Reply in new thread' action on comments. Enters a select mode where you pick comments in the thread and lift them into a new thread on the same issue; each moved comment is left as a breadcrumb linking to the new thread. JEH-2488.",
-  },
-  {
-    key: "cerebro_agent_passes",
-    label: "Agent passes admin",
-    group: "permissions",
-    description:
-      "Enable the workspace agent-pass admin page at /:workspace/agent-passes — issue, list, and revoke agent passes (machine-readable mandates that scope what an agent may do on an issue). Owner/admin only. JEH-1731.",
   },
   {
     key: "cerebro_skill_ownership",
@@ -1482,10 +1441,10 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   },
   {
     key: "cerebro_permission_detail",
-    label: "Permission detail page",
+    label: "Why Access and Permission audit",
     group: "permissions",
     description:
-      "Open a detail page for a single tool permission that shows who holds it (which agents, people, groups and runtimes have it set) and which layer grants it. Permissions that are shown but not enforced at runtime yet are greyed out. Off by default while it is built; nothing links to the page until it is turned on, so the change is reversible. Later phases add a change log and a usage log. FIR-3091.",
+      "Explain why a person or agent has access to a capability and audit every effective decision across workspace, runtime, agent, group and member layers. Uses the same resolved policy answer as get_agent_capabilities. FIR-3403.",
   },
   {
     key: "cerebro_image_reload",
@@ -1878,7 +1837,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Tool approval enforcement",
     group: "permissions",
     description:
-      "When on, the server enforces the per-tool Allow / Ask / Block policy for every agent tool call — tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off lets all tool calls through for this workspace without an inbox ask, even when the server gate is active. Requires the server's CEREBRO_APPROVAL_GATE_ENABLED flag to have any effect. FIR-2563.",
+      "When on, tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off keeps Ask blocked without opening an inbox request. Allow / Ask / Block access is always enforced from Settings → Permissions. FIR-3403.",
   },
   // FIR-1914: firtal_registry per-agent access summary in the system prompt.
   {
@@ -1930,21 +1889,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Show a small orange clock dot on issue list rows and board cards when the issue has a pending agent wakeup, stacked next to the running-agent indicator so a row can show both at once. Click the dot to expand a list of every scheduled run with a live countdown and a cancel button. Off keeps lists and boards showing only the running-agent indicator. FIR-1521.",
-  },
-  // TECH-3173: local-runtime per-tool enforcement, staged from settings.
-  {
-    key: "cerebro_local_tool_policy",
-    label: "Tool enforcement on local runtimes",
-    group: "permissions",
-    description:
-      "Extend the per-tool Allow / Ask / Block policy to agents running on LOCAL CLI runtimes (Claude, Codex, Cursor, Gemini), which otherwise bypass the gateway gate entirely. When on, the daemon resolves each tool call through the SAME tool-policy chain and approval inbox as the gateway. Off by default — turning it on starts in observe-only mode (see 'Enforce on local runtimes'). No restart needed. TECH-3173.",
-  },
-  {
-    key: "cerebro_local_tool_policy_enforce",
-    label: "Enforce on local runtimes (else observe-only)",
-    group: "permissions",
-    description:
-      "Only matters when 'Tool enforcement on local runtimes' is on. Off = observe-only dry run: the daemon resolves every tool call and logs what an enforce WOULD block, but allows everything through (safe to watch before committing). On = enforce: Allow proceeds, Block stops, Ask routes to the approval inbox and blocks until a human decides. Default off so you can watch the would-block stream first. TECH-3173.",
   },
   {
     key: "cerebro_policy_cel",
@@ -2053,14 +1997,11 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   // Tool permissions — the tool-policy chain and everything that feeds it.
   cerebro_tool_policy: "tool_permissions",
   cerebro_simple_tool_policy: "tool_permissions",
-  cerebro_runtime_tool_grant_ui: "tool_permissions",
   cerebro_web_fetch_policy: "tool_permissions",
   cerebro_web_fetch_permissions: "tool_permissions",
   cerebro_permission_detail: "tool_permissions",
   cerebro_platform_capabilities: "tool_permissions",
   cerebro_approval_gate: "tool_permissions",
-  cerebro_local_tool_policy: "tool_permissions",
-  cerebro_local_tool_policy_enforce: "tool_permissions",
   cerebro_policy_cel: "tool_permissions",
   cerebro_credential_chain_grant: "tool_permissions",
   cerebro_registry_access_hint: "tool_permissions",
@@ -2070,7 +2011,6 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   cerebro_google_identity: "credentials",
   // Approvals & sign-off.
   cerebro_approvals: "approvals",
-  cerebro_agent_passes: "approvals",
   cerebro_private_agent_requests: "approvals",
   // Folders & content access.
   cerebro_folder_access: "content_access",

@@ -14,6 +14,7 @@
     "./data-source-scope": "./views/data-source-scope.ts"
   },
   "dependencies": {
+    "@multica/cerebro-agent-capabilities": "workspace:*",
     "@multica/cerebro-agentvault": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-web-fetch-policy": "workspace:*",

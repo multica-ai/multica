@@ -1,16 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { cn } from "@multica/ui/lib/utils";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
-import { useNavigation } from "@multica/views/navigation";
+import { AppLink, useNavigation } from "@multica/views/navigation";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
-import { NativeSelect } from "@multica/ui/components/ui/native-select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { AgentPicker } from "@multica/views/autopilots/components/pickers/agent-picker";
@@ -21,10 +28,14 @@ import { SkillNamePicker } from "./loop-pickers";
 import { MachineControlNotice } from "./workflow-issue-loop-chain";
 import {
   BLOCK_TYPES,
+  ISSUE_STATUS_OPTIONS,
+  issueStatusLabel,
   blockMeta,
   blockSummary,
   nudgeBlock,
+  nudgePhase,
   reorderBlocks,
+  reorderPhases,
   totalSteps,
   type LoopBlockKind,
 } from "./loop-chain-model";
@@ -33,8 +44,10 @@ import {
   cerebroWorkflowsKeys,
   createWorkflow,
   updateWorkflow,
+  workflowEvalBindingsOptions,
 } from "../core";
 import type {
+  WorkflowEvalBinding,
   CerebroWorkflow,
   LoopBusyPolicy,
   LoopChainBlock,
@@ -59,21 +72,117 @@ const TYPE_ICON: Record<LoopBlockType, typeof Play> = {
   eval: Gauge,
 };
 
-// Machine steps read blue, human steps read gold — a clear two-tone split (the
-// intent of the approved mockup) expressed with semantic tokens only, so the
-// package's no-hardcoded-palette guard stays green.
+type EvalPhase = "plan" | "delivery" | "monitor";
+
+// What each eval phase actually does to a run, in the user's words. Monitor can
+// never block — the server drops blocking on monitor bindings (validation.go).
+const EVAL_PHASE_HELP: Record<EvalPhase, string> = {
+  plan: "Plan — gates the plan before any work starts.",
+  delivery: "Delivery — gates the delivered result.",
+  monitor: "Monitor — advisory only, it warns but never blocks the run.",
+};
+
+const EVAL_PHASE_LABEL: Record<EvalPhase, string> = {
+  plan: "Plan",
+  delivery: "Delivery",
+  monitor: "Monitor",
+};
+
+// One radius per level, so the editor reads as three nested surfaces instead of
+// four competing corner sizes: outer step card, controls, inner panels.
+const CARD_RADIUS = "rounded-[14px]";
+const CONTROL_RADIUS = "rounded-[10px]";
+const PANEL_RADIUS = "rounded-lg";
+
+// One control height, matching the shared Input (h-8 / 32px). The only taller
+// controls are the full-width Add step / Add phase buttons at 44px.
+const CONTROL_HEIGHT = "h-8";
+// Input bakes in `md:text-sm`, and class merging does not drop a `md:` variant.
+// Any font size set on an Input therefore needs its own md: twin or the desktop
+// rendering silently falls back to 14px. These pairs are locked by a render test.
+const INPUT_TEXT_SM = "text-sm md:text-sm";
+const INPUT_TEXT_XS = "text-xs md:text-xs";
+
+// A picker trigger that matches the Input siblings exactly, so a picker never
+// falls back to its bare-link default inside a form field.
+const PICKER_TRIGGER_CLASS = cn(
+  "flex w-full items-center justify-between gap-2 border border-input bg-transparent px-2.5 text-left text-sm transition-colors hover:bg-accent/30",
+  CONTROL_HEIGHT,
+  CONTROL_RADIUS,
+);
+
+// Timeline geometry — one axis, everything derived from it. RAIL_CENTER_PX is
+// the rail's centre line measured from the chain container's left edge;
+// CHAIN_INSET_PX is that container's left padding (pl-7), which every row sits
+// behind. Before this, the rail and the three dot sizes each carried their own
+// hand-tuned offset and drifted apart by up to 4px.
+const RAIL_CENTER_PX = 10;
+const CHAIN_INSET_PX = 28;
+const RAIL_WIDTH_PX = 2;
+// Half of the step card's header row (min-h-12), so the step dot lands on the
+// header's centre line rather than a fixed distance from the card's top.
+const STEP_HEADER_CENTER_PX = 24;
+
+function railDotStyle(sizePx: number): React.CSSProperties {
+  return { left: RAIL_CENTER_PX - CHAIN_INSET_PX - sizePx / 2 };
+}
+
+function railLineStyle(): React.CSSProperties {
+  return { left: RAIL_CENTER_PX - RAIL_WIDTH_PX / 2, width: RAIL_WIDTH_PX };
+}
+
+// Two-tone split from the approved mockup: machine steps read teal, human
+// steps read violet. The colours live as component-scoped CSS variables set on
+// the editor root through a scoped <style> element rather than an inline style
+// object, because inline styles cannot express a dark-theme variant and beat
+// every stylesheet rule on specificity. Nothing outside this component is
+// touched, so no shared design token moves.
 const DOT_CLASS: Record<LoopBlockKind, string> = {
-  machine: "bg-info",
-  human: "bg-warning",
+  machine: "bg-[var(--wf-machine)]",
+  human: "bg-[var(--wf-human)]",
 };
 const BADGE_CLASS: Record<LoopBlockKind, string> = {
-  machine: "bg-info/10 text-info",
-  human: "bg-warning/15 text-warning",
+  machine: "bg-[var(--wf-machine-soft)] text-[var(--wf-machine)]",
+  human: "bg-[var(--wf-human-soft)] text-[var(--wf-human)]",
 };
+
+// Exact approved-mockup teal + violet expressed as rgb() so the guard's
+// hex/palette-class check never trips; alpha-baked soft fills stay theme-safe.
+// The dark variants are lifted so 12px bold badge text clears 4.5:1 against the
+// dark card surface — the light-theme pair only reaches ~3.1:1 there.
+export const WF_STEP_COLOR_CSS = `
+[data-wf-editor] {
+  --wf-machine: rgb(14 116 144);
+  --wf-machine-soft: rgb(14 116 144 / 0.12);
+  --wf-human: rgb(124 58 237);
+  --wf-human-soft: rgb(124 58 237 / 0.14);
+  --wf-rail: var(--color-border);
+}
+.dark [data-wf-editor] {
+  --wf-machine: rgb(103 232 249);
+  --wf-machine-soft: rgb(103 232 249 / 0.16);
+  --wf-human: rgb(196 181 253);
+  --wf-human-soft: rgb(196 181 253 / 0.18);
+  --wf-rail: rgb(255 255 255 / 0.22);
+}
+`;
+
+// Workflow-scoped context so the deeply nested step fields can reach the two
+// facts they need (which workflow is being edited, and where Workflow gates
+// lives) without threading props through four component levels.
+interface EditorScope {
+  workflowId?: string;
+  gatesHref: string;
+}
+
+const EditorScopeContext = createContext<EditorScope>({ gatesHref: "" });
 
 function key(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
+
+// A new Human step is born with a usable request instead of an empty box.
+const DEFAULT_APPROVAL_PROMPT = "Confirm the delivered result is correct and ready to ship.";
 
 function newBlock(type: LoopBlockType = "session"): LoopChainBlock {
   const id = key(type);
@@ -84,6 +193,7 @@ function newBlock(type: LoopBlockType = "session"): LoopChainBlock {
   }
   if (type === "command") block.expect = "exit_zero";
   if (type === "eval") block.eval_phase = "delivery";
+  if (type === "human") block.prompt = DEFAULT_APPROVAL_PROMPT;
   return block;
 }
 
@@ -175,7 +285,7 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
   if (form.legacy) {
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <div className="max-w-lg rounded-lg border border-warning/40 bg-warning/10 p-5 text-sm">
+        <div className={cn("max-w-lg border border-warning/40 bg-warning/10 p-5 text-sm", PANEL_RADIUS)}>
           <h2 className="font-semibold text-foreground">This workflow needs migration</h2>
           <p className="mt-2 text-muted-foreground">
             This workflow still uses the retired recipe format. It cannot be edited until the block-chain migration has run,
@@ -217,6 +327,8 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
           onToggle={(id) => setOpenId((current) => (current === id ? null : id))}
           onReorder={(dragId, targetId, above) => setChain((chain) => ({ ...chain, phases: reorderBlocks(chain.phases, dragId, targetId, above) }))}
           onNudge={(blockId, offset) => setChain((chain) => ({ ...chain, phases: nudgeBlock(chain.phases, blockId, offset) }))}
+          onReorderPhase={(dragId, targetId, above) => setChain((chain) => ({ ...chain, phases: reorderPhases(chain.phases, dragId, targetId, above) }))}
+          onNudgePhase={(phaseId, offset) => setChain((chain) => ({ ...chain, phases: nudgePhase(chain.phases, phaseId, offset) }))}
           onPhaseChange={setPhase}
           onRemovePhase={(phaseId) => setChain((chain) => ({ ...chain, phases: chain.phases.filter((phase) => phase.id !== phaseId) }))}
           onAddPhase={() => setChain((chain) => ({ ...chain, phases: [...chain.phases, newPhase(chain.phases.length)] }))}
@@ -233,7 +345,7 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
           onDoneStatusChange={(value) => setChain((chain) => ({ ...chain, done_status: value || undefined }))}
         />
 
-        {error && <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
+        {error && <div className={cn("border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive", PANEL_RADIUS)}>{error}</div>}
       </form>
     </div>
   );
@@ -248,14 +360,14 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
           onChange={(event) => setName(event.target.value)}
           placeholder="Name this workflow"
           aria-label="Workflow name"
-          className="h-8 border-0 bg-transparent px-0 text-[15px] font-semibold shadow-none focus-visible:ring-0"
+          className={cn("h-8 border-0 bg-transparent px-0 font-semibold shadow-none focus-visible:ring-0", INPUT_TEXT_SM)}
         />
-        <p className="truncate text-[11px] text-muted-foreground">
+        <p className="truncate text-xs text-muted-foreground">
           Issue workflow · {steps} {steps === 1 ? "step" : "steps"}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <span className="text-[11px] text-muted-foreground">Enabled</span>
+        <span className="text-xs text-muted-foreground">Enabled</span>
         <Switch checked={form.enabled} onCheckedChange={(checked) => setEnabled(checked === true)} aria-label="Enabled" />
       </div>
     </div>
@@ -274,12 +386,24 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
   );
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="sticky top-0 z-10 flex shrink-0 items-center border-b bg-background px-4 py-2.5 sm:px-6">{topBar}</div>
-      {body}
-      {footer}
-    </div>
+    <EditorScopeContext.Provider value={{ workflowId, gatesHref: `/${workspace.slug}/workflows/evals` }}>
+      <div data-wf-editor="" className="flex h-full flex-col">
+        <style>{WF_STEP_COLOR_CSS}</style>
+        <div className="sticky top-0 z-10 flex shrink-0 items-center border-b bg-background px-4 py-2.5 sm:px-6">{topBar}</div>
+        {body}
+        {footer}
+      </div>
+    </EditorScopeContext.Provider>
   );
+}
+
+// A drag in progress: either a step being moved between phases, or a whole
+// phase being moved. One state, two kinds, so the two drags can never collide.
+type DragKind = "step" | "phase";
+interface DragHint {
+  kind: DragKind;
+  id: string;
+  above: boolean;
 }
 
 interface RailProps {
@@ -288,6 +412,8 @@ interface RailProps {
   onToggle: (blockId: string) => void;
   onReorder: (dragId: string, targetId: string, above: boolean) => void;
   onNudge: (blockId: string, offset: -1 | 1) => void;
+  onReorderPhase: (dragId: string, targetId: string, above: boolean) => void;
+  onNudgePhase: (phaseId: string, offset: -1 | 1) => void;
   onPhaseChange: (phaseId: string, updater: (phase: LoopChainPhase) => LoopChainPhase) => void;
   onRemovePhase: (phaseId: string) => void;
   onAddPhase: () => void;
@@ -297,26 +423,28 @@ interface RailProps {
   onDoneStatusChange: (value: string) => void;
 }
 
-function ChainRail(props: RailProps) {
-  const { chain, openId, onReorder, onNudge } = props;
+// Exported as the editor's render-test seam: it is the whole chain surface
+// (rail, phases, step cards) without the workspace/query/navigation shell.
+export function ChainRail(props: RailProps) {
+  const { chain, openId, onReorder, onNudge, onReorderPhase, onNudgePhase } = props;
   // Pointer-based drag reorder (mouse + touch), matching the approved mockup.
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dropHint, setDropHint] = useState<{ id: string; above: boolean } | null>(null);
+  const [drag, setDrag] = useState<{ kind: DragKind; id: string } | null>(null);
+  const [dropHint, setDropHint] = useState<DragHint | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
-  const startDrag = (blockId: string) => (event: React.PointerEvent) => {
+  const startDrag = (kind: DragKind, dragId: string) => (event: React.PointerEvent) => {
     event.preventDefault();
-    setDragId(blockId);
+    setDrag({ kind, id: dragId });
     const onMove = (moveEvent: PointerEvent) => {
-      const steps = listRef.current?.querySelectorAll<HTMLElement>("[data-step-id]");
-      if (!steps) return;
-      let hint: { id: string; above: boolean } | null = null;
-      steps.forEach((element) => {
-        const id = element.dataset.stepId;
-        if (!id || id === blockId) return;
+      const targets = listRef.current?.querySelectorAll<HTMLElement>(`[data-drag-kind="${kind}"]`);
+      if (!targets) return;
+      let hint: DragHint | null = null;
+      targets.forEach((element) => {
+        const id = element.dataset.dragId;
+        if (!id || id === dragId) return;
         const rect = element.getBoundingClientRect();
         if (moveEvent.clientY >= rect.top && moveEvent.clientY <= rect.bottom) {
-          hint = { id, above: moveEvent.clientY < rect.top + rect.height / 2 };
+          hint = { kind, id, above: moveEvent.clientY < rect.top + rect.height / 2 };
         }
       });
       setDropHint(hint);
@@ -325,10 +453,11 @@ function ChainRail(props: RailProps) {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       setDropHint((current) => {
-        if (current) onReorder(blockId, current.id, current.above);
+        if (current?.kind === "step") onReorder(dragId, current.id, current.above);
+        if (current?.kind === "phase") onReorderPhase(dragId, current.id, current.above);
         return null;
       });
-      setDragId(null);
+      setDrag(null);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -336,37 +465,42 @@ function ChainRail(props: RailProps) {
 
   return (
     <div ref={listRef} data-testid="issue-loop-chain" className="relative pl-7">
-      <span className="absolute bottom-8 left-[9px] top-3 w-0.5 rounded bg-border" aria-hidden="true" />
-      {chain.phases.map((phase, phaseIndex) => (
-        <PhaseGroup
-          key={phase.id}
-          phase={phase}
-          phaseCount={chain.phases.length}
-          openId={openId}
-          dragId={dragId}
-          dropHint={dropHint}
-          onToggle={props.onToggle}
-          onStartDrag={startDrag}
-          onNudge={onNudge}
-          onChange={(updater) => props.onPhaseChange(phase.id, updater)}
-          onRemovePhase={() => props.onRemovePhase(phase.id)}
-          onAddBlock={() => props.onAddBlock(phase.id)}
-          onRemoveBlock={(blockId) => props.onRemoveBlock(phase.id, blockId)}
-          isLast={phaseIndex === chain.phases.length - 1}
-          onAddPhase={props.onAddPhase}
-        />
-      ))}
-      <div className="relative mt-5 pl-1 text-xs text-muted-foreground">
-        <span className="absolute -left-[22px] top-1 size-2.5 rounded-full bg-foreground" aria-hidden="true" />
-        When the chain finishes → issue becomes{" "}
-        <span className="inline-flex items-center">
-          <Input
-            value={props.doneStatus}
-            onChange={(event) => props.onDoneStatusChange(event.target.value)}
-            aria-label="Done status"
-            className="ml-1 h-6 w-28 px-2 text-xs"
+      <div className="relative">
+        <span className="absolute top-3 bottom-0 rounded bg-[var(--wf-rail)]" style={railLineStyle()} aria-hidden="true" />
+        {chain.phases.map((phase, phaseIndex) => (
+          <PhaseGroup
+            key={phase.id}
+            phase={phase}
+            phaseCount={chain.phases.length}
+            openId={openId}
+            drag={drag}
+            dropHint={dropHint}
+            onToggle={props.onToggle}
+            onStartDrag={startDrag}
+            onNudge={onNudge}
+            onNudgePhase={onNudgePhase}
+            onChange={(updater) => props.onPhaseChange(phase.id, updater)}
+            onRemovePhase={() => props.onRemovePhase(phase.id)}
+            onAddBlock={() => props.onAddBlock(phase.id)}
+            onRemoveBlock={(blockId) => props.onRemoveBlock(phase.id, blockId)}
+            isLast={phaseIndex === chain.phases.length - 1}
+            onAddPhase={props.onAddPhase}
           />
-        </span>
+        ))}
+      </div>
+      {/* The finish row carries its own rail segment: it bridges the mt-5 gap
+          above and stops exactly on the dot, so the rail never leaves a hole. */}
+      <div className="relative mt-5 flex flex-wrap items-center gap-x-1 pl-1 text-xs text-muted-foreground">
+        <span className="absolute -top-5 h-[calc(50%+1.25rem)] rounded bg-[var(--wf-rail)]" style={railLineStyle()} aria-hidden="true" />
+        <span className="absolute top-1/2 size-2.5 -translate-y-1/2 rounded-full bg-foreground" style={railDotStyle(10)} aria-hidden="true" />
+        <span>When the chain finishes → issue becomes</span>
+        <IssueStatusSelect
+          value={props.doneStatus}
+          onChange={(status) => props.onDoneStatusChange(status ?? "done")}
+          ariaLabel="Done status"
+          clearable={false}
+          className="ml-1 w-36 text-xs"
+        />
       </div>
     </div>
   );
@@ -376,11 +510,12 @@ function PhaseGroup({
   phase,
   phaseCount,
   openId,
-  dragId,
+  drag,
   dropHint,
   onToggle,
   onStartDrag,
   onNudge,
+  onNudgePhase,
   onChange,
   onRemovePhase,
   onAddBlock,
@@ -391,11 +526,12 @@ function PhaseGroup({
   phase: LoopChainPhase;
   phaseCount: number;
   openId: string | null;
-  dragId: string | null;
-  dropHint: { id: string; above: boolean } | null;
+  drag: { kind: DragKind; id: string } | null;
+  dropHint: DragHint | null;
   onToggle: (blockId: string) => void;
-  onStartDrag: (blockId: string) => (event: React.PointerEvent) => void;
+  onStartDrag: (kind: DragKind, id: string) => (event: React.PointerEvent) => void;
   onNudge: (blockId: string, offset: -1 | 1) => void;
+  onNudgePhase: (phaseId: string, offset: -1 | 1) => void;
   onChange: (updater: (phase: LoopChainPhase) => LoopChainPhase) => void;
   onRemovePhase: () => void;
   onAddBlock: () => void;
@@ -403,23 +539,63 @@ function PhaseGroup({
   isLast: boolean;
   onAddPhase: () => void;
 }) {
-  const [showLimits, setShowLimits] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const setBlock = (blockId: string, updater: (block: LoopChainBlock) => LoopChainBlock) =>
     onChange((current) => ({ ...current, blocks: current.blocks.map((block) => (block.id === blockId ? updater(block) : block)) }));
 
+  const draggingThisPhase = drag?.kind === "phase" && drag.id === phase.id;
+  // While a step is being dragged, highlight the phase it would land in — the
+  // old feedback only marked one card and never said which phase you were in.
+  const landingPhase =
+    drag?.kind === "step" && dropHint?.kind === "step" && phase.blocks.some((block) => block.id === dropHint.id);
+  const phaseDropHint = dropHint?.kind === "phase" && dropHint.id === phase.id ? dropHint : null;
+
   return (
-    <div>
-      <div className="relative mb-3 mt-6 first:mt-1">
-        <span className="absolute -left-[22px] top-0.5 size-3 rounded-full border-2 border-background bg-foreground ring-2 ring-border" aria-hidden="true" />
-        <div className="flex items-center gap-2">
+    <div
+      data-drag-kind="phase"
+      data-drag-id={phase.id}
+      className={cn(
+        "relative",
+        draggingThisPhase && "opacity-40",
+        landingPhase && cn("bg-[var(--wf-machine-soft)] ring-1 ring-[var(--wf-machine)]/40", PANEL_RADIUS),
+      )}
+    >
+      {phaseDropHint && <DropIndicator position={phaseDropHint.above ? "above" : "below"} />}
+      <div className="mb-3 mt-6 first:mt-1">
+        <div className="relative flex items-center gap-2">
+          <span
+            className="absolute top-1/2 size-3 -translate-y-1/2 rounded-full border-2 border-background bg-foreground ring-2 ring-border"
+            style={railDotStyle(12)}
+            aria-hidden="true"
+          />
+          <button
+            type="button"
+            aria-label="Drag to reorder phase"
+            onPointerDown={onStartDrag("phase", phase.id)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowUp") { event.preventDefault(); onNudgePhase(phase.id, -1); }
+              if (event.key === "ArrowDown") { event.preventDefault(); onNudgePhase(phase.id, 1); }
+            }}
+            className="flex size-9 shrink-0 cursor-grab touch-none items-center justify-center text-muted-foreground hover:text-foreground active:cursor-grabbing sm:size-7"
+            style={{ touchAction: "none" }}
+          >
+            <GripVertical className="size-4" />
+          </button>
           <Input
             value={phase.name ?? ""}
             onChange={(event) => onChange((current) => ({ ...current, name: event.target.value }))}
             aria-label="Phase name"
-            className="h-7 flex-1 border-0 bg-transparent px-0 text-xs font-bold uppercase tracking-wide text-muted-foreground shadow-none focus-visible:ring-0"
+            placeholder="Name this phase"
+            className={cn(
+              // Reads as the static heading it is at rest, but shows a real
+              // field on hover and focus so it is discoverably editable.
+              "h-7 flex-1 border-transparent bg-transparent px-1.5 font-bold uppercase tracking-wide text-muted-foreground shadow-none transition-colors hover:border-input hover:bg-background focus-visible:border-ring focus-visible:bg-background",
+              CONTROL_RADIUS,
+              INPUT_TEXT_XS,
+            )}
           />
-          <button type="button" onClick={() => setShowLimits((value) => !value)} className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
-            limits <ChevronDown className={cn("size-3 transition-transform", showLimits && "rotate-180")} />
+          <button type="button" onClick={() => setShowSettings((value) => !value)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            Settings <ChevronDown className={cn("size-3 transition-transform", showSettings && "rotate-180")} />
           </button>
           {phaseCount > 1 && (
             <Button type="button" variant="ghost" size="icon" aria-label="Remove phase" onClick={onRemovePhase}>
@@ -427,16 +603,20 @@ function PhaseGroup({
             </Button>
           )}
         </div>
-        {showLimits && (
-          <div className="mt-3 flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+        {showSettings && (
+          <div className={cn("mt-3 flex flex-col gap-3 border bg-muted/20 p-3", PANEL_RADIUS)}>
             <div className="grid gap-3 sm:grid-cols-2">
-              <NumberField label="Max steps" value={phase.limits.max_steps} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, max_steps: value } }))} />
-              <NumberField label="Max rounds" value={phase.limits.max_rounds} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, max_rounds: value } }))} />
-              <NumberField label="No-progress rounds" value={phase.limits.no_progress_stalls} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, no_progress_stalls: value } }))} />
-              <NumberField label="Max wait (seconds)" value={phase.limits.max_wait_seconds ?? 0} min={0} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, max_wait_seconds: value || undefined } }))} />
+              <NumberField label="Max steps" hint="How many steps this phase may open in total." value={phase.limits.max_steps} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, max_steps: value } }))} />
+              <NumberField label="Max rounds" hint="How many times this phase may start over." value={phase.limits.max_rounds} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, max_rounds: value } }))} />
+              <NumberField label="No-progress rounds" hint="How many rounds without progress before the phase stops." value={phase.limits.no_progress_stalls} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, no_progress_stalls: value } }))} />
+              <NumberField label="Max wait (seconds)" hint="How long to wait for a free agent before giving up." value={phase.limits.max_wait_seconds ?? 0} min={0} onChange={(value) => onChange((current) => ({ ...current, limits: { ...current.limits, max_wait_seconds: value || undefined } }))} />
             </div>
-            <Field label="Starts when issue status is (optional)">
-              <Input value={phase.status ?? ""} onChange={(event) => onChange((current) => ({ ...current, status: event.target.value || undefined }))} placeholder="in_progress" />
+            <Field label="Issue status while this phase runs" hint="Set before the phase opens its first step. Leave unchanged to keep the status the previous phase left behind.">
+              <IssueStatusSelect
+                value={phase.status}
+                onChange={(status) => onChange((current) => ({ ...current, status }))}
+                ariaLabel="Phase status"
+              />
             </Field>
           </div>
         )}
@@ -447,11 +627,11 @@ function PhaseGroup({
           key={block.id}
           block={block}
           open={openId === block.id}
-          dragging={dragId === block.id}
-          dropHint={dropHint?.id === block.id ? dropHint.above ? "above" : "below" : null}
+          dragging={drag?.kind === "step" && drag.id === block.id}
+          dropHint={dropHint?.kind === "step" && dropHint.id === block.id ? (dropHint.above ? "above" : "below") : null}
           canDelete={phase.blocks.length > 1}
           onToggle={() => onToggle(block.id)}
-          onStartDrag={onStartDrag(block.id)}
+          onStartDrag={onStartDrag("step", block.id)}
           onNudge={(offset) => onNudge(block.id, offset)}
           onChange={(updater) => setBlock(block.id, updater)}
           onDelete={() => onRemoveBlock(block.id)}
@@ -459,19 +639,35 @@ function PhaseGroup({
       ))}
 
       <div className="relative mb-3">
-        <button type="button" onClick={onAddBlock} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-dashed text-xs text-muted-foreground hover:bg-muted/40">
+        <button type="button" onClick={onAddBlock} className={cn("flex min-h-11 w-full items-center justify-center gap-2 border border-dashed text-xs text-muted-foreground hover:bg-muted/40", CARD_RADIUS)}>
           <Plus className="size-4" /> Add step
         </button>
       </div>
 
       {isLast && (
         <div className="relative mb-3">
-          <button type="button" onClick={onAddPhase} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-dotted text-xs text-muted-foreground hover:bg-muted/40">
+          <button type="button" onClick={onAddPhase} className={cn("flex min-h-11 w-full items-center justify-center gap-2 border border-dotted text-xs text-muted-foreground hover:bg-muted/40", CARD_RADIUS)}>
             <Plus className="size-4" /> Add phase
           </button>
         </div>
       )}
     </div>
+  );
+}
+
+// A single continuous landing line drawn across the whole row, replacing the
+// old 3px box-shadow that only appeared on one card edge.
+function DropIndicator({ position }: { position: "above" | "below" }) {
+  return (
+    <span
+      data-testid="drop-indicator"
+      aria-hidden="true"
+      className={cn(
+        "pointer-events-none absolute inset-x-0 z-10 h-0.5 rounded-full bg-foreground",
+        position === "above" ? "-top-1" : "-bottom-1",
+      )}
+      style={{ left: RAIL_CENTER_PX - CHAIN_INSET_PX }}
+    />
   );
 }
 
@@ -502,20 +698,21 @@ function StepCard({
   return (
     <div
       data-step-id={block.id}
+      data-drag-kind="step"
+      data-drag-id={block.id}
       className={cn(
         "relative mb-3",
         dragging && "opacity-40",
       )}
     >
-      <span className="absolute -left-[19px] top-5 size-2.5 rounded-full border-2 border-foreground bg-background" aria-hidden="true" />
-      <div
-        className={cn(
-          "overflow-hidden rounded-xl border bg-card shadow-sm",
-          dropHint === "above" && "shadow-[0_-3px_0_0_var(--color-foreground)]",
-          dropHint === "below" && "shadow-[0_3px_0_0_var(--color-foreground)]",
-        )}
-      >
-        <div className="flex min-h-12 items-center gap-2.5 px-3 py-3">
+      {dropHint && <DropIndicator position={dropHint} />}
+      <span
+        className="absolute size-2.5 -translate-y-1/2 rounded-full border-2 border-foreground bg-background"
+        style={{ top: STEP_HEADER_CENTER_PX, ...railDotStyle(10) }}
+        aria-hidden="true"
+      />
+      <div className={cn("overflow-hidden border bg-card shadow-sm", CARD_RADIUS)}>
+        <div className="flex min-h-12 items-center gap-2.5 px-3.5 py-3">
           <button
             type="button"
             aria-label="Drag to reorder"
@@ -524,7 +721,7 @@ function StepCard({
               if (event.key === "ArrowUp") { event.preventDefault(); onNudge(-1); }
               if (event.key === "ArrowDown") { event.preventDefault(); onNudge(1); }
             }}
-            className="flex size-7 shrink-0 cursor-grab touch-none items-center justify-center text-muted-foreground/60 hover:text-muted-foreground active:cursor-grabbing"
+            className="flex size-9 shrink-0 cursor-grab touch-none items-center justify-center text-muted-foreground hover:text-foreground active:cursor-grabbing sm:size-7"
             style={{ touchAction: "none" }}
           >
             <GripVertical className="size-4" />
@@ -535,7 +732,7 @@ function StepCard({
               <span className="block break-words text-sm font-semibold">{block.name || meta.label}</span>
               <span className="mt-0.5 block break-words text-xs text-muted-foreground">{blockSummary(block)}</span>
             </span>
-            <span className={cn("shrink-0 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wide", BADGE_CLASS[meta.kind])}>{meta.label}</span>
+            <span className={cn("shrink-0 px-2 py-1 text-xs font-bold uppercase tracking-wide", CONTROL_RADIUS, BADGE_CLASS[meta.kind])}>{meta.label}</span>
             <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
           </button>
         </div>
@@ -550,9 +747,19 @@ function StepCard({
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => onChange((current) => ({ ...newBlock(option.value), id: current.id, name: current.name || blockMeta(option.value).label }))}
+                      onClick={() => onChange((current) => ({
+                        ...newBlock(option.value),
+                        id: current.id,
+                        name: current.name || blockMeta(option.value).label,
+                        // Statuses belong to the step's place in the chain, not
+                        // to what it does, so they survive a type change.
+                        status_on_start: current.status_on_start,
+                        status_on_done: current.status_on_done,
+                      }))}
                       className={cn(
-                        "inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-[13px]",
+                        "inline-flex items-center gap-1.5 border px-3 text-sm",
+                        CONTROL_HEIGHT,
+                        CONTROL_RADIUS,
                         selected ? "border-foreground font-semibold text-foreground shadow-[inset_0_0_0_1px_var(--color-foreground)]" : "text-muted-foreground hover:text-foreground",
                       )}
                     >
@@ -565,12 +772,12 @@ function StepCard({
             </Field>
 
             <Field label="Name">
-              <Input value={block.name ?? ""} onChange={(event) => onChange((current) => ({ ...current, name: event.target.value }))} placeholder="Name this step" />
+              <Input value={block.name ?? ""} onChange={(event) => onChange((current) => ({ ...current, name: event.target.value }))} placeholder="Name this step" className={cn(CONTROL_HEIGHT, CONTROL_RADIUS, INPUT_TEXT_SM)} />
             </Field>
 
             <BlockFields block={block} onChange={onChange} />
 
-            <AdvancedDisclosure block={block} onChange={onChange} />
+            <StepStatusFields block={block} onChange={onChange} />
 
             <div className="flex items-center border-t pt-3">
               <Button
@@ -591,6 +798,33 @@ function StepCard({
   );
 }
 
+/**
+ * Per-step status control. Until now the only status a chain could set was the
+ * phase's and the chain's final one, so a run could not show "in review" while
+ * a review step waited. The engine applies these at the step boundary — never
+ * while the step runs — so the board follows the run without flapping.
+ */
+export function StepStatusFields({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
+  return (
+    <div className={cn("grid gap-3 border bg-muted/20 p-3 sm:grid-cols-2", PANEL_RADIUS)}>
+      <Field label="Before this step → issue becomes">
+        <IssueStatusSelect
+          value={block.status_on_start}
+          onChange={(status) => onChange((current) => ({ ...current, status_on_start: status }))}
+          ariaLabel="Status before this step"
+        />
+      </Field>
+      <Field label="After this step → issue becomes">
+        <IssueStatusSelect
+          value={block.status_on_done}
+          onChange={(status) => onChange((current) => ({ ...current, status_on_done: status }))}
+          ariaLabel="Status after this step"
+        />
+      </Field>
+    </div>
+  );
+}
+
 function BlockFields({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
   if (block.type === "session") {
     return (
@@ -605,7 +839,7 @@ function BlockFields({ block, onChange }: { block: LoopChainBlock; onChange: (up
   if (block.type === "command") {
     return (
       <Field label="Command">
-        <Input value={(block.check ?? []).join(" ")} onChange={(event) => onChange((current) => ({ ...current, check: event.target.value.trim().split(/\s+/).filter(Boolean), expect: "exit_zero" }))} placeholder="make test" />
+        <Input value={(block.check ?? []).join(" ")} onChange={(event) => onChange((current) => ({ ...current, check: event.target.value.trim().split(/\s+/).filter(Boolean), expect: "exit_zero" }))} placeholder="make test" className={cn(CONTROL_HEIGHT, CONTROL_RADIUS, INPUT_TEXT_SM)} />
         <p className="text-xs text-muted-foreground">Must exit with code 0.</p>
       </Field>
     );
@@ -623,49 +857,141 @@ function BlockFields({ block, onChange }: { block: LoopChainBlock; onChange: (up
   if (block.type === "human") {
     return (
       <>
-        <Field label="Approver"><AssigneePicker assigneeType={block.approver_id ? block.approver_type ?? null : null} assigneeId={block.approver_id ?? null} onUpdate={(update) => onChange((current) => ({ ...current, approver_type: update.assignee_type === "agent" || update.assignee_type === "member" ? update.assignee_type : undefined, approver_id: update.assignee_id ?? undefined }))} align="start" /></Field>
+        <Field label="Approver">
+          <AssigneePicker
+            assigneeType={block.approver_id ? block.approver_type ?? null : null}
+            assigneeId={block.approver_id ?? null}
+            onUpdate={(update) => onChange((current) => ({ ...current, approver_type: update.assignee_type === "agent" || update.assignee_type === "member" ? update.assignee_type : undefined, approver_id: update.assignee_id ?? undefined }))}
+            align="start"
+            triggerRender={<button type="button" className={PICKER_TRIGGER_CLASS} />}
+          />
+        </Field>
         <Field label="Approval request"><Textarea rows={3} value={block.prompt ?? ""} onChange={(event) => onChange((current) => ({ ...current, prompt: event.target.value }))} placeholder="What should the approver confirm?" /></Field>
       </>
     );
   }
   if (block.type === "eval") {
-    return (
-      <>
-        <Field label="Quality gate"><Input value={block.eval_key ?? ""} onChange={(event) => onChange((current) => ({ ...current, eval_key: event.target.value }))} placeholder="delivery-quality" /><p className="text-xs text-muted-foreground">The server scores the result — nobody can claim a pass.</p></Field>
-        <Field label="Eval phase"><NativeSelect value={block.eval_phase ?? "delivery"} onChange={(event) => onChange((current) => ({ ...current, eval_phase: event.target.value as "plan" | "delivery" | "monitor" }))}><option value="plan">Plan</option><option value="delivery">Delivery</option><option value="monitor">Monitor</option></NativeSelect></Field>
-      </>
-    );
+    return <EvalBlockFields block={block} onChange={onChange} />;
   }
   return null;
 }
 
-function AllowMoreSteps({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
+// Reads the workflow's own gate bindings so the quality-gate field can only
+// offer keys the engine will actually resolve. Kept as a thin wrapper around
+// the pure EvalGateFields below, which is what the tests render.
+function EvalBlockFields({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
+  const wsId = useWorkspaceId();
+  const scope = useContext(EditorScopeContext);
+  const { data: bindings = [] } = useQuery(workflowEvalBindingsOptions(wsId, scope.workflowId ?? ""));
+  return <EvalGateFields block={block} onChange={onChange} bindings={bindings} gatesHref={scope.gatesHref} />;
+}
+
+// A gate is identified by key AND phase: the same eval can be bound to this
+// workflow at more than one phase, and the engine resolves on the pair
+// (block_runner.go matches e.eval_key AND b.phase). The picker therefore
+// carries both in one option value.
+export function gateOptionValue(evalKey: string, phase: string) {
+  return [evalKey, phase].join("::");
+}
+
+// Applies a picked gate to the block. Both fields move together, so the phase
+// can never end up contradicting the binding the key came from.
+export function applyGateSelection(block: LoopChainBlock, optionValue: string): LoopChainBlock {
+  const [evalKey = "", phase = "delivery"] = optionValue.split("::");
+  if (!evalKey) return block;
+  return { ...block, eval_key: evalKey, eval_phase: phase as EvalPhase };
+}
+
+/**
+ * The Eval step's fields. A quality gate is picked from the gates already bound
+ * to this workflow, never typed free-hand: an unbound key used to save fine and
+ * only blow up mid-run as `resolve eval block "…": no rows in result set`.
+ * The phase is not an independent choice either — it comes from the binding.
+ */
+export function EvalGateFields({
+  block,
+  bindings,
+  gatesHref,
+  onChange,
+}: {
+  block: LoopChainBlock;
+  bindings: WorkflowEvalBinding[];
+  gatesHref: string;
+  onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void;
+}) {
+  const selectedKey = block.eval_key ?? "";
+  const selectedPhase = (block.eval_phase ?? "delivery") as EvalPhase;
+  const selectedValue = selectedKey ? gateOptionValue(selectedKey, selectedPhase) : "";
+  const stillBound = bindings.some(
+    (binding) => binding.eval_key === selectedKey && binding.phase === selectedPhase,
+  );
+
+  if (bindings.length === 0) {
+    return (
+      <Field label="Quality gate">
+        <div className={cn("border border-warning/40 bg-warning/10 p-3 text-xs", PANEL_RADIUS)}>
+          <p className="font-medium text-foreground">No quality gate is bound to this workflow yet.</p>
+          <p className="mt-1 text-muted-foreground">
+            An Eval step can only run a gate that is bound to this workflow. Bind one first, then pick it here.
+          </p>
+          <AppLink href={gatesHref} className="mt-2 inline-block font-medium underline underline-offset-2">
+            Open Workflow gates
+          </AppLink>
+        </div>
+      </Field>
+    );
+  }
+
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
-      <div>
-        <p className="text-xs font-medium">Allow follow-up steps</p>
-        <p className="text-[11px] text-muted-foreground">The agent may open another step of this same block.</p>
-      </div>
-      <div className="flex items-center gap-2">
-        <Switch checked={block.steps?.allowed === true} onCheckedChange={(checked) => onChange((current) => ({ ...current, steps: { allowed: checked === true, max: checked ? current.steps?.max ?? 2 : undefined } }))} />
-        {block.steps?.allowed && <Input aria-label="Maximum block steps" type="number" min={1} className="h-8 w-16" value={block.steps.max ?? 2} onChange={(event) => onChange((current) => ({ ...current, steps: { allowed: true, max: positive(event.target.value) } }))} />}
-      </div>
-    </div>
+    <>
+      <Field label="Quality gate">
+        <Select
+          value={selectedValue}
+          onValueChange={(value) => {
+            if (typeof value !== "string" || !value) return;
+            onChange((current) => applyGateSelection(current, value));
+          }}
+        >
+          <SelectTrigger aria-label="Quality gate" className={cn("w-full", CONTROL_HEIGHT, CONTROL_RADIUS)}>
+            <SelectValue placeholder="Select a bound gate…" />
+          </SelectTrigger>
+          <SelectContent>
+            {selectedKey && !stillBound && (
+              <SelectItem value={selectedValue}>
+                {selectedKey} — no longer bound to this workflow
+              </SelectItem>
+            )}
+            {bindings.map((binding) => (
+              <SelectItem key={binding.id} value={gateOptionValue(binding.eval_key, binding.phase)}>
+                {binding.eval_title} · {binding.eval_key} · {EVAL_PHASE_LABEL[binding.phase as EvalPhase] ?? binding.phase}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">The server scores the result — nobody can claim a pass.</p>
+      </Field>
+      <Field label="Eval phase">
+        <p className="text-sm">{EVAL_PHASE_LABEL[selectedPhase] ?? selectedPhase}</p>
+        <p className="text-xs text-muted-foreground">
+          {EVAL_PHASE_HELP[selectedPhase] ?? EVAL_PHASE_HELP.delivery} It follows the gate you picked and is set under{" "}
+          <AppLink href={gatesHref} className="underline underline-offset-2">Workflow gates</AppLink>.
+        </p>
+      </Field>
+    </>
   );
 }
 
-function AdvancedDisclosure({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
-  const [open, setOpen] = useState(false);
+function AllowMoreSteps({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
   return (
-    <div className="flex flex-col gap-3">
-      <button type="button" onClick={() => setOpen((value) => !value)} className="flex items-center gap-2 self-start text-xs text-muted-foreground hover:text-foreground">
-        Advanced — block ID, engine keys <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
-      </button>
-      {open && (
-        <Field label="Stable block ID">
-          <Input value={block.id} onChange={(event) => onChange((current) => ({ ...current, id: event.target.value }))} />
-        </Field>
-      )}
+    <div className={cn("flex items-center justify-between gap-3 border bg-muted/20 p-3", PANEL_RADIUS)}>
+      <div>
+        <p className="text-xs font-medium">Allow follow-up steps</p>
+        <p className="text-xs text-muted-foreground">The agent may open another step of this same block.</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Switch checked={block.steps?.allowed === true} onCheckedChange={(checked) => onChange((current) => ({ ...current, steps: { allowed: checked === true, max: checked ? current.steps?.max ?? 2 : undefined } }))} />
+        {block.steps?.allowed && <Input aria-label="Maximum block steps" type="number" min={1} className={cn("w-16", CONTROL_HEIGHT, CONTROL_RADIUS, INPUT_TEXT_SM)} value={block.steps.max ?? 2} onChange={(event) => onChange((current) => ({ ...current, steps: { allowed: true, max: positive(event.target.value) } }))} />}
+      </div>
     </div>
   );
 }
@@ -673,28 +999,43 @@ function AdvancedDisclosure({ block, onChange }: { block: LoopChainBlock; onChan
 function AgentCandidates({ block, onChange }: { block: LoopChainBlock; onChange: (updater: (block: LoopChainBlock) => LoopChainBlock) => void }) {
   const agents = block.agents ?? [];
   return (
-    <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+    <div className={cn("flex flex-col gap-2 border bg-muted/20 p-3", PANEL_RADIUS)}>
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-xs font-medium">Who runs it?</p>
-          <p className="text-[11px] text-muted-foreground">The first available agent runs this step.</p>
+          <p className="text-xs text-muted-foreground">The first available agent runs this step.</p>
         </div>
         <Button type="button" size="sm" variant="outline" onClick={() => onChange((current) => ({ ...current, agents: [...(current.agents ?? []), { agent_id: "" }] }))}><Plus className="size-3.5" /> Add agent</Button>
       </div>
-      {agents.length === 0 && <p className="text-[11px] text-muted-foreground">No agent pinned — use the issue assignee.</p>}
+      {agents.length === 0 && <p className="text-xs text-muted-foreground">No agent pinned — use the issue assignee.</p>}
       {agents.map((agent, index) => (
         <div key={`${index}-${agent.agent_id}`} className="flex items-center gap-2">
-          <span className="w-4 text-[10px] text-muted-foreground">{index + 1}</span>
+          <span className="w-4 text-xs text-muted-foreground">{index + 1}</span>
           <div className="min-w-0 flex-1">
-            <AgentPicker agentId={agent.agent_id || null} onChange={(agentId) => onChange((current) => ({ ...current, agents: (current.agents ?? []).map((item, itemIndex) => (itemIndex === index ? { ...item, agent_id: agentId } : item)) }))} />
+            <AgentPicker
+              agentId={agent.agent_id || null}
+              onChange={(agentId) => onChange((current) => ({ ...current, agents: (current.agents ?? []).map((item, itemIndex) => (itemIndex === index ? { ...item, agent_id: agentId } : item)) }))}
+              triggerRender={<button type="button" className={PICKER_TRIGGER_CLASS} />}
+            />
           </div>
           <Button type="button" variant="ghost" size="icon" aria-label="Remove agent" onClick={() => onChange((current) => ({ ...current, agents: (current.agents ?? []).filter((_, itemIndex) => itemIndex !== index) }))}><Trash2 className="size-4" /></Button>
         </div>
       ))}
       <Field label="When every agent is busy">
-        <NativeSelect value={block.on_all_busy ?? "wait"} onChange={(event) => onChange((current) => ({ ...current, on_all_busy: event.target.value as LoopBusyPolicy }))}>
-          {BUSY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </NativeSelect>
+        <Select
+          value={block.on_all_busy ?? "wait"}
+          onValueChange={(value) => {
+            if (typeof value !== "string" || !value) return;
+            onChange((current) => ({ ...current, on_all_busy: value as LoopBusyPolicy }));
+          }}
+        >
+          <SelectTrigger aria-label="When every agent is busy" className={cn("w-full", CONTROL_HEIGHT, CONTROL_RADIUS)}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {BUSY_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </Field>
     </div>
   );
@@ -702,10 +1043,76 @@ function AgentCandidates({ block, onChange }: { block: LoopChainBlock; onChange:
 
 function positive(value: string) { return Math.max(1, Number.parseInt(value, 10) || 1); }
 
-function NumberField({ label, value, min = 1, onChange }: { label: string; value: number; min?: number; onChange: (value: number) => void }) {
-  return <Field label={label}><Input type="number" min={min} value={value} onChange={(event) => onChange(min === 0 ? Math.max(0, Number.parseInt(event.target.value, 10) || 0) : positive(event.target.value))} /></Field>;
+function NumberField({ label, hint, value, min = 1, onChange }: { label: string; hint?: string; value: number; min?: number; onChange: (value: number) => void }) {
+  return (
+    <Field label={label} hint={hint}>
+      <Input
+        type="number"
+        min={min}
+        value={value}
+        className={cn(CONTROL_HEIGHT, CONTROL_RADIUS, INPUT_TEXT_SM)}
+        onChange={(event) => onChange(min === 0 ? Math.max(0, Number.parseInt(event.target.value, 10) || 0) : positive(event.target.value))}
+      />
+    </Field>
+  );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div className="flex flex-col gap-1.5"><Label className="text-xs">{label}</Label>{children}</div>;
+// "Leave it alone" needs a value of its own: an empty string is not a
+// selectable option value, so the sentinel carries it and is translated back
+// to undefined on the way into the spec.
+const STATUS_UNCHANGED = "__unchanged__";
+
+/**
+ * The one control that decides an issue status anywhere in this editor. Every
+ * status the chain can set is picked from the board's own statuses — typing
+ * one by hand used to be possible and produced a status the board does not
+ * have, which the run then parked the issue in.
+ */
+export function IssueStatusSelect({
+  value,
+  onChange,
+  ariaLabel,
+  clearable = true,
+  placeholder = "Leave unchanged",
+  className,
+}: {
+  value: string | undefined;
+  onChange: (status: string | undefined) => void;
+  ariaLabel: string;
+  clearable?: boolean;
+  placeholder?: string;
+  className?: string;
+}) {
+  const current = value || (clearable ? STATUS_UNCHANGED : "");
+  const known = ISSUE_STATUS_OPTIONS.some((option) => option.value === value);
+  return (
+    <Select value={current} onValueChange={(next: string | null | undefined) => onChange(!next || next === STATUS_UNCHANGED ? undefined : next)}>
+      <SelectTrigger aria-label={ariaLabel} className={cn(CONTROL_HEIGHT, CONTROL_RADIUS, "w-full text-sm", className)}>
+        {/* The trigger shows the board's own wording ("In progress"), not the
+            stored key — Base UI renders the raw value unless it is mapped. */}
+        <SelectValue placeholder={placeholder}>
+          {(selected: string) => (!selected || selected === STATUS_UNCHANGED ? placeholder : issueStatusLabel(selected))}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {clearable && <SelectItem value={STATUS_UNCHANGED}>{placeholder}</SelectItem>}
+        {/* A status saved by an older recipe stays selectable instead of being
+            silently rewritten the first time the recipe is opened. */}
+        {value && !known && <SelectItem value={value}>{issueStatusLabel(value)}</SelectItem>}
+        {ISSUE_STATUS_OPTIONS.map((option) => (
+          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label className="text-xs">{label}</Label>
+      {children}
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
 }

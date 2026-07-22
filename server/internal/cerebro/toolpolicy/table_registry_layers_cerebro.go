@@ -3,13 +3,9 @@ package toolpolicy
 // CEREBRO-FEATURE(FIR-2269): author firtal_registry per-data-source rules at
 // every actor layer, not only the per-agent layer.
 //
-// table_registry.go projects the legacy per-agent grant (agent_tool_grant) onto
-// the agent layer — that path is unchanged and still serves the agent's Tools
-// tab. This file adds the missing surface: at the workspace, runtime, group,
-// user, and system scopes there is no per-agent grant, so the picker must read
-// the AUTHORED chain rows (cerebro_tool_policy, resource_pattern = data source
-// id) — exactly the rows the gate enforces in chainGateDataSource — and render
-// one authorable row per data source. It mirrors appendRepoRows/loadRepoPolicy
+// Every actor scope reads authored chain rows (cerebro_tool_policy,
+// resource_pattern = data source id), exactly as chainGateDataSource enforces,
+// and renders one authorable row per data source. It mirrors appendRepoRows/loadRepoPolicy
 // Settings: a catalog (injected, because the FDR proxy lives in package handler)
 // crossed with the authored per-layer settings, resolved against Base.
 
@@ -83,9 +79,8 @@ func (s *Store) loadRegistryResourceSettings(ctx context.Context, in TableQuery,
 // AppendRegistryDataSourceRows folds the workspace's data-source catalog into the
 // table as one authorable firtal_registry per-source row each, populated with the
 // authored chain settings for the query's scope and resolved against Base. It is
-// the non-agent-scope counterpart to AppendRegistryProjection: used at the
-// workspace, runtime, group, user, and system views, where there is no per-agent
-// grant to project. dataSources is the catalog supplied by the handler (the FDR
+// used at workspace, runtime, agent, group, user, and system views. dataSources
+// is the catalog supplied by the handler (the FDR
 // proxy is owned there, so toolpolicy.Table stays free of the registry API). A
 // data source whose row was already authored on the table is left as-is.
 func (s *Store) AppendRegistryDataSourceRows(ctx context.Context, in TableQuery, dataSources []RegistryDataSource, out []TableRow) ([]TableRow, error) {
@@ -151,9 +146,8 @@ func (s *Store) AppendRegistryDataSourceRows(ctx context.Context, in TableQuery,
 }
 
 // AppendAuthoredRegistryDataSourceRows appends only already-authored
-// firtal_registry per-data-source rows. Agent-scoped views use this before the
-// legacy agent_tool_grant projection, so a newly authored Permissions row wins
-// while un-authored sources still fall back to the legacy allowlist projection.
+// firtal_registry per-data-source rows. It is retained for callers that need a
+// sparse catalog projection rather than the full authoring table.
 func (s *Store) AppendAuthoredRegistryDataSourceRows(ctx context.Context, in TableQuery, dataSources []RegistryDataSource, out []TableRow) ([]TableRow, error) {
 	if len(dataSources) == 0 {
 		return out, nil

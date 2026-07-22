@@ -159,4 +159,117 @@ describe("permission audit model", () => {
       },
     ]);
   });
+
+  it("orders actual access risk, proof gaps, and governance findings first", () => {
+    const severityMembers = [
+      {
+        id: "allow-user",
+        name: "Allow User",
+        email: "allow@example.com",
+        role: "member",
+      },
+      {
+        id: "deny-user",
+        name: "Deny User",
+        email: "deny@example.com",
+        role: "member",
+      },
+      {
+        id: "ask-user",
+        name: "Ask User",
+        email: "ask@example.com",
+        role: "member",
+      },
+      {
+        id: "proof-gap-user",
+        name: "Proof Gap User",
+        email: "proof-gap@example.com",
+        role: "member",
+      },
+      {
+        id: "unverified-user",
+        name: "Unverified User",
+        email: "unverified@example.com",
+        role: "member",
+      },
+      {
+        id: "governance-user",
+        name: "Governance User",
+        email: "governance@example.com",
+        role: "member",
+      },
+    ];
+    const severityContexts = severityMembers.map((member) => ({
+      id: `${member.id}::`,
+      userId: member.id,
+      label: "User only",
+    }));
+
+    const rows = buildPermissionAuditRows({
+      members: severityMembers,
+      agents: [],
+      runtimes: [],
+      groups: [],
+      holders: [],
+      contexts: severityContexts,
+      resolvedByContext: new Map([
+        [
+          "allow-user::",
+          {
+            setting: "allow",
+            decidedBy: "workspace",
+            cappedBy: "",
+            policySetting: "allow",
+            availabilityLevel: "verified",
+          },
+        ],
+        [
+          "deny-user::",
+          { setting: "deny", decidedBy: "workspace", cappedBy: "" },
+        ],
+        [
+          "ask-user::",
+          { setting: "ask", decidedBy: "workspace", cappedBy: "" },
+        ],
+        [
+          "proof-gap-user::",
+          {
+            setting: "deny",
+            decidedBy: "availability",
+            cappedBy: "",
+            policySetting: "allow",
+            availabilityLevel: "declared",
+          },
+        ],
+        [
+          "unverified-user::",
+          {
+            setting: "allow",
+            decidedBy: "workspace",
+            cappedBy: "",
+            policySetting: "allow",
+            availabilityLevel: "discovered",
+          },
+        ],
+        [
+          "governance-user::",
+          {
+            setting: "deny",
+            decidedBy: "workspace",
+            cappedBy: "",
+            governanceSeverity: "critical",
+          },
+        ],
+      ]),
+    });
+
+    expect(rows.map((row) => [row.user.id, row.severity])).toEqual([
+      ["governance-user", "critical"],
+      ["proof-gap-user", "critical"],
+      ["unverified-user", "critical"],
+      ["allow-user", "high"],
+      ["ask-user", "medium"],
+      ["deny-user", "low"],
+    ]);
+  });
 });

@@ -62,7 +62,11 @@ export function AppEditorPage({ appId }: { appId: string }) {
     </div>}
     {publishing && <AppPublishDialog defaultVersion={nextPatchVersion(sourceVersion)} saving={saving} onCancel={() => setPublishing(false)} onPublish={async (version, releaseNotes) => {
       setSaving(true); setError("");
-      try { await publishAppVersion(appId, { version, release_notes: releaseNotes, files }, workspace.slug); setSourceVersion(version); setPublishing(false); }
+      try {
+        const publishFiles = syncManifestVersion(files, version);
+        await publishAppVersion(appId, { version, release_notes: releaseNotes, files: publishFiles }, workspace.slug);
+        setFiles(publishFiles); setSourceVersion(version); setPublishing(false);
+      }
       catch (cause) { setError(cause instanceof Error ? cause.message : "Could not publish app"); }
       finally { setSaving(false); }
     }} />}
@@ -74,6 +78,22 @@ function nextPatchVersion(version?: string): string {
   const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
   if (!match) return "0.1.0";
   return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`;
+}
+
+// Keep app.json's manifest.version in lockstep with the version being published.
+// The backend rejects a publish whose manifest.version differs from the version
+// field ("app.json manifest identity does not match app version"), so the chosen
+// publish version is authoritative and the manifest follows it automatically.
+function syncManifestVersion(files: AppSourceFile[], version: string): AppSourceFile[] {
+  return files.map((file) => {
+    if (file.path !== "app.json") return file;
+    try {
+      const parsed = JSON.parse(file.content) as { manifest?: Record<string, unknown> };
+      if (!parsed.manifest) return file;
+      parsed.manifest.version = version;
+      return { ...file, content: JSON.stringify(parsed, null, 2) };
+    } catch { return file; }
+  });
 }
 
 function validatePackage(files: AppSourceFile[]): string {

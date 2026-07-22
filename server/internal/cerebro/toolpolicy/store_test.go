@@ -15,6 +15,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 )
 
 const (
@@ -126,6 +128,109 @@ func clearAll(t *testing.T, s *Store) {
 	if _, err := s.pool.Exec(context.Background(),
 		`DELETE FROM cerebro_tool_policy WHERE workspace_id = $1`, tpTestWorkspaceID); err != nil {
 		t.Fatalf("clear policy rows: %v", err)
+	}
+}
+
+// TestStoreFromQueries_ResolvesActiveRoleAssignments pins the public Resolve
+// seam used by handlers and runtimes that already own generated queries. Role
+// bindings must not disappear merely because the caller chose this constructor.
+func TestStoreFromQueries_ResolvesActiveRoleAssignments(t *testing.T) {
+	if tpTestPool == nil {
+		t.Skip("DATABASE_URL not configured; skipping toolpolicy integration test")
+	}
+	ctx := context.Background()
+	agent := uuidByte(42)
+	const tool = "role.protected_tool"
+
+	var roleID pgtype.UUID
+	if err := tpTestPool.QueryRow(ctx, `
+		INSERT INTO cerebro_role (workspace_id, name, description, created_by, permissions)
+		VALUES ($1, 'StoreFromQueries role', 'constructor parity fixture', $2,
+		        jsonb_build_object($3::text, jsonb_build_object('setting', 'deny')))
+		RETURNING id
+	`, tpTestWorkspaceID, tpTestUserID, tool).Scan(&roleID); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	defer func() {
+		_, _ = tpTestPool.Exec(context.Background(), `DELETE FROM cerebro_role WHERE id=$1`, roleID)
+	}()
+	if _, err := tpTestPool.Exec(ctx, `
+		INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, added_by)
+		VALUES ($1, 'agent', $2, $3)
+	`, roleID, agent, tpTestUserID); err != nil {
+		t.Fatalf("assign role: %v", err)
+	}
+
+	store := NewStoreFromQueries(cerebrodb.New(tpTestPool))
+	effective, err := store.Resolve(ctx, Query{
+		WorkspaceID: tpTestWorkspaceID,
+		ToolKey:     tool,
+		AgentID:     agent,
+		UserID:      tpTestUserID,
+	})
+	if err != nil {
+		t.Fatalf("resolve role-bound tool: %v", err)
+	}
+	if effective.Setting != SettingDeny {
+		t.Fatalf("setting = %q, want %q from active role binding", effective.Setting, SettingDeny)
+	}
+}
+
+// TestStoreFromQueries_RoleAllowCannotOverrideExplicitAgentDeny pins the
+// FIR-3403 security floor: a role grant folds into the agent layer TIGHTEN-only,
+// so a role `allow` can never cancel an administrator's explicit agent-layer
+// `deny`. Before the fix the fold was most-permissive and the tool resolved to
+// allow — a role silently reopened a denied tool.
+func TestStoreFromQueries_RoleAllowCannotOverrideExplicitAgentDeny(t *testing.T) {
+	if tpTestPool == nil {
+		t.Skip("DATABASE_URL not configured; skipping toolpolicy integration test")
+	}
+	ctx := context.Background()
+	agent := uuidByte(43)
+	const tool = "role.floor_tool"
+
+	store := NewStore(tpTestPool)
+	clearAll(t, store)
+
+	// Administrator explicitly denies the tool for this agent.
+	if _, err := store.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool, Layer: LayerAgent,
+		SubjectID: agent, Setting: SettingDeny, UpdatedBy: tpTestUserID,
+	}); err != nil {
+		t.Fatalf("set explicit agent deny: %v", err)
+	}
+
+	// A role the agent holds grants the same tool `allow`.
+	var roleID pgtype.UUID
+	if err := tpTestPool.QueryRow(ctx, `
+		INSERT INTO cerebro_role (workspace_id, name, description, created_by, permissions)
+		VALUES ($1, 'Floor role', 'FIR-3403 tighten-only fixture', $2,
+		        jsonb_build_object($3::text, jsonb_build_object('setting', 'allow')))
+		RETURNING id
+	`, tpTestWorkspaceID, tpTestUserID, tool).Scan(&roleID); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	defer func() {
+		_, _ = tpTestPool.Exec(context.Background(), `DELETE FROM cerebro_role WHERE id=$1`, roleID)
+	}()
+	if _, err := tpTestPool.Exec(ctx, `
+		INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, added_by)
+		VALUES ($1, 'agent', $2, $3)
+	`, roleID, agent, tpTestUserID); err != nil {
+		t.Fatalf("assign role: %v", err)
+	}
+
+	eff, err := store.Resolve(ctx, Query{
+		WorkspaceID: tpTestWorkspaceID,
+		ToolKey:     tool,
+		AgentID:     agent,
+		UserID:      tpTestUserID,
+	})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if eff.Setting != SettingDeny {
+		t.Fatalf("setting = %q, want %q — a role allow must not override an explicit agent deny", eff.Setting, SettingDeny)
 	}
 }
 

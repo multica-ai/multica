@@ -17,7 +17,6 @@ import (
 	cerebrocapabilityregistry "github.com/multica-ai/multica/server/internal/cerebro/capabilityregistry"
 	"github.com/multica-ai/multica/server/internal/cerebro/cloudtoolscan"
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
-	"github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -40,15 +39,13 @@ func callableCloudToolMeta() []cloudtoolscan.ToolMeta {
 // runtime's capability rows only refreshed on a manual "Scan now", so a tool
 // added to legacyGatewayToolMeta after the last manual scan (e.g. create_file)
 // stayed invisible in the admin matrix even though it was live and callable.
-// Mirrors the inventory backfill (SeedBuiltinCloudToolsForAllRuntimes), which
-// already runs on startup but only seeds cerebro_runtime_tool, not the register.
+// This startup scan makes the capability register self-healing after deploys.
 func seedCloudCapabilitiesForAllRuntimes(ctx context.Context, pool *pgxpool.Pool) error {
 	if pool == nil {
 		return fmt.Errorf("seed cloud capabilities: nil pool")
 	}
 	scanner := cloudtoolscan.New(
 		cerebrocapabilityregistry.New(pool),
-		runtimetools.New(pool),
 		callableCloudToolMeta(),
 	)
 

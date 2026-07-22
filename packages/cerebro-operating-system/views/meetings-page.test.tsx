@@ -70,4 +70,9 @@ describe("MeetingsPage", () => {
     expect(screen.getByText("Canonical Note note-current")).toBeInTheDocument();
     expect(screen.queryByText("Recurring note type")).not.toBeInTheDocument();
   });
+
+  it("shows the cycle timeline overview in the default view", () => {
+    render(<MeetingsPage renderCurrentNote={(noteId) => <div>Canonical Note {noteId}</div>} />);
+    expect(screen.getByRole("region", { name: "Cycles timeline" })).toBeInTheDocument();
+  });
 });

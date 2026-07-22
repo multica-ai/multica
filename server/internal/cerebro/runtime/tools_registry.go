@@ -2,16 +2,13 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
 	"sync"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -32,9 +29,7 @@ type Tool interface {
 	Call(ctx context.Context, args map[string]any) (string, error)
 }
 
-// Registry holds all registered Tool implementations and provides a
-// DB-backed lookup of which tools are enabled for a given agent via the
-// agent_tool_grant table.
+// Registry holds all registered Tool implementations.
 type Registry struct {
 	mu    sync.RWMutex
 	tools map[string]Tool
@@ -72,125 +67,6 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	defer r.mu.RUnlock()
 	t, ok := r.tools[name]
 	return t, ok
-}
-
-// GetEnabledToolsForAgent queries agent_tool_grant for the given agent and
-// returns the subset of registered tools that are both enabled in the DB and
-// present in the in-memory registry. On DB error it falls back to an empty
-// list (fail-safe: don't give unexpected tools on error).
-func (r *Registry) GetEnabledToolsForAgent(ctx context.Context, agentID pgtype.UUID) []Tool {
-	if !agentID.Valid || r.db == nil {
-		return nil
-	}
-
-	rows, err := r.db.Query(ctx,
-		`SELECT tool_name FROM agent_tool_grant WHERE agent_id = $1 AND enabled = true`,
-		agentID,
-	)
-	if err != nil {
-		slog.Warn("tool registry: agent_tool_grant query failed",
-			"agent_id", util.UUIDToString(agentID),
-			"error", err,
-		)
-		return nil
-	}
-	defer rows.Close()
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var out []Tool
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			continue
-		}
-		if t, ok := r.tools[name]; ok {
-			out = append(out, t)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		slog.Warn("tool registry: scan error",
-			"agent_id", util.UUIDToString(agentID),
-			"error", err,
-		)
-	}
-	return out
-}
-
-// GetCascadeEnabledToolsForAgent resolves the tool list for an agent using
-// the cerebro_runtime_tool cascade (JEH-1710 bid 5):
-//
-//	tool is callable iff
-//	  runtime_tool.enabled = true
-//	  AND (user has a direct user_grant
-//	       OR user is in a group with a group_grant
-//	       OR the user is workspace owner/admin)
-//	  AND (no override OR override.enabled = true)
-//
-// If the agent's runtime has no cerebro_runtime_tool rows (the new grant
-// system has not been configured for this runtime yet), this falls back to
-// the legacy agent_tool_grant path so existing agents keep working until the
-// bid-6 migration backfills the new tables.
-//
-// userID may be invalid (e.g. autopilot runs without an originating user).
-// In that case the cascade cannot match the workspace-admin/user-grant arms
-// of the rule, so we fall back to the legacy path rather than fail closed —
-// otherwise scheduled autopilots would lose every tool overnight when bid 6
-// rolls out. Once issue-driven autopilots all carry an original_user_id this
-// can be tightened to fail closed.
-func (r *Registry) GetCascadeEnabledToolsForAgent(ctx context.Context, cerebro *cerebrodb.Queries, agentID, userID pgtype.UUID) []Tool {
-	if cerebro == nil || !agentID.Valid {
-		return r.GetEnabledToolsForAgent(ctx, agentID)
-	}
-
-	configured, err := cerebro.HasCerebroRuntimeToolsForAgent(ctx, agentID)
-	if err != nil {
-		slog.Warn("tool registry: cascade configured-check failed",
-			"agent_id", util.UUIDToString(agentID),
-			"error", err,
-		)
-		return nil
-	}
-	if !configured {
-		return r.GetEnabledToolsForAgent(ctx, agentID)
-	}
-
-	if !userID.Valid {
-		slog.Info("tool registry: cascade skipped — no originating user, falling back to legacy grants",
-			"agent_id", util.UUIDToString(agentID),
-		)
-		return r.GetEnabledToolsForAgent(ctx, agentID)
-	}
-
-	rows, err := cerebro.ResolveCerebroAgentToolAccess(ctx, cerebrodb.ResolveCerebroAgentToolAccessParams{
-		ID:     agentID,
-		UserID: userID,
-	})
-	if err != nil {
-		slog.Warn("tool registry: cascade resolution failed",
-			"agent_id", util.UUIDToString(agentID),
-			"user_id", util.UUIDToString(userID),
-			"error", err,
-		)
-		return nil
-	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make([]Tool, 0, len(rows))
-	seen := make(map[string]struct{}, len(rows))
-	for _, row := range rows {
-		if _, dup := seen[row.ToolName]; dup {
-			// Same tool surfaced via multiple grant arms — only register once.
-			continue
-		}
-		seen[row.ToolName] = struct{}{}
-		if t, ok := r.tools[row.ToolName]; ok {
-			out = append(out, t)
-		}
-	}
-	return out
 }
 
 // GetToolPolicyEnabledToolsForAgent builds an agent's tool list from the
@@ -336,29 +212,6 @@ func normalizeAnthropicSchemaNode(node any) any {
 	}
 }
 
-// GetGrantConfig returns the config_json bytes stored on this agent's
-// agent_tool_grant row for the named tool, or (nil, nil) when no row exists,
-// the grant is disabled, the registry has no pool (test contexts), or the
-// agentID is invalid. The bytes are the raw stored JSON — the caller decides
-// how to parse them. Returns (nil, err) only on a real DB failure.
-func (r *Registry) GetGrantConfig(ctx context.Context, agentID pgtype.UUID, toolName string) ([]byte, error) {
-	if r == nil || r.db == nil || !agentID.Valid {
-		return nil, nil
-	}
-	var config []byte
-	err := r.db.QueryRow(ctx,
-		`SELECT config_json FROM agent_tool_grant WHERE agent_id = $1 AND tool_name = $2 AND enabled = true`,
-		agentID, toolName,
-	).Scan(&config)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return config, nil
-}
-
 // AllToolSchemas returns a name → InputSchema map for all currently registered
 // tools. Schemas are static (do not depend on ToolContext or DB queries) so
 // this can be called on a throwaway registry created with nil queries.
@@ -372,20 +225,6 @@ func (r *Registry) AllToolSchemas() map[string]map[string]any {
 		out[name] = t.InputSchema()
 	}
 	return out
-}
-
-// GrantAgentTool upserts an agent_tool_grant row. Pass nil configJSON for no
-// configuration. If the grant already exists the enabled flag and config are
-// updated.
-func GrantAgentTool(ctx context.Context, pool *pgxpool.Pool, agentID pgtype.UUID, toolName string, configJSON []byte) error {
-	_, err := pool.Exec(ctx,
-		`INSERT INTO agent_tool_grant (agent_id, tool_name, config_json, enabled)
-         VALUES ($1, $2, $3, true)
-         ON CONFLICT (agent_id, tool_name)
-         DO UPDATE SET config_json = EXCLUDED.config_json, enabled = true`,
-		agentID, toolName, configJSON,
-	)
-	return err
 }
 
 // ToolMeta holds display metadata for a registered tool. Used by the admin API
@@ -558,6 +397,17 @@ func MulticaMCPToolMatrix() []ToolMeta {
 	return out
 }
 
+// GatewayNativeToolNames returns the stable names of tools implemented by the
+// gateway itself rather than by the Multica MCP bridge. Capability identity
+// consumers use this read-only inventory instead of duplicating the list.
+func GatewayNativeToolNames() []string {
+	out := make([]string, len(legacyGatewayToolMeta))
+	for i, tool := range legacyGatewayToolMeta {
+		out[i] = tool.Name
+	}
+	return out
+}
+
 // AllBuiltinToolMeta returns display metadata for every tool the admin UI
 // should show, including explicit exclusions and non-Multica legacy gateway
 // tools that predate the MCP inventory.
@@ -579,18 +429,4 @@ func callableBuiltinToolNames() []string {
 		}
 	}
 	return names
-}
-
-// SeedKristianTools grants only concrete callable tools to Kristian's agent. It
-// is idempotent — safe to call on every server start.
-func SeedKristianTools(ctx context.Context, pool *pgxpool.Pool, kristianAgentID pgtype.UUID) error {
-	if !kristianAgentID.Valid {
-		return fmt.Errorf("SeedKristianTools: invalid agent UUID")
-	}
-	for _, name := range callableBuiltinToolNames() {
-		if err := GrantAgentTool(ctx, pool, kristianAgentID, name, nil); err != nil {
-			return fmt.Errorf("SeedKristianTools: grant %q: %w", name, err)
-		}
-	}
-	return nil
 }

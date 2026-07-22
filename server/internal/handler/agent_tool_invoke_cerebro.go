@@ -29,13 +29,13 @@ var ErrToolNotPermitted = errors.New("tool not permitted")
 // CEREBRO-PATCH(handler-tool-executor-iface): seam for universal tool execution.
 type ToolExecutorInvoker interface {
 	// userID: authorship (member when set, agent when zero).
-	// cascadeUserID: passed to GetCascadeEnabledToolsForAgent for permission
-	// resolution. For task tokens: task.OriginalUserID. For user tokens: caller.
+	// cascadeUserID identifies the initiating member for task-scoped adjunct
+	// tools. Core tool exposure is resolved by the canonical policy service.
 	Invoke(ctx context.Context, agentID, workspaceID, userID, cascadeUserID, taskID pgtype.UUID, toolName string, args map[string]any) (string, error)
 }
 
 // InvokeAgentTool handles POST /api/agents/{id}/tools/{name}/invoke.
-// Permissions match the gateway: cascade via GetCascadeEnabledToolsForAgent.
+// Permissions match the gateway's canonical capability policy.
 // Task tokens use task.OriginalUserID for cascade (agent authorship).
 // User tokens use the calling user for both cascade and authorship (member).
 func (h *Handler) InvokeAgentTool(w http.ResponseWriter, r *http.Request) {

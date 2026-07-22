@@ -29,6 +29,26 @@ export function blockMeta(type: LoopBlockType): BlockTypeMeta {
   return BLOCK_TYPES.find((item) => item.value === type) ?? BLOCK_TYPES[0]!;
 }
 
+// The issue statuses a chain may move an issue through, in board order. This
+// mirrors loops.IssueStatuses on the server, which rejects anything else at
+// save time — a status can no longer be typed by hand and silently park an
+// issue in a status the board does not have.
+export const ISSUE_STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "backlog", label: "Backlog" },
+  { value: "todo", label: "Todo" },
+  { value: "in_progress", label: "In progress" },
+  { value: "in_review", label: "In review" },
+  { value: "blocked", label: "Blocked" },
+  { value: "done", label: "Done" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
+// A saved status the list does not know is shown as-is rather than dropped, so
+// opening an older recipe never rewrites what it already stores.
+export function issueStatusLabel(status: string): string {
+  return ISSUE_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
+}
+
 // One-line summary shown under a collapsed step card, so the user reads the
 // chain without opening each step. Kept in plain language, never raw keys.
 export function blockSummary(block: LoopChainBlock): string {
@@ -98,6 +118,45 @@ export function reorderBlocks(
   if (from.phaseIndex === to.phaseIndex && from.blockIndex < to.blockIndex) insertIndex -= 1;
   next[to.phaseIndex]!.blocks.splice(insertIndex, 0, moved);
   return next;
+}
+
+// Pure reorder for whole phases, the phase-level twin of reorderBlocks.
+// `above` places the dragged phase just before the target, otherwise just
+// after it. Unknown ids and a self-drop are no-ops, so a stale drag hint can
+// never rewrite the chain.
+export function reorderPhases(
+  phases: LoopChainPhase[],
+  dragId: string,
+  targetId: string,
+  above: boolean,
+): LoopChainPhase[] {
+  if (dragId === targetId) return phases;
+  const from = phases.findIndex((phase) => phase.id === dragId);
+  const to = phases.findIndex((phase) => phase.id === targetId);
+  if (from < 0 || to < 0) return phases;
+
+  const next = [...phases];
+  const [moved] = next.splice(from, 1);
+  if (!moved) return phases;
+
+  let insertIndex = to + (above ? 0 : 1);
+  if (from < to) insertIndex -= 1;
+  next.splice(insertIndex, 0, moved);
+  return next;
+}
+
+// Move a phase one slot up (-1) or down (+1) — the keyboard path on the phase
+// drag handle, mirroring nudgeBlock so reordering never needs a pointer.
+export function nudgePhase(
+  phases: LoopChainPhase[],
+  phaseId: string,
+  offset: -1 | 1,
+): LoopChainPhase[] {
+  const from = phases.findIndex((phase) => phase.id === phaseId);
+  if (from < 0) return phases;
+  const target = from + offset;
+  if (target < 0 || target >= phases.length) return phases;
+  return reorderPhases(phases, phaseId, phases[target]!.id, offset < 0);
 }
 
 // Move a block one slot up (-1) or down (+1) within its phase — the keyboard

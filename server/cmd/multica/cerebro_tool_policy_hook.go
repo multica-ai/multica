@@ -9,18 +9,14 @@ package main
 // the daemon runs, the hook runs.
 //
 // Per tool call Claude Code invokes it with the tool payload on stdin. The hook:
-//   1. Short-circuits default-allow tools (Read/Grep/Glob/planning) with no IO.
-//   2. POSTs gated tools (Bash/Write/Edit/WebFetch/Task/mcp__*) to the daemon's
+//   1. Parses the provider's before-tool payload.
+//   2. POSTs every named tool to the daemon's
 //      loopback resolve IPC, which proxies the unified tool-policy chain and
 //      long-polls a pending approval.
 //   3. Exits 0 to allow or 2 to block (Claude Code's hook protocol: exit 2
 //      blocks the tool and surfaces stderr to the model).
 //
-// Fail direction on a transport error mirrors the daemon: under enforce it fails
-// closed (exit 2); under observe / off / unknown it fails open (exit 0) so a dry
-// run or a disabled feature never stalls work. Its own input errors (an
-// unparseable payload, a missing daemon port) fail open — a malformed hook
-// payload is a CLI/version mismatch, not a policy decision.
+// Transport, input and protocol errors fail closed (exit 2).
 
 import (
 	"bytes"
@@ -61,33 +57,31 @@ var cerebroToolPolicyHookCmd = &cobra.Command{
 // exits with the Claude hook code. It never returns on a deny (os.Exit(2)); on
 // allow it returns so the process exits 0.
 func runToolPolicyHook(cmd *cobra.Command) {
-	stage := os.Getenv("CEREBRO_TOOLPOLICY_STAGE")
-
 	in, err := claudehook.Parse(cmd.InOrStdin())
 	if err != nil {
-		// Unparseable payload — not a policy decision. Allow.
+		failHook("unknown", err)
 		return
 	}
 	tool := in.Name()
 	if tool == "" || !claudehook.Gated(tool) {
-		// Default-allow tool (or no tool) — no resolve round-trip.
+		failHook("unknown", fmt.Errorf("tool_name missing from hook payload"))
 		return
 	}
 
 	port := os.Getenv("MULTICA_DAEMON_PORT")
 	if port == "" {
-		// No daemon to ask — fail per stage.
-		failHook(stage, tool, fmt.Errorf("MULTICA_DAEMON_PORT not set"))
+		// No daemon to ask — fail closed.
+		failHook(tool, fmt.Errorf("MULTICA_DAEMON_PORT not set"))
 		return
 	}
 
 	body, _ := json.Marshal(map[string]any{
 		"workspace_id":     os.Getenv("MULTICA_WORKSPACE_ID"),
 		"agent_id":         os.Getenv("MULTICA_AGENT_ID"),
+		"task_id":          os.Getenv("MULTICA_TASK_ID"),
 		"tool_name":        tool,
 		"resource_pattern": claudehook.ResourcePattern(tool, in.InputArgs()),
 		"args":             in.InputArgs(),
-		"stage":            stage,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), toolPolicyHookClientTimeout)
@@ -96,19 +90,19 @@ func runToolPolicyHook(cmd *cobra.Command) {
 	url := fmt.Sprintf("http://127.0.0.1:%s/tool-policy/resolve", port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		failHook(stage, tool, err)
+		failHook(tool, err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := (&http.Client{Timeout: toolPolicyHookClientTimeout}).Do(req)
 	if err != nil {
-		failHook(stage, tool, err)
+		failHook(tool, err)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		failHook(stage, tool, fmt.Errorf("daemon returned status %d", resp.StatusCode))
+		failHook(tool, fmt.Errorf("daemon returned status %d", resp.StatusCode))
 		return
 	}
 
@@ -117,7 +111,7 @@ func runToolPolicyHook(cmd *cobra.Command) {
 		Reason  string `json:"reason"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		failHook(stage, tool, err)
+		failHook(tool, err)
 		return
 	}
 	if out.Allowed {
@@ -133,14 +127,9 @@ func runToolPolicyHook(cmd *cobra.Command) {
 
 // failHook applies the fail direction for a transport/IO error: deny under
 // enforce, allow otherwise.
-func failHook(stage, tool string, err error) {
-	if stage == "enforce" {
-		fmt.Fprintf(os.Stderr, "Blocked by Multica tool policy: %s (enforcement unreachable: %v)\n", tool, err)
-		osExit(hookExitDeny)
-		return
-	}
-	// observe / off / unknown — allow, but leave a breadcrumb on stderr.
-	fmt.Fprintf(os.Stderr, "Multica tool policy: allow (resolve unavailable under %q stage: %v)\n", stage, err)
+func failHook(tool string, err error) {
+	fmt.Fprintf(os.Stderr, "Blocked by Multica tool policy: %s (enforcement unreachable: %v)\n", tool, err)
+	osExit(hookExitDeny)
 }
 
 // osExit is a package var so tests can intercept the exit code instead of

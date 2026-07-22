@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -61,16 +62,17 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 	t.Helper()
 
 	ctx := context.Background()
+	ownerEmail := "private-agent-owner-" + uuid.NewString() + "@multica.test" // CEREBRO-PATCH(private-agent-test-isolation): avoid persistent fixture collisions.
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
-		VALUES ('Private Agent Owner', 'private-agent-owner@multica.test')
+		VALUES ('Private Agent Owner', $1)
 		RETURNING id
-	`).Scan(&ownerID); err != nil {
+	`, ownerEmail).Scan(&ownerID); err != nil {
 		t.Fatalf("create owner user: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM "user" WHERE email = 'private-agent-owner@multica.test'`)
+			`DELETE FROM "user" WHERE email = $1`, ownerEmail)
 	})
 
 	if _, err := testPool.Exec(ctx, `
@@ -80,16 +82,17 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 		t.Fatalf("add owner as member: %v", err)
 	}
 
+	memberEmail := "plain-member-" + uuid.NewString() + "@multica.test" // CEREBRO-PATCH(private-agent-test-isolation): avoid persistent fixture collisions.
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
-		VALUES ('Plain Member', 'plain-member@multica.test')
+		VALUES ('Plain Member', $1)
 		RETURNING id
-	`).Scan(&memberID); err != nil {
+	`, memberEmail).Scan(&memberID); err != nil {
 		t.Fatalf("create plain member user: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM "user" WHERE email = 'plain-member@multica.test'`)
+			`DELETE FROM "user" WHERE email = $1`, memberEmail)
 	})
 
 	if _, err := testPool.Exec(ctx, `

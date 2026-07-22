@@ -288,3 +288,173 @@ func (d *recordingStepDispatcher) DispatchBlock(_ context.Context, dispatch Bloc
 	d.steps = append(d.steps, dispatch.Step.StepRef)
 	return BlockDispatchResult{Status: StepRunning}, nil
 }
+
+// Per-step status control: the board should show "in review" while a review
+// step waits, which the chain could not express when the only statuses were
+// the phase's and the chain's final one. The statuses are applied at step
+// boundaries, so a step never has its status pulled out from under it.
+func TestChainDriver_SetsStatusAroundEachStep(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	workflowID := seedLoopWorkflow(t, issueID)
+	store := NewStore(loopTestPool)
+	driver := NewChainDriver(store, &recordingStepDispatcher{})
+	chain := &Chain{
+		Version:    ChainVersion,
+		DoneStatus: "done",
+		Phases: []Phase{{
+			ID: "delivery", Status: "todo",
+			Limits: PhaseLimits{MaxSteps: 4, MaxRounds: 1, NoProgressStalls: 1},
+			Blocks: []Block{
+				{ID: "build", Type: BlockSession, Skill: "build", StatusOnStart: "in_progress"},
+				{ID: "review", Type: BlockReview, Rubric: "Review the build", StatusOnStart: "in_review"},
+			},
+		}},
+	}
+	run := ChainRun{IssueID: issueID, WorkflowID: workflowID, IssueStatus: "backlog", AgentID: "agent"}
+
+	// The first step names its own entry status, so that one wins over the
+	// phase status — one status change at the boundary, not two competing ones.
+	decision, err := driver.Advance(ctx, chain, run)
+	if err != nil {
+		t.Fatalf("build status advance: %v", err)
+	}
+	if decision.Kind != ChainSetStatus || decision.Status != "in_progress" {
+		t.Fatalf("build status decision = %+v, want set_status in_progress", decision)
+	}
+	run.IssueStatus = decision.Status
+
+	decision, err = driver.Advance(ctx, chain, run)
+	if err != nil {
+		t.Fatalf("dispatch build: %v", err)
+	}
+	if decision.Kind != ChainWait || decision.Step.BlockID != "build" {
+		t.Fatalf("build dispatch decision = %+v", decision)
+	}
+	if err := store.RecordStepOutcome(ctx, decision.Step.StepRef, StepCompleted, nil); err != nil {
+		t.Fatalf("complete build: %v", err)
+	}
+
+	// The review step moves the issue to in_review before it is dispatched —
+	// and the phase status does not drag it back to todo.
+	decision, err = driver.Advance(ctx, chain, run)
+	if err != nil {
+		t.Fatalf("review status advance: %v", err)
+	}
+	if decision.Kind != ChainSetStatus || decision.Status != "in_review" {
+		t.Fatalf("review status decision = %+v, want set_status in_review", decision)
+	}
+	run.IssueStatus = decision.Status
+
+	decision, err = driver.Advance(ctx, chain, run)
+	if err != nil {
+		t.Fatalf("dispatch review: %v", err)
+	}
+	if decision.Kind != ChainWait || decision.Step.BlockID != "review" {
+		t.Fatalf("review dispatch decision = %+v", decision)
+	}
+	if err := store.RecordStepOutcome(ctx, decision.Step.StepRef, StepCompleted, nil); err != nil {
+		t.Fatalf("complete review: %v", err)
+	}
+
+	decision, err = driver.Advance(ctx, chain, run)
+	if err != nil {
+		t.Fatalf("finish chain: %v", err)
+	}
+	if decision.Kind != ChainDone || decision.Status != "done" {
+		t.Fatalf("final decision = %+v, want done", decision)
+	}
+}
+
+// A step's exit status has to land even when it is the last step of the last
+// phase, where there is no following step boundary to carry it.
+func TestChainDriver_AppliesLastStepExitStatus(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	workflowID := seedLoopWorkflow(t, issueID)
+	store := NewStore(loopTestPool)
+	driver := NewChainDriver(store, &recordingStepDispatcher{})
+	chain := &Chain{
+		Version:    ChainVersion,
+		DoneStatus: "done",
+		Phases: []Phase{{
+			ID:     "delivery",
+			Limits: PhaseLimits{MaxSteps: 2, MaxRounds: 1, NoProgressStalls: 1},
+			Blocks: []Block{{ID: "build", Type: BlockSession, Skill: "build", StatusOnDone: "in_review"}},
+		}},
+	}
+	run := ChainRun{IssueID: issueID, WorkflowID: workflowID, IssueStatus: "in_progress", AgentID: "agent"}
+
+	decision, err := driver.Advance(ctx, chain, run)
+	if err != nil {
+		t.Fatalf("dispatch build: %v", err)
+	}
+	if err := store.RecordStepOutcome(ctx, decision.Step.StepRef, StepCompleted, nil); err != nil {
+		t.Fatalf("complete build: %v", err)
+	}
+
+	decision, err = driver.Advance(ctx, chain, run)
+	if err != nil {
+		t.Fatalf("exit status advance: %v", err)
+	}
+	if decision.Kind != ChainSetStatus || decision.Status != "in_review" {
+		t.Fatalf("exit status decision = %+v, want set_status in_review", decision)
+	}
+	run.IssueStatus = decision.Status
+
+	decision, err = driver.Advance(ctx, chain, run)
+	if err != nil {
+		t.Fatalf("finish chain: %v", err)
+	}
+	if decision.Kind != ChainDone || decision.Status != "done" {
+		t.Fatalf("final decision = %+v, want done", decision)
+	}
+}
+
+// The phase status still carries a phase whose first step does not name its
+// own entry status — it is the phase's opening status, not a second mechanism.
+func TestChainDriver_UsesPhaseStatusWhenFirstStepNamesNone(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	workflowID := seedLoopWorkflow(t, issueID)
+	driver := NewChainDriver(NewStore(loopTestPool), &recordingStepDispatcher{})
+	chain := &Chain{
+		Version:    ChainVersion,
+		DoneStatus: "done",
+		Phases: []Phase{{
+			ID: "delivery", Status: "in_progress",
+			Limits: PhaseLimits{MaxSteps: 2, MaxRounds: 1, NoProgressStalls: 1},
+			Blocks: []Block{{ID: "build", Type: BlockSession, Skill: "build"}},
+		}},
+	}
+	run := ChainRun{IssueID: issueID, WorkflowID: workflowID, IssueStatus: "todo", AgentID: "agent"}
+
+	decision, err := driver.Advance(ctx, chain, run)
+	if err != nil {
+		t.Fatalf("phase status advance: %v", err)
+	}
+	if decision.Kind != ChainSetStatus || decision.Status != "in_progress" {
+		t.Fatalf("phase status decision = %+v, want set_status in_progress", decision)
+	}
+	run.IssueStatus = decision.Status
+
+	decision, err = driver.Advance(ctx, chain, run)
+	if err != nil {
+		t.Fatalf("dispatch build: %v", err)
+	}
+	if decision.Kind != ChainWait || decision.Step.BlockID != "build" {
+		t.Fatalf("build dispatch decision = %+v", decision)
+	}
+}

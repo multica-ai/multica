@@ -1,0 +1,1 @@
+-- Intentionally irreversible: retired silent-failure settings must not return.

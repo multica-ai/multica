@@ -62,7 +62,7 @@ func TestRegistryGate_ArgAllowScopesDataSources(t *testing.T) {
 		} else {
 			_, _ = pool.Exec(bg, `UPDATE workspace SET settings = '{}'::jsonb WHERE id = $1`, runtimeAccountTestWSID)
 		}
-		_, _ = pool.Exec(bg, `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1`, runtimeAccountTestWSID)
+		_, _ = pool.Exec(bg, `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1 AND tool_key = 'firtal_registry'`, runtimeAccountTestWSID)
 		_, _ = pool.Exec(bg, `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 
@@ -148,7 +148,7 @@ func TestRegistryGate_RuntimeLayerDenyBlocks(t *testing.T) {
 		} else {
 			_, _ = pool.Exec(bg, `UPDATE workspace SET settings = '{}'::jsonb WHERE id = $1`, runtimeAccountTestWSID)
 		}
-		_, _ = pool.Exec(bg, `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1`, runtimeAccountTestWSID)
+		_, _ = pool.Exec(bg, `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1 AND tool_key = 'firtal_registry'`, runtimeAccountTestWSID)
 		_, _ = pool.Exec(bg, `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 
@@ -294,7 +294,7 @@ func TestRegistryGate_FolderScopeAutoCovers(t *testing.T) {
 		} else {
 			_, _ = pool.Exec(bg, `UPDATE workspace SET settings = '{}'::jsonb WHERE id = $1`, runtimeAccountTestWSID)
 		}
-		_, _ = pool.Exec(bg, `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1`, runtimeAccountTestWSID)
+		_, _ = pool.Exec(bg, `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1 AND tool_key = 'firtal_registry'`, runtimeAccountTestWSID)
 		_, _ = pool.Exec(bg, `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 

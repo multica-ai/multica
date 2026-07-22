@@ -8,7 +8,9 @@
 #   3. For each file, check it against scripts/cerebro-zones.txt — keep only
 #      files inside the upstream zone (includes minus excludes).
 #   4. For each kept file, run `git diff BASE...HEAD -- <file>` and confirm
-#      at least one added line (^+, not ^+++) contains "CEREBRO-PATCH(".
+#      at least one added line (^+, not ^+++) contains "CEREBRO-PATCH(". A
+#      every deletion hunk must carry a marker on an added or removed line, so
+#      one marked change cannot hide an unrelated unmarked deletion.
 #   5. Allow opt-out via env CEREBRO_ALLOW_NO_PATCH=1, or a
 #      "CEREBRO-ALLOW-NO-PATCH:" token anywhere in commit messages on the
 #      range BASE..HEAD.
@@ -98,6 +100,30 @@ commit_range_opts_out() {
   [[ "$log" == *'CEREBRO-ALLOW-NO-PATCH:'* ]]
 }
 
+# Require each hunk that removes content to identify the Cerebro patch being
+# changed. Checking only once per file lets a marked addition hide an unrelated
+# deletion elsewhere in the same upstream file.
+deletion_hunks_are_marked() {
+  awk '
+    function finish_hunk() {
+      if (in_hunk && has_deletion && !has_marker) invalid = 1
+    }
+    /^@@/ {
+      finish_hunk()
+      in_hunk = 1
+      has_deletion = 0
+      has_marker = 0
+      next
+    }
+    in_hunk && /^-/ && !/^---/ { has_deletion = 1 }
+    in_hunk && /^[+-]/ && /CEREBRO-PATCH\(/ { has_marker = 1 }
+    END {
+      finish_hunk()
+      exit invalid
+    }
+  '
+}
+
 run_validation() {
   local base="${BASE_REF:-origin/main}"
 
@@ -117,14 +143,18 @@ run_validation() {
   fi
 
   local -a offenders=()
-  local file diff_added
+  local file diff diff_added diff_removed
   while IFS= read -r file; do
     [[ -z "$file" ]] && continue
     in_upstream_zone "$file" || continue
     # Restrict to text diffs; binary/renames-without-content show as "Binary files ... differ".
-    diff_added="$(git diff "$base...HEAD" -- "$file" 2>/dev/null \
-      | grep -E '^\+' | grep -vE '^\+\+\+' || true)"
-    if ! grep -q 'CEREBRO-PATCH(' <<<"$diff_added"; then
+    diff="$(git diff "$base...HEAD" -- "$file" 2>/dev/null)"
+    diff_added="$(grep -E '^\+' <<<"$diff" | grep -vE '^\+\+\+' || true)"
+    diff_removed="$(grep -E '^-' <<<"$diff" | grep -vE '^---' || true)"
+    if ! grep -q 'CEREBRO-PATCH(' <<<"$diff_added" &&
+       ! { [[ -z "$diff_added" ]] && grep -q 'CEREBRO-PATCH(' <<<"$diff_removed"; }; then
+      offenders+=("$file")
+    elif ! deletion_hunks_are_marked <<<"$diff"; then
       offenders+=("$file")
     fi
   done < <(git diff --name-only "$base...HEAD")
@@ -176,15 +206,52 @@ self_test() {
     else
       echo "self-test step 2 (negative): OK (correctly rejected)"
     fi
+    # Positive removal case: retiring an existing marked fork patch has no
+    # added line on which a fresh marker could be placed.
+    printf '// CEREBRO-PATCH(self-test-removal): fork-only\n' > packages/views/removable.ts
+    git add . && git commit -q -m "marked removal fixture"
+    git branch removal-base
+    rm packages/views/removable.ts
+    git add . && git commit -q -m "remove marked fork patch"
+    if BASE_REF=removal-base ZONES_FILE="$tmp/scripts/cerebro-zones.txt" \
+        bash "$SCRIPT_DIR/validate-cerebro-patches.sh"; then
+      echo "self-test step 3 (marked removal): OK"
+    else
+      echo "self-test step 3 (marked removal) FAILED." >&2
+      return 1
+    fi
+    # Negative mixed case: a marked addition must not hide a separate,
+    # unmarked deletion hunk in the same upstream file.
+    {
+      printf 'export const keep = 1;\n'
+      printf 'export const remove = 2;\n'
+      for _ in {1..12}; do printf '\n'; done
+      printf 'export const tail = 3;\n'
+    } > packages/views/mixed.ts
+    git add . && git commit -q -m "mixed deletion fixture"
+    git branch mixed-base
+    {
+      printf 'export const keep = 1;\n'
+      for _ in {1..12}; do printf '\n'; done
+      printf 'export const tail = 3; // CEREBRO-PATCH(self-test-mixed): marked addition\n'
+    } > packages/views/mixed.ts
+    git add . && git commit -q -m "mixed marked and unmarked deletion"
+    if BASE_REF=mixed-base ZONES_FILE="$tmp/scripts/cerebro-zones.txt" \
+        bash "$SCRIPT_DIR/validate-cerebro-patches.sh" 2>/dev/null; then
+      echo "self-test step 4 (mixed deletion) FAILED — script accepted an unmarked deletion hunk." >&2
+      return 1
+    else
+      echo "self-test step 4 (mixed deletion): OK (correctly rejected)"
+    fi
     # Opt-out case: CEREBRO-ALLOW-NO-PATCH: token in commit msg -> OK
     git commit --allow-empty -q -m "ship anyway
 
 CEREBRO-ALLOW-NO-PATCH: hot-fix"
     if BASE_REF=base ZONES_FILE="$tmp/scripts/cerebro-zones.txt" \
         bash "$SCRIPT_DIR/validate-cerebro-patches.sh"; then
-      echo "self-test step 3 (opt-out): OK"
+      echo "self-test step 5 (opt-out): OK"
     else
-      echo "self-test step 3 (opt-out) FAILED — script ignored opt-out token." >&2
+      echo "self-test step 5 (opt-out) FAILED — script ignored opt-out token." >&2
       return 1
     fi
     echo "self-test: all cases passed"
