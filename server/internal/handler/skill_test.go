@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -362,9 +363,10 @@ func TestFetchFromSkillsSh_ResolvesRootLevelSkillMd(t *testing.T) {
 }
 
 func TestFetchFromSkillsSh_PrefersMostSpecificDirOverCollidingRoot(t *testing.T) {
-	// Multi-skill repo with an unrelated root SKILL.md (skill "other") plus a
-	// subdir skill "wanted". URL requests "wanted". Tree-first resolution must
-	// pick the most specific matching directory (extras/wanted) instead of
+	// Multi-skill repo whose root SKILL.md name collides with the URL slug
+	// ("wanted") — the real api-gateway-skill scenario — plus a deeper subdir
+	// skill also named "wanted". Tree-first resolution must pick the most
+	// specific matching directory (extras/wanted) instead of
 	// letting the repo-root SKILL.md hijack the request — this is the
 	// api-gateway-skill root-collision that used to make the importer crawl the
 	// whole repository.
@@ -388,7 +390,10 @@ func TestFetchFromSkillsSh_PrefersMostSpecificDirOverCollidingRoot(t *testing.T)
 		case "raw.githubusercontent.com":
 			switch r.URL.Path {
 			case "/acme/multi/main/SKILL.md":
-				w.Write([]byte("---\nname: other\n---\ncontent"))
+				// Root SKILL.md name collides byte-for-byte with the URL slug —
+				// the exact api-gateway-skill scenario. The most-specific
+				// (deeper) match must still win over this root.
+				w.Write([]byte("---\nname: wanted\n---\ncontent"))
 			case "/acme/multi/main/extras/wanted/SKILL.md":
 				w.Write([]byte("---\nname: wanted\ndescription: the right one\n---\ncontent"))
 			case "/acme/multi/main/extras/wanted/ref.md":
@@ -563,6 +568,103 @@ func TestFetchFromSkillsSh_TreeEnumerationImportsManyFiles(t *testing.T) {
 		if result.files[i-1].path >= result.files[i].path {
 			t.Fatalf("files not in stable sorted order: %q then %q", result.files[i-1].path, result.files[i].path)
 		}
+	}
+}
+
+// A skill sitting at a conventional path (skills/<name>/) must still import
+// even when its frontmatter name doesn't byte-match the URL slug (e.g.
+// `name: Foo` for slug `foo`). Tree-first resolution first tries frontmatter
+// matching, then falls back to accepting the conventional path — restoring the
+// pre-tree importer's lenient semantics without re-introducing the root
+// collision.
+func TestFetchFromSkillsSh_TreeAcceptsConventionalPathDespiteNameMismatch(t *testing.T) {
+	tree := []githubTreeEntry{
+		{Path: "skills/foo/SKILL.md", Type: "blob"},
+		{Path: "skills/foo/ref.md", Type: "blob", Size: 3},
+	}
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{Tree: tree})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/skills/main/skills/foo/SKILL.md":
+				w.Write([]byte("---\nname: Foo\ndescription: display name\n---\nbody"))
+			case "/acme/skills/main/skills/foo/ref.md":
+				w.Write([]byte("ref"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/acme/skills/foo")
+	if err != nil {
+		t.Fatalf("fetchFromSkillsSh: %v", err)
+	}
+	if result.name != "Foo" {
+		t.Fatalf("name = %q, want Foo (frontmatter display name)", result.name)
+	}
+	if !equalStrings(importedFilePaths(result.files), []string{"ref.md"}) {
+		t.Fatalf("files = %v, want [ref.md]", importedFilePaths(result.files))
+	}
+}
+
+// If the overall import context is cancelled mid-download, the import must
+// abort with an error rather than silently dropping the remaining files and
+// reporting success with a half-populated bundle.
+func TestFetchFromSkillsSh_ContextCancelledMidDownloadAborts(t *testing.T) {
+	tree := []githubTreeEntry{
+		{Path: "skills/foo/SKILL.md", Type: "blob"},
+		{Path: "skills/foo/ref.md", Type: "blob", Size: 3},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{Tree: tree})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/skills/main/skills/foo/SKILL.md":
+				w.Write([]byte("---\nname: foo\n---\nbody"))
+			case "/acme/skills/main/skills/foo/ref.md":
+				// Simulate the overall deadline firing during the download
+				// phase: cancel the import context, then block until the
+				// request is torn down so fetchRawFile observes the cancel.
+				cancel()
+				<-r.Context().Done()
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := fetchFromSkillsSh(ctx, client, "https://skills.sh/acme/skills/foo")
+	if err == nil {
+		t.Fatal("expected import to abort on cancellation, not silently drop files")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %q, want a propagated context.Canceled", err.Error())
 	}
 }
 
