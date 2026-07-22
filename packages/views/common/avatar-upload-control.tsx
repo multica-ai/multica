@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import { parseAvatarEmoji } from "@multica/ui/lib/avatar-emoji";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 import { AvatarCropDialog } from "./avatar-crop-dialog";
@@ -100,8 +101,10 @@ export function AvatarUploadControl({
   const [busy, setBusy] = useState(false);
   const [previewError, setPreviewError] = useState(false);
 
-  const resolved = value ? resolvePublicFileUrl(value) : null;
+  const emoji = parseAvatarEmoji(value);
+  const resolved = value && !emoji ? resolvePublicFileUrl(value) : null;
   const hasImage = !!resolved && !previewError;
+  const hasAvatar = !!emoji || hasImage;
 
   const handlePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -151,7 +154,16 @@ export function AvatarUploadControl({
         )}
         style={{ width: size, height: size }}
       >
-        {hasImage ? (
+        {emoji ? (
+          <span
+            role="img"
+            aria-label={name}
+            className="select-none leading-none"
+            style={{ fontSize: size * 0.58 }}
+          >
+            {emoji}
+          </span>
+        ) : hasImage ? (
           <img
             src={resolved ?? undefined}
             alt={name}
@@ -173,7 +185,7 @@ export function AvatarUploadControl({
         )}
       </button>
 
-      {onClear && hasImage && !busy && !disabled && (
+      {onClear && hasAvatar && !busy && !disabled && (
         <button
           type="button"
           onClick={(e) => {
