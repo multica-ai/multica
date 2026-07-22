@@ -3,8 +3,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabHistory } from "@/hooks/use-tab-history";
-import { useActiveTitleSync } from "@/hooks/use-tab-sync";
-import { useTabStore, resolveRouteIcon } from "@/stores/tab-store";
+import { useTabStore } from "@/stores/tab-store";
 import {
   SidebarProvider,
   SidebarTrigger,
@@ -153,9 +152,10 @@ function useInternalLinkHandler() {
     const handler = (e: Event) => {
       const path = (e as CustomEvent).detail?.path;
       if (!path) return;
-      const icon = resolveRouteIcon(path);
       const store = useTabStore.getState();
-      const tabId = store.openTab(path, path, icon);
+      // Empty seed title — the tab bar derives the real title from the URL and
+      // cache; a raw path would flash before that resolves.
+      const tabId = store.openTab(path, "");
       store.setActiveTab(tabId);
     };
     window.addEventListener("multica:navigate", handler);
@@ -209,7 +209,6 @@ function DesktopInboxBridge() {
 
 export function DesktopShell() {
   useInternalLinkHandler();
-  useActiveTitleSync();
   useNativeNavigationGestures();
 
   // Reactive read of current workspace slug from the platform singleton.

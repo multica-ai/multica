@@ -3,6 +3,8 @@ title: Project Resources
 description: Attach typed pointers (Git repos, local directories, more later) to a project so agents can pick them up as scoped context.
 ---
 
+import { Callout } from "fumadocs-ui/components/callout";
+
 A **Project Resource** is a typed pointer — a Git repo URL, a path on your own machine, a Notion page tomorrow — attached to a [project](/workspaces). When an [agent](/agents) runs against an issue inside that project, the daemon automatically writes the project's resource list into the agent's working directory and into its [meta-skill](/skills) prompt.
 
 The result: the agent knows which repo to check out (or which local directory to work in), and which docs are the "primary references" for this project, without anyone copy-pasting context into the issue body.
@@ -42,6 +44,12 @@ The default resource type — checked out per task into an isolated worktree:
 
 For repos that can't reasonably be re-cloned per task — multi-gigabyte game checkouts, large monorepos, or any project where the worktree-per-task model is painful — a project can instead point at an **existing directory on a specific [daemon](/daemon-runtimes)'s machine**. The agent runs **directly inside that folder**, with no clone, no copy, and no worktree.
 
+<Callout type="warning">
+**This is an escape hatch, not a more convenient default.** `local_directory` exists for people who have no other option — the canonical case is a game project whose checkout is tens of gigabytes, where re-cloning per task is simply not viable.
+
+If your directory is an ordinary git repo you can clone, **use `github_repo` instead**: it runs in worktree mode by default, so tasks on the same repo run with unlimited concurrency. Choosing `local_directory` means every task on that folder runs **strictly one at a time, forever**. Read "When to pick" below before you commit to it.
+</Callout>
+
 ```json
 {
   "resource_type": "local_directory",
@@ -65,14 +73,25 @@ The trade-off vs. `github_repo` is intentional: only the bound daemon can pick u
 | Where it can run | Any daemon | Exactly one daemon (the one bound) |
 | Disk footprint | One worktree per task | Zero overhead — your existing folder |
 
-Pick `local_directory` when **either** of these matches:
+**The default answer is `github_repo`.** Only these cases justify switching to `local_directory`:
 
-1. **Re-cloning is prohibitively expensive** — a multi-gigabyte game checkout, a monorepo with heavy LFS assets, or anything where the per-task `git clone` would dominate the actual work. You trade concurrency for a clone-free run.
-2. **Your changes are fine-grained and you want to review them locally as they happen** — you're iterating on a single component, you want to flip between the agent's edits and your editor every few minutes, and you'd rather have your existing checkout be the source of truth than a per-task worktree you have to dig out of `~/multica_workspaces/`.
+1. **Re-cloning is prohibitively expensive** — a multi-gigabyte game checkout, a monorepo with heavy LFS assets, or anything where the per-task `git clone` would dominate the actual work. This is the mode's primary reason to exist.
+2. **The directory isn't a git repo at all** — an art asset library, a docs folder, an exported dataset. There's no remote to clone from, so working in place is the only option.
+3. **The work depends on machine-local state** — a local database, a multi-gigabyte dataset, an engine / SDK / licensed toolchain installed on that machine, attached hardware. None of it exists inside a fresh worktree.
 
-The trade-off you accept in both cases is the same: **this version ships no file-level write lock.** The per-directory serial gate (one task at a time on the same folder) is the only protection against agents in two different issues touching the same files at the same time. If you point two issues' agents at the same `local_directory`, their tasks queue rather than parallelise — that's by design. If you need real parallelism on the same codebase, stay on `github_repo`.
+These, on the other hand, are **not** reasons to pick it:
+
+- **"I want to see the agent's edits in my own editor."** Worktrees are on your local disk too (under `~/multica_workspaces/`) and open in any editor. Giving up concurrency to save one directory hop isn't a good trade.
+- **"Cloning is a bit slow."** It only counts as a cost when the clone outweighs the task itself. A few-hundred-megabyte repo doesn't qualify.
+- **"I don't want agent branches piling up."** Branch policy belongs in `default_branch_hint` and task conventions, not in your choice of execution mode.
+
+**Serial execution is a premise of this mode, not a limitation waiting to be fixed.** This version ships no file-level write lock, so the per-directory serial gate (one task at a time on the same folder) is the only thing stopping agents in two different issues from writing the same files at once. That's also why "add worktrees to `local_directory` so tasks can run in parallel" is self-contradictory — a worktree *is* another copy of the working tree, and you chose this mode precisely because copies are too expensive. **If you need real parallelism on the same codebase, the answer is `github_repo`.**
 
 ### Attaching a local directory
+
+<Callout type="info">
+Before you do this, make sure you actually need it (see the section above). If the folder is an ordinary git repo you can clone, `github_repo` is the better choice — its concurrency is unbounded. `local_directory` targets cases like a tens-of-gigabytes game project, where re-cloning once is already too expensive.
+</Callout>
 
 The folder picker lives in the **Desktop app** only — the web app has no way to read OS paths, so the "Add local directory" button is hidden there. On Desktop:
 

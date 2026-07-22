@@ -2434,10 +2434,14 @@ func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
 }
 
 func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
-	t.Parallel()
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	// The model catalog signal below makes both attempts retry safe, so this
+	// exercises the exhausted-retry path and pays two cleanup windows.
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
 
 	fakePath := writeFakeCodexAppServer(t, ""+
 		`read line`+"\n"+
@@ -2449,7 +2453,7 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-stuck","turn":{"id":"turn-stuck"}}}'`+"\n"+
 		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
-		`sleep 5`+"\n")
+		`sleep 2`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                   5 * time.Second,
@@ -2464,9 +2468,9 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 		"turn-stuck",
 		`model="default(empty)"`,
 		`codex_version="codex-cli 0.0.0-test"`,
-		"model catalog refresh timed out",
+		"Codex could not load its model catalog",
 		"codex stderr:",
-		codexModelCatalogRefreshTimeoutSignal,
+		codexModelCatalogRefreshFailureSignal,
 	} {
 		if !strings.Contains(result.Error, want) {
 			t.Fatalf("expected error to contain %q, got %q", want, result.Error)
@@ -2815,6 +2819,272 @@ func TestCodexExecuteSemanticInactivityDoesNotAffectNormalTurnCompletion(t *test
 	}
 }
 
+// TestCodexExecuteRetriesAfterModelCatalogRefreshFailure covers the MUL-5110
+// hot path: Codex accepts the turn, fails to load its model catalog, and never
+// emits an item. The daemon must retry once and surface the second attempt.
+func TestCodexExecuteRetriesAfterModelCatalogRefreshFailure(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	// The fixture counts invocations next to itself so attempt 1 can stall and
+	// attempt 2 can succeed on a different thread.
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`STATE="$(dirname "$0")/attempts"`+"\n"+
+		`ATTEMPT=$(cat "$STATE" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$STATE"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`if [ "$ATTEMPT" = "1" ]; then`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-cold"}}}'`+"\n"+
+		`  read line`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-cold","turn":{"id":"turn-cold"}}}'`+"\n"+
+		`  echo 'ERROR codex_models_manager::manager: failed to refresh available models: stream disconnected before completion' >&2`+"\n"+
+		`  sleep 2`+"\n"+
+		`else`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-warm"}}}'`+"\n"+
+		`  read line`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-warm","turn":{"id":"turn-warm"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-warm","item":{"type":"agentMessage","id":"msg-1","text":"Recovered"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-warm","turn":{"id":"turn-warm","status":"completed"}}}'`+"\n"+
+		`fi`+"\n")
+
+	result, messages := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		Timeout:                   20 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	}, 20*time.Second)
+
+	if result.Status != "completed" {
+		t.Fatalf("expected the retry to complete, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Recovered" {
+		t.Fatalf("expected output from the second attempt, got %q", result.Output)
+	}
+	if result.SessionID != "thr-warm" {
+		t.Fatalf("expected the surviving thread id, got %q", result.SessionID)
+	}
+	// The discarded attempt must not pin the resume pointer to a thread that
+	// never produced a turn.
+	for _, msg := range messages {
+		if msg.SessionID == "thr-cold" {
+			t.Fatalf("discarded attempt leaked a session pin for thr-cold: %+v", msg)
+		}
+	}
+}
+
+// TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume covers the
+// resume case: the stalled attempt already reached turn/started on the prior
+// thread, so the retry must not resume it again. It starts a fresh thread and
+// keeps ResumeExpected so the lost context is disclosed to the agent.
+func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	// Each invocation records the JSON-RPC lines it received so the test can
+	// assert which thread RPC the retry used.
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`LOG="$DIR/rpc-$ATTEMPT.log"`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`if [ "$ATTEMPT" = "1" ]; then`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-prior"}}}'`+"\n"+
+		`  read line; echo "$line" >> "$LOG"`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-prior","turn":{"id":"turn-prior"}}}'`+"\n"+
+		`  echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`  sleep 2`+"\n"+
+		`else`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-fresh"}}}'`+"\n"+
+		`  read line; echo "$line" >> "$LOG"`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-fresh","turn":{"id":"turn-fresh"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-fresh","item":{"type":"agentMessage","id":"msg-1","text":"Fresh"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-fresh","turn":{"id":"turn-fresh","status":"completed"}}}'`+"\n"+
+		`fi`+"\n")
+
+	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		ResumeSessionID:           "thr-prior",
+		ResumeExpected:            true,
+		Timeout:                   20 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	}, 20*time.Second)
+
+	if result.Status != "completed" {
+		t.Fatalf("expected the retry to complete, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.SessionID != "thr-fresh" {
+		t.Fatalf("expected the retry to land on a fresh thread, got %q", result.SessionID)
+	}
+	dir := filepath.Dir(fakePath)
+	first, err := os.ReadFile(filepath.Join(dir, "rpc-1.log"))
+	if err != nil {
+		t.Fatalf("read first attempt rpc log: %v", err)
+	}
+	if !strings.Contains(string(first), "thread/resume") {
+		t.Fatalf("expected the first attempt to resume the prior thread, got %s", first)
+	}
+	second, err := os.ReadFile(filepath.Join(dir, "rpc-2.log"))
+	if err != nil {
+		t.Fatalf("read second attempt rpc log: %v", err)
+	}
+	if strings.Contains(string(second), "thread/resume") {
+		t.Fatalf("retry must not resume the stalled thread, got %s", second)
+	}
+	if !strings.Contains(string(second), "thread/start") {
+		t.Fatalf("expected the retry to start a fresh thread, got %s", second)
+	}
+	// ResumeExpected survives the cleared pointer, so the agent is told the
+	// prior context could not be restored.
+	if !strings.Contains(string(second), "previous conversation context could not be restored") {
+		t.Fatalf("expected the retry input to carry the continuity notice, got %s", second)
+	}
+}
+
+// TestCodexExecuteDoesNotRetryCatalogFailureWhenCleanupUnconfirmed keeps the
+// retry gate tied to a reaped process tree: a surviving app-server would race
+// the second attempt, so an unconfirmed cleanup must not retry.
+func TestCodexExecuteDoesNotRetryCatalogFailureWhenCleanupUnconfirmed(t *testing.T) {
+	// Not t.Parallel(): this test mutates package-level Codex overrides.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+	codexCleanupConfirmationOverride.Store(-1)
+	t.Cleanup(func() { codexCleanupConfirmationOverride.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-unreaped"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-unreaped","turn":{"id":"turn-unreaped"}}}'`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+// TestCodexExecuteDoesNotRetryCatalogFailureAfterSemanticProgress is the core
+// no-duplicate-side-effects guard: once a turn has produced content or run a
+// tool, the catalog signal must not buy it a replay.
+func TestCodexExecuteDoesNotRetryCatalogFailureAfterSemanticProgress(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-worked"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-worked","turn":{"id":"turn-worked"}}}'`+"\n"+
+		// A tool ran: this turn has side effects and must never be replayed,
+		// even though the catalog signal is present in stderr.
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-worked","item":{"type":"commandExecution","id":"cmd-1","aggregatedOutput":"deployed"}}}'`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+func assertCodexAttemptCount(t *testing.T, fakePath, want string) {
+	t.Helper()
+	attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
+	if err != nil {
+		t.Fatalf("read attempt counter: %v", err)
+	}
+	if got := strings.TrimSpace(string(attempts)); got != want {
+		t.Fatalf("expected %s attempt(s), got %q", want, got)
+	}
+}
+
+// TestCodexExecuteDoesNotRetryFirstTurnNoProgressWithoutCatalogSignal keeps the
+// retry gate narrow: a stalled first turn with no model catalog evidence in
+// stderr is not known to be transient, so it must fail on the first attempt.
+func TestCodexExecuteDoesNotRetryFirstTurnNoProgressWithoutCatalogSignal(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`STATE="$(dirname "$0")/attempts"`+"\n"+
+		`ATTEMPT=$(cat "$STATE" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$STATE"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-quiet"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-quiet","turn":{"id":"turn-quiet"}}}'`+"\n"+
+		`echo 'ERROR something else entirely went wrong' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
 func TestCodexExecuteTurnCompletionCanPrecedeTurnStartResponse(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -2888,18 +3158,34 @@ func writeFakeCodexAppServer(t *testing.T, body string) string {
 
 func executeFakeCodex(t *testing.T, fakePath string, opts ExecOptions) Result {
 	t.Helper()
+	result, _ := executeFakeCodexCollectingMessages(t, fakePath, opts, 10*time.Second)
+	return result
+}
+
+// executeFakeCodexCollectingMessages runs the fixture and returns the streamed
+// messages alongside the result. budget bounds both the execution context and
+// the wait, so retry-exercising tests can ask for more than the default.
+func executeFakeCodexCollectingMessages(t *testing.T, fakePath string, opts ExecOptions, budget time.Duration) (Result, []Message) {
+	t.Helper()
 	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
 	if err != nil {
 		t.Fatalf("new codex backend: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	session, err := backend.Execute(ctx, "prompt", opts)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
+	var (
+		mu       sync.Mutex
+		messages []Message
+	)
 	go func() {
-		for range session.Messages {
+		for msg := range session.Messages {
+			mu.Lock()
+			messages = append(messages, msg)
+			mu.Unlock()
 		}
 	}()
 	select {
@@ -2907,10 +3193,13 @@ func executeFakeCodex(t *testing.T, fakePath string, opts ExecOptions) Result {
 		if !ok {
 			t.Fatal("result channel closed without a value")
 		}
-		return result
-	case <-time.After(10 * time.Second):
+		mu.Lock()
+		collected := append([]Message(nil), messages...)
+		mu.Unlock()
+		return result, collected
+	case <-time.After(budget):
 		t.Fatal("timeout waiting for result")
-		return Result{}
+		return Result{}, nil
 	}
 }
 

@@ -11,18 +11,11 @@ import {
   MessageSquare,
   Plus,
   SearchIcon,
-  Inbox,
-  CircleUser,
   ListChevronsDownUp,
   ListChevronsUpDown,
-  ListTodo,
-  FolderKanban,
-  Bot,
   Monitor,
   Moon,
   Sun,
-  BookOpenText,
-  Settings,
   type LucideIcon,
 } from "lucide-react";
 import { Command as CommandPrimitive } from "cmdk";
@@ -52,6 +45,7 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { StatusIcon } from "../issues/components";
 import { resolvedThreadRootIds, rootCommentIds } from "../issues/components/thread-utils";
 import { ProjectIcon } from "../projects/components/project-icon";
+import { routeIconForPath } from "../layout/route-icon-components";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { ProjectStatus } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
@@ -85,10 +79,12 @@ type NavKey =
   | "skills"
   | "settings";
 
+// No `icon` field: like the sidebar nav, a page's icon is derived from its
+// destination path via routeIconForPath, so all navigation surfaces show the
+// same icon for the same route.
 interface NavPage {
   key: NavKey;
   label: string;
-  icon: LucideIcon;
   keywords: string[];
 }
 
@@ -148,14 +144,14 @@ interface SearchResults {
 export function SearchCommand() {
   const { t } = useT("search");
   const navPages: NavPage[] = [
-    { key: "inbox", label: t(($) => $.pages.inbox), icon: Inbox, keywords: ["inbox", "notifications", "收件箱"] },
-    { key: "myIssues", label: t(($) => $.pages.my_issues), icon: CircleUser, keywords: ["my", "issues", "assigned", "我的"] },
-    { key: "issues", label: t(($) => $.pages.issues), icon: ListTodo, keywords: ["issues", "tasks", "bugs"] },
-    { key: "projects", label: t(($) => $.pages.projects), icon: FolderKanban, keywords: ["projects", "kanban", "项目"] },
-    { key: "agents", label: t(($) => $.pages.agents), icon: Bot, keywords: ["agents", "bots", "ai"] },
-    { key: "runtimes", label: t(($) => $.pages.runtimes), icon: Monitor, keywords: ["runtimes", "environments"] },
-    { key: "skills", label: t(($) => $.pages.skills), icon: BookOpenText, keywords: ["skills", "library"] },
-    { key: "settings", label: t(($) => $.pages.settings), icon: Settings, keywords: ["settings", "config", "preferences", "设置"] },
+    { key: "inbox", label: t(($) => $.pages.inbox), keywords: ["inbox", "notifications", "收件箱"] },
+    { key: "myIssues", label: t(($) => $.pages.my_issues), keywords: ["my", "issues", "assigned", "我的"] },
+    { key: "issues", label: t(($) => $.pages.issues), keywords: ["issues", "tasks", "bugs"] },
+    { key: "projects", label: t(($) => $.pages.projects), keywords: ["projects", "kanban", "项目"] },
+    { key: "agents", label: t(($) => $.pages.agents), keywords: ["agents", "bots", "ai"] },
+    { key: "runtimes", label: t(($) => $.pages.runtimes), keywords: ["runtimes", "environments"] },
+    { key: "skills", label: t(($) => $.pages.skills), keywords: ["skills", "library"] },
+    { key: "settings", label: t(($) => $.pages.settings), keywords: ["settings", "config", "preferences", "设置"] },
   ];
   const { push, pathname, getShareableUrl } = useNavigation();
   const open = useSearchStore((s) => s.open);
@@ -533,19 +529,22 @@ export function SearchCommand() {
                 <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
                   {t(($) => $.groups.pages)}
                 </div>
-                {filteredPages.map((page) => (
+                {filteredPages.map((page) => {
+                  const PageIcon = routeIconForPath(p[page.key]());
+                  return (
                   <CommandPrimitive.Item
                     key={page.key}
                     value={`page:${page.key}`}
                     onSelect={() => handlePageSelect(page.key)}
                     className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
-                    <page.icon className="size-4 shrink-0 text-muted-foreground" />
+                    <PageIcon className="size-4 shrink-0 text-muted-foreground" />
                     <span className="truncate">
                       <HighlightText text={page.label} query={query} />
                     </span>
                   </CommandPrimitive.Item>
-                ))}
+                  );
+                })}
               </CommandPrimitive.Group>
             )}
 

@@ -294,6 +294,25 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.7",
+        date: "2026-07-21",
+        title: "Qwen Code runtime, live chat diagrams, and Windows agent fixes",
+        changes: [],
+        features: [
+          "You can now build agents on the Qwen Code runtime.",
+          "Diagrams your agents draw in Chat now show as real diagrams.",
+        ],
+        improvements: [
+          "The assign-confirmation dialog now opens instantly, with no loading wait.",
+        ],
+        fixes: [
+          "On Windows, Cursor tasks no longer fail when your prompt contains command-line flags.",
+          "On Windows, Codex tasks no longer get rejected before they can start.",
+          "Self-hosted custom models no longer fail to sign in on the first turn.",
+          "The project dropdown now closes after you pick a project while creating an issue.",
+        ],
+      },
+      {
         version: "0.4.5",
         date: "2026-07-20",
         title: "Customizable issue tables, live-sorting boards, and steadier agent runs",

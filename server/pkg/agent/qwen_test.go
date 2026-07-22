@@ -185,12 +185,17 @@ func TestQwenBackendFailureTimeoutAndCancellation(t *testing.T) {
 		status      string
 		needle      string
 		wantSession string
+		// wantResumeRejected asserts the daemon gets positive evidence that
+		// the resume itself was refused. Without it the fresh-session
+		// fallback never fires and the user is back to a terminal failure
+		// they have to clear by hand.
+		wantResumeRejected bool
 	}{
-		{"result error", map[string]string{"QWEN_MODE": "error"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic Qwen authentication failure", "sess-error"},
-		{"process error", map[string]string{"QWEN_MODE": "exit"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic qwen stderr", ""},
-		{"missing resume", map[string]string{"QWEN_MODE": "resume-missing", "QWEN_STDERR_FIXTURE": resumeFixture}, newQwenTestContext, ExecOptions{ResumeSessionID: "session-redacted"}, "failed", "No saved session found", ""},
-		{"timeout", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{Timeout: 20 * time.Millisecond}, "timeout", "timed out", ""},
-		{"cancel", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{}, "aborted", "cancelled", ""},
+		{"result error", map[string]string{"QWEN_MODE": "error"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic Qwen authentication failure", "sess-error", false},
+		{"process error", map[string]string{"QWEN_MODE": "exit"}, newQwenTestContext, ExecOptions{}, "failed", "synthetic qwen stderr", "", false},
+		{"missing resume", map[string]string{"QWEN_MODE": "resume-missing", "QWEN_STDERR_FIXTURE": resumeFixture}, newQwenTestContext, ExecOptions{ResumeSessionID: "session-redacted"}, "failed", "No saved session found", "", true},
+		{"timeout", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{Timeout: 20 * time.Millisecond}, "timeout", "timed out", "", false},
+		{"cancel", map[string]string{"QWEN_MODE": "spin"}, newQwenTestContext, ExecOptions{}, "aborted", "cancelled", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := tc.ctx()
@@ -206,6 +211,9 @@ func TestQwenBackendFailureTimeoutAndCancellation(t *testing.T) {
 			_, result := awaitQwenResult(t, session)
 			if result.Status != tc.status || !strings.Contains(result.Error, tc.needle) || result.SessionID != tc.wantSession {
 				t.Fatalf("result = %+v, want status=%q error containing %q session=%q", result, tc.status, tc.needle, tc.wantSession)
+			}
+			if result.ResumeRejected != tc.wantResumeRejected {
+				t.Fatalf("ResumeRejected = %v, want %v (error=%q)", result.ResumeRejected, tc.wantResumeRejected, result.Error)
 			}
 		})
 	}

@@ -113,6 +113,7 @@
     "sort_ascending": "昇順",
     "sort_descending": "降順",
     "toggle_sub_issues": "サブイシューを展開または折りたたむ",
+    "rename_title": "イシュー名を変更",
     "empty_value": "空",
     "quick_create_placeholder": "イシューを追加…",
     "quick_create_submit": "追加",
