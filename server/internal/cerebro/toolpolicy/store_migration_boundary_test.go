@@ -461,9 +461,9 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// The file's firtal_registry backfill reads agent_tool_grant, and its final
-	// DROPs expect it and cerebro_agent_pass to be droppable; recreate the
-	// already-retired table empty so the replay executes end to end.
+	// Recreate realistic legacy direct grants. The migration must preserve every
+	// tool choice, including explicit denies and Registry action configuration,
+	// before retiring the table.
 	if _, err := tx.Exec(ctx, `
 		CREATE TABLE agent_tool_grant (
 			agent_id UUID NOT NULL,
@@ -476,8 +476,37 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 		t.Fatalf("recreate agent_tool_grant: %v", err)
 	}
 
-	agent := uuidByte(71)
+	agent := uuidByte(171)
 	const tool = "replay.role_tool"
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO agent (id, workspace_id, name, runtime_mode)
+		VALUES ($1, $2, 'Migration replay agent', 'local')
+	`, agent, tpTestWorkspaceID); err != nil {
+		t.Fatalf("create migration replay agent: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM cerebro_role_assignment
+		WHERE role_id IN (
+			SELECT id FROM cerebro_role
+			WHERE workspace_id = $1 AND name = 'Migrated agent ' || $2::text
+		)
+	`, tpTestWorkspaceID, util.UUIDToString(agent)); err != nil {
+		t.Fatalf("clear pre-existing migrated role assignments: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM cerebro_role
+		WHERE workspace_id = $1 AND name = 'Migrated agent ' || $2::text
+	`, tpTestWorkspaceID, util.UUIDToString(agent)); err != nil {
+		t.Fatalf("clear pre-existing migrated role fixture: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO agent_tool_grant (agent_id, tool_name, enabled, config_json)
+		VALUES ($1, 'legacy.allowed_tool', true, NULL),
+		       ($1, 'legacy.denied_tool', false, NULL),
+		       ($1, 'firtal_registry', true, '{"allowed_apps": true, "allow_write": false}'::jsonb)
+	`, agent); err != nil {
+		t.Fatalf("seed legacy direct grants: %v", err)
+	}
 	// Two agent-layer rows for the SAME tool that differ on resource_pattern —
 	// the shape the buggy jsonb_object_agg collapsed to one arbitrary winner.
 	if _, err := tx.Exec(ctx, `
@@ -510,5 +539,46 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 	}
 	if byPattern["action:list_apps"] != "allow" || byPattern[""] != "deny" {
 		t.Fatalf("packaged rules = %v, want scoped allow + capability-wide deny", byPattern)
+	}
+
+	for legacyTool, wantSetting := range map[string]string{
+		"legacy.allowed_tool": "allow",
+		"legacy.denied_tool":  "deny",
+	} {
+		var raw []byte
+		if err := tx.QueryRow(ctx, `
+			SELECT permissions -> $3 FROM cerebro_role
+			WHERE workspace_id = $1 AND name = 'Migrated agent ' || $2::text
+		`, tpTestWorkspaceID, util.UUIDToString(agent), legacyTool).Scan(&raw); err != nil {
+			t.Fatalf("read migrated legacy tool %s: %v", legacyTool, err)
+		}
+		legacyRules, err := decodeRolePermission(bytes.TrimSpace(raw))
+		if err != nil || len(legacyRules) != 1 || legacyRules[0].Setting != wantSetting || legacyRules[0].ResourcePattern != "" {
+			var allPermissions []byte
+			_ = tx.QueryRow(ctx, `
+				SELECT permissions FROM cerebro_role
+				WHERE workspace_id = $1 AND name = 'Migrated agent ' || $2::text
+			`, tpTestWorkspaceID, util.UUIDToString(agent)).Scan(&allPermissions)
+			t.Fatalf("legacy tool %s raw = %s rules = %+v (decode err %v), want one capability-wide %s; all permissions = %s", legacyTool, raw, legacyRules, err, wantSetting, allPermissions)
+		}
+	}
+
+	var registryRaw []byte
+	if err := tx.QueryRow(ctx, `
+		SELECT permissions -> 'firtal_registry' FROM cerebro_role
+		WHERE workspace_id = $1 AND name = 'Migrated agent ' || $2::text
+	`, tpTestWorkspaceID, util.UUIDToString(agent)).Scan(&registryRaw); err != nil {
+		t.Fatalf("read migrated Registry rules: %v", err)
+	}
+	registryRules, err := decodeRolePermission(bytes.TrimSpace(registryRaw))
+	if err != nil {
+		t.Fatalf("decode Registry rules: %v", err)
+	}
+	registryByPattern := map[string]string{}
+	for _, rule := range registryRules {
+		registryByPattern[rule.ResourcePattern] = rule.Setting
+	}
+	if registryByPattern[""] != "allow" || registryByPattern["action:list_apps"] != "allow" || registryByPattern["action:update_app"] != "deny" {
+		t.Fatalf("Registry rules = %v, want generic allow + preserved action allow/deny", registryByPattern)
 	}
 }

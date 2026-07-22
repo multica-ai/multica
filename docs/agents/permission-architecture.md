@@ -167,7 +167,7 @@ Workspace/runtime/agent/group/user choices are authored only in
 | connection per-tool Deny/Ask | `table_connection.go:305` `ConnectionToolEffective` | live |
 | mention `trigger_other_agent` (layered over a code baseline) | `mentiongate/gate.go:92` | live |
 | general gateway tool calls (Policy Decision Service via `accessdecision.Observer`) | `runtime/access_decision_shadow.go` + `approval_gate.go` | **live and fail-closed**; no server rollout switch |
-| local-CLI tool calls (Claude/Codex/Cursor/Gemini, via `ResolveGeneral`) | `daemon_tool_policy_cerebro.go:68` | **always enforced**; provider adapters fail closed |
+| local-CLI tool calls (Claude/Codex/Cursor/Gemini, via `ResolveGeneral`) | `daemon_tool_policy_cerebro.go:68` | **always enforced**; provider adapters fail closed, and local CLI providers without an adapter are rejected before spawn |
 
 Both **general** gates resolve through `Store.ResolveGeneral`, so when `cerebro_member_override`
 (FIR-2175, default ON) is on for the workspace they apply the member-override model; OFF keeps

@@ -38,6 +38,21 @@ func TestPrepareToolPolicySpawn_AllLocalProvidersEnforce(t *testing.T) {
 	}
 }
 
+func TestPrepareToolPolicySpawn_RejectsLocalProvidersWithoutEnforcementAdapter(t *testing.T) {
+	d := &Daemon{}
+	for _, provider := range []string{"copilot", "opencode", "openclaw", "hermes", "pi", "kimi", "kiro", "antigravity"} {
+		t.Run(provider, func(t *testing.T) {
+			got, err := d.prepareToolPolicySpawn(provider, t.TempDir(), false)
+			if err == nil {
+				t.Fatalf("spawn = %+v, want provider rejected until it has a mandatory tool-policy adapter", got)
+			}
+			if !strings.Contains(err.Error(), "does not support mandatory tool-policy enforcement") {
+				t.Fatalf("error = %q, want explicit tool-policy rejection", err)
+			}
+		})
+	}
+}
+
 func TestWriteToolPolicySettingsJSON_ProviderContracts(t *testing.T) {
 	for _, tc := range []struct {
 		provider string
