@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import type { Agent, ChatSession } from "@multica/core/types";
+import type { Agent, ChatSession, Project } from "@multica/core/types";
 
 interface QueuedRestore {
   id: string;
@@ -14,11 +14,15 @@ const h = vi.hoisted(() => {
   const store = {
     activeSessionId: null as string | null,
     selectedAgentId: null as string | null,
+    selectedProjectId: null as string | null,
     setActiveSession: vi.fn((id: string | null) => {
       store.activeSessionId = id;
     }),
     setSelectedAgentId: vi.fn((id: string | null) => {
       store.selectedAgentId = id;
+    }),
+    setSelectedProjectId: vi.fn((id: string | null) => {
+      store.selectedProjectId = id;
     }),
     appliedDraftRestoreIds: [] as string[],
     markDraftRestoreApplied: vi.fn((id: string) => {
@@ -63,6 +67,7 @@ const h = vi.hoisted(() => {
     // useQuery reads these so each test can vary the loaded data.
     sessions: [] as ChatSession[],
     agents: [] as Agent[],
+    projects: [] as Project[],
     draftRestores: null as
       | { restores: { id: string; chat_session_id: string; content: string }[] }
       | null,
@@ -77,6 +82,9 @@ vi.mock("@multica/core/auth", () => ({
 vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["agents"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
+}));
+vi.mock("@multica/core/projects/queries", () => ({
+  projectListOptions: () => ({ queryKey: ["projects"] }),
 }));
 vi.mock("@multica/views/issues/components", () => ({ canAssignAgent: () => true }));
 vi.mock("@multica/core/api", () => ({
@@ -127,6 +135,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
         return { data: [{ user_id: "user-1", role: "admin" }] };
       }
       if (key.includes("sessions")) return { data: h.sessions, isSuccess: true };
+      if (key.includes("projects")) return { data: h.projects, isSuccess: true };
       if (key.includes("draft-restores")) return { data: h.draftRestores };
       return { data: null };
     },
@@ -178,16 +187,84 @@ const sC = makeSession({ id: "sC", agent_id: "agent-a", updated_at: "2026-07-08T
 function setup(activeSessionId: string | null, sessions: ChatSession[], agents: Agent[]) {
   h.store.activeSessionId = activeSessionId;
   h.store.selectedAgentId = null;
+  h.store.selectedProjectId = null;
   h.sessions = sessions;
   h.agents = agents;
+  h.projects = [];
   const { result } = renderHook(() => useChatController());
   // Ignore any render-time store writes (self-heal etc.); we assert only the
   // effect of the call under test.
   h.store.setActiveSession.mockClear();
   h.store.setSelectedAgentId.mockClear();
+  h.store.setSelectedProjectId.mockClear();
   h.archivedMutate.mockClear();
   return result;
 }
+
+describe("useChatController project context", () => {
+  const project = {
+    id: "project-a",
+    workspace_id: "ws-1",
+    title: "Project Alpha",
+  } as Project;
+
+  beforeEach(() => {
+    h.store.setActiveSession.mockClear();
+    h.store.setSelectedProjectId.mockClear();
+    h.createSessionMutate.mockClear();
+    h.createSessionMutate.mockResolvedValue({ id: "new-session" });
+  });
+
+  afterEach(() => {
+    h.store.selectedProjectId = null;
+    h.projects = [];
+  });
+
+  it("starts a fresh chat when the project changes", () => {
+    const projectSession = makeSession({
+      id: "project-session",
+      agent_id: "agent-a",
+      project_id: project.id,
+    });
+    h.store.activeSessionId = projectSession.id;
+    h.store.selectedProjectId = project.id;
+    h.sessions = [projectSession];
+    h.agents = [agentA];
+    h.projects = [project];
+
+    const { result } = renderHook(() => useChatController());
+    h.store.setActiveSession.mockClear();
+    h.store.setSelectedProjectId.mockClear();
+
+    act(() => result.current.handleProjectChange(null));
+
+    expect(h.store.setSelectedProjectId).toHaveBeenCalledWith(null);
+    expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
+  });
+
+  it("persists the selected project when lazy-creating a session", async () => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = agentA.id;
+    h.store.selectedProjectId = project.id;
+    h.sessions = [];
+    h.agents = [agentA];
+    h.projects = [project];
+    vi.mocked(api.sendChatMessage).mockResolvedValue({
+      message_id: "message-1",
+      task_id: "task-1",
+      created_at: new Date(0).toISOString(),
+    } as Awaited<ReturnType<typeof api.sendChatMessage>>);
+
+    const { result } = renderHook(() => useChatController());
+    await act(async () => {
+      await result.current.handleSend("hello", undefined, vi.fn());
+    });
+
+    expect(h.createSessionMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ project_id: project.id }),
+    );
+  });
+});
 
 describe("useChatController.advanceSelectionAfterArchive", () => {
   beforeEach(() => {

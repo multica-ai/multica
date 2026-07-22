@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { canAssignAgent } from "@multica/views/issues/components";
 import { api } from "@multica/core/api";
 import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
@@ -137,9 +138,11 @@ export function ChatWindow() {
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
+  const selectedProjectId = useChatStore((s) => s.selectedProjectId);
   const setOpen = useChatStore((s) => s.setOpen);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
+  const setSelectedProjectId = useChatStore((s) => s.setSelectedProjectId);
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -147,6 +150,9 @@ export function ChatWindow() {
   // that used to drift during the WS-invalidate window.
   const { data: sessions = [], isSuccess: sessionsLoaded } = useQuery(
     chatSessionsOptions(wsId),
+  );
+  const { data: projects = [], isSuccess: projectsLoaded } = useQuery(
+    projectListOptions(wsId),
   );
   const {
     data: rawMessagePages,
@@ -213,6 +219,19 @@ export function ChatWindow() {
     ? sessions.find((s) => s.id === activeSessionId)
     : null;
   const isSessionArchived = currentSession?.status === "archived";
+  const candidateProjectId = currentSession
+    ? currentSession.project_id ?? null
+    : selectedProjectId;
+  const activeProjectId = candidateProjectId &&
+    (!projectsLoaded || projects.some((project) => project.id === candidateProjectId))
+    ? candidateProjectId
+    : null;
+
+  useEffect(() => {
+    if (!projectsLoaded || !selectedProjectId) return;
+    if (projects.some((project) => project.id === selectedProjectId)) return;
+    setSelectedProjectId(null);
+  }, [projectsLoaded, projects, selectedProjectId, setSelectedProjectId]);
 
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
@@ -367,6 +386,7 @@ export function ChatWindow() {
           const session = await createSession.mutateAsync({
             agent_id: activeAgent.id,
             title: titleSeed.slice(0, 50),
+            project_id: activeProjectId,
           });
           return session.id;
         } finally {
@@ -376,7 +396,15 @@ export function ChatWindow() {
       sessionPromiseRef.current = promise;
       return promise;
     },
-    [activeSessionId, activeAgent, createSession, sessions, sessionsLoaded, qc],
+    [
+      activeSessionId,
+      activeAgent,
+      activeProjectId,
+      createSession,
+      sessions,
+      sessionsLoaded,
+      qc,
+    ],
   );
 
   const handleUploadFile = useCallback(
@@ -643,11 +671,21 @@ export function ChatWindow() {
         previousSessionId: activeSessionId,
       });
       setSelectedAgentId(agent.id);
+      setSelectedProjectId(activeProjectId);
       // Reset session when switching agent
       setActiveSession(null);
       requestInputFocus();
     },
-    [activeAgent, selectedAgentId, activeSessionId, setSelectedAgentId, setActiveSession, requestInputFocus],
+    [
+      activeAgent,
+      selectedAgentId,
+      activeSessionId,
+      activeProjectId,
+      setSelectedAgentId,
+      setSelectedProjectId,
+      setActiveSession,
+      requestInputFocus,
+    ],
   );
 
   const handleNewChat = useCallback(() => {
@@ -655,9 +693,17 @@ export function ChatWindow() {
       previousSessionId: activeSessionId,
       previousPendingTask: pendingTaskId,
     });
+    setSelectedProjectId(activeProjectId);
     setActiveSession(null);
     requestInputFocus();
-  }, [activeSessionId, pendingTaskId, setActiveSession, requestInputFocus]);
+  }, [
+    activeSessionId,
+    pendingTaskId,
+    activeProjectId,
+    setSelectedProjectId,
+    setActiveSession,
+    requestInputFocus,
+  ]);
 
   const handleSelectSession = useCallback(
     (session: ChatSession) => {
@@ -671,9 +717,30 @@ export function ChatWindow() {
         });
         setSelectedAgentId(session.agent_id);
       }
+      setSelectedProjectId(session.project_id ?? null);
       setActiveSession(session.id);
     },
-    [activeAgent, setSelectedAgentId, setActiveSession],
+    [activeAgent, setSelectedAgentId, setSelectedProjectId, setActiveSession],
+  );
+
+  const handleProjectChange = useCallback(
+    (projectId: string | null) => {
+      if (projectId === activeProjectId) return;
+      uiLogger.info("selectProjectContext", {
+        from: activeProjectId,
+        to: projectId,
+        previousSessionId: activeSessionId,
+      });
+      setSelectedProjectId(projectId);
+      setActiveSession(null);
+      requestInputFocus();
+    }, [
+      activeProjectId,
+      activeSessionId,
+      setSelectedProjectId,
+      setActiveSession,
+      requestInputFocus,
+    ],
   );
 
   const handleMinimize = useCallback(() => {
@@ -839,6 +906,9 @@ export function ChatWindow() {
         noAgent={noAgent}
         agentArchived={isAgentArchived}
         agentName={activeAgent?.name}
+        projects={projects}
+        projectId={activeProjectId}
+        onProjectChange={handleProjectChange}
         leftAdornment={
           <AgentDropdown
             agents={availableAgents}

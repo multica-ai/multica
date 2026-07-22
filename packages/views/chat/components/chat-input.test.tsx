@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useRef, useImperativeHandle } from "react";
+import { cloneElement, forwardRef, useEffect, useRef, useImperativeHandle } from "react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -142,6 +142,25 @@ vi.mock("../../editor", async () => ({
       />
     );
   }),
+}));
+
+vi.mock("../../projects/components/project-picker", () => ({
+  ProjectPicker: ({
+    projectId,
+    onUpdate,
+    triggerRender,
+  }: {
+    projectId: string;
+    onUpdate: (updates: { project_id: string | null }) => void;
+    triggerRender: React.ReactElement<{
+      onClick?: () => void;
+      children?: React.ReactNode;
+    }>;
+  }) =>
+    cloneElement(triggerRender, {
+      onClick: () => onUpdate({ project_id: null }),
+      children: projectId,
+    }),
 }));
 
 // Mock chat store with an in-memory implementation that supports both
@@ -369,6 +388,40 @@ describe("ChatInput @ context wiring", () => {
 
     expect(editorProps.last?.mentionMode).toBe("context");
     expect(editorProps.last?.mentionContextItems).toBe(contextItems);
+  });
+});
+
+describe("ChatInput project context", () => {
+  it("renders the selected project chip and forwards context changes", () => {
+    const onProjectChange = vi.fn();
+    renderInput({
+      projects: [
+        {
+          id: "project-alpha",
+          workspace_id: "ws-1",
+          title: "Project Alpha",
+          description: null,
+          icon: "📘",
+          status: "planned",
+          priority: "none",
+          lead_type: null,
+          lead_id: null,
+          start_date: null,
+          due_date: null,
+          created_at: new Date(0).toISOString(),
+          updated_at: new Date(0).toISOString(),
+          issue_count: 0,
+          done_count: 0,
+          resource_count: 0,
+        },
+      ],
+      projectId: "project-alpha",
+      onProjectChange,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Change project context" }));
+
+    expect(onProjectChange).toHaveBeenCalledWith(null);
   });
 });
 

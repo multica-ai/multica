@@ -31,8 +31,9 @@ const chatSessionTitleMaxLen = 200
 // ---------------------------------------------------------------------------
 
 type CreateChatSessionRequest struct {
-	AgentID string `json:"agent_id"`
-	Title   string `json:"title"`
+	AgentID   string  `json:"agent_id"`
+	Title     string  `json:"title"`
+	ProjectID *string `json:"project_id"`
 }
 
 func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +59,13 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
 		return
+	}
+	projectID := pgtype.UUID{Valid: false}
+	if req.ProjectID != nil && strings.TrimSpace(*req.ProjectID) != "" {
+		projectID, ok = parseUUIDOrBadRequest(w, strings.TrimSpace(*req.ProjectID), "project_id")
+		if !ok {
+			return
+		}
 	}
 
 	// Verify agent exists in workspace.
@@ -103,12 +111,26 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to lock workspace")
 		return
 	}
+	if projectID.Valid {
+		if _, err := qtx.LockProjectForChatSessionCreate(r.Context(), db.LockProjectForChatSessionCreateParams{
+			ID:          projectID,
+			WorkspaceID: workspaceUUID,
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "project not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to lock project")
+			return
+		}
+	}
 
 	session, err := qtx.CreateChatSession(r.Context(), db.CreateChatSessionParams{
 		WorkspaceID: workspaceUUID,
 		AgentID:     agentID,
 		CreatorID:   parseUUID(userID),
 		Title:       req.Title,
+		ProjectID:   projectID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create chat session")
@@ -171,6 +193,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				WorkspaceID: uuidToString(s.WorkspaceID),
 				AgentID:     uuidToString(s.AgentID),
 				CreatorID:   uuidToString(s.CreatorID),
+				ProjectID:   uuidToPtr(s.ProjectID),
 				Title:       s.Title,
 				Status:      s.Status,
 				HasUnread:   s.UnreadCount > 0,
@@ -200,6 +223,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				WorkspaceID: uuidToString(s.WorkspaceID),
 				AgentID:     uuidToString(s.AgentID),
 				CreatorID:   uuidToString(s.CreatorID),
+				ProjectID:   uuidToPtr(s.ProjectID),
 				Title:       s.Title,
 				Status:      s.Status,
 				HasUnread:   s.UnreadCount > 0,
@@ -1378,12 +1402,13 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type ChatSessionResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	AgentID     string `json:"agent_id"`
-	CreatorID   string `json:"creator_id"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	AgentID     string  `json:"agent_id"`
+	CreatorID   string  `json:"creator_id"`
+	ProjectID   *string `json:"project_id"`
+	Title       string  `json:"title"`
+	Status      string  `json:"status"`
 	// Only populated by list endpoints — single-session fetches return 0/false/nil.
 	// HasUnread is kept as a convenience (== UnreadCount > 0) for existing consumers.
 	HasUnread   bool             `json:"has_unread"`
@@ -1456,6 +1481,7 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 		WorkspaceID: uuidToString(s.WorkspaceID),
 		AgentID:     uuidToString(s.AgentID),
 		CreatorID:   uuidToString(s.CreatorID),
+		ProjectID:   uuidToPtr(s.ProjectID),
 		Title:       s.Title,
 		Status:      s.Status,
 		Pinned:      s.PinnedAt.Valid,

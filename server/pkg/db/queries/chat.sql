@@ -1,7 +1,15 @@
 -- name: CreateChatSession :one
-INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id, is_agent_intro)
-VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2), $5)
+INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id, is_agent_intro, project_id)
+VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2), $5, sqlc.narg('project_id'))
 RETURNING *;
+
+-- name: ClearChatSessionProjectByProject :exec
+-- Project references are intentionally soft (no database FK). Keep chat
+-- history while removing the context selection when a project is deleted.
+-- Do not touch updated_at: context cleanup is not chat activity.
+UPDATE chat_session
+SET project_id = NULL
+WHERE project_id = $1 AND workspace_id = $2;
 
 -- name: GetChatSession :one
 SELECT * FROM chat_session

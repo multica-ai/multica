@@ -2076,7 +2076,53 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				}
 				break
 			}
-			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
+			// A web chat can opt into the same durable project context as an
+			// issue-bound task. Revalidate the soft reference in this workspace at
+			// claim time: a deleted/stale project degrades to workspace context and
+			// can never leak a project from another tenant.
+			var projectRepos []RepoData
+			if cs.ProjectID.Valid {
+				if project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+					ID:          cs.ProjectID,
+					WorkspaceID: cs.WorkspaceID,
+				}); err == nil {
+					resp.ProjectID = uuidToString(project.ID)
+					resp.ProjectTitle = project.Title
+					resp.ProjectDescription = project.Description.String
+					if rows := h.listProjectResourcesForProject(r.Context(), project.ID); len(rows) > 0 {
+						resources := make([]ProjectResourceData, 0, len(rows))
+						for _, row := range rows {
+							label := ""
+							if row.Label.Valid {
+								label = row.Label.String
+							}
+							ref := json.RawMessage(row.ResourceRef)
+							if len(ref) == 0 {
+								ref = json.RawMessage("{}")
+							}
+							resources = append(resources, ProjectResourceData{
+								ID:           uuidToString(row.ID),
+								ResourceType: row.ResourceType,
+								ResourceRef:  ref,
+								Label:        label,
+							})
+							if row.ResourceType == "github_repo" {
+								var payload struct {
+									URL string `json:"url"`
+									Ref string `json:"ref,omitempty"`
+								}
+								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
+									projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
+								}
+							}
+						}
+						resp.ProjectResources = resources
+					}
+				}
+			}
+			if len(projectRepos) > 0 {
+				resp.Repos = projectRepos
+			} else if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
 					resp.Repos = repos
