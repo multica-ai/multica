@@ -1,4 +1,3 @@
-{{- $frontendImageTag := default .Chart.AppVersion .Values.images.frontend.tag -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,6 +7,9 @@ metadata:
     app.kubernetes.io/component: frontend
 spec:
   replicas: {{ .Values.frontend.replicas }}
+  revisionHistoryLimit: {{ .Values.frontend.revisionHistoryLimit }}
+  strategy:
+    {{- toYaml .Values.frontend.strategy | nindent 4 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: multica
@@ -15,14 +17,31 @@ spec:
       app.kubernetes.io/component: frontend
   template:
     metadata:
+      {{- with .Values.frontend.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       labels:
-        {{- include "multica.labels" . | nindent 8 }}
-        app.kubernetes.io/component: frontend
+        {{- include "multica.podLabels" (dict "root" . "component" "frontend" "custom" .Values.frontend.podLabels) | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "multica.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.frontend.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: frontend
-          image: "{{ .Values.images.frontend.repository }}:{{ $frontendImageTag }}"
+          image: {{ include "multica.frontend.image" . | quote }}
           imagePullPolicy: {{ .Values.images.frontend.pullPolicy }}
+          {{- with .Values.frontend.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: 3000
               name: http
@@ -31,14 +50,30 @@ spec:
               value: "0.0.0.0"
             - name: PORT
               value: "3000"
+          {{- with .Values.frontend.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
+      {{- with .Values.frontend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.frontend.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.frontend.tolerations }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.frontend.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.frontend.extraVolumes }}
+      volumes:
         {{- toYaml . | nindent 8 }}
       {{- end }}
 ---
@@ -57,5 +92,5 @@ spec:
     app.kubernetes.io/component: frontend
   ports:
     - port: 3000
-      targetPort: 3000
+      targetPort: http
       name: http

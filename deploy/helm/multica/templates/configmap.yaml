@@ -9,9 +9,17 @@ data:
   PORT: "8080"
   APP_ENV: {{ .Values.backend.config.appEnv | quote }}
   MULTICA_APP_URL: {{ .Values.backend.config.appUrl | quote }}
+  MULTICA_PUBLIC_URL: {{ .Values.backend.config.publicUrl | quote }}
   FRONTEND_ORIGIN: {{ .Values.backend.config.frontendOrigin | quote }}
   CORS_ALLOWED_ORIGINS: {{ .Values.backend.config.corsAllowedOrigins | quote }}
+  ALLOWED_ORIGINS: {{ .Values.backend.config.allowedOrigins | quote }}
   COOKIE_DOMAIN: {{ .Values.backend.config.cookieDomain | quote }}
+  DATABASE_MAX_CONNS: {{ .Values.backend.config.databaseMaxConns | quote }}
+  DATABASE_MIN_CONNS: {{ .Values.backend.config.databaseMinConns | quote }}
+  LOG_LEVEL: {{ .Values.backend.config.logLevel | quote }}
+  METRICS_ADDR: {{ .Values.backend.config.metricsAddr | quote }}
+  ANALYTICS_DISABLED: {{ .Values.backend.config.analyticsDisabled | quote }}
+  MULTICA_SHUTDOWN_HOLD_DURATION: {{ .Values.backend.config.shutdownHoldDuration | quote }}
   RESEND_FROM_EMAIL: {{ .Values.backend.config.resendFromEmail | quote }}
   ALLOW_SIGNUP: {{ .Values.backend.config.allowSignup | quote }}
   ALLOWED_EMAILS: {{ .Values.backend.config.allowedEmails | quote }}
@@ -19,8 +27,25 @@ data:
   DISABLE_WORKSPACE_CREATION: {{ .Values.backend.config.disableWorkspaceCreation | quote }}
   GOOGLE_CLIENT_ID: {{ .Values.backend.config.googleClientId | quote }}
   GOOGLE_REDIRECT_URI: {{ .Values.backend.config.googleRedirectUri | quote }}
+  SMTP_HOST: {{ .Values.backend.config.smtp.host | quote }}
+  SMTP_PORT: {{ .Values.backend.config.smtp.port | quote }}
+  SMTP_FROM_EMAIL: {{ .Values.backend.config.smtp.fromEmail | quote }}
+  SMTP_TLS: {{ .Values.backend.config.smtp.tls | quote }}
+  SMTP_TLS_INSECURE: {{ .Values.backend.config.smtp.tlsInsecure | quote }}
+  SMTP_EHLO_NAME: {{ .Values.backend.config.smtp.ehloName | quote }}
+  REDIS_DISABLE_CLIENT_NAME: {{ .Values.backend.config.redis.disableClientName | quote }}
+  RATE_LIMIT_AUTH: {{ .Values.backend.config.rateLimit.auth | quote }}
+  RATE_LIMIT_AUTH_VERIFY: {{ .Values.backend.config.rateLimit.authVerify | quote }}
+  RATE_LIMIT_TRUSTED_PROXIES: {{ .Values.backend.config.rateLimit.trustedProxies | quote }}
+  MULTICA_TRUSTED_PROXIES: {{ .Values.backend.config.trustedProxies | quote }}
   S3_BUCKET: {{ .Values.backend.config.s3Bucket | quote }}
   S3_REGION: {{ .Values.backend.config.s3Region | quote }}
+  AWS_ENDPOINT_URL: {{ .Values.backend.config.s3EndpointUrl | quote }}
+  {{- if ne .Values.backend.config.s3UsePathStyle nil }}
+  S3_USE_PATH_STYLE: {{ .Values.backend.config.s3UsePathStyle | quote }}
+  {{- end }}
+  ATTACHMENT_DOWNLOAD_MODE: {{ .Values.backend.config.attachmentDownloadMode | quote }}
+  ATTACHMENT_DOWNLOAD_URL_TTL: {{ .Values.backend.config.attachmentDownloadUrlTtl | quote }}
   CLOUDFRONT_DOMAIN: {{ .Values.backend.config.cloudfrontDomain | quote }}
   CLOUDFRONT_KEY_PAIR_ID: {{ .Values.backend.config.cloudfrontKeyPairId | quote }}
   LOCAL_UPLOAD_BASE_URL: {{ .Values.backend.config.localUploadBaseUrl | quote }}
