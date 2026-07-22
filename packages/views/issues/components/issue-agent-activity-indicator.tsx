@@ -25,6 +25,10 @@ interface IssueAgentActivityIndicatorProps {
   // primary control. Default xs (16 px) reads as a dot at typical board
   // densities while still showing the agent's face on hover-zoom.
   size?: AvatarSize;
+  // Dense metadata rows such as Inbox already have a primary actor avatar.
+  // Use a quiet status token there instead of repeating agent identity and
+  // running a continuous shimmer beside every timestamp.
+  variant?: "avatars" | "status";
 }
 
 /**
@@ -32,8 +36,8 @@ interface IssueAgentActivityIndicatorProps {
  * in the top-right of board cards and right after the identifier in list
  * rows. Derives state from the workspace-wide agent task snapshot:
  *
- *   - has ≥1 running task  → tiny avatar stack + shimmering "Working"
- *   - 0 running, ≥1 queued → half-opacity stack + muted "Queued"
+ *   - has ≥1 running task  → "Working" presentation for the selected variant
+ *   - 0 running, ≥1 queued → muted "Queued" presentation
  *   - nothing               → return null (no chrome, no placeholder)
  *
  * The shimmer reuses chat's `animate-chat-text-shimmer` utility (defined
@@ -42,6 +46,12 @@ interface IssueAgentActivityIndicatorProps {
  * dense board. Moving the "alive" signal onto the label keeps the
  * avatars themselves still and lets the cue ride a piece of text the
  * user can already read.
+ *
+ * Inbox uses the `status` variant: a static semantic dot plus a regular
+ * 12 px label. Its primary avatar already identifies the notification actor,
+ * so another tiny face is visually ambiguous; removing the perpetual shimmer
+ * also keeps a frequently scanned list calm. The hover card still exposes the
+ * exact agents and tasks on demand.
  *
  * Hover opens AgentActivityHoverContent which lists every active task
  * with status dot + duration. No link rows — the card itself is the
@@ -59,6 +69,7 @@ interface IssueAgentActivityIndicatorProps {
 export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndicator({
   issueId,
   size = "xs",
+  variant = "avatars",
 }: IssueAgentActivityIndicatorProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -86,32 +97,54 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
   if (agentIds.length === 0) return null;
   const hoverTasks = [...groups.running, ...groups.queued];
   const isRunning = opacity === "full";
+  const label = isRunning
+    ? t(($) => $.agent_activity.status_running)
+    : t(($) => $.agent_activity.status_queued);
+  const isStatusVariant = variant === "status";
 
   return (
     <HoverCard>
       <HoverCardTrigger
         render={
-          <span className="inline-flex shrink-0 items-center gap-1" />
+          <span
+            className={cn(
+              "inline-flex shrink-0 items-center gap-1",
+              isStatusVariant && "text-xs leading-4 text-muted-foreground",
+            )}
+          />
         }
       >
-        <AgentAvatarStack
-          agentIds={agentIds}
-          size={size}
-          opacity={opacity}
-          max={3}
-        />
-        <span
-          className={cn(
-            "text-[10px] leading-4",
-            isRunning
-              ? "animate-chat-text-shimmer"
-              : "text-muted-foreground",
-          )}
-        >
-          {isRunning
-            ? t(($) => $.agent_activity.status_running)
-            : t(($) => $.agent_activity.status_queued)}
-        </span>
+        {isStatusVariant ? (
+          <>
+            <span
+              aria-hidden="true"
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                isRunning ? "bg-brand" : "bg-muted-foreground/50",
+              )}
+            />
+            <span>{label}</span>
+          </>
+        ) : (
+          <>
+            <AgentAvatarStack
+              agentIds={agentIds}
+              size={size}
+              opacity={opacity}
+              max={3}
+            />
+            <span
+              className={cn(
+                "text-[10px] leading-4",
+                isRunning
+                  ? "animate-chat-text-shimmer"
+                  : "text-muted-foreground",
+              )}
+            >
+              {label}
+            </span>
+          </>
+        )}
       </HoverCardTrigger>
       <HoverCardContent align="end" className="w-72">
         <AgentActivityHoverContent tasks={hoverTasks} />

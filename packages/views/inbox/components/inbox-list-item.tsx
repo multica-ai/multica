@@ -109,18 +109,19 @@ export function InboxListItem({
             )}
           </div>
         </div>
-        <div className="mt-0.5 flex items-center justify-between gap-2">
+        <div className="mt-0.5 grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2">
           <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
             <InboxDetailLabel item={item} />
           </p>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {item.issue_id && (
-              <IssueAgentActivityIndicator issueId={item.issue_id} />
-            )}
-            <span className={`text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
-              {timeAgo(item.created_at)}
-            </span>
-          </div>
+          {item.issue_id && (
+            <IssueAgentActivityIndicator
+              issueId={item.issue_id}
+              variant="status"
+            />
+          )}
+          <span className={`shrink-0 text-xs tabular-nums ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+            {timeAgo(item.created_at)}
+          </span>
         </div>
       </div>
     </button>

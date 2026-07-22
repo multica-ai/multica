@@ -22,7 +22,13 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("@multica/ui/components/ui/hover-card", () => ({
   HoverCard: ({ children }: { children: React.ReactNode }) => children,
-  HoverCardTrigger: ({ children }: { children: React.ReactNode }) => children,
+  HoverCardTrigger: ({
+    children,
+    render,
+  }: {
+    children: React.ReactNode;
+    render: React.ReactElement<{ className?: string }>;
+  }) => <span className={render.props.className}>{children}</span>,
   HoverCardContent: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -47,5 +53,21 @@ describe("IssueAgentActivityIndicator", () => {
     const label = screen.getByText("Working");
     expect(label.classList.contains("leading-4")).toBe(true);
     expect(label.classList.contains("leading-none")).toBe(false);
+  });
+
+  it("renders a quiet status token without an avatar or shimmer", () => {
+    render(
+      <IssueAgentActivityIndicator issueId="issue-1" variant="status" />,
+    );
+
+    const label = screen.getByText("Working");
+    const trigger = label.parentElement;
+    expect(trigger?.className).toContain("text-xs");
+    expect(trigger?.className).toContain("leading-4");
+    expect(trigger?.querySelector('[aria-hidden="true"]')?.className).toContain(
+      "bg-brand",
+    );
+    expect(label.className).not.toContain("animate-chat-text-shimmer");
+    expect(screen.queryByTestId("agent-avatar")).toBeNull();
   });
 });

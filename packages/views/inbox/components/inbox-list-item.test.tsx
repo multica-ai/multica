@@ -5,8 +5,18 @@ import { InboxListItem } from "./inbox-list-item";
 
 vi.mock("../../issues/components", () => ({ StatusIcon: () => null }));
 vi.mock("../../issues/components/issue-agent-activity-indicator", () => ({
-  IssueAgentActivityIndicator: ({ issueId }: { issueId: string }) => (
-    <span data-testid="issue-agent-activity" data-issue-id={issueId} />
+  IssueAgentActivityIndicator: ({
+    issueId,
+    variant,
+  }: {
+    issueId: string;
+    variant?: string;
+  }) => (
+    <span
+      data-testid="issue-agent-activity"
+      data-issue-id={issueId}
+      data-variant={variant}
+    />
   ),
 }));
 vi.mock("../../common/actor-avatar", () => ({
@@ -105,6 +115,12 @@ describe("InboxListItem issue activity", () => {
     expect(
       getByTestId("issue-agent-activity").getAttribute("data-issue-id"),
     ).toBe("issue-1");
+    expect(
+      getByTestId("issue-agent-activity").getAttribute("data-variant"),
+    ).toBe("status");
+    expect(
+      getByTestId("issue-agent-activity").parentElement?.className,
+    ).toContain("grid-cols-[minmax(0,1fr)_auto_auto]");
   });
 
   it("omits issue activity for a notification without an issue", () => {
