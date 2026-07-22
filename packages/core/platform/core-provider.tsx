@@ -18,6 +18,7 @@ import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
 import type { CoreProviderProps, ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
+import { ClientUsageReporter } from "../client-usage";
 import {
   configureShortcutPlatform,
   configureShortcutRuntime,
@@ -117,6 +118,7 @@ export function CoreProvider({
         cookieAuth={cookieAuth}
         identity={identity}
       >
+        <ClientUsageReporter storage={storage} identity={identity} />
         <WSProvider
           wsUrl={wsUrl}
           authStore={authStore}

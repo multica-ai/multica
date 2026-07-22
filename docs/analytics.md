@@ -720,6 +720,92 @@ issue). Since MUL-4127 it is Prometheus-only, so reconcile
 `multica_issue_executed_total` against `issue.first_executed_at` rather than a
 PostHog event.
 
+## Daily client usage and local runtime state
+
+`client_usage_daily` is the operational source of truth for Web/Desktop usage
+and Desktop local-runtime conversion. Its primary key is
+`(user_id, client_type, install_id, activity_date)`, where `activity_date` is
+derived by the server in UTC. `install_id` is a random UUID stored in the Web
+origin or Electron app profile and reused across restarts, upgrades, logout,
+and login. Clearing/resetting that profile intentionally creates a new
+installation. Web and Desktop never share an installation ID.
+
+Clients report after authentication when that installation has no successful
+report for the current UTC day, and re-check on focus/resume. Desktop updates
+the same daily row after its first local-runtime probe and whenever the
+same-day runtime signature changes. Reports contain only client kind/version,
+a coarse OS bucket, optional current workspace context, and aggregate runtime
+provider/online/offline counts. The server supplies user, date, and timestamps.
+Device names, hostnames, local usernames, filesystem paths, raw user agents,
+IP addresses, and raw probe errors are not stored here.
+
+Use this query for a 30-day client split and user-level Desktop runtime state.
+It first selects the latest non-null probe for each installation, then rolls
+installations up to the user so multi-device users are not double counted and
+missing probes remain `unknown` rather than being classified as no-runtime:
+
+```sql
+WITH window_rows AS (
+    SELECT *
+    FROM client_usage_daily
+    WHERE activity_date >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 29
+),
+active_clients AS (
+    SELECT DISTINCT user_id, client_type, install_id FROM window_rows
+),
+latest_desktop_probe AS (
+    SELECT DISTINCT ON (user_id, install_id)
+        user_id, install_id, probe_result, runtime_count, online_count
+    FROM window_rows
+    WHERE client_type = 'desktop' AND probe_result IS NOT NULL
+    ORDER BY user_id, install_id, activity_date DESC, runtime_probed_at DESC
+),
+desktop_by_user AS (
+    SELECT
+        a.user_id,
+        count(*) AS installation_count,
+        count(*) FILTER (WHERE p.probe_result = 'success') AS successful_probe_count,
+        coalesce(sum(p.runtime_count) FILTER (WHERE p.probe_result = 'success'), 0) AS runtime_count,
+        coalesce(sum(p.online_count) FILTER (WHERE p.probe_result = 'success'), 0) AS online_count
+    FROM active_clients a
+    LEFT JOIN latest_desktop_probe p USING (user_id, install_id)
+    WHERE a.client_type = 'desktop'
+    GROUP BY a.user_id
+),
+desktop_state AS (
+    SELECT user_id,
+        CASE
+            WHEN successful_probe_count < installation_count THEN 'unknown'
+            WHEN runtime_count = 0 THEN 'no_runtime'
+            WHEN online_count = 0 THEN 'all_offline'
+            ELSE 'runtime_available'
+        END AS runtime_state
+    FROM desktop_by_user
+)
+SELECT
+    (SELECT count(DISTINCT user_id) FROM active_clients WHERE client_type = 'web') AS active_web_users,
+    (SELECT count(DISTINCT user_id) FROM active_clients WHERE client_type = 'desktop') AS active_desktop_users,
+    count(*) FILTER (WHERE runtime_state = 'runtime_available') AS desktop_users_with_runtime,
+    count(*) FILTER (WHERE runtime_state = 'no_runtime') AS desktop_users_without_runtime,
+    round(100.0 * count(*) FILTER (WHERE runtime_state = 'no_runtime')
+        / nullif((SELECT count(DISTINCT user_id) FROM active_clients WHERE client_type = 'desktop'), 0), 2)
+        AS desktop_users_without_runtime_pct,
+    count(*) FILTER (WHERE runtime_state = 'all_offline') AS desktop_users_all_offline,
+    round(100.0 * count(*) FILTER (WHERE runtime_state = 'all_offline')
+        / nullif((SELECT count(DISTINCT user_id) FROM active_clients WHERE client_type = 'desktop'), 0), 2)
+        AS desktop_users_all_offline_pct,
+    count(*) FILTER (WHERE runtime_state = 'unknown') AS desktop_users_unknown
+FROM desktop_state;
+```
+
+The initial retention policy is 180 UTC days. This MVP deliberately does not
+add another in-process background job; operators should run
+`DELETE FROM client_usage_daily WHERE activity_date < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 179`
+through the existing database-maintenance schedule until a shared retention
+worker exists. Deleting a workspace nulls its optional context, while deleting
+a user must delete that user's daily rows explicitly because this table has no
+foreign keys by repository policy.
+
 ## Governance
 
 Before adding, renaming, or removing any event:
