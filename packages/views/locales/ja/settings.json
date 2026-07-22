@@ -67,7 +67,7 @@
       "createIssue": { "label": "Issueを作成", "description": "優先するissue作成フローを開きます。" },
       "toggleSidebar": { "label": "サイドバーを切り替え", "description": "メインサイドバーの表示を切り替えます。" },
       "findInIssue": { "label": "Issue内を検索", "description": "開いているissueの詳細を検索します。" },
-      "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信します。" },
+      "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログで issue を作成します。" },
       "goInbox": { "label": "受信トレイへ移動", "description": "ワークスペースの受信トレイを開きます。" },
       "goChat": { "label": "チャットへ移動", "description": "ワークスペースのチャットを開きます。" },
       "goMyIssues": { "label": "自分のIssuesへ移動", "description": "自分に割り当てられたissueを開きます。" },

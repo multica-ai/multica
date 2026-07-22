@@ -631,3 +631,157 @@ func TestAcquireLocalDirectoryLock_CancelDuringWait(t *testing.T) {
 		t.Errorf("wait-local-directory calls = %d, want 1", got)
 	}
 }
+
+func TestAcquireLocalDirectoryLock_ParentCancellationReportsWaitFailure(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("evalsymlinks: %v", err)
+	}
+
+	parked := make(chan struct{}, 1)
+	var failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/wait-local-directory"):
+			select {
+			case parked <- struct{}{}:
+			default:
+			}
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(req.URL.Path, "/status"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"running"}`))
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	const daemonID = "d-test"
+	locker := NewLocalPathLocker()
+	release, err := locker.Acquire(context.Background(), realDir, "task-holder", nil)
+	if err != nil {
+		t.Fatalf("preclaim acquire: %v", err)
+	}
+	t.Cleanup(release)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.Default(),
+		localPathLocks:     locker,
+		cancelPollInterval: time.Hour,
+		cfg:                Config{DaemonID: daemonID},
+	}
+	ref, err := json.Marshal(localDirectoryRef{LocalPath: dir, DaemonID: daemonID})
+	if err != nil {
+		t.Fatalf("marshal ref: %v", err)
+	}
+	task := Task{
+		ID: "task-waiter",
+		ProjectResources: []ProjectResourceData{
+			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: ref},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	type result struct {
+		release func()
+		abort   bool
+	}
+	done := make(chan result, 1)
+	go func() {
+		rel, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default())
+		done <- result{release: rel, abort: abort}
+	}()
+
+	select {
+	case <-parked:
+		cancel()
+	case <-time.After(2 * time.Second):
+		t.Fatal("task never entered local_directory wait")
+	}
+
+	select {
+	case got := <-done:
+		if !got.abort {
+			t.Fatal("expected abort=true after parent cancellation")
+		}
+		if got.release != nil {
+			t.Fatal("expected nil release after parent cancellation")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("acquireLocalDirectoryLockIfNeeded did not return after parent cancellation")
+	}
+
+	if got := failCalls.Load(); got != 1 {
+		t.Fatalf("fail callback calls = %d, want 1", got)
+	}
+}
+
+func TestAcquireLocalDirectoryLock_EarlyFailureReportsWithCancelledParent(t *testing.T) {
+	t.Parallel()
+
+	var failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasSuffix(req.URL.Path, "/fail") {
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+		}
+		failCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	const daemonID = "d-test"
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		logger:         slog.Default(),
+		localPathLocks: NewLocalPathLocker(),
+		cfg:            Config{DaemonID: daemonID},
+	}
+	missingPathRef, err := json.Marshal(localDirectoryRef{
+		LocalPath: filepath.Join(t.TempDir(), "missing"),
+		DaemonID:  daemonID,
+	})
+	if err != nil {
+		t.Fatalf("marshal ref: %v", err)
+	}
+	tests := []struct {
+		name string
+		ref  json.RawMessage
+	}{
+		{name: "resource resolution", ref: json.RawMessage(`{not-json`)},
+		{name: "path validation", ref: missingPathRef},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			task := Task{
+				ID: "task-invalid-local-directory",
+				ProjectResources: []ProjectResourceData{
+					{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: tc.ref},
+				},
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			release, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default())
+			if !abort {
+				t.Fatal("expected local_directory failure to abort task")
+			}
+			if release != nil {
+				t.Fatal("expected nil release on local_directory failure")
+			}
+		})
+	}
+	if got := failCalls.Load(); got != int32(len(tests)) {
+		t.Fatalf("fail callback calls = %d, want %d", got, len(tests))
+	}
+}

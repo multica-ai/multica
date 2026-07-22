@@ -65,10 +65,10 @@ type OpenclawConfigPrep struct {
 // only, token left to inherit from the user's config) does the right
 // thing under OpenClaw's deep-merge $include semantics.
 type OpenclawGatewayPin struct {
-	Host  string
-	Port  int
-	Token string
-	TLS   bool
+	Host  string `json:"host,omitempty"`
+	Port  int    `json:"port,omitempty"`
+	Token string `json:"token,omitempty"`
+	TLS   bool   `json:"tls,omitempty"`
 }
 
 // IsZero reports whether every field is zero, i.e. there is nothing to pin.
@@ -91,8 +91,8 @@ func (p OpenclawGatewayPin) String() string {
 
 // MarshalJSON masks the bearer token in any default JSON dump (debug
 // endpoints, error envelopes, structured-log encoders). The wrapper config
-// writer goes through buildGatewayOverride which assembles a map directly,
-// so it is unaffected by this masking.
+// writer goes through buildGatewayOverride, and the private preparation-helper
+// transport uses its own methodless wire view, so both retain the real token.
 func (p OpenclawGatewayPin) MarshalJSON() ([]byte, error) {
 	type alias struct {
 		Host  string `json:"host,omitempty"`

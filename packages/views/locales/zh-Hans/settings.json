@@ -70,7 +70,7 @@
       "createIssue": { "label": "新建 issue", "description": "打开你常用的 issue 创建流程。" },
       "toggleSidebar": { "label": "显示或隐藏侧边栏", "description": "切换主侧边栏的显示状态。" },
       "findInIssue": { "label": "在 issue 中查找", "description": "搜索当前打开的 issue 详情。" },
-      "send": { "label": "发送", "description": "发送聊天消息、评论、回复、反馈和提示词。" },
+      "send": { "label": "发送", "description": "发送聊天消息、评论、回复、反馈和提示词，并在创建弹窗中创建 issue。" },
       "goInbox": { "label": "前往收件箱", "description": "打开工作区收件箱。" },
       "goChat": { "label": "前往聊天", "description": "打开工作区聊天。" },
       "goMyIssues": { "label": "前往我的 issue", "description": "打开分配给你的 issue。" },

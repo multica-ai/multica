@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
@@ -707,6 +707,42 @@ describe("AgentCreatePanel", () => {
       const submit = await screen.findByRole("button", { name: "Uploading…" });
       expect(submit).toBeDisabled();
       expect(screen.getByRole("button", { name: "Upload file" })).not.toBeDisabled();
+    });
+  });
+
+  // MUL-4931 — this path files a real issue, so a double-fire is a duplicate
+  // issue, not a cosmetic glitch. `submitting` is state: two chords landing in
+  // one tick both read the pre-update value, so only a synchronously-flipped
+  // ref can gate it. Mirrors the manual-create regression.
+  describe("send shortcut single-flight", () => {
+    it("creates once when the send chord fires twice in the same tick", async () => {
+      // Hold the request open so both presses land inside the in-flight window.
+      let release!: (v: unknown) => void;
+      mockQuickCreateIssue.mockImplementationOnce(
+        () => new Promise((resolve) => { release = resolve; }),
+      );
+
+      renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+      const editor = screen.getByPlaceholderText(
+        'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      );
+
+      // Both presses inside ONE act: React cannot re-render between them, so
+      // the second handler still closes over `submitting === false`. fireEvent
+      // would flush in between and hide the race entirely.
+      await act(async () => {
+        const press = () =>
+          editor.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true }),
+          );
+        press();
+        press();
+      });
+
+      await act(async () => { release(undefined); });
+
+      expect(mockQuickCreateIssue).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -266,7 +266,7 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 	t.Run("non-Codex runtime is unchanged", func(t *testing.T) {
 		t.Parallel()
 		codexHome := t.TempDir()
-		if err := configureCodexTaskShellEnvironment("claude", codexHome, nil, nil, slog.Default()); err != nil {
+		if err := configureCodexTaskShellEnvironment("claude", codexHome, nil, nil, nil, slog.Default()); err != nil {
 			t.Fatalf("configureCodexTaskShellEnvironment: %v", err)
 		}
 		if _, err := os.Stat(filepath.Join(codexHome, "config.toml")); !os.IsNotExist(err) {
@@ -284,11 +284,17 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			"MULTICA_LLM_API_KEY=daemon-secret",
 		}
 		agentEnv := map[string]string{
-			"CUSTOM_FLAG":        "enabled",
-			"MULTICA_SERVER_URL": "https://task.example",
-			"MULTICA_TOKEN":      "mat_task",
+			"CUSTOM_ACCESS_TOKEN": "agent-secret",
+			"CUSTOM_FLAG":         "enabled",
+			"UNAUTHORIZED_TOKEN":  "daemon-secret",
+			"MULTICA_SERVER_URL":  "https://task.example",
+			"MULTICA_TOKEN":       "mat_task",
 		}
-		if err := configureCodexTaskShellEnvironment("codex", codexHome, inherited, agentEnv, slog.Default()); err != nil {
+		agentCustomEnv := map[string]string{
+			"CUSTOM_ACCESS_TOKEN": "agent-secret",
+			"CUSTOM_FLAG":         "enabled",
+		}
+		if err := configureCodexTaskShellEnvironment("codex", codexHome, inherited, agentEnv, agentCustomEnv, slog.Default()); err != nil {
 			t.Fatalf("configureCodexTaskShellEnvironment: %v", err)
 		}
 		data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
@@ -296,12 +302,12 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			t.Fatalf("read config.toml: %v", err)
 		}
 		config := string(data)
-		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_FLAG", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
+		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_ACCESS_TOKEN", "CUSTOM_FLAG", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
 			if !strings.Contains(config, want) {
 				t.Errorf("config.toml missing %q:\n%s", want, config)
 			}
 		}
-		for _, unwanted := range []string{"OPENAI_API_KEY", "MULTICA_LLM_API_KEY", "MULTICA_*"} {
+		for _, unwanted := range []string{"OPENAI_API_KEY", "MULTICA_LLM_API_KEY", "UNAUTHORIZED_TOKEN", "MULTICA_*", "agent-secret", "daemon-secret", "mat_task"} {
 			if strings.Contains(config, unwanted) {
 				t.Errorf("config.toml unexpectedly contains %q:\n%s", unwanted, config)
 			}
@@ -310,11 +316,30 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 
 	t.Run("Codex without task home fails closed", func(t *testing.T) {
 		t.Parallel()
-		err := configureCodexTaskShellEnvironment("codex", "", nil, map[string]string{"MULTICA_TOKEN": "mat_task"}, slog.Default())
+		err := configureCodexTaskShellEnvironment("codex", "", nil, map[string]string{"MULTICA_TOKEN": "mat_task"}, nil, slog.Default())
 		if err == nil || !strings.Contains(err.Error(), "CODEX_HOME is missing") {
 			t.Fatalf("error = %v, want missing CODEX_HOME", err)
 		}
 	})
+}
+
+func TestCodexShellAuthorizedCustomEnvNamesUsesDaemonBlocklist(t *testing.T) {
+	t.Parallel()
+
+	got := codexShellAuthorizedCustomEnvNames(map[string]string{
+		"CUSTOM_ACCESS_TOKEN": "agent-secret",
+		"custom_secret":       "agent-secret",
+		"MULTICA_TOKEN":       "must-not-authorize",
+		"PATH":                "/must/not/override",
+		"HOME":                "/must/not/override",
+		"CODEX_HOME":          "/must/not/override",
+		"":                    "must-not-authorize",
+	})
+	slices.Sort(got)
+	want := []string{"CUSTOM_ACCESS_TOKEN", "custom_secret"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("codexShellAuthorizedCustomEnvNames() = %#v, want %#v", got, want)
+	}
 }
 
 func TestTaskScopedAuthToken(t *testing.T) {
@@ -484,9 +509,13 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		// directly. Inlining the full runtime brief duplicates that context and
 		// can trip upstream provider safety filters on otherwise harmless tasks.
 		{provider: "hermes", want: false},
-		{provider: "kiro", want: true},
+		// Kiro CLI loads a root AGENTS.md in ACP sessions. Inlining the same
+		// runtime brief duplicates it at the start of every user turn.
+		{provider: "kiro", want: false},
 		{provider: "kimi", want: true},
 		{provider: "traecli", want: true},
+		// Qwen Code loads the per-task QWEN.md file natively.
+		{provider: "qwen", want: false},
 		{provider: "codex", want: false},
 		{provider: "claude", want: false},
 	}
@@ -1414,7 +1443,7 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 
 	fb := &fakeBackend{
 		results: []agent.Result{
-			{Status: "failed", Error: "session not found", Usage: map[string]agent.TokenUsage{
+			{Status: "failed", Error: "no conversation found", ResumeRejected: true, Usage: map[string]agent.TokenUsage{
 				"m1": {InputTokens: 5},
 			}},
 			{Status: "completed", Output: "done", SessionID: "new-sess", Usage: map[string]agent.TokenUsage{
@@ -1426,7 +1455,7 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	// First attempt: resume fails (no SessionID in result).
 	opts := agent.ExecOptions{ResumeSessionID: "stale-id"}
 	var msgSeq atomic.Int32
-	result, _, err := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
+	result, tools, err := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
 	if err != nil {
 		t.Fatalf("first call error: %v", err)
 	}
@@ -1434,8 +1463,8 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 		t.Fatalf("expected failed result with empty SessionID, got %+v", result)
 	}
 
-	// Simulate the retry logic from runTask.
-	if result.Status == "failed" && result.SessionID == "" {
+	// Mirrors the retry in runTask, gated on the same production predicate.
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools, "claude") {
 		firstUsage := result.Usage
 		opts.ResumeSessionID = ""
 		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
@@ -1634,7 +1663,7 @@ func TestExecuteAndDrain_ContextCancelled_FlushesPendingTranscript(t *testing.T)
 	}
 }
 
-func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
+func TestExecuteAndDrain_NoRetryAfterToolsExecuted(t *testing.T) {
 	t.Parallel()
 
 	d := newTestDaemon(t)
@@ -1646,19 +1675,332 @@ func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
 	}
 
 	opts := agent.ExecOptions{ResumeSessionID: "some-id"}
-	result, _, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t", new(atomic.Int32))
+	result, tools, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t", new(atomic.Int32))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// SessionID is set → session was established → should NOT retry.
-	shouldRetry := result.Status == "failed" && result.SessionID == ""
-	if shouldRetry {
-		t.Fatal("should not retry when SessionID is present")
+	// A run that executed tools may have mutated the world (posted a comment,
+	// opened a PR, written commits into the reused workdir). Re-running it
+	// from scratch would duplicate those side effects, so the fallback must
+	// stay out regardless of what the backend reported as SessionID.
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools+1, "claude") {
+		t.Fatal("should not retry once tools have executed")
 	}
 	if int(fb.idx.Load()) != 1 {
 		t.Fatalf("expected 1 call, got %d", fb.idx.Load())
 	}
+}
+
+// A mid-stream provider disconnect on a resumed run must leave the session
+// pointer alone: internal/service/task.go treats provider_network as
+// resume-safe and expects its retry to continue the truncated conversation.
+// If the daemon reset the session first, that contract would be unsatisfiable.
+func TestExecuteAndDrain_NetworkFailureKeepsResumeSession(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+
+	fb := &fakeBackend{
+		results: []agent.Result{
+			{
+				Status:    "failed",
+				Error:     "API Error: Connection closed mid-response",
+				SessionID: "live-sess",
+			},
+		},
+	}
+
+	opts := agent.ExecOptions{ResumeSessionID: "live-sess"}
+	result, tools, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t", new(atomic.Int32))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.ResumeRejected {
+		t.Fatal("a network drop must not be reported as a rejected resume")
+	}
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools, "claude") {
+		t.Fatal("network failure must not trigger a fresh-session retry")
+	}
+	if int(fb.idx.Load()) != 1 {
+		t.Fatalf("expected exactly 1 call, got %d", fb.idx.Load())
+	}
+	// The pointer the platform retry needs is still intact.
+	if result.SessionID != "live-sess" {
+		t.Fatalf("expected session to survive, got %q", result.SessionID)
+	}
+}
+
+func TestShouldRetryWithFreshSession(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		result         agent.Result
+		priorSessionID string
+		tools          int32
+		// provider defaults to claude — a backend that CAN detect rejections,
+		// so cases that leave it unset assert the capable-backend contract.
+		provider string
+		want     bool
+	}{
+		{
+			name:           "rejected resume before any tool retries",
+			result:         agent.Result{Status: "failed", Error: "no conversation found", ResumeRejected: true},
+			priorSessionID: "stale-id",
+			want:           true,
+		},
+		{
+			// The reported bug: the session belongs to another provider
+			// account and the backend echoes the requested id back on the
+			// rejection, so SessionID stays non-empty. The backend still
+			// reports ResumeRejected, which is what the gate reads now.
+			name: "account rejection echoing session id retries",
+			result: agent.Result{
+				Status:         "failed",
+				Error:          "400 此 session 已绑定另外的ai账号，请执行 /new 开启新 session",
+				SessionID:      "stale-id",
+				ResumeRejected: true,
+			},
+			priorSessionID: "stale-id",
+			want:           true,
+		},
+		{
+			// qwen-code 0.20.0's real wording, from
+			// pkg/agent/testdata/qwen-code-0.20.0-resume-not-found.stderr.txt.
+			// The backend reports no session at all here, so before the
+			// phrase was recognised this path silently lost its recovery.
+			name: "qwen stale session rejection retries",
+			result: agent.Result{
+				Status:         "failed",
+				Error:          "No saved session found with ID session-redacted. Run `qwen --resume` without an ID to choose from existing sessions.",
+				ResumeRejected: true,
+			},
+			priorSessionID: "session-redacted",
+			want:           true,
+		},
+		{
+			name:           "no resume requested never retries",
+			result:         agent.Result{Status: "failed", Error: "boom", ResumeRejected: true},
+			priorSessionID: "",
+			want:           false,
+		},
+
+		// The compatibility path for backends that cannot detect a rejection
+		// (antigravity, copilot, cursor, deveco, opencode). An empty
+		// SessionID is all they can offer, and it only proves no session was
+		// established — so it still gates a retry, but only for failures a
+		// fresh session could plausibly cure.
+		{
+			name:           "undetectable backend with no session established retries",
+			result:         agent.Result{Status: "failed", Error: "agent exited before dispatching"},
+			priorSessionID: "stale-id",
+			provider:       "copilot",
+			want:           true,
+		},
+		{
+			name:           "undetectable backend that established a session does not retry",
+			result:         agent.Result{Status: "failed", Error: "agent exited before dispatching", SessionID: "live-sess"},
+			priorSessionID: "stale-id",
+			provider:       "copilot",
+			want:           false,
+		},
+		{
+			// The regression that motivated the positive signal: without the
+			// classification guard, every unsignalled network blip would
+			// reset the session these backends were about to resume.
+			name:           "undetectable backend network drop does not retry",
+			result:         agent.Result{Status: "failed", Error: "API Error: Connection closed mid-response"},
+			priorSessionID: "stale-id",
+			provider:       "cursor",
+			want:           false,
+		},
+		{
+			name:           "undetectable backend rate limit does not retry",
+			result:         agent.Result{Status: "failed", Error: "API Error: 429 rate limit exceeded"},
+			priorSessionID: "stale-id",
+			provider:       "deveco",
+			want:           false,
+		},
+
+		// Failures with a defined non-session remedy. Restarting the
+		// conversation cannot fix a missing binary or an unavailable model,
+		// so these must not burn a second run even on the compat path.
+		{
+			name:           "missing config does not retry",
+			result:         agent.Result{Status: "failed", Error: "missing environment variable: ANTHROPIC_API_KEY"},
+			priorSessionID: "stale-id",
+			provider:       "copilot",
+			want:           false,
+		},
+		{
+			name:           "unavailable model does not retry",
+			result:         agent.Result{Status: "failed", Error: "model not found: gpt-99"},
+			priorSessionID: "stale-id",
+			provider:       "opencode",
+			want:           false,
+		},
+		{
+			name:           "missing executable does not retry",
+			result:         agent.Result{Status: "failed", Error: "cursor-agent: executable not found"},
+			priorSessionID: "stale-id",
+			provider:       "cursor",
+			want:           false,
+		},
+		{
+			name:           "unsupported runtime version does not retry",
+			result:         agent.Result{Status: "failed", Error: "installed CLI is below the minimum supported version"},
+			priorSessionID: "stale-id",
+			provider:       "antigravity",
+			want:           false,
+		},
+		{
+			name:           "successful run never retries",
+			result:         agent.Result{Status: "completed", SessionID: "sess"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "failure after a tool ran never retries",
+			result:         agent.Result{Status: "failed", Error: "no conversation found", ResumeRejected: true},
+			priorSessionID: "stale-id",
+			tools:          1,
+			want:           false,
+		},
+
+		// Failures a fresh session cannot cure. Each of these previously
+		// slipped through the exclusion-based gate and cost a wasted run plus
+		// a destroyed session pointer. provider_network is the sharpest case:
+		// internal/service/task.go marks it resume-safe precisely so the
+		// platform retry can continue the truncated conversation.
+		{
+			name:           "provider network drop keeps the session",
+			result:         agent.Result{Status: "failed", Error: "API Error: Connection closed mid-response"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "dns failure keeps the session",
+			result:         agent.Result{Status: "failed", Error: "dial tcp: lookup api.anthropic.com: no such host"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "rate limit keeps the session",
+			result:         agent.Result{Status: "failed", Error: "API Error: 429 rate limit exceeded"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "overloaded keeps the session",
+			result:         agent.Result{Status: "failed", Error: "API Error: 529 overloaded_error"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "quota exhaustion keeps the session",
+			result:         agent.Result{Status: "failed", Error: "API Error: 402 credit balance is too low"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "provider 5xx keeps the session",
+			result:         agent.Result{Status: "failed", Error: "API Error: 500 internal_server_error"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			// Unclassified AND a session was established: nothing suggests
+			// the resume was the problem, so leave the pointer alone.
+			name:           "unrecognised failure with a live session keeps it",
+			result:         agent.Result{Status: "failed", Error: "exit status 1", SessionID: "live-sess"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			// Bad credentials cannot succeed on a second attempt. A 401
+			// before the first stream message leaves SessionID empty, which
+			// is exactly why an empty id never meant "resume was rejected".
+			name:           "provider auth failure does not retry",
+			result:         agent.Result{Status: "failed", Error: "API Error: 401 Unauthorized"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "revoked oauth token does not retry",
+			result:         agent.Result{Status: "failed", Error: "OAuth access token has been revoked"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			// Mid-execution terminals carry their own status and must never
+			// reach the fallback.
+			name:           "idle watchdog terminal does not retry",
+			result:         agent.Result{Status: "idle_watchdog", Error: "no activity", ResumeRejected: true},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			name:           "cancelled terminal does not retry",
+			result:         agent.Result{Status: "cancelled"},
+			priorSessionID: "stale-id",
+			want:           false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			provider := tt.provider
+			if provider == "" {
+				provider = "claude"
+			}
+			if got := shouldRetryWithFreshSession(tt.result, tt.priorSessionID, tt.tools, provider); got != tt.want {
+				t.Fatalf("shouldRetryWithFreshSession(provider=%q) = %v, want %v", provider, got, tt.want)
+			}
+		})
+	}
+}
+
+// The compatibility path must be reachable ONLY by backends that cannot
+// report a rejection. One identical result, opposite answers: a backend that
+// can detect has already said "not a rejection" by leaving ResumeRejected
+// false, and must be taken at its word rather than second-guessed by
+// exclusion.
+func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
+	t.Parallel()
+
+	// Unclassified startup failure, no session established — the exact shape
+	// the compat path exists to catch.
+	result := agent.Result{Status: "failed", Error: "exit status 1"}
+
+	undetectable := []string{"antigravity", "copilot", "cursor", "deveco", "opencode"}
+	for _, provider := range undetectable {
+		t.Run(provider+" retries", func(t *testing.T) {
+			t.Parallel()
+			if !shouldRetryWithFreshSession(result, "stale-id", 0, provider) {
+				t.Fatalf("%s cannot detect rejections; it must keep its empty-session recovery", provider)
+			}
+		})
+	}
+
+	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "kiro", "qoder", "traecli", "pi", "openclaw"}
+	for _, provider := range detectable {
+		t.Run(provider+" does not retry", func(t *testing.T) {
+			t.Parallel()
+			if shouldRetryWithFreshSession(result, "stale-id", 0, provider) {
+				t.Fatalf("%s reports rejections; a false ResumeRejected is an answer, not an absence", provider)
+			}
+		})
+	}
+
+	t.Run("unknown provider fails closed", func(t *testing.T) {
+		t.Parallel()
+		if shouldRetryWithFreshSession(result, "stale-id", 0, "some-future-backend") {
+			t.Fatal("a backend not listed as undetectable must not inherit the compat path")
+		}
+	})
 }
 
 func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T) {
@@ -2522,6 +2864,17 @@ type reportTaskResultRecorder struct {
 	payload map[string]any
 }
 
+func TestTerminalTaskReportTimeoutCoversRetrySchedule(t *testing.T) {
+	client := NewClient("http://example.invalid")
+	worstCase := time.Duration(len(defaultTerminalRetrySchedule)+1) * client.client.Timeout
+	for _, delay := range defaultTerminalRetrySchedule {
+		worstCase += delay
+	}
+	if terminalTaskReportTimeout < worstCase {
+		t.Fatalf("terminal report timeout = %s, want at least retry worst case %s", terminalTaskReportTimeout, worstCase)
+	}
+}
+
 func (r *reportTaskResultRecorder) handler(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -2577,6 +2930,63 @@ func TestReportTaskResult_CompletedHitsCompleteEndpoint(t *testing.T) {
 	}
 	if rec.payload["session_id"] != "ses-1" {
 		t.Errorf("session_id: got %v", rec.payload["session_id"])
+	}
+}
+
+func TestReportTaskResult_CancelledParentStillReportsTerminalState(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		result     TaskResult
+		wantSuffix string
+	}{
+		{
+			name: "complete",
+			result: TaskResult{
+				Status:     "completed",
+				Comment:    "all good",
+				BranchName: "agent/foo",
+				SessionID:  "ses-complete",
+				WorkDir:    "/tmp/complete",
+			},
+			wantSuffix: "/complete",
+		},
+		{
+			name: "fail",
+			result: TaskResult{
+				Status:        "blocked",
+				Comment:       "provider unavailable",
+				SessionID:     "ses-fail",
+				WorkDir:       "/tmp/fail",
+				FailureReason: "agent_error.provider_unavailable",
+			},
+			wantSuffix: "/fail",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if !strings.HasSuffix(req.URL.Path, tc.wantSuffix) {
+					t.Errorf("terminal callback path = %q, want suffix %q", req.URL.Path, tc.wantSuffix)
+				}
+				calls.Add(1)
+				w.WriteHeader(http.StatusOK)
+			}))
+			t.Cleanup(srv.Close)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+			d.reportTaskResult(ctx, "task-cancelled-parent", tc.result, slog.Default())
+
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("terminal callback calls = %d, want 1", got)
+			}
+		})
 	}
 }
 
@@ -2784,6 +3194,76 @@ func TestReportTaskResult_PermanentCompleteFallsBackToFail(t *testing.T) {
 	}
 	if got := failCalls.Load(); got != 1 {
 		t.Fatalf("permanent /complete should fall back to /fail exactly once, got %d", got)
+	}
+}
+
+func TestReportTaskResult_CancelledParentStillRunsPermanentFailureFallback(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var completeCalls, failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/complete"):
+			completeCalls.Add(1)
+			w.WriteHeader(http.StatusBadRequest)
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(ctx, "task-cancelled-fallback", TaskResult{
+		Status:  "completed",
+		Comment: "ok",
+	}, slog.Default())
+
+	if got := completeCalls.Load(); got != 1 {
+		t.Fatalf("complete calls = %d, want 1", got)
+	}
+	if got := failCalls.Load(); got != 1 {
+		t.Fatalf("fallback fail calls = %d, want 1", got)
+	}
+}
+
+func TestHandleTask_BareErrorReportsFailureWithCancelledParent(t *testing.T) {
+	t.Parallel()
+
+	var failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasSuffix(req.URL.Path, "/fail") {
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+		}
+		failCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "codex"}},
+		cancelPollInterval: time.Hour,
+	}
+	d.runner = taskRunnerFunc(func(runCtx context.Context, _ Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
+		if !errors.Is(runCtx.Err(), context.Canceled) {
+			t.Errorf("runner context error = %v, want context.Canceled", runCtx.Err())
+		}
+		return TaskResult{}, errors.New("runner exited during shutdown")
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	d.handleTask(ctx, Task{ID: "task-bare-error", RuntimeID: "rt-1"}, 0)
+
+	if got := failCalls.Load(); got != 1 {
+		t.Fatalf("fail callback calls = %d, want 1", got)
 	}
 }
 

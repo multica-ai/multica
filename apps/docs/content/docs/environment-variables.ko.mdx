@@ -19,6 +19,9 @@ import { Callout } from "fumadocs-ui/components/callout";
 | `APP_ENV` | 비어 있음 | **예** (`production`이어야 함) |
 | `FRONTEND_ORIGIN` | 비어 있음 | **예** (자체 호스팅은 자체 도메인을 설정해야 함) |
 | `MULTICA_DEV_VERIFICATION_CODE` | 비어 있음 | 아니오 (프로덕션에서는 반드시 비워 두어야 함) |
+| `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 아니오. `SIGTERM`/`SIGINT` 수신 후 정상 종료를 시작하기 전의 선택적 대기 시간입니다. `300s`, `5m` 같은 음수가 아닌 Go duration을 허용하며, 비어 있거나 `0`이면 즉시 종료를 시작합니다 |
+
+Kubernetes에서 `MULTICA_SHUTDOWN_HOLD_DURATION`을 사용할 때는 `terminationGracePeriodSeconds`를 hold 시간과 이후 정상 종료 시간의 합보다 길게 설정하세요. 두 값을 같은 시간으로 설정하면 정리가 끝나기 전에 kubelet이 `SIGKILL`을 보낼 수 있습니다.
 
 <Callout type="warning">
 **프로덕션에서는 `MULTICA_DEV_VERIFICATION_CODE`를 비워 두세요.** 고정된 로컬 테스트 코드는 기본적으로 비활성화되어 있지만, `MULTICA_DEV_VERIFICATION_CODE=888888`로 활성화하면 `APP_ENV`가 production이 아닌 동안에는 코드를 요청할 수 있는 누구나 그 고정 값으로 로그인할 수 있습니다. 이 단축 코드는 `APP_ENV=production`일 때 무시됩니다.

@@ -25,6 +25,9 @@ import type {
   IssueProperty,
   ListPropertiesResponse,
   IssuePropertiesResponse,
+  IssueTableFacetsResponse,
+  IssueTableGroupsResponse,
+  IssueTableRowsResponse,
   ListIssuesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
@@ -563,6 +566,98 @@ export const GroupedIssuesResponseSchema = z.object({
 
 export const EMPTY_GROUPED_ISSUES_RESPONSE: GroupedIssuesResponse = {
   groups: [],
+};
+
+const IssueTableActorRefSchema = z.object({
+  // Server-driven enums stay open so installed desktop clients survive a
+  // backend that introduces another actor kind.
+  type: z.string(),
+  id: z.string(),
+}).loose();
+
+const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("status"),
+    status: z.string(),
+  }).loose(),
+  z.object({
+    kind: z.literal("assignee"),
+    actor: IssueTableActorRefSchema.nullable(),
+  }).loose(),
+  z.object({
+    kind: z.literal("property"),
+    property_id: z.string(),
+    value: z.union([z.string(), z.boolean(), z.null()]).optional(),
+    value_state: z.enum(["value", "unavailable", "unset"]),
+  }).loose(),
+]);
+
+const IssueTableGroupDescriptorSchema = z.object({
+  key: z.string(),
+  value: IssueTableGroupValueSchema,
+  count: z.number(),
+}).loose();
+
+export const IssueTableGroupsResponseSchema = z.object({
+  query_fingerprint: z.string(),
+  total: z.number(),
+  groups: z.array(IssueTableGroupDescriptorSchema).default([]),
+  next_cursor: z.string().nullable().default(null),
+}).loose();
+
+export const EMPTY_ISSUE_TABLE_GROUPS_RESPONSE: IssueTableGroupsResponse = {
+  query_fingerprint: "",
+  total: 0,
+  groups: [],
+  next_cursor: null,
+};
+
+const IssueTableRowSchema = z.object({
+  issue: IssueSchema,
+  direct_child_count: z.number().default(0),
+}).loose();
+
+export const IssueTableRowsResponseSchema = z.object({
+  query_fingerprint: z.string(),
+  group_key: z.string().nullable().default(null),
+  parent_id: z.string().nullable().default(null),
+  total: z.number(),
+  rows: z.array(IssueTableRowSchema).default([]),
+  branch_total: z.number(),
+  next_cursor: z.string().nullable().default(null),
+}).loose();
+
+export const EMPTY_ISSUE_TABLE_ROWS_RESPONSE: IssueTableRowsResponse = {
+  query_fingerprint: "",
+  group_key: null,
+  parent_id: null,
+  total: 0,
+  rows: [],
+  branch_total: 0,
+  next_cursor: null,
+};
+
+const IssueTableFacetValueSchema = z.object({
+  key: z.string(),
+  count: z.number(),
+}).loose();
+
+const IssueTableFacetSchema = z.object({
+  kind: z.enum(["status", "priority", "assignee", "creator", "project", "label", "property"]),
+  property_id: z.string().optional(),
+  values: z.array(IssueTableFacetValueSchema).default([]),
+}).loose();
+
+export const IssueTableFacetsResponseSchema = z.object({
+  query_fingerprint: z.string(),
+  total: z.number(),
+  facets: z.array(IssueTableFacetSchema).default([]),
+}).loose();
+
+export const EMPTY_ISSUE_TABLE_FACETS_RESPONSE: IssueTableFacetsResponse = {
+  query_fingerprint: "",
+  total: 0,
+  facets: [],
 };
 
 const SubscriberSchema = z.object({

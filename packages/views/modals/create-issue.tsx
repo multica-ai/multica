@@ -50,7 +50,9 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, useUploadGate, useEditorUpload } from "../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useUploadGate, useEditorUpload } from "../editor";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
@@ -230,8 +232,10 @@ export function ManualCreatePanel({
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
   const manualFields = useIssueCreateSettingsStore((s) => s.manualCreateFields);
 
+  const sendShortcut = useShortcut("send");
   const [title, setTitle] = useState(draft.title);
   const [formResetKey, setFormResetKey] = useState(0);
+  const titleEditorRef = useRef<TitleEditorRef>(null);
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
@@ -241,6 +245,7 @@ export function ManualCreatePanel({
     (data?.priority as IssuePriority | undefined) ?? draft.priority,
   );
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(() => {
     if (data && "assignee_type" in data) {
       return (data.assignee_type as IssueAssigneeType | null) ?? undefined;
@@ -421,8 +426,19 @@ export function ManualCreatePanel({
   };
 
   const handleSubmit = async () => {
-    if (!title.trim() || submitting) return;
+    // Single-flight on a ref, not `submitting`: two shortcut presses in one
+    // tick both read the pre-update state and would each fire a create. The
+    // ref flips synchronously, so the second press loses the race.
+    if (submittingRef.current) return;
+    if (!title.trim()) {
+      // The shortcut paths bypass the button entirely, so an empty title would
+      // otherwise be a silent no-op. Put the caret where the fix is; the
+      // button's tooltip says the rest.
+      titleEditorRef.current?.focus();
+      return;
+    }
     if (uploadGate.isBlocked()) return;
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
@@ -627,6 +643,7 @@ export function ManualCreatePanel({
           : t(($) => $.create_issue.toast_failed),
       );
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -682,6 +699,59 @@ export function ManualCreatePanel({
     });
   };
 
+  // One state for the button and the keyboard paths, so a rendered affordance
+  // can never disagree with what `handleSubmit` will actually do.
+  const submitState: "submitting" | "uploading" | "missing_title" | "ready" =
+    submitting
+      ? "submitting"
+      : uploadGate.uploading
+        ? "uploading"
+        : !title.trim()
+          ? "missing_title"
+          : "ready";
+  const submitBusy = submitState === "submitting" || submitState === "uploading";
+
+  // Built once and reused by both footer branches: rendering a separate Button
+  // per branch is how the keycaps drifted out of one of them before.
+  const createButton = (
+    <Button
+      size="sm"
+      onClick={handleSubmit}
+      // Native `disabled` for the transient busy states, but `aria-disabled`
+      // for a missing title — a native-disabled button is not focusable, so
+      // keyboard and screen-reader users could never reach the tooltip that
+      // explains why nothing happens. `handleSubmit` is the real gate either way.
+      disabled={submitBusy}
+      aria-disabled={submitState === "missing_title" || undefined}
+      aria-busy={submitBusy || undefined}
+      // The Button base only dims/blocks on native `disabled`, so aria-disabled
+      // would otherwise stay a fully lit, pressable-looking primary button.
+      // Deliberately no `pointer-events-none`: this control still has to hover
+      // its tooltip and take the click that focuses the title.
+      className="aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:active:translate-y-0"
+    >
+      {submitState === "submitting" ? (
+        t(($) => $.create_issue.submitting)
+      ) : submitState === "uploading" ? (
+        tEditor(($) => $.upload.in_progress)
+      ) : (
+        <>
+          {t(($) => $.create_issue.submit)}
+          {/* Decorative: the accessible name must stay "Create Issue", not
+              "Create Issue Command Enter". Absent when `send` is unbound. */}
+          {sendShortcut ? (
+            <ShortcutKeycaps
+              shortcut={sendShortcut}
+              decorative
+              className="ml-1"
+              keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
+            />
+          ) : null}
+        </>
+      )}
+    </Button>
+  );
+
   return (
     <>
             <DialogTitle className="sr-only">{t(($) => $.create_issue.sr_manual)}</DialogTitle>
@@ -733,11 +803,14 @@ export function ManualCreatePanel({
             <div className="px-5 pb-2 shrink-0">
               <TitleEditor
                 key={formResetKey}
+                ref={titleEditorRef}
                 autoFocus
                 defaultValue={draft.title}
                 placeholder={t(($) => $.create_issue.title_placeholder)}
                 className="text-lg font-semibold"
                 onChange={(v) => updateTitle(v)}
+                // Chord only — plain Enter still just ends title editing (#5532).
+                onSubmitShortcut={handleSubmit}
               />
             </div>
 
@@ -748,6 +821,7 @@ export function ManualCreatePanel({
                 defaultValue={draft.description}
                 placeholder={t(($) => $.create_issue.description_placeholder)}
                 onUpdate={(md) => setDraft({ description: md })}
+                onSubmit={handleSubmit}
                 onUploadFile={handleUpload}
                 onUploadingChange={uploadGate.onUploadingChange}
                 debounceMs={500}
@@ -1137,27 +1211,18 @@ export function ManualCreatePanel({
                   />
                   {t(($) => $.create_issue.create_another)}
                 </label>
-                {!title.trim() ? (
+                {submitState === "missing_title" ? (
                   <TooltipProvider delay={200}>
                     <Tooltip>
-                      <TooltipTrigger render={<span><Button size="sm" onClick={handleSubmit} disabled>{t(($) => $.create_issue.submit)}</Button></span>} />
+                      {/* No `<span>` wrapper needed now: aria-disabled leaves the
+                          button focusable and hoverable, so it can anchor its own
+                          tooltip. */}
+                      <TooltipTrigger render={createButton} />
                       <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 ) : (
-                  <Button
-                    size="sm"
-                    onClick={handleSubmit}
-                    disabled={submitting || uploadGate.uploading}
-                    aria-disabled={uploadGate.uploading || undefined}
-                    aria-busy={uploadGate.uploading || undefined}
-                  >
-                    {submitting
-                      ? t(($) => $.create_issue.submitting)
-                      : uploadGate.uploading
-                        ? tEditor(($) => $.upload.in_progress)
-                        : t(($) => $.create_issue.submit)}
-                  </Button>
+                  createButton
                 )}
               </div>
             </div>

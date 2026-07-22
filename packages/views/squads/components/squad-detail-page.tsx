@@ -1353,7 +1353,7 @@ function SquadInstructionsTab({
       >
         <ContentEditor
           key={squad.id}
-          defaultValue={value}
+          value={value}
           onUpdate={canManage ? setValue : () => {}}
           placeholder={
             canManage
