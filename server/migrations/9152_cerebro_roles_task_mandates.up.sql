@@ -32,19 +32,32 @@ CREATE INDEX IF NOT EXISTS idx_cerebro_task_mandate_agent_expiry
 -- Preserve current agent-layer choices as versioned, permanent role bindings.
 -- Explicitly authored policy remains the source of truth; this migration only
 -- packages it into roles so the flip has no decision differences.
+-- Each tool maps to a LIST of rules, not a single object: an agent may carry
+-- several rows for the same tool_key that differ on resource_pattern or
+-- conditions (e.g. an action-scoped allow next to a capability-wide deny).
+-- Keying jsonb_object_agg directly on tool_key would collapse those rows to
+-- one arbitrary winner, and a resource-scoped allow would silently become a
+-- whole-tool allow when only 'setting' is read back. The reader
+-- (toolpolicy.Store.activeRoleSettings) honours setting, resource_pattern
+-- AND conditions for every rule in the list.
 INSERT INTO cerebro_role (workspace_id, name, description, version, permissions)
 SELECT
     workspace_id,
     'Migrated agent ' || subject_id::text,
     'Automatically migrated from direct agent policy rows',
     1,
-    jsonb_object_agg(tool_key, jsonb_build_object(
-        'setting', setting,
-        'resource_pattern', resource_pattern,
-        'conditions', conditions
-    ) ORDER BY tool_key)
-FROM cerebro_tool_policy
-WHERE layer = 'agent'
+    jsonb_object_agg(tool_key, rules ORDER BY tool_key)
+FROM (
+    SELECT workspace_id, subject_id, tool_key,
+           jsonb_agg(jsonb_build_object(
+               'setting', setting,
+               'resource_pattern', resource_pattern,
+               'conditions', conditions
+           ) ORDER BY resource_pattern) AS rules
+    FROM cerebro_tool_policy
+    WHERE layer = 'agent'
+    GROUP BY workspace_id, subject_id, tool_key
+) per_tool
 GROUP BY workspace_id, subject_id
 ON CONFLICT (workspace_id, name) DO NOTHING;
 

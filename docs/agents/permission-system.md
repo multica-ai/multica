@@ -21,6 +21,11 @@
 > Every `toolpolicy.Store` constructor now retains the database adapter used by
 > generated queries, so active role assignments participate in every resolve
 > path. Missing role storage is an error instead of a silent policy bypass.
+> Migrated scopes survive verbatim: a legacy group/user grant keyed on a
+> runtime becomes an Allow conditioned on that `runtime_id` (arg allowlist),
+> and a role permission stores a LIST of rules per tool — resolution honours
+> each rule's `resource_pattern` and `conditions`, never just its setting, so
+> a scoped grant can never widen into a workspace- or tool-wide one.
 > The live server also starts a daily, tighten-only governance sweep over role
 > assignments; it reports expired, orphaned, and unused access in severity
 > order. Permission audit rows use the same critical-to-low ordering.

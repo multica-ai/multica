@@ -10,6 +10,7 @@ package toolpolicy
 // chain Input from stored rows.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // Store reads and writes the explicit per-layer tool settings.
@@ -285,6 +287,11 @@ func (s *Store) loadInput(ctx context.Context, in Query) (Input, error) {
 		return Input{}, fmt.Errorf("toolpolicy: load context settings: %w", err)
 	}
 
+	// Thread the resolving runtime into the condition-matching context, so a
+	// runtime-scoped rule (arg_allowlist on runtime_id — the shape migration
+	// 9153 writes for legacy group/user grants) bites at every chain gate.
+	reqCtx := requestContextWithRuntime(in)
+
 	input := Input{Settings: map[Layer]Setting{}, Base: in.Base, IsSystem: in.IsSystem}
 	var groupSettings []Setting
 	for _, r := range rows {
@@ -294,7 +301,7 @@ func (s *Store) loadInput(ctx context.Context, in Query) (Input, error) {
 		if err != nil {
 			return Input{}, fmt.Errorf("toolpolicy: decode conditions for layer %q: %w", layer, err)
 		}
-		setting, applies := ConditionedSetting(setting, cond, in.RequestContext, in.Eval)
+		setting, applies := ConditionedSetting(setting, cond, reqCtx, in.Eval)
 		if !applies {
 			// The WHEN layer's terms are not met (or the row fails closed): the
 			// row drops out, so this layer inherits as if the row were absent.
@@ -309,7 +316,7 @@ func (s *Store) loadInput(ctx context.Context, in Query) (Input, error) {
 	if len(groupSettings) > 0 {
 		input.Settings[LayerGroup] = CombineGroups(groupSettings...)
 	}
-	roleSettings, err := s.activeRoleSettings(ctx, in)
+	roleSettings, err := s.activeRoleSettings(ctx, in, reqCtx)
 	if err != nil {
 		return Input{}, err
 	}
@@ -333,12 +340,18 @@ func (s *Store) loadInput(ctx context.Context, in Query) (Input, error) {
 // activeRoleSettings expands unexpired member/agent bindings into the policy
 // decision. An expired binding is filtered by the database clock on every
 // resolve, so access disappears at the call itself without a cleanup worker.
-func (s *Store) activeRoleSettings(ctx context.Context, in Query) ([]Setting, error) {
+//
+// A role permission is the FULL rule set for a tool, not just a setting: each
+// rule carries resource_pattern (matched verbatim against the query, exactly
+// like ListCerebroToolPolicyForContext) and conditions (evaluated through
+// ConditionedSetting). Reading only 'setting' let a resource- or
+// condition-scoped allow act as a whole-tool allow (FIR-3403 finding 2).
+func (s *Store) activeRoleSettings(ctx context.Context, in Query, reqCtx RequestContext) ([]Setting, error) {
 	if s == nil || s.pool == nil {
 		return nil, errors.New("toolpolicy: role binding store is not configured")
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT r.permissions -> $4 ->> 'setting'
+		SELECT r.permissions -> $4
 		FROM cerebro_role_assignment b
 		JOIN cerebro_role r ON r.id=b.role_id
 		WHERE r.workspace_id=$1
@@ -352,16 +365,85 @@ func (s *Store) activeRoleSettings(ctx context.Context, in Query) ([]Setting, er
 	defer rows.Close()
 	var out []Setting
 	for rows.Next() {
-		var raw string
+		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
 			return nil, err
 		}
-		setting := Setting(raw)
-		if validSetting(setting) && setting != SettingInherit {
+		rules, err := decodeRolePermission(raw)
+		if err != nil {
+			return nil, fmt.Errorf("toolpolicy: decode role permission for %q: %w", in.ToolKey, err)
+		}
+		for _, rule := range rules {
+			if rule.ResourcePattern != in.ResourcePattern {
+				continue
+			}
+			setting := Setting(rule.Setting)
+			if !validSetting(setting) || setting == SettingInherit {
+				continue
+			}
+			setting, applies := ConditionedSetting(setting, rule.Conditions, reqCtx, in.Eval)
+			if !applies {
+				continue
+			}
 			out = append(out, setting)
 		}
 	}
 	return out, rows.Err()
+}
+
+// rolePermissionRule is one rule inside a role's per-tool permission list —
+// the same (setting, resource_pattern, conditions) triple a direct
+// cerebro_tool_policy row carries, packaged into cerebro_role.permissions by
+// migration 9152.
+type rolePermissionRule struct {
+	Setting         string     `json:"setting"`
+	ResourcePattern string     `json:"resource_pattern"`
+	Conditions      *Condition `json:"conditions"`
+}
+
+// decodeRolePermission decodes one tool's permission value from
+// cerebro_role.permissions. The canonical shape is a LIST of rules (several
+// rows for one tool must not collapse). A bare object is accepted as a
+// single-rule list for rows written by the pre-fix migration shape, so an
+// already-migrated environment keeps resolving without a rewrite.
+func decodeRolePermission(raw []byte) ([]rolePermissionRule, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil, nil
+	}
+	if trimmed[0] == '[' {
+		var rules []rolePermissionRule
+		if err := json.Unmarshal(trimmed, &rules); err != nil {
+			return nil, err
+		}
+		return rules, nil
+	}
+	var rule rolePermissionRule
+	if err := json.Unmarshal(trimmed, &rule); err != nil {
+		return nil, err
+	}
+	return []rolePermissionRule{rule}, nil
+}
+
+// requestContextWithRuntime returns the query's request context with the
+// resolving runtime threaded into ArgValues, so a runtime-scoped rule
+// (arg_allowlist on runtime_id — the shape migration 9153 writes when it
+// preserves legacy per-runtime group/user grants) is matched at every gate.
+// The caller's map is copied, never mutated. When no runtime is in scope the
+// argument stays absent, so a runtime-scoped Allow fails closed to Deny
+// (ConditionedSetting) instead of silently applying workspace-wide.
+func requestContextWithRuntime(in Query) RequestContext {
+	rc := in.RequestContext
+	if !in.RuntimeID.Valid {
+		return rc
+	}
+	av := make(map[string]string, len(rc.ArgValues)+1)
+	for k, v := range rc.ArgValues {
+		av[k] = v
+	}
+	av["runtime_id"] = util.UUIDToString(in.RuntimeID)
+	rc.ArgValues = av
+	return rc
 }
 
 // resolveGroupIDs returns the group ids that enter the chain at LayerGroup.
