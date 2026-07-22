@@ -1,6 +1,6 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
-import type { TaskMessagePayload } from "../types/events";
+import type { ExecutionLogPage, TaskMessagePayload } from "../types/events";
 import type { ChatSession } from "../types/chat";
 
 // NOTE on workspace scoping:
@@ -226,4 +226,73 @@ export function hasPendingChatTasksOptions(wsId: string) {
     queryFn: () => api.hasAnyPendingChatTasks(),
     staleTime: Infinity,
   });
+}
+
+// ─── Paginated Execution Log (MUL-5122) ──────────────────────────────────────
+//
+// A dedicated infinite-query namespace, deliberately separate from the legacy
+// full-array `taskMessages` cache above (Chat/live-stream keep using that). The
+// server owns cursors and full-Run totals/facets; the client only stores pages
+// and echoes cursors back.
+
+export const executionLogKeys = {
+  all: () => ["execution-log"] as const,
+  /** Filters live in the key so a chip change is a distinct cache, and the
+   *  cursor stays a page parameter (never in the key). */
+  page: (taskId: string, filterKey: string) =>
+    [...executionLogKeys.all(), taskId, filterKey] as const,
+};
+
+export interface ExecutionLogFilters {
+  types?: string[];
+  tools?: string[];
+}
+
+// Stable, order-independent string for the filter portion of the query key so
+// selecting the same chips in a different order does not fragment the cache.
+export function executionLogFilterKey(filters: ExecutionLogFilters | undefined): string {
+  const types = [...(filters?.types ?? [])].sort();
+  const tools = [...(filters?.tools ?? [])].sort();
+  return JSON.stringify({ types, tools });
+}
+
+export function executionLogPageOptions(
+  taskId: string,
+  filters?: ExecutionLogFilters,
+  limit = 50,
+) {
+  return infiniteQueryOptions({
+    queryKey: executionLogKeys.page(taskId, executionLogFilterKey(filters)),
+    queryFn: ({ pageParam }) =>
+      api.listTaskMessagesPage(taskId, {
+        before: pageParam,
+        limit,
+        types: filters?.types,
+        tools: filters?.tools,
+      }),
+    initialPageParam: null as string | null,
+    // `older_cursor` walks history backwards; absent → no older pages remain.
+    getNextPageParam: (lastPage: ExecutionLogPage) =>
+      lastPage.older_cursor ?? undefined,
+    enabled: isTaskMessageTaskId(taskId),
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * Flatten infinite pages into one chronological (oldest→newest) list. Page 0 is
+ * the newest window and each subsequent page is older, so reversing page order
+ * and concatenating yields ascending order. Cursor paging is exclusive, so
+ * windows never overlap — no cross-page de-duplication is required here.
+ */
+export function flattenExecutionLogPages(
+  pages: ExecutionLogPage[] | undefined,
+): TaskMessagePayload[] {
+  if (!pages || pages.length === 0) return [];
+  const out: TaskMessagePayload[] = [];
+  for (let i = pages.length - 1; i >= 0; i--) {
+    const p = pages[i];
+    if (p) out.push(...p.messages);
+  }
+  return out;
 }

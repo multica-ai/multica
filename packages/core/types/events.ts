@@ -259,6 +259,29 @@ export interface TaskMessagePayload {
   created_at?: string;
 }
 
+/** One dynamic filter key computed across the complete Run (MUL-5122). Keys are
+ *  open strings — provider-native tool names and event types — never a closed
+ *  enum. */
+export interface ExecutionLogFacet {
+  key: string;
+  count: number;
+}
+
+/** One bounded, chronological page of the paginated Execution Log plus the
+ *  full-Run context (MUL-5122). `older_cursor` pages history via `before=`;
+ *  `latest_cursor` is the live edge anchor fed to `after=` for terminal
+ *  catch-up. Cursors are opaque — echoed back verbatim, never parsed. */
+export interface ExecutionLogPage {
+  messages: TaskMessagePayload[];
+  limit: number;
+  older_cursor?: string | null;
+  latest_cursor?: string | null;
+  raw_total: number;
+  matched_total: number;
+  type_facets: ExecutionLogFacet[];
+  tool_facets: ExecutionLogFacet[];
+}
+
 export interface TaskQueuedPayload {
   task_id: string;
   agent_id: string;

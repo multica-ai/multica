@@ -67,6 +67,7 @@ import type {
   TimelineEntry,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
+  ExecutionLogPage,
   Attachment,
   ChatSession,
   ChatPinnedAgent,
@@ -166,6 +167,8 @@ import {
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
   ChildIssuesResponseSchema,
+  ExecutionLogPageResponseSchema,
+  EMPTY_EXECUTION_LOG_PAGE,
   CommentsListSchema,
   CommentTriggerPreviewSchema,
   IssueTriggerPreviewSchema,
@@ -1596,6 +1599,63 @@ export class ApiClient {
 
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
     return this.fetch(`/api/tasks/${taskId}/messages`);
+  }
+
+  // Paginated Execution Log (MUL-5122). `before`/`after` are opaque cursors
+  // (older history / bounded terminal catch-up); `types`/`tools` are full-Run
+  // server-side filters. Both cursors are mutually exclusive at the server.
+  async listTaskMessagesPage(
+    taskId: string,
+    params: {
+      limit?: number;
+      before?: string | null;
+      after?: string | null;
+      types?: string[];
+      tools?: string[];
+    } = {},
+  ): Promise<ExecutionLogPage> {
+    const limit = params.limit ?? 50;
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (params.before) query.set("before", params.before);
+    if (params.after) query.set("after", params.after);
+    if (params.types && params.types.length > 0) query.set("types", params.types.join(","));
+    if (params.tools && params.tools.length > 0) query.set("tools", params.tools.join(","));
+
+    const isInitial =
+      !params.before &&
+      !params.after &&
+      !(params.types && params.types.length > 0) &&
+      !(params.tools && params.tools.length > 0);
+
+    try {
+      const raw = await this.fetch(
+        `/api/tasks/${taskId}/messages/page?${query.toString()}`,
+      );
+      return parseWithFallback(raw, ExecutionLogPageResponseSchema, EMPTY_EXECUTION_LOG_PAGE, {
+        endpoint: "listTaskMessagesPage",
+      });
+    } catch (err) {
+      // Deployment-order compatibility: a backend deployed before this endpoint
+      // existed 404s the unknown route. Only the initial, unfiltered, cursorless
+      // page falls back to the legacy full-array endpoint so a newer client
+      // never white-screens against an older backend; the fallback returns the
+      // whole Run as one page (no further history). A 404 on a cursor/filter
+      // request is unexpected and propagates.
+      if (err instanceof ApiError && err.status === 404 && isInitial) {
+        const messages = await this.listTaskMessages(taskId);
+        return {
+          messages,
+          limit,
+          older_cursor: null,
+          latest_cursor: null,
+          raw_total: messages.length,
+          matched_total: messages.length,
+          type_facets: [],
+          tool_facets: [],
+        };
+      }
+      throw err;
+    }
   }
 
   async listTasksByIssue(issueId: string): Promise<AgentTask[]> {

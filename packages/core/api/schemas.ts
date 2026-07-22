@@ -39,6 +39,7 @@ import type {
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
+import type { ExecutionLogPage } from "../types/events";
 
 // Label responses are consumed by settings tables and resource pickers. Keep
 // the resource type lenient so newer server scopes do not break older clients,
@@ -1527,4 +1528,47 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
+};
+
+// Paginated Execution Log (MUL-5122). Lenient by design: event `type` stays an
+// open string so an unknown/new event kind still parses, and every optional
+// message field degrades to absent independently rather than erasing the page.
+export const TaskMessagePayloadSchema = z.object({
+  task_id: z.string().default(""),
+  issue_id: z.string().default(""),
+  chat_session_id: z.string().optional(),
+  seq: z.number().default(0),
+  type: z.string().default(""),
+  tool: z.string().optional(),
+  content: z.string().optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+  output: z.string().optional(),
+  created_at: z.string().optional(),
+}).loose();
+
+export const ExecutionLogFacetSchema = z.object({
+  key: z.string().default(""),
+  count: z.number().default(0),
+}).loose();
+
+export const ExecutionLogPageResponseSchema = z.object({
+  messages: z.array(TaskMessagePayloadSchema).default([]),
+  limit: z.number().default(50),
+  older_cursor: z.string().nullable().optional(),
+  latest_cursor: z.string().nullable().optional(),
+  raw_total: z.number().default(0),
+  matched_total: z.number().default(0),
+  type_facets: z.array(ExecutionLogFacetSchema).default([]),
+  tool_facets: z.array(ExecutionLogFacetSchema).default([]),
+}).loose();
+
+export const EMPTY_EXECUTION_LOG_PAGE: ExecutionLogPage = {
+  messages: [],
+  limit: 50,
+  older_cursor: null,
+  latest_cursor: null,
+  raw_total: 0,
+  matched_total: 0,
+  type_facets: [],
+  tool_facets: [],
 };

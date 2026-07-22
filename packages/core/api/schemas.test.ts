@@ -31,6 +31,8 @@ import {
   SquadSchema,
   TimelineEntriesSchema,
   UserSchema,
+  ExecutionLogPageResponseSchema,
+  EMPTY_EXECUTION_LOG_PAGE,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
 
@@ -946,5 +948,56 @@ describe("CommentTriggerPreviewSchema.blocked", () => {
       ],
     });
     expect(parsed.blocked.map((b) => b.target_id)).toEqual(["s1", "a1"]);
+  });
+});
+
+describe("ExecutionLogPageResponseSchema", () => {
+  const validPage = {
+    messages: [
+      { task_id: "t1", issue_id: "i1", seq: 1, type: "text", content: "hi" },
+      { task_id: "t1", issue_id: "i1", seq: 2, type: "tool_use", tool: "exec_command", input: { command: "ls" } },
+    ],
+    limit: 50,
+    older_cursor: "b64cursor",
+    latest_cursor: "b64latest",
+    raw_total: 2,
+    matched_total: 2,
+    type_facets: [{ key: "text", count: 1 }, { key: "tool_use", count: 1 }],
+    tool_facets: [{ key: "exec_command", count: 1 }],
+  };
+
+  it("parses a full valid page", () => {
+    const parsed = ExecutionLogPageResponseSchema.parse(validPage);
+    expect(parsed.messages).toHaveLength(2);
+    expect(parsed.raw_total).toBe(2);
+    expect(parsed.type_facets).toEqual([
+      { key: "text", count: 1 },
+      { key: "tool_use", count: 1 },
+    ]);
+  });
+
+  it("keeps an unknown event type (open string) and missing optional fields", () => {
+    const parsed = ExecutionLogPageResponseSchema.parse({
+      messages: [{ task_id: "t1", issue_id: "i1", seq: 9, type: "mystery_type" }],
+      limit: 50,
+      raw_total: 1,
+      matched_total: 1,
+      type_facets: [],
+      tool_facets: [],
+    });
+    expect(parsed.messages[0]?.type).toBe("mystery_type");
+    expect(parsed.messages[0]?.tool).toBeUndefined();
+  });
+
+  it("falls back to an empty page on a malformed response rather than throwing", () => {
+    const parsed = parseWithFallback(
+      { messages: "not-an-array", limit: "nope" },
+      ExecutionLogPageResponseSchema,
+      EMPTY_EXECUTION_LOG_PAGE,
+      { endpoint: "listTaskMessagesPage" },
+    );
+    expect(parsed).toBe(EMPTY_EXECUTION_LOG_PAGE);
+    expect(parsed.messages).toEqual([]);
+    expect(parsed.raw_total).toBe(0);
   });
 });
