@@ -271,6 +271,43 @@ export interface CreateMemberRequest {
   role?: MemberRole;
 }
 
+export interface ProvisionMemberEntry {
+  email: string;
+  role: Exclude<MemberRole, "owner">;
+}
+
+export interface ProvisionMembersRequest {
+  entries: ProvisionMemberEntry[];
+}
+
+export type ProvisionMemberStatus =
+  | "created"
+  | "already_member"
+  | "duplicate"
+  | "invalid"
+  | "failed";
+
+export interface ProvisionMemberResult {
+  email: string;
+  role?: Exclude<MemberRole, "owner">;
+  status: ProvisionMemberStatus;
+  user_id?: string;
+  member_id?: string;
+  error?: string;
+}
+
+export interface ProvisionMembersResponse {
+  summary: {
+    total: number;
+    created: number;
+    already_member: number;
+    duplicate: number;
+    invalid: number;
+    failed: number;
+  };
+  results: ProvisionMemberResult[];
+}
+
 export interface UpdateMemberRequest {
   role: MemberRole;
 }

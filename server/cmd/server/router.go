@@ -893,6 +893,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/runtime-profiles/{profileId}", h.DeleteRuntimeProfile)
 				})
 				// Owner-only access
+				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Post("/members/provision", h.ProvisionMembers)
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
 
 				// GitHub integration — connect / disconnect remain admin-only;

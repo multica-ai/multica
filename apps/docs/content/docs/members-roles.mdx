@@ -39,6 +39,24 @@ If the invitation email fails to deliver (wrong address, mail service hiccup), t
 
 Invitations are **valid for 7 days**. After that, clicking the link shows an "expired" message, and the inviter needs to send a new one.
 
+## Provisioning an enterprise seed cohort
+
+Self-hosted organizations can optionally enable bulk member provisioning for a
+known early-adopter group. With the feature enabled, a workspace **owner** can
+open **Settings > Members > Provision members**, paste up to 100 email
+addresses, and assign the member or admin role to the whole batch.
+
+Provisioning creates the workspace memberships immediately and sends no
+invitation email. This is useful when an internal rollout should not depend on
+mail delivery, and it lets those users bind integrations such as the Lark bot
+as soon as they sign in. New accounts still verify their email during first
+sign-in; provisioning does not create passwords or bypass authentication.
+
+The capability is disabled by default. A self-hosted operator can enable it
+with `FF_SETTINGS_BULK_MEMBER_PROVISIONING=true`. Only owners can use the UI or
+API, only member/admin roles are accepted, and configured email/domain
+allowlists continue to apply when provisioning a new account.
+
 ## Always at least one owner
 
 Every workspace **must have at least one owner at all times**. This constraint automatically blocks two operations:

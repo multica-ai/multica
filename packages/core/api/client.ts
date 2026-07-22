@@ -9,6 +9,8 @@ import type {
   SearchProjectsResponse,
   UpdateMeRequest,
   CreateMemberRequest,
+  ProvisionMembersRequest,
+  ProvisionMembersResponse,
   UpdateMemberRequest,
   ListIssuesParams,
   ListGroupedIssuesParams,
@@ -182,6 +184,7 @@ import {
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
+  EMPTY_PROVISION_MEMBERS_RESPONSE,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
@@ -198,6 +201,7 @@ import {
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   AppConfigSchema,
+  ProvisionMembersResponseSchema,
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
   ListAutopilotsResponseSchema,
@@ -1780,6 +1784,22 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  async provisionMembers(
+    workspaceId: string,
+    data: ProvisionMembersRequest,
+  ): Promise<ProvisionMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/members/provision`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      ProvisionMembersResponseSchema,
+      EMPTY_PROVISION_MEMBERS_RESPONSE,
+      { endpoint: "POST /api/workspaces/{id}/members/provision" },
+    );
   }
 
   async updateMember(workspaceId: string, memberId: string, data: UpdateMemberRequest): Promise<MemberWithUser> {
