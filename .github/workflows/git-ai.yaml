@@ -1,0 +1,31 @@
+name: Git AI
+
+on:
+  pull_request:
+    types: [closed, synchronize]
+
+jobs:
+  git-ai:
+    if: github.event.pull_request.merged == true || github.event.action == 'synchronize'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Install git-ai v1.6.15
+        env:
+          GIT_AI_VERSION: v1.6.15
+          # sha256 of git-ai-linux-x64 from https://github.com/git-ai-project/git-ai/releases/tag/v1.6.15
+          GIT_AI_SHA256: 726fd59562866947f23b5eb14b0973ebbbc4a964796dc5377cfeb7dbda5e0646
+        run: |
+          curl -fsSL "https://github.com/git-ai-project/git-ai/releases/download/${GIT_AI_VERSION}/git-ai-linux-x64" -o /tmp/git-ai
+          echo "${GIT_AI_SHA256}  /tmp/git-ai" | sha256sum -c
+          install -m 755 /tmp/git-ai /usr/local/bin/git-ai
+      - name: Run git-ai
+        id: run-git-ai
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git-ai ci github run
