@@ -34,6 +34,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/cerebro/ai-impact/metrics", h.ListMetrics)
 	r.Post("/api/cerebro/ai-impact/metrics", h.CreateMetric)
 	r.Get("/api/cerebro/ai-impact/evidence", h.ListWorkspaceEvidence)
+	r.Get("/api/cerebro/ai-impact/quality-risk/decisions", h.ListQualityRiskDecisions)
 	r.Get("/api/cerebro/ai-impact/functions/{functionId}/evidence", h.ListFunctionEvidence)
 	r.Get("/api/cerebro/ai-impact/operating-loops/{operatingLoopId}/evidence", h.ListOperatingLoopEvidence)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/evidence", h.ListMetricEvidence)
@@ -41,6 +42,38 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/latest-observations", h.ListLatestObservations)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
 	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
+}
+
+type qualityRiskDecisionResponse struct {
+	FunctionID        uuid.UUID `json:"function_id"`
+	FunctionName      string    `json:"function_name"`
+	OperatingLoopID   uuid.UUID `json:"operating_loop_id"`
+	OperatingLoopName string    `json:"operating_loop_name"`
+	Decision          Decision  `json:"decision"`
+}
+
+// ListQualityRiskDecisions returns one evidence-based decision per Operating Loop.
+func (h *Handler) ListQualityRiskDecisions(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, _, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+	decisions, err := h.service.ListQualityRiskDecisions(r.Context(), workspaceID)
+	if err != nil {
+		writeObservationError(w, http.StatusInternalServerError, "failed to list quality and risk decisions")
+		return
+	}
+	response := make([]qualityRiskDecisionResponse, 0, len(decisions))
+	for _, item := range decisions {
+		response = append(response, qualityRiskDecisionResponse{
+			FunctionID:        item.Function.ID,
+			FunctionName:      item.Function.Name,
+			OperatingLoopID:   item.OperatingLoop.ID,
+			OperatingLoopName: item.OperatingLoop.Name,
+			Decision:          item.Decision,
+		})
+	}
+	writeObservationJSON(w, http.StatusOK, map[string]any{"decisions": response})
 }
 
 type evidenceResponse struct {

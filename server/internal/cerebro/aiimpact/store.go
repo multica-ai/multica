@@ -213,7 +213,7 @@ func (s *Store) ListProjectBindings(ctx context.Context, workspaceID uuid.UUID) 
 }
 
 const metricColumns = `id, workspace_id, operating_loop_id, name, family, unit,
- direction, baseline_start, baseline_end, source, guardrail, active, created_at, updated_at`
+ direction, baseline_start, baseline_end, target_value, source, guardrail, active, created_at, updated_at`
 
 func scanMetric(row pgx.Row) (Metric, error) {
 	var metric Metric
@@ -227,6 +227,7 @@ func scanMetric(row pgx.Row) (Metric, error) {
 		&metric.Direction,
 		&metric.BaselineStart,
 		&metric.BaselineEnd,
+		&metric.TargetValue,
 		&metric.Source,
 		&metric.Guardrail,
 		&metric.Active,

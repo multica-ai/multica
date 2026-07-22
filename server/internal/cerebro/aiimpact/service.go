@@ -3,6 +3,7 @@ package aiimpact
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -226,6 +227,105 @@ type EvidenceFilter struct {
 	MinimumConfidence float64
 	PeriodStart       time.Time
 	PeriodEnd         time.Time
+}
+
+// QualityRiskDecisionReadModel gives one evidence-based decision per Operating Loop.
+type QualityRiskDecisionReadModel struct {
+	Function      Function
+	OperatingLoop OperatingLoop
+	Decision      Decision
+}
+
+// ListQualityRiskDecisions evaluates the latest targeted Outcome and guardrail evidence.
+func (s *Service) ListQualityRiskDecisions(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+) ([]QualityRiskDecisionReadModel, error) {
+	functions, err := s.store.ListFunctions(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	operatingLoops, err := s.store.ListOperatingLoops(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	evidence, err := s.ListWorkspaceEvidence(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	type decisionEvidence struct {
+		function            Function
+		operatingLoop       OperatingLoop
+		hasOutcome          bool
+		outcomesPositive    bool
+		hasDecisionEvidence bool
+		evidenceMeasured    bool
+		guardrails          []GuardrailResult
+	}
+	byLoop := make(map[uuid.UUID]*decisionEvidence)
+	loopOrder := make([]uuid.UUID, 0, len(operatingLoops))
+	functionsByID := make(map[uuid.UUID]Function, len(functions))
+	for _, function := range functions {
+		functionsByID[function.ID] = function
+	}
+	for _, operatingLoop := range operatingLoops {
+		function, ok := functionsByID[operatingLoop.FunctionID]
+		if !ok || !function.Active || !operatingLoop.Active {
+			continue
+		}
+		byLoop[operatingLoop.ID] = &decisionEvidence{
+			function:         function,
+			operatingLoop:    operatingLoop,
+			outcomesPositive: true,
+			evidenceMeasured: true,
+		}
+		loopOrder = append(loopOrder, operatingLoop.ID)
+	}
+	for _, item := range evidence {
+		if item.Metric.TargetValue == nil || (!item.Metric.Guardrail && item.Metric.Family != FamilyOutcome) {
+			continue
+		}
+		state, ok := byLoop[item.OperatingLoop.ID]
+		if !ok {
+			continue
+		}
+
+		passed := metricMeetsTarget(item.Metric, item.Observation.Value)
+		state.hasDecisionEvidence = true
+		if item.Observation.EvidenceStatus != EvidenceMeasured {
+			state.evidenceMeasured = false
+		}
+		if item.Metric.Family == FamilyOutcome {
+			state.hasOutcome = true
+			state.outcomesPositive = state.outcomesPositive && passed
+		}
+		if item.Metric.Guardrail {
+			state.guardrails = append(state.guardrails, GuardrailResult{Critical: true, Passed: passed})
+		}
+	}
+
+	result := make([]QualityRiskDecisionReadModel, 0, len(loopOrder))
+	for _, loopID := range loopOrder {
+		state := byLoop[loopID]
+		decision := ComputeDecision(DecisionInput{
+			OutcomePositive:  state.hasOutcome && state.outcomesPositive,
+			EvidenceMeasured: state.hasDecisionEvidence && state.evidenceMeasured,
+			Guardrails:       state.guardrails,
+		}).Decision
+		result = append(result, QualityRiskDecisionReadModel{
+			Function:      state.function,
+			OperatingLoop: state.operatingLoop,
+			Decision:      decision,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].OperatingLoop.Name == result[j].OperatingLoop.Name {
+			return result[i].OperatingLoop.ID.String() < result[j].OperatingLoop.ID.String()
+		}
+		return result[i].OperatingLoop.Name < result[j].OperatingLoop.Name
+	})
+	return result, nil
 }
 
 // ListFilteredEvidence returns latest workspace evidence matching every supplied filter.

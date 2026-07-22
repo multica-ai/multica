@@ -167,11 +167,22 @@ type Metric struct {
 	Direction       MetricDirection
 	BaselineStart   time.Time
 	BaselineEnd     time.Time
+	TargetValue     *float64
 	Source          string
 	Guardrail       bool
 	Active          bool
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+func metricMeetsTarget(metric Metric, value float64) bool {
+	if metric.TargetValue == nil {
+		return false
+	}
+	if metric.Direction == DirectionDecrease {
+		return value <= *metric.TargetValue
+	}
+	return value >= *metric.TargetValue
 }
 
 func validMetricFamily(family MetricFamily) bool {

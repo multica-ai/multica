@@ -984,6 +984,78 @@ func TestWorkspaceEvidenceReadModelFiltersByGuardrail(t *testing.T) {
 	}
 }
 
+func TestQualityRiskDecisionsUseLatestMeasuredOutcomesAndGuardrails(t *testing.T) {
+	workspaceID := uuid.New()
+	functionID := uuid.New()
+	scaleLoopID := uuid.MustParse("00000000-0000-4000-8000-000000000001")
+	stopLoopID := uuid.MustParse("00000000-0000-4000-8000-000000000002")
+	observeLoopID := uuid.MustParse("00000000-0000-4000-8000-000000000003")
+	scaleOutcomeMetricID := uuid.New()
+	scaleGuardrailMetricID := uuid.New()
+	stopOutcomeMetricID := uuid.New()
+	stopGuardrailMetricID := uuid.New()
+	outcomeTarget := 10.0
+	guardrailTarget := 0.05
+	periodStart := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.Add(24 * time.Hour)
+	store := &recordingObservationStore{
+		functions: []Function{{
+			ID: functionID, WorkspaceID: workspaceID, Name: "Customer Service", Active: true,
+		}},
+		operatingLoops: []OperatingLoop{
+			{ID: scaleLoopID, WorkspaceID: workspaceID, FunctionID: functionID, Name: "Resolve customer needs", Active: true},
+			{ID: stopLoopID, WorkspaceID: workspaceID, FunctionID: functionID, Name: "Prevent repeat contacts", Active: true},
+			{ID: observeLoopID, WorkspaceID: workspaceID, FunctionID: functionID, Name: "Route customer needs", Active: true},
+		},
+		metrics: []Metric{
+			{ID: scaleOutcomeMetricID, WorkspaceID: workspaceID, OperatingLoopID: scaleLoopID, Name: "Resolved needs", Family: FamilyOutcome, Unit: "needs", Direction: DirectionIncrease, TargetValue: &outcomeTarget, Source: "support", Active: true},
+			{ID: scaleGuardrailMetricID, WorkspaceID: workspaceID, OperatingLoopID: scaleLoopID, Name: "Reopen rate", Family: FamilyQuality, Unit: "percent", Direction: DirectionDecrease, TargetValue: &guardrailTarget, Source: "support", Guardrail: true, Active: true},
+			{ID: stopOutcomeMetricID, WorkspaceID: workspaceID, OperatingLoopID: stopLoopID, Name: "Prevented contacts", Family: FamilyOutcome, Unit: "needs", Direction: DirectionIncrease, TargetValue: &outcomeTarget, Source: "support", Active: true},
+			{ID: stopGuardrailMetricID, WorkspaceID: workspaceID, OperatingLoopID: stopLoopID, Name: "Complaint rate", Family: FamilyRisk, Unit: "percent", Direction: DirectionDecrease, TargetValue: &guardrailTarget, Source: "support", Guardrail: true, Active: true},
+		},
+		workspaceObservations: []Observation{
+			{ID: uuid.New(), MetricID: scaleGuardrailMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 0.08, EvidenceStatus: EvidenceMeasured, Confidence: 0.9, Source: "support", Method: "superseded rate", CreatedAt: periodEnd.Add(-time.Hour)},
+			{ID: uuid.New(), MetricID: scaleOutcomeMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 12, EvidenceStatus: EvidenceMeasured, Confidence: 0.9, Source: "support", Method: "audited count", CreatedAt: periodEnd},
+			{ID: uuid.New(), MetricID: scaleGuardrailMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 0.04, EvidenceStatus: EvidenceMeasured, Confidence: 0.9, Source: "support", Method: "audited rate", CreatedAt: periodEnd},
+			{ID: uuid.New(), MetricID: stopGuardrailMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 0.04, EvidenceStatus: EvidenceMeasured, Confidence: 0.9, Source: "support", Method: "superseded rate", CreatedAt: periodEnd.Add(-time.Hour)},
+			{ID: uuid.New(), MetricID: stopOutcomeMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 15, EvidenceStatus: EvidenceMeasured, Confidence: 0.9, Source: "support", Method: "audited count", CreatedAt: periodEnd},
+			{ID: uuid.New(), MetricID: stopGuardrailMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 0.08, EvidenceStatus: EvidenceMeasured, Confidence: 0.9, Source: "support", Method: "audited rate", CreatedAt: periodEnd},
+		},
+	}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cerebro/ai-impact/quality-risk/decisions", nil)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("quality and risk decisions status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Decisions []struct {
+			FunctionID        uuid.UUID `json:"function_id"`
+			OperatingLoopID   uuid.UUID `json:"operating_loop_id"`
+			OperatingLoopName string    `json:"operating_loop_name"`
+			Decision          Decision  `json:"decision"`
+		} `json:"decisions"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode quality and risk decisions: %v", err)
+	}
+	if len(response.Decisions) != 3 ||
+		response.Decisions[0].FunctionID != functionID || response.Decisions[0].OperatingLoopID != stopLoopID || response.Decisions[0].OperatingLoopName != "Prevent repeat contacts" || response.Decisions[0].Decision != DecisionStop ||
+		response.Decisions[1].FunctionID != functionID || response.Decisions[1].OperatingLoopID != scaleLoopID || response.Decisions[1].OperatingLoopName != "Resolve customer needs" || response.Decisions[1].Decision != DecisionScale ||
+		response.Decisions[2].FunctionID != functionID || response.Decisions[2].OperatingLoopID != observeLoopID || response.Decisions[2].OperatingLoopName != "Route customer needs" || response.Decisions[2].Decision != DecisionObserve {
+		t.Fatalf("quality and risk decisions = %+v, want Stop, Scale, then Observe", response.Decisions)
+	}
+}
+
 func TestFunctionEvidenceReadModelReturnsOnlyLatestEvidenceForRequestedFunction(t *testing.T) {
 	workspaceID := uuid.New()
 	requestedFunctionID := uuid.New()
