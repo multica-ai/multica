@@ -70,6 +70,8 @@ VALUES ($1, $2, $3, 'feishu', 'ou_cc_user', now() + interval '10 minutes')`, tok
 VALUES ($1, 'feishu', 'oc_cc_chat', 'om_cc_card', 'final')`, chatSess)
 	exec(`INSERT INTO channel_inbound_message_dedup (installation_id, message_id)
 VALUES ($1, 'msg_cc_dedup')`, id)
+	exec(`INSERT INTO channel_inbound_delivery (installation_id, message_id, sequence_key, payload)
+VALUES ($1, $2, 'cc-sequence', '{"message_id":"cc"}'::jsonb)`, id, "delivery_"+app)
 	exec(`INSERT INTO channel_inbound_audit (installation_id, channel_type, event_type, channel_event_id, drop_reason)
 VALUES ($1, 'feishu', 'im.message.receive_v1', $2, 'test')`, id, auditEvent)
 	return id
@@ -108,6 +110,9 @@ func assertInstallationSwept(t *testing.T, ctx context.Context, pool *pgxpool.Po
 	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_inbound_message_dedup WHERE installation_id = $1`, id); n != 0 {
 		t.Fatalf("inbound dedup rows not swept: %d dangling rows (PurgeChannelInboundDedup has no caller)", n)
 	}
+	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_inbound_delivery WHERE installation_id = $1`, id); n != 0 {
+		t.Fatalf("inbound delivery rows not swept: %d dangling rows", n)
+	}
 	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_inbound_audit WHERE channel_event_id = $1`, auditEvent); n != 0 {
 		t.Fatalf("audit row should be purged on a hard delete, got %d remaining", n)
 	}
@@ -127,6 +132,9 @@ func assertInstallationIntact(t *testing.T, ctx context.Context, pool *pgxpool.P
 	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_inbound_message_dedup WHERE installation_id = $1`, id); n != 1 {
 		t.Fatalf("live-owner dedup row was swept: %d (want 1)", n)
 	}
+	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_inbound_delivery WHERE installation_id = $1`, id); n != 1 {
+		t.Fatalf("live-owner inbound delivery was removed: %d (want 1)", n)
+	}
 	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_inbound_audit WHERE channel_event_id = $1 AND installation_id = $2`, auditEvent, id); n != 1 {
 		t.Fatalf("live-owner audit ref was removed: %d (want 1)", n)
 	}
@@ -141,6 +149,7 @@ func TestDeleteChannelInstallationsByArchivedRuntimeAgents(t *testing.T) {
 	q := db.New(pool)
 
 	clean := func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_delivery WHERE message_id = ANY($1)`, []string{"delivery_" + ccAppArchive, "delivery_" + ccAppLive})
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_installation WHERE config->>'app_id' = ANY($1)`, []string{ccAppArchive, ccAppLive})
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_user_binding WHERE multica_user_id = $1`, ccUser)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = ANY($1)`, []string{ccChatArch, ccChatLive})
@@ -187,6 +196,7 @@ func TestDeleteWorkspace_SweepsChannelInstallations(t *testing.T) {
 	q := db.New(pool)
 
 	clean := func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_delivery WHERE message_id = $1`, "delivery_"+ccAppWs)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_installation WHERE config->>'app_id' = $1`, ccAppWs)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_user_binding WHERE multica_user_id = $1`, ccUser)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, ccChatWs)

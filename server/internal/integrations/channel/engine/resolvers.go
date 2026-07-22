@@ -90,6 +90,7 @@ type EnsureSessionParams struct {
 // is the dedup owner-fence token; the binder runs the dedup Mark INSIDE its
 // chat_message+session tx so the durable write and the Mark commit atomically.
 type AppendParams struct {
+	WorkspaceID    pgtype.UUID
 	SessionID      pgtype.UUID
 	Sender         pgtype.UUID
 	InstallationID pgtype.UUID
@@ -146,6 +147,14 @@ type IdentityResolver interface {
 	ResolveSender(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage) (ResolvedIdentity, error)
 }
 
+// MediaResolver persists platform-bound message resources after every access
+// gate has passed and before the user message transaction starts. Cleanup is
+// called when a later persistence step fails; a successful append owns the
+// objects and the callback is discarded.
+type MediaResolver interface {
+	Resolve(ctx context.Context, inst ResolvedInstallation, identity ResolvedIdentity, msg channel.InboundMessage) (resolved channel.InboundMessage, cleanup func(context.Context), err error)
+}
+
 // Deduper is the two-phase idempotency seam. Claim mints an owner-fence token
 // (ErrDuplicate when already processed / in flight); Mark/Release are fenced on
 // the token (a no-op on token mismatch is not an error).
@@ -198,6 +207,7 @@ type TypingNotifier interface {
 type ResolverSet struct {
 	Installation InstallationResolver
 	Identity     IdentityResolver
+	Media        MediaResolver
 	Dedup        Deduper
 	Session      SessionBinder
 	Audit        Auditor

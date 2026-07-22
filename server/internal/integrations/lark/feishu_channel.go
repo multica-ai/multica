@@ -20,9 +20,8 @@ import (
 // feishuChannel is the Feishu implementation of channel.Channel — the first
 // adapter driven by the channel-agnostic engine (MUL-3620). It wraps the
 // existing Lark transport: Connect runs the shared WS long-conn connector for
-// this installation, translating each decoded event into a normalized
-// channel.InboundMessage and handing it to the engine's shared inbound handler
-// (the Router, injected via channel.Config.Handler); Send posts a text reply
+// this installation and durably enqueueing each decoded event before ACK;
+// Send posts a text reply
 // through the Lark HTTP API. One instance is built per channel_installation by
 // the registered Factory; the connector is shared across instances.
 //
@@ -33,7 +32,7 @@ import (
 type feishuChannel struct {
 	inst    Installation
 	conn    EventConnector
-	handler channel.InboundHandler
+	inbound InboundDeliveryAcceptor
 	sender  APIClient
 	creds   CredentialsResolver
 	logger  *slog.Logger
@@ -51,10 +50,10 @@ func (c *feishuChannel) Type() channel.Type { return channel.TypeFeishu }
 // so the handler's error is what flows back.
 func (c *feishuChannel) Connect(ctx context.Context) error {
 	return c.conn.Run(ctx, c.inst, func(emitCtx context.Context, lm InboundMessage) (DispatchResult, error) {
-		if c.handler == nil {
-			return DispatchResult{}, errors.New("lark: inbound handler not configured")
+		if c.inbound == nil {
+			return DispatchResult{}, errors.New("lark: inbound delivery queue not configured")
 		}
-		return DispatchResult{}, c.handler(emitCtx, channelMessageFromLark(lm))
+		return DispatchResult{}, c.inbound.Enqueue(emitCtx, c.inst, lm)
 	})
 }
 
@@ -181,6 +180,7 @@ func outboundReplyTarget(out channel.OutboundMessage) ReplyTarget {
 // engine via channel.Config.Handler.
 type FeishuChannelDeps struct {
 	Connector   EventConnector
+	Inbound     InboundDeliveryAcceptor
 	APIClient   APIClient
 	Credentials CredentialsResolver
 	Logger      *slog.Logger
@@ -207,6 +207,7 @@ func newFeishuFactory(deps FeishuChannelDeps) channel.Factory {
 		// We build a credentials-only Installation from it; the workspace /
 		// agent identity is resolved per message by the Router, not needed here.
 		inst, err := installationFromRow(db.ChannelInstallation{
+			ID:          cfg.InstallationID,
 			ChannelType: channelTypeFeishu,
 			Config:      cfg.Raw,
 		})
@@ -216,7 +217,7 @@ func newFeishuFactory(deps FeishuChannelDeps) channel.Factory {
 		return &feishuChannel{
 			inst:    inst,
 			conn:    deps.Connector,
-			handler: cfg.Handler,
+			inbound: deps.Inbound,
 			sender:  deps.APIClient,
 			creds:   deps.Credentials,
 			logger:  logger,

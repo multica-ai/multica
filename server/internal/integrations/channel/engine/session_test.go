@@ -39,6 +39,9 @@ type fakeSessionQueries struct {
 	nextSession     byte
 	createdSessions int
 	messages        []string
+	messageID       pgtype.UUID
+	attachments     []db.CreateAttachmentParams
+	linked          []db.LinkAttachmentsToChatMessageParams
 	touched         int
 	replyTargets    int
 	lockedWorkspace int    // count of LockWorkspaceForChatSessionCreate calls
@@ -51,7 +54,7 @@ type fakeSessionQueries struct {
 }
 
 func newFake() *fakeSessionQueries {
-	return &fakeSessionQueries{bindings: map[string]pgtype.UUID{}, markRows: 1}
+	return &fakeSessionQueries{bindings: map[string]pgtype.UUID{}, markRows: 1, messageID: uid(80)}
 }
 
 func bindKey(inst pgtype.UUID, chat string) string { return fmt.Sprintf("%x|%s", inst.Bytes, chat) }
@@ -89,7 +92,17 @@ func (f *fakeSessionQueries) CreateChannelChatSessionBinding(_ context.Context, 
 
 func (f *fakeSessionQueries) CreateChatMessage(_ context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	f.messages = append(f.messages, arg.Content)
-	return db.ChatMessage{}, nil
+	return db.ChatMessage{ID: f.messageID}, nil
+}
+
+func (f *fakeSessionQueries) CreateAttachment(_ context.Context, arg db.CreateAttachmentParams) (db.Attachment, error) {
+	f.attachments = append(f.attachments, arg)
+	return db.Attachment{ID: arg.ID}, nil
+}
+
+func (f *fakeSessionQueries) LinkAttachmentsToChatMessage(_ context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error) {
+	f.linked = append(f.linked, arg)
+	return append([]pgtype.UUID(nil), arg.AttachmentIds...), nil
 }
 
 func (f *fakeSessionQueries) TouchChatSession(context.Context, pgtype.UUID) error {
@@ -235,6 +248,42 @@ func TestAppendUserMessage_PlainText(t *testing.T) {
 	}
 	if f.touched != 1 || f.replyTargets != 1 {
 		t.Errorf("touched=%d replyTargets=%d, want 1/1", f.touched, f.replyTargets)
+	}
+}
+
+func TestAppendUserMessageCreatesAndBindsInboundAttachments(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	workspaceID := uid(2)
+	senderID := uid(7)
+	sessionID := uid(1)
+	_, err := s.AppendUserMessage(context.Background(), AppendInput{
+		WorkspaceID: workspaceID,
+		SessionID:   sessionID,
+		Sender:      senderID,
+		Body:        "[File attachment: report.pdf]",
+		MediaRefs: []channel.MediaRef{{
+			Type:       channel.MsgTypeFile,
+			StorageKey: "workspaces/ws/channel-inbound/object.pdf",
+			URL:        "/uploads/workspaces/ws/channel-inbound/object.pdf",
+			Filename:   "report.pdf",
+			MimeType:   "application/pdf",
+			SizeBytes:  123,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if len(f.attachments) != 1 {
+		t.Fatalf("created attachments = %d, want 1", len(f.attachments))
+	}
+	created := f.attachments[0]
+	if created.WorkspaceID != workspaceID || created.ChatSessionID != sessionID || created.UploaderType != "member" || created.UploaderID != senderID ||
+		created.Filename != "report.pdf" || created.Url != "/uploads/workspaces/ws/channel-inbound/object.pdf" || created.ContentType != "application/pdf" || created.SizeBytes != 123 {
+		t.Fatalf("created attachment = %+v", created)
+	}
+	if len(f.linked) != 1 || f.linked[0].ChatMessageID != f.messageID || len(f.linked[0].AttachmentIds) != 1 || f.linked[0].AttachmentIds[0] != created.ID {
+		t.Fatalf("link params = %+v", f.linked)
 	}
 }
 

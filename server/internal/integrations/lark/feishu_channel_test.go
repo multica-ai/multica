@@ -27,6 +27,24 @@ type fakeCreds struct{ secret string }
 
 func (f fakeCreds) DecryptAppSecret(_ Installation) (string, error) { return f.secret, nil }
 
+type emitOnceConnector struct{ msg InboundMessage }
+
+func (c emitOnceConnector) Run(ctx context.Context, _ Installation, emit EventEmitter) error {
+	_, err := emit(ctx, c.msg)
+	return err
+}
+
+type recordingInboundAcceptor struct {
+	inst Installation
+	msg  InboundMessage
+}
+
+func (a *recordingInboundAcceptor) Enqueue(_ context.Context, inst Installation, msg InboundMessage) error {
+	a.inst = inst
+	a.msg = msg
+	return nil
+}
+
 // feishuConfigJSON builds a channel_installation.config blob like migration 124
 // backfills — the shape the Feishu factory decodes.
 func feishuConfigJSON(t *testing.T, appID, region string) []byte {
@@ -99,6 +117,21 @@ func TestFeishuChannel_Capabilities(t *testing.T) {
 	}
 	if caps.Has(channel.CapVoice) {
 		t.Fatalf("Feishu adapter does not declare voice")
+	}
+}
+
+func TestFeishuChannelConnectOnlyEnqueuesBeforeAcknowledgement(t *testing.T) {
+	acceptor := &recordingInboundAcceptor{}
+	instID := binderUUID(9)
+	fc := buildFeishuChannel(t, FeishuChannelDeps{
+		Connector: emitOnceConnector{msg: InboundMessage{MessageID: "om_queued", ChatID: "oc_chat"}},
+		Inbound:   acceptor,
+	}, channel.Config{InstallationID: instID, Type: channel.TypeFeishu, Raw: feishuConfigJSON(t, "cli_app", "feishu")})
+	if err := fc.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if acceptor.inst.ID != instID || acceptor.msg.MessageID != "om_queued" {
+		t.Fatalf("enqueued installation=%v message=%+v", acceptor.inst.ID, acceptor.msg)
 	}
 }
 

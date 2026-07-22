@@ -44,10 +44,11 @@ func larkMsgFromRaw(msg channel.InboundMessage) (InboundMessage, error) {
 // shared session service, audit logger, and (optional) outbound replier +
 // typing indicator. Feishu is just another consumer of the channel-agnostic
 // engine.ChatSession — there is no Feishu-specific session implementation.
-func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager) engine.ResolverSet {
+func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, media *FeishuMediaResolver, replier OutcomeReplier, typing *TypingIndicatorManager) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &feishuInstallationResolver{store: store},
 		Identity:     &feishuIdentityResolver{store: store},
+		Media:        media,
 		Dedup:        &feishuDeduper{store: store},
 		Session:      &feishuSessionBinder{session: session},
 		Audit:        &feishuAuditor{audit: audit},
@@ -207,6 +208,7 @@ func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.Append
 		return engine.AppendResult{}, err
 	}
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
+		WorkspaceID:    p.WorkspaceID,
 		SessionID:      p.SessionID,
 		Sender:         p.Sender,
 		InstallationID: p.InstallationID,
@@ -215,6 +217,7 @@ func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.Append
 		MessageID:      p.Message.MessageID,
 		ThreadID:       p.Message.Source.ThreadID,
 		ClaimToken:     p.ClaimToken,
+		MediaRefs:      p.Message.MediaRefs,
 	})
 }
 

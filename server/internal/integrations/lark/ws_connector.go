@@ -88,21 +88,6 @@ type WSConnectorConfig struct {
 	// should not tear down the entire connection.
 	FrameDecoder FrameDecoder
 
-	// Enricher optionally expands a decoded message's body with the
-	// context the user explicitly attached (quoted reply / forwarded
-	// bundle) before it is emitted to the dispatcher. It runs on the
-	// inbound read loop, so it is bounded by EnrichTimeout to protect
-	// the Lark long-conn ACK budget; on timeout / fetch failure the
-	// enricher degrades to a placeholder rather than blocking. Nil
-	// disables enrichment (the decoded body is emitted as-is).
-	Enricher Enricher
-
-	// EnrichTimeout caps a single message's enrichment (at most two
-	// GetMessage calls). It MUST stay well under Lark's ~3s long-conn
-	// ACK window, since enrichment runs before the frame is ACKed.
-	// Zero defaults to 2 seconds.
-	EnrichTimeout time.Duration
-
 	// CredentialsProvider returns the InstallationCredentials the
 	// EndpointFetcher needs. Typically wraps
 	// InstallationService.DecryptAppSecret so the plaintext secret
@@ -152,9 +137,6 @@ func (c WSConnectorConfig) withDefaults() WSConnectorConfig {
 	}
 	if c.ChunkTTL == 0 {
 		c.ChunkTTL = 5 * time.Second
-	}
-	if c.EnrichTimeout == 0 {
-		c.EnrichTimeout = 2 * time.Second
 	}
 	if c.Now == nil {
 		c.Now = time.Now
@@ -379,18 +361,6 @@ func (c *WSLongConnConnector) Run(ctx context.Context, inst Installation, emit E
 				return fmt.Errorf("write ack: %w", werr)
 			}
 			continue
-		}
-
-		// Enrich the decoded body with explicitly-attached context
-		// (quoted reply / forwarded bundle) before emitting. This runs
-		// before the frame ACK, so it is bounded by EnrichTimeout and
-		// degrades to a placeholder on failure rather than blocking the
-		// pipeline. Most messages need no enrichment and return
-		// immediately without any network call.
-		if c.cfg.Enricher != nil {
-			enrichCtx, cancelEnrich := context.WithTimeout(ctx, c.cfg.EnrichTimeout)
-			msg = c.cfg.Enricher.Enrich(enrichCtx, msg, creds)
-			cancelEnrich()
 		}
 
 		_, emitErr := emit(ctx, msg)

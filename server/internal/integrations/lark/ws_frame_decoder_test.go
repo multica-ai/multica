@@ -2,6 +2,7 @@ package lark
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -57,6 +58,131 @@ func TestLarkJSONFrameDecoderTextMessageInP2P(t *testing.T) {
 	if msg.AddressedToBot {
 		t.Errorf("P2P AddressedToBot should not be true")
 	}
+}
+
+func TestLarkJSONFrameDecoderExtractsInboundResources(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		messageType string
+		content     string
+		wantBody    string
+		want        []MessageResourceRef
+	}{
+		{
+			name:        "image",
+			messageType: "image",
+			content:     `{"image_key":"img_v2_123"}`,
+			wantBody:    "[Image attachment]",
+			want:        []MessageResourceRef{{Type: "image", Key: "img_v2_123"}},
+		},
+		{
+			name:        "file",
+			messageType: "file",
+			content:     `{"file_key":"file_v2_123","file_name":"quarterly-report.pdf"}`,
+			wantBody:    "[File attachment: quarterly-report.pdf]",
+			want:        []MessageResourceRef{{Type: "file", Key: "file_v2_123", Filename: "quarterly-report.pdf"}},
+		},
+		{
+			name:        "audio",
+			messageType: "audio",
+			content:     `{"file_key":"file_v2_audio","duration":8000}`,
+			wantBody:    "[Audio attachment]",
+			want:        []MessageResourceRef{{Type: "audio", Key: "file_v2_audio"}},
+		},
+		{
+			name:        "video",
+			messageType: "media",
+			content:     `{"file_key":"file_v2_video","image_key":"img_v2_cover","file_name":"demo.mp4"}`,
+			wantBody:    "[Video attachment: demo.mp4]",
+			want:        []MessageResourceRef{{Type: "video", Key: "file_v2_video", Filename: "demo.mp4"}},
+		},
+		{
+			name:        "rich post resources",
+			messageType: "post",
+			content:     `{"title":"Launch","content":[[{"tag":"text","text":"Please review"},{"tag":"img","image_key":"img_v2_post"}],[{"tag":"media","file_key":"file_v2_post","file_name":"walkthrough.mp4"}]]}`,
+			wantBody:    "Launch\nPlease review [Image]\n[Video]",
+			want: []MessageResourceRef{
+				{Type: "image", Key: "img_v2_post"},
+				{Type: "video", Key: "file_v2_post", Filename: "walkthrough.mp4"},
+			},
+		},
+		{
+			name:        "folder is explicit but unsupported",
+			messageType: "folder",
+			content:     `{"file_key":"folder_v2_123","file_name":"archive"}`,
+			wantBody:    "[Unsupported Lark folder attachment]",
+		},
+		{
+			name:        "sticker is explicit but unsupported",
+			messageType: "sticker",
+			content:     `{"file_key":"sticker_v2_123"}`,
+			wantBody:    "[Unsupported Lark sticker attachment]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			contentBytes, err := json.Marshal(tt.content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := []byte(`{
+				"type":"event_callback",
+				"header":{"event_id":"evt-media","event_type":"im.message.receive_v1","app_id":"cli_app"},
+				"event":{"sender":{"sender_id":{"open_id":"ou_user"}},"message":{
+					"message_id":"om_media","chat_id":"oc_chat","chat_type":"p2p",
+					"message_type":"` + tt.messageType + `","content":` + string(contentBytes) + `
+				}}
+			}`)
+
+			msg, ok, err := NewLarkJSONFrameDecoder().Decode(raw, Installation{})
+			if err != nil || !ok {
+				t.Fatalf("Decode ok=%v err=%v", ok, err)
+			}
+			if msg.Body != tt.wantBody {
+				t.Fatalf("Body = %q, want %q", msg.Body, tt.wantBody)
+			}
+			if got, want := msg.Resources, tt.want; !resourceRefsEqual(got, want) {
+				t.Fatalf("Resources = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestExtractMessageResourcesCapsAndDeduplicates(t *testing.T) {
+	t.Parallel()
+	blocks := make([]map[string]string, 0, maxInboundResources+5)
+	for i := 0; i < maxInboundResources+5; i++ {
+		blocks = append(blocks, map[string]string{"tag": "img", "image_key": fmt.Sprintf("img_%02d", i)})
+	}
+	blocks = append(blocks, map[string]string{"tag": "img", "image_key": "img_00"})
+	doc := map[string]any{"zh_cn": map[string]any{"content": []any{blocks}}}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refs := extractMessageResources("post", string(b))
+	if len(refs) != maxInboundResources {
+		t.Fatalf("len(Resources) = %d, want %d", len(refs), maxInboundResources)
+	}
+	if refs[0].Key != "img_00" || refs[len(refs)-1].Key != "img_19" {
+		t.Fatalf("unexpected capped resources: first=%q last=%q", refs[0].Key, refs[len(refs)-1].Key)
+	}
+}
+
+func resourceRefsEqual(got, want []MessageResourceRef) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestLarkJSONFrameDecoderGroupMentionDiscrimination(t *testing.T) {
@@ -429,7 +555,7 @@ func TestLarkJSONFrameDecoderMessageContentEmptyOnInvalidContentJSON(t *testing.
 	}
 }
 
-func TestLarkJSONFrameDecoderNonTextMessageHasEmptyBody(t *testing.T) {
+func TestLarkJSONFrameDecoderNonTextMessageHasSafePlaceholderAndResource(t *testing.T) {
 	t.Parallel()
 	raw := []byte(`{
 		"type":"event_callback",
@@ -443,11 +569,14 @@ func TestLarkJSONFrameDecoderNonTextMessageHasEmptyBody(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
-	if msg.Body != "" {
-		t.Errorf("Body = %q; non-text messages should have empty body in MVP", msg.Body)
+	if msg.Body != "[Image attachment]" {
+		t.Errorf("Body = %q; expected a non-empty safe placeholder", msg.Body)
 	}
 	if msg.MessageID == "" {
 		t.Error("MessageID should still be populated for non-text events")
+	}
+	if len(msg.Resources) != 1 || msg.Resources[0].Type != "image" || msg.Resources[0].Key != "img1" {
+		t.Errorf("Resources = %#v", msg.Resources)
 	}
 }
 

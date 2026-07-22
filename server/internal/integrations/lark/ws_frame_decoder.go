@@ -83,7 +83,8 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 		// thread_id is present only when the message lives inside a Lark
 		// topic (话题). The outbound patcher uses it to decide whether to
 		// reply back into that thread; empty means a normal chat message.
-		ThreadID: evt.Message.ThreadID,
+		ThreadID:  evt.Message.ThreadID,
+		Resources: extractMessageResources(evt.Message.MessageType, evt.Message.Content),
 	}
 
 	botUnionID := ""
@@ -101,6 +102,20 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 	case "text", "post":
 		msg.Body = resolveMentions(flattenContent(evt.Message.MessageType, evt.Message.Content),
 			evt.Message.Mentions, inst.BotOpenID, botUnionID)
+	case "image":
+		msg.Body = "[Image attachment]"
+	case "file":
+		msg.Body = attachmentPlaceholder("File", msg.Resources)
+	case "audio":
+		msg.Body = "[Audio attachment]"
+	case "media", "video":
+		msg.Body = attachmentPlaceholder("Video", msg.Resources)
+	case "folder":
+		msg.Body = "[Unsupported Lark folder attachment]"
+	case "sticker":
+		msg.Body = "[Unsupported Lark sticker attachment]"
+	default:
+		msg.Body = flattenContent(evt.Message.MessageType, evt.Message.Content)
 	}
 
 	// Snapshot the user's own text as the command source BEFORE any
@@ -114,6 +129,87 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 	}
 
 	return msg, true, nil
+}
+
+const maxInboundResources = 20
+
+func attachmentPlaceholder(kind string, refs []MessageResourceRef) string {
+	if len(refs) > 0 && refs[0].Filename != "" {
+		return "[" + kind + " attachment: " + refs[0].Filename + "]"
+	}
+	return "[" + kind + " attachment]"
+}
+
+func extractMessageResources(messageType, content string) []MessageResourceRef {
+	if content == "" {
+		return nil
+	}
+	var raw any
+	if err := json.Unmarshal([]byte(content), &raw); err != nil {
+		return nil
+	}
+
+	refs := make([]MessageResourceRef, 0, 2)
+	seen := make(map[string]struct{})
+	add := func(ref MessageResourceRef) {
+		if ref.Key == "" || len(refs) >= maxInboundResources {
+			return
+		}
+		identity := ref.Type + "\x00" + ref.Key
+		if _, ok := seen[identity]; ok {
+			return
+		}
+		seen[identity] = struct{}{}
+		refs = append(refs, ref)
+	}
+
+	root, _ := raw.(map[string]any)
+	stringField := func(m map[string]any, key string) string {
+		v, _ := m[key].(string)
+		return v
+	}
+	switch messageType {
+	case "image":
+		add(MessageResourceRef{Type: "image", Key: stringField(root, "image_key")})
+	case "file", "audio":
+		add(MessageResourceRef{Type: messageType, Key: stringField(root, "file_key"), Filename: stringField(root, "file_name")})
+	case "media", "video":
+		add(MessageResourceRef{Type: "video", Key: stringField(root, "file_key"), Filename: stringField(root, "file_name")})
+	case "post":
+		walkPostResources(root, add)
+	}
+	return refs
+}
+
+func walkPostResources(root map[string]any, add func(MessageResourceRef)) {
+	// Receive events use {title,content}; accept locale wrappers as a defensive
+	// compatibility shape because forwarded and historical API payloads may use
+	// the send-side document form.
+	docs := []map[string]any{root}
+	for _, locale := range []string{"zh_cn", "en_us", "ja_jp"} {
+		if doc, ok := root[locale].(map[string]any); ok {
+			docs = append(docs, doc)
+		}
+	}
+	for _, doc := range docs {
+		paragraphs, _ := doc["content"].([]any)
+		for _, paragraph := range paragraphs {
+			spans, _ := paragraph.([]any)
+			for _, item := range spans {
+				span, _ := item.(map[string]any)
+				tag, _ := span["tag"].(string)
+				switch tag {
+				case "img":
+					key, _ := span["image_key"].(string)
+					add(MessageResourceRef{Type: "image", Key: key})
+				case "media":
+					key, _ := span["file_key"].(string)
+					filename, _ := span["file_name"].(string)
+					add(MessageResourceRef{Type: "video", Key: key, Filename: filename})
+				}
+			}
+		}
+	}
 }
 
 // larkEventEnvelope mirrors the outer JSON Lark wraps every push in.

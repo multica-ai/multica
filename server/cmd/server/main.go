@@ -428,6 +428,9 @@ func main() {
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)
 	}
+	if h.LarkInboundDeliveryWorker != nil {
+		go h.LarkInboundDeliveryWorker.Run(sweepCtx)
+	}
 
 	// Channel inbound supervisor (MUL-3620): holds the §4.4 WS lease per
 	// installation and drives each channel.Channel. It is built
@@ -536,6 +539,9 @@ func main() {
 			slog.Warn("channel supervisor: connections did not exit within shutdown timeout; proceeding",
 				"timeout", h.ChannelSupervisor.ShutdownTimeout().String(),
 			)
+		}
+		if h.LarkInboundDeliveryWorker != nil && !h.LarkInboundDeliveryWorker.WaitWithTimeout(5*time.Second) {
+			slog.Warn("lark inbound delivery worker did not exit within shutdown timeout")
 		}
 		if h.ChannelRouter != nil {
 			h.ChannelRouter.Drain()

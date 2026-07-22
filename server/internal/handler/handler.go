@@ -185,6 +185,10 @@ type Handler struct {
 	// UI consults IsConfigured() to decide whether to surface install
 	// entry points.
 	LarkAPIClient lark.APIClient
+	// LarkInboundDeliveryWorker owns the durable receive queue. Feishu ACKs
+	// after Enqueue commits; enrichment, media download, and Router dispatch
+	// happen here under a recoverable Postgres lease.
+	LarkInboundDeliveryWorker *lark.InboundDeliveryWorker
 	// Composio integration (MUL-3720). Nil when COMPOSIO_API_KEY is unset;
 	// the composio HTTP handlers return 503 in that case. Wired in
 	// cmd/server/router.go after handler.New.
