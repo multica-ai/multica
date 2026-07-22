@@ -69,8 +69,18 @@ func (h *Handler) VerifyInternalAgentBrowser(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		credential.Username, err = h.PersonalBrowserSecrets.RevealCredential(r.Context(), wsID, target.Vault, "USERNAME")
-		if err == nil {
+		// A code-login target has no password: it signs in with the staging
+		// master code instead, so that key replaces PASSWORD entirely.
+		if err == nil && target.CodeSelector != "" {
+			credential.LoginCode, err = h.PersonalBrowserSecrets.RevealCredential(r.Context(), wsID, target.Vault, "LOGIN_CODE")
+		} else if err == nil {
 			credential.Password, err = h.PersonalBrowserSecrets.RevealCredential(r.Context(), wsID, target.Vault, "PASSWORD")
+		}
+		if err == nil && target.AccessHeaders {
+			credential.AccessClientID, err = h.PersonalBrowserSecrets.RevealCredential(r.Context(), wsID, target.Vault, "CF_ACCESS_CLIENT_ID")
+			if err == nil {
+				credential.AccessClientSecret, err = h.PersonalBrowserSecrets.RevealCredential(r.Context(), wsID, target.Vault, "CF_ACCESS_CLIENT_SECRET")
+			}
 		}
 		if err != nil {
 			h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "deny", "credential unavailable")

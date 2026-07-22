@@ -667,3 +667,182 @@ func TestSafeErrorAllowsOnlyKnownOpenFailureClasses(t *testing.T) {
 		t.Fatalf("unexpected open detail escaped: %q", got)
 	}
 }
+
+// coldStartCommander times out the first open, then behaves like a healthy app.
+// This is the Finance shape: an idle container that wakes on the second try.
+type coldStartCommander struct {
+	stageFailingCommander
+	opens atomic.Int32
+}
+
+func (c *coldStartCommander) Run(ctx context.Context, stdin string, args ...string) ([]byte, error) {
+	if stageVerb(args) == openStage && c.opens.Add(1) == 1 {
+		return nil, commandFailure{kind: commandFailureTimeout}
+	}
+	return c.stageFailingCommander.Run(ctx, stdin, args...)
+}
+
+func TestVerifyRetriesOpenOnceWhenTheAppIsSlowToWake(t *testing.T) {
+	commander := &coldStartCommander{stageFailingCommander: stageFailingCommander{stage: "no-such-stage"}}
+	result, err := testRunner(commander).Verify(context.Background(), "customer-service", Credential{})
+	if err != nil {
+		t.Fatalf("Verify failed after a cold start: %v", err)
+	}
+	if commander.opens.Load() != 2 {
+		t.Fatalf("open attempts = %d, want 2 (one cold-start retry)", commander.opens.Load())
+	}
+	if len(result.Markers) == 0 {
+		t.Fatal("markers empty, want the verified page markers")
+	}
+}
+
+// Only a timeout earns the retry. A refused connection is a real failure and
+// must be reported on the first attempt instead of doubling every run's cost.
+func TestVerifyDoesNotRetryOpenOnNonTimeoutFailure(t *testing.T) {
+	commander := &countingOpenFailureCommander{
+		stageFailingCommander: stageFailingCommander{stage: "no-such-stage"}, kind: commandFailureConnection,
+	}
+	if _, err := testRunner(commander).Verify(context.Background(), "customer-service", Credential{}); err == nil {
+		t.Fatal("Verify succeeded, want failure")
+	}
+	if commander.opens.Load() != 1 {
+		t.Fatalf("open attempts = %d, want 1 (no retry for a refused connection)", commander.opens.Load())
+	}
+}
+
+type countingOpenFailureCommander struct {
+	stageFailingCommander
+	kind  commandFailureKind
+	opens atomic.Int32
+}
+
+func (c *countingOpenFailureCommander) Run(ctx context.Context, stdin string, args ...string) ([]byte, error) {
+	if stageVerb(args) == openStage {
+		c.opens.Add(1)
+		return nil, commandFailure{kind: c.kind}
+	}
+	return c.stageFailingCommander.Run(ctx, stdin, args...)
+}
+
+func TestTargetForResolvesDataCatalogOnItsPrivateHost(t *testing.T) {
+	target, err := TargetFor("data-catalog")
+	if err != nil {
+		t.Fatalf("TargetFor(data-catalog) failed: %v", err)
+	}
+	if target.Host() != "data-catalog.internal:3000" {
+		t.Fatalf("host = %q, want data-catalog.internal:3000", target.Host())
+	}
+	if target.Vault != "" || target.SessionCookie {
+		t.Fatal("data-catalog must not request credentials: the private host carries no app login")
+	}
+}
+
+// dialogCommander reproduces the first-login survey: the navigation link is not
+// clickable until the modal's Skip button has been pressed.
+type dialogCommander struct {
+	stageFailingCommander
+	skipped  atomic.Bool
+	navTries atomic.Int32
+}
+
+func (c *dialogCommander) Run(ctx context.Context, stdin string, args ...string) ([]byte, error) {
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "role button click --name Skip") {
+		c.skipped.Store(true)
+		return nil, nil
+	}
+	if stageVerb(args) == "navigation" {
+		c.navTries.Add(1)
+		if !c.skipped.Load() {
+			return nil, commandFailure{kind: commandFailureNotFound}
+		}
+		return nil, nil
+	}
+	return c.stageFailingCommander.Run(ctx, stdin, args...)
+}
+
+func TestVerifyDismissesTheFirstLoginDialogBeforeNavigating(t *testing.T) {
+	commander := &dialogCommander{stageFailingCommander: stageFailingCommander{stage: "no-such-stage"}}
+	if _, err := testRunner(commander).Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"}); err != nil {
+		t.Fatalf("Verify failed with the survey dialog up: %v", err)
+	}
+	if !commander.skipped.Load() {
+		t.Fatal("the blocking dialog was never dismissed")
+	}
+	if commander.navTries.Load() != 1 {
+		t.Fatalf("navigation attempts = %d, want 1 after the dialog was cleared", commander.navTries.Load())
+	}
+}
+
+// No dialog is the normal case: a missing Skip button must not fail the run.
+func TestVerifySucceedsWhenThereIsNoDialogToDismiss(t *testing.T) {
+	commander := &stageFailingCommander{stage: "no-such-stage"}
+	if _, err := testRunner(commander).Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"}); err != nil {
+		t.Fatalf("Verify failed without a dialog: %v", err)
+	}
+}
+
+func TestTargetForAllowsTheCerebroPublicEdgeWithAccessHeaders(t *testing.T) {
+	target, err := TargetFor("cerebro")
+	if err != nil {
+		t.Fatalf("TargetFor(cerebro) failed: %v", err)
+	}
+	if !target.AccessHeaders {
+		t.Fatal("cerebro must carry Cloudflare Access headers: its internal address is on another server")
+	}
+	if target.Host() != "cerebro.firtal.com" {
+		t.Fatalf("host = %q, want cerebro.firtal.com", target.Host())
+	}
+	if target.SessionCookie {
+		t.Fatal("a production session token is worthless on staging; cerebro must use the code login")
+	}
+	if target.CodeSelector == "" || target.SubmitButtonName == "" {
+		t.Fatal("cerebro needs both the code field and the submit button for the two-step login")
+	}
+}
+
+// Only a target that carries Access headers may leave the internal network. A
+// public URL without them would put an unguarded host on the allowlist.
+func TestTargetForRejectsAPublicURLWithoutAccessHeaders(t *testing.T) {
+	original := targets["cerebro"]
+	t.Cleanup(func() { targets["cerebro"] = original })
+	stripped := original
+	stripped.AccessHeaders = false
+	targets["cerebro"] = stripped
+	if _, err := TargetFor("cerebro"); err == nil {
+		t.Fatal("TargetFor accepted a public URL with no Access headers")
+	}
+}
+
+// codeLoginCommander records the batch payload so the test can prove the code
+// login was driven, without the payload ever reaching an argument vector.
+type codeLoginCommander struct {
+	stageFailingCommander
+	authStdin string
+}
+
+func (c *codeLoginCommander) Run(ctx context.Context, stdin string, args ...string) ([]byte, error) {
+	if strings.HasSuffix(strings.Join(args, " "), "batch") && strings.Contains(stdin, "fill") {
+		c.authStdin = stdin
+	}
+	return c.stageFailingCommander.Run(ctx, stdin, args...)
+}
+
+func TestVerifyDrivesTheCodeLoginAndKeepsSecretsOffTheCommandLine(t *testing.T) {
+	commander := &codeLoginCommander{stageFailingCommander: stageFailingCommander{stage: "no-such-stage"}}
+	credential := Credential{
+		Username: "agent-testing@firtal.com", LoginCode: "the-staging-code",
+		AccessClientID: "id.access", AccessClientSecret: "the-token-secret",
+	}
+	if _, err := testRunner(commander).Verify(context.Background(), "cerebro", credential); err != nil {
+		t.Fatalf("Verify failed for the code login: %v", err)
+	}
+	for _, want := range []string{"agent-testing@firtal.com", "the-staging-code", "input[data-input-otp]", "Continue"} {
+		if !strings.Contains(commander.authStdin, want) {
+			t.Fatalf("auth payload missing %q: %s", want, commander.authStdin)
+		}
+	}
+	if strings.Contains(commander.authStdin, "PASSWORD") {
+		t.Fatal("a code-login target must never send a password")
+	}
+}
