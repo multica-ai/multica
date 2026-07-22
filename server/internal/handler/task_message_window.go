@@ -74,7 +74,10 @@ func decodeExecLogCursor(token string) (int32, pgtype.UUID, error) {
 	if !found {
 		return 0, pgtype.UUID{}, errors.New("invalid cursor")
 	}
-	seq, err := strconv.Atoi(seqStr)
+	// Parse into the column's int32 width so a seq beyond int32 range is a hard
+	// invalid-cursor error, not a silent wrap that would then match the wrong
+	// rows. task_message.seq is INTEGER (int32).
+	seq, err := strconv.ParseInt(seqStr, 10, 32)
 	if err != nil {
 		return 0, pgtype.UUID{}, errors.New("invalid cursor")
 	}

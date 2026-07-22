@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -382,6 +383,24 @@ func TestExecutionLogPage_InvalidAndContradictoryCursor(t *testing.T) {
 	}
 	if code := execLogStatus(t, taskID, "before=abc&after=def"); code != http.StatusBadRequest {
 		t.Fatalf("before+after together should be 400, got %d", code)
+	}
+}
+
+func TestExecutionLogPage_CursorSeqOverflowIs400(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	// A cursor whose seq exceeds int32 must be rejected as an invalid cursor,
+	// not silently wrapped (e.g. 2^31 -> negative) and used as a query position.
+	// task_message.seq is INTEGER (int32); the decode runs before authorization,
+	// so a syntactically valid but non-existent task id is fine here.
+	taskID := "11111111-1111-1111-1111-111111111111"
+	overflow := base64.RawURLEncoding.EncodeToString([]byte("9999999999:00000000-0000-0000-0000-000000000001"))
+	if code := execLogStatus(t, taskID, "before="+overflow); code != http.StatusBadRequest {
+		t.Fatalf("out-of-int32 before-cursor seq should be 400, got %d", code)
+	}
+	if code := execLogStatus(t, taskID, "after="+overflow); code != http.StatusBadRequest {
+		t.Fatalf("out-of-int32 after-cursor seq should be 400, got %d", code)
 	}
 }
 
