@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 )
 
 // TestCatalogInvariants guards the shape every catalog entry must hold: a stable
@@ -68,23 +70,23 @@ func TestWorkflowHookCapabilityContracts(t *testing.T) {
 	}
 
 	want := map[string]struct {
-		enforcement Enforcement
+		enforcement platformaccess.Enforcement
 		tools       []string
 	}{
 		"hooks:read": {
-			enforcement: EnforcementAuthenticatedRead,
+			enforcement: platformaccess.EnforcementAuthenticatedRead,
 			tools:       []string{"get_effective_workflow_hooks", "get_workflow_hook", "list_workflow_hook_runs", "list_workflow_hooks"},
 		},
 		"hooks:write": {
-			enforcement: EnforcementActorOptIn,
+			enforcement: platformaccess.EnforcementActorOptIn,
 			tools:       []string{"create_workflow_hook", "test_workflow_hook", "update_workflow_hook"},
 		},
 		"hooks:enforce": {
-			enforcement: EnforcementHumanOptIn,
+			enforcement: platformaccess.EnforcementHumanOptIn,
 			tools:       []string{"publish_workflow_hook"},
 		},
 		"hooks:manage_managed": {
-			enforcement: EnforcementOwnerOnly,
+			enforcement: platformaccess.EnforcementOwnerOnly,
 		},
 	}
 
@@ -93,8 +95,9 @@ func TestWorkflowHookCapabilityContracts(t *testing.T) {
 		if !ok {
 			t.Fatalf("capability %q missing", key)
 		}
-		if capability.Enforcement != expected.enforcement {
-			t.Errorf("%s enforcement = %q, want %q", key, capability.Enforcement, expected.enforcement)
+		contract, ok := platformaccess.ForKey(key)
+		if !ok || contract.Enforcement != expected.enforcement {
+			t.Errorf("%s enforcement = %+v, %v; want %q", key, contract, ok, expected.enforcement)
 		}
 		if strings.Join(capability.ToolBindings, ",") != strings.Join(expected.tools, ",") {
 			t.Errorf("%s tool bindings = %v, want %v", key, capability.ToolBindings, expected.tools)

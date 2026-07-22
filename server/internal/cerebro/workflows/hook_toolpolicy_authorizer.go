@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
-	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -18,7 +17,7 @@ func NewToolPolicyHookAuthorizer(store *toolpolicy.Store) *ToolPolicyHookAuthori
 }
 
 func (a *ToolPolicyHookAuthorizer) Can(ctx context.Context, workspaceID string, actor HookPermissionActor, permission HookPermission) bool {
-	capability, ok := platformcatalog.ByKey(string(permission))
+	_, ok := platformaccess.ForKey(string(permission))
 	if !ok {
 		return false
 	}
@@ -27,17 +26,14 @@ func (a *ToolPolicyHookAuthorizer) Can(ctx context.Context, workspaceID string, 
 		Agent:         actor.Type == "agent",
 		Owner:         actor.Type == "member" && actor.IsOwner,
 	}
-	if capability.Enforcement == platformaccess.EnforcementAuthenticatedRead || capability.Enforcement == platformaccess.EnforcementOwnerOnly {
-		return toolpolicy.ResolvePlatformAction(toolpolicy.Input{}, capability.Enforcement, platformActor).Setting == toolpolicy.SettingAllow
-	}
 	if a == nil || a.store == nil {
-		return false
+		return toolpolicy.ResolvePermission(toolpolicy.Input{}, string(permission), platformActor).Setting == toolpolicy.SettingAllow
 	}
 	query, ok := hookActorQuery(workspaceID, actor, string(permission))
 	if !ok {
 		return false
 	}
-	effective, err := a.store.ResolvePlatformAction(ctx, query, capability.Enforcement, platformActor)
+	effective, err := a.store.ResolvePermission(ctx, query, platformActor)
 	return err == nil && effective.Setting == toolpolicy.SettingAllow
 }
 

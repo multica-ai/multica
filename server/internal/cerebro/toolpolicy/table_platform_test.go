@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 )
 
@@ -55,7 +56,7 @@ func TestTable_PlatformRowsGatedByIncludeFlag(t *testing.T) {
 		// code-owned actor contract fail closed when this workspace-only query
 		// supplies no authenticated actor context.
 		want := SettingAllow
-		if c.Enforcement != "" && c.Enforcement != platformcatalog.EnforcementPolicy {
+		if _, special := platformaccess.ForKey(c.Key); special {
 			want = SettingDeny
 		}
 		if row.Effective.Setting != want {

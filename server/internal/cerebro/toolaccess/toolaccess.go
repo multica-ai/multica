@@ -35,8 +35,8 @@ type PolicyResolver interface {
 	Resolve(ctx context.Context, in toolpolicy.Query) (toolpolicy.Effective, error)
 }
 
-type platformPolicyResolver interface {
-	ResolvePlatformAction(ctx context.Context, in toolpolicy.Query, enforcement platformaccess.Enforcement, actor platformaccess.Actor) (toolpolicy.Effective, error)
+type permissionPolicyResolver interface {
+	ResolvePermission(ctx context.Context, in toolpolicy.Query, actor platformaccess.Actor) (toolpolicy.Effective, error)
 }
 
 type Service struct {
@@ -164,16 +164,20 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 }
 
 func (s *Service) resolvePolicy(ctx context.Context, query toolpolicy.Query, agentActor bool) (toolpolicy.Effective, error) {
+	permissionKey := query.ToolKey
 	capability, bound := platformcatalog.ByToolBinding(query.ToolKey)
-	if !bound {
+	if bound {
+		permissionKey = capability.Key
+	}
+	if _, special := platformaccess.ForKey(permissionKey); !special {
 		return s.policy.Resolve(ctx, query)
 	}
-	resolver, ok := s.policy.(platformPolicyResolver)
+	resolver, ok := s.policy.(permissionPolicyResolver)
 	if !ok {
-		return toolpolicy.Effective{}, fmt.Errorf("platform action resolver not configured for %s", query.ToolKey)
+		return toolpolicy.Effective{}, fmt.Errorf("permission resolver not configured for %s", permissionKey)
 	}
-	query.ToolKey = capability.Key
-	return resolver.ResolvePlatformAction(ctx, query, capability.Enforcement, platformaccess.Actor{
+	query.ToolKey = permissionKey
+	return resolver.ResolvePermission(ctx, query, platformaccess.Actor{
 		Authenticated: true,
 		Agent:         agentActor,
 	})

@@ -485,7 +485,7 @@ func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtim
 // "C" v2. Each connection carries a default_access mode (allow/ask/deny) chosen
 // when it is created/edited (connections.DefaultAccess*); per-actor tool-policy
 // rows override that default. This is NOT the tighten-only Resolve, for the same
-// reason tools:test-as-user uses ResolveOptIn (FIR-1771): the tighten chain only
+// reason tools:test-as-user uses an opt-in contract (FIR-1771): the tighten chain only
 // ever tightens below its Base and refuses to loosen, so a Deny base could never
 // be lifted by an Allow grant. The rule, over all of the above rows/layers:
 //

@@ -28,10 +28,10 @@ func (s platformPolicyStub) Resolve(_ context.Context, in toolpolicy.Query) (too
 	return toolpolicy.Effective{Setting: s.settings[in.ToolKey]}, nil
 }
 
-func (s platformPolicyStub) ResolvePlatformAction(_ context.Context, in toolpolicy.Query, enforcement platformaccess.Enforcement, actor platformaccess.Actor) (toolpolicy.Effective, error) {
-	return toolpolicy.ResolvePlatformAction(toolpolicy.Input{Settings: map[toolpolicy.Layer]toolpolicy.Setting{
+func (s platformPolicyStub) ResolvePermission(_ context.Context, in toolpolicy.Query, actor platformaccess.Actor) (toolpolicy.Effective, error) {
+	return toolpolicy.ResolvePermission(toolpolicy.Input{Settings: map[toolpolicy.Layer]toolpolicy.Setting{
 		toolpolicy.LayerAgent: s.settings[in.ToolKey],
-	}}, enforcement, actor), nil
+	}}, in.ToolKey, actor), nil
 }
 
 func TestEffectiveToolWireShapeHasNoLegacyRuntimeGrant(t *testing.T) {
@@ -75,7 +75,12 @@ func TestListEffectiveToolsUsesPlatformActionContractForWorkflowHooks(t *testing
 		{Key: "list_workflow_hooks", Title: "List workflow hooks", Source: "builtin"},
 		{Key: "create_workflow_hook", Title: "Create workflow hook", Source: "builtin"},
 		{Key: "publish_workflow_hook", Title: "Publish workflow hook", Source: "builtin"},
-	}}, platformPolicyStub{settings: map[string]toolpolicy.Setting{}})
+		{Key: "tools:personal-browser", Title: "Personal browser", Source: "builtin"},
+		{Key: "tools:test-as-user", Title: "Test as user", Source: "builtin"},
+	}}, platformPolicyStub{settings: map[string]toolpolicy.Setting{
+		"tools:personal-browser": toolpolicy.SettingAllow,
+		"tools:test-as-user":     toolpolicy.SettingAllow,
+	}})
 
 	rows, err := service.ListEffectiveTools(context.Background(), Query{
 		RuntimeMode:     "cloud",
@@ -87,9 +92,11 @@ func TestListEffectiveToolsUsesPlatformActionContractForWorkflowHooks(t *testing
 	}
 
 	want := map[string]string{
-		"list_workflow_hooks":   AccessAllow,
-		"create_workflow_hook":  AccessDeny,
-		"publish_workflow_hook": AccessDeny,
+		"list_workflow_hooks":    AccessAllow,
+		"create_workflow_hook":   AccessDeny,
+		"publish_workflow_hook":  AccessDeny,
+		"tools:personal-browser": AccessAllow,
+		"tools:test-as-user":     AccessDeny,
 	}
 	for _, row := range rows {
 		if got, ok := want[row.Descriptor.ToolKey]; ok {

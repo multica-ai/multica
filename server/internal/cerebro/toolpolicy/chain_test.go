@@ -1,6 +1,10 @@
 package toolpolicy
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
+)
 
 // set is a tiny helper to build a chain from named layers in tests.
 func set(pairs ...any) map[Layer]Setting {
@@ -9,6 +13,51 @@ func set(pairs ...any) map[Layer]Setting {
 		m[pairs[i].(Layer)] = pairs[i+1].(Setting)
 	}
 	return m
+}
+
+func TestResolvePermissionUsesDeclaredContractsForAllEightSpecialKeys(t *testing.T) {
+	agent := platformaccess.Actor{Authenticated: true, Agent: true}
+	human := platformaccess.Actor{Authenticated: true}
+	admin := platformaccess.Actor{Authenticated: true, Admin: true}
+	owner := platformaccess.Actor{Authenticated: true, Owner: true, Admin: true}
+
+	assert := func(key string, input Input, actor platformaccess.Actor, want Setting) {
+		t.Helper()
+		if got := ResolvePermission(input, key, actor); got.Setting != want {
+			t.Errorf("%s = %q (%s), want %q", key, got.Setting, got.Reason, want)
+		}
+	}
+
+	assert("hooks:read", Input{}, agent, SettingAllow)
+	for _, key := range []string{
+		"hooks:write",
+		"hooks:enforce",
+		"hooks:manage_managed",
+		"tools:personal-browser",
+		"tools:test-as-user",
+		"manage_workspace_overrides",
+		"manage_group_overrides",
+	} {
+		assert(key, Input{}, agent, SettingDeny)
+	}
+
+	agentGrant := Input{Settings: set(LayerAgent, SettingAllow)}
+	assert("hooks:write", agentGrant, agent, SettingAllow)
+	assert("tools:personal-browser", agentGrant, agent, SettingAllow)
+	assert("hooks:enforce", agentGrant, agent, SettingDeny)
+
+	humanGrant := Input{Settings: set(LayerUser, SettingAllow)}
+	assert("hooks:write", humanGrant, human, SettingAllow)
+	assert("hooks:enforce", humanGrant, human, SettingAllow)
+	assert("tools:test-as-user", humanGrant, human, SettingAllow)
+	assert("manage_workspace_overrides", humanGrant, human, SettingAllow)
+	assert("manage_group_overrides", humanGrant, human, SettingAllow)
+	assert("tools:personal-browser", humanGrant, human, SettingDeny)
+
+	assert("manage_workspace_overrides", Input{}, admin, SettingAllow)
+	assert("manage_group_overrides", Input{}, admin, SettingAllow)
+	assert("tools:test-as-user", Input{}, admin, SettingDeny)
+	assert("hooks:manage_managed", Input{}, owner, SettingAllow)
 }
 
 // TestResolve_IssueCheck is the live check from the FIR-2230 plan:
@@ -349,7 +398,7 @@ func TestResolveOptIn(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ResolveOptIn(Input{Settings: tc.settings})
+			got := resolveOptIn(Input{Settings: tc.settings})
 			if got != tc.want {
 				t.Fatalf("ResolveOptIn(%v) = %v, want %v", tc.settings, got, tc.want)
 			}
@@ -358,19 +407,19 @@ func TestResolveOptIn(t *testing.T) {
 }
 
 func TestResolveActorOptIn(t *testing.T) {
-	if ResolveActorOptIn(Input{}, true) {
+	if resolveActorOptIn(Input{}, true) {
 		t.Fatal("a fresh agent must not receive opt-in access")
 	}
-	if !ResolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow}}, true) {
+	if !resolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow}}, true) {
 		t.Fatal("an explicit agent grant should enable the opt-in capability")
 	}
-	if ResolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow, LayerUser: SettingDeny}}, true) {
+	if resolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow, LayerUser: SettingDeny}}, true) {
 		t.Fatal("a user ceiling must revoke an agent grant")
 	}
-	if ResolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow, LayerWorkspace: SettingDisable}}, true) {
+	if resolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow, LayerWorkspace: SettingDisable}}, true) {
 		t.Fatal("workspace Disable must remain an unopenable floor")
 	}
-	if ResolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow}}, false) {
+	if resolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow}}, false) {
 		t.Fatal("member checks must not inherit an agent-layer grant")
 	}
 }

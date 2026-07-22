@@ -132,7 +132,8 @@ Workspace/runtime/agent/group/user choices are authored only in
   delegate specific writes off that hardcoded role: a `credential.*` key routes to
   `manage_credential_access` (FIR-1479, `Resolve`+Base=Allow, tighten-only); a LayerUser row on
   any OTHER key routes to `manage_group_overrides` / `manage_workspace_overrides` (FIR-2351,
-  `ResolveOptIn` — **OFF by default, opt-in only**; Base=Allow would be backwards here since
+  the declared `human_opt_in_or_admin` contract through `ResolvePermission` — **OFF by default
+  for non-admin members, opt-in only**; Base=Allow would be backwards here since
   the whole point is a permission nobody holds until granted). Group-scope reaches a user
   sharing a group with the actor; workspace-scope reaches any OTHER real member of THIS
   workspace (a UUID valid only in a different workspace is rejected via
@@ -235,7 +236,7 @@ does nothing. They are a permanent code-only set, not a backlog item.
 
 **Two dimensions, do not confuse them:**
 
-Workflow Hook capabilities are independent of `manage_workflows`. `platformcatalog` binds each concrete hook tool to one action contract, and `toolpolicy.ResolvePlatformAction` projects that same contract into the capability card, claim-time tool list, and call-time authorizer. Agents receive `hooks:read`, while `hooks:write` needs an explicit grant, `hooks:enforce` rejects agent actors, and `hooks:manage_managed` accepts only the workspace owner. Tool registration therefore means only `available`; it never implies `allowed` or `callable`.
+Workflow Hook capabilities are independent of `manage_workflows`. `platformcatalog` binds each concrete hook tool to one permission key; `platformaccess` owns that key's contract, and `toolpolicy.ResolvePermission` projects it into the capability card, claim-time tool list, and call-time authorizer. Agents receive `hooks:read`, while `hooks:write` needs an explicit grant, `hooks:enforce` rejects agent actors, and `hooks:manage_managed` accepts only the workspace owner. Tool registration therefore means only `available`; it never implies `allowed` or `callable`. The complete eight-key special-contract list lives in `permission-system.md`; this architecture document does not duplicate it.
 
 Eval catalog mutations (`POST`/`PUT`/`DELETE /api/cerebro/evals*`) belong to `manage_workflows`: eval definitions, immutable run records, and workflow bindings are part of the workflow delivery-gate contract, not a separate permission family. Their CLI/MCP wrappers call those same classified routes.
 - **Platform capabilities** (this catalog, `manage_*` / `create_*` keys) — coarse HTTP/action

@@ -19,7 +19,63 @@ package toolpolicy
 import (
 	"context"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 )
+
+func TestEightSpecialPermissionsMatchTableExplainAndCallResolver(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+	agent, user := uuidByte(3), tpTestUserID
+
+	addCap(t, s, "tools:personal-browser", "Personal browser", "Tools", "builtin")
+	addCap(t, s, "tools:test-as-user", "Test as user", "Tools", "builtin")
+
+	rows, err := s.Table(ctx, TableQuery{
+		WorkspaceID:     tpTestWorkspaceID,
+		AgentID:         agent,
+		UserID:          user,
+		Base:            SettingAllow,
+		IncludePlatform: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]Setting{
+		"hooks:read":                 SettingAllow,
+		"hooks:write":                SettingDeny,
+		"hooks:enforce":              SettingDeny,
+		"hooks:manage_managed":       SettingDeny,
+		"tools:personal-browser":     SettingDeny,
+		"tools:test-as-user":         SettingDeny,
+		"manage_workspace_overrides": SettingDeny,
+		"manage_group_overrides":     SettingDeny,
+	}
+	for key, expected := range want {
+		row, ok := findRow(rows, key)
+		if !ok {
+			t.Errorf("table is missing %q", key)
+			continue
+		}
+		call, err := s.ResolvePermission(ctx, Query{
+			WorkspaceID: tpTestWorkspaceID,
+			ToolKey:     key,
+			AgentID:     agent,
+			UserID:      user,
+			Base:        SettingAllow,
+		}, platformaccess.Actor{Authenticated: true, Agent: true})
+		if err != nil {
+			t.Errorf("resolve %s: %v", key, err)
+			continue
+		}
+		if row.Effective.Setting != expected || call.Setting != expected {
+			t.Errorf("%s table=%q call=%q, want %q", key, row.Effective.Setting, call.Setting, expected)
+		}
+	}
+}
 
 // TestCardBriefSurfaceParity seeds one agent with an Allow/Ask/Deny/base spread
 // and asserts Store.Table (card) and Store.Resolve (brief) return the same
