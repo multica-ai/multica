@@ -66,6 +66,12 @@ RETURNING *;
 -- =====================
 
 -- name: UpsertVCSPullRequest :one
+-- pr_updated_at guards against an out-of-order webhook redelivery regressing
+-- the PR state, mirroring the updated_at guard on UpsertVCSCommitStatus. Each
+-- mutable column is applied only when the incoming event is at least as new as
+-- the stored row; a stale event keeps the existing values. The row is still
+-- touched (and thus RETURNED) either way, so callers always get the current PR
+-- — the webhook needs pr.id to link the issue even on a stale redelivery.
 INSERT INTO vcs_pull_request (
     workspace_id, connection_id, provider, repo_owner, repo_name, pr_number,
     title, state, html_url, branch, author_login, author_avatar_url,
@@ -78,21 +84,21 @@ INSERT INTO vcs_pull_request (
     $12, $13, $14, $15
 )
 ON CONFLICT (connection_id, repo_owner, repo_name, pr_number) DO UPDATE SET
-    workspace_id      = EXCLUDED.workspace_id,
-    provider          = EXCLUDED.provider,
-    title             = EXCLUDED.title,
-    state             = EXCLUDED.state,
-    html_url          = EXCLUDED.html_url,
-    branch            = EXCLUDED.branch,
-    author_login      = EXCLUDED.author_login,
-    author_avatar_url = EXCLUDED.author_avatar_url,
-    merged_at         = EXCLUDED.merged_at,
-    closed_at         = EXCLUDED.closed_at,
-    pr_updated_at     = EXCLUDED.pr_updated_at,
-    additions         = EXCLUDED.additions,
-    deletions         = EXCLUDED.deletions,
-    changed_files     = EXCLUDED.changed_files,
-    head_sha          = EXCLUDED.head_sha,
+    workspace_id      = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.workspace_id      ELSE vcs_pull_request.workspace_id      END,
+    provider          = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.provider          ELSE vcs_pull_request.provider          END,
+    title             = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.title             ELSE vcs_pull_request.title             END,
+    state             = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.state             ELSE vcs_pull_request.state             END,
+    html_url          = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.html_url          ELSE vcs_pull_request.html_url          END,
+    branch            = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.branch            ELSE vcs_pull_request.branch            END,
+    author_login      = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.author_login      ELSE vcs_pull_request.author_login      END,
+    author_avatar_url = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.author_avatar_url ELSE vcs_pull_request.author_avatar_url END,
+    merged_at         = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.merged_at         ELSE vcs_pull_request.merged_at         END,
+    closed_at         = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.closed_at         ELSE vcs_pull_request.closed_at         END,
+    pr_updated_at     = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.pr_updated_at     ELSE vcs_pull_request.pr_updated_at     END,
+    additions         = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.additions         ELSE vcs_pull_request.additions         END,
+    deletions         = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.deletions         ELSE vcs_pull_request.deletions         END,
+    changed_files     = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.changed_files     ELSE vcs_pull_request.changed_files     END,
+    head_sha          = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.head_sha          ELSE vcs_pull_request.head_sha          END,
     updated_at        = now()
 RETURNING *;
 
