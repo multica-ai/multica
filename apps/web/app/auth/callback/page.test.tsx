@@ -147,6 +147,38 @@ describe("CallbackPage", () => {
     expect(mockLoginWithGoogle).not.toHaveBeenCalled();
   });
 
+  it("hands an OIDC token back to the mobile app", async () => {
+    mockSearchParams.set("state", "oidc.server-generated-state");
+    mockLoginWithOIDC.mockResolvedValue({
+      user: makeUser(),
+      token: "mobile-oidc-token",
+      appState: "platform:mobile",
+    });
+
+    const hrefSetter = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, set href(value: string) { hrefSetter(value); } },
+    });
+
+    try {
+      render(<CallbackPage />);
+
+      await waitFor(() => {
+        expect(hrefSetter).toHaveBeenCalledWith(
+          "multica://auth/callback?token=mobile-oidc-token",
+        );
+      });
+      expect(mockPush).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
+  });
+
   it("unonboarded user with pending invitations lands on /invitations", async () => {
     mockListMyInvitations.mockResolvedValue([
       {

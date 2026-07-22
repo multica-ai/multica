@@ -26,7 +26,7 @@ function CallbackContent() {
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
   const loginWithOIDC = useAuthStore((s) => s.loginWithOIDC);
   const [error, setError] = useState("");
-  const [desktopToken, setDesktopToken] = useState<string | null>(null);
+  const [handoffToken, setHandoffToken] = useState<string | null>(null);
 
   useEffect(() => {
     const errorParam = searchParams.get("error");
@@ -66,7 +66,9 @@ function CallbackContent() {
         cliCallbackRaw = null;
       }
       return {
-        isDesktop: stateParts.includes("platform:desktop"),
+        isAppHandoff:
+          stateParts.includes("platform:desktop") ||
+          stateParts.includes("platform:mobile"),
         nextUrl: sanitizeNextUrl(nextPart ? nextPart.slice(5) : null),
         cliCallback:
           cliCallbackRaw && validateCliCallback(cliCallbackRaw)
@@ -114,8 +116,8 @@ function CallbackContent() {
             );
             return;
           }
-          if (destination.isDesktop) {
-            setDesktopToken(token);
+          if (destination.isAppHandoff) {
+            setHandoffToken(token);
             window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
             return;
           }
@@ -144,12 +146,12 @@ function CallbackContent() {
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");
         });
-    } else if (destination.isDesktop) {
-      // Desktop flow: exchange code for token, then redirect via deep link
+    } else if (destination.isAppHandoff) {
+      // Native app flow: exchange code for token, then redirect via deep link.
       api
         .googleLogin(code, redirectUri)
         .then(({ token }) => {
-          setDesktopToken(token);
+          setHandoffToken(token);
           window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
         })
         .catch((err) => {
@@ -167,25 +169,25 @@ function CallbackContent() {
     }
   }, [searchParams, loginWithGoogle, loginWithOIDC, router, qc]);
 
-  if (desktopToken) {
+  if (handoffToken) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl">Opening Multica</CardTitle>
             <CardDescription>
-              You should see a prompt to open the Multica desktop app. If
-              nothing happens, click the button below.
+              You should see a prompt to open the Multica app. If nothing
+              happens, click the button below.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
             <Button
               variant="outline"
               onClick={() => {
-                window.location.href = `multica://auth/callback?token=${encodeURIComponent(desktopToken)}`;
+                window.location.href = `multica://auth/callback?token=${encodeURIComponent(handoffToken)}`;
               }}
             >
-              Open Multica Desktop
+              Open Multica
             </Button>
           </CardContent>
         </Card>

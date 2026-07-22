@@ -70,6 +70,8 @@ function LoginPageContent() {
   const cliState = searchParams.get("cli_state") || "";
   const platform = searchParams.get("platform");
   const isDesktopHandoff = platform === "desktop" && !cliCallbackRaw;
+  const isMobileHandoff = platform === "mobile" && !cliCallbackRaw;
+  const isAppHandoff = isDesktopHandoff || isMobileHandoff;
   // `next` carries a protected URL the user was originally headed to
   // (e.g. /invite/{id}). With URL-driven workspaces there is no legacy
   // "/issues" default — if `next` is absent we decide after login based on
@@ -77,8 +79,8 @@ function LoginPageContent() {
   // cannot bounce the user off-origin after a successful login.
   const nextUrl = sanitizeNextUrl(searchParams.get("next"));
 
-  const [desktopToken, setDesktopToken] = useState<string | null>(null);
-  const [desktopError, setDesktopError] = useState("");
+  const [handoffToken, setHandoffToken] = useState<string | null>(null);
+  const [handoffError, setHandoffError] = useState("");
   const hasOnboarded = useHasOnboarded();
 
   // Latched once auth has been observed settled as logged-out on this page.
@@ -96,21 +98,25 @@ function LoginPageContent() {
       return;
     }
     if (cliCallbackRaw) return;
-    if (isDesktopHandoff) {
-      // Desktop opened the browser for login but the web session is already
+    if (isAppHandoff) {
+      // A native app opened the browser for login but the web session is already
       // authenticated — mint a bearer token from the cookie session and hand
       // it off via deep link instead of silently redirecting to the workspace.
       api
         .issueCliToken()
         .then(({ token }) => {
-          setDesktopToken(token);
+          setHandoffToken(token);
           window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
         })
         .catch((err) => {
-          setDesktopError(
+          setHandoffError(
             err instanceof Error
               ? err.message
-              : t(($) => $.web.desktop_handoff.prepare_failed),
+              : t(($) =>
+                  isMobileHandoff
+                    ? $.web.mobile_handoff.prepare_failed
+                    : $.web.desktop_handoff.prepare_failed,
+                ),
           );
         });
       return;
@@ -135,9 +141,10 @@ function LoginPageContent() {
       .catch(() => [] as Workspace[])
       .then((list) => resolveLoggedInDestination(qc, hasOnboarded, list))
       .then((dest) => router.replace(dest));
-  }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, hasOnboarded, qc]);
+  }, [isLoading, user, router, nextUrl, cliCallbackRaw, isAppHandoff, isMobileHandoff, hasOnboarded, qc, t]);
 
   const handleSuccess = async () => {
+    if (isAppHandoff) return;
     // Read the latest user snapshot directly — the closure's `hasOnboarded`
     // was captured before login completed and would be stale here.
     const currentUser = useAuthStore.getState().user;
@@ -156,7 +163,11 @@ function LoginPageContent() {
   // post-login callback page can redirect the JWT back to the CLI's local
   // HTTP listener (critical for headless / WSL2 environments).
   const authAppState = [
-    platform === "desktop" ? "platform:desktop" : "",
+    platform === "desktop"
+      ? "platform:desktop"
+      : platform === "mobile"
+        ? "platform:mobile"
+        : "",
     nextUrl ? `next:${nextUrl}` : "",
     cliCallbackRaw && validateCliCallback(cliCallbackRaw)
       ? `cli_callback:${encodeURIComponent(cliCallbackRaw)}`
@@ -169,16 +180,20 @@ function LoginPageContent() {
   // While the desktop handoff is in progress (or has produced a token/error),
   // render a dedicated screen instead of flashing the login form or redirecting
   // away to a workspace page.
-  if (isDesktopHandoff && user) {
-    if (desktopError) {
+  if (isAppHandoff && user) {
+    if (handoffError) {
       return (
         <div className="flex min-h-screen items-center justify-center">
           <Card className="w-full max-w-sm">
             <CardHeader className="text-center">
               <CardTitle className="text-2xl">
-                {t(($) => $.web.desktop_handoff.failed_title)}
+                {t(($) =>
+                  isMobileHandoff
+                    ? $.web.mobile_handoff.failed_title
+                    : $.web.desktop_handoff.failed_title,
+                )}
               </CardTitle>
-              <CardDescription>{desktopError}</CardDescription>
+              <CardDescription>{handoffError}</CardDescription>
             </CardHeader>
           </Card>
         </div>
@@ -189,23 +204,39 @@ function LoginPageContent() {
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl">
-              {t(($) => $.web.desktop_handoff.opening_title)}
+              {t(($) =>
+                isMobileHandoff
+                  ? $.web.mobile_handoff.opening_title
+                  : $.web.desktop_handoff.opening_title,
+              )}
             </CardTitle>
             <CardDescription>
-              {desktopToken
-                ? t(($) => $.web.desktop_handoff.opening_description)
-                : t(($) => $.web.desktop_handoff.preparing)}
+              {handoffToken
+                ? t(($) =>
+                    isMobileHandoff
+                      ? $.web.mobile_handoff.opening_description
+                      : $.web.desktop_handoff.opening_description,
+                  )
+                : t(($) =>
+                    isMobileHandoff
+                      ? $.web.mobile_handoff.preparing
+                      : $.web.desktop_handoff.preparing,
+                  )}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
-            {desktopToken ? (
+            {handoffToken ? (
               <Button
                 variant="outline"
                 onClick={() => {
-                  window.location.href = `multica://auth/callback?token=${encodeURIComponent(desktopToken)}`;
+                  window.location.href = `multica://auth/callback?token=${encodeURIComponent(handoffToken)}`;
                 }}
               >
-                {t(($) => $.web.desktop_handoff.open_button)}
+                {t(($) =>
+                  isMobileHandoff
+                    ? $.web.mobile_handoff.open_button
+                    : $.web.desktop_handoff.open_button,
+                )}
               </Button>
             ) : (
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

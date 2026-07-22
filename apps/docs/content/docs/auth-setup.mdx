@@ -160,6 +160,8 @@ Multica can use one discovery-capable OIDC provider alongside email codes and Go
 
 By default Multica requires `email_verified=true` before it creates an account. On first login, the account is linked to the provider's stable `(issuer, subject)` identity, so later email changes do not create a second account. Set `OIDC_REQUIRE_VERIFIED_EMAIL=false` only when the provider cannot emit this claim and its email ownership policy is trusted. `OIDC_ALLOWED_GROUPS` optionally requires an exact match in `OIDC_GROUPS_CLAIM`. OIDC configuration is read at runtime, so the frontend does not need to be rebuilt.
 
+The iOS app opens this same web login in the system authentication browser and returns through the registered `multica://auth/callback` scheme. Its `EXPO_PUBLIC_WEB_URL` must point to the frontend paired with the configured API.
+
 ## Restricting who can sign up
 
 Three environment variables combine by priority:
