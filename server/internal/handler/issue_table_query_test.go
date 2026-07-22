@@ -17,6 +17,7 @@ type issueTableEnrichmentFailTxStarter struct {
 	inner           txStarter
 	labelCalls      *int
 	tableQueryCalls *int
+	facetQueryCalls *int
 	rowQuerySQL     *string
 	groupQuerySQL   *string
 }
@@ -30,6 +31,7 @@ func (s issueTableEnrichmentFailTxStarter) Begin(ctx context.Context) (pgx.Tx, e
 		Tx:              tx,
 		labelCalls:      s.labelCalls,
 		tableQueryCalls: s.tableQueryCalls,
+		facetQueryCalls: s.facetQueryCalls,
 		rowQuerySQL:     s.rowQuerySQL,
 		groupQuerySQL:   s.groupQuerySQL,
 	}, nil
@@ -39,6 +41,7 @@ type issueTableEnrichmentFailTx struct {
 	pgx.Tx
 	labelCalls      *int
 	tableQueryCalls *int
+	facetQueryCalls *int
 	rowQuerySQL     *string
 	groupQuerySQL   *string
 }
@@ -49,6 +52,9 @@ func (tx *issueTableEnrichmentFailTx) recordTableQuery(sql string) {
 			strings.Contains(sql, "SELECT COUNT(*)::bigint FROM issue i WHERE") {
 			*tx.tableQueryCalls = *tx.tableQueryCalls + 1
 		}
+	}
+	if tx.facetQueryCalls != nil && strings.Contains(sql, "GROUP BY GROUPING SETS") {
+		*tx.facetQueryCalls = *tx.facetQueryCalls + 1
 	}
 	if tx.rowQuerySQL != nil && strings.Contains(sql, "page AS MATERIALIZED (") {
 		*tx.rowQuerySQL = sql
@@ -137,6 +143,30 @@ func TestIssueTableCursorRejectsAnotherQuery(t *testing.T) {
 	}
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusConflict)
+	}
+}
+
+func TestIssueTablePositionCursorIncludesIndexableLowerBound(t *testing.T) {
+	cursorValue := "90000"
+	cursor := issueTableCursor{
+		SortValue:    &cursorValue,
+		RowCreatedAt: "2026-01-01T00:00:00Z",
+		RowID:        "00000000-0000-4000-8000-000000000001",
+	}
+	args := make([]any, 0, 3)
+	predicate, ok := (resolvedIssueTableSort{
+		expression: "i.position",
+		direction:  "asc",
+		castType:   "double precision",
+	}).cursorPredicate(httptest.NewRecorder(), &cursor, func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", len(args))
+	})
+	if !ok {
+		t.Fatal("valid position cursor was rejected")
+	}
+	if !strings.Contains(predicate, "i.position >= $3::double precision") {
+		t.Fatalf("position cursor is missing its indexable lower bound: %s", predicate)
 	}
 }
 
@@ -527,6 +557,83 @@ func TestIssueTableStatusGroupingOverOneThousandRows(t *testing.T) {
 	}
 	if facetCountQueries != 0 {
 		t.Fatalf("include_total=false executed %d total count queries, want 0", facetCountQueries)
+	}
+
+	batchFacetQueries := 0
+	batchTotalQueries := 0
+	batchHandler := *testHandler
+	batchHandler.TxStarter = issueTableEnrichmentFailTxStarter{
+		inner:           testHandler.TxStarter,
+		facetQueryCalls: &batchFacetQueries,
+		tableQueryCalls: &batchTotalQueries,
+	}
+	batchRecorder := httptest.NewRecorder()
+	batchHandler.ListIssueTableFacets(batchRecorder, newRequest("POST", "/api/issues/table/facets", issueTableFacetsRequest{
+		Query: query,
+		Facets: []issueTableFacetSpec{
+			{Kind: "status"},
+			{Kind: "priority"},
+			{Kind: "assignee"},
+			{Kind: "creator"},
+			{Kind: "project"},
+		},
+	}))
+	if batchRecorder.Code != http.StatusOK {
+		t.Fatalf("batch facets status = %d: %s", batchRecorder.Code, batchRecorder.Body.String())
+	}
+	var batchResponse issueTableFacetsResponse
+	if err := json.NewDecoder(batchRecorder.Body).Decode(&batchResponse); err != nil {
+		t.Fatalf("decode batch facets: %v", err)
+	}
+	if batchResponse.Total != 1001 || len(batchResponse.Facets) != 5 {
+		t.Fatalf("unexpected batch facets response: total=%d facets=%d", batchResponse.Total, len(batchResponse.Facets))
+	}
+	if batchFacetQueries != 1 || batchTotalQueries != 0 {
+		t.Fatalf("batch facets executed grouping queries=%d total queries=%d, want 1 and 0", batchFacetQueries, batchTotalQueries)
+	}
+	batchCounts := make(map[string]map[string]int64, len(batchResponse.Facets))
+	for _, facet := range batchResponse.Facets {
+		counts := make(map[string]int64, len(facet.Values))
+		for _, value := range facet.Values {
+			counts[value.Key] = value.Count
+		}
+		batchCounts[facet.Kind] = counts
+	}
+	if batchCounts["status"]["todo"] != 501 || batchCounts["status"]["done"] != 500 ||
+		batchCounts["priority"]["none"] != 1001 ||
+		batchCounts["assignee"]["__none__"] != 1001 ||
+		batchCounts["creator"]["member:"+testUserID] != 1001 ||
+		batchCounts["project"][projectID] != 1001 {
+		t.Fatalf("unexpected batched facet counts: %#v", batchCounts)
+	}
+
+	mixedRecorder := httptest.NewRecorder()
+	testHandler.ListIssueTableFacets(mixedRecorder, newRequest("POST", "/api/issues/table/facets", issueTableFacetsRequest{
+		Query:  filteredQuery,
+		Facets: []issueTableFacetSpec{{Kind: "status"}, {Kind: "priority"}},
+	}))
+	if mixedRecorder.Code != http.StatusOK {
+		t.Fatalf("mixed facets status = %d: %s", mixedRecorder.Code, mixedRecorder.Body.String())
+	}
+	var mixedResponse issueTableFacetsResponse
+	if err := json.NewDecoder(mixedRecorder.Body).Decode(&mixedResponse); err != nil {
+		t.Fatalf("decode mixed facets: %v", err)
+	}
+	if mixedResponse.Total != 501 || len(mixedResponse.Facets) != 2 ||
+		mixedResponse.Facets[0].Kind != "status" || mixedResponse.Facets[1].Kind != "priority" {
+		t.Fatalf("unexpected mixed facets response: %#v", mixedResponse)
+	}
+	mixedCounts := make(map[string]map[string]int64, len(mixedResponse.Facets))
+	for _, facet := range mixedResponse.Facets {
+		counts := make(map[string]int64, len(facet.Values))
+		for _, value := range facet.Values {
+			counts[value.Key] = value.Count
+		}
+		mixedCounts[facet.Kind] = counts
+	}
+	if mixedCounts["status"]["todo"] != 501 || mixedCounts["status"]["done"] != 500 ||
+		mixedCounts["priority"]["none"] != 501 {
+		t.Fatalf("mixed facets lost disjunctive semantics: %#v", mixedCounts)
 	}
 }
 

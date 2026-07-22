@@ -104,6 +104,12 @@ func (sort resolvedIssueTableSort) cursorPredicate(w http.ResponseWriter, cursor
 		comparison = "<"
 	}
 	predicate := fmt.Sprintf("(%s %s %s OR (%s = %s AND %s))", sort.expression, comparison, valueExpr, sort.expression, valueExpr, tie)
+	if sort.expression == "i.position" {
+		// The exact mixed-direction keyset predicate is not itself indexable.
+		// This redundant lower bound lets PostgreSQL start the default position
+		// index at the cursor instead of filtering every preceding index entry.
+		predicate = fmt.Sprintf("(%s >= %s AND %s)", sort.expression, valueExpr, predicate)
+	}
 	if sort.nullsLast {
 		predicate = fmt.Sprintf("(%s IS NULL OR %s)", sort.expression, predicate)
 	}

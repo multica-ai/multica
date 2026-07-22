@@ -13,7 +13,7 @@ execution: code
 
 > 本文定义 Table View 的目标产品语义、前后端边界和分阶段实施方案。核心目标不是提高当前的 `1000` 上限，而是移除“前端必须拥有完整结果集才能 Group/Hierarchy”的架构前提。
 
-> **Implementation status (2026-07-22):** 新 Table 路径的 canonical compiler、U2–U3、U5–U7，以及 U8 的 exact facets / cache invalidation 已落地；标准字段和默认 position keyset 顺序所需 concurrent indexes 已加入。Rows 先裁 page，再只为当前页解析 hierarchy；assignee 显示名在 actor 聚合后解析。Legacy GET handlers 尚未迁入同一 compiler。Table 采用 hard cutover，新旧客户端仍可分别使用 additive table endpoints 与 legacy endpoints，不维护两套前端 Table truth。当前显式导出由浏览器遍历同一 rows Query Spec，并在 schema fallback、fingerprint/cursor 漂移、重复行或最终数量不等于首屏 total 时 fail closed；server-stream / async export job、observability、100k/1m staging SLO 与 browser network smoke 属于后续收口项。
+> **Implementation status (2026-07-22):** 新 Table 路径的 canonical compiler、U2–U3、U5–U7，以及 U8 的 exact facets / cache invalidation 已落地；标准字段和默认 position keyset 顺序所需 concurrent indexes 已加入。Rows 先裁 page，再只为当前页解析 hierarchy；默认 position 续页额外提供可下推的 cursor range bound，避免深页从 workspace 索引起点线性过滤。Assignee 显示名在 actor 聚合后解析；无自身 active filter 的标准 facets 在批量请求中用 `GROUPING SETS` 共享一次 base scan。Legacy GET handlers 尚未迁入同一 compiler。Table 采用 hard cutover，新旧客户端仍可分别使用 additive table endpoints 与 legacy endpoints，不维护两套前端 Table truth。当前显式导出由浏览器遍历同一 rows Query Spec，并在 schema fallback、fingerprint/cursor 漂移、重复行或最终数量不等于首屏 total 时 fail closed；非默认/自定义属性排序仍可能扫描并排序完整 membership，由 query timeout 限损；server-stream / async export job、observability、100k/1m staging SLO 与 browser network smoke 属于后续收口项。
 
 ## Goal Capsule
 
@@ -482,6 +482,7 @@ Response：
 
 - Cursor fields 全部经过类型验证并只作为 bind args，绝不拼接用户值到 SQL。
 - Cursor fingerprint 与当前 canonical Query Spec 不一致时返回 `409 cursor_query_mismatch`。
+- 默认 `position ASC, created_at DESC, id DESC` 保留精确的混合方向谓词，同时增加语义冗余的 `position >= cursor.position` index bound，使 PostgreSQL 可直接 seek 到深页位置；不能改成普通 row-value 比较，因为 position 不保证唯一且 tie-break 方向相反。
 - Cursor 不代表跨请求数据库 snapshot。每个响应是当次 transaction/read snapshot；实时写入通过 WS invalidation 触发 refetch。
 - Keyset 可避免普通 insert 下 offset shift 的重复/遗漏；如果某行的 sort/group 值在翻页期间变化，它可能跨过 cursor，WS invalidation 是最终一致性的修复机制。
 - Group header cursor 使用 group order rank/display sort key/stable group key，而不是 row sort cursor。
@@ -503,6 +504,8 @@ Request 复用 Query Spec，并声明需要的 facets：
 Response 返回 query fingerprint、query total，以及每个 facet 的 kind、可选 property ID 和 `{key,count}` values。`include_total` 省略时默认为 `true`，保留原 endpoint contract；筛选选项不消费 query total，因此前端传 `false`，跳过额外 COUNT。
 
 Table 初始渲染不请求 facets。用户打开某个标准字段或 custom property 的筛选子菜单时，只请求该维度；关闭筛选菜单后停用查询。这样一次正常交互最多执行当前维度的聚合，不会在每次 Table mount / realtime invalidation 时依次扫描全部标准字段和工作区 properties。
+
+API 仍支持批量 `facets[]`。对于没有自身 active filter、因而与 base query 共享同一 membership 的 status / priority / assignee / creator / project 维度，server 使用一条 `GROUP BY GROUPING SETS` 查询，并可把 base total 作为空 grouping set 同批返回。存在自身 active filter 的维度必须使用“排除自身 filter”的独立 universe；label join 与 custom-property 展开也继续独立查询，避免改变 exact disjunctive facet 语义。
 
 前端不再用 `scopedIssues` 计算 Table facet counts；Board/List 在统一 Query API 前可保留现有行为。
 

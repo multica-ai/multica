@@ -76,6 +76,103 @@ func issueTableFacetIdentity(facet issueTableFacetSpec) string {
 	return facet.Kind
 }
 
+func issueTableBaseFacetExpression(query issueTableQuerySpec, facet issueTableFacetSpec) (string, bool) {
+	switch facet.Kind {
+	case "status":
+		return "i.status", len(query.Filters.Statuses) == 0
+	case "priority":
+		return "i.priority", len(query.Filters.Priorities) == 0
+	case "assignee":
+		return "CASE WHEN i.assignee_type IS NULL OR i.assignee_id IS NULL THEN '__none__' ELSE i.assignee_type || ':' || i.assignee_id::text END", len(query.Filters.Assignees) == 0 && !query.Filters.IncludeNoAssignee
+	case "creator":
+		return "i.creator_type || ':' || i.creator_id::text", len(query.Filters.Creators) == 0
+	case "project":
+		return "COALESCE(i.project_id::text, '__none__')", len(query.Filters.ProjectIDs) == 0 && !query.Filters.IncludeNoProject
+	default:
+		return "", false
+	}
+}
+
+func (h *Handler) issueTableBaseFacetQuery(
+	w http.ResponseWriter,
+	r *http.Request,
+	base issueTableSQL,
+	requestQuery issueTableQuerySpec,
+	facets []issueTableFacetSpec,
+	includeTotal bool,
+) (map[string]issueTableFacetResponse, int64, bool) {
+	markerCases := make([]string, 0, len(facets))
+	valueCases := make([]string, 0, len(facets))
+	groupingSets := make([]string, 0, len(facets)+1)
+	responses := make(map[string]issueTableFacetResponse, len(facets))
+	for _, facet := range facets {
+		expression, ok := issueTableBaseFacetExpression(requestQuery, facet)
+		if !ok {
+			writeIssueTableQueryFailure(w, r, "failed to batch table facets")
+			return nil, 0, false
+		}
+		identity := issueTableFacetIdentity(facet)
+		markerCases = append(markerCases, fmt.Sprintf("WHEN GROUPING(%s) = 0 THEN '%s'", expression, identity))
+		valueCases = append(valueCases, fmt.Sprintf("WHEN GROUPING(%s) = 0 THEN (%s)::text", expression, expression))
+		groupingSets = append(groupingSets, "("+expression+")")
+		responses[identity] = issueTableFacetResponse{
+			Kind:       facet.Kind,
+			PropertyID: facet.PropertyID,
+			Values:     []issueTableFacetValueResponse{},
+		}
+	}
+	if includeTotal {
+		groupingSets = append(groupingSets, "()")
+	}
+
+	query := fmt.Sprintf(`SELECT CASE %s ELSE '__total__' END,
+       CASE %s ELSE '' END,
+       COUNT(*)::bigint
+FROM issue i
+WHERE %s
+GROUP BY GROUPING SETS (%s)`, strings.Join(markerCases, " "), strings.Join(valueCases, " "), base.where, strings.Join(groupingSets, ", "))
+	rows, err := h.DB.Query(r.Context(), query, base.args...)
+	if err != nil {
+		slog.Warn("ListIssueTableFacets batch query failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeIssueTableQueryFailure(w, r, "failed to list table facets")
+		return nil, 0, false
+	}
+	defer rows.Close()
+
+	var total int64
+	for rows.Next() {
+		var identity string
+		var value string
+		var count int64
+		if err := rows.Scan(&identity, &value, &count); err != nil {
+			writeIssueTableQueryFailure(w, r, "failed to list table facets")
+			return nil, 0, false
+		}
+		if identity == "__total__" {
+			total = count
+			continue
+		}
+		response, ok := responses[identity]
+		if !ok {
+			writeIssueTableQueryFailure(w, r, "failed to list table facets")
+			return nil, 0, false
+		}
+		response.Values = append(response.Values, issueTableFacetValueResponse{Key: value, Count: count})
+		responses[identity] = response
+	}
+	if err := rows.Err(); err != nil {
+		writeIssueTableQueryFailure(w, r, "failed to list table facets")
+		return nil, 0, false
+	}
+	for identity, response := range responses {
+		sort.Slice(response.Values, func(i, j int) bool {
+			return strings.Compare(response.Values[i].Key, response.Values[j].Key) < 0
+		})
+		responses[identity] = response
+	}
+	return responses, total, true
+}
+
 func (h *Handler) issueTableFacetQuery(w http.ResponseWriter, r *http.Request, requestQuery issueTableQuerySpec, facet issueTableFacetSpec) (issueTableFacetResponse, bool) {
 	response := issueTableFacetResponse{Kind: facet.Kind, PropertyID: facet.PropertyID, Values: []issueTableFacetValueResponse{}}
 	compiled, ok := h.compileIssueTableQuery(w, r, issueTableQueryWithoutFacet(requestQuery, facet))
@@ -196,19 +293,10 @@ func (h *Handler) ListIssueTableFacets(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var total int64
-	includeTotal := request.IncludeTotal == nil || *request.IncludeTotal
-	if includeTotal {
-		if err := h.DB.QueryRow(r.Context(), fmt.Sprintf("SELECT COUNT(*)::bigint FROM issue i WHERE %s", base.where), base.args...).Scan(&total); err != nil {
-			slog.Warn("ListIssueTableFacets total failed", append(logger.RequestAttrs(r), "error", err)...)
-			writeIssueTableQueryFailure(w, r, "failed to count table facets")
-			return
-		}
-	}
 
 	seen := make(map[string]struct{}, len(request.Facets))
-	facets := make([]issueTableFacetResponse, 0, len(request.Facets))
-	for _, facet := range request.Facets {
+	normalizedFacets := make([]issueTableFacetSpec, len(request.Facets))
+	for index, facet := range request.Facets {
 		facet.Kind = strings.TrimSpace(facet.Kind)
 		facet.PropertyID = strings.TrimSpace(facet.PropertyID)
 		identity := issueTableFacetIdentity(facet)
@@ -217,17 +305,57 @@ func (h *Handler) ListIssueTableFacets(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		seen[identity] = struct{}{}
-		resolved, ok := h.issueTableFacetQuery(w, r, request.Query, facet)
+		normalizedFacets[index] = facet
+	}
+
+	includeTotal := request.IncludeTotal == nil || *request.IncludeTotal
+	batchFacets := make([]issueTableFacetSpec, 0, len(normalizedFacets))
+	individualIndexes := make([]int, 0, len(normalizedFacets))
+	for index, facet := range normalizedFacets {
+		if _, batchable := issueTableBaseFacetExpression(request.Query, facet); batchable {
+			batchFacets = append(batchFacets, facet)
+		} else {
+			individualIndexes = append(individualIndexes, index)
+		}
+	}
+
+	responses := make([]issueTableFacetResponse, len(normalizedFacets))
+	var total int64
+	totalResolved := false
+	if len(batchFacets) > 0 {
+		batched, batchTotal, ok := h.issueTableBaseFacetQuery(w, r, base, request.Query, batchFacets, includeTotal)
 		if !ok {
 			return
 		}
-		facets = append(facets, resolved)
+		for index, facet := range normalizedFacets {
+			if response, exists := batched[issueTableFacetIdentity(facet)]; exists {
+				responses[index] = response
+			}
+		}
+		if includeTotal {
+			total = batchTotal
+			totalResolved = true
+		}
+	}
+	if includeTotal && !totalResolved {
+		if err := h.DB.QueryRow(r.Context(), fmt.Sprintf("SELECT COUNT(*)::bigint FROM issue i WHERE %s", base.where), base.args...).Scan(&total); err != nil {
+			slog.Warn("ListIssueTableFacets total failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeIssueTableQueryFailure(w, r, "failed to count table facets")
+			return
+		}
+	}
+	for _, index := range individualIndexes {
+		resolved, ok := h.issueTableFacetQuery(w, r, request.Query, normalizedFacets[index])
+		if !ok {
+			return
+		}
+		responses[index] = resolved
 	}
 
 	response := issueTableFacetsResponse{
 		QueryFingerprint: base.fingerprint,
 		Total:            total,
-		Facets:           facets,
+		Facets:           responses,
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		slog.Warn("ListIssueTableFacets snapshot commit failed", append(logger.RequestAttrs(r), "error", err)...)
