@@ -178,6 +178,17 @@ export function ConnectRemoteDialog({
   const firstRuntime = sessionRuntimes[0] ?? null;
   const primaryRuntime = onboarding ? selectedRuntime : firstRuntime;
 
+  // Progress must reflect the actually-connected state, not just THIS dialog
+  // session's token. Reopening the dialog mints a fresh session, so a user who
+  // already connected a computer (an earlier session, or the Runtimes page
+  // before entering onboarding) would otherwise watch the checklist spin at 0
+  // forever while their runtimes are online (MUL-5112). selectableRuntimes
+  // already resolves that connected set, so fold it in.
+  const connectedRuntimeCount = Math.max(
+    session?.runtime_count ?? 0,
+    selectableRuntimes.length,
+  );
+
   // A progress poll can succeed even if the corresponding websocket event
   // was missed. Refresh the runtime list when that fallback discovers one.
   useEffect(() => {
@@ -277,12 +288,14 @@ export function ConnectRemoteDialog({
               </div>
 
               <SetupChecklist
-                redeemed={Boolean(session?.redeemed_at)}
-                daemonConnected={Boolean(session?.daemon_connected_at)}
-                runtimeCount={session?.runtime_count ?? 0}
+                redeemed={Boolean(session?.redeemed_at) || connectedRuntimeCount > 0}
+                daemonConnected={
+                  Boolean(session?.daemon_connected_at) || connectedRuntimeCount > 0
+                }
+                runtimeCount={connectedRuntimeCount}
               />
 
-              {session?.daemon_connected_at && session.runtime_count === 0 ? (
+              {session?.daemon_connected_at && connectedRuntimeCount === 0 ? (
                 <div className="flex gap-2.5 rounded-lg border border-warning/30 bg-warning/5 p-3">
                   <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
                   <div>
