@@ -124,6 +124,7 @@ func init() {
 	autopilotCreateCmd.Flags().String("priority", "none", "Priority for created issues (none, low, medium, high, urgent)")
 	autopilotCreateCmd.Flags().String("project", "", "Project ID (optional)")
 	autopilotCreateCmd.Flags().String("issue-title-template", "", "Template for issue titles (create_issue mode). Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected at create-time.")
+	autopilotCreateCmd.Flags().Int("max-concurrent-runs", 0, "Max in-flight runs (issue_created/running) before new dispatches are skipped. 0 / unset = unlimited.")
 	autopilotCreateCmd.Flags().StringArray("subscriber", nil, "Member subscriber to notify for issues this autopilot creates (name or user ID; repeatable)")
 	autopilotCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -136,6 +137,8 @@ func init() {
 	autopilotUpdateCmd.Flags().String("status", "", "New status (active, paused)")
 	autopilotUpdateCmd.Flags().String("mode", "", "New execution mode (create_issue or run_only)")
 	autopilotUpdateCmd.Flags().String("issue-title-template", "", "New issue title template. Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected.")
+	autopilotUpdateCmd.Flags().Int("max-concurrent-runs", 0, "Max in-flight runs before new dispatches are skipped. 0 / unset leaves the value unchanged.")
+	autopilotUpdateCmd.Flags().Bool("clear-max-concurrent-runs", false, "Reset the in-flight run cap to unlimited")
 	autopilotUpdateCmd.Flags().StringArray("subscriber", nil, "Replace subscribers with this member (name or user ID; repeatable)")
 	autopilotUpdateCmd.Flags().Bool("clear-subscribers", false, "Remove all autopilot subscribers")
 	autopilotUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -316,6 +319,13 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("issue-title-template"); v != "" {
 		body["issue_title_template"] = v
 	}
+	if cmd.Flags().Changed("max-concurrent-runs") {
+		v, _ := cmd.Flags().GetInt("max-concurrent-runs")
+		if v < 1 {
+			return fmt.Errorf("--max-concurrent-runs must be a positive integer (>= 1)")
+		}
+		body["max_concurrent_runs"] = v
+	}
 	if subscriberRefs, _ := cmd.Flags().GetStringArray("subscriber"); len(subscriberRefs) > 0 {
 		subscribers, err := resolveAutopilotSubscriberInputs(ctx, client, subscriberRefs)
 		if err != nil {
@@ -399,6 +409,19 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("issue-title-template") {
 		v, _ := cmd.Flags().GetString("issue-title-template")
 		body["issue_title_template"] = v
+	}
+	clearCap, _ := cmd.Flags().GetBool("clear-max-concurrent-runs")
+	if clearCap && cmd.Flags().Changed("max-concurrent-runs") {
+		return fmt.Errorf("--max-concurrent-runs and --clear-max-concurrent-runs are mutually exclusive")
+	}
+	if clearCap {
+		body["max_concurrent_runs"] = nil
+	} else if cmd.Flags().Changed("max-concurrent-runs") {
+		v, _ := cmd.Flags().GetInt("max-concurrent-runs")
+		if v < 1 {
+			return fmt.Errorf("--max-concurrent-runs must be a positive integer (>= 1)")
+		}
+		body["max_concurrent_runs"] = v
 	}
 	clearSubscribers, _ := cmd.Flags().GetBool("clear-subscribers")
 	subscriberRefs, _ := cmd.Flags().GetStringArray("subscriber")

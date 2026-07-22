@@ -33,13 +33,17 @@ Execution modes:
 
 `issue-title-template` only supports `{{date}}`. Do not invent `{{trigger_id}}`, `{{branch}}`, or other variables.
 
+## Concurrency cap
+
+`max_concurrent_runs` (nullable integer, default null = unlimited) caps how many in-flight runs (`issue_created` / `running`) an autopilot may have at once. When a dispatch would exceed the cap, it is admitted as a `skipped` run with `failure_reason` carrying `concurrency cap` and reason code `concurrency_cap`, instead of stacking another dispatch - the pre-existing in-flight run is untouched. Terminal runs (`completed` / `failed` / `skipped`) do not count. The check runs in `shouldSkipDispatch`, so it applies uniformly to schedule, webhook, and manual triggers. A transient count failure fails open (admits).
+
 ## CLI
 
 ```bash
 multica autopilot list --output json
 multica autopilot get <autopilot-id> --output json
-multica autopilot create --title "<title>" --description "<task prompt>" --agent <agent-name-or-id> --mode create_issue|run_only --output json
-multica autopilot update <autopilot-id> --status active|paused --output json
+multica autopilot create --title "<title>" --description "<task prompt>" --agent <agent-name-or-id> --mode create_issue|run_only [--max-concurrent-runs N] --output json
+multica autopilot update <autopilot-id> --status active|paused [--max-concurrent-runs N | --clear-max-concurrent-runs] --output json
 multica autopilot runs <autopilot-id> --output json
 multica autopilot trigger-add <autopilot-id> --kind schedule --cron "0 9 * * *" --timezone Asia/Shanghai --output json
 multica autopilot trigger-add <autopilot-id> --kind webhook --label "ci" --output json
@@ -56,7 +60,7 @@ Webhook trigger output can include a URL/token. Do not paste webhook tokens or s
 For "why didn't it run":
 
 1. `multica autopilot get <id> --output json` — status, mode, assignee, triggers.
-2. `multica autopilot runs <id> --output json` — run status and failure reason.
+2. `multica autopilot runs <id> --output json` — run status and failure reason. A `skipped` run whose reason mentions `concurrency cap` means `max_concurrent_runs` was reached; raise the cap or wait for in-flight runs to finish.
 3. If assigned to a squad, inspect the squad: `multica squad get <squad-id> --output json`; execution goes to the leader.
 4. Inspect the target agent/runtime: `multica agent get <agent-id> --output json` and `multica runtime list --output json`.
 5. For webhooks, inspect delivery status: `queued` means the worker has not completed dispatch; `failed` carries the worker error. A provider retry with the same `X-GitHub-Delivery` / `Idempotency-Key` reuses the original delivery.
