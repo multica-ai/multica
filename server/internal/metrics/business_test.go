@@ -118,6 +118,7 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	exerciseEvent(m, analytics.EventTeamInviteAccepted, nil)
 	exerciseEvent(m, analytics.EventOnboardingStarted, map[string]any{"platform": "web"})
 	exerciseEvent(m, analytics.EventOnboardingQuestionnaireSubmit, nil)
+	exerciseEvent(m, analytics.EventOnboardingSourceSubmit, nil)
 	exerciseEvent(m, analytics.EventOnboardingCompleted, map[string]any{"completion_path": "full"})
 	exerciseEvent(m, analytics.EventCloudWaitlistJoined, nil)
 	exerciseEvent(m, analytics.EventIssueCreated, map[string]any{"source": "manual", "platform": "web"})

@@ -16,9 +16,7 @@ import {
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import type { AgentRuntime, Workspace } from "@multica/core/types";
 import { StepWelcome } from "./steps/step-welcome";
-import { StepSource } from "./steps/step-source";
-import { StepRole } from "./steps/step-role";
-import { StepUseCase } from "./steps/step-use-case";
+import { StepAboutYou } from "./steps/step-about-you";
 import { StepWorkspace } from "./steps/step-workspace";
 import { StepRuntimeConnect } from "./steps/step-runtime-connect";
 import { StepPlatformFork } from "./steps/step-platform-fork";
@@ -255,7 +253,7 @@ export function OnboardingFlow({
   const handleBack = useCallback((from: OnboardingStep) => {
     const idx = ONBOARDING_STEP_ORDER.indexOf(from);
     if (idx <= 0) {
-      // Source (the first persisted step) returns to Welcome.
+      // About you (the first persisted step) returns to Welcome.
       setStep("welcome");
       return;
     }
@@ -276,38 +274,14 @@ export function OnboardingFlow({
     );
   }
 
-  if (step === "source") {
+  if (step === "about_you") {
     return (
-      <StepSource
+      <StepAboutYou
         answers={answers}
         onChange={applyAnswers}
-        onAdvance={() => advanceFrom("source")}
-        onSkip={() => advanceFrom("source")}
-        onBack={() => handleBack("source")}
-      />
-    );
-  }
-
-  if (step === "role") {
-    return (
-      <StepRole
-        answers={answers}
-        onChange={applyAnswers}
-        onAdvance={() => advanceFrom("role")}
-        onSkip={() => advanceFrom("role")}
-        onBack={() => handleBack("role")}
-      />
-    );
-  }
-
-  if (step === "use_case") {
-    return (
-      <StepUseCase
-        answers={answers}
-        onChange={applyAnswers}
-        onAdvance={() => advanceFrom("use_case")}
-        onSkip={() => advanceFrom("use_case")}
-        onBack={() => handleBack("use_case")}
+        onAdvance={() => advanceFrom("about_you")}
+        onSkip={() => advanceFrom("about_you")}
+        onBack={() => handleBack("about_you")}
       />
     );
   }
