@@ -7,8 +7,14 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { DashboardTabBar } from "./components/dashboard-tab-bar";
 import { useDashboardStore } from "../core/store";
-import { dashboardOverviewOptions } from "../core/queries";
+import {
+  aiImpactFunctionsOptions,
+  aiImpactOverviewOptions,
+  aiImpactQualityRiskOptions,
+  dashboardOverviewOptions,
+} from "../core/queries";
 import { AnalyticsDashboard } from "./components/analytics-dashboard";
+import { AIImpactControlRoom } from "./components/ai-impact-control-room";
 import { MessagesControlRoom } from "./components/messages-control-room";
 import { OverviewControlRoom } from "./components/overview-control-room";
 import { RunsControlRoom } from "./components/runs-control-room";
@@ -30,6 +36,10 @@ export function DashboardPage() {
   );
   const wsId = workspace?.id ?? "";
   const overview = useQuery(dashboardOverviewOptions(wsId, range, scope, actorId));
+  const aiImpactWsId = tab === "ai-impact" ? wsId : "";
+  const aiImpactOverview = useQuery(aiImpactOverviewOptions(aiImpactWsId));
+  const aiImpactFunctions = useQuery(aiImpactFunctionsOptions(aiImpactWsId));
+  const aiImpactQualityRisk = useQuery(aiImpactQualityRiskOptions(aiImpactWsId));
 
   if (!enabled) return null;
 
@@ -68,7 +78,7 @@ export function DashboardPage() {
               {actorName ?? "Actor"} x
             </button>
           )}
-          <DashboardTabBar />
+          <DashboardTabBar showAIImpact />
         </div>
       </PageHeader>
 
@@ -109,6 +119,19 @@ export function DashboardPage() {
           )}
 
           {tab === "messages" && <MessagesControlRoom workspaceId={workspace.id} workspaceSlug={workspace.slug} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={(id, name) => setActor(id, name)} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
+
+          {tab === "ai-impact" && (
+            <AIImpactControlRoom
+              overview={aiImpactOverview.data}
+              functions={aiImpactFunctions.data}
+              qualityRisk={aiImpactQualityRisk.data}
+              isLoading={{
+                overview: aiImpactOverview.isLoading,
+                functions: aiImpactFunctions.isLoading,
+                qualityRisk: aiImpactQualityRisk.isLoading,
+              }}
+            />
+          )}
         </div>
       </div>
     </div>

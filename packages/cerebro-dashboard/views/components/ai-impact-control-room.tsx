@@ -2,57 +2,16 @@
 
 import { useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
+import type {
+  AIImpactFunctionsResponse,
+  AIImpactOverviewResponse,
+  AIImpactQualityRiskResponse,
+} from "../../core/ai-impact-api";
 import {
   ControlRoomEmpty,
   ControlRoomLoading,
   ControlRoomPanel,
-  formatDollars,
 } from "./control-room-primitives";
-
-export type AIImpactDecision = "Scale" | "Observe" | "Stop";
-export type AIImpactEvidenceStatus = "Measured" | "Estimated" | "Missing";
-
-export interface AIImpactFunction {
-  id: string;
-  name: string;
-  operating_loops: number;
-  realized_cash_cents: number;
-  approved_capacity_cents: number;
-  estimated_value_cents: number;
-  ai_cost_cents: number;
-  implementation_cost_cents: number;
-  net_value_cents: number;
-  decision: AIImpactDecision;
-  evidence_status: AIImpactEvidenceStatus;
-  confidence: number;
-}
-
-export interface AIImpactQualityGuardrail {
-  id: string;
-  name: string;
-  value: string;
-  target: string;
-  passed: boolean;
-  critical: boolean;
-  evidence_status: AIImpactEvidenceStatus;
-  confidence: number;
-}
-
-export interface AIImpactSummary {
-  period_start: string;
-  period_end: string;
-  realized_cash_cents: number;
-  approved_capacity_cents: number;
-  estimated_value_cents: number;
-  ai_cost_cents: number;
-  implementation_cost_cents: number;
-  net_value_cents: number;
-  decision: AIImpactDecision;
-  evidence_status: AIImpactEvidenceStatus;
-  confidence: number;
-  functions: AIImpactFunction[];
-  quality_guardrails: AIImpactQualityGuardrail[];
-}
 
 type AIImpactView = "overview" | "functions" | "quality";
 
@@ -62,14 +21,24 @@ const VIEWS: { id: AIImpactView; label: string }[] = [
   { id: "quality", label: "Quality & Risk" },
 ];
 
+export interface AIImpactLoadingState {
+  overview: boolean;
+  functions: boolean;
+  qualityRisk: boolean;
+}
+
 export function AIImpactControlRoom({
-  data,
-  loading,
+  overview,
+  functions,
+  qualityRisk,
+  isLoading,
   onOpenEvidence,
 }: {
-  data: AIImpactSummary | undefined;
-  loading: boolean;
-  onOpenEvidence: () => void;
+  overview: AIImpactOverviewResponse | undefined;
+  functions: AIImpactFunctionsResponse | undefined;
+  qualityRisk: AIImpactQualityRiskResponse | undefined;
+  isLoading: AIImpactLoadingState;
+  onOpenEvidence?: () => void;
 }) {
   const [view, setView] = useState<AIImpactView>("overview");
 
@@ -79,10 +48,10 @@ export function AIImpactControlRoom({
         <div>
           <h2 className="text-sm font-semibold text-foreground">AI Impact</h2>
           <p className="text-[11px] text-muted-foreground">
-            Evidence-backed value, cost, capacity, and quality decisions
+            Evidence-backed outcomes, quality, and operating-loop decisions
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        {onOpenEvidence && (
           <button
             type="button"
             onClick={onOpenEvidence}
@@ -90,7 +59,7 @@ export function AIImpactControlRoom({
           >
             Open evidence
           </button>
-        </div>
+        )}
       </header>
 
       <nav className="flex gap-1 border-b" aria-label="AI Impact views">
@@ -112,81 +81,89 @@ export function AIImpactControlRoom({
         ))}
       </nav>
 
-      {loading ? (
-        <ControlRoomPanel title="Value flow" meta="Loading measured AI impact">
-          <ControlRoomLoading rows={5} />
-        </ControlRoomPanel>
-      ) : !data ? (
-        <ControlRoomPanel title="Value flow" meta="Measured outcomes only">
-          <ControlRoomEmpty>No AI impact evidence is available for this period.</ControlRoomEmpty>
-        </ControlRoomPanel>
-      ) : view === "overview" ? (
-        <OverviewView data={data} />
+      {view === "overview" ? (
+        <OverviewView data={overview} loading={isLoading.overview} />
       ) : view === "functions" ? (
-        <FunctionsView functions={data.functions} />
+        <FunctionsView data={functions} loading={isLoading.functions} />
       ) : (
-        <QualityView guardrails={data.quality_guardrails} />
+        <QualityRiskView data={qualityRisk} loading={isLoading.qualityRisk} />
       )}
     </div>
   );
 }
 
-function OverviewView({ data }: { data: AIImpactSummary }) {
-  const totalCost = data.ai_cost_cents + data.implementation_cost_cents;
+function OverviewView({
+  data,
+  loading,
+}: {
+  data: AIImpactOverviewResponse | undefined;
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <ControlRoomPanel title="Evidence overview" meta="Loading measured AI impact">
+        <ControlRoomLoading rows={5} />
+      </ControlRoomPanel>
+    );
+  }
+
+  if (!data || data.families.every((family) => family.evidence.length === 0)) {
+    return (
+      <ControlRoomPanel title="Evidence overview" meta="Measured and estimated evidence">
+        <ControlRoomEmpty>No AI impact evidence is available for this period.</ControlRoomEmpty>
+      </ControlRoomPanel>
+    );
+  }
 
   return (
-    <div className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
-      <ControlRoomPanel
-        title="Value flow"
-        meta={`${formatPeriod(data.period_start, data.period_end)} · realized value and approved capacity only`}
-      >
-        <div className="grid divide-y sm:grid-cols-4 sm:divide-x sm:divide-y-0">
-          <ValueStep
-            label="AI cost"
-            value={formatDollars(totalCost)}
-            note={`${formatDollars(data.ai_cost_cents)} usage · ${formatDollars(data.implementation_cost_cents)} implementation`}
-          />
-          <ValueStep
-            label="Capacity released"
-            value={formatDollars(data.approved_capacity_cents)}
-            note="Approved capacity value"
-          />
-          <ValueStep
-            label="Outcome value"
-            value={formatDollars(data.realized_cash_cents)}
-            note={`${formatDollars(data.estimated_value_cents)} estimated separately`}
-          />
-          <ValueStep
-            label="Net value"
-            value={formatDollars(data.net_value_cents)}
-            note="Realized cash + approved capacity − total cost"
-            emphasized
-          />
-        </div>
-      </ControlRoomPanel>
-
-      <ControlRoomPanel title="Decision" meta="Evidence status and confidence">
-        <div className="space-y-4 p-4">
-          <div>
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              Recommendation
-            </p>
-            <p className="mt-1 text-2xl font-semibold text-foreground">{data.decision}</p>
+    <div className="grid gap-3 xl:grid-cols-2">
+      {data.families.map((family) => (
+        <ControlRoomPanel
+          key={family.family}
+          title={family.family}
+          meta={`${family.evidence.length} evidence ${family.evidence.length === 1 ? "point" : "points"}`}
+        >
+          <div className="divide-y">
+            {family.evidence.map((item) => (
+              <div
+                key={`${item.operating_loop_id}:${item.metric_id}:${item.period_start}`}
+                className="flex items-start justify-between gap-4 px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium text-foreground">{item.metric_name}</p>
+                  <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                    {item.function_name} · {item.operating_loop_name}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="font-mono text-sm font-semibold tabular-nums text-foreground">
+                    {formatEvidenceValue(item.value, item.metric_unit)}
+                  </p>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    {item.evidence_status} · {formatPercent(item.confidence)}
+                  </p>
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <EvidenceFact label="Evidence" value={data.evidence_status} />
-            <EvidenceFact label="Confidence" value={formatPercent(data.confidence)} />
-          </div>
-        </div>
-      </ControlRoomPanel>
+        </ControlRoomPanel>
+      ))}
     </div>
   );
 }
 
-function FunctionsView({ functions }: { functions: AIImpactFunction[] }) {
+function FunctionsView({
+  data,
+  loading,
+}: {
+  data: AIImpactFunctionsResponse | undefined;
+  loading: boolean;
+}) {
   return (
-    <ControlRoomPanel title="Function decisions" meta="Compare value without ranking people">
-      {functions.length === 0 ? (
+    <ControlRoomPanel title="Function decisions" meta="Compare operating loops without ranking people">
+      {loading ? (
+        <ControlRoomLoading rows={5} />
+      ) : !data || data.functions.length === 0 ? (
         <ControlRoomEmpty>No function-level evidence is available for this period.</ControlRoomEmpty>
       ) : (
         <div className="overflow-x-auto">
@@ -194,24 +171,20 @@ function FunctionsView({ functions }: { functions: AIImpactFunction[] }) {
             <thead>
               <tr className="border-b text-left text-[10px] uppercase tracking-wide text-muted-foreground">
                 <th className="px-4 py-2 font-medium">Function</th>
-                <th className="px-4 py-2 font-medium">Operating loops</th>
-                <th className="px-4 py-2 font-medium">Net value</th>
-                <th className="px-4 py-2 font-medium">Evidence</th>
+                <th className="px-4 py-2 font-medium">Operating loop</th>
                 <th className="px-4 py-2 font-medium">Decision</th>
               </tr>
             </thead>
             <tbody>
-              {functions.map((item) => (
-                <tr key={item.id} className="border-b last:border-0">
-                  <td className="px-4 py-3 font-medium text-foreground">{item.name}</td>
-                  <td className="px-4 py-3 font-mono tabular-nums">{item.operating_loops}</td>
-                  <td className="px-4 py-3 font-mono tabular-nums">{formatDollars(item.net_value_cents)}</td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {item.evidence_status} · {formatPercent(item.confidence)}
-                  </td>
-                  <td className="px-4 py-3 font-medium">{item.decision}</td>
-                </tr>
-              ))}
+              {data.functions.flatMap((item) =>
+                item.operating_loops.map((loop) => (
+                  <tr key={`${item.id}:${loop.id}`} className="border-b last:border-0">
+                    <td className="px-4 py-3 font-medium text-foreground">{item.name}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{loop.name}</td>
+                    <td className="px-4 py-3 font-medium">{loop.decision}</td>
+                  </tr>
+                )),
+              )}
             </tbody>
           </table>
         </div>
@@ -220,28 +193,29 @@ function FunctionsView({ functions }: { functions: AIImpactFunction[] }) {
   );
 }
 
-function QualityView({ guardrails }: { guardrails: AIImpactQualityGuardrail[] }) {
+function QualityRiskView({
+  data,
+  loading,
+}: {
+  data: AIImpactQualityRiskResponse | undefined;
+  loading: boolean;
+}) {
   return (
-    <ControlRoomPanel title="Quality guardrails" meta="Critical failures override value gains">
-      {guardrails.length === 0 ? (
-        <ControlRoomEmpty>No quality guardrail evidence is available for this period.</ControlRoomEmpty>
+    <ControlRoomPanel title="Quality & Risk decisions" meta="Operating-loop decisions from current evidence">
+      {loading ? (
+        <ControlRoomLoading rows={5} />
+      ) : !data || data.decisions.length === 0 ? (
+        <ControlRoomEmpty>No quality and risk decisions are available for this period.</ControlRoomEmpty>
       ) : (
         <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">
-          {guardrails.map((guardrail) => (
-            <article key={guardrail.id} className="rounded-md border bg-background p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-medium text-foreground">{guardrail.name}</p>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground">Target {guardrail.target}</p>
-                </div>
-                <span className="text-[10px] font-medium text-muted-foreground">
-                  {guardrail.passed ? "Within guardrail" : guardrail.critical ? "Critical risk" : "Needs attention"}
-                </span>
-              </div>
-              <p className="mt-3 font-mono text-xl font-semibold tabular-nums">{guardrail.value}</p>
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                {guardrail.evidence_status} · {formatPercent(guardrail.confidence)} confidence
-              </p>
+          {data.decisions.map((decision) => (
+            <article
+              key={`${decision.function_id}:${decision.operating_loop_id}`}
+              className="rounded-md border bg-background p-3"
+            >
+              <p className="text-[10px] text-muted-foreground">{decision.function_name}</p>
+              <p className="mt-1 text-xs font-medium text-foreground">{decision.operating_loop_name}</p>
+              <p className="mt-3 text-xl font-semibold text-foreground">{decision.decision}</p>
             </article>
           ))}
         </div>
@@ -250,43 +224,10 @@ function QualityView({ guardrails }: { guardrails: AIImpactQualityGuardrail[] })
   );
 }
 
-function ValueStep({
-  label,
-  value,
-  note,
-  emphasized = false,
-}: {
-  label: string;
-  value: string;
-  note: string;
-  emphasized?: boolean;
-}) {
-  return (
-    <div className={cn("min-w-0 p-4", emphasized && "bg-primary/5")}>
-      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-foreground">{value}</p>
-      <p className="mt-1 text-[10px] text-muted-foreground">{note}</p>
-    </div>
-  );
-}
-
-function EvidenceFact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border bg-background p-3">
-      <p className="text-[10px] text-muted-foreground">{label}</p>
-      <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">{value}</p>
-    </div>
-  );
+function formatEvidenceValue(value: number, unit: string): string {
+  return unit ? `${value.toLocaleString("en-US")} ${unit}` : value.toLocaleString("en-US");
 }
 
 function formatPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
-}
-
-function formatPeriod(start: string, end: string): string {
-  const formatter = new Intl.DateTimeFormat("en", { day: "numeric", month: "short" });
-  const startDate = new Date(start);
-  const endDate = new Date(end);
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return "Selected period";
-  return `${formatter.format(startDate)}–${formatter.format(endDate)}`;
 }
