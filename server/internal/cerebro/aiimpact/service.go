@@ -247,6 +247,46 @@ type FunctionSummaryReadModel struct {
 	OperatingLoops []FunctionSummaryLoopReadModel
 }
 
+// OverviewFamilyReadModel groups latest evidence under one canonical metric family.
+type OverviewFamilyReadModel struct {
+	Family   MetricFamily
+	Evidence []EvidenceReadModel
+}
+
+// ListOverviewSummary groups latest workspace evidence without inferring value or Project attribution.
+func (s *Service) ListOverviewSummary(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+) ([]OverviewFamilyReadModel, error) {
+	evidence, err := s.ListWorkspaceEvidence(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	families := []MetricFamily{
+		FamilyAdoption,
+		FamilyOutput,
+		FamilyOutcome,
+		FamilyQuality,
+		FamilyEconomics,
+		FamilyRisk,
+	}
+	result := make([]OverviewFamilyReadModel, 0, len(families))
+	for _, family := range families {
+		familyEvidence := make([]EvidenceReadModel, 0)
+		for _, item := range evidence {
+			if item.Metric.Family == family {
+				familyEvidence = append(familyEvidence, item)
+			}
+		}
+		result = append(result, OverviewFamilyReadModel{
+			Family:   family,
+			Evidence: familyEvidence,
+		})
+	}
+	return result, nil
+}
+
 // ListQualityRiskDecisions evaluates the latest targeted Outcome and guardrail evidence.
 func (s *Service) ListQualityRiskDecisions(
 	ctx context.Context,

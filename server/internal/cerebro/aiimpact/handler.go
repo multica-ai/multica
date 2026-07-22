@@ -34,6 +34,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/cerebro/ai-impact/metrics", h.ListMetrics)
 	r.Post("/api/cerebro/ai-impact/metrics", h.CreateMetric)
 	r.Get("/api/cerebro/ai-impact/evidence", h.ListWorkspaceEvidence)
+	r.Get("/api/cerebro/ai-impact/overview/summary", h.ListOverviewSummary)
 	r.Get("/api/cerebro/ai-impact/functions/summary", h.ListFunctionSummaries)
 	r.Get("/api/cerebro/ai-impact/quality-risk/decisions", h.ListQualityRiskDecisions)
 	r.Get("/api/cerebro/ai-impact/functions/{functionId}/evidence", h.ListFunctionEvidence)
@@ -43,6 +44,36 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/latest-observations", h.ListLatestObservations)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
 	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
+}
+
+type overviewFamilyResponse struct {
+	Family   MetricFamily       `json:"family"`
+	Evidence []evidenceResponse `json:"evidence"`
+}
+
+// ListOverviewSummary returns latest evidence grouped by the canonical metric families.
+func (h *Handler) ListOverviewSummary(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, _, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+	summary, err := h.service.ListOverviewSummary(r.Context(), workspaceID)
+	if err != nil {
+		writeObservationError(w, http.StatusInternalServerError, "failed to list overview summary")
+		return
+	}
+	response := make([]overviewFamilyResponse, 0, len(summary))
+	for _, family := range summary {
+		evidence := make([]evidenceResponse, 0, len(family.Evidence))
+		for _, item := range family.Evidence {
+			evidence = append(evidence, toEvidenceResponse(item))
+		}
+		response = append(response, overviewFamilyResponse{
+			Family:   family.Family,
+			Evidence: evidence,
+		})
+	}
+	writeObservationJSON(w, http.StatusOK, map[string]any{"families": response})
 }
 
 type functionSummaryLoopResponse struct {

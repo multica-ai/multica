@@ -1128,6 +1128,74 @@ func TestFunctionsSummaryReturnsActiveFunctionsWithTheirLoopDecisions(t *testing
 	}
 }
 
+func TestOverviewSummaryGroupsLatestEvidenceByMetricFamily(t *testing.T) {
+	workspaceID := uuid.New()
+	functionID := uuid.New()
+	operatingLoopID := uuid.New()
+	outcomeMetricID := uuid.New()
+	economicsMetricID := uuid.New()
+	periodStart := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.Add(24 * time.Hour)
+	store := &recordingObservationStore{
+		functions: []Function{
+			{ID: functionID, WorkspaceID: workspaceID, Name: "Customer Service", Active: true},
+		},
+		operatingLoops: []OperatingLoop{
+			{ID: operatingLoopID, WorkspaceID: workspaceID, FunctionID: functionID, Name: "Resolve customer needs", Active: true},
+		},
+		metrics: []Metric{
+			{ID: outcomeMetricID, WorkspaceID: workspaceID, OperatingLoopID: operatingLoopID, Name: "Resolved needs", Family: FamilyOutcome, Unit: "needs", Direction: DirectionIncrease, Active: true},
+			{ID: economicsMetricID, WorkspaceID: workspaceID, OperatingLoopID: operatingLoopID, Name: "AI cost", Family: FamilyEconomics, Unit: "cents", Direction: DirectionDecrease, Active: true},
+		},
+		workspaceObservations: []Observation{
+			{ID: uuid.New(), MetricID: outcomeMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 10, EvidenceStatus: EvidenceEstimated, Confidence: 0.6, Source: "support", Method: "sampled assessment", CreatedAt: periodEnd},
+			{ID: uuid.New(), MetricID: outcomeMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 12, EvidenceStatus: EvidenceMeasured, Confidence: 0.9, Source: "support", Method: "audited count", CreatedAt: periodEnd.Add(time.Hour)},
+			{ID: uuid.New(), MetricID: economicsMetricID, PeriodStart: periodStart, PeriodEnd: periodEnd, Value: 2500, EvidenceStatus: EvidenceMeasured, Confidence: 1, Source: "gateway", Method: "usage ledger", CreatedAt: periodEnd},
+		},
+	}
+	handler := NewHandler(NewService(store))
+	router := chi.NewRouter()
+	handler.Mount(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cerebro/ai-impact/overview/summary", nil)
+	ctx := middleware.SetMemberContext(req.Context(), workspaceID.String(), db.Member{
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		Role:   "member",
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req.WithContext(ctx))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("overview summary status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Families []struct {
+			Family   MetricFamily       `json:"family"`
+			Evidence []evidenceResponse `json:"evidence"`
+		} `json:"families"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode overview summary: %v", err)
+	}
+	wantFamilies := []MetricFamily{FamilyAdoption, FamilyOutput, FamilyOutcome, FamilyQuality, FamilyEconomics, FamilyRisk}
+	if len(response.Families) != len(wantFamilies) {
+		t.Fatalf("overview families = %+v, want all six metric families", response.Families)
+	}
+	for index, family := range wantFamilies {
+		if response.Families[index].Family != family {
+			t.Fatalf("overview family %d = %q, want %q", index, response.Families[index].Family, family)
+		}
+	}
+	outcomeEvidence := response.Families[2].Evidence
+	if len(outcomeEvidence) != 1 || outcomeEvidence[0].MetricID != outcomeMetricID || outcomeEvidence[0].Value != 12 || outcomeEvidence[0].EvidenceStatus != EvidenceMeasured || outcomeEvidence[0].Source != "support" || !outcomeEvidence[0].PeriodStart.Equal(periodStart) || !outcomeEvidence[0].PeriodEnd.Equal(periodEnd) {
+		t.Fatalf("overview outcome evidence = %+v, want latest measured outcome with period and source", outcomeEvidence)
+	}
+	economicsEvidence := response.Families[4].Evidence
+	if len(economicsEvidence) != 1 || economicsEvidence[0].MetricID != economicsMetricID || economicsEvidence[0].Value != 2500 || economicsEvidence[0].Source != "gateway" {
+		t.Fatalf("overview economics evidence = %+v, want measured AI cost without inferred value", economicsEvidence)
+	}
+}
+
 func TestFunctionEvidenceReadModelReturnsOnlyLatestEvidenceForRequestedFunction(t *testing.T) {
 	workspaceID := uuid.New()
 	requestedFunctionID := uuid.New()
