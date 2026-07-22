@@ -273,6 +273,13 @@ SDK data routes reuse `apps.loadApp`, and `connections.call` applies the same
 predicate before it reads approved scopes. The runtime iframe remains opaque
 and receives no parent session or Connection credential.
 
+App lifecycle actions are a separate default-deny group-capability layer:
+`apps.create` controls app creation, `apps.manage` controls preview, publish,
+retry, rollback, scope approval and Collection management, and `apps.delete`
+controls deletion. Workspace owners/admins bypass this layer; other members
+need the corresponding `cerebro_group_capability` row in addition to Collection
+visibility where the action targets an existing app.
+
 ### Managed Pi harness
 
 When the workspace flag `cerebro_pi_harness` is on, a Pi runtime receives one

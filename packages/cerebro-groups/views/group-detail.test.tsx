@@ -442,12 +442,15 @@ describe("GroupDetailView", () => {
     for (const testId of [
       "capability-create-runtime",
       "capability-create-agent",
+      "capability-apps-create",
+      "capability-apps-manage",
+      "capability-apps-delete",
       "capability-create-shared-filters",
       "capability-create-memory",
       "capability-set-blocking-gate",
     ]) {
       expect(screen.getByTestId(testId)).toBeInTheDocument();
     }
-    expect(screen.getAllByRole("switch")).toHaveLength(5);
+    expect(screen.getAllByRole("switch")).toHaveLength(8);
   });
 });

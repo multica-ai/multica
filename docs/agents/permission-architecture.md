@@ -296,6 +296,7 @@ Middleware defs in `server/internal/middleware/`; helpers `roleAllowed` (`handle
 | `CanCreateRuntime` / `CanCreateAgent` | `grouppermissions/permissions.go:295,300` | create a runtime / agent | admin→true; else `cerebro_group_capability` row |
 | `CanUseRuntime` / `CanUseAgent` | `permissions.go:322,336` | use a runtime / trigger an agent | admin→true; else `_runtime_access` / `_agent_access` rows |
 | `CanSeeProjectViaGroup` | `permissions.go:352` | project visibility via group | DB rows |
+| `apps.RequireCapability` (`apps.create`, `apps.manage`, `apps.delete`) | `cerebro/apps/admin.go` | app creation, lifecycle/Collection management, and deletion | admin→true; else `cerebro_group_capability` row |
 
 *(These are settable via the Groups UI + `multica group capability`, but they are a
 **different store** from `cerebro_tool_policy` and only partly overlap the 5 interfaces —
