@@ -28,10 +28,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -42,6 +44,27 @@ import (
 // Runtime bootstrap is just workspace_id + runtime_id, but keep a separate
 // small cap so this endpoint cannot be used as bulk storage.
 const runtimeBootstrapBodyLimit = 8 * 1024
+
+// resolveOnboardingStatus closes the onboarding create paths against the
+// archive-concurrency protocol: it takes the workspace status-write lock in the
+// unified lock order, then resolves the default "todo" onboarding status to its
+// catalog row so the seeded issue double-writes (legacy token + status_id) from
+// the same active row. On an unseeded workspace ResolveForWrite reports no row
+// and we fall back to the bare legacy token with a nil status_id. The caller
+// must run this inside the same transaction that writes the issue.
+func resolveOnboardingStatus(ctx context.Context, tx pgx.Tx, qtx *db.Queries, wsUUID pgtype.UUID) (string, pgtype.UUID, error) {
+	if err := issuestatus.LockWorkspaceForStatusWrite(ctx, tx, wsUUID); err != nil {
+		return "", pgtype.UUID{}, err
+	}
+	resolved, ok, err := issuestatus.ResolveForWrite(ctx, qtx, wsUUID, "todo")
+	if err != nil {
+		return "", pgtype.UUID{}, err
+	}
+	if ok {
+		return issuestatus.LegacyStatusToken(resolved), resolved.ID, nil
+	}
+	return "todo", pgtype.UUID{}, nil
+}
 
 // maxStarterPromptLen caps the user-supplied StarterPrompt on
 // bootstrapOnboardingRuntimeRequest. The prompt becomes the seeded
@@ -258,11 +281,18 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		if req.StarterPrompt != "" {
 			description = req.StarterPrompt
 		}
+		onboardingStatus, onboardingStatusID, err := resolveOnboardingStatus(r.Context(), tx, qtx, wsUUID)
+		if err != nil {
+			slog.Warn("bootstrap onboarding (shim): resolve status failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+			return
+		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
 			WorkspaceID:   wsUUID,
 			Title:         onboardingIssueTitle,
 			Description:   strOrNullText(description),
-			Status:        "todo",
+			Status:        onboardingStatus,
+			StatusID:      onboardingStatusID,
 			Priority:      "high",
 			AssigneeType:  pgtype.Text{String: "agent", Valid: true},
 			AssigneeID:    assistant.ID,
@@ -416,11 +446,18 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
 			return
 		}
+		onboardingStatus, onboardingStatusID, err := resolveOnboardingStatus(r.Context(), tx, qtx, wsUUID)
+		if err != nil {
+			slog.Warn("bootstrap no-runtime onboarding (shim): resolve status failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+			return
+		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
 			WorkspaceID:   wsUUID,
 			Title:         noRuntimeIssueTitle,
 			Description:   strOrNullText(noRuntimeIssueDescription(userBefore.Language)),
-			Status:        "todo",
+			Status:        onboardingStatus,
+			StatusID:      onboardingStatusID,
 			Priority:      "high",
 			AssigneeType:  pgtype.Text{String: "member", Valid: true},
 			AssigneeID:    parseUUID(userID),

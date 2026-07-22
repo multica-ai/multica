@@ -2,13 +2,117 @@ package issuestatus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// WriteInputError is a bad-input error from ResolveWriteInput that an HTTP caller
+// maps to 400. It is distinct from an internal DB error (which maps to 500) and
+// from *InvalidStatusError (also 400) so a caller can treat all user-facing status
+// errors uniformly without importing net/http here.
+type WriteInputError struct{ Msg string }
+
+func (e *WriteInputError) Error() string { return e.Msg }
+
+func writeInputErr(msg string) error { return &WriteInputError{Msg: msg} }
+
+// IsBadStatusInput reports whether err is a user-facing status-input error (either
+// an unresolvable/ambiguous input or an invalid catalog reference), so HTTP
+// callers can respond 400 for these and 500 for everything else.
+func IsBadStatusInput(err error) bool {
+	var w *WriteInputError
+	var inv *InvalidStatusError
+	return errors.As(err, &w) || errors.As(err, &inv)
+}
+
+// ResolveWriteInput resolves an issue write's status inputs to the authoritative
+// ACTIVE catalog row (MUL-4809 §3.1 / §6.1). Exactly one of the two forms drives
+// the result, and either may be given:
+//
+//   - statusID targets a catalog row directly (what the UI picker sends). It must
+//     name a status in THIS workspace and must NOT be archived — archived statuses
+//     stay readable for old issues but must never accept a new assignment.
+//   - status is the alias form (Category alias / legacy alias / exact active name),
+//     resolved via Resolve, which only ever returns active statuses.
+//
+// Both may be sent together, but only when they resolve to the SAME row; a
+// mismatch is a WriteInputError, never a silent winner. Returns (row, token,
+// seeded): token is the legacy `status` projection to double-write, seeded is
+// false when the workspace catalog is not seeded yet (the pre-backfill window),
+// where the caller writes the legacy token only and leaves status_id NULL.
+//
+// CONCURRENCY: q MUST be the write transaction's queries, and the caller MUST have
+// already taken LockWorkspaceForStatusWrite on the same tx. Resolving under that
+// lock, then writing in the same tx, is what makes an assignment atomic against an
+// archive-with-migration: the archive either censused this issue first (and it
+// resolves against an active status) or waits for this write to commit (§5.5).
+func ResolveWriteInput(
+	ctx context.Context,
+	q *db.Queries,
+	workspaceID pgtype.UUID,
+	status *string,
+	statusID *pgtype.UUID,
+) (row db.IssueStatus, token string, seeded bool, err error) {
+	count, err := q.CountWorkspaceIssueStatuses(ctx, workspaceID)
+	if err != nil {
+		return db.IssueStatus{}, "", false, fmt.Errorf("count workspace issue statuses: %w", err)
+	}
+	if count == 0 {
+		// Unseeded workspace (rolling-deploy / pre-backfill). Nothing to resolve
+		// against; the caller keeps the legacy token authoritative and status_id NULL.
+		if statusID != nil {
+			return db.IssueStatus{}, "", false, writeInputErr("status_id does not name a status in this workspace")
+		}
+		if status == nil {
+			return db.IssueStatus{}, "", false, nil
+		}
+		// The 7 legacy tokens are the 5 Categories plus in_review / blocked. Reject
+		// anything else so an unseeded write can't persist a junk status token.
+		tok := strings.ToLower(strings.TrimSpace(*status))
+		_, isCategory := categoryAliasSet[tok]
+		_, isLegacy := legacyAliases[tok]
+		if !isCategory && !isLegacy {
+			return db.IssueStatus{}, "", false, writeInputErr(fmt.Sprintf("invalid status %q", *status))
+		}
+		return db.IssueStatus{}, tok, false, nil
+	}
+
+	var byID db.IssueStatus
+	if statusID != nil {
+		byID, err = q.GetWorkspaceIssueStatus(ctx, db.GetWorkspaceIssueStatusParams{
+			ID:          *statusID,
+			WorkspaceID: workspaceID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.IssueStatus{}, "", true, writeInputErr("status_id does not name a status in this workspace")
+		}
+		if err != nil {
+			return db.IssueStatus{}, "", true, fmt.Errorf("load status by id: %w", err)
+		}
+		if byID.ArchivedAt.Valid {
+			return db.IssueStatus{}, "", true, writeInputErr("status_id names an archived status")
+		}
+	}
+
+	if status == nil {
+		return byID, LegacyStatusToken(byID), true, nil
+	}
+
+	byName, err := Resolve(ctx, q, workspaceID, *status)
+	if err != nil {
+		return db.IssueStatus{}, "", true, err
+	}
+	if statusID != nil && uuidToString(byName.ID) != uuidToString(byID.ID) {
+		return db.IssueStatus{}, "", true, writeInputErr("status and status_id refer to different statuses")
+	}
+	return byName, LegacyStatusToken(byName), true, nil
+}
 
 // Categories are the 5 immutable machine-readable status categories. This is
 // the ONLY status semantics any automation may branch on.

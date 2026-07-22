@@ -101,96 +101,6 @@ type IssueStatusDetail struct {
 var validIssueStatuses = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
 var validIssuePriorities = []string{"urgent", "high", "medium", "low", "none"}
 
-// resolveIssueStatusInput turns the status inputs of a write request into the
-// authoritative issue_status row (MUL-4809 §3.1 / §6.1). Callers pass whichever
-// of the two the client sent:
-//
-//   - statusID targets a catalog row directly (what the UI picker sends). It must
-//     name a status in THIS workspace and must not be archived — archived statuses
-//     stay readable for old issues but must not accept new ones.
-//   - status is the alias form: Category alias, legacy alias, or exact display
-//     name, resolved by issuestatus.Resolve.
-//
-// Sending both is accepted only when they resolve to the same row; a mismatch is
-// a 400 rather than a silent winner, because either field could have been the
-// user's intent. Writes fail closed on an unknown status with the legal values.
-// It returns the resolved row plus the legacy token to write. On a workspace whose
-// catalog is not seeded yet — the Phase-2 rolling-deploy / pre-backfill window —
-// there is nothing to resolve against, so it falls back to validating the legacy
-// token and returns a zero row: `status` stays authoritative and status_id stays
-// NULL, exactly as the create path already behaves there (§6.1).
-func (h *Handler) resolveIssueStatusInput(
-	w http.ResponseWriter,
-	r *http.Request,
-	workspaceID pgtype.UUID,
-	status *string,
-	statusID *string,
-) (db.IssueStatus, string, bool) {
-	seeded, err := h.Queries.CountWorkspaceIssueStatuses(r.Context(), workspaceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load status catalog: "+err.Error())
-		return db.IssueStatus{}, "", false
-	}
-	if seeded == 0 {
-		if statusID != nil {
-			// Nothing to target: the catalog this id would name does not exist yet.
-			writeError(w, http.StatusBadRequest, "status_id does not name a status in this workspace")
-			return db.IssueStatus{}, "", false
-		}
-		if status == nil {
-			return db.IssueStatus{}, "", true
-		}
-		if !validateIssueEnum(w, "status", *status, validIssueStatuses) {
-			return db.IssueStatus{}, "", false
-		}
-		return db.IssueStatus{}, *status, true
-	}
-
-	var byID db.IssueStatus
-	if statusID != nil {
-		parsed, err := util.ParseUUID(strings.TrimSpace(*statusID))
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "status_id must be a status id")
-			return db.IssueStatus{}, "", false
-		}
-		byID, err = h.Queries.GetWorkspaceIssueStatus(r.Context(), db.GetWorkspaceIssueStatusParams{
-			ID: parsed, WorkspaceID: workspaceID,
-		})
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				writeError(w, http.StatusBadRequest, "status_id does not name a status in this workspace")
-				return db.IssueStatus{}, "", false
-			}
-			writeError(w, http.StatusInternalServerError, "failed to load status: "+err.Error())
-			return db.IssueStatus{}, "", false
-		}
-		if byID.ArchivedAt.Valid {
-			writeError(w, http.StatusBadRequest, "status_id names an archived status")
-			return db.IssueStatus{}, "", false
-		}
-	}
-
-	if status == nil {
-		return byID, issuestatus.LegacyStatusToken(byID), true
-	}
-
-	byName, err := issuestatus.Resolve(r.Context(), h.Queries, workspaceID, *status)
-	if err != nil {
-		var invalid *issuestatus.InvalidStatusError
-		if errors.As(err, &invalid) {
-			writeError(w, http.StatusBadRequest, invalid.Error())
-			return db.IssueStatus{}, "", false
-		}
-		writeError(w, http.StatusInternalServerError, "failed to resolve status: "+err.Error())
-		return db.IssueStatus{}, "", false
-	}
-	if statusID != nil && uuidToString(byName.ID) != uuidToString(byID.ID) {
-		writeError(w, http.StatusBadRequest, "status and status_id refer to different statuses")
-		return db.IssueStatus{}, "", false
-	}
-	return byName, issuestatus.LegacyStatusToken(byName), true
-}
-
 func validateIssueEnum(w http.ResponseWriter, field, value string, allowed []string) bool {
 	for _, a := range allowed {
 		if value == a {
@@ -2698,25 +2608,20 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if priority == "" {
 		priority = "none"
 	}
-	// Resolve through the catalog so a create can target a custom status, and so
-	// status_id + the compat token come from one row (MUL-4809 §6.1). Degrades to
-	// legacy-token validation on an unseeded workspace.
-	//
-	// Only forward `status` when the client actually sent one: defaulting it to
-	// "todo" here and passing it alongside status_id would look like a caller
-	// asking for two different statuses and trip the conflict check.
-	var statusInput *string
-	if req.Status != "" {
-		statusInput = &req.Status
-	} else if req.StatusID == nil {
-		fallback := "todo"
-		statusInput = &fallback
+	// Status is resolved by IssueService.Create INSIDE its write transaction and
+	// under the status-write lock (MUL-4809 §5.5), so no assignment races an
+	// archive and every create entrypoint double-writes status_id. Here we only
+	// parse the optional direct status_id and forward the raw inputs; the service
+	// returns a bad-input error we map to 400 below.
+	var statusIDInput *pgtype.UUID
+	if req.StatusID != nil {
+		parsed, perr := util.ParseUUID(strings.TrimSpace(*req.StatusID))
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "status_id must be a status id")
+			return
+		}
+		statusIDInput = &parsed
 	}
-	resolvedStatus, statusToken, ok := h.resolveIssueStatusInput(w, r, wsUUID, statusInput, req.StatusID)
-	if !ok {
-		return
-	}
-	status := statusToken
 	if !validateIssueEnum(w, "priority", priority, validIssuePriorities) {
 		return
 	}
@@ -2875,11 +2780,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
-		StatusID:       resolvedStatus.ID,
+		StatusIDInput:  statusIDInput,
 		WorkspaceID:    wsUUID,
 		Title:          req.Title,
 		Description:    ptrToText(req.Description),
-		Status:         status,
+		Status:         req.Status,
 		Priority:       priority,
 		AssigneeType:   assigneeType,
 		AssigneeID:     assigneeID,
@@ -2932,6 +2837,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, service.ErrIssueLabelNotFound) {
 		writeError(w, http.StatusBadRequest, "one or more labels not found in this workspace")
+		return
+	}
+	if errors.Is(err, service.ErrWorkspaceGone) {
+		writeError(w, http.StatusNotFound, "workspace no longer exists")
+		return
+	}
+	if issuestatus.IsBadStatusInput(err) {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err != nil {
@@ -3034,16 +2947,18 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if req.Description != nil {
 		params.Description = pgtype.Text{String: *req.Description, Valid: true}
 	}
-	if req.Status != nil || req.StatusID != nil {
-		resolved, legacyToken, ok := h.resolveIssueStatusInput(w, r, prevIssue.WorkspaceID, req.Status, req.StatusID)
-		if !ok {
+	// Status is resolved + written together under the status-write lock below, so
+	// the assignment is atomic against an archive migration (MUL-4809 §5.5). Here
+	// we only parse the optional direct status_id.
+	statusChanging := req.Status != nil || req.StatusID != nil
+	var statusIDInput *pgtype.UUID
+	if req.StatusID != nil {
+		parsed, perr := util.ParseUUID(strings.TrimSpace(*req.StatusID))
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "status_id must be a status id")
 			return
 		}
-		// Double-write: the authoritative status_id plus the compat legacy token
-		// derived from that SAME row, so the two can never disagree (§6.1). On an
-		// unseeded workspace resolved is zero and only the legacy token is written.
-		params.StatusID = resolved.ID
-		params.Status = pgtype.Text{String: legacyToken, Valid: true}
+		statusIDInput = &parsed
 	}
 	if req.Priority != nil {
 		if !validateIssueEnum(w, "priority", *req.Priority, validIssuePriorities) {
@@ -3176,11 +3091,46 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issue, err := h.Queries.UpdateIssue(r.Context(), params)
-	if err != nil {
-		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
-		return
+	var issue db.Issue
+	if statusChanging {
+		// Resolve the catalog status and write it in ONE transaction under the
+		// status-write lock, so the resolve+write commits atomically against a
+		// concurrent archive-with-migration (MUL-4809 §5.5). params carries every
+		// other field too, so the whole update lands in that tx.
+		lockErr := h.withIssueStatusLock(r, prevIssue.WorkspaceID, func(q *db.Queries) error {
+			row, token, seeded, rerr := issuestatus.ResolveWriteInput(r.Context(), q, prevIssue.WorkspaceID, req.Status, statusIDInput)
+			if rerr != nil {
+				return rerr
+			}
+			params.Status = pgtype.Text{String: token, Valid: true}
+			if seeded {
+				params.StatusID = row.ID
+			}
+			var werr error
+			issue, werr = q.UpdateIssue(r.Context(), params)
+			return werr
+		})
+		if errors.Is(lockErr, issuestatus.ErrWorkspaceGone) {
+			writeError(w, http.StatusNotFound, "workspace no longer exists")
+			return
+		}
+		if issuestatus.IsBadStatusInput(lockErr) {
+			writeError(w, http.StatusBadRequest, lockErr.Error())
+			return
+		}
+		if lockErr != nil {
+			slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", lockErr, "issue_id", id, "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to update issue: "+lockErr.Error())
+			return
+		}
+	} else {
+		var werr error
+		issue, werr = h.Queries.UpdateIssue(r.Context(), params)
+		if werr != nil {
+			slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", werr, "issue_id", id, "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to update issue: "+werr.Error())
+			return
+		}
 	}
 
 	if len(attachmentIDs) > 0 {
@@ -3544,6 +3494,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	hasMutation := req.Updates.Title != nil ||
 		req.Updates.Description != nil ||
 		req.Updates.Status != nil ||
+		req.Updates.StatusID != nil ||
 		req.Updates.Priority != nil ||
 		req.Updates.Position != nil
 	if !hasMutation {
@@ -3558,11 +3509,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"updated": 0})
 		return
 	}
-	if req.Updates.Status != nil {
-		if !validateIssueEnum(w, "status", *req.Updates.Status, validIssueStatuses) {
-			return
-		}
-	}
 	if req.Updates.Priority != nil {
 		if !validateIssueEnum(w, "priority", *req.Updates.Priority, validIssuePriorities) {
 			return
@@ -3573,6 +3519,40 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
 		return
+	}
+
+	// Status resolves through the catalog (MUL-4809). Parse the optional direct
+	// status_id, then validate the whole input ONCE up front under the status-write
+	// lock so a genuinely bad status fails the batch with 400 instead of silently
+	// reporting {"updated": 0}. Each per-issue write below re-resolves under the
+	// lock so the assignment stays atomic against a concurrent archive (§5.5).
+	statusChangeRequested := req.Updates.Status != nil || req.Updates.StatusID != nil
+	var batchStatusIDInput *pgtype.UUID
+	if req.Updates.StatusID != nil {
+		parsed, perr := util.ParseUUID(strings.TrimSpace(*req.Updates.StatusID))
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "status_id must be a status id")
+			return
+		}
+		batchStatusIDInput = &parsed
+	}
+	if statusChangeRequested {
+		vErr := h.withIssueStatusLock(r, wsUUID, func(q *db.Queries) error {
+			_, _, _, rerr := issuestatus.ResolveWriteInput(r.Context(), q, wsUUID, req.Updates.Status, batchStatusIDInput)
+			return rerr
+		})
+		if errors.Is(vErr, issuestatus.ErrWorkspaceGone) {
+			writeError(w, http.StatusNotFound, "workspace no longer exists")
+			return
+		}
+		if issuestatus.IsBadStatusInput(vErr) {
+			writeError(w, http.StatusBadRequest, vErr.Error())
+			return
+		}
+		if vErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve status: "+vErr.Error())
+			return
+		}
 	}
 	updated := 0
 	// Children that transitioned into a terminal status this batch, collected so
@@ -3609,9 +3589,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if req.Updates.Description != nil {
 			params.Description = pgtype.Text{String: *req.Updates.Description, Valid: true}
 		}
-		if req.Updates.Status != nil {
-			params.Status = pgtype.Text{String: *req.Updates.Status, Valid: true}
-		}
+		// Status is resolved + written under the lock at the write site below.
 		if req.Updates.Priority != nil {
 			params.Priority = pgtype.Text{String: *req.Updates.Priority, Valid: true}
 		}
@@ -3730,10 +3708,36 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		issue, err := h.Queries.UpdateIssue(r.Context(), params)
-		if err != nil {
-			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
-			continue
+		var issue db.Issue
+		if statusChangeRequested {
+			// Resolve + write in one tx under the status-write lock, so this
+			// assignment is atomic against an archive-with-migration (MUL-4809 §5.5)
+			// and double-writes status_id (§6.1). Bad input was already rejected up
+			// front, so a failure here is a rare race (archived mid-batch) — skip.
+			writeErr := h.withIssueStatusLock(r, wsUUID, func(q *db.Queries) error {
+				row, token, seeded, rerr := issuestatus.ResolveWriteInput(r.Context(), q, wsUUID, req.Updates.Status, batchStatusIDInput)
+				if rerr != nil {
+					return rerr
+				}
+				params.Status = pgtype.Text{String: token, Valid: true}
+				if seeded {
+					params.StatusID = row.ID
+				}
+				var werr error
+				issue, werr = q.UpdateIssue(r.Context(), params)
+				return werr
+			})
+			if writeErr != nil {
+				slog.Warn("batch update issue failed", "issue_id", issueID, "error", writeErr)
+				continue
+			}
+		} else {
+			var werr error
+			issue, werr = h.Queries.UpdateIssue(r.Context(), params)
+			if werr != nil {
+				slog.Warn("batch update issue failed", "issue_id", issueID, "error", werr)
+				continue
+			}
 		}
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
@@ -3742,7 +3746,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
-		statusChanged := req.Updates.Status != nil && prevIssue.Status != issue.Status
+		// status_id is authoritative, so compare it too: moving between two custom
+		// statuses in one Category leaves the legacy token unchanged (MUL-4809).
+		statusChanged := statusChangeRequested &&
+			(prevIssue.Status != issue.Status || uuidToString(prevIssue.StatusID) != uuidToString(issue.StatusID))
 		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
 		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 

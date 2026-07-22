@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 )
@@ -339,5 +340,160 @@ func TestListIssuesFiltersByStatusIDs(t *testing.T) {
 		return IssueResponse{}, w.Code, w.Body.String()
 	}(); code != http.StatusBadRequest {
 		t.Fatalf("malformed status_ids: expected 400, got %d %s", code, body)
+	}
+}
+
+// TestBatchUpdateByStatusIDMovesIssue is the P0-2 regression (MUL-4809 review).
+// StatusPicker sends status_id, but BatchUpdateIssues' hasMutation used to ignore
+// it and the loop never resolved/wrote StatusID: the request returned 200 with
+// {"updated": 0} while the issue kept its status — a silent no-op that looked like
+// success. This pins the fixed path — a batch keyed only on status_id recognizes
+// the mutation, resolves through the catalog under the status-write lock,
+// double-writes status_id + the legacy token, and reports the real count.
+func TestBatchUpdateByStatusIDMovesIssue(t *testing.T) {
+	ensureTestWorkspaceStatuses(t)
+	custom, code, body := createStatus(t, map[string]any{
+		"name": "Batch Target", "category": "in_progress", "icon": "in_progress", "color": "warning",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create custom status: %d %s", code, body)
+	}
+	t.Cleanup(func() { deleteStatus(t, custom.ID, "") })
+
+	a := createTestIssue(t, "batch by status_id A", "todo", "none")
+	b := createTestIssue(t, "batch by status_id B", "todo", "none")
+	t.Cleanup(func() { deleteTestIssue(t, a) })
+	t.Cleanup(func() { deleteTestIssue(t, b) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{a, b},
+		"updates":   map[string]any{"status_id": custom.ID},
+	})
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("batch by status_id: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Updated int `json:"updated"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Updated != 2 {
+		t.Fatalf("batch status_id must move both issues; updated = %d (0 is the old no-op bug)", resp.Updated)
+	}
+	for _, id := range []string{a, b} {
+		status, statusID := readIssueStatusColumns(t, id)
+		if statusID != custom.ID {
+			t.Errorf("issue %s: persisted status_id = %q, want %s", id, statusID, custom.ID)
+		}
+		// Custom status has no system_key, so the compat token is its Category.
+		if status != "in_progress" {
+			t.Errorf("issue %s: compat token = %q, want in_progress", id, status)
+		}
+	}
+}
+
+// TestBatchUpdateRejectsBadStatusID pins the other half of the P0-2 fix: a batch
+// pointed at a status_id that names nothing in the workspace fails up front with
+// 400, rather than the pre-fix silent {"updated": 0}. The up-front validation runs
+// once under the lock before any issue is touched, so no issue moves.
+func TestBatchUpdateRejectsBadStatusID(t *testing.T) {
+	ensureTestWorkspaceStatuses(t)
+	a := createTestIssue(t, "batch bad status_id", "todo", "none")
+	t.Cleanup(func() { deleteTestIssue(t, a) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{a},
+		// Well-formed UUID that names no status in this workspace.
+		"updates": map[string]any{"status_id": "00000000-0000-0000-0000-000000000000"},
+	})
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown status_id: expected 400, got %d %s", w.Code, w.Body.String())
+	}
+	if status, _ := readIssueStatusColumns(t, a); status != "todo" {
+		t.Errorf("rejected batch still moved the issue to %q", status)
+	}
+}
+
+// TestCreateIssueLegacyStatusDoubleWritesStatusID is the P0-3 regression
+// (MUL-4809 review). The create entrypoints — the HTTP handler, the channel
+// engine router, the onboarding shim — pass only a legacy `status` token and never
+// a status_id. If resolution lived in the handler instead of IssueService.Create,
+// those callers would write a bare legacy token and leave status_id NULL: a
+// half-migrated row the catalog filters can't see. Centralizing resolution inside
+// the Create transaction means even a plain "todo" create double-writes the
+// catalog id.
+func TestCreateIssueLegacyStatusDoubleWritesStatusID(t *testing.T) {
+	ensureTestWorkspaceStatuses(t)
+	id := createTestIssue(t, "plain legacy create", "todo", "none")
+	t.Cleanup(func() { deleteTestIssue(t, id) })
+
+	status, statusID := readIssueStatusColumns(t, id)
+	if status != "todo" {
+		t.Fatalf("legacy token = %q, want todo", status)
+	}
+	if statusID == "" {
+		t.Fatal("plain legacy create left status_id NULL — the leaked-entrypoint double-write bug")
+	}
+	if want := getStatusCatalog(t, false).CategoryDefaults["todo"]; statusID != want {
+		t.Fatalf("status_id = %q, want the seeded Todo default %q", statusID, want)
+	}
+}
+
+// TestUpdateIssueStatusWriteWaitsOnArchiveLock is the P0-1 counterexample at the
+// handler layer (MUL-4809 review). The pre-fix update path resolved the target
+// status OUTSIDE any transaction, then wrote — so an archive migration could run
+// its census+archive between the read and the write and strand the issue on the
+// now-archived status. The fix resolves and writes inside one tx under
+// LockWorkspaceForStatusWrite. This holds that exact lock in a separate tx —
+// standing in for an in-flight archive — and proves the UpdateIssue handler blocks
+// on it rather than racing ahead. The old out-of-tx read would not have blocked.
+func TestUpdateIssueStatusWriteWaitsOnArchiveLock(t *testing.T) {
+	ensureTestWorkspaceStatuses(t)
+	issueID := createTestIssue(t, "waits on archive lock", "todo", "none")
+	t.Cleanup(func() { deleteTestIssue(t, issueID) })
+
+	ctx := context.Background()
+	tx1, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx1: %v", err)
+	}
+	defer tx1.Rollback(ctx)
+	// tx1 stands in for an archive migration holding the status-write lock.
+	if err := issuestatus.LockWorkspaceForStatusWrite(ctx, tx1, parseUUID(testWorkspaceID)); err != nil {
+		t.Fatalf("tx1 acquire status-write lock: %v", err)
+	}
+
+	done := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest("PATCH", "/api/issues/"+issueID, map[string]any{"status": "in_progress"}), "id", issueID)
+		testHandler.UpdateIssue(w, req)
+		done <- w.Code
+	}()
+
+	// While tx1 holds the lock, the handler's status write must not complete.
+	select {
+	case code := <-done:
+		t.Fatalf("UpdateIssue completed (code %d) while the archive lock was held; the write did not serialize", code)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// Release the lock; the blocked handler now proceeds and succeeds.
+	if err := tx1.Commit(ctx); err != nil {
+		t.Fatalf("commit tx1: %v", err)
+	}
+	select {
+	case code := <-done:
+		if code != http.StatusOK {
+			t.Fatalf("UpdateIssue after lock release: expected 200, got %d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("UpdateIssue never completed after the lock was released")
+	}
+	if _, statusID := readIssueStatusColumns(t, issueID); statusID == "" {
+		t.Fatal("update did not double-write status_id")
 	}
 }

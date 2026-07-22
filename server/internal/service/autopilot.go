@@ -753,6 +753,14 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 
 	qtx := s.Queries.WithTx(tx)
 
+	// Take the workspace status-write lock FIRST (before the duplicate-guard
+	// advisory lock below), so the status resolution + create commit atomically
+	// against an archive-with-migration and every create path shares one lock
+	// order (MUL-4809 §5.5). A concurrently deleted workspace surfaces here.
+	if err := issuestatus.LockWorkspaceForStatusWrite(ctx, tx, ap.WorkspaceID); err != nil {
+		return fmt.Errorf("lock workspace for status write: %w", err)
+	}
+
 	title := s.interpolateTemplate(ap, *run, triggerTimezone)
 	description := s.buildIssueDescription(ap, *run, triggerTimezone)
 
