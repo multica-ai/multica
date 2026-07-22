@@ -171,7 +171,8 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		b.cfg.Logger.Info("qwen finished", "pid", cmd.Process.Pid, "status", status, "duration", duration.Round(time.Millisecond).String())
 		resCh <- Result{
 			Status: status, Output: output, Error: errMsg, DurationMs: duration.Milliseconds(),
-			SessionID: resolveSessionID(opts.ResumeSessionID, state.sessionID, status == "failed"), Usage: state.usage,
+			SessionID: resolveSessionID(opts.ResumeSessionID, state.sessionID, status == "failed", errMsg), Usage: state.usage,
+			ResumeRejected: resumeWasRejected(opts.ResumeSessionID, state.sessionID, status == "failed", errMsg),
 		}
 	}()
 	return &Session{Messages: msgCh, Result: resCh}, nil

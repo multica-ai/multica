@@ -115,6 +115,7 @@
     "sort_ascending": "Ascending",
     "sort_descending": "Descending",
     "toggle_sub_issues": "Toggle sub-issues",
+    "rename_title": "Rename issue",
     "empty_value": "Empty",
     "quick_create_placeholder": "Add an issue…",
     "quick_create_submit": "Add",

@@ -811,6 +811,131 @@ func TestWriteMcpConfigToTemp(t *testing.T) {
 	}
 }
 
+func TestResumeWasRejected(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		requested string
+		emitted   string
+		failed    bool
+		texts     []string
+		want      bool
+	}{
+		{
+			// Verbatim from multica-ai/multica#5704 (Claude Code 2.1.207,
+			// zh-CN). This is the failure the whole signal exists for: the
+			// session belongs to the account the user switched away from, and
+			// claude echoes the requested id back rather than a fresh one.
+			name:      "account binding 400 echoing the requested id is a rejection",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			texts:     []string{"400 此 session 已绑定另外的ai账号，请执行 /new 开启新 session"},
+			want:      true,
+		},
+		{
+			name:      "no conversation found on stderr is a rejection",
+			requested: "sess-dead",
+			emitted:   "sess-dead",
+			failed:    true,
+			texts:     []string{"No conversation found with session ID: sess-dead"},
+			want:      true,
+		},
+		{
+			name:      "a different emitted id means the resume did not land",
+			requested: "sess-dead",
+			emitted:   "fresh-new",
+			failed:    true,
+			want:      true,
+		},
+
+		// Failures a fresh session cannot cure. None of these may set the
+		// flag: doing so would throw away a session the platform's own retry
+		// is expected to resume.
+		{
+			name:      "mid-response network drop is not a rejection",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			texts:     []string{"API Error: Connection closed mid-response"},
+			want:      false,
+		},
+		{
+			name:      "rate limit is not a rejection",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			texts:     []string{"API Error: 429 rate_limit_error: rate limit exceeded"},
+			want:      false,
+		},
+		{
+			name:      "overloaded is not a rejection",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			texts:     []string{"API Error: 529 overloaded_error"},
+			want:      false,
+		},
+		{
+			name:      "quota exhaustion is not a rejection",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			texts:     []string{"API Error: 402 credit balance is too low"},
+			want:      false,
+		},
+		{
+			// Reported alongside the 400 in #5704 and easy to conflate with
+			// it. This one needs a re-login, not a new session.
+			name:      "revoked oauth token is not a rejection",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			texts:     []string{"401 Invalid authentication credentials: OAuth access token has been revoked"},
+			want:      false,
+		},
+		{
+			name:      "a run that succeeded is never a rejection",
+			requested: "sess-old",
+			emitted:   "fresh-new",
+			failed:    false,
+			texts:     []string{"No conversation found with session ID: sess-old"},
+			want:      false,
+		},
+		{
+			name:      "no resume requested is never a rejection",
+			requested: "",
+			emitted:   "fresh-abc",
+			failed:    true,
+			texts:     []string{"No conversation found with session ID: whatever"},
+			want:      false,
+		},
+		{
+			// A failure before claude emitted anything. Empty is not
+			// evidence of anything, which is why the daemon stopped reading
+			// an empty SessionID as "the resume was rejected".
+			name:      "failure with no emitted id and no matching text is not a rejection",
+			requested: "sess-old",
+			emitted:   "",
+			failed:    true,
+			texts:     []string{"exit status 1"},
+			want:      false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := resumeWasRejected(tc.requested, tc.emitted, tc.failed, tc.texts...)
+			if got != tc.want {
+				t.Fatalf("resumeWasRejected(%q, %q, %v, %q) = %v, want %v",
+					tc.requested, tc.emitted, tc.failed, tc.texts, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveSessionID(t *testing.T) {
 	t.Parallel()
 
@@ -949,6 +1074,128 @@ func TestClaudeExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 		}
 		if !strings.Contains(result.Error, "claude stderr:") {
 			t.Fatalf("expected stderr label in error, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// End-to-end through the backend rather than the predicate alone: a fake
+// claude reproduces the account-switch guardrail from #5704 — it echoes the
+// resumed session id back on the init frame, then fails the turn with the
+// 400. The result must carry ResumeRejected so the daemon retries fresh, and
+// must not persist the dead session id.
+func TestClaudeExecuteReportsResumeRejectedOnAccountBinding(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`echo '{"type":"system","subtype":"init","session_id":"sess-old"}'` + "\n" +
+		`echo '{"type":"result","subtype":"error","is_error":true,"session_id":"sess-old","result":"400 此 session 已绑定另外的ai账号，请执行 /new 开启新 session"}'` + "\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{
+		ResumeSessionID: "sess-old",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q", result.Status)
+		}
+		if !result.ResumeRejected {
+			t.Fatalf("expected ResumeRejected for the account-binding 400, got error=%q", result.Error)
+		}
+		// The session belongs to the previous account; keeping it would make
+		// every later dispatch on this (agent, workdir) fail identically.
+		if result.SessionID != "" {
+			t.Fatalf("expected the dead session id to be dropped, got %q", result.SessionID)
+		}
+		// The provider's own wording has to survive so a matcher miss on some
+		// other locale is diagnosable from the failure itself.
+		if !strings.Contains(result.Error, "已绑定另外") {
+			t.Fatalf("expected the raw provider error to be preserved, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// The counterpart: a resumed run that dies from a transient network fault
+// must NOT be reported as a rejected resume, and must keep its session id so
+// the platform's resume-safe retry can continue the conversation.
+func TestClaudeExecuteKeepsSessionOnNetworkFailure(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`echo '{"type":"system","subtype":"init","session_id":"sess-old"}'` + "\n" +
+		`echo '{"type":"result","subtype":"error","is_error":true,"session_id":"sess-old","result":"API Error: Connection closed mid-response"}'` + "\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{
+		ResumeSessionID: "sess-old",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.ResumeRejected {
+			t.Fatal("a network drop must not be reported as a rejected resume")
+		}
+		if result.SessionID != "sess-old" {
+			t.Fatalf("expected the session to survive a network failure, got %q", result.SessionID)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")

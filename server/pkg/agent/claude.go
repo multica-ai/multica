@@ -280,21 +280,25 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", stderrTail)
-		if reportedSessionID != sessionID {
-			b.cfg.Logger.Info("claude resume did not land; clearing fresh session id for daemon fallback",
+		// The account-binding 400 arrives in the result event (finalError);
+		// "no conversation found" is printed to stderr. Check both.
+		resumeRejected := resumeWasRejected(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
+		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
+		if resumeRejected {
+			b.cfg.Logger.Info("claude resume was rejected; dropping session id and signalling fresh-session retry",
 				"requested_resume", opts.ResumeSessionID,
 				"emitted_session", sessionID,
 			)
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  reportedSessionID,
-			Usage:      usage,
+			Status:         finalStatus,
+			Output:         finalOutput,
+			Error:          finalError,
+			DurationMs:     duration.Milliseconds(),
+			SessionID:      reportedSessionID,
+			Usage:          usage,
+			ResumeRejected: resumeRejected,
 		}
 	}()
 
@@ -678,29 +682,76 @@ func buildClaudeInput(prompt string) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-// resolveSessionID decides which session id to report on the Result. When the
-// caller requested --resume but claude emitted a fresh, different session id
-// AND the run failed, the resume did not land. Claude can also report the
-// requested id while printing "No conversation found with session ID: ..." to
-// stderr. Returning "" in those cases keeps the daemon's retry-with-fresh-
-// session fallback able to trigger instead of persisting the dead resume id.
-func resolveSessionID(requestedResume, emitted string, failed bool, stderrTail ...string) string {
-	if failed && requestedResume != "" && claudeNoConversationFound(stderrTail...) {
-		return ""
+// resumeRejectedPhrases are the provider messages that positively identify a
+// refused resume, as opposed to a failure that merely happened to occur during
+// a resumed run. Shared by the stream-json backends (claude, codebuddy, qwen);
+// the ACP backends match structured error codes via isACPSessionNotFound
+// instead.
+//
+// Matching must stay tight: a false positive makes the daemon throw away a
+// recoverable session pointer and re-run the task, so anything ambiguous
+// belongs out of this list.
+var resumeRejectedPhrases = []string{
+	// Verified: claude prints this when the transcript named by --resume is
+	// absent. Covered by TestResolveSessionID's existing stderr fixture.
+	"no conversation found",
+	// Verified: qwen-code 0.20.0, captured in
+	// testdata/qwen-code-0.20.0-resume-not-found.stderr.txt — "No saved
+	// session found with ID <id>. Run `qwen --resume` without an ID to
+	// choose from existing sessions."
+	"no saved session found",
+	// Reported verbatim in multica-ai/multica#5704 against Claude Code
+	// 2.1.207 (zh-CN): "400 此 session 已绑定另外的ai账号，请执行 /new 开启新
+	// session". This is the account-switch guardrail this signal exists for.
+	"已绑定另外",
+	// INFERRED, not yet observed: the en-US wording of the same guardrail has
+	// not been captured. These are guesses derived from the zh-CN text and
+	// should be corrected once a real English sample is available. A miss
+	// here degrades to a terminal failure carrying the provider's raw error,
+	// which is diagnosable — it does not silently mis-route the run.
+	"bound to another account",
+	"bound to a different account",
+}
+
+// resumeWasRejected reports whether a failed run's --resume was itself
+// refused. It is the positive-evidence predicate behind Result.ResumeRejected:
+// only a rejected resume can be cured by starting a fresh session.
+//
+// texts should include every place the provider may have written the reason —
+// the final error string and the stderr tail — because the account-binding 400
+// arrives in the stream-json result event while "no conversation found" is
+// printed to stderr.
+func resumeWasRejected(requestedResume, emitted string, failed bool, texts ...string) bool {
+	if !failed || requestedResume == "" {
+		return false
 	}
-	if failed && requestedResume != "" && emitted != "" && emitted != requestedResume {
+	for _, text := range texts {
+		lower := strings.ToLower(text)
+		for _, phrase := range resumeRejectedPhrases {
+			if strings.Contains(lower, phrase) {
+				return true
+			}
+		}
+	}
+	// Claude answered with a different session than the one we asked to
+	// continue: the requested transcript did not load.
+	return emitted != "" && emitted != requestedResume
+}
+
+// resolveSessionID decides which session id to report on the Result. A session
+// known to be dead must not be persisted as the resume pointer, so a rejected
+// resume reports "" regardless of what claude echoed back.
+//
+// This is deliberately no longer the signal the daemon reads to decide *why*
+// a run failed — Result.ResumeRejected carries that. An empty SessionID is
+// also produced by any failure before the first stream message (a 401, a
+// missing binary), which is why inferring "the resume was rejected" from it
+// was wrong in both directions.
+func resolveSessionID(requestedResume, emitted string, failed bool, texts ...string) string {
+	if resumeWasRejected(requestedResume, emitted, failed, texts...) {
 		return ""
 	}
 	return emitted
-}
-
-func claudeNoConversationFound(stderrTail ...string) bool {
-	for _, tail := range stderrTail {
-		if strings.Contains(strings.ToLower(tail), "no conversation found") {
-			return true
-		}
-	}
-	return false
 }
 
 func buildEnv(extra map[string]string) []string {
